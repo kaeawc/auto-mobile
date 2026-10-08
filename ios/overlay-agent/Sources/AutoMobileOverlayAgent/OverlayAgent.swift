@@ -258,6 +258,8 @@ struct OverlayRootView: View {
         // Scheme-aware system controls (text fields, buttons) follow the theme's light or dark.
         .environment(\.colorScheme, palette.dark ? .dark : .light)
         .environment(\.overlayPalette, palette)
+        .environment(\.overlayTypography, OverlayTypography(theme: model.spec?.theme?.typography))
+        .environment(\.overlayShapes, OverlayShapes(theme: model.spec?.theme?.shapes))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Bars and cutouts are the spec's job (safeAreaPadding); the keyboard still pushes a
         // sheet or bottom-floating overlay up so its text field stays visible.

@@ -31,6 +31,27 @@ extension EnvironmentValues {
     }
 }
 
+private struct TypographyKey: EnvironmentKey {
+    static let defaultValue = OverlayTypography.standard
+}
+
+private struct ShapesKey: EnvironmentKey {
+    static let defaultValue = OverlayShapes.standard
+}
+
+extension EnvironmentValues {
+    /// The active spec theme's type scale and corner scale; Material 3 stock when it has none.
+    var overlayTypography: OverlayTypography {
+        get { self[TypographyKey.self] }
+        set { self[TypographyKey.self] = newValue }
+    }
+
+    var overlayShapes: OverlayShapes {
+        get { self[ShapesKey.self] }
+        set { self[ShapesKey.self] = newValue }
+    }
+}
+
 extension Color {
     init(_ rgba: OverlayRGBA) {
         self.init(.sRGB, red: rgba.red, green: rgba.green, blue: rgba.blue, opacity: rgba.alpha)
@@ -96,6 +117,8 @@ struct NodeView: View {
     var presentedAsModal = false
     @Environment(\.pagerContext) private var pager
     @Environment(\.overlayPalette) private var palette
+    @Environment(\.overlayTypography) private var typography
+    @Environment(\.overlayShapes) private var shapes
 
     var body: some View {
         if isVisible, presentedAsModal || !overlayModalTypes.contains(node.type) {
@@ -251,14 +274,13 @@ struct NodeView: View {
     }
 
     private var textView: some View {
-        let size = style?.textSize ?? 14
-        let design: Font.Design = switch style?.fontFamily {
-        case .keyword("serif"): .serif
-        case .keyword("monospace"): .monospaced
-        // An uploaded font asset is not delivered to the agent, so it uses the system font.
-        default: .default
+        let resolved = typography.resolve(style)
+        let design: Font.Design = switch resolved.design {
+        case .serif: .serif
+        case .monospaced: .monospaced
+        case .standard: .default
         }
-        let weight: Font.Weight = switch style?.fontWeight ?? 400 {
+        let weight: Font.Weight = switch resolved.weight {
         case ..<200: .ultraLight
         case ..<300: .thin
         case ..<400: .light
@@ -275,7 +297,7 @@ struct NodeView: View {
         default: .leading
         }
         // Scaled with Dynamic Type, unlike the Android bug #10436.
-        let scaled = UIFontMetrics.default.scaledValue(for: size)
+        let scaled = UIFontMetrics.default.scaledValue(for: resolved.size)
         var text = Text(interpolatedText)
             .font(.system(size: scaled, weight: weight, design: design))
         if style?.fontStyle == "italic" { text = text.italic() }
@@ -283,8 +305,8 @@ struct NodeView: View {
         if decoration == "underline" || decoration == "underlineLineThrough" { text = text.underline() }
         if decoration == "lineThrough" || decoration == "underlineLineThrough" { text = text.strikethrough() }
         return text
-            .tracking(style?.letterSpacing ?? 0)
-            .lineSpacing(max(0, (style?.lineHeight ?? scaled) - scaled))
+            .tracking(resolved.letterSpacing)
+            .lineSpacing(max(0, (resolved.lineHeight.map { $0 * scaled / resolved.size } ?? scaled) - scaled))
             .foregroundColor(palette.color(style?.color) ?? contentColor)
             .multilineTextAlignment(alignment)
             .lineLimit(style?.maxLines)
@@ -411,11 +433,13 @@ struct NodeView: View {
     // MARK: Style
 
     private var cornerShape: UnevenRoundedRectangle {
-        switch style?.cornerRadius {
+        switch style?.cornerRadius.map(shapes.resolve) {
         case let .uniform(radius)?:
             UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
                 topLeading: radius, bottomLeading: radius, bottomTrailing: radius, topTrailing: radius
             ))
+        case .token?:
+            UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii())
         case let .corners(topStart, topEnd, bottomEnd, bottomStart)?:
             UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
                 topLeading: topStart, bottomLeading: bottomStart, bottomTrailing: bottomEnd, topTrailing: topEnd

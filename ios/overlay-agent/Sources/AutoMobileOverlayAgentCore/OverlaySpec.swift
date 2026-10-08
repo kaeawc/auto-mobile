@@ -144,6 +144,8 @@ struct Border: Decodable {
 /// `cornerRadius`: dp number, Material 3 shape token, or per-corner dp radii.
 enum CornerRadius: Decodable, Equatable {
     case uniform(Double)
+    /// A Material 3 shape step, resolved against the theme's `shapes` by `OverlayShapes`.
+    case token(String)
     case corners(topStart: Double, topEnd: Double, bottomEnd: Double, bottomStart: Double)
 
     private struct Corners: Decodable {
@@ -159,15 +161,7 @@ enum CornerRadius: Decodable, Equatable {
             self = .uniform(value)
         } else if let token = try? container.decode(String.self) {
             // Material 3 Shapes steps; an unknown token is square rather than a decode failure.
-            switch token {
-            case "extraSmall": self = .uniform(4)
-            case "small": self = .uniform(8)
-            case "medium": self = .uniform(12)
-            case "large": self = .uniform(16)
-            case "extraLarge": self = .uniform(28)
-            case "full": self = .uniform(9999)
-            default: self = .uniform(0)
-            }
+            self = OverlayShapes.stepNames.contains(token) ? .token(token) : .uniform(0)
         } else {
             let corners = try container.decode(Corners.self)
             self = .corners(
@@ -222,6 +216,8 @@ struct Style: Decodable {
     let textDecoration: String?
     let fontStyle: String?
     let overflow: String?
+    /// A Material 3 type role (`titleLarge`...) supplying size, weight, line height and spacing.
+    let textStyle: String?
 
     /// Android's `mergedOver`: properties set on `overlay` win, unset ones keep this style's value.
     /// A present property replaces the base value as a whole (`padding` and `border` included).
@@ -250,7 +246,8 @@ struct Style: Decodable {
             letterSpacing: overlay.letterSpacing ?? letterSpacing,
             textDecoration: overlay.textDecoration ?? textDecoration,
             fontStyle: overlay.fontStyle ?? fontStyle,
-            overflow: overlay.overflow ?? overflow
+            overflow: overlay.overflow ?? overflow,
+            textStyle: overlay.textStyle ?? textStyle
         )
     }
 }

@@ -131,7 +131,8 @@ private fun overlayImageTarget(constraints: Constraints): OverlayImageTarget {
 @Composable
 internal fun OverlayImageContent(node: OverlayRenderNode, modifier: Modifier) {
   val source = node.source as? OverlayImageNode ?: return
-  val background = node.style.background ?: Color.LightGray
+  val background =
+    overlayThemedColor(node.style.background, node.style.source.background) ?: Color.LightGray
   BoxWithConstraints(modifier.defaultMinSize(24.dp, 24.dp)) {
     val state = rememberOverlayImage(source.asset, overlayImageTarget(constraints))
     val image = (state as? OverlayImageState.Ready)?.image as? BitmapOverlayImage

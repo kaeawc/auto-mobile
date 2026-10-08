@@ -20,6 +20,18 @@ sealed class OverlayDimension {
   data class Dp(val dp: Double) : OverlayDimension()
 }
 
+/** A dp number, or a Material 3 Shapes step (`none`, `extraSmall` ... `extraLarge`, `full`). */
+@Serializable(with = OverlayCornerRadiusSerializer::class)
+sealed class OverlayCornerRadius {
+  data class Dp(val dp: Double) : OverlayCornerRadius()
+
+  data class Token(val name: String) : OverlayCornerRadius()
+
+  companion object {
+    val TOKENS = setOf("none", "extraSmall", "small", "medium", "large", "extraLarge", "full")
+  }
+}
+
 @Serializable(with = OverlayDetentSerializer::class)
 sealed class OverlayDetent {
   data object Half : OverlayDetent()
@@ -94,6 +106,28 @@ object OverlayDimensionSerializer :
       OverlayDimension.Fill -> JsonPrimitive("fill")
       OverlayDimension.Wrap -> JsonPrimitive("wrap")
       is OverlayDimension.Dp -> dpJson(value.dp)
+    }
+}
+
+object OverlayCornerRadiusSerializer :
+  OverlayJsonValueSerializer<OverlayCornerRadius>("OverlayCornerRadius") {
+  override fun fromJson(value: JsonElement): OverlayCornerRadius {
+    val primitive = value as? JsonPrimitive ?: throw SerializationException("Invalid cornerRadius")
+    if (primitive.isString) {
+      if (primitive.content !in OverlayCornerRadius.TOKENS)
+        throw SerializationException("Invalid cornerRadius token")
+      return OverlayCornerRadius.Token(primitive.content)
+    }
+    val number = primitive.doubleOrNull
+    if (number == null || !number.isFinite() || number < 0.0)
+      throw SerializationException("Invalid cornerRadius")
+    return OverlayCornerRadius.Dp(number)
+  }
+
+  override fun toJson(value: OverlayCornerRadius): JsonElement =
+    when (value) {
+      is OverlayCornerRadius.Dp -> JsonPrimitive(value.dp)
+      is OverlayCornerRadius.Token -> JsonPrimitive(value.name)
     }
 }
 

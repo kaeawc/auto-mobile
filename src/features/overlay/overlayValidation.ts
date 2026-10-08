@@ -371,7 +371,7 @@ function visitChoice(
   depth: number,
 ): OverlayValidationError | undefined {
   const options = rule.options ?? [];
-  const selected = options.find((option) => {
+  const candidates = options.filter((option) => {
     if (option.kind === "object") {
       return object(value) !== undefined;
     }
@@ -380,7 +380,16 @@ function visitChoice(
     }
     return typeof value === "string";
   });
-  return selected ? walk(value, selected, path, context, depth) : fail(path, "Invalid union value");
+  // Several options can accept the same JSON type (a hex colour or a role name are both strings).
+  let firstError: OverlayValidationError | undefined;
+  for (const option of candidates) {
+    const error = walk(value, option, path, context, depth);
+    if (!error) {
+      return undefined;
+    }
+    firstError ??= error;
+  }
+  return candidates.length > 0 ? firstError : fail(path, "Invalid union value");
 }
 function walk(
   value: unknown,

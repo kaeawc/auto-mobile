@@ -117,6 +117,7 @@ nav:
       - "Session execution logs": using/session-logs.md
       - "Session Downloads fixtures": using/session-downloads.md
       - "Storage capabilities": using/storage-capabilities.md
+      - "SDK capabilities": using/sdk-capabilities.md
       - "Live device acceptance": using/live-device-acceptance.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "Environment variables": using/environment-variables.md
@@ -133,6 +134,7 @@ nav:
       - "iOS Playground theme parity": design-docs/plat/ios/playground-theme-parity.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Android overlay specification": design-docs/plat/android/overlay-ux.md
+      - "iOS simulator overlay agent": design-docs/plat/ios/overlay-agent.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Daemon": design-docs/mcp/daemon.md

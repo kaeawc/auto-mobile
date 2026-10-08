@@ -19,7 +19,7 @@ The 2026-10-04 decisions supersede the issue's earlier proposals:
   or a number state key.
 - Windows are edge-to-edge. Safe-area padding is an explicit node opt-in.
 - A `sheet` window and a modal `bottomSheet` node are separate concepts.
-- Built-in icons come from a closed list; other artwork uses image assets.
+- Built-in icons come from a closed list (the bundled Material icon set); other artwork uses image assets.
 
 Earlier decisions still apply: the renderer is Compose; sizes and positions use
 dp; overlay opacity is a percentage; app-element anchoring is supported; observe
@@ -89,8 +89,24 @@ from. At least one of its fields is required:
 | `colors.seed`   | Hex color a full light or dark scheme is generated from.                                                                                                  |
 | `colors.source` | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                      |
 
-An explicit theme wins over the scheme inferred from backgrounds. Type and shape scales
-are a later slice (#10438).
+| `typography.scale` | Number 0.75–1.5 multiplying the size and line height of every Material type role. Default 1. |
+| `typography.fontFamily` | `sans`, `serif` or `mono`: the family of every Material type role. |
+| `shapes.corner` | `none`, `small`, `medium` (the stock Material 3 scale), `large` or `full` (pill). Shifts every corner family built-in components use. |
+
+`typography` and `shapes` each need at least one field. An explicit theme wins over the scheme
+inferred from backgrounds.
+
+A text node's `style.textStyle` names a Material 3 type role (`displayLarge` … `labelSmall`, 15
+in all) and so follows the theme's scale and family. It supplies size, weight and family; an
+explicit `textSize`, `fontWeight` or `fontFamily` on the same node still wins. Plain text
+without `textStyle` keeps its authored 14 sp default and is not scaled; it takes the theme's
+`typography.fontFamily` only when it names no `fontFamily` of its own.
+
+A text node with no `color` draws in the theme's content colour (`onSurface`). A `cornerRadius` token maps to the
+theme's Shapes (`shapes.corner` shifts them), `none` is square and `full` a pill. A
+role-valued `background` does not take part in inferring the overlay's light/dark
+theme from authored backgrounds (it would be circular); set `theme.mode` or
+`colors.seed` for that.
 
 ## Windows
 
@@ -140,7 +156,7 @@ layout room.
 | `column`      | Required `children` array, possibly empty; vertical layout.                                                          |
 | `text`        | Required `text` string, possibly empty.                                                                              |
 | `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                            |
-| `icon`        | Required built-in `name` below.                                                                                      |
+| `icon`        | Required built-in `name`; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                  |
 | `spacer`      | No node-specific properties; size comes from style.                                                                  |
 | `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.          |
 | `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                            |
@@ -208,9 +224,9 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `weight`                                         | Positive number. A `row`/`column` child fills the remaining main-axis space in proportion to its weight (ignored elsewhere). |
 | `minWidth`, `maxWidth`, `minHeight`, `maxHeight` | Nonnegative dp bounds applied after `width`/`height`, so `fill` and `{dp}` are clamped by them.                              |
 | `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                         |
-| `background`, `color`                            | Strict hex color.                                                                                                            |
-| `cornerRadius`                                   | Nonnegative dp.                                                                                                              |
-| `border`                                         | `{width, color}`; nonnegative dp width.                                                                                      |
+| `background`, `color`                            | Strict hex color, or a Material 3 color role name (see below).                                                               |
+| `cornerRadius`                                   | Nonnegative dp, or a Shapes token: `none`, `extraSmall`, `small`, `medium`, `large`, `extraLarge`, `full`.                   |
+| `border`                                         | `{width, color}`; nonnegative dp width; `color` takes hex or a color role name.                                              |
 | `alpha`                                          | Finite number 0–1; default 1. Multiplies window opacity.                                                                     |
 | `alignment`                                      | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`.         |
 | `arrangement`                                    | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                                      |
@@ -221,20 +237,29 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `maxLines`                                       | Integer 1–2147483647.                                                                                                        |
 | `fontFamily`                                     | Closed system set: `default`, `sansSerif`, `serif`, `monospace`.                                                             |
 
-Colors accept only `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits.
-No short hex, named colors, CSS functions, or separate color opacity. Style
+Colors accept `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits, or one
+of the Material 3 `ColorScheme` role names (`primary`, `onPrimary`,
+`primaryContainer`, `secondary`, `tertiary`, `background`, `surface`, `onSurface`,
+`surfaceVariant`, `surfaceContainer` and its `Low`/`High`/`Highest`/`Lowest`
+steps, `surfaceBright`, `surfaceDim`, `error`, `outline`, `scrim`, and the rest
+of the scheme, 36 in all). A role resolves against the overlay's active theme
+(`theme.mode`, `colors.seed`, device colour), so it follows light/dark and the
+seed. No short hex, other named colors, CSS functions, or separate color opacity. Style
 properties that do not apply to a node have no rendering effect; their shape is
 still validated. Omitted layout/text properties use Compose/system defaults.
 Start/end use layout direction, including RTL.
 
 ## Icons and images
 
-Built-in Material names (36): `home`, `search`, `settings`, `person`, `favorite`,
-`add`, `close`, `check`, `arrow_back`, `arrow_forward`, `chevron_left`,
-`chevron_right`, `menu`, `more_vert`, `share`, `edit`, `delete`, `info`, `warning`,
-`notifications`, `star`, `shopping_cart`, `help`, `refresh`, `done`, `cancel`,
-`play_arrow`, `pause`, `stop`, `mail`, `phone`, `location_on`, `calendar_today`,
-`visibility`, `lock`, `logout`.
+Built-in Material names are the 2,075 icons of `material-icons-extended`, written
+in snake_case (`home`, `timer`, `bedtime`, `alarm_add`, `add_a_photo`). The closed list is the
+`iconName` definition in `schemas/overlay-spec-contract.json`, shared by the TypeScript
+and JVM validators. The renderer already ships that library, so the full set adds no APK
+size beyond the list itself (about 10 KB measured). An icon node may set `variant`:
+`filled` (default), `outlined`, `rounded`, `sharp` or `twoTone`; nav items are always
+filled. Material Symbols names with no `material-icons-extended` counterpart are not
+available, and neither are symbol `weight` or `fill` axes or custom `fontFamily`
+assets, which would need a bundled variable font or an asset-transport extension.
 
 Unknown names reject the spec. #9301 pins ID-based assets, but no nested reference
 shape, so image nodes use `{type: "image", asset: "opaque-id"}` and nav items

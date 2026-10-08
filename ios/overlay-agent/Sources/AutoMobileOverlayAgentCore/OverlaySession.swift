@@ -158,13 +158,25 @@ struct OverlaySession {
         return emit(kind: "emit", name: "change", payload: payload)
     }
 
-    /// Test-hook tap (see `OverlayTestHooks`): runs the identified node's `onTap` in-process, as a
-    /// real tap on a plain tappable node would.
+    /// Several keys written together, reported by one `change` event (see `emitStateChange`).
+    mutating func setStates(_ values: [(String, JSONValue)]) -> [OverlayEvent] {
+        guard isShown else { return [] }
+        let baseline = state
+        values.forEach { state[$0.0] = $0.1 }
+        return emitStateChange(values.map(\.0).filter { baseline[$0] != state[$0] })
+    }
+
+    /// Test-hook tap (see `OverlayTestHooks`): performs in-process what a real tap on the
+    /// identified node or composite part (`<tag>.confirm`, `<tag>.<value>`, ...) does: a toggle
+    /// flips its key, an option binds its value, a dialog button closes the dialog, anything else
+    /// runs its `onTap`.
     mutating func simulateTap(identifier: String) -> Result<[OverlayEvent], OverlayTapFailure> {
         guard isShown, let spec else { return .failure(.notShown) }
-        guard let node = spec.root.find(identifier: identifier) else { return .failure(.notFound) }
-        guard let actions = node.onTap, !actions.isEmpty else { return .failure(.notTappable) }
-        return .success(run(actions))
+        guard let target = spec.root.tapTarget(identifier: identifier, state: state) else {
+            return .failure(.notFound)
+        }
+        guard let events = activate(target) else { return .failure(.notTappable) }
+        return .success(events)
     }
 
     /// Settled pager position; clamped, and silent when the page does not change.

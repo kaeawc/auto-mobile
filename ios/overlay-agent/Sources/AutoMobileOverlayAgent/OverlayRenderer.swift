@@ -64,6 +64,11 @@ func swiftUIAlignment(_ name: String?) -> Alignment {
     }
 }
 
+/// SF Symbol for a built-in (Material) icon name; unknown names draw a placeholder.
+func overlaySymbol(_ name: String?, fallback: String = "questionmark.square") -> String {
+    name.flatMap { sfSymbols[$0] } ?? fallback
+}
+
 private let sfSymbols: [String: String] = [
     "home": "house", "search": "magnifyingglass", "settings": "gearshape", "person": "person",
     "favorite": "heart", "add": "plus", "close": "xmark", "check": "checkmark",
@@ -76,16 +81,24 @@ private let sfSymbols: [String: String] = [
     "pause": "pause.fill", "stop": "stop.fill", "mail": "envelope", "phone": "phone",
     "location_on": "mappin.and.ellipse", "calendar_today": "calendar", "visibility": "eye",
     "lock": "lock", "logout": "rectangle.portrait.and.arrow.right",
+    "alarm": "alarm", "schedule": "clock", "event": "calendar", "today": "calendar",
+    "remove": "minus", "expand_more": "chevron.down", "expand_less": "chevron.up",
+    "more_horiz": "ellipsis", "account_circle": "person.crop.circle", "send": "paperplane",
+    "bookmark": "bookmark", "thumb_up": "hand.thumbsup", "photo_camera": "camera",
+    "image": "photo", "music_note": "music.note", "wifi": "wifi", "sort": "arrow.up.arrow.down",
+    "filter_list": "line.3.horizontal.decrease", "content_copy": "doc.on.doc",
 ]
 
 struct NodeView: View {
     let node: OverlayNode
     @ObservedObject var model: OverlayModel
+    /// Dialogs and snackbars draw nothing in place; `OverlayModalLayer` draws them with this set.
+    var presentedAsModal = false
     @Environment(\.pagerContext) private var pager
     @Environment(\.overlayPalette) private var palette
 
     var body: some View {
-        if isVisible {
+        if isVisible, presentedAsModal || !overlayModalTypes.contains(node.type) {
             styled(content)
         }
     }
@@ -97,7 +110,10 @@ struct NodeView: View {
 
     /// Controls that run `onTap` from their own action, so the generic tap gesture stays off them.
     private var handlesOwnTap: Bool {
-        ["switch", "checkbox", "button"].contains(node.type)
+        [
+            "switch", "checkbox", "button", "slider", "chip", "radioGroup", "listItem", "iconButton",
+            "fab", "segmentedButton", "topAppBar", "timePicker", "datePicker", "dialog", "snackbar",
+        ].contains(node.type)
     }
 
     /// Unstyled text and icons follow the theme's onSurface once the spec has a theme (Android's
@@ -148,6 +164,43 @@ struct NodeView: View {
             navBar
         case "bottomSheet":
             sheet
+        case "slider":
+            OverlaySliderView(node: node, model: model, style: style)
+        case "chip":
+            OverlayChipView(node: node, model: model, style: style)
+        case "card":
+            OverlayCardView(node: node, model: model, style: style)
+        case "radioGroup":
+            OverlayRadioGroupView(node: node, model: model, style: style)
+        case "listItem":
+            OverlayListItemView(node: node, model: model, style: style)
+        case "iconButton":
+            OverlayIconButtonView(node: node, model: model, style: style)
+        case "fab":
+            OverlayFabView(node: node, model: model, style: style)
+        case "segmentedButton":
+            OverlaySegmentedButtonView(node: node, model: model)
+        case "topAppBar":
+            OverlayTopAppBarView(node: node, model: model, style: style, title: interpolated(node.title))
+        case "divider":
+            OverlayDividerView(node: node, style: style)
+        case "badge":
+            OverlayBadgeView(text: interpolated(node.text), style: style, tagged: node.identifier != nil)
+        case "progress":
+            OverlayProgressView(node: node, model: model)
+        case "timePicker":
+            OverlayTimePickerView(node: node, model: model)
+        case "datePicker":
+            OverlayDatePickerView(node: node, model: model)
+        case "dialog":
+            OverlayDialogView(
+                node: node,
+                model: model,
+                title: interpolated(node.title),
+                text: node.text.map(interpolated)
+            )
+        case "snackbar":
+            OverlaySnackbarView(node: node, model: model, text: interpolated(node.text))
         default:
             EmptyView()
         }
@@ -179,13 +232,17 @@ struct NodeView: View {
     }
 
     private var interpolatedText: String {
-        interpolateOverlayText(node.text ?? "", state: model.state, pager: pagerPosition)
+        interpolated(node.text)
+    }
+
+    private func interpolated(_ text: String?) -> String {
+        interpolateOverlayText(text ?? "", state: model.state, pager: pagerPosition)
     }
 
     /// Text nodes already read their text, so only an authored description or a tappable icon's
     /// name needs to be applied explicitly.
     private var accessibilityLabelOverride: String? {
-        guard node.contentDescription != nil || node.type == "icon" else { return nil }
+        guard node.contentDescription != nil || ["icon", "iconButton", "fab"].contains(node.type) else { return nil }
         return node.accessibilityLabel(
             state: model.state,
             pager: pagerPosition,
@@ -284,10 +341,18 @@ struct NodeView: View {
         .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 
+    /// Filled (default), tonal, elevated, outlined or text, with an optional leading icon.
     @ViewBuilder private var buttonView: some View {
-        let button = Button(node.label ?? "") { model.run(node.onTap ?? []) }
+        let button = Button { model.run(node.onTap ?? []) } label: {
+            if let icon = node.icon {
+                Label(node.label ?? "", systemImage: overlaySymbol(icon))
+            } else {
+                Text(node.label ?? "")
+            }
+        }
         switch node.variant {
-        case "outlined": button.buttonStyle(.bordered)
+        case "outlined", "tonal": button.buttonStyle(.bordered)
+        case "elevated": button.buttonStyle(.bordered).shadow(color: .black.opacity(0.2), radius: 2, y: 1)
         case "text": button.buttonStyle(.borderless)
         default: button.buttonStyle(.borderedProminent)
         }
@@ -399,7 +464,12 @@ struct NodeView: View {
     /// Containers get their own accessibility element so a testTag names the container instead of
     /// being copied onto every descendant. A tappable container reads as one button.
     private var grouping: AccessibilityGrouping {
-        guard ["box", "row", "column", "scroll", "pager"].contains(node.type) else { return .leaf }
+        // Composite controls always contain their parts, so each part keeps its own
+        // `<tag>.<part>` identifier, label and selected state.
+        if ["radioGroup", "segmentedButton", "topAppBar", "dialog", "snackbar"].contains(node.type) {
+            return .contain
+        }
+        guard ["box", "row", "column", "scroll", "pager", "card"].contains(node.type) else { return .leaf }
         return node.onTap == nil ? .contain : .combine
     }
 

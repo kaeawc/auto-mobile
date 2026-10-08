@@ -4467,9 +4467,9 @@ describe("finalizeToolResponse", () => {
  * requested dimension is honored purely from the `scope` arg (nothing is gated
  * off). Scoping is applied to the agent-facing payload only — it must leave the
  * diff baseline (the full sanitized tree) intact and never touch internal
- * tool-to-tool calls. It runs on the FULL projection; the skeleton default
- * replaces the hierarchy, so these tests opt into `project:"full"` to exercise the
- * structural scope transforms.
+ * tool-to-tool calls. These tests opt into `project:"full"` to exercise the
+ * structural scope transforms; the skeleton default keeps only the rows that
+ * survive them (finalizeToolResponse.skeletonScope.test.ts).
  */
 describe("finalizeToolResponse observe scope experiments (#4344)", () => {
   beforeEach(() => {
@@ -4553,7 +4553,7 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
     expect(finalized.content[0].text).toBe(stringifyToolResponse(structuredPayload(finalized)));
   });
 
-  test("explicit skeleton projection returns the skeleton; scope transforms cannot run on it", () => {
+  test("explicit skeleton projection scopes the skeleton and withholds overview", () => {
     const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
       name: "observe",
       args: {
@@ -4566,13 +4566,13 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
     expect(out.skeleton).toEqual([]);
     expect(out.viewHierarchy).toBeUndefined();
     expect(out.elements).toBeUndefined();
-    // Gates are always on, so nothing is gated off; the skeleton replaces the
-    // hierarchy, so no scope transform runs and no observeScope is recorded.
-    expect(out.observeScope).toBeUndefined();
+    // FOCUS/REGION run on the full tree and filter the skeleton; OVERVIEW has no
+    // skeleton form, so it is reported as withheld rather than silently ignored.
+    expect(out.observeScope).toMatchObject({ applied: ["focus"], gatedOff: ["overview"] });
     expect(finalized.content[0].text).toBe(stringifyToolResponse(structuredPayload(finalized)));
   });
 
-  test("default skeleton + scope: skeleton returned, no observeScope (nothing gated off)", () => {
+  test("default skeleton + scope: skeleton returned with its observeScope", () => {
     const finalized = finalizeToolResponse(createStructuredToolResponse(chromeObserve()), {
       name: "observe",
       args: { scope: { focus: true, region: true } },
@@ -4581,7 +4581,8 @@ describe("finalizeToolResponse observe scope experiments (#4344)", () => {
     const out = structuredPayload(finalized) as ObserveResult;
     expect(out.skeleton).toEqual([]);
     expect(out.viewHierarchy).toBeUndefined();
-    expect(out.observeScope).toBeUndefined();
+    expect(out.observeScope).toMatchObject({ applied: ["focus"] });
+    expect(out.observeScope!.gatedOff).toBeUndefined();
     expect(finalized.content[0].text).toBe(stringifyToolResponse(structuredPayload(finalized)));
   });
 

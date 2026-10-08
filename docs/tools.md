@@ -2162,7 +2162,9 @@ matching, first-node behavior, and unchanged metadata without `chain`. An object
 with `elementId` or `container` is a nested selector; every other object keeps
 the flat `resourceId`/`text` anchor, ignoring extra fields. Boolean foreground-app
 focus keeps its existing metadata.
-As before, scope transforms apply to full projection, not the default skeleton.
+On the default skeleton projection, `focus` and `region` run on the full tree and
+the skeleton and context keep only the rows that survive them; `overview` has no
+skeleton form and is reported in `observeScope.gatedOff`.
 
 A failed new selector returns an empty subtree and `observeScope.focus.matched:
 false`, with the resolver's unchanged `error`. A missing leaf reports

@@ -14,6 +14,7 @@ import {
 } from "../features/observe/output/ObserveResultOutput";
 import {
   applyObserveScopeExperiments,
+  applyObserveScopeToSkeleton,
   buildObserveScopeConfig,
 } from "../features/observe/output/ObserveScopeExperiments";
 import type { ObserveScopeInput } from "../models/ObserveScope";
@@ -547,15 +548,10 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     let served: ObserveResult = sanitized;
     if (resolveObserveProjection(ctx.args) === "skeleton") {
       served = projectSanitizedObserveSkeleton(sanitized, observeResult);
-      // Skeleton replaces the hierarchy, so scope's structural transforms cannot
-      // run afterward. Preserve only the requested dimensions withheld by flags.
-      if ((scopeConfig.gatedOff?.length ?? 0) > 0) {
-        served = applyObserveScopeExperiments(served, {
-          focus: false,
-          overview: false,
-          region: false,
-          gatedOff: scopeConfig.gatedOff,
-        });
+      // Skeleton replaces the hierarchy, so FOCUS/REGION run on the full uncapped
+      // tree and the skeleton keeps only the rows that survive them.
+      if (scopeActive) {
+        served = applyObserveScopeToSkeleton(served, uncapped, scopeConfig);
       }
     } else if (scopeActive) {
       // Scope-then-cap (#5074): use the already-sanitized UNCAPPED copy so the scope
@@ -584,7 +580,10 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
           };
           let panel = sanitizeObserveResult(source, cfg, ctx.cloneObservation);
           if (resolveObserveProjection(ctx.args) === "skeleton") {
-            panel = projectSanitizedObserveSkeleton(panel, source);
+            const projected = projectSanitizedObserveSkeleton(panel, source);
+            panel = scopeActive
+              ? applyObserveScopeToSkeleton(projected, panel, scopeConfig)
+              : projected;
           } else if (scopeActive) {
             panel = applyObserveScopeExperiments(panel, scopeConfig);
           }

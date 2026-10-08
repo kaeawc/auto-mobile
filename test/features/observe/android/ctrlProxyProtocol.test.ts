@@ -763,6 +763,19 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       expected: '{"type":"get_sdk_capabilities","requestId":"sc-1","packageName":"com.x"}',
     },
     {
+      builder: "getSdkCapabilities",
+      name: "SDK capability snapshot for another Android user",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.getSdkCapabilities({
+          requestId: "sc-2",
+          packageName: "com.x",
+          userId: 10,
+        }),
+      ),
+      expected:
+        '{"type":"get_sdk_capabilities","requestId":"sc-2","packageName":"com.x","userId":10}',
+    },
+    {
       builder: "listDataStores",
       name: "packageName + adapterName",
       actual: serializeCtrlProxyRequest(

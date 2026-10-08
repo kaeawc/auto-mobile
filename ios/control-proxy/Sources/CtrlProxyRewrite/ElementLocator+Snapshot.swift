@@ -1,5 +1,6 @@
 import Foundation
 #if canImport(XCTest) && os(iOS)
+    import os
     import UIKit
     import XCTest
 #endif
@@ -64,6 +65,7 @@ extension ElementLocator {
             )
             let springboardCapture = try getAlertsFromSpringboard(
                 runSnapshot: runSpringboardSnapshot,
+                appFrame: appSnapshot.frame,
                 truncationReasons: &truncationReasons,
                 keyboardFocus: keyboardFocus
             )
@@ -106,38 +108,69 @@ extension ElementLocator {
         /// skipped and no alerts are returned, but the (cheap, local) rotation sample
         /// is still captured so the caller's rotation-agreement check is unaffected
         /// (issue #5474).
+        ///
+        /// SpringBoard alert frames are screen-space. When the observed app is an inset iPadOS
+        /// window (#6635), they are shifted into the app's window-relative space before merging,
+        /// so every node in the observed hierarchy shares one space and the gesture path's single
+        /// window-origin translation is correct for alert taps too.
         private func getAlertsFromSpringboard(
             runSnapshot: Bool,
+            appFrame: CGRect,
             truncationReasons: inout Set<String>,
             keyboardFocus: KeyboardFocus? = nil
         )
             throws -> (alerts: [UIElementInfo], rotation: Int?)
         {
-            let capture: (alertSnapshots: [XCUIElementSnapshot], rotation: Int?) =
+            let capture: (alertSnapshots: [XCUIElementSnapshot], springboardFrame: CGRect, rotation: Int?) =
                 try catchingObjCException {
-                    let capture = DeviceRotation.capture { () -> [XCUIElementSnapshot] in
+                    let capture = DeviceRotation.capture { () -> ([XCUIElementSnapshot], CGRect) in
                         guard runSnapshot else {
-                            return []
+                            return ([], .zero)
                         }
                         let freshSpringboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
                         guard let snapshot = try? freshSpringboard.snapshot() else {
-                            return []
+                            return ([], .zero)
                         }
-                        return self.collectAlertElements(from: snapshot)
+                        return (self.collectAlertElements(from: snapshot), snapshot.frame)
                     }
-                    return (alertSnapshots: capture.value, rotation: capture.rotation)
+                    return (
+                        alertSnapshots: capture.value.0, springboardFrame: capture.value.1, rotation: capture.rotation
+                    )
                 }
 
+            let offset = capture.alertSnapshots.isEmpty ? .zero : Self.springboardAlertOffset(
+                appFrame: appFrame,
+                springboardFrame: capture.springboardFrame,
+                windowFrame: { self.observedAppWindowFrame() }
+            )
             let alerts = capture.alertSnapshots.map { snapshot in
                 buildElementInfoFromSnapshot(
                     snapshot,
                     depth: 0,
-                    screenBounds: snapshot.frame,
+                    screenBounds: snapshot.frame.offsetBy(dx: offset.x, dy: offset.y),
                     truncationReasons: &truncationReasons,
-                    keyboardFocus: keyboardFocus
+                    keyboardFocus: keyboardFocus,
+                    coordinateOffset: offset
                 )
             }
             return (alerts, capture.rotation)
+        }
+
+        /// Screen frame of the observed app's window, read only for a non-screen-sized app with a
+        /// SpringBoard alert to merge. Like the gesture path's window read, this is a live query
+        /// that can stall on a suspended app; the app snapshot taken just before it has already
+        /// queried the same app, so it adds no new precondition.
+        private func observedAppWindowFrame() -> CGRect? {
+            guard let bundleId = foregroundBundleId else { return nil }
+            do {
+                return try catchingObjCException {
+                    XCUIApplication(bundleIdentifier: bundleId).windows.firstMatch.frame
+                }
+            } catch {
+                Logger(subsystem: "dev.jasonpearson.automobile", category: "ElementLocator")
+                    .warning("app window frame unavailable; SpringBoard alerts stay screen-space: \(error)")
+                return nil
+            }
         }
 
         /// Recursively collect system-dialog snapshots from a snapshot tree.

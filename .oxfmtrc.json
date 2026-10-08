@@ -23,9 +23,11 @@
     "test/fixtures/ios-devicectl/info-*.json",
     "test/fixtures/ios-devicectl/motion-*.json",
     "test/fixtures/ios-contract/**",
+    "test/fixtures/network-filter-controller/*.json",
     "test/fixtures/swipeon-auto-target/*.json",
     "test/fixtures/identify-interactions/*.json",
     "test/fixtures/android-ime-window/*.json",
+    "test/fixtures/android-overlay-testtag/*.json",
     "test/fixtures/android-enabled/*.json",
     "test/fixtures/android-action-compact/*.json",
     "test/fixtures/android-launcher/*.json",
@@ -33,6 +35,7 @@
     "test/fixtures/observe-output/ios-keyboard-states/*.json",
     "test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json",
     "test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json",
+    "test/fixtures/ios/keyboard-modes/*.json",
     "**/*.generated.ts",
     "**/generated/**"
   ]

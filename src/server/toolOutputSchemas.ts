@@ -1578,6 +1578,16 @@ const deviceStateOutputFields = {
       observedValues: networkConditionValuesOutputSchema.partial().optional(),
       expiresInSeconds: z.number().optional(),
       rawStatus: z.string().optional(),
+      backend: z.literal("network-extension").optional(),
+      controller: z
+        .object({
+          state: z.string(),
+          contractVersion: z.number().optional(),
+          detail: z.string(),
+          nextStep: z.string(),
+        })
+        .passthrough()
+        .optional(),
     })
     .passthrough()
     .optional(),

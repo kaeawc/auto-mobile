@@ -109,7 +109,8 @@ export async function runWithAcquisitionDeadline<T>(
   const abortAtLiveDeadline = (): void =>
     controller.abort(
       new ActionableError(
-        `${operationName} timed out at the live MCP request deadline. Retry device acquisition.`,
+        `${operationName} timed out at the live MCP request deadline while ${stage.current}. ` +
+          `Retry device acquisition.`,
       ),
     );
   const expire = (): void => {

@@ -2786,6 +2786,29 @@
             },
             "rawStatus": {
               "type": "string"
+            },
+            "backend": {
+              "type": "string",
+              "const": "network-extension"
+            },
+            "controller": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string"
+                },
+                "contractVersion": {
+                  "type": "number"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "nextStep": {
+                  "type": "string"
+                }
+              },
+              "required": ["state", "detail", "nextStep"],
+              "additionalProperties": {}
             }
           },
           "required": ["supported"],
@@ -17993,7 +18016,7 @@
   },
   {
     "name": "prototype",
-    "description": "Show, showVariants (1-12 image or spec alternatives composed into one swipeable carousel, fullscreen or floating; accepts display and assets like show, so image variants may reference ids uploaded in the same call; optional waitForSelection returns the picked selection {index, label?}), update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show/showVariants/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both need a CtrlProxy advertising overlay_window_options_v1.",
+    "description": "Show, showVariants (1-12 image or spec alternatives composed into one swipeable carousel, fullscreen or floating; accepts display and assets like show, so image variants may reference ids uploaded in the same call; optional waitForSelection returns the picked selection {index, label?}), update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, awaitEvent; a same-id show replaces the overlay; no update, showVariants or display; sizes are points). awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show/showVariants/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -18509,8 +18532,23 @@
                           "maximum": 2147483647
                         },
                         "fontFamily": {
-                          "type": "string",
-                          "enum": ["default", "sansSerif", "serif", "monospace"]
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": ["default", "sansSerif", "serif", "monospace"]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "asset": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": ["asset"],
+                              "additionalProperties": false
+                            }
+                          ]
                         },
                         "textStyle": {
                           "type": "string",
@@ -18659,6 +18697,10 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when"
+                    },
+                    "transition": {
+                      "type": "string",
+                      "enum": ["none", "fade", "expand", "slide"]
                     },
                     "anchor": {
                       "anyOf": [
@@ -18818,6 +18860,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -18859,6 +18904,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -18902,6 +18950,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -18939,6 +18990,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -18983,6 +19037,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19025,6 +19082,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19059,6 +19119,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -19101,6 +19164,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -19145,6 +19211,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19188,6 +19257,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19204,7 +19276,10 @@
                     },
                     "variant": {
                       "type": "string",
-                      "enum": ["filled", "outlined", "text"]
+                      "enum": ["filled", "tonal", "elevated", "outlined", "text"]
+                    },
+                    "icon": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
                     }
                   },
                   "required": ["type", "label"],
@@ -19230,6 +19305,168 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["radioGroup"]
+                    },
+                    "stateKey": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["value", "label"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 2,
+                      "maxItems": 16
+                    }
+                  },
+                  "required": ["type", "stateKey", "options"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["listItem"]
+                    },
+                    "headline": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "supporting": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "leadingIcon": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                    },
+                    "trailing": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["switch"]
+                            },
+                            "stateKey": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                            }
+                          },
+                          "required": ["type", "stateKey"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["checkbox"]
+                            },
+                            "stateKey": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                            }
+                          },
+                          "required": ["type", "stateKey"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["icon"]
+                            },
+                            "name": {
+                              "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                            }
+                          },
+                          "required": ["type", "name"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["type", "headline"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -19283,6 +19520,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19330,6 +19570,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19376,6 +19619,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19420,6 +19666,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19461,6 +19710,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -19531,6 +19783,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19544,7 +19799,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/16/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/18/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -19581,6 +19836,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -20031,8 +20289,23 @@
                             "maximum": 2147483647
                           },
                           "fontFamily": {
-                            "type": "string",
-                            "enum": ["default", "sansSerif", "serif", "monospace"]
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": ["default", "sansSerif", "serif", "monospace"]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "asset": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": ["asset"],
+                                "additionalProperties": false
+                              }
+                            ]
                           },
                           "textStyle": {
                             "type": "string",
@@ -20181,6 +20454,10 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when"
+                      },
+                      "transition": {
+                        "type": "string",
+                        "enum": ["none", "fade", "expand", "slide"]
                       },
                       "anchor": {
                         "anyOf": [
@@ -20350,6 +20627,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20391,6 +20671,9 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -20434,6 +20717,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20471,6 +20757,9 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -20515,6 +20804,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20557,6 +20849,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20591,6 +20886,9 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -20633,6 +20931,9 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -20677,6 +20978,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20720,6 +21024,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20736,7 +21043,10 @@
                       },
                       "variant": {
                         "type": "string",
-                        "enum": ["filled", "outlined", "text"]
+                        "enum": ["filled", "tonal", "elevated", "outlined", "text"]
+                      },
+                      "icon": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/5/properties/name"
                       }
                     },
                     "required": ["type", "label"],
@@ -20762,6 +21072,168 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["radioGroup"]
+                      },
+                      "stateKey": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "label": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["value", "label"],
+                          "additionalProperties": false
+                        },
+                        "minItems": 2,
+                        "maxItems": 16
+                      }
+                    },
+                    "required": ["type", "stateKey", "options"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["listItem"]
+                      },
+                      "headline": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "supporting": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "leadingIcon": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/5/properties/name"
+                      },
+                      "trailing": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["switch"]
+                              },
+                              "stateKey": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              }
+                            },
+                            "required": ["type", "stateKey"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["checkbox"]
+                              },
+                              "stateKey": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              }
+                            },
+                            "required": ["type", "stateKey"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["icon"]
+                              },
+                              "name": {
+                                "$ref": "#/properties/variants/items/properties/spec/anyOf/5/properties/name"
+                              }
+                            },
+                            "required": ["type", "name"],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["type", "headline"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -20815,6 +21287,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20862,6 +21337,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20908,6 +21386,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20952,6 +21433,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20993,6 +21477,9 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -21063,6 +21550,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -21076,7 +21566,7 @@
                       "items": {
                         "type": "array",
                         "items": {
-                          "$ref": "#/properties/variants/items/properties/spec/anyOf/16/properties/items/items"
+                          "$ref": "#/properties/variants/items/properties/spec/anyOf/18/properties/items/items"
                         },
                         "minItems": 2,
                         "maxItems": 5
@@ -21113,6 +21603,9 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -21262,7 +21755,7 @@
           }
         },
         "assets": {
-          "description": "show, showVariants, or update with spec: images to upload before the overlay is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes. Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored. If the device reports a supplied asset missing after the overlay is sent, it is re-uploaded and the overlay re-sent once.",
+          "description": "show, showVariants, or update with spec: images to upload before the overlay is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored. If the device reports a supplied asset missing after the overlay is sent, it is re-uploaded and the overlay re-sent once.",
           "minItems": 1,
           "maxItems": 32,
           "type": "array",
@@ -21270,13 +21763,13 @@
             "type": "object",
             "properties": {
               "id": {
-                "description": "Opaque asset id that spec image nodes reference (image.asset)",
+                "description": "Opaque asset id that spec image nodes reference (image.asset, or style.fontFamily {asset})",
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 256
               },
               "path": {
-                "description": "Absolute path of a PNG, JPEG or WebP file the daemon can read",
+                "description": "Absolute path of a PNG, JPEG or WebP image, or a TTF/OTF font (up to 2 MiB), the daemon can read",
                 "type": "string",
                 "minLength": 1
               },
@@ -28286,6 +28779,29 @@
             },
             "rawStatus": {
               "type": "string"
+            },
+            "backend": {
+              "type": "string",
+              "const": "network-extension"
+            },
+            "controller": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string"
+                },
+                "contractVersion": {
+                  "type": "number"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "nextStep": {
+                  "type": "string"
+                }
+              },
+              "required": ["state", "detail", "nextStep"],
+              "additionalProperties": {}
             }
           },
           "required": ["supported"],

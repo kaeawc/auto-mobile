@@ -549,11 +549,16 @@ export interface DiscoverKeystoreMessage {
   packageName: string;
 }
 
-/** Reads the app SDK's capability and capture-policy snapshot (issue #5191). */
+/**
+ * Reads the app SDK's capability and capture-policy snapshot (issue #5191). `userId` targets the
+ * app instance in another Android user and is sent only when the service advertises
+ * {@link SDK_CAPABILITIES_USER_ID_CAPABILITY}.
+ */
 export interface GetSdkCapabilitiesMessage {
   type: "get_sdk_capabilities";
   requestId: string;
   packageName: string;
+  userId?: number;
 }
 
 /**
@@ -878,6 +883,13 @@ export const OVERLAY_WINDOW_OPTIONS_CAPABILITY = "overlay_window_options_v1";
  */
 export const NETWORK_MOCK_RULES_REPORT_CAPABILITY = "network_mock_rules_report_v1";
 
+/**
+ * Advertised by a CtrlProxy whose `get_sdk_capabilities` honours `userId` (work or secondary
+ * profile). An older service ignores the unknown field and reads its own user's app instance, so the
+ * host omits it there.
+ */
+export const SDK_CAPABILITIES_USER_ID_CAPABILITY = "sdk_capabilities_user_id_v1";
+
 /** Capability flags in the handshake that are never sent as wire requests. */
 export const ANDROID_CAPABILITY_FLAGS = [
   "node_selector_actions",
@@ -889,6 +901,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   OVERLAY_DISPLAY_CAPABILITY,
   OVERLAY_WINDOW_OPTIONS_CAPABILITY,
   NETWORK_MOCK_RULES_REPORT_CAPABILITY,
+  SDK_CAPABILITIES_USER_ID_CAPABILITY,
 ] as const;
 
 /** The supportedCommands list is authoritative for every request when this marker is present. */
@@ -1391,7 +1404,11 @@ export const ctrlProxyRequests = {
     return { type: "discover_keystore", ...args };
   },
 
-  getSdkCapabilities(args: { requestId: string; packageName: string }): GetSdkCapabilitiesMessage {
+  getSdkCapabilities(args: {
+    requestId: string;
+    packageName: string;
+    userId?: number;
+  }): GetSdkCapabilitiesMessage {
     return { type: "get_sdk_capabilities", ...args };
   },
 

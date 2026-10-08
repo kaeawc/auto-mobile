@@ -79,15 +79,17 @@ describe("CtrlProxyStorage (Android)", function () {
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
   };
 
+  // The socket helpers wait on microtasks, not real turns: auto-advance fires a
+  // pending request deadline whenever the test yields the event loop.
   const waitForSocket = async (
     getSocket: () => CapturingWebSocket | null,
   ): Promise<CapturingWebSocket | null> => {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 100; i++) {
       const s = getSocket();
       if (s) {
         return s;
       }
-      await new Promise((r) => setImmediate(r));
+      await Promise.resolve();
     }
     return getSocket();
   };
@@ -99,11 +101,11 @@ describe("CtrlProxyStorage (Android)", function () {
     if (!socket) {
       return;
     }
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 100; i++) {
       if (socket.sentMessages.length >= minCount) {
         return;
       }
-      await new Promise((r) => setImmediate(r));
+      await Promise.resolve();
     }
   };
 
@@ -208,7 +210,10 @@ describe("CtrlProxyStorage (Android)", function () {
   };
 
   const answerSdkCapabilities = async (state: unknown) => {
-    const { client, socket } = await openSdkCapabilitiesClient(["get_sdk_capabilities"]);
+    const { client, socket } = await openSdkCapabilitiesClient([
+      "get_sdk_capabilities",
+      "sdk_capabilities_user_id_v1",
+    ]);
     try {
       const count = socket.sentMessages.length;
       const pending = client.getSdkCapabilities("com.example");
@@ -249,6 +254,48 @@ describe("CtrlProxyStorage (Android)", function () {
       snapshot: { schemaVersion: 1 },
     });
     expect(result).toEqual({ status: "unavailable", reason: "MALFORMED_RESPONSE" });
+  });
+
+  const sentSdkCapabilitiesRequest = async (supportedCommands: string[], userId?: number) => {
+    const { client, socket } = await openSdkCapabilitiesClient(supportedCommands);
+    try {
+      const count = socket.sentMessages.length;
+      const pending = client.getSdkCapabilities("com.example", userId);
+      await waitForSentMessages(socket, count + 1);
+      const request = findSentMessage(socket, "get_sdk_capabilities");
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "sdk_capabilities",
+          requestId: request.requestId,
+          state: { outcome: "unavailable", reason: "CROSS_USER_UNSUPPORTED" },
+        }),
+      );
+      return { request, result: await pending };
+    } finally {
+      client.close();
+    }
+  };
+
+  test("SDK capabilities forward the app's user to a CtrlProxy that advertises it", async () => {
+    const { request, result } = await sentSdkCapabilitiesRequest(
+      ["get_sdk_capabilities", "sdk_capabilities_user_id_v1"],
+      10,
+    );
+    expect(request.userId).toBe(10);
+    expect(result).toEqual({ status: "unavailable", reason: "CROSS_USER_UNSUPPORTED" });
+  });
+
+  test("SDK capabilities omit the user for a CtrlProxy without the user flag", async () => {
+    const { request } = await sentSdkCapabilitiesRequest(["get_sdk_capabilities"], 10);
+    expect("userId" in request).toBe(false);
+  });
+
+  test("SDK capabilities omit the user when none is known", async () => {
+    const { request } = await sentSdkCapabilitiesRequest([
+      "get_sdk_capabilities",
+      "sdk_capabilities_user_id_v1",
+    ]);
+    expect("userId" in request).toBe(false);
   });
 
   test("an old CtrlProxy APK yields unavailable without sending a request", async () => {

@@ -63,6 +63,8 @@ class OverlayController(
    */
   private val appLayerPermitted: () -> Boolean = { true },
   private val packageName: String = DEFAULT_CTRL_PROXY_PACKAGE,
+  /** Loaded custom fonts the rendered overlay draws `fontFamily: {asset}` text with. */
+  private val fonts: OverlayFontCache? = null,
 ) {
   val isShowing: Boolean
     get() = host.isShowing
@@ -200,7 +202,9 @@ class OverlayController(
         darkTheme = overlayHostDark(mappedSpec),
         onHostDismiss = { interact(runtime, OverlayInteraction.HostDismiss) },
         content = {
-          OverlayRuntimeContent(runtime, images) { interaction -> interact(runtime, interaction) }
+          OverlayRuntimeContent(runtime, images, fonts) { interaction ->
+            interact(runtime, interaction)
+          }
         },
       )
     val blocked = lifecycle.isBlocked()

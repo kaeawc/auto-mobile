@@ -21,7 +21,11 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { ProviderUnavailableError } from "../../storage/ProviderUnavailableError";
 import type { DelegateContext } from "./types";
 import { generateSecureId } from "./types";
-import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
+import {
+  ctrlProxyRequests,
+  SDK_CAPABILITIES_USER_ID_CAPABILITY,
+  serializeCtrlProxyRequest,
+} from "./ctrlProxyProtocol";
 import type {
   PreferenceFile,
   KeyValueEntry,
@@ -255,9 +259,14 @@ export class CtrlProxyStorage {
   /**
    * Reads the app SDK's capability and capture-policy snapshot (issue #5191). Resolves to a typed
    * `unavailable` result, never an empty capability set, when CtrlProxy, the SDK, or the response
-   * cannot supply a snapshot.
+   * cannot supply a snapshot. `userId` (the app's Android user, e.g. a work profile) is forwarded
+   * only to a CtrlProxy advertising {@link SDK_CAPABILITIES_USER_ID_CAPABILITY}.
    */
-  async getSdkCapabilities(packageName: string, timeoutMs = 5000): Promise<SdkCapabilitiesResult> {
+  async getSdkCapabilities(
+    packageName: string,
+    userId?: number,
+    timeoutMs = 5000,
+  ): Promise<SdkCapabilitiesResult> {
     try {
       if (!(await this.context.ensureConnected())) {
         return sdkCapabilitiesUnavailable("CTRLPROXY_UNREACHABLE");
@@ -278,8 +287,16 @@ export class CtrlProxyStorage {
         timeoutMs,
         () => ({ state: { outcome: "unavailable", reason: "REQUEST_TIMEOUT" } }),
       );
+      const forwardUser =
+        userId !== undefined && commands?.includes(SDK_CAPABILITIES_USER_ID_CAPABILITY) === true;
       ws.send(
-        serializeCtrlProxyRequest(ctrlProxyRequests.getSdkCapabilities({ requestId, packageName })),
+        serializeCtrlProxyRequest(
+          ctrlProxyRequests.getSdkCapabilities({
+            requestId,
+            packageName,
+            ...(forwardUser ? { userId } : {}),
+          }),
+        ),
       );
       return parseSdkCapabilitiesState((await pending).state);
     } catch (error) {

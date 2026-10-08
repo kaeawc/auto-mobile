@@ -436,6 +436,12 @@ Keep `contentDescription` as the accessibility-owned label. `observe` exposes th
 ID as `testTag` in its searchable output; select it with
 `tapOn({ testTag: "widget_<id>" })`. The raw hierarchy field is `test-tag`.
 
+Compose with `testTagsAsResourceId = true` (including the AutoMobile overlay)
+reports `Modifier.testTag` as a bare `resource-id` and no `test-tag`. A
+`testTag` selector therefore matches nodes by `test-tag` first; only when no
+node carries that tag does it match a node without a `test-tag` whose
+`resource-id` equals the tag exactly (no `pkg:id/` suffix matching).
+
 Semantic node actions using `testTag`, `uniqueId`, or collection row + column
 (with a stable ID) require a CtrlProxy runner that advertises node-action selector
 support. Without that support, taps use coordinate routing and long presses use

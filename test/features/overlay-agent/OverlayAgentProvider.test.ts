@@ -124,7 +124,8 @@ describe("OverlayAgentProvider", () => {
     await expect(makeProvider().ensure()).rejects.toThrow(/checksum verification failed/);
     expect(await exists(dylibPath())).toBe(true);
     expect(await exists(metadataPath())).toBe(true);
-    expect(await fs.readdir(cacheDir)).toEqual([
+    // readdir order is filesystem-defined (ext4 hash order differs from APFS/NTFS); sort first.
+    expect((await fs.readdir(cacheDir)).sort()).toEqual([
       OVERLAY_AGENT_CACHE_FILENAME,
       OVERLAY_AGENT_METADATA_FILENAME,
     ]);

@@ -121,6 +121,8 @@ import {
   assertAppGestureNotUnderOverlay,
   scopeHierarchyForSelector,
 } from "../observe/hierarchyLayer";
+import { ownOverlaySafeGesturePoint } from "../observe/ApplicationWindowCover";
+import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import {
   DefaultTalkBackNavigationDriverFactory,
   type TalkBackNavigationDriverFactory,
@@ -163,6 +165,8 @@ interface CapturedTapTarget {
   observationDisplay?: ScreenSizeForOffscreenCheckOptions["display"];
   scoped?: boolean;
   talkBackState?: boolean | null;
+  /** The request's `layer`; with none, the tap point must avoid AutoMobile's overlay windows. */
+  layer?: HierarchyLayer;
   element: Element;
   capture: HierarchySnapshot;
 }
@@ -988,6 +992,20 @@ export class TapAnyElement extends BaseVisualChange {
     return { element: selection.element, containerFound };
   }
 
+  private capturedTapTarget(
+    options: TapAnyElementOptions,
+    observeResult: ObserveResult,
+    picked: Pick<CapturedTapTarget, "element" | "capture" | "talkBackState">,
+  ): CapturedTapTarget {
+    return {
+      ...picked,
+      observationDisplay: observeResult.viewHierarchy,
+      observationScreenSize: observeResult.screenSize,
+      scoped: isStrictlyScoped(options),
+      layer: options.layer,
+    };
+  }
+
   private resolveTapPoint(
     target: CapturedTapTarget,
     sizeOptions: ScreenSizeForOffscreenCheckOptions = {},
@@ -1005,7 +1023,24 @@ export class TapAnyElement extends BaseVisualChange {
         "Matched element has no visible tap area; scroll it into view, then retry tapAny.",
       );
     }
-    return this.geometry.getElementCenter({ bounds });
+    const center = this.geometry.getElementCenter({ bounds });
+    if (target.layer !== undefined || this.device.platform === "ios") {
+      return center;
+    }
+    // Default-layer selectors also resolve app rows kept under AutoMobile's own overlay (#10691),
+    // so avoid the overlay as tapOn does; layer "app" refuses later with its own error.
+    const safe = ownOverlaySafeGesturePoint(
+      target.capture.hierarchy,
+      target.element,
+      bounds,
+      center,
+    );
+    if (!safe) {
+      throw new ActionableError(
+        "Target is covered by an AutoMobile overlay window; hide or move the overlay, then retry tapAny.",
+      );
+    }
+    return safe;
   }
 
   private hashViewHierarchy(viewHierarchy: ViewHierarchyResult | null): string | null {
@@ -1704,14 +1739,11 @@ export class TapAnyElement extends BaseVisualChange {
         }));
       }
     }
-    const target = {
+    const target = this.capturedTapTarget(options, observeResult, {
       element,
       capture: selectedCapture,
-      observationDisplay: observeResult.viewHierarchy,
-      observationScreenSize: observeResult.screenSize,
-      scoped: isStrictlyScoped(options),
       talkBackState,
-    };
+    });
     const tapPoint = this.resolveTapPoint(target);
     // The element resolved in the scoped tree; the touch lands on whatever is on top (#9305).
     assertAppGestureNotUnderOverlay(target.capture.hierarchy, options.layer, tapPoint, "tap");

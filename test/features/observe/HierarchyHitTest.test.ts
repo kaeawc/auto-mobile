@@ -12,6 +12,8 @@ import {
 import type { ElementBounds, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
+import { ownOverlaySafeGesturePoint } from "../../../src/features/observe/ApplicationWindowCover";
+import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import capturedIme from "../../fixtures/android-ime-window/playground-gboard-api36.json";
 import { nestedClickableHierarchy } from "../../fixtures/nestedClickableHierarchy";
@@ -221,5 +223,54 @@ describe("skeleton occlusion by application windows", () => {
         { type: 3, windowLayer: 1, hierarchy: dialog },
       ]).skeleton.map((row) => row.elementId),
     ).toContain("list_row");
+  });
+});
+
+// Inline model trees: no capture has an AutoMobile overlay and an application dialog splitting
+// one app row between them (#10715).
+describe("AutoMobile overlay covers (#10715)", () => {
+  const row = { "resource-id": "list_row", clickable: "true", bounds: rect(0, 400) };
+  function rect(left: number, right: number): ElementBounds {
+    return { left, top: 0, right, bottom: 100 };
+  }
+  function overlayWindow(
+    bounds: ElementBounds,
+    metadata: Pick<
+      NonNullable<ViewHierarchyResult["windows"]>[number],
+      "overlayPlacement" | "overlayOpaque"
+    > = {},
+  ): NonNullable<ViewHierarchyResult["windows"]>[number] {
+    return {
+      type: 4,
+      windowLayer: 2,
+      packageName: CTRL_PROXY_PACKAGE,
+      bounds,
+      hierarchy: { node: [{ "resource-id": "overlay_btn", clickable: "true", bounds }] },
+      ...metadata,
+    };
+  }
+  function hierarchyWith(
+    windows: NonNullable<ViewHierarchyResult["windows"]>,
+  ): ViewHierarchyResult {
+    return {
+      hierarchy: { node: [] },
+      windows: [{ type: 1, windowLayer: 0, hierarchy: row }, ...windows],
+    };
+  }
+  const target = (hierarchy: ViewHierarchyResult) =>
+    new DefaultElementParser().parseNodeBounds(hierarchy.windows![0].hierarchy!)!;
+
+  test("gesture point moves off a partial overlay and is refused under a full one", () => {
+    const partial = hierarchyWith([overlayWindow(rect(100, 300))]);
+    expect(
+      ownOverlaySafeGesturePoint(partial, target(partial), row.bounds, { x: 200, y: 50 }),
+    ).toEqual({
+      x: 50,
+      y: 50,
+    });
+    const full = hierarchyWith([overlayWindow(rect(0, 400))]);
+    expect(
+      ownOverlaySafeGesturePoint(full, target(full), row.bounds, { x: 200, y: 50 }),
+    ).toBeNull();
   });
 });

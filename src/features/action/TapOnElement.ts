@@ -1,4 +1,5 @@
 import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
+import type { OwnOverlayCoverRule } from "../observe/ApplicationWindowCover";
 import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
@@ -355,6 +356,11 @@ export interface TapPreTapStabilitySeam {
 export const tapFocusFailure: unique symbol = Symbol("tapFocusFailure");
 export type TapFocusFailure = "not-found" | "no-visible-tap-area" | "navigation-bar";
 export type TapOnFocusResult = TapOnElementResult & { [tapFocusFailure]?: TapFocusFailure };
+
+/** With no `layer`, a tap must avoid AutoMobile's own overlay windows as well (#10691). */
+function tapOwnOverlayCoverRule(layer: TapOnElementOptions["layer"]): OwnOverlayCoverRule {
+  return layer === undefined ? "touch" : "none";
+}
 
 class TapTargetUnavailableError extends ActionableError {
   constructor(
@@ -1420,7 +1426,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         },
         // Default-layer selectors also resolve app rows kept under AutoMobile's own overlay
         // (#10691); layer "app" refuses those later with its own overlay-specific error.
-        context.options.layer === undefined,
+        tapOwnOverlayCoverRule(context.options.layer),
       );
       if (!safe.point) {
         throw new TapTargetUnavailableError(

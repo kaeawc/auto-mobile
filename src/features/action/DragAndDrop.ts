@@ -12,6 +12,7 @@ import {
   BootedDevice,
   DragAndDropOptions,
   DragAndDropResult,
+  Element,
   ObserveResult,
   ViewHierarchyResult,
 } from "../../models";
@@ -21,6 +22,7 @@ import {
   scopeHierarchyForSelector,
 } from "../observe/hierarchyLayer";
 import type { HierarchyCapture } from "../observe/HierarchyCapture";
+import { ownOverlaySafeGesturePoint } from "../observe/ApplicationWindowCover";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -527,11 +529,35 @@ export class DragAndDrop extends BaseVisualChange {
     const scoped = scopeHierarchyForSelector(hierarchy, options.layer);
     const source = this.resolveTarget(scoped, { ...options.source, screenSizeOptions }, "source");
     const target = this.resolveTarget(scoped, { ...options.target, screenSizeOptions }, "target");
-    const sourcePoint = this.geometry.getElementCenter(source);
-    const targetPoint = this.geometry.getElementCenter(target);
+    const sourcePoint = this.overlaySafePoint(hierarchy, options.layer, source, "source");
+    const targetPoint = this.overlaySafePoint(hierarchy, options.layer, target, "target");
     assertAppGestureNotUnderOverlay(hierarchy, options.layer, sourcePoint, "drag from");
     assertAppGestureNotUnderOverlay(hierarchy, options.layer, targetPoint, "drop");
     return { sourcePoint, targetPoint };
+  }
+
+  /**
+   * The endpoint's center, moved off AutoMobile's own overlay windows for a default-layer drag:
+   * selectors also resolve app rows kept under the overlay (#10691), as tapOn does. Layer "app"
+   * refuses an overlay-covered point later with its own error.
+   */
+  private overlaySafePoint(
+    hierarchy: ViewHierarchyResult,
+    layer: DragAndDropOptions["layer"],
+    element: Element,
+    label: "source" | "target",
+  ): { x: number; y: number } {
+    const center = this.geometry.getElementCenter(element);
+    if (layer !== undefined || this.device.platform === "ios") {
+      return center;
+    }
+    const safe = ownOverlaySafeGesturePoint(hierarchy, element, element.bounds, center);
+    if (!safe) {
+      throw new ActionableError(
+        `dragAndDrop ${label} is covered by an AutoMobile overlay window; hide or move the overlay, then retry.`,
+      );
+    }
+    return safe;
   }
 
   private resolveTarget(

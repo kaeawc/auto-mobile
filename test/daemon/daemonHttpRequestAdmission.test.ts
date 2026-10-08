@@ -1,4 +1,5 @@
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { releasingSessionHarness, releasingSessionId } from "../helpers/releasingSessionHarness";
 import { EventEmitter } from "node:events";
 import type {
@@ -12,12 +13,14 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { MCP_STREAMABLE_PATH } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 
 const port = 41321;
 
 interface DaemonHttpInternals {
   startHttpServer(): Promise<void>;
   sessionManager: SessionManager;
+  observerSessionRegistry: ObserverSessionRegistry;
   transports: Map<string, FakeTransport>;
 }
 
@@ -124,6 +127,7 @@ class FakeTransport {
 
 async function harness(
   sessionManager?: SessionManager,
+  observers?: ObserverSessionRegistry,
 ): Promise<{ server: FakeHttpServer; transport: FakeTransport }> {
   const server = new FakeHttpServer();
   const daemon = new Daemon(
@@ -145,6 +149,9 @@ async function harness(
   const internals = daemon as unknown as DaemonHttpInternals;
   if (sessionManager) {
     internals.sessionManager = sessionManager;
+  }
+  if (observers) {
+    internals.observerSessionRegistry = observers;
   }
   internals.transports.set(transport.sessionId, transport);
   await internals.startHttpServer();
@@ -214,7 +221,7 @@ describe("Daemon HTTP request admission", () => {
 
 describe("HTTP heartbeat during release", () => {
   for (const phase of ["A", "B"] as const) {
-    test(`heartbeat refuses Phase ${phase}, drains release, then keeps unknown-session behavior`, async () => {
+    test(`heartbeat refuses Phase ${phase}, drains release, then 404s the released session`, async () => {
       const h = releasingSessionHarness();
       const heartbeat = spyOn(h.manager, "recordHeartbeat");
       try {
@@ -244,11 +251,14 @@ describe("HTTP heartbeat during release", () => {
         );
         expect(called).toBe(0);
         const after = await send();
-        expect(after.statusCode).toBe(200);
-        expect(after.body).toBe('{"status":"ok"}');
-        expect(heartbeat).toHaveBeenCalledTimes(1);
-        // The legacy unknown-session HTTP acknowledgement is a liveness no-op,
-        // including when the missing UUID has an explicit terminal snapshot.
+        // A released session is gone: the client must learn that, like the socket route.
+        expect(after.statusCode).toBe(404);
+        expect(after.body).toBe(
+          JSON.stringify({ error: `Session not found: ${releasingSessionId}` }),
+        );
+        expect(heartbeat).toHaveBeenCalledTimes(0);
+        // The unknown-session refusal is a liveness no-op, including when the
+        // missing UUID has an explicit terminal snapshot.
         expect(h.persistence.activityWrites).toBe(writes);
         expect(session.lastHeartbeat).toBe(lastHeartbeat);
         expect(h.manager.getSession(releasingSessionId)).toBeNull();
@@ -263,7 +273,7 @@ describe("HTTP heartbeat during release", () => {
   test("HTTP heartbeat keeps observer and rebind behavior", async () => {
     const h = releasingSessionHarness();
     try {
-      const { server } = await harness(h.manager);
+      const { server } = await harness(h.manager, h.observers);
       const send = () =>
         server.dispatch(
           { host: `127.0.0.1:${port}` },
@@ -284,6 +294,41 @@ describe("HTTP heartbeat during release", () => {
       h.dispose();
     }
   });
+});
+
+test("HTTP heartbeat 404s a session id the daemon never knew, like the socket route", async () => {
+  const h = releasingSessionHarness();
+  const heartbeat = spyOn(h.manager, "recordHeartbeat");
+  try {
+    const { server } = await harness(h.manager, h.observers);
+    const send = () =>
+      server.dispatch(
+        { host: `127.0.0.1:${port}` },
+        "POST",
+        "/heartbeat",
+        JSON.stringify({ sessionId: "never-created" }),
+      );
+    const response = await send();
+    expect(response.statusCode).toBe(404);
+    expect(response.body).toBe(JSON.stringify({ error: "Session not found: never-created" }));
+    expect(heartbeat).not.toHaveBeenCalled();
+    const socket = await handleDaemonRequest(
+      {
+        id: "unknown",
+        type: "daemon_request",
+        method: "daemon/heartbeat",
+        params: { sessionId: "never-created" },
+      },
+      h.state,
+    );
+    expect(socket).toMatchObject({ success: false, error: "Session not found: never-created" });
+    // A live observer session with that id still heartbeats.
+    h.observers.register("never-created", "desktop");
+    expect((await send()).statusCode).toBe(200);
+  } finally {
+    heartbeat.mockRestore();
+    h.dispose();
+  }
 });
 
 test("HTTP heartbeat accepts an unregistered non-releasing object", async () => {

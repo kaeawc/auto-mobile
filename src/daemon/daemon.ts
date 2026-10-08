@@ -1342,14 +1342,22 @@ export class Daemon {
     const session =
       this.sessionManager.getSession(sessionId) ??
       this.sessionManager.getReleasingSession(sessionId);
-    if (session && isSessionReleasing(this.sessionManager, sessionId, session)) {
+    // Match the socket route: an unknown, released, or releasing session id is a
+    // 404 unless it names a live observer session, so a client learns its session
+    // is gone instead of heartbeating a dead id forever.
+    if (!session || isSessionReleasing(this.sessionManager, sessionId, session)) {
+      if (this.observerSessionRegistry.heartbeat(sessionId)) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok" }));
+        return;
+      }
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: `Session not found: ${sessionId}` }));
       return;
     }
     // HTTP heartbeats carry no liveness owner token, so apply the socket route's
     // tokenless rule: a no-op (200) on a proxy-owned or claim-pending session.
-    if (!(session && isTokenOwnedOrClaimPending(session))) {
+    if (!isTokenOwnedOrClaimPending(session)) {
       this.sessionManager.recordHeartbeat(sessionId);
     }
     res.writeHead(200, { "Content-Type": "application/json" });

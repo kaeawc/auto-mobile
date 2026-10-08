@@ -37,6 +37,8 @@ data class OverlayRenderNode(
   val sheetOpen: Boolean = false,
   /** The bound boolean of a `switch` or `checkbox`; false for every other role. */
   val checked: Boolean = false,
+  /** The bound number of a `slider`; 0 for every other role. */
+  val sliderValue: Double = 0.0,
 )
 
 data class OverlayRenderModel(
@@ -81,6 +83,7 @@ private fun overlayChildren(node: OverlayNode): List<OverlayNode> =
     is OverlayRowNode -> node.children
     is OverlayColumnNode -> node.children
     is OverlayPagerNode -> node.children
+    is OverlayCardNode -> node.children
     else -> emptyList()
   }
 
@@ -131,6 +134,9 @@ private fun mapOverlayNode(
       is OverlaySwitchNode -> "switch"
       is OverlayCheckboxNode -> "checkbox"
       is OverlayButtonNode -> "button"
+      is OverlaySliderNode -> "slider"
+      is OverlayChipNode -> "chip"
+      is OverlayCardNode -> "card"
       is OverlayScrollNode -> "scroll"
       is OverlayPagerNode -> "pager"
       is OverlayTabBarNode -> "tabBar"
@@ -144,6 +150,8 @@ private fun mapOverlayNode(
       is OverlaySwitchNode -> node.label.orEmpty()
       is OverlayCheckboxNode -> node.label.orEmpty()
       is OverlayButtonNode -> node.label
+      is OverlaySliderNode -> node.label.orEmpty()
+      is OverlayChipNode -> node.label
       is OverlayIconNode -> node.name
       else -> ""
     }
@@ -192,6 +200,9 @@ private fun mapOverlayNode(
     } ?: false,
     checked =
       overlayToggleKey(node)?.let { state[it] == OverlayScalar.BooleanValue(true) } ?: false,
+    sliderValue =
+      (node as? OverlaySliderNode)?.let { (state[it.stateKey] as? OverlayScalar.Numeric)?.value }
+        ?: 0.0,
   )
 }
 

@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "v": 0
+    },
+    "root": {
+      "type": "slider",
+      "stateKey": "v",
+      "min": 0,
+      "max": 10,
+      "step": 3
+    }
+  },
+  "expectedPath": "root.step"
+}

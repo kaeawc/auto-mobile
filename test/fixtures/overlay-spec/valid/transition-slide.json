@@ -1,0 +1,11 @@
+{
+  "id": "transition",
+  "window": { "placement": { "type": "fullscreen" } },
+  "state": { "open": false },
+  "root": {
+    "type": "text",
+    "text": "x",
+    "transition": "slide",
+    "visibleWhen": { "key": "open", "equals": true }
+  }
+}

@@ -69,8 +69,7 @@ export function ownOverlayWindows(
  * is full-screen while an overlay is attached) or its metadata was unavailable, so it is never
  * taken as hiding the app.
  *
- * `isFullyCoveredByOwnOverlay` (PR for #10446, branch work/orch-v10-10446-host) should call this in
- * place of its bare bounds test.
+ * `isFullyCoveredByOwnOverlay` calls this in place of a bare bounds test.
  */
 export function ownOverlayHidesApp(
   window: Pick<ViewHierarchyWindowInfo, "overlayPlacement" | "overlayOpaque">,
@@ -82,3 +81,16 @@ export function ownOverlayHidesApp(
   }
   return window.overlayPlacement === "fullscreen" && window.overlayOpaque;
 }
+/**
+ * Node kinds the overlay renderer used to report as a node's `contentDescription` when it had no
+ * text (`OverlaySpecContent.kt`'s `SEMANTICS_FREE_CONTAINERS`). A tappable container still reads as
+ * its kind, so observe treats these as "no real label" when an icon names the control.
+ */
+export const OVERLAY_LAYOUT_KINDS: ReadonlySet<string> = new Set([
+  "box",
+  "row",
+  "column",
+  "scroll",
+  "pager",
+  "spacer",
+]);

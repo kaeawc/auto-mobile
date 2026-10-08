@@ -11,8 +11,10 @@ import { normalizeQuotes } from "../../utility/TextMatcher";
 import { compareSelectionRank, selectableCandidates } from "../../utility/selectionRank";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
 import {
+  applicationWindowCoverIndex,
   isFullyCoveredByApplicationWindow,
   ownOverlayNodeSources,
+  type ApplicationWindowCoverIndex,
 } from "../ApplicationWindowCover";
 import { visibleTapBounds } from "../../utility/ElementGeometry";
 import { OVERLAY_LAYOUT_KINDS } from "../ownOverlayFocus";
@@ -1478,13 +1480,19 @@ function markAppRowsCoveredByApplicationWindow(
   if (!hierarchy?.windows?.length) {
     return;
   }
+  let coverIndex: ApplicationWindowCoverIndex | undefined;
   for (const acc of kept) {
     if (acc.occluded || !acc.target || acc.affordances.size === 0) {
       continue;
     }
     const [left, top, right, bottom] = acc.bounds;
     const bounds = visibleTapBounds({ left, top, right, bottom }, viewport);
-    if (bounds && isFullyCoveredByApplicationWindow(hierarchy, acc.target, bounds, "touch")) {
+    // Project the capture once for every row, not once per row.
+    coverIndex ??= applicationWindowCoverIndex(hierarchy);
+    if (
+      bounds &&
+      isFullyCoveredByApplicationWindow(hierarchy, acc.target, bounds, "touch", coverIndex)
+    ) {
       acc.affordances.clear();
       acc.occluded = true;
     }

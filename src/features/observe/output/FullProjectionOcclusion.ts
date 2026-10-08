@@ -2,7 +2,10 @@ import type { Element } from "../../../models/Element";
 import type { ObserveResult } from "../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
 import { visibleTapBounds } from "../../utility/ElementGeometry";
-import { isFullyCoveredByApplicationWindow } from "../ApplicationWindowCover";
+import {
+  applicationWindowCoverIndex,
+  isFullyCoveredByApplicationWindow,
+} from "../ApplicationWindowCover";
 import { getHierarchyNodeSource } from "./elementProvenance";
 
 // The full projection carries the skeleton's `occluded: true` signal (owner decision 2026-10-08,
@@ -32,6 +35,8 @@ function coveredSources(
 ): { covered: Set<ViewHierarchyNode>; indexes: Map<ActionableCategory, Set<number>> } {
   const covered = new Set<ViewHierarchyNode>();
   const indexes = new Map<ActionableCategory, Set<number>>();
+  // Project the capture once for every row, not once per row.
+  const coverIndex = applicationWindowCoverIndex(source.viewHierarchy!);
   for (const category of ACTIONABLE_CATEGORIES) {
     const hits = new Set<number>();
     (elements[category] as Element[]).forEach((element, index) => {
@@ -40,7 +45,13 @@ function coveredSources(
       if (
         node &&
         bounds &&
-        isFullyCoveredByApplicationWindow(source.viewHierarchy!, element, bounds, "touch")
+        isFullyCoveredByApplicationWindow(
+          source.viewHierarchy!,
+          element,
+          bounds,
+          "touch",
+          coverIndex,
+        )
       ) {
         covered.add(node);
         hits.add(index);

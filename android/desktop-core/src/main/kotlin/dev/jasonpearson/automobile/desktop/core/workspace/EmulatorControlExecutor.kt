@@ -92,6 +92,11 @@ class DaemonEmulatorControlExecutor(
   private val client: AutoMobileClient,
   private val foregroundAppResolver: ForegroundAppResolver = ObservationForegroundAppResolver(),
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+  /**
+   * The client the Unix `input/pressButton` fast path uses. A device the desktop session holds
+   * takes input only from that session (#10698), so the desktop passes a client that names it.
+   */
+  private val inputClient: AutoMobileClient = client,
 ) : EmulatorControlExecutor {
   override suspend fun run(
     deviceId: String,
@@ -173,7 +178,7 @@ class DaemonEmulatorControlExecutor(
     val startMs = MONOTONIC_NOW_MS()
     val result =
       withContext(ioDispatcher) {
-        client.inputPressButton(
+        inputClient.inputPressButton(
           button = button.toolValue,
           platform = wire,
           deviceId = deviceId,

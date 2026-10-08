@@ -281,7 +281,7 @@ class DesktopDaemonSessionCompositionTest {
       mainClock.advanceTimeByFrame()
 
       repeat(5) { tick() }
-      assertEquals(emptyList(), transport.boundDevices())
+      assertEquals(emptyList<String>(), transport.boundDevices())
 
       binding.value = pixel
       mainClock.advanceTimeByFrame()
@@ -630,14 +630,103 @@ class DesktopDaemonSessionCompositionTest {
     mainClock.advanceTimeByFrame()
   }
 
+  @Test
+  fun `hiding the host past the grace releases the held device and showing it binds only on input`() =
+    runComposeUiTest {
+      // #10695: a window closed to the tray (or a hidden IDE tool window) keeps its composition, so
+      // the focused device would stay held with nobody looking at it.
+      val transport = RecordingDaemonTransport()
+      val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+      val visible = mutableStateOf(true)
+      var state: DesktopDaemonSessionState? = null
+      setContent { state = sessionHost(transport, binding, visible) }
+      mainClock.autoAdvance = false
+      mainClock.advanceTimeByFrame()
+      repeat(2) { tick() }
+      assertEquals("emulator-5554", state?.boundDeviceId)
+
+      visible.value = false
+      mainClock.advanceTimeByFrame()
+      repeat((HIDDEN_RELEASE_GRACE_MS / HEARTBEAT_MS).toInt() + 1) { tick() }
+      mainClock.advanceTimeByFrame()
+      mainClock.advanceTimeByFrame()
+      repeat(2) { tick() }
+
+      assertEquals(listOf<String?>("session-1"), transport.sessionsFor("daemon/releaseSession"))
+      assertEquals(listOf("emulator-5554"), transport.boundDevices())
+      assertEquals(null, state?.boundDeviceId)
+      assertEquals("emulator-5554", state?.idleReleasedDeviceId)
+      assertEquals("session-2", state?.sessionUuidProvider?.invoke())
+
+      // Showing the window again binds nothing on its own.
+      visible.value = true
+      mainClock.advanceTimeByFrame()
+      repeat(3) { tick() }
+      assertEquals(listOf("emulator-5554"), transport.boundDevices())
+
+      // The first input on the pane binds it once under the fresh session.
+      requireNotNull(state).onUserInteraction("emulator-5554")
+      mainClock.advanceTimeByFrame()
+      repeat(2) { tick() }
+      assertEquals(listOf("emulator-5554", "emulator-5554"), transport.boundDevices())
+      assertEquals("emulator-5554", state.boundDeviceId)
+      assertEquals(null, state.idleReleasedDeviceId)
+      assertEquals(1, transport.count("daemon/releaseSession"))
+    }
+
+  @Test
+  fun `a hide shorter than the grace keeps the device bound`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport()
+    val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+    val visible = mutableStateOf(true)
+    var state: DesktopDaemonSessionState? = null
+    setContent { state = sessionHost(transport, binding, visible) }
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeByFrame()
+    repeat(2) { tick() }
+
+    visible.value = false
+    mainClock.advanceTimeByFrame()
+    repeat(2) { tick() }
+    visible.value = true
+    mainClock.advanceTimeByFrame()
+    repeat((HIDDEN_RELEASE_GRACE_MS / HEARTBEAT_MS).toInt() + 2) { tick() }
+
+    assertEquals(0, transport.count("daemon/releaseSession"))
+    assertEquals(listOf("emulator-5554"), transport.boundDevices())
+    assertEquals("emulator-5554", state?.boundDeviceId)
+    assertEquals(null, state?.idleReleasedDeviceId)
+  }
+
+  @Test
+  fun `a pick made while the host is hidden is not bound`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport()
+    val binding = mutableStateOf<DesktopDaemonSessionBinding?>(null)
+    val visible = mutableStateOf(false)
+    var state: DesktopDaemonSessionState? = null
+    setContent { state = sessionHost(transport, binding, visible) }
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeByFrame()
+    repeat((HIDDEN_RELEASE_GRACE_MS / HEARTBEAT_MS).toInt() + 1) { tick() }
+
+    binding.value = pixel
+    mainClock.advanceTimeByFrame()
+    repeat(3) { tick() }
+
+    assertEquals(emptyList<String>(), transport.boundDevices())
+    assertEquals("emulator-5554", state?.idleReleasedDeviceId)
+  }
+
   @Composable
   private fun sessionHost(
     transport: RecordingDaemonTransport,
     binding: MutableState<DesktopDaemonSessionBinding?>,
+    visible: MutableState<Boolean>? = null,
   ): DesktopDaemonSessionState {
     return rememberDesktopDaemonSession(
       socketPath = "in-memory",
       binding = binding,
+      hostVisible = visible?.value ?: true,
       sessionFactory = {
         DesktopDaemonSession(
           McpDaemonClient(transport, sessionUuid = "session-${++sessionCounter}"),

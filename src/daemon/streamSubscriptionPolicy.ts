@@ -1,9 +1,9 @@
 import { ActionableError } from "../models/ActionableError";
 
 /**
- * Shared relay/WebRTC rule: any live, non-releasing device session may attach read-only
- * to any device; its owner session has owner kind. Registration-only observer sessions
- * are not admitted. Viewers cannot mutate an owner's capture parameters or control.
+ * Shared relay/WebRTC rule: any live, non-releasing device session or registered observer
+ * session may attach read-only to any device (#10698); its owner session has owner kind.
+ * Viewers cannot mutate an owner's capture parameters or control.
  * A live viewer survives ownership changes; an owner losing its device becomes a
  * read-only viewer. The subscribing identity ending terminates either kind. Device
  * removal, VM restore, identity quarantine and daemon shutdown terminate both kinds.

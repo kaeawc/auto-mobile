@@ -319,9 +319,15 @@ describe("sessionless identity quarantine", () => {
       server["captureInputTargetOwner"](device);
 
       let ran = false;
-      await server["runTrackedDeviceInput"]("input/tap", device, async () => {
-        ran = true;
-      });
+      await server["runTrackedDeviceInput"](
+        "input/tap",
+        device,
+        async () => {
+          ran = true;
+        },
+        undefined,
+        () => "owner",
+      );
       expect(ran).toBe(true);
     });
 

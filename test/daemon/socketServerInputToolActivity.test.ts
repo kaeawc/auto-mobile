@@ -122,8 +122,23 @@ const tapFrame: DaemonRequest = {
   id: "tap",
   type: "mcp_request",
   method: "input/tap",
-  params: { platform: "android", deviceId: androidDevice.deviceId, x: 1, y: 2 },
+  params: { platform: "android", deviceId: androidDevice.deviceId, x: 1, y: 2, sessionUuid: OWNER },
 };
+
+function tapAs(id: string, sessionUuid?: string): DaemonRequest {
+  return {
+    id,
+    type: "mcp_request",
+    method: "input/tap",
+    params: {
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+      x: 1,
+      y: 2,
+      ...(sessionUuid === undefined ? {} : { sessionUuid }),
+    },
+  };
+}
 
 describe("desktop input/* counts as tool activity for the device's session", () => {
   test("a completed input/tap ends an execution under the owning session", async () => {
@@ -148,6 +163,18 @@ describe("desktop input/* counts as tool activity for the device's session", () 
     expect(ended).toEqual([]);
   });
 
+  test("an unowned device takes a sessionless tap", async () => {
+    useServer("emulator-other");
+    const socket = connect();
+
+    socket.send(tapAs("sessionless"));
+    await drain();
+
+    expect(socket.responses.find((frame) => frame.id === "sessionless")).toMatchObject({
+      success: true,
+    });
+  });
+
   test("subscribing to the socket's notifications alone is not activity", async () => {
     useServer(androidDevice.deviceId);
     const socket = connect();
@@ -160,5 +187,63 @@ describe("desktop input/* counts as tool activity for the device's session", () 
     await drain();
 
     expect(ended).toEqual([]);
+  });
+});
+
+describe("input/* on a held device follows ownership (#10698)", () => {
+  test("a sessionless tap on another session's device is refused with a typed code", async () => {
+    useServer(androidDevice.deviceId);
+    const socket = connect();
+
+    socket.send(tapAs("sessionless"));
+    await drain();
+
+    expect(socket.responses.find((frame) => frame.id === "sessionless")).toMatchObject({
+      success: false,
+      code: "device_owned_by_other_session",
+    });
+    expect(ended).toEqual([]);
+  });
+
+  test("a tap naming a session that does not hold the device is refused", async () => {
+    useServer(androidDevice.deviceId);
+    const socket = connect();
+
+    socket.send(tapAs("viewer", "desktop-viewer"));
+    await drain();
+
+    expect(socket.responses.find((frame) => frame.id === "viewer")).toMatchObject({
+      success: false,
+      code: "device_owned_by_other_session",
+    });
+    expect(ended).toEqual([]);
+  });
+
+  test("the holder's tap passes", async () => {
+    useServer(androidDevice.deviceId);
+    const socket = connect();
+
+    socket.send(tapAs("owner", OWNER));
+    await drain();
+
+    expect(socket.responses.find((frame) => frame.id === "owner")).toMatchObject({
+      success: true,
+    });
+    expect(ended).toEqual([[OWNER]]);
+  });
+
+  test("a malformed sessionUuid is rejected", async () => {
+    useServer("emulator-other");
+    const socket = connect();
+    const frame = tapAs("bad");
+    (frame.params as Record<string, unknown>).sessionUuid = 42;
+
+    socket.send(frame);
+    await drain();
+
+    expect(socket.responses.find((response) => response.id === "bad")).toMatchObject({
+      success: false,
+      error: expect.stringContaining("sessionUuid must be a non-empty string"),
+    });
   });
 });

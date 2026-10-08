@@ -126,6 +126,11 @@ import {
 } from "../features/toolSelection/SessionToolSelectionService";
 import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSelectionPolicy";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
+import {
+  assertInputRequesterHoldsDevice,
+  InputDeviceOwnedError,
+  parseInputRequesterSessionUuid,
+} from "./inputDeviceOwnership";
 import { ToolRegistry } from "../server/toolRegistry";
 import { preferenceSetWarning, validateTypeForPlatform } from "../server/storageTools";
 import {
@@ -311,6 +316,7 @@ export function mcpRequestFailureDetails(
       ? { code: JSONRPC_INVALID_PARAMS }
       : {}),
     ...(isToolUnavailableWireError(error) ? { code: DAEMON_TOOL_UNAVAILABLE_CODE } : {}),
+    ...(error instanceof InputDeviceOwnedError ? { code: error.code } : {}),
     ...(cause ? { requestFailureCause: cause } : {}),
   };
 }
@@ -700,12 +706,19 @@ interface InputRequestContext {
   signal?: AbortSignal;
   /** When the frame was received; the whole budget, socket queue wait included, runs from here. */
   receivedAtMs?: number;
+  /**
+   * The device session the frame acts for (#10698), resolved only when the target device is held;
+   * undefined for a sessionless frame.
+   */
+  requester?: () => string | undefined;
 }
 
 /** Owner fence and device-key wait bound for one tracked `input/*` execution. */
 interface InputDeviceGate {
   ownerSignal?: AbortSignal;
   chainWait?: McpForwardChainWait;
+  /** Who sent the frame; only the device's holder may drive a held device (#10698). */
+  requester?: () => string | undefined;
 }
 
 /** Wire method name for each streamed-gesture frame kind (issue: streaming gesture input). */
@@ -4641,7 +4654,13 @@ export class UnixSocketServer {
       // queue must not even resolve a device (#10006).
       signal?.throwIfAborted();
     }
-    const input: InputRequestContext = { signal, receivedAtMs };
+    const input: InputRequestContext = {
+      signal,
+      receivedAtMs,
+      requester: request.method.startsWith("input/")
+        ? this.inputRequester(request, socketSessionId)
+        : undefined,
+    };
     if (request.method === "input/tap") {
       return await this.handleInputTap(request, socketSessionId, input);
     }
@@ -6306,6 +6325,7 @@ export class UnixSocketServer {
       "submit",
       "mode",
       "frameContext",
+      "sessionUuid",
     ]);
     const unsupportedParams = Object.keys(args).filter((key) => !supportedParams.has(key));
     if (unsupportedParams.length > 0) {
@@ -6403,7 +6423,7 @@ export class UnixSocketServer {
     }
 
     const args = params as Record<string, unknown>;
-    const supportedParams = new Set(["platform", "deviceId", "key", "frameContext"]);
+    const supportedParams = new Set(["platform", "deviceId", "key", "frameContext", "sessionUuid"]);
     const unsupportedParams = Object.keys(args).filter((key) => !supportedParams.has(key));
     if (unsupportedParams.length > 0) {
       throw new Error(`input/key unsupported params: ${unsupportedParams.join(", ")}`);
@@ -6458,6 +6478,31 @@ export class UnixSocketServer {
         `${action} frameContext is stale or unavailable; observe a fresh frame before retrying`,
       );
     }
+  }
+
+  /**
+   * The device session an `input/*` frame acts for (#10698): its explicit `sessionUuid`, else the
+   * device session this socket's MCP session is autolocked to for the frame's platform (a proxy
+   * connection that already drives that session's device). A malformed `sessionUuid` fails here,
+   * before any device work; the autolock fallback is read only when a held device needs it.
+   */
+  private inputRequester(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+  ): () => string | undefined {
+    const explicit = parseInputRequesterSessionUuid(request.method, request.params);
+    return () => {
+      if (explicit || !socketSessionId || !this.daemonState.isInitialized()) {
+        return explicit;
+      }
+      const platform = (request.params as Record<string, unknown> | undefined)?.platform;
+      if (platform !== "android" && platform !== "ios") {
+        return undefined;
+      }
+      return this.daemonState
+        .getDevicePool()
+        .resolveAutolockSessionForMcpSession?.(socketSessionId, platform);
+    };
   }
 
   private async resolveInputTargetDevice(
@@ -6551,6 +6596,7 @@ export class UnixSocketServer {
           gate?.chainWait,
         ),
       gate?.ownerSignal,
+      gate?.requester,
     );
   }
 
@@ -6569,6 +6615,7 @@ export class UnixSocketServer {
     const remainingMs = () => totalTimeoutMs - (this.timer.now() - budgetStartMs);
     return {
       ownerSignal: input?.signal,
+      requester: input?.requester,
       chainWait: {
         remainingMs,
         timeoutError: (executionKey) =>
@@ -6644,6 +6691,7 @@ export class UnixSocketServer {
     targetDevice: BootedDevice,
     operation: (signal?: AbortSignal) => Promise<T>,
     ownerSignal?: AbortSignal,
+    requester?: () => string | undefined,
   ): Promise<T> {
     // FUNNEL 2, ahead of the session lookup: a device-addressed input on a
     // quarantined serial must be refused WITH OR WITHOUT a session. The
@@ -6655,6 +6703,15 @@ export class UnixSocketServer {
       ? this.daemonState.getSessionManager()
       : undefined;
     const sessionUuid = sessionManager?.getSessionForDevice?.(targetDevice.deviceId) ?? undefined;
+    // A held device takes input only from its holder (#10698); checked here, the one funnel every
+    // `input/*` handler runs through, before anything reaches the device.
+    assertInputRequesterHoldsDevice({
+      action: toolName,
+      deviceId: targetDevice.deviceId,
+      ownerSessionUuid: sessionUuid,
+      requesterSessionUuid: sessionUuid ? requester?.() : undefined,
+      sessionManager,
+    });
     if (sessionUuid) {
       this.daemonState.getDevicePool().assertSessionReadyForAutomation?.(sessionUuid);
     }

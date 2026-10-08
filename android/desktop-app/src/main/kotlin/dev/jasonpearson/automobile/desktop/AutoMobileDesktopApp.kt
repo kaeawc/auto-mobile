@@ -133,6 +133,9 @@ fun AutoMobileDesktopApp(
   // system-tray icon share one daemon-health source instead of each running its own 5s poll
   // (#4858).
   daemonConnectionState: ConnectionState = ConnectionState.Connecting,
+  // False while the window is closed to the tray (#10695): after a short grace the desktop session
+  // releases the focused device, and showing the window binds it again on the next input.
+  windowVisible: Boolean = true,
 ) {
   val graph = LocalAutoMobileGraph.current
 
@@ -144,7 +147,11 @@ fun AutoMobileDesktopApp(
   val desktopSocketPath =
     remember(usesUnixSocket) { if (usesUnixSocket) DaemonSocketPaths.socketPath() else null }
   val desktopSessionState =
-    rememberDesktopDaemonSession(desktopSocketPath, desktopSessionBinding) {
+    rememberDesktopDaemonSession(
+      desktopSocketPath,
+      desktopSessionBinding,
+      hostVisible = windowVisible,
+    ) {
       refreshAfterDaemonRecovery()
     }
   val desktopDaemonSession = desktopSessionState.session
@@ -167,11 +174,27 @@ fun AutoMobileDesktopApp(
   // Read through rememberUpdatedState so a session rotation does not rebuild the executor (and the
   // view model keyed on it); a button press is the user using the device (#10716).
   val onUserInteraction by rememberUpdatedState(desktopSessionState.onUserInteraction)
+  // The daemon accepts input for a held device only from its holder (#10698), so every input path
+  // names the desktop session, read per frame so a session rotation is picked up.
+  val latestSessionUuidProvider by rememberUpdatedState(desktopSessionState.sessionUuidProvider)
+  val desktopInputSessionUuid: () -> String? = remember { { latestSessionUuidProvider() } }
+  val desktopInputClient =
+    remember(graph) {
+      if (graph.autoMobileClient.transportName == "Unix Socket") {
+        McpDaemonClient(
+          DaemonSocketPaths.socketPath(),
+          inputSessionUuidProvider = desktopInputSessionUuid,
+        )
+      } else {
+        graph.autoMobileClient
+      }
+    }
   val controlExecutor =
     remember(graph, desktopDaemonSession) {
       InteractionNotifyingControlExecutor(
         DaemonEmulatorControlExecutor(
           graph.autoMobileClient,
+          inputClient = desktopInputClient,
           foregroundAppResolver =
             ObservationForegroundAppResolver(
               sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
@@ -304,7 +327,9 @@ fun AutoMobileDesktopApp(
       if (graph.autoMobileClient.transportName == "Unix Socket") {
         // Resolve once: this provider runs per input action on the pane's dispatch thread.
         val socketPath = DaemonSocketPaths.socketPath()
-        val provider: () -> AutoMobileClient? = { McpDaemonClient(socketPath) }
+        val provider: () -> AutoMobileClient? = {
+          McpDaemonClient(socketPath, inputSessionUuidProvider = desktopInputSessionUuid)
+        }
         provider
       } else {
         { null }
@@ -313,10 +338,9 @@ fun AutoMobileDesktopApp(
   // Bind the focused device only: setActiveDevice allocates the device to this session. Other
   // observed devices remain unowned, so their stream subscriptions use the daemon's unowned-device
   // authorization path. The shared hook heartbeats and re-registers this binding after restarts.
-  val focusedColumn =
-    (workspaceState as? WorkspaceUiState.Content)?.let { content ->
-      content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
-    }
+  // A pane that took focus only because the focused pane closed binds nothing until the user
+  // focuses or drives it (#10697), so closing a pane releases its device without grabbing another.
+  val focusedColumn = (workspaceState as? WorkspaceUiState.Content)?.sessionBindingColumn
   val focusedBinding = focusedColumn?.let {
     DesktopDaemonSessionBinding(it.deviceId, it.platform.wireName())
   }
@@ -634,8 +658,14 @@ fun AutoMobileDesktopApp(
                       focused && desktopSessionState.idleReleasedDeviceId == column.deviceId
                     val onUserInteraction = desktopSessionState.onUserInteraction
                     val columnControlClientProvider =
-                      remember(workspaceControlClientProvider, onUserInteraction, column.deviceId) {
+                      remember(
+                        workspaceControlClientProvider,
+                        workspaceViewModel,
+                        onUserInteraction,
+                        column.deviceId,
+                      ) {
                         val provider: () -> AutoMobileClient? = {
+                          workspaceViewModel.onUserInteraction(column.deviceId)
                           onUserInteraction(column.deviceId)
                           workspaceControlClientProvider()
                         }

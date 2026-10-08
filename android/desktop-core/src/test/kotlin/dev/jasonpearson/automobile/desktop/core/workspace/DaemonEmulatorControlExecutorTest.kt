@@ -186,6 +186,24 @@ class DaemonEmulatorControlExecutorTest {
   }
 
   @Test
+  fun `pressButton goes through the session-naming input client when one is given`() = runTest {
+    // #10698: the daemon accepts input for a held device only from its holder, so the desktop hands
+    // the executor a client that names its session; tool calls stay on the shared client.
+    val client = FakeAutoMobileClient().apply { transportName = "Unix Socket" }
+    val inputClient = FakeAutoMobileClient().apply { transportName = "Unix Socket" }
+    DaemonEmulatorControlExecutor(
+        client,
+        inputClient = inputClient,
+        foregroundAppResolver = FakeForegroundAppResolver(appId = null),
+        ioDispatcher = UnconfinedTestDispatcher(),
+      )
+      .pressButton("emulator-5554", Platform.Android, DeviceButton.Back)
+
+    assertTrue(client.inputPressButtonCalls.isEmpty())
+    assertEquals("back", inputClient.inputPressButtonCalls.single().button)
+  }
+
+  @Test
   fun `a non-Unix transport routes pressButton through the pressButton MCP tool`() = runTest {
     // MCP HTTP/STDIO transports don't serve the direct input/* helpers, so the command bar must
     // fall back to the transport-agnostic pressButton tool (its pre-fast-path behavior) instead of

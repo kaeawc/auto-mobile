@@ -266,6 +266,7 @@ describe("UnixSocketServer input/typeText", () => {
       platform: "android",
       deviceId: androidDevice.deviceId,
       text: "still running",
+      sessionUuid: sessionId,
     });
     await operationStarted.promise;
     expect(executionTracker.hasActiveSessionUuidExecutions(sessionId)).toBe(true);
@@ -813,6 +814,7 @@ describe("UnixSocketServer input/typeText", () => {
         deviceId: androidDevice.deviceId,
         text,
         mode: "append",
+        sessionUuid: "session-a",
       });
 
     const firstAppend = append("A");

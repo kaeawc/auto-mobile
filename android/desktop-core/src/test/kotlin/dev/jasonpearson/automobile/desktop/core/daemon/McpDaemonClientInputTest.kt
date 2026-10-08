@@ -279,6 +279,49 @@ class McpDaemonClientInputTest {
   }
 
   @Test
+  fun `input frames name the session the provider reports at send time`() {
+    // #10698: a held device takes input only from its holder, so the per-action pane client names
+    // the desktop session; a rotated session is read per frame.
+    val inputResult = """{"action":"input/tap","platform":"android","success":true}"""
+    TestDaemonSocket(
+        responses = listOf(SocketResponse(inputResult, null), SocketResponse(inputResult, null)),
+      )
+      .use { server ->
+        var current: String? = "desktop-1"
+        val client =
+          McpDaemonClient(
+            socketPathValue = server.socketPath.toString(),
+            inputSessionUuidProvider = { current },
+          )
+
+        client.inputTap(x = 1.0, y = 2.0, deviceId = "emulator-5554")
+        current = null
+        client.inputTap(x = 1.0, y = 2.0, deviceId = "emulator-5554")
+
+        val requests = server.awaitRequests()
+        assertEquals("desktop-1", requests[0].params["sessionUuid"]?.jsonPrimitive?.content)
+        assertFalse("sessionUuid" in requests[1].params)
+      }
+  }
+
+  @Test
+  fun `a session-bound client names its own session on input`() {
+    TestDaemonSocket(
+        resultJson = """{"action":"input/pressButton","platform":"android","success":true}""",
+        error = null,
+      )
+      .use { server ->
+        McpDaemonClient(socketPathValue = server.socketPath.toString(), sessionUuid = "ide-1")
+          .inputPressButton(button = "home", platform = "android", deviceId = "emulator-5554")
+
+        assertEquals(
+          "ide-1",
+          server.awaitRequest().params["sessionUuid"]?.jsonPrimitive?.content,
+        )
+      }
+  }
+
+  @Test
   fun `inputTap serializes to input tap socket request`() {
     val responseResult =
       """

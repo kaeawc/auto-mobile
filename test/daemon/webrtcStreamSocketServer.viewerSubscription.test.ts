@@ -1056,7 +1056,7 @@ test.each([false, true])(
   },
 );
 
-test("transport default rejects a registered observer-only session", async () => {
+test("transport default admits a registered observer-only session as a viewer of an owned device (#10698)", async () => {
   const sessions = releasingSessionHarness();
   sessions.observers.register("observer", "desktop");
   expect(sessions.observers.resolveObserverScope("observer").kind).not.toBe("denied");
@@ -1065,6 +1065,8 @@ test("transport default rejects a registered observer-only session", async () =>
     spyOn(state, "isInitialized").mockReturnValue(true),
     spyOn(state, "getSessionManager").mockReturnValue(sessions.manager),
     spyOn(state, "getObserverSessionRegistry").mockReturnValue(sessions.observers),
+    // An agent holds the device; the observer holds nothing at all.
+    spyOn(sessions.manager, "getSessionForDevice").mockReturnValue("agent-session"),
   ];
   const previousAuth = process.env.AUTOMOBILE_DAEMON_STREAM_AUTH;
   process.env.AUTOMOBILE_DAEMON_STREAM_AUTH = "1";
@@ -1077,11 +1079,20 @@ test("transport default rejects a registered observer-only session", async () =>
       deviceId: device.deviceId,
     });
     await flush();
-    expect(socket.getWrittenMessages()[0]).toMatchObject({
+    expect(socket.getWrittenMessages()[0]).toMatchObject({ success: true });
+    expect(h.sources).toHaveLength(1);
+
+    const stranger = new FakeSocket();
+    await h.server.line(stranger, {
+      action: "start",
+      sessionUuid: "stranger",
+      deviceId: device.deviceId,
+    });
+    await flush();
+    expect(stranger.getWrittenMessages()[0]).toMatchObject({
       success: false,
       error: expect.stringContaining("unknown or expired"),
     });
-    expect(h.sources).toHaveLength(0);
   } finally {
     for (const spy of stateSpies) {
       spy.mockRestore();

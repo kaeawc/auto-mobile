@@ -12,9 +12,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/vcs-diff.sh"
 
 if ! vcs_base_exists "$base_ref"; then
   if ! vcs_uses_jj && [[ "$base_ref" == 'origin/main' && "${GITHUB_ACTIONS:-}" == 'true' && -n "${GITHUB_BASE_REF:-}" ]]; then
-    base_ref="origin/$GITHUB_BASE_REF"
-    git fetch --no-tags --depth=1 origin \
-      "refs/heads/$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"
+    base_ref="$(vcs_fetch_pr_base "$GITHUB_BASE_REF" || printf '%s' "$base_ref")"
   fi
 
   if ! vcs_base_exists "$base_ref"; then

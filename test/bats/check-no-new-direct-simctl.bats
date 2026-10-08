@@ -161,3 +161,26 @@ teardown_file() {
   [ "$status" -eq 0 ]
   git -C "$shallow_dir" rev-parse --verify --quiet 'origin/main^{commit}'
 }
+
+@test "falls back to main when the stacked PR base branch was deleted" {
+  remote_dir="$(mktemp -d)"
+  shallow_dir="$(mktemp -d)"
+  git -C "$repo_dir" branch -M main
+  git -C "$repo_dir" remote remove origin 2>/dev/null || true
+  git -C "$repo_dir" remote add origin "$remote_dir"
+  git -C "$remote_dir" init --bare -q
+  git -C "$repo_dir" push -q origin main
+  git -C "$repo_dir" checkout -qB feature
+  printf '%s\n' 'export const noop = true;' > "$repo_dir/src/change-stacked.ts"
+  git -C "$repo_dir" add src/change-stacked.ts
+  git -C "$repo_dir" commit -qm feature
+  git -C "$repo_dir" push -qf origin feature
+  rmdir "$shallow_dir"
+  git clone --depth 1 --branch feature -q "file://$remote_dir" "$shallow_dir"
+
+  run bash -c 'cd "$1" && GITHUB_ACTIONS=true GITHUB_BASE_REF=work/deleted-parent bash scripts/check-no-new-direct-simctl.sh' _ "$shallow_dir"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"falling back to origin/main"* ]]
+  git -C "$shallow_dir" rev-parse --verify --quiet 'origin/main^{commit}'
+}

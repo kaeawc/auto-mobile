@@ -30,6 +30,31 @@ type CommandRunner = (file: string, args: string[]) => string;
 
 const runCommand: CommandRunner = (file, args) => execFileSync(file, args, { encoding: "utf8" });
 
+function fetchBranch(runner: CommandRunner, branch: string): void {
+  runner("git", [
+    "fetch",
+    "--no-tags",
+    "--depth=1",
+    "origin",
+    `refs/heads/${branch}:refs/remotes/origin/${branch}`,
+  ]);
+}
+
+// A stacked PR whose parent branch was deleted keeps a stale GITHUB_BASE_REF; fall back to main.
+function fetchPullRequestBase(runner: CommandRunner, base: string): string {
+  try {
+    fetchBranch(runner, base);
+    return `origin/${base}`;
+  } catch (error) {
+    if (base === "main") {
+      throw error;
+    }
+    console.warn(`PR base '${base}' no longer exists on origin; falling back to origin/main`);
+    fetchBranch(runner, "main");
+    return "origin/main";
+  }
+}
+
 export function resolveBaseRef(
   requestedBaseRef: string,
   environment: NodeJS.ProcessEnv = process.env,
@@ -44,14 +69,7 @@ export function resolveBaseRef(
       environment.GITHUB_ACTIONS === "true" &&
       environment.GITHUB_BASE_REF
     ) {
-      baseRef = `origin/${environment.GITHUB_BASE_REF}`;
-      runner("git", [
-        "fetch",
-        "--no-tags",
-        "--depth=1",
-        "origin",
-        `refs/heads/${environment.GITHUB_BASE_REF}:refs/remotes/origin/${environment.GITHUB_BASE_REF}`,
-      ]);
+      baseRef = fetchPullRequestBase(runner, environment.GITHUB_BASE_REF);
     }
     try {
       runner("git", ["rev-parse", "--verify", "--quiet", `${baseRef}^{commit}`]);

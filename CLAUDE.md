@@ -200,7 +200,7 @@ oxlint failure; the ratchet and both boundary gates run only when both stages
 pass. CI therefore checks the committed tree without rewriting it. Turbo hashes
 and forwards `CI` so local fix results cannot satisfy CI's check cache.
 `bun run format:check` remains `oxfmt --check` in every environment.
-Check mode skips `oxfmt --check` on Windows runners because CRLF checkouts would flag every file; formatting is gated by the Linux `format-check` job and Linux/macOS lint.
+Check mode skips `oxfmt --check` on Windows runners because CRLF checkouts would flag every file; formatting is gated by the `Check formatting` step of the Linux Fast Validation job and Linux/macOS lint.
 `scripts/prepush-node.sh` inherits this mode: local runs fix, and `CI=true`/`1`
 runs check only. `test/bats/lint-format-pipeline.bats` guards this contract.
 
@@ -304,8 +304,10 @@ present in the shade; ignoring this flag keeps those children matchable.
 
 # CI failure triage
 
-The `iOS`, `Android`, `Node Tests`, and `WebRTC` aggregators include advisory
-lanes, so a red aggregator does not itself mean a required check failed. Run
+`pull_request.yml` keeps roll-up gates only for required checks (`IDE Plugin`,
+`iOS Build`, `Shell Tests`); every other job reports directly, and advisory lanes
+never block a merge. Runs from before the `iOS`, `Android`, `Node Tests`, and
+`WebRTC` roll-ups were removed may still show them red. Run
 `bash scripts/ci/classify-failure.sh <run-id>` before retrying or changing code;
 it identifies the specific upstream job and consults
 `scripts/ci/known-flakes.txt`. Do not re-fix documented non-fixes. Before

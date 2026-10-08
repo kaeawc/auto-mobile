@@ -25,8 +25,9 @@ what is still prototype-only.
 4. The window's `hitTest` returns `nil` outside the overlay content, so touches there pass
    through to the app. Floating cards therefore leave the live app usable.
 5. The agent listens on a loopback (`127.0.0.1`) TCP socket and speaks the CtrlProxy overlay
-   message names (`show_overlay`, `update_overlay`, `dismiss_overlay`, `put_overlay_asset`,
-   `overlay_result`, `overlay_event`) as newline-delimited JSON.
+   message names (`show_overlay`, `dismiss_overlay`, `put_overlay_asset`, `overlay_result`,
+   `overlay_event`) as newline-delimited JSON. There is no `update_overlay` (#10490): a
+   `show_overlay` with the id already shown replaces it in place.
 6. Each launch gets its own port and a random token. The host passes them as
    `AUTOMOBILE_OVERLAY_PORT` and `AUTOMOBILE_OVERLAY_TOKEN`; the first frame on a connection
    must be a `hello` carrying the token, and the agent replies with its version and

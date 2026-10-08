@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   FileCtrlProxyForwardLease,
   ctrlProxyForwardLeaseFileName,
+  ctrlProxyOwnedForwardFileName,
   deviceIdFromCtrlProxyForwardLeaseFileName,
 } from "../../../../src/features/observe/android/CtrlProxyForwardLease";
 import type {
@@ -244,5 +245,58 @@ describe("FileCtrlProxyForwardLease stale-owner reclaim (#10497)", () => {
     const name = ctrlProxyForwardLeaseFileName("192.168.1.5:5555");
     expect(deviceIdFromCtrlProxyForwardLeaseFileName(name)).toBe("192.168.1.5:5555");
     expect(deviceIdFromCtrlProxyForwardLeaseFileName("x.lock.1.reclaim")).toBeUndefined();
+  });
+
+  test("records forward ownership for its coordination directory only (#10690)", () => {
+    const probe = new FakeOwnerProbe({ kind: "unreachable", detail: "unused" });
+    const creator = lease(probe, { pid: FOREIGN_PID });
+    creator.recordOwnedForward(8767);
+
+    const record = JSON.parse(
+      readFileSync(join(dir, ctrlProxyOwnedForwardFileName(DEVICE, 8767)), "utf8"),
+    );
+    expect(record).toEqual({
+      pid: FOREIGN_PID,
+      deviceId: DEVICE,
+      localPort: 8767,
+      createdAt: 100_000,
+    });
+    // A later daemon sharing the directory may reclaim it; other ports stay foreign.
+    const successor = lease(probe);
+    expect(successor.ownsForward(8767)).toBe(true);
+    expect(successor.ownsForward(8765)).toBe(false);
+    expect(successor.ownershipDirectory()).toBe(dir);
+
+    const otherDir = mkdtempSync(join(tmpdir(), "ctrlproxy-lease-other-"));
+    try {
+      const isolated = new FileCtrlProxyForwardLease(DEVICE, {
+        lockDir: () => otherDir,
+        ownerProbe: probe,
+        ownerSocketPath: () => undefined,
+        timer,
+      });
+      expect(isolated.ownsForward(8767)).toBe(false);
+    } finally {
+      rmSync(otherDir, { recursive: true, force: true });
+    }
+
+    successor.forgetOwnedForward(8767);
+    expect(creator.ownsForward(8767)).toBe(true);
+    expect(successor.ownsForward(8767)).toBe(false);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  test("forks share forward records, and records stay out of the lease listing", () => {
+    const own = lease(new FakeOwnerProbe({ kind: "unreachable", detail: "unused" }));
+    const fork = own.fork();
+    fork.recordOwnedForward!(8768);
+    expect(own.ownsForward(8768)).toBe(true);
+
+    const name = ctrlProxyOwnedForwardFileName(DEVICE, 8768);
+    expect(readdirSync(dir)).toEqual([name]);
+    expect(deviceIdFromCtrlProxyForwardLeaseFileName(name)).toBeUndefined();
+
+    own.forgetOwnedForward(8768);
+    expect(fork.ownsForward!(8768)).toBe(false);
   });
 });

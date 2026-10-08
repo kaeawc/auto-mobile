@@ -1411,6 +1411,32 @@ function describeCtrlProxyForwardingLeaseConflict(
 }
 
 /**
+ * Actionable message for CtrlProxy forwards on a device that no process in this
+ * coordination directory created (issue #10690). They usually belong to a
+ * daemon with a different `AUTOMOBILE_COORDINATION_DIR`, whose lease this
+ * process cannot see, so removing them would break that daemon's connection.
+ */
+function describeForeignCtrlProxyForwards(
+  deviceId: string,
+  ports: number[],
+  ownershipDirectory: string | undefined,
+): string {
+  const listed = ports.map((port) => `tcp:${port}`).join(", ");
+  const removal = ports
+    .map((port) => `\`adb -s ${deviceId} forward --remove tcp:${port}\``)
+    .join(", ");
+  const domain = ownershipDirectory === undefined ? "" : ` (records in ${ownershipDirectory})`;
+  return (
+    `${deviceId} is driven by another AutoMobile daemon: its CtrlProxy forward ${listed} was not ` +
+    `created by this daemon (PID ${process.pid}) or any daemon sharing its coordination ` +
+    `directory${domain}, so it was left in place. A daemon started with a different ` +
+    `AUTOMOBILE_COORDINATION_DIR is the usual owner; stop it or use another device. ` +
+    `If no other AutoMobile daemon uses this device, remove the stale forward with ` +
+    `${removal} and retry.`
+  );
+}
+
+/**
  * Raise the appropriate error for a failed {@link CtrlProxyForwardLease.tryAcquire}
  * (issue #6260 / PRRT_kwDOP-GF5M6fuKn9). Split out of `setupPortForwarding` to keep
  * that method's branching complexity down; always throws.
@@ -5084,6 +5110,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           signal,
         }),
       );
+      this.ctrlProxyForwardLease.recordOwnedForward?.(this.localPort);
 
       if (this.closed) {
         await this.removeCtrlProxyPortForward(this.localPort);
@@ -5126,13 +5153,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         .map((client) => client.localPort),
     );
     const orphanedPorts = new Set<number>();
+    const foreignPorts = new Set<number>();
     for (const line of stdout.split(/\r?\n/)) {
       const forward = this.parseOwnPortForward(line);
       if (!forward || forward.remote !== `tcp:${PortManager.DEVICE_PORT}`) {
         continue;
       }
       const port = this.localPortFromForward(forward.local);
-      if (port !== null && !livePorts.has(port)) {
+      if (port === null) {
+        continue;
+      }
+      if (!this.ownsCtrlProxyPortForward(port)) {
+        // No record in this coordination directory: another daemon created it (#10690).
+        foreignPorts.add(port);
+      } else if (!livePorts.has(port)) {
         orphanedPorts.add(port);
       }
     }
@@ -5147,6 +5181,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         );
       }
     }
+
+    if (foreignPorts.size > 0) {
+      throw new CtrlProxyForwardingLeaseConflictError(
+        describeForeignCtrlProxyForwards(
+          this.device.deviceId,
+          [...foreignPorts],
+          this.ctrlProxyForwardLease.ownershipDirectory?.(),
+        ),
+        undefined,
+      );
+    }
+  }
+
+  /**
+   * Whether this process's coordination domain created the forward on `port`.
+   * A lease without ownership records (the test-only no-op lease) predates
+   * #10690 and treats every forward as its own.
+   */
+  private ownsCtrlProxyPortForward(port: number): boolean {
+    return this.ctrlProxyForwardLease.ownsForward?.(port) ?? true;
   }
 
   /**
@@ -5161,8 +5215,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     try {
       const expectedLocal = `tcp:${port}`;
       if (!(await this.hasCtrlProxyPortForward(port, signal))) {
-        PortManager.clearQuarantine(port);
+        this.markCtrlProxyPortForwardGone(port);
         return true;
+      }
+      if (!this.ownsCtrlProxyPortForward(port)) {
+        // Never remove or replace another daemon's forward (#10690).
+        logger.warn(
+          `[CTRL_PROXY] Leaving CtrlProxy forward on ${this.device.deviceId} tcp:${port} in place: ` +
+            `this process did not create it`,
+        );
+        return false;
       }
 
       await this.adb.execute(["forward", "--remove", expectedLocal], { signal });
@@ -5171,7 +5233,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const backoff = exponentialBackoff({ initialDelayMs: 100, maxDelayMs: 800 });
       for (let attempt = 1; ; attempt++) {
         if (!(await this.hasCtrlProxyPortForward(port, signal))) {
-          PortManager.clearQuarantine(port);
+          this.markCtrlProxyPortForwardGone(port);
           return true;
         }
         const remainingMs = confirmationDeadlineMs - (this.timer.now() - startedAt);
@@ -5192,6 +5254,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       );
       return false;
     }
+  }
+
+  private markCtrlProxyPortForwardGone(port: number): void {
+    PortManager.clearQuarantine(port);
+    this.ctrlProxyForwardLease.forgetOwnedForward?.(port);
   }
 
   private async hasCtrlProxyPortForward(port: number, signal?: AbortSignal): Promise<boolean> {

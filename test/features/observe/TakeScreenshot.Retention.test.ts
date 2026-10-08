@@ -363,7 +363,7 @@ test("cache invalidation drops both reference stores without unlinking a returne
 
 test("a reference added while another unlink is pending prevents deleting the next file", async () => {
   timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS + 1);
-  const first = files.add("snapshot-of-first.png", 1, 0);
+  const first = files.add("screenshot_0_device_a-first.png", 1, 0);
   const next = files.add("screenshot_0_device_next.png", 1, 0);
   const remove = files.unlink.bind(files);
   const unlink = spyOn(files, "unlink").mockImplementation(async (path) => {
@@ -383,7 +383,7 @@ test("a reference added while another unlink is pending prevents deleting the ne
 
 test("a newly added equivalent reference prevents deleting the next stale file", async () => {
   timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS + 1);
-  const first = files.add("snapshot-of-first.png", 1, 0);
+  const first = files.add("screenshot_0_device_a-first.png", 1, 0);
   const next = files.add("screenshot_0_device_next.png", 1, 0);
   const remove = files.unlink.bind(files);
   const unlink = spyOn(files, "unlink").mockImplementation(async (path) => {

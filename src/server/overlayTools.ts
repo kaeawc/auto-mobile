@@ -51,6 +51,7 @@ import {
   type OverlayStatusStore,
   type OverlayScope,
 } from "../features/overlay/OverlayStatusStore";
+import { OverlayCommitGenerations } from "../features/overlay/OverlayCommitGenerations";
 import type { Timer } from "../utils/SystemTimer";
 import {
   defaultAdbClientFactory,
@@ -697,6 +698,8 @@ type OverlayHandlerDependencies = {
   events: OverlayEventCoordinator;
   target: OverlayTarget;
   assetReaders: AssetReaders;
+  commits: OverlayCommitGenerations;
+  now: () => number;
 } & Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">;
 type OverlayOutput = z.infer<typeof overlayOutputSchema>;
 
@@ -709,6 +712,27 @@ function mutationTarget(
   return { id: args.action === "show" ? (args.spec as OverlaySpec).id : args.id };
 }
 
+function shownOnDevice(
+  store: OverlayStatusStore,
+  scope: OverlayScope,
+  target: { id?: string },
+): OverlayLastResult | undefined {
+  return target.id ? store.shownOnDevice(scope.deviceId, target.id) : undefined;
+}
+
+/** A refused display ends the call before any asset is uploaded. */
+async function stageUnlessRefused(
+  failure: OverlayResult | undefined,
+  target: OverlayTarget,
+  args: z.infer<typeof overlaySchema>,
+  readers: AssetReaders,
+  signal: AbortSignal | undefined,
+): Promise<AssetStage> {
+  return failure
+    ? { uploaded: [], prepared: [], failure }
+    : stageAssets(target, args, readers, signal);
+}
+
 async function performMutation(
   dependencies: OverlayHandlerDependencies,
   device: BootedDevice,
@@ -716,42 +740,127 @@ async function performMutation(
   scope: OverlayScope,
   signal?: AbortSignal,
 ): Promise<OverlayOutput> {
-  const { store, events, target: overlayTarget, assetReaders } = dependencies;
+  const { store, events, target: overlayTarget, assetReaders, commits } = dependencies;
   const target = mutationTarget(args);
-  const shown = store.status(scope).overlays.find((entry) => entry.id === target.id);
-  const previouslyShown = shown !== undefined;
-  const inPlace = args.action === "show" && previouslyShown && args.reset !== true;
   const source = overlayEventSource(overlayTarget.transport);
+  // The device holds one active overlay, so presence is device-wide, not per session.
+  const shown = shownOnDevice(store, scope, target);
+  const previouslyShown = shown !== undefined;
+  const inPlace = args.action === "show" && shown !== undefined && args.reset !== true;
+  const generation = beginShowGeneration(commits, scope, args.action, target);
   startFreshShowEvents(events, scope, source, { target, args, inPlace });
+  // Every display lookup happens before staging; nothing is re-resolved after dispatch.
   const resolved = await resolveMutationDisplay(inPlace, overlayTarget, device, args, dependencies);
-  const { displayId } = resolved;
-  const stage: AssetStage = resolved.failure
-    ? { uploaded: [], prepared: [], failure: resolved.failure }
-    : await stageAssets(overlayTarget, args, assetReaders, signal);
-  const { result, warning } = await sendOverlay(overlayTarget, args, stage, signal, displayId);
-  settleShowEvents(events, scope, source, { target, inPlace, success: result.success });
-  clearMutationEvents(events, scope, target, args.action, result.success, previouslyShown);
-  if (args.action === "show" && result.success && target.id) {
-    events.replaceShown(scope.deviceId, target.id);
-  }
-  const comparable = await comparableRequestedDisplay(
-    inPlace,
-    displayId,
-    device,
+  const comparable = await comparableForMutation(resolved, inPlace, device, args, dependencies);
+  // An in-place show names the display it replaces on: if the overlay is dismissed while assets
+  // stage, the runner then shows it fresh there instead of on the default display.
+  const displayId = inPlace ? shown?.displayId : resolved.displayId;
+  const stage = await stageUnlessRefused(
+    resolved.failure,
+    overlayTarget,
     args,
-    dependencies,
+    assetReaders,
+    signal,
   );
+  const { result, warning } = await sendOverlay(overlayTarget, args, stage, signal, displayId);
   const placed = placedDisplay(args, shown, comparable, result.success);
-  const lastResult = store.record(scope, args.action, target, result, placed.displayId);
-  if (target.id && events.isDismissed(scope, target.id)) {
-    store.dismissed(scope, target.id);
-  }
+  const lastResult = isSuperseded(commits, scope, target, generation)
+    ? supersededResult(dependencies, { args, target, result, placed })
+    : commitMutation(dependencies, scope, source, {
+        args,
+        target,
+        result,
+        placed,
+        inPlace,
+        previouslyShown,
+      });
   return {
     success: result.success,
     ...(result.error ? { error: result.error } : {}),
     lastResult,
     ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
     ...missingAssetsOutput(result, [warning, placed.warning]),
+  };
+}
+
+function beginShowGeneration(
+  commits: OverlayCommitGenerations,
+  scope: OverlayScope,
+  action: OverlayMutation,
+  target: { id?: string },
+): number | undefined {
+  return action === "show" && target.id ? commits.begin(scope.deviceId, target.id) : undefined;
+}
+
+function isSuperseded(
+  commits: OverlayCommitGenerations,
+  scope: OverlayScope,
+  target: { id?: string },
+  generation: number | undefined,
+): boolean {
+  return (
+    generation !== undefined &&
+    target.id !== undefined &&
+    !commits.isLatest(scope.deviceId, target.id, generation)
+  );
+}
+
+async function comparableForMutation(
+  resolved: { displayId?: number; failure?: OverlayResult },
+  inPlace: boolean,
+  device: BootedDevice,
+  args: z.infer<typeof overlaySchema>,
+  dependencies: Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">,
+): Promise<number | undefined | null> {
+  return resolved.failure
+    ? undefined
+    : comparableRequestedDisplay(inPlace, resolved.displayId, device, args, dependencies);
+}
+
+interface CommitOutcome {
+  args: { action: OverlayMutation };
+  target: { id?: string; all?: true };
+  result: OverlayResult;
+  placed: { displayId?: number };
+}
+
+function commitMutation(
+  dependencies: OverlayHandlerDependencies,
+  scope: OverlayScope,
+  source: OverlayEventSource,
+  outcome: CommitOutcome & { inPlace: boolean; previouslyShown: boolean },
+): OverlayLastResult {
+  const { store, events } = dependencies;
+  const { args, target, result, placed, inPlace, previouslyShown } = outcome;
+  settleShowEvents(events, scope, source, { target, inPlace, success: result.success });
+  clearMutationEvents(events, scope, target, args.action, result.success, previouslyShown);
+  if (args.action === "show" && result.success && target.id) {
+    events.replaceShown(scope.deviceId, target.id);
+  }
+  const lastResult = store.record(scope, args.action, target, result, placed.displayId);
+  if (target.id && events.isDismissed(scope, target.id)) {
+    store.dismissed(scope, target.id);
+  }
+  return lastResult;
+}
+
+/**
+ * A newer show of the same id on this device started after this one, so it owns host status and
+ * event buffers; this call reports only its own outcome and commits nothing.
+ */
+function supersededResult(
+  dependencies: OverlayHandlerDependencies,
+  outcome: CommitOutcome,
+): OverlayLastResult {
+  const { args, target, result, placed } = outcome;
+  return {
+    ...target,
+    lastAction: args.action,
+    ...(placed.displayId === undefined ? {} : { displayId: placed.displayId }),
+    success: result.success,
+    ...(result.error ? { error: result.error } : {}),
+    ...(result.totalTimeMs === undefined ? {} : { totalTimeMs: result.totalTimeMs }),
+    timestamp: dependencies.now(),
   };
 }
 
@@ -955,17 +1064,17 @@ function subscribeOverlayCleanup(
   };
 }
 
-export function registerOverlayTools(dependencies: OverlayToolDependencies = {}): () => void {
-  // Registry replacement makes the previous handler, store and event buffers obsolete.
-  unsubscribeOverlayLifecycle?.();
-  const store =
-    dependencies.store ?? new InMemoryOverlayStatusStore(dependencies.clock ?? dependencies.timer);
-  const clientFactory =
-    dependencies.clientFactory ??
-    ((device: BootedDevice) => AndroidCtrlProxyClient.getInstance(device));
-  const agentConnections = dependencies.agentConnections ?? noOverlayAgentConnections;
-  // One transport per underlying client keeps the coordinator's per-device event subscription
-  // stable across calls, exactly as when it subscribed to the client itself.
+/**
+ * One transport per underlying client keeps the coordinator's per-device event subscription
+ * stable across calls, exactly as when it subscribed to the client itself.
+ */
+function overlayTargets(
+  clientFactory: (device: BootedDevice) => OverlayClient,
+  agentConnections: OverlayAgentConnections,
+): {
+  androidTarget: (device: BootedDevice) => OverlayTarget;
+  iosTarget: (device: BootedDevice) => OverlayTarget | undefined;
+} {
   const androidTransports = new WeakMap<OverlayClient, AndroidOverlayTransport>();
   const iosTransports = new WeakMap<OverlayAgentClient, IosOverlayTransport>();
   const androidTarget = (device: BootedDevice): OverlayTarget => {
@@ -989,11 +1098,29 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
     }
     return { transport };
   };
+  return { androidTarget, iosTarget };
+}
+
+function overlayClock(dependencies: OverlayToolDependencies): Pick<Timer, "now"> {
+  return dependencies.clock ?? dependencies.timer ?? defaultTimer;
+}
+
+export function registerOverlayTools(dependencies: OverlayToolDependencies = {}): () => void {
+  // Registry replacement makes the previous handler, store and event buffers obsolete.
+  unsubscribeOverlayLifecycle?.();
+  const store = dependencies.store ?? new InMemoryOverlayStatusStore(overlayClock(dependencies));
+  const clientFactory =
+    dependencies.clientFactory ??
+    ((device: BootedDevice) => AndroidCtrlProxyClient.getInstance(device));
+  const agentConnections = dependencies.agentConnections ?? noOverlayAgentConnections;
+  const { androidTarget, iosTarget } = overlayTargets(clientFactory, agentConnections);
   const events = new OverlayEventCoordinator(
     dependencies.timer ?? defaultTimer,
     store,
     TelemetryRecorder.getInstance(),
   );
+  const commits = new OverlayCommitGenerations();
+  const clock = overlayClock(dependencies);
   const assetReaders: AssetReaders = {
     assetFileReader: dependencies.assetFileReader ?? nodeOverlayAssetFileReader,
     observationScreenshotReader:
@@ -1047,6 +1174,8 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
       events,
       target,
       assetReaders,
+      commits,
+      now: () => clock.now(),
       adbFactory: dependencies.adbFactory,
       lastRenderedObservation: dependencies.lastRenderedObservation,
     };

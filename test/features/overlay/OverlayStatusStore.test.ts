@@ -84,3 +84,15 @@ describe("InMemoryOverlayStatusStore scope bound", () => {
     expect(store.status({ sessionUuid: "b", deviceId: "dev" })).toEqual({ overlays: [] });
   });
 });
+
+describe("InMemoryOverlayStatusStore.shownOnDevice", () => {
+  test("finds a shown overlay from any session on that device only, as a copy", () => {
+    const store = new InMemoryOverlayStatusStore(new FakeTimer());
+    store.record({ sessionUuid: "a", deviceId: "dev" }, "show", { id: "panel" }, ok, 2);
+    expect(store.shownOnDevice("dev", "panel")?.displayId).toBe(2);
+    expect(store.shownOnDevice("other", "panel")).toBeUndefined();
+    expect(store.shownOnDevice("dev", "missing")).toBeUndefined();
+    store.dismissed({ sessionUuid: "b", deviceId: "dev" }, "panel");
+    expect(store.shownOnDevice("dev", "panel")).toBeUndefined();
+  });
+});

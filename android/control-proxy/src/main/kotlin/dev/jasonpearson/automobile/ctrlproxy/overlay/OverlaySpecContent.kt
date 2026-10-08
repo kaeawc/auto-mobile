@@ -117,7 +117,7 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
         maxLines = node.style.source.maxLines ?: Int.MAX_VALUE,
       )
     "icon" -> {
-      val icon = overlayIcon(node.iconName)
+      val icon = overlayIcon(node.iconName, (node.source as? OverlayIconNode)?.variant)
       if (icon != null)
         Icon(icon, contentDescription = null, modifier = modifier, tint = node.style.color)
       else

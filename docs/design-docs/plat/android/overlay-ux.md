@@ -19,7 +19,7 @@ The 2026-10-04 decisions supersede the issue's earlier proposals:
   or a number state key.
 - Windows are edge-to-edge. Safe-area padding is an explicit node opt-in.
 - A `sheet` window and a modal `bottomSheet` node are separate concepts.
-- Built-in icons come from a closed list; other artwork uses image assets.
+- Built-in icons come from a closed list (the bundled Material icon set); other artwork uses image assets.
 
 Earlier decisions still apply: the renderer is Compose; sizes and positions use
 dp; overlay opacity is a percentage; app-element anchoring is supported; observe
@@ -124,7 +124,7 @@ layout room.
 | `column`      | Required `children` array, possibly empty; vertical layout.                                                          |
 | `text`        | Required `text` string, possibly empty.                                                                              |
 | `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                            |
-| `icon`        | Required built-in `name` below.                                                                                      |
+| `icon`        | Required built-in `name`; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                  |
 | `spacer`      | No node-specific properties; size comes from style.                                                                  |
 | `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.          |
 | `scroll`      | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping. |
@@ -194,12 +194,15 @@ Start/end use layout direction, including RTL.
 
 ## Icons and images
 
-Built-in Material names (36): `home`, `search`, `settings`, `person`, `favorite`,
-`add`, `close`, `check`, `arrow_back`, `arrow_forward`, `chevron_left`,
-`chevron_right`, `menu`, `more_vert`, `share`, `edit`, `delete`, `info`, `warning`,
-`notifications`, `star`, `shopping_cart`, `help`, `refresh`, `done`, `cancel`,
-`play_arrow`, `pause`, `stop`, `mail`, `phone`, `location_on`, `calendar_today`,
-`visibility`, `lock`, `logout`.
+Built-in Material names are the 2,075 icons of `material-icons-extended`, written
+in snake_case (`home`, `timer`, `bedtime`, `alarm_add`, `add_a_photo`). The closed list is the
+`iconName` definition in `schemas/overlay-spec-contract.json`, shared by the TypeScript
+and JVM validators. The renderer already ships that library, so the full set adds no APK
+size beyond the list itself (about 10 KB measured). An icon node may set `variant`:
+`filled` (default), `outlined`, `rounded`, `sharp` or `twoTone`; nav items are always
+filled. Material Symbols names with no `material-icons-extended` counterpart are not
+available, and neither are symbol `weight` or `fill` axes or custom `fontFamily`
+assets, which would need a bundled variable font or an asset-transport extension.
 
 Unknown names reject the spec. #9301 pins ID-based assets, but no nested reference
 shape, so image nodes use `{type: "image", asset: "opaque-id"}` and nav items

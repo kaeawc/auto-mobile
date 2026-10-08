@@ -2194,6 +2194,61 @@ describe("DevicePool", () => {
       expect(devicePool.isPooledIdentityUnresolved(placeholder.deviceId)).toBe(false);
     });
 
+    // Assignment refuses a quarantined placeholder, so a placeholder-named entry
+    // that holds a session cannot be built through the public API; seed the
+    // session on the discovered, quarantined entry directly.
+    const holdSessionThenLosePlaceholderName = async (placeholder: BootedDevice) => {
+      fakeDeviceManager.bootedDevices = [placeholder];
+      await devicePool.refreshDevices();
+      const pooled = devicePool.getDevice(placeholder.deviceId)!;
+      pooled.sessionId = "held-session";
+      pooled.status = "busy";
+    };
+
+    test("upgrades a quarantined placeholder that holds a session without rebinding it", async () => {
+      const placeholder = createBootedDevice("emulator-5600", "android", "Unknown (emulator-5600)");
+      await holdSessionThenLosePlaceholderName(placeholder);
+      const before = devicePool.getDevice(placeholder.deviceId)!;
+      const incarnation = before.incarnation;
+      expect(before.sessionId).toBe("held-session");
+      expect(before.avdName).toBeUndefined();
+      expect(devicePool.isPooledIdentityUnresolved(placeholder.deviceId)).toBe(true);
+
+      await devicePool.reconcileDiscoveryObservation(
+        [{ ...placeholder, name: "am-api36-ga-arm64" }],
+        "test",
+      );
+
+      const after = devicePool.getDevice(placeholder.deviceId);
+      expect(after).toBe(before);
+      expect(after).toMatchObject({
+        name: "am-api36-ga-arm64",
+        incarnation,
+        sessionId: "held-session",
+      });
+      expect(devicePool.isPooledIdentityUnresolved(placeholder.deviceId)).toBe(false);
+    });
+
+    test("does not tolerate a resolved name for a retired placeholder incarnation that held a session", async () => {
+      const placeholder = createBootedDevice("emulator-5600", "android", "Unknown (emulator-5600)");
+      const resolved = { ...placeholder, name: "am-api36-ga-arm64" };
+      await holdSessionThenLosePlaceholderName(placeholder);
+      const pooled = devicePool.getDevice(placeholder.deviceId)!;
+      // Snapshot of the session-holding incarnation, then retire it the way the
+      // pool does: the session ends, the entry goes, a new one takes the serial.
+      const retired = { ...pooled };
+      expect(retired.sessionId).toBe("held-session");
+      pooled.sessionId = null;
+      pooled.status = "idle";
+      await devicePool.removeDevice(placeholder.deviceId);
+      await devicePool.refreshDevices();
+      const current = devicePool.getDevice(placeholder.deviceId)!;
+
+      expect(current.incarnation).toBeGreaterThan(retired.incarnation);
+      expect(devicePool.matchesRuntimeIdentity(retired, resolved)).toBe(false);
+      expect(devicePool.matchesRuntimeIdentity(current, resolved)).toBe(true);
+    });
+
     test("does not tolerate a resolved name for a retired placeholder incarnation", async () => {
       const placeholder = createBootedDevice("emulator-5600", "android", "Unknown (emulator-5600)");
       const resolved = { ...placeholder, name: "am-api36-ga-arm64" };

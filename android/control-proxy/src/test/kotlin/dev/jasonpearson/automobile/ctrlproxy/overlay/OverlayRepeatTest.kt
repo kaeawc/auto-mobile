@@ -185,6 +185,63 @@ class OverlayRepeatTest {
   }
 
   @Test
+  fun `component labels and button actions bind per item`() {
+    val open = OverlaySheetCondition("open", true)
+    fun button(label: String, name: String) =
+      OverlayDialogButton(label, listOf(OverlayEmitAction(name)))
+    val template =
+      listOf(
+        OverlayButtonNode(label = "Open {item.label}"),
+        OverlayFabNode(icon = "add", label = "New {index}"),
+        OverlaySegmentedButtonNode(
+          stateKey = "mode",
+          options = listOf(OverlayRadioOption("a", "{item.label} A"), OverlayRadioOption("b", "B")),
+        ),
+        OverlayTopAppBarNode(
+          title = "{item.label} ({item.price})",
+          navigationIcon =
+            OverlayAppBarAction("menu", "Back {item.label}", listOf(OverlayEmitAction("b{index}"))),
+          actions = listOf(OverlayAppBarAction("delete", "Del {item.label}")),
+        ),
+        OverlayDialogNode(
+          openWhen = open,
+          title = "Remove {item.label}?",
+          text = "{item.price} left",
+          confirm = button("Remove {item.label}", "rm-{item.id}"),
+          dismiss = OverlayDialogButton("Keep {item.label}"),
+        ),
+        OverlaySnackbarNode(
+          openWhen = open,
+          text = "Removed {item.label}",
+          action = button("Undo {item.label}", "undo-{index}"),
+        ),
+      )
+    val bound = overlayChildEntries(list(*template.toTypedArray()), "root").map { it.node }
+    val second = bound.drop(template.size)
+    assertEquals("Open Beta", (second[0] as OverlayButtonNode).label)
+    assertEquals("New 1", (second[1] as OverlayFabNode).label)
+    val segmented = second[2] as OverlaySegmentedButtonNode
+    assertEquals(listOf("Beta A", "B"), segmented.options.map { it.label })
+    assertEquals(listOf("a", "b"), segmented.options.map { it.value })
+    val bar = second[3] as OverlayTopAppBarNode
+    assertEquals("Beta (4.5)", bar.title)
+    assertEquals("Back Beta", bar.navigationIcon?.label)
+    assertEquals(listOf(OverlayEmitAction("b1")), bar.navigationIcon?.onTap)
+    assertEquals("Del Beta", bar.actions?.single()?.label)
+    val dialog = second[4] as OverlayDialogNode
+    assertEquals("Remove Beta?", dialog.title)
+    assertEquals("4.5 left", dialog.text)
+    assertEquals("Remove Beta", dialog.confirm.label)
+    assertEquals(listOf(OverlayEmitAction("rm-7")), dialog.confirm.onTap)
+    assertEquals("Keep Beta", dialog.dismiss?.label)
+    val snackbar = second[5] as OverlaySnackbarNode
+    assertEquals("Removed Beta", snackbar.text)
+    assertEquals("Undo Beta", snackbar.action?.label)
+    assertEquals(listOf(OverlayEmitAction("undo-1")), snackbar.action?.onTap)
+    assertEquals("Open Alpha", (bound[0] as OverlayButtonNode).label)
+  }
+
+  @Test
   fun `an emit name that expands to empty for any item fails validation at the name`() {
     fun json(name: String) =
       """{"id":"r","window":{"placement":{"type":"fullscreen"}},"root":{"type":"column",""" +

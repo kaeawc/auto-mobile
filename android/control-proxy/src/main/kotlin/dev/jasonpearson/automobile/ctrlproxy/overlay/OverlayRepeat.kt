@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import dev.jasonpearson.automobile.protocol.OverlayAction
+import dev.jasonpearson.automobile.protocol.OverlayAppBarAction
 import dev.jasonpearson.automobile.protocol.OverlayBadgeNode
 import dev.jasonpearson.automobile.protocol.OverlayBottomNavNode
 import dev.jasonpearson.automobile.protocol.OverlayBottomSheetNode
@@ -12,6 +13,7 @@ import dev.jasonpearson.automobile.protocol.OverlayChipNode
 import dev.jasonpearson.automobile.protocol.OverlayColumnNode
 import dev.jasonpearson.automobile.protocol.OverlayCondition
 import dev.jasonpearson.automobile.protocol.OverlayDatePickerNode
+import dev.jasonpearson.automobile.protocol.OverlayDialogButton
 import dev.jasonpearson.automobile.protocol.OverlayDialogNode
 import dev.jasonpearson.automobile.protocol.OverlayDividerNode
 import dev.jasonpearson.automobile.protocol.OverlayEmitAction
@@ -163,7 +165,13 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
     is OverlayBottomNavNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlaySwitchNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlayCheckboxNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
-    is OverlayButtonNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayButtonNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        label = instance.interpolate(label),
+      )
     is OverlaySliderNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlayChipNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlayRadioGroupNode ->
@@ -174,24 +182,60 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
+        title = title?.let(instance::interpolate),
+        text = text?.let(instance::interpolate),
+        confirm = confirm.bound(instance),
+        dismiss = dismiss?.bound(instance),
         child = child?.bound(instance),
       )
     is OverlayIconButtonNode ->
       copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
-    is OverlayFabNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayFabNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        label = label?.let(instance::interpolate),
+      )
     is OverlaySegmentedButtonNode ->
-      copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
-    is OverlayTopAppBarNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        options = options.map { it.copy(label = instance.interpolate(it.label)) },
+      )
+    is OverlayTopAppBarNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        title = instance.interpolate(title),
+        navigationIcon = navigationIcon?.bound(instance),
+        actions = actions?.map { it.bound(instance) },
+      )
     is OverlayDividerNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlayBadgeNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlayProgressNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
-    is OverlaySnackbarNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlaySnackbarNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        text = instance.interpolate(text),
+        action = action?.bound(instance),
+      )
     is OverlayTimePickerNode ->
       copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlayDatePickerNode ->
       copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
   }
 }
+
+private fun OverlayDialogButton.bound(instance: RepeatInstance) =
+  copy(label = instance.interpolate(label), onTap = onTap?.map { it.bound(instance) })
+
+private fun OverlayAppBarAction.bound(instance: RepeatInstance) =
+  copy(label = instance.interpolate(label), onTap = onTap?.map { it.bound(instance) })
 
 private fun OverlayAction.bound(instance: RepeatInstance): OverlayAction =
   when (this) {

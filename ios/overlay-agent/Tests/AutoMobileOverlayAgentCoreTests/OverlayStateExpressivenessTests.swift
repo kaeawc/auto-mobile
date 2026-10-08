@@ -118,6 +118,48 @@ final class OverlayStateExpressivenessTests: XCTestCase {
         ]))
     }
 
+    func testComponentLabelsTitlesAndButtonActionsBindPerItem() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let url = root.appendingPathComponent("test/fixtures/overlay-spec/valid/repeat-component-labels.json")
+        let raw = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: url))
+        guard case let .object(spec) = raw, let tree = spec["root"] else { return XCTFail("no root") }
+        guard case let .object(expanded) = OverlayRepeat.expand(tree),
+              case let .array(children)? = expanded["children"] else { return XCTFail("not expanded") }
+        XCTAssertEqual(children.count, 12)
+        func field(_ node: JSONValue, _ path: String...) -> JSONValue? {
+            path.reduce(Optional(node)) { current, key in
+                switch current {
+                case let .object(fields)?: fields[key]
+                case let .array(items)?: Int(key).flatMap { items.indices.contains($0) ? items[$0] : nil }
+                default: nil
+                }
+            }
+        }
+        let second = Array(children[6...])
+        XCTAssertEqual(field(second[0], "label"), .string("Open Beta"))
+        XCTAssertEqual(field(second[0], "onTap", "0", "name"), .string("open-b"))
+        XCTAssertEqual(field(second[1], "label"), .string("New Beta"))
+        XCTAssertEqual(field(second[2], "options", "0", "label"), .string("Beta one"))
+        XCTAssertEqual(field(second[2], "options", "1", "label"), .string("1 two"))
+        XCTAssertEqual(field(second[2], "options", "1", "value"), .string("y"))
+        XCTAssertEqual(field(second[3], "title"), .string("Beta (4)"))
+        XCTAssertEqual(field(second[3], "navigationIcon", "label"), .string("Back from Beta"))
+        XCTAssertEqual(field(second[3], "navigationIcon", "onTap", "0", "name"), .string("back-b"))
+        XCTAssertEqual(field(second[3], "actions", "0", "label"), .string("Delete Beta"))
+        XCTAssertEqual(field(second[3], "actions", "0", "onTap", "0", "name"), .string("delete-b"))
+        XCTAssertEqual(field(second[4], "title"), .string("Remove Beta?"))
+        XCTAssertEqual(field(second[4], "text"), .string("4 items go away."))
+        XCTAssertEqual(field(second[4], "confirm", "label"), .string("Remove Beta"))
+        XCTAssertEqual(field(second[4], "confirm", "onTap", "0", "name"), .string("remove-b"))
+        XCTAssertEqual(field(second[4], "dismiss", "label"), .string("Keep Beta"))
+        XCTAssertEqual(field(second[5], "text"), .string("Removed Beta"))
+        XCTAssertEqual(field(second[5], "action", "label"), .string("Undo Beta"))
+        XCTAssertEqual(field(second[5], "action", "onTap", "0", "name"), .string("undo-b"))
+        XCTAssertEqual(field(children[0], "label"), .string("Open Alpha"))
+    }
+
     func testPlaceholderSegmentsLeaveOtherBracesLiteral() {
         XCTAssertEqual(
             OverlayRepeat.segments("{index}{it.a_1}{it.}{it.1x}{x}}{", alias: "it"),

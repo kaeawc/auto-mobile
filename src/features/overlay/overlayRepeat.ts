@@ -128,9 +128,55 @@ function checkList(
   return undefined;
 }
 
+/** A `{label, onTap?}` part (dialog or snackbar button, app bar action): label and actions bind. */
+function checkButtonPart(value: unknown, path: string, scope: Scope): RepeatError | undefined {
+  const part = record(value);
+  return part
+    ? (checkString(part.label, `${path}.label`, scope) ??
+        checkList(part.onTap, `${path}.onTap`, (entry, entryPath) =>
+          checkAction(entry, entryPath, scope),
+        ))
+    : undefined;
+}
+
+type ComponentCheck = (node: Raw, path: string, scope: Scope) => RepeatError | undefined;
+
+const labelCheck: ComponentCheck = (node, path, scope) =>
+  checkString(node.label, `${path}.label`, scope);
+
+/** Component fields that take `{alias.field}` placeholders besides a text node's `text`. */
+const COMPONENT_CHECKS: Record<string, ComponentCheck> = {
+  button: labelCheck,
+  fab: labelCheck,
+  segmentedButton: (node, path, scope) =>
+    checkList(node.options, `${path}.options`, (entry, entryPath) =>
+      checkString(record(entry)?.label, `${entryPath}.label`, scope),
+    ),
+  topAppBar: (node, path, scope) =>
+    checkString(node.title, `${path}.title`, scope) ??
+    checkButtonPart(node.navigationIcon, `${path}.navigationIcon`, scope) ??
+    checkList(node.actions, `${path}.actions`, (entry, entryPath) =>
+      checkButtonPart(entry, entryPath, scope),
+    ),
+  dialog: (node, path, scope) =>
+    checkString(node.title, `${path}.title`, scope) ??
+    checkString(node.text, `${path}.text`, scope) ??
+    checkButtonPart(node.confirm, `${path}.confirm`, scope) ??
+    checkButtonPart(node.dismiss, `${path}.dismiss`, scope),
+  snackbar: (node, path, scope) =>
+    checkString(node.text, `${path}.text`, scope) ??
+    checkButtonPart(node.action, `${path}.action`, scope),
+};
+
+function checkComponentFields(node: Raw, path: string, scope: Scope): RepeatError | undefined {
+  const check = typeof node.type === "string" ? COMPONENT_CHECKS[node.type] : undefined;
+  return check?.(node, path, scope);
+}
+
 function checkOwnFields(node: Raw, path: string, scope: Scope): RepeatError | undefined {
   return (
     (node.type === "text" ? checkString(node.text, `${path}.text`, scope) : undefined) ??
+    checkComponentFields(node, path, scope) ??
     checkCondition(node.visibleWhen, `${path}.visibleWhen`, scope) ??
     checkList(node.styleWhen, `${path}.styleWhen`, (entry, entryPath) =>
       checkCondition(record(entry)?.when, `${entryPath}.when`, scope),

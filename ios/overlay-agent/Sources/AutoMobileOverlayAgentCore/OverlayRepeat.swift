@@ -7,7 +7,8 @@ import Foundation
 /// only ever see concrete nodes. The host validator has already checked the template (fields exist
 /// in every item, no nested `repeat`, expanded limits), so this only binds values.
 ///
-/// Bound per instance, as on Android: a `text` node's `text`; `setState` values and `emit` names in
+/// Bound per instance, as on Android: a `text` node's `text`, the component label, title and
+/// button fields listed on `bindComponentFields`; `setState` values and `emit` names in
 /// `onTap`; and the `equals`/`notEquals` operands of `visibleWhen` and `styleWhen` conditions,
 /// recursively through `all`/`any`/`not`. A string that is exactly one placeholder keeps the
 /// item's own type, so `equals: "{item.id}"` can match a numeric state value.
@@ -100,6 +101,7 @@ private struct Instance {
         if case .string("text")? = fields["type"], case let .string(text)? = fields["text"] {
             fields["text"] = .string(interpolate(text))
         }
+        bindComponentFields(&fields)
         if case let .array(actions)? = fields["onTap"] {
             fields["onTap"] = .array(actions.map(bindAction))
         }
@@ -118,6 +120,61 @@ private struct Instance {
         }
         if let child = fields["child"] { fields["child"] = bind(child) }
         return .object(fields)
+    }
+
+    /// Component fields that take placeholders besides a `text` node's `text`: button, fab and
+    /// segmented option labels, app bar titles and actions, and dialog and snackbar text and buttons.
+    private func bindComponentFields(_ fields: inout [String: JSONValue]) {
+        guard case let .string(type)? = fields["type"] else { return }
+        switch type {
+        case "button", "fab":
+            bindString("label", in: &fields)
+        case "segmentedButton":
+            bindList("options", in: &fields) { bindString("label", in: &$0) }
+        case "topAppBar":
+            bindString("title", in: &fields)
+            bindPart("navigationIcon", in: &fields)
+            bindList("actions", in: &fields) { bindPartFields(&$0) }
+        case "dialog":
+            bindString("title", in: &fields)
+            bindString("text", in: &fields)
+            bindPart("confirm", in: &fields)
+            bindPart("dismiss", in: &fields)
+        case "snackbar":
+            bindString("text", in: &fields)
+            bindPart("action", in: &fields)
+        default:
+            break
+        }
+    }
+
+    private func bindString(_ key: String, in fields: inout [String: JSONValue]) {
+        if case let .string(text)? = fields[key] { fields[key] = .string(interpolate(text)) }
+    }
+
+    /// A `{label, onTap?}` part: its label and its actions bind.
+    private func bindPartFields(_ part: inout [String: JSONValue]) {
+        bindString("label", in: &part)
+        if case let .array(actions)? = part["onTap"] { part["onTap"] = .array(actions.map(bindAction)) }
+    }
+
+    private func bindPart(_ key: String, in fields: inout [String: JSONValue]) {
+        guard case var .object(part)? = fields[key] else { return }
+        bindPartFields(&part)
+        fields[key] = .object(part)
+    }
+
+    private func bindList(
+        _ key: String,
+        in fields: inout [String: JSONValue],
+        _ bind: (inout [String: JSONValue]) -> Void
+    ) {
+        guard case let .array(entries)? = fields[key] else { return }
+        fields[key] = .array(entries.map { entry in
+            guard case var .object(entryFields) = entry else { return entry }
+            bind(&entryFields)
+            return .object(entryFields)
+        })
     }
 
     private func bindAction(_ action: JSONValue) -> JSONValue {

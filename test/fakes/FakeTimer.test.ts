@@ -129,6 +129,25 @@ describe("FakeTimer auto-advance", function () {
     expect(ticks).toBeLessThanOrEqual(3);
     expect(timer.now()).toBe(ticks);
   });
+
+  test("still pumps a sleep that a paced interval tick registers", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let woke = false;
+    const handle = timer.setInterval(() => {
+      void timer.sleep(50).then(() => {
+        woke = true;
+      });
+      timer.clearInterval(handle);
+    }, 1);
+
+    for (let turn = 0; turn < 5 && !woke; turn++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    expect(woke).toBe(true);
+    expect(timer.now()).toBe(51);
+  });
 });
 
 describe("FakeTimer async manual advancement", function () {

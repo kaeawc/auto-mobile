@@ -554,6 +554,15 @@ export class FakeTimer implements Timer {
       if (this.onlyIntervalsPending()) {
         this.fireNextDueEvent();
       }
+      if (this.onlyIntervalsPending()) {
+        // Still only background ticks: stay on the cheap per-turn path. A full pump
+        // pass costs a quiescence drain per tick, and an abandoned interval that no
+        // test cleared would then tax every later test sharing the process (the
+        // Windows single-process run starved a real logger flush past its 5s budget).
+        // Anything the tick registers later restarts the pump through its own kick.
+        this.schedulePacedIntervalTick();
+        return;
+      }
       this.kickAutoAdvancePump();
     });
   }

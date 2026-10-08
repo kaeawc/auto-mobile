@@ -623,6 +623,22 @@ function clearMutationEvents(
   }
 }
 
+/**
+ * A fresh show starts its event epoch before dispatch. An in-place show waits until the
+ * replacement lands: a failed one leaves the old overlay on screen, so its buffered events and
+ * sequence high-water mark must survive.
+ */
+function startFreshShowEvents(
+  events: OverlayEventCoordinator,
+  scope: OverlayScope,
+  client: OverlayClient,
+  show: { target: { id?: string }; args: { action: OverlayMutation }; inPlace: boolean },
+): void {
+  if (show.args.action === "show" && !show.inPlace) {
+    events.show(scope, show.target.id!, client);
+  }
+}
+
 function subscribeOverlayDeviceUnbound(listener: (deviceId: string) => void): () => void {
   const state = DaemonState.getInstance();
   if (!state.isInitialized()) {
@@ -668,9 +684,7 @@ async function performMutation(
   const shown = store.status(scope).overlays.find((entry) => entry.id === target.id);
   const previouslyShown = shown !== undefined;
   const inPlace = args.action === "show" && previouslyShown && args.reset !== true;
-  if (args.action === "show" && !inPlace) {
-    events.show(scope, target.id!, client);
-  }
+  startFreshShowEvents(events, scope, client, { target, args, inPlace });
   const resolved = await resolveMutationDisplay(inPlace, client, device, args, dependencies);
   const { displayId } = resolved;
   const stage: AssetStage = resolved.failure
@@ -678,8 +692,6 @@ async function performMutation(
     : await stageAssets(client, args, assetReaders, signal);
   const { result, warning } = await sendOverlay(client, args, stage, signal, displayId);
   if (inPlace && result.success) {
-    // Start the new epoch only once the replacement landed: a failed in-place show leaves the old
-    // overlay on screen, so its buffered events and sequence high-water mark must survive.
     events.show(scope, target.id!, client);
   }
   clearMutationEvents(events, scope, target, args.action, result.success, previouslyShown);

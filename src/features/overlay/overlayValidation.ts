@@ -423,22 +423,77 @@ function pagerErrors(context: Context): OverlayValidationError | undefined {
   }
   return undefined;
 }
+function stepFitsRange(step: number, range: number): boolean {
+  const count = range / step;
+  return step > 0 && count >= 1 && Math.abs(count - Math.round(count)) < 1e-9;
+}
+/** Slider range, step and bound-value checks; the contract only types the individual fields. */
+function sliderErrors(
+  value: Record<string, unknown>,
+  path: string,
+  stored: unknown,
+): OverlayValidationError | undefined {
+  const { min, max, step } = value;
+  if (typeof min !== "number" || typeof max !== "number" || min >= max) {
+    return fail(`${path}.max`, "Slider max must be greater than min");
+  }
+  if (typeof step === "number" && !stepFitsRange(step, max - min)) {
+    return fail(`${path}.step`, "Slider step must be positive and divide the range evenly");
+  }
+  if (typeof stored !== "number" || !Number.isFinite(stored) || stored < min || stored > max) {
+    return fail(`${path}.stateKey`, "Slider requires a numeric state key within min and max");
+  }
+  return undefined;
+}
+/** A filter chip is a boolean toggle; an assist chip only runs its actions. */
+function chipErrors(
+  value: Record<string, unknown>,
+  path: string,
+  stored: unknown,
+): OverlayValidationError | undefined {
+  const bound = typeof value.stateKey === "string";
+  if (value.variant === "filter" && !bound) {
+    return fail(`${path}.stateKey`, "Filter chip requires a boolean state key");
+  }
+  if (value.variant === "assist" && bound) {
+    return fail(`${path}.stateKey`, "Assist chip cannot bind a state key");
+  }
+  if (bound && typeof stored !== "boolean") {
+    return fail(`${path}.stateKey`, "Filter chip requires a boolean state key");
+  }
+  return undefined;
+}
+function componentBindingErrors(
+  value: Record<string, unknown>,
+  path: string,
+  state: Record<string, unknown>,
+): OverlayValidationError | undefined {
+  const stored = typeof value.stateKey === "string" ? state[value.stateKey] : undefined;
+  if (value.type === "textField" && typeof stored !== "string") {
+    return fail(`${path}.stateKey`, "Text field requires a string state key");
+  }
+  if ((value.type === "switch" || value.type === "checkbox") && typeof stored !== "boolean") {
+    return fail(`${path}.stateKey`, "Toggle control requires a boolean state key");
+  }
+  if (value.type === "slider") {
+    return sliderErrors(value, path, stored);
+  }
+  return value.type === "chip" ? chipErrors(value, path, stored) : undefined;
+}
 function bindingErrors(
   context: Context,
   data: Record<string, unknown>,
 ): OverlayValidationError | undefined {
   const state = object(data.state) ?? {};
   for (const { value, path } of context.nodes) {
+    const component = componentBindingErrors(value, path, state);
+    if (component) {
+      return component;
+    }
     if (typeof value.stateKey !== "string") {
       continue;
     }
     const stored = state[value.stateKey];
-    if (value.type === "textField" && typeof stored !== "string") {
-      return fail(`${path}.stateKey`, "Text field requires a string state key");
-    }
-    if ((value.type === "switch" || value.type === "checkbox") && typeof stored !== "boolean") {
-      return fail(`${path}.stateKey`, "Toggle control requires a boolean state key");
-    }
     if (value.type !== "tabBar" && value.type !== "bottomNav") {
       continue;
     }

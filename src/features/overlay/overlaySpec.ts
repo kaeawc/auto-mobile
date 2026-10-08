@@ -390,6 +390,36 @@ const buttonBaseSchema = z
     variant: z.enum(["filled", "outlined", "text"]).optional(),
   })
   .strict();
+const sliderBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["slider"]),
+    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    label: z.string().min(1).optional(),
+    min: z.number().finite(),
+    max: z.number().finite(),
+    step: z.number().finite().optional(),
+  })
+  .strict();
+const chipBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["chip"]),
+    label: z.string().min(1),
+    variant: z.enum(["assist", "filter"]).optional(),
+    stateKey: z
+      .string()
+      .regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/)
+      .optional(),
+  })
+  .strict();
+const cardBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["card"]),
+    variant: z.enum(["filled", "elevated", "outlined"]).optional(),
+  })
+  .strict();
 const scrollBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -451,6 +481,9 @@ export type OverlayNode =
   | z.infer<typeof switchBaseSchema>
   | z.infer<typeof checkboxBaseSchema>
   | z.infer<typeof buttonBaseSchema>
+  | z.infer<typeof sliderBaseSchema>
+  | z.infer<typeof chipBaseSchema>
+  | (z.infer<typeof cardBaseSchema> & { children: OverlayNode[] })
   | (z.infer<typeof scrollBaseSchema> & { child: OverlayNode })
   | (z.infer<typeof pagerBaseSchema> & { children: OverlayNode[] })
   | z.infer<typeof tabBarBaseSchema>
@@ -469,6 +502,9 @@ export const overlayNodeSchema: z.ZodType<OverlayNode, z.ZodTypeDef, unknown> = 
     switchBaseSchema,
     checkboxBaseSchema,
     buttonBaseSchema,
+    sliderBaseSchema,
+    chipBaseSchema,
+    cardBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
     scrollBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
     pagerBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(1) }),
     tabBarBaseSchema,
@@ -530,6 +566,9 @@ export const OVERLAY_NODE_TYPES = [
   "switch",
   "checkbox",
   "button",
+  "slider",
+  "chip",
+  "card",
   "scroll",
   "pager",
   "tabBar",

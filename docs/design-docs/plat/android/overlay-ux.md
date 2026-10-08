@@ -133,24 +133,27 @@ layout room.
 
 ## Nodes
 
-| `type`        | Node-specific properties                                                                                             |
-| ------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `box`         | Required `children` array, possibly empty; children stack.                                                           |
-| `row`         | Required `children` array, possibly empty; horizontal layout.                                                        |
-| `column`      | Required `children` array, possibly empty; vertical layout.                                                          |
-| `text`        | Required `text` string, possibly empty.                                                                              |
-| `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                            |
-| `icon`        | Required built-in `name` below.                                                                                      |
-| `spacer`      | No node-specific properties; size comes from style.                                                                  |
-| `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.          |
-| `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                            |
-| `checkbox`    | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                            |
-| `button`      | Required nonempty `label`; optional `variant`: `filled` (default), `outlined`, `text`. Taps run `onTap`.             |
-| `scroll`      | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping. |
-| `pager`       | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                |
-| `tabBar`      | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                   |
-| `bottomNav`   | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.            |
-| `bottomSheet` | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                |
+| `type`        | Node-specific properties                                                                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `box`         | Required `children` array, possibly empty; children stack.                                                                                       |
+| `row`         | Required `children` array, possibly empty; horizontal layout.                                                                                    |
+| `column`      | Required `children` array, possibly empty; vertical layout.                                                                                      |
+| `text`        | Required `text` string, possibly empty.                                                                                                          |
+| `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                        |
+| `icon`        | Required built-in `name` below.                                                                                                                  |
+| `spacer`      | No node-specific properties; size comes from style.                                                                                              |
+| `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.                                      |
+| `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                        |
+| `checkbox`    | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                        |
+| `button`      | Required nonempty `label`; optional `variant`: `filled` (default), `outlined`, `text`. Taps run `onTap`.                                         |
+| `slider`      | Required `stateKey` naming an initialized number within `min`..`max`; required finite `min` < `max`; optional `step`, optional nonempty `label`. |
+| `chip`        | Required nonempty `label`; optional `variant`: `assist`, `filter`; optional `stateKey` naming a boolean (a filter chip).                         |
+| `card`        | Required `children` array; optional `variant`: `filled` (default), `elevated`, `outlined`.                                                       |
+| `scroll`      | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                             |
+| `pager`       | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                                            |
+| `tabBar`      | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                               |
+| `bottomNav`   | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                        |
+| `bottomSheet` | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                            |
 
 Each nav item is `{label, icon?, image?}`. Label is nonempty; icon uses the same
 closed list as icon nodes; image is an opaque asset ID. Both icon and image may
@@ -186,8 +189,24 @@ node carrying its label as text, a native role (`Switch`, `Checkbox`,
 `Button`), and for switch and checkbox the checkable/checked state, so `observe`
 reports them as controls and `tapOn` by `testTag` or label toggles or presses
 them. Each reserves the Material 48 dp minimum touch target. `radioGroup`,
-`slider`, `chip`, `card`, `listItem` and the other components in #10439 are
-later slices.
+`listItem` and the other components in #10439 are later slices.
+
+`slider`, `chip` and `card` are the second slice. A slider is bound to a number
+state key that must already lie within `min`..`max`; `step`, when given, must
+be positive and divide `max - min` evenly (the thumb snaps to those positions,
+otherwise it is continuous). Dragging, or an accessibility set-progress action,
+stores the snapped number, emits `change` (`{key, value}`) only when the value
+moved, and then runs the node's `onTap`. It is one accessibility node carrying
+its label and a progress range (current, `min`..`max`, steps), so `observe`
+reports the value as range info. A chip with a `stateKey` is a filter chip: it
+toggles that boolean like a switch, emits `change`, then runs `onTap`, and
+reports the `Checkbox` role with its checked state. A chip without one is an
+assist chip: a `Button` that runs `onTap`. `variant: filter` requires a
+`stateKey` and `variant: assist` forbids one; `input` and `suggestion` chips are
+later slices. A card is a Material container whose `children` are laid out as a
+column; its `variant` selects filled, elevated or outlined, a `style.background`
+overrides the container colour, and an `onTap` makes the whole card clickable.
+A card has no accessibility label of its own.
 
 Text interpolation is a renderer concern: `{page}`, `{pageCount}`, and state
 keys may appear in text. No expressions or interpolation parsing occurs during

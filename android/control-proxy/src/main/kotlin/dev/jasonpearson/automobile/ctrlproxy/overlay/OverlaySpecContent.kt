@@ -194,6 +194,12 @@ private fun RenderOverlayNodeContent(
     "switch",
     "checkbox" -> RenderOverlayToggle(node, modifier, interact)
     "button" -> RenderOverlayButton(node, modifier, interact)
+    "slider" -> RenderOverlaySlider(node, modifier, interact)
+    "chip" -> RenderOverlayChip(node, modifier, interact)
+    "card" ->
+      RenderOverlayCard(node, modifier) {
+        node.children.forEach { RenderOverlayNode(it, interact, columnWeight(it)) }
+      }
     // Spacer keeps its size and authored actions.
     else -> Box(modifier)
   }
@@ -480,7 +486,8 @@ private fun overlayNodeModifier(
   return modifier
 }
 
-private val SEMANTICS_FREE_CONTAINERS = setOf("box", "row", "column", "scroll", "pager", "spacer")
+private val SEMANTICS_FREE_CONTAINERS =
+  setOf("box", "row", "column", "scroll", "pager", "spacer", "card")
 
 /**
  * The accessible label for an overlay node. Authored text wins; an icon-only tappable node reads as

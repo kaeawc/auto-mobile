@@ -19159,6 +19159,151 @@
                     },
                     "type": {
                       "type": "string",
+                      "enum": ["slider"]
+                    },
+                    "stateKey": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "min": {
+                      "type": "number"
+                    },
+                    "max": {
+                      "type": "number"
+                    },
+                    "step": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["type", "stateKey", "min", "max"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["chip"]
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": ["assist", "filter"]
+                    },
+                    "stateKey": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                    }
+                  },
+                  "required": ["type", "label"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["card"]
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": ["filled", "elevated", "outlined"]
+                    },
+                    "children": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/root"
+                      },
+                      "minItems": 0
+                    }
+                  },
+                  "required": ["type", "children"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
                       "enum": ["scroll"]
                     },
                     "axis": {
@@ -19357,7 +19502,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/13/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/16/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -20539,6 +20684,151 @@
                       },
                       "type": {
                         "type": "string",
+                        "enum": ["slider"]
+                      },
+                      "stateKey": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "min": {
+                        "type": "number"
+                      },
+                      "max": {
+                        "type": "number"
+                      },
+                      "step": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["type", "stateKey", "min", "max"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["chip"]
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "variant": {
+                        "type": "string",
+                        "enum": ["assist", "filter"]
+                      },
+                      "stateKey": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      }
+                    },
+                    "required": ["type", "label"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["card"]
+                      },
+                      "variant": {
+                        "type": "string",
+                        "enum": ["filled", "elevated", "outlined"]
+                      },
+                      "children": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/properties/variants/items/properties/spec"
+                        },
+                        "minItems": 0
+                      }
+                    },
+                    "required": ["type", "children"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
                         "enum": ["scroll"]
                       },
                       "axis": {
@@ -20737,7 +21027,7 @@
                       "items": {
                         "type": "array",
                         "items": {
-                          "$ref": "#/properties/variants/items/properties/spec/anyOf/13/properties/items/items"
+                          "$ref": "#/properties/variants/items/properties/spec/anyOf/16/properties/items/items"
                         },
                         "minItems": 2,
                         "maxItems": 5

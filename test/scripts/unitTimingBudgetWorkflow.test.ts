@@ -21,7 +21,7 @@ const callers = readdirSync(workflowDir)
 describe("unit timing validator workflow budgets", () => {
   test("discovers both existing timing gates", () => {
     expect(callers.map(({ file, id }) => `${file}:${id}`)).toContain(
-      "pull_request.yml:node-unit-timing-budget",
+      "pull_request.yml:node-unit-tests",
     );
     expect(callers.map(({ file, id }) => `${file}:${id}`)).toContain("merge.yml:node-unit-tests");
   });
@@ -60,8 +60,28 @@ describe("unit timing validator workflow budgets", () => {
   }
 });
 
-const budgetSteps =
-  loadJobs(".github/workflows/pull_request.yml")["node-unit-timing-budget"].steps ?? [];
+const prJobs = loadJobs(".github/workflows/pull_request.yml");
+const budgetSteps = prJobs["node-unit-tests"].steps ?? [];
+
+test("timing budget runs on the leg that produced the reports, not a separate job", () => {
+  // A separate job cost a runner slot, queue wait, checkout and bun install
+  // per PR just to download these JUnit reports.
+  expect(prJobs["node-unit-timing-budget"]).toBeUndefined();
+  const laneIndex = budgetSteps.findIndex((step) =>
+    step.run?.includes("bash scripts/test-ts.sh unit"),
+  );
+  const enforceIndex = budgetSteps.findIndex((step) =>
+    step.run?.includes("scripts/validate-bun-test-timings.sh"),
+  );
+  const enforce = budgetSteps[enforceIndex];
+  expect(laneIndex).toBeGreaterThanOrEqual(0);
+  expect(enforceIndex).toBeGreaterThan(laneIndex);
+  expect(enforce?.if).toBe("runner.os == 'Linux'");
+  expect(enforce?.env?.BUN_TEST_TIMING_REPORT_DIR).toBe(
+    budgetSteps[laneIndex].env?.AUTOMOBILE_UNIT_JUNIT_DIR,
+  );
+  expect(enforce?.env?.BUN_TEST_TIMING_BASE_REF).toBe("${{ github.event.pull_request.base.sha }}");
+});
 
 test("timing budget uploads its summary after enforcement even on failure", () => {
   const enforceIndex = budgetSteps.findIndex((step) =>
@@ -74,7 +94,7 @@ test("timing budget uploads its summary after enforcement even on failure", () =
   expect(uploadIndex).toBeGreaterThan(enforceIndex);
   const upload = budgetSteps[uploadIndex];
   expect(upload.uses).toBe("actions/upload-artifact@v6");
-  expect(upload.if).toBe("always() && !cancelled()");
+  expect(upload.if).toBe("always() && !cancelled() && runner.os == 'Linux'");
   expect(upload.with).toEqual({
     name: "node-unit-timing-budget-summary",
     path: "scratch/timing-unit-reports/unit-timing-budget-summary.md",

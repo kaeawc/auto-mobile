@@ -237,6 +237,22 @@ JSON
   [[ "$output" == *"Node Tests → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
 }
 
+@test "classifies a timing-budget flap on the folded budget step of the ubuntu unit leg" {
+  fixture="$BATS_TEST_TMPDIR/folded-timing-budget-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/folded-timing-budget",
+  "jobs": [
+    {"databaseId": 1, "name": "Node Unit Tests (ubuntu-latest)", "conclusion": "failure", "steps": [{"name": "Enforce 100ms budget for changed unit tests", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 127
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Node Unit Tests (ubuntu-latest) → Enforce 100ms budget for changed unit tests → none → RERUN-DONT-FIX"* ]]
+}
+
 @test "investigates a timing-budget breach retained by isolated median rechecks" {
   fixture="$BATS_TEST_TMPDIR/timing-budget-median-run.json"
   cat > "$fixture" <<'JSON'

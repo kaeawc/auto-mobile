@@ -24,9 +24,13 @@ Run Playground Automobile Emulator*|*sys.boot_completed is not 1*|RERUN-DONT-FIX
 Run Playground Automobile Emulator*|*timeout exhausted while waiting for device boot readiness*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Run Playground Automobile Emulator*|*notification shade) is covering the app*|INVESTIGATE|post-fix LaunchApp launch-observation poll retries shade collapse; inspect a recurring overlay timeout before rerunning
 Node Unit Timing Budget*|*test exceeded 100ms*median*isolated runs*|INVESTIGATE|isolated recheck confirms this is not a loaded-runner artifact; a real regression survived the bounded median recheck, fix the test or source and do not just rerun
+Node Unit Tests (ubuntu-latest)|*test exceeded 100ms*median*isolated runs*|INVESTIGATE|isolated recheck confirms this is not a loaded-runner artifact; a real regression survived the bounded median recheck, fix the test or source and do not just rerun
 Node Unit Timing Budget*|*recheck produced [0-9]* of [0-9]* isolated samples*|INVESTIGATE|incomplete isolated recheck is unverified; investigate the process failure before rerunning
+Node Unit Tests (ubuntu-latest)|*recheck produced [0-9]* of [0-9]* isolated samples*|INVESTIGATE|incomplete isolated recheck is unverified; investigate the process failure before rerunning
 Node Unit Timing Budget*|*test exceeded 100ms*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
+Node Unit Tests (ubuntu-latest)|*test exceeded 100ms*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required (budget step of the ubuntu unit leg), rerun
 Node Unit Timing Budget*|*exceed the 100ms budget*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required, rerun
+Node Unit Tests (ubuntu-latest)|*exceed the 100ms budget*|RERUN-DONT-FIX|loaded-runner 100ms unit-budget flap, non-required (budget step of the ubuntu unit leg), rerun
 Node Unit Tests*|*TIMEOUT: unit shard*exceeded its wall-clock budget after a retry*|INVESTIGATE|unit shard hit its wall budget on both attempts of the in-job infra retry (#10583); a one-off loaded runner is already absorbed, so read the shard log's last active file and watchdog snapshot before rerunning
 Node Unit Tests*|*FAIL: unit shard*exited with status*after a retry*|INVESTIGATE|unit shard was killed by a signal on both attempts of the in-job infra retry (#10583); likely an OOM kill or a Bun crash, inspect the shard logs before rerunning
 Node Host Integration Tests*|*WATCHDOG: integration test exceeded*toolRegistry.collaborators.integration.test.ts*|RERUN-DONT-FIX|historical pre-#7773 shared-Bun-process watchdog hang; #7773 isolates each file on current main, so this should not recur there; retain for old PR bases

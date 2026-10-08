@@ -27,7 +27,7 @@ fi
 
 oxfmt_status=0
 if [[ "$oxfmt_mode" == --check && "$runner_os" == Windows ]]; then
-  echo "format is gated on Linux (format-check job); skipped on Windows: CRLF checkout" >&2
+  echo "format is gated on Linux (Fast Validation format step); skipped on Windows: CRLF checkout" >&2
 else
   oxfmt "$oxfmt_mode" "$@"
   oxfmt_status=$?

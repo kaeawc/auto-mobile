@@ -6,7 +6,7 @@ import { loadJobSteps, stepNamed } from "../helpers/workflowSteps";
 // Every exclusion names the job that checks the real tree. Keep this next to
 // the guard so a new registry entry requires an explicit CI coverage decision.
 const EXCLUDED_WITH_REASON: Readonly<Record<string, string>> = {
-  "node-format": "PR format-check: bun run format:check",
+  "node-format": "PR fast-validation Check formatting step: bun run format:check",
   "markdown-bash":
     "PR bats-integration-tests: validate-markdown-bash.bats scans commands and skills",
   lychee:

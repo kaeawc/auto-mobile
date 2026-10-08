@@ -10,6 +10,11 @@ on:
       - bun.lock
       - scripts/ci/install-bun-deps.sh
       - .github/workflows/prime-bun-cache.yml
+  # The repository's caches exceed GitHub's 10 GB limit, so LRU eviction can
+  # drop this entry within hours of a save; PR jobs only restore it. Re-prime
+  # daily so a PR's Windows install starts from a warm package store.
+  schedule:
+    - cron: "17 9 * * *"
   workflow_dispatch:
 
 permissions:

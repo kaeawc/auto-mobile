@@ -826,22 +826,17 @@ jobs:
     timeout-minutes: 20
     name: "Fast Validation"
     runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
-    needs: [detect-changes, format-check]
+    needs: [detect-changes]
     # This required check must always report a result, including auto-chore
     # changes and a failed change-detection job.
     if: always()
     steps:
-      - name: "Require formatter result"
+      - name: "Require change detection result"
         shell: bash
         run: |
           detect_result="${{ needs.detect-changes.result }}"
-          formatter_result="${{ needs.format-check.result }}"
           if [[ "$detect_result" != "success" ]]; then
             echo "Change detection concluded $detect_result; formatter gate cannot be trusted"
-            exit 1
-          fi
-          if [[ "$formatter_result" == "failure" || "$formatter_result" == "cancelled" ]]; then
-            echo "Formatter gate concluded $formatter_result — run 'bun run format' and push again"
             exit 1
           fi
 
@@ -913,6 +908,20 @@ jobs:
           java-version: "21"
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      # Formatting used to be its own "Check Formatting" job that this job
+      # waited on: a whole runner slot (plus queue wait and a serial hop on
+      # the required path) for a ~10 s check. It runs here first, right after
+      # bun is installed, so a formatting failure still fails this required
+      # check before the slower validators start.
+      - name: "Check formatting"
+        if: needs.detect-changes.outputs.format_changed == 'true'
+        shell: bash
+        run: |
+          if ! bun run format:check; then
+            echo "::error::Formatting check failed — run 'bun run format' and push again"
+            exit 1
+          fi
 
       - wait: install-fast-validation-deps
 
@@ -1346,8 +1355,9 @@ jobs:
 
   node-unit-tests:
     # 1560s unit lane cap (720s shard budget, one infra retry: see
-    # scripts/test-ts.sh) + setup, cold-import probe and upload < 1920s.
-    timeout-minutes: 32
+    # scripts/test-ts.sh) + 360s timing rechecks + setup, cold-import probe
+    # and upload < 2220s.
+    timeout-minutes: 37
     name: "Node Unit Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || matrix.os }}
     needs: [detect-changes, fast-validation]
@@ -1387,6 +1397,29 @@ jobs:
           fi
           bash scripts/test-ts.sh unit
 
+      # The 100 ms budget used to run in a separate "Node Unit Timing Budget"
+      # job that downloaded these JUnit reports onto a fresh hosted runner: a
+      # runner slot, a queue wait, a checkout and a bun install per PR. It now
+      # runs on the leg that produced the reports, as merge.yml already does.
+      # Same validator, same isolated median recheck, same base ref.
+      - name: "Enforce 100ms budget for changed unit tests"
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          BUN_TEST_TIMING_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
+          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "360"
+        run: bash scripts/validate-bun-test-timings.sh
+
+      - name: "Upload Node Unit Timing Budget Summary"
+        if: always() && !cancelled() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: node-unit-timing-budget-summary
+          path: scratch/timing-unit-reports/unit-timing-budget-summary.md
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: "Measure cold module imports (advisory, #10429)"
         if: runner.os == 'Linux'
         continue-on-error: true
@@ -1399,60 +1432,6 @@ jobs:
             echo "### Cold module import (Linux)"
             cat scratch/cold-imports.md
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: "Upload Node Unit Timing Reports"
-        if: success() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v6
-        with:
-          name: node-unit-timing-reports
-          path: scratch/timing-unit-reports
-          retention-days: 7
-
-  node-unit-timing-budget:
-    timeout-minutes: 10
-    name: "Node Unit Timing Budget"
-    runs-on: ubuntu-latest
-    needs: [detect-changes, node-unit-tests]
-    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true' && needs.node-unit-tests.result == 'success'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-          fetch-depth: 0
-
-      - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
-
-      - name: "Install Bun dependencies"
-        shell: bash
-        run: bash scripts/ci/install-bun-deps.sh
-
-      - name: "Download Node Unit Timing Reports"
-        uses: actions/download-artifact@v7
-        with:
-          name: node-unit-timing-reports
-          path: scratch/timing-unit-reports
-
-      - name: "Enforce 100ms budget for changed unit tests"
-        shell: bash
-        env:
-          BUN_TEST_TIMING_BASE_REF: ${{ github.event.pull_request.base.sha }}
-          BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
-          # 360s rechecks + 180s setup/verdict reserve < 600s job timeout.
-          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "360"
-        run: bash scripts/validate-bun-test-timings.sh
-
-      - name: "Upload Node Unit Timing Budget Summary"
-        if: always() && !cancelled()
-        uses: actions/upload-artifact@v6
-        with:
-          name: node-unit-timing-budget-summary
-          path: scratch/timing-unit-reports/unit-timing-budget-summary.md
-          if-no-files-found: ignore
-          retention-days: 7
 
   node-host-integration-tests:
     timeout-minutes: 20
@@ -1537,9 +1516,14 @@ jobs:
       # Disjoint cache paths, so the two restores overlap each other. The
       # barrier must precede "Setup Auto Mobile": that composite runs
       # `turbo run build` against the same .turbo directory being restored.
+      # Restore-only: prime-bun-cache.yml saves this key on main (on bun.lock
+      # changes and daily, since repo-wide LRU eviction drops it), and every PR
+      # can read a main-ref cache. A PR-side save only produced a ~100 MB
+      # PR-scoped entry no other PR could read, plus a post-job upload, and
+      # churned the 10 GB repo cache that also holds the Gradle caches.
       - name: "Cache Bun dependencies"
         if: env.RUN_MCP_BUILD_TEST == 'true'
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         background: true
         id: cache-bun
         with:
@@ -1655,28 +1639,6 @@ jobs:
   # Formatting and TypeScript Code Coverage
   # =============================================================================
 
-  format-check:
-    timeout-minutes: 10
-    name: "Check Formatting"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
-    needs: detect-changes
-    if: needs.detect-changes.outputs.format_changed == 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
-
-      - name: "Install Bun dependencies"
-        run: bun install --frozen-lockfile
-
-      - name: "Check formatting"
-        run: bun run format:check
-
   ts-code-coverage:
     name: "Node TypeScript Build and Test (ubuntu-latest)"
     runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
@@ -1693,21 +1655,12 @@ jobs:
           # default one-commit shallow clone.
           fetch-depth: 0
 
-      # Disjoint cache paths, so the two restores overlap each other. The
-      # barrier must precede "Setup Auto Mobile": that composite runs
+      # No Bun dependency cache here: a frozen install takes ~1 s on Linux
+      # runners, while the ~130 MB PR-scoped cache it replaced was never
+      # restored by another PR (nothing saves it on main) and its post-job
+      # upload churned the 10 GB repo cache that also holds the Gradle caches.
+      # The barrier must precede "Setup Auto Mobile": that composite runs
       # `turbo run build` against the same .turbo directory being restored.
-      - name: "Cache Bun dependencies"
-        uses: actions/cache@v5
-        background: true
-        id: cache-bun
-        with:
-          path: |
-            ~/.bun/install/cache
-            node_modules
-          key: bun-ubuntu-latest-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            bun-ubuntu-latest-
-
       - name: "Cache Turborepo"
         uses: actions/cache@v5
         background: true
@@ -1719,7 +1672,7 @@ jobs:
             turbo-ubuntu-latest-${{ hashFiles('bun.lock') }}-
             turbo-ubuntu-latest-
 
-      - wait: [cache-bun, cache-turbo]
+      - wait: cache-turbo
 
       - name: "Setup Auto Mobile"
         uses: ./.github/actions/setup-auto-mobile-npm-package
@@ -2075,8 +2028,8 @@ jobs:
     runs-on: ${{ matrix.config.runner }}
     # Keep costly hosted macOS work behind the inexpensive Fast Validation gate.
     needs: [detect-changes, fast-validation]
-    # format-check is skipped for Swift-only changes. Fast Validation succeeds
-    # through always(), so bypass the implicit success() of that skipped ancestor.
+    # Fast Validation runs through always(), so bypass the implicit success()
+    # check on ancestors and require its result explicitly.
     if: always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     # Fail fast on a hung/evicted macOS runner instead of sitting until GHA
     # infra-cancels the job (a cancelled terminal run blocks the required
@@ -3502,9 +3455,9 @@ jobs:
   # Clean-room pack+install proof that a consumer's
   # `bun install -g @kaeawc/auto-mobile` reproduces the pinned runtime
   # dependency graph (issue #5421, acceptance criterion 3). Extracted from the
-  # "MCP Benchmarks" job into its own job so it can be rolled up by
-  # runtime-graph-gate below and promoted to a required status check — the
-  # heavy pack+install still runs exactly once per PR. Same gating as
+  # "MCP Benchmarks" job into its own job so "Pinned Runtime Graph" can be
+  # promoted to a required status check directly (it has no matrix, so it needs
+  # no roll-up gate) — the heavy pack+install still runs exactly once per PR. Same gating as
   # benchmarks (ts_changed, minus the automated sha256-only PRs) so the
   # verification exercises every source/dependency change without wedging the
   # SHA256 bump chores.
@@ -3535,25 +3488,10 @@ jobs:
           retention-days: 90
 
   # =============================================================================
-  # Gate Jobs for Branch Protection
-  # =============================================================================
-  # These jobs always run and aggregate pass/skip/fail status of their group.
-  # Branch protection required checks should point to these gate jobs instead
-  # of the individual conditional jobs, avoiding the GitHub Actions issue where
-  # skipped matrix jobs produce uninterpolated check names that block merges.
-
-  # Full iOS roll-up (superset). This is the broad, NON-required signal: it
-  # leaves ios-xctest-runner-simulator-tests outside both gates as a standalone
-  # advisory lane and must not gate merges. The required, deterministic subset
-  # lives in ios-build-gate
-  # below ("iOS Build"), which this gate reuses so the build-leg membership is
-  # declared in exactly one place (add a new iOS *build* job to ios-build-gate,
-  # not here).
-  # =============================================================================
   # WebRTC integration coverage (#4290 / #4328)
   # The publisher contract and Android/iOS capture-to-WHEP paths run only when
-  # WebRTC is in play (webrtc_should_run). They report through the stable
-  # "WebRTC" gate below; advisory until that gate is added to the ruleset.
+  # WebRTC is in play (webrtc_should_run). They are non-required and report
+  # directly; there is no roll-up gate (it cost a runner slot per PR).
   # =============================================================================
   webrtc-integration-test:
     name: "WebRTC Publisher Integration (MediaMTX)"
@@ -3830,120 +3768,17 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  ios-gate:
-    timeout-minutes: 10
-    name: "iOS"
-    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
-    # ios-playground-tests normally runs on CircleCI; the GHA job stays in this
-    # roll-up for the label-forced-without-iOS-paths fallback, where it runs here.
-    # In the common iOS-path case it is skipped (result 'skipped'), which this
-    # gate treats as non-failing. XCTestRunner Simulator Tests is intentionally
-    # not part of this roll-up: the ~10-30 minute, simulator-flaky macOS lane
-    # remains a standalone, non-required advisory check outside the gate.
-    needs:
-      - detect-changes
-      - ios-build-gate
-      - ios-playground-tests
-      - ios-spm-root-package-build
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
-    steps:
-      # HARD dependencies below fail this roll-up. The ~10-30 minute,
-      # simulator-flaky macOS XCTestRunner Simulator Tests lane is intentionally
-      # standalone and non-required outside this gate, so it is not an advisory
-      # dependency here. See scripts/ci/known-flakes.txt.
-      - name: "Check results"
-        run: |
-          hard_results=(
-            "detect-changes=${{ needs.detect-changes.result }}"
-            "ios-build-gate=${{ needs.ios-build-gate.result }}"
-            "ios-playground-tests=${{ needs.ios-playground-tests.result }}"
-            "ios-spm-root-package-build=${{ needs.ios-spm-root-package-build.result }}"
-          )
-          advisory_results=( )
-          fail=
-          for entry in "${hard_results[@]}"; do
-            name="${entry%%=*}"
-            r="${entry#*=}"
-            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::error::iOS gate HARD dependency ${name} = ${r}"
-              fail=1
-            fi
-          done
-          if (( ${#advisory_results[@]} > 0 )); then
-            for entry in "${advisory_results[@]}"; do
-              name="${entry%%=*}"
-              r="${entry#*=}"
-              if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-                echo "::warning::iOS gate advisory dependency ${name} = ${r}; advisory: ios-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
-              fi
-            done
-          fi
-          if [[ -n "$fail" ]]; then
-            exit 1
-          fi
-
-  android-gate:
-    timeout-minutes: 10
-    name: "Android"
-    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
-    needs:
-      - detect-changes
-      - build-android-control-proxy
-      - build-junit-runner-library
-      - build-playground-app
-      - sdk-debug-inspector-consumer
-      - junit-runner-kotlin-consumer-compatibility
-      - junit-runner-unit-tests
-      - android-emulator-compile-smoke
-      - junit-runner-emulator-tests
-      - junit-runner-emulator-wtf-tests
-      - playground-automobile-emulator-tests
-      - kotlin-code-coverage
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
-    steps:
-      # HARD dependencies below fail this roll-up. ADVISORY live emulator lanes
-      # only warn; add new needs as HARD unless they are non-required device/
-      # emulator/simulator coverage. See scripts/ci/known-flakes.txt.
-      - name: "Check results"
-        run: |
-          # Compile-smoke failure is checked directly; downstream emulator skips only propagate that failure.
-          hard_results=(
-            "detect-changes=${{ needs.detect-changes.result }}"
-            "build-android-control-proxy=${{ needs.build-android-control-proxy.result }}"
-            "build-junit-runner-library=${{ needs.build-junit-runner-library.result }}"
-            "build-playground-app=${{ needs.build-playground-app.result }}"
-            "sdk-debug-inspector-consumer=${{ needs.sdk-debug-inspector-consumer.result }}"
-            "junit-runner-kotlin-consumer-compatibility=${{ needs.junit-runner-kotlin-consumer-compatibility.result }}"
-            "junit-runner-unit-tests=${{ needs.junit-runner-unit-tests.result }}"
-            "android-emulator-compile-smoke=${{ needs.android-emulator-compile-smoke.result }}"
-            "kotlin-code-coverage=${{ needs.kotlin-code-coverage.result }}"
-          )
-          advisory_results=(
-            "junit-runner-emulator-tests=${{ needs.junit-runner-emulator-tests.result }}"
-            "junit-runner-emulator-wtf-tests=${{ needs.junit-runner-emulator-wtf-tests.result }}"
-            "playground-automobile-emulator-tests=${{ needs.playground-automobile-emulator-tests.result }}"
-          )
-          fail=
-          for entry in "${hard_results[@]}"; do
-            name="${entry%%=*}"
-            r="${entry#*=}"
-            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::error::Android gate HARD dependency ${name} = ${r}"
-              fail=1
-            fi
-          done
-          if (( ${#advisory_results[@]} > 0 )); then
-            for entry in "${advisory_results[@]}"; do
-              name="${entry%%=*}"
-              r="${entry#*=}"
-              if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-                echo "::warning::Android gate advisory dependency ${name} = ${r}; advisory: android-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
-              fi
-            done
-          fi
-          if [[ -n "$fail" ]]; then
-            exit 1
-          fi
+  # =============================================================================
+  # Gate Jobs for Branch Protection
+  # =============================================================================
+  # These jobs always run and aggregate pass/skip/fail status of their group.
+  # Branch protection required checks should point to these gate jobs instead
+  # of the individual conditional jobs, avoiding the GitHub Actions issue where
+  # skipped matrix jobs produce uninterpolated check names that block merges.
+  # Only the gates whose names are required checks in the green-main ruleset
+  # ("IDE Plugin", "iOS Build", "Shell Tests") exist: non-required roll-ups each
+  # cost a runner slot per PR without blocking anything, so their underlying
+  # jobs report directly instead.
 
   ide-plugin-gate:
     timeout-minutes: 10
@@ -4007,44 +3842,6 @@ jobs:
             exit 1
           fi
 
-  # Stable roll-up of the CodeQL matrix so it can be required. codeql-node is a
-  # per-language matrix; when it is gated out (non-TypeScript PRs) the matrix
-  # never expands and reports its literal name, so the expanded
-  # "... (typescript)" context would hang as a required check.
-  codeql-gate:
-    timeout-minutes: 10
-    name: "CodeQL"
-    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
-    needs:
-      - detect-changes
-      - codeql-node
-    # Roll-up only reads needs.*.result — it needs no token scopes.
-    permissions: {}
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
-    steps:
-      - name: "Check results"
-        run: |
-          declare -A results=(
-            [detect-changes]="${{ needs.detect-changes.result }}"
-            [codeql-node]="${{ needs.codeql-node.result }}"
-          )
-          fail=
-          for name in "${!results[@]}"; do
-            r="${results[$name]}"
-            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::error::CodeQL gate dependency ${name} = ${r}"
-              fail=1
-            fi
-          done
-          if [[ -n "${fail}" ]]; then
-            echo "One or more jobs failed or were cancelled"
-            exit 1
-          fi
-
-  # Stable roll-up of the BATS shell tests so they can be required. bats-tests
-  # is an OS matrix; when it is gated out (sha256-only / auto-chore PRs) it
-  # reports its literal "(${{ matrix.os }})" name, so requiring the expanded
-  # "(macos-latest)" context would hang those PRs.
   shell-tests-gate:
     timeout-minutes: 10
     name: "Shell Tests"
@@ -4069,149 +3866,6 @@ jobs:
             r="${results[$name]}"
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
               echo "::error::Shell Tests gate dependency ${name} = ${r}"
-              fail=1
-            fi
-          done
-          if [[ -n "${fail}" ]]; then
-            echo "One or more jobs failed or were cancelled"
-            exit 1
-          fi
-
-  node-tests-gate:
-    timeout-minutes: 10
-    name: "Node Tests"
-    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
-    needs:
-      - detect-changes
-      - fast-validation
-      - node-unit-tests
-      - node-unit-timing-budget
-      - node-host-integration-tests
-    permissions: {}
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
-    steps:
-      # HARD dependencies below fail this roll-up. The ADVISORY timing budget
-      # only warns; add new needs as HARD unless they are an excluded
-      # live-device/emulator/simulator lane. See scripts/ci/known-flakes.txt.
-      - name: "Check results"
-        run: |
-          hard_results=(
-            "detect-changes=${{ needs.detect-changes.result }}"
-            "fast-validation=${{ needs.fast-validation.result }}"
-            "node-unit-tests=${{ needs.node-unit-tests.result }}"
-            "node-host-integration-tests=${{ needs.node-host-integration-tests.result }}"
-          )
-          advisory_results=(
-            "node-unit-timing-budget=${{ needs.node-unit-timing-budget.result }}"
-          )
-          fail=
-          for entry in "${hard_results[@]}"; do
-            name="${entry%%=*}"
-            r="${entry#*=}"
-            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::error::Node Tests gate HARD dependency ${name} = ${r}"
-              fail=1
-            fi
-          done
-          if (( ${#advisory_results[@]} > 0 )); then
-            for entry in "${advisory_results[@]}"; do
-              name="${entry%%=*}"
-              r="${entry#*=}"
-              if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-                echo "::warning::Node Tests gate advisory dependency ${name} = ${r}; advisory: node-tests-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
-              fi
-            done
-          fi
-          if [[ -n "$fail" ]]; then
-            exit 1
-          fi
-
-  # Stable roll-up of all WebRTC integration jobs so they can be promoted to a
-  # required check. The jobs are conditional (webrtc_should_run); when gated out
-  # their results are "skipped" (not failure), so this gate passes and does not
-  # wedge non-WebRTC PRs. NOTE: advisory until "WebRTC" is added to the green-main
-  # ruleset's required checks — a manual repo-settings step.
-  webrtc-gate:
-    timeout-minutes: 10
-    name: "WebRTC"
-    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
-    needs:
-      - detect-changes
-      - webrtc-integration-test
-      - android-device-webrtc
-      - ios-device-webrtc
-    # Roll-up only reads needs.*.result — it needs no token scopes.
-    permissions: {}
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
-    steps:
-      # detect-changes remains HARD. Every WebRTC input is currently live
-      # device/hardware coverage and non-required, so this intentionally always
-      # passes when triggered until a deterministic WebRTC leg exists; see the
-      # advisory-until-promoted rule above and scripts/ci/known-flakes.txt.
-      - name: "Check results"
-        run: |
-          hard_results=(
-            "detect-changes=${{ needs.detect-changes.result }}"
-            "webrtc-integration-test=${{ needs.webrtc-integration-test.result }}"
-          )
-          advisory_results=(
-            "android-device-webrtc=${{ needs.android-device-webrtc.result }}"
-            "ios-device-webrtc=${{ needs.ios-device-webrtc.result }}"
-          )
-          fail=
-          for entry in "${hard_results[@]}"; do
-            name="${entry%%=*}"
-            r="${entry#*=}"
-            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::error::WebRTC gate HARD dependency ${name} = ${r}"
-              fail=1
-            fi
-          done
-          if (( ${#advisory_results[@]} > 0 )); then
-            for entry in "${advisory_results[@]}"; do
-              name="${entry%%=*}"
-              r="${entry#*=}"
-              if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-                echo "::warning::WebRTC gate advisory dependency ${name} = ${r}; advisory: webrtc-gate lane failed; classify with scripts/ci/classify-failure.sh <run-id>"
-              fi
-            done
-          fi
-          if [[ -n "${fail}" ]]; then
-            echo "One or more jobs failed or were cancelled"
-            exit 1
-          fi
-
-  # Stable roll-up of the clean-room pinned-runtime-graph verification so it can
-  # be promoted to a required check (issue #5421, acceptance criterion 3). The
-  # verification is conditional (runtime-graph-verification runs only on
-  # ts_changed, non-sha256-only PRs); when it is gated out its result is
-  # "skipped" (not failure), so this gate passes and does not wedge PRs that do
-  # not touch the runtime graph. A real verification failure is "failure", which
-  # this gate turns into a merge block. NOTE: advisory until "Pinned Runtime
-  # Graph Gate" is added to the green-main ruleset's required checks — a manual
-  # repo-settings step.
-  runtime-graph-gate:
-    timeout-minutes: 10
-    name: "Pinned Runtime Graph Gate"
-    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
-    needs:
-      - detect-changes
-      - runtime-graph-verification
-    # Roll-up only reads needs.*.result — it needs no token scopes.
-    permissions: {}
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
-    steps:
-      - name: "Check results"
-        run: |
-          declare -A results=(
-            [detect-changes]="${{ needs.detect-changes.result }}"
-            [runtime-graph-verification]="${{ needs.runtime-graph-verification.result }}"
-          )
-          fail=
-          for name in "${!results[@]}"; do
-            r="${results[$name]}"
-            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::error::Pinned Runtime Graph gate dependency ${name} = ${r}"
               fail=1
             fi
           done

@@ -24,14 +24,19 @@
 #      (test/scripts/batsSerialTags.test.ts) fails if a new real-tree mutator
 #      lands without the tag.
 #
-#   1b. Within-file pass — files tagged `parallel-within-file` opt in to running
-#      their own tests concurrently (`bats --jobs N`). Only files whose every
-#      test builds its state in a per-test `mktemp -d` (no `setup_file`, fixed
-#      /tmp paths, shared ports/sockets/HOME or writes into the source tree) may
-#      carry it. The policy never oversubscribes: outer file jobs times inner
-#      test jobs is at most the core count (see within_file_jobs). Set
-#      AUTOMOBILE_BATS_WITHIN_FILE_JOBS=1 to disable the pass and run tagged
-#      files like any other parallel-pass file.
+#   1b. Files tagged `parallel-within-file` are the suite's slow, fully
+#      hermetic files: every test builds its state in a per-test `mktemp -d`
+#      (no `setup_file`, fixed /tmp paths, shared ports/sockets/HOME or writes
+#      into the source tree). By default (AUTOMOBILE_BATS_WITHIN_FILE_JOBS=1)
+#      they run FIRST in the parallel pass, one file per job, so the longest
+#      files start before the short ones fill the tail. Measured (#10478):
+#      cross-file parallelism beats `bats --jobs N` for these files; bats
+#      re-sources the whole file per test in --jobs mode, and a pass that runs
+#      one file at a time with 4 inner jobs took 244-246s locally versus
+#      115-130s for the same files 4 at a time. AUTOMOBILE_BATS_WITHIN_FILE_JOBS
+#      >1 restores a separate within-file pass (`bats --jobs N`) after the
+#      parallel pass; it never oversubscribes: outer file jobs times inner test
+#      jobs is at most the core count (see within_file_jobs).
 #
 # The orthogonal `integration` file tag selects real network/process/timing or
 # host-tool tests. The default `unit` lane excludes those files.
@@ -110,11 +115,12 @@ has_file_tag() {
 }
 
 # Inner (per-file) test concurrency for `parallel-within-file` files. Defaults to
-# 4 capped at the core count; AUTOMOBILE_BATS_WITHIN_FILE_JOBS overrides it, and
-# the result is always clamped to the outer job budget so files x tests <= cores.
+# 1 (tagged files lead the cross-file pass instead; see the header);
+# AUTOMOBILE_BATS_WITHIN_FILE_JOBS overrides it, and the result is always
+# clamped to the outer job budget so files x tests <= cores.
 within_file_jobs() {
   local cores="$1"
-  local requested="${AUTOMOBILE_BATS_WITHIN_FILE_JOBS:-4}"
+  local requested="${AUTOMOBILE_BATS_WITHIN_FILE_JOBS:-1}"
   if ! [[ "$requested" =~ ^[1-9][0-9]*$ ]]; then
     return 1
   fi
@@ -376,10 +382,12 @@ main() {
   : > "$within_list"
   mkdir -p "$(dirname "$joblog")"
   rm -f "$joblog" "$within_joblog"
-  if [[ "$inner_jobs" -gt 1 ]]; then
-    classify_files "$bats_dir" "$lane" "$parallel_list" "$serial_list" "$within_list"
-  else
-    classify_files "$bats_dir" "$lane" "$parallel_list" "$serial_list"
+  classify_files "$bats_dir" "$lane" "$parallel_list" "$serial_list" "$within_list"
+  if [[ "$inner_jobs" -eq 1 ]]; then
+    # Slow hermetic files lead the cross-file pass (longest-first scheduling).
+    cat "$within_list" "$parallel_list" > "$temp_dir/front-loaded-files"
+    mv "$temp_dir/front-loaded-files" "$parallel_list"
+    : > "$within_list"
   fi
   if [[ ! -s "$parallel_list" && ! -s "$serial_list" && ! -s "$within_list" ]]; then
     log "ERROR: no BATS files selected for ${lane} lane in ${bats_dir}"

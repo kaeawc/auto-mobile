@@ -9,7 +9,7 @@ describe("Fast Validation independence from XCTestRunner", () => {
     const fastValidation = loadWorkflow(WORKFLOW).jobs?.["fast-validation"];
     const steps = loadJobSteps(WORKFLOW, "fast-validation");
 
-    expect(fastValidation?.needs).toEqual(["detect-changes", "format-check"]);
+    expect(fastValidation?.needs).toEqual(["detect-changes"]);
     expect(fastValidation?.if).toBe("always()");
     expect(fastValidation?.["timeout-minutes"]).toBe(20);
     expect(steps.some((step) => step.id === "validate-ios-workflow-change")).toBe(false);

@@ -27,11 +27,11 @@ function majorVersion(ref: string): number | undefined {
 }
 
 describe("gradle-task-run action", () => {
-  test("installs JDK on hosted and Namespace runners, Android SDK only on hosted runners", () => {
+  test("installs JDK and Android SDK only on hosted runners", () => {
     const action = load(readFileSync(actionPath, "utf8")) as CompositeAction;
     const steps = action.runs?.steps ?? [];
     expect(steps.find((step) => step.name === "Install JDK")?.if).toBe(
-      "runner.environment == 'github-hosted' || startsWith(runner.name, 'nsc-runner-')",
+      "runner.environment == 'github-hosted'",
     );
     expect(steps.find((step) => step.name === "Restore Android SDK Cache")?.if).toBe(
       "runner.environment == 'github-hosted'",

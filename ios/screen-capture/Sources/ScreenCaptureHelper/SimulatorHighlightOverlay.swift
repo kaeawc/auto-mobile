@@ -211,7 +211,11 @@ final class SimulatorHighlightHost {
         waitForFrame: @escaping () async throws -> Void = { try await Task.sleep(nanoseconds: 16_666_667) },
         replySink: @escaping (SimulatorHighlightReply) -> Void = { reply in
             if let data = try? JSONEncoder().encode(reply) {
-                FileHandle.standardOutput.write(data + Data([10]))
+                // The reply reader is gone: end cleanly rather than trapping in FileHandle.write.
+                if !DescriptorWrite.writeAll(data + Data([10]), toFileDescriptor: STDOUT_FILENO) {
+                    logError("error: failed to write highlight reply to stdout: errno \(errno)")
+                    exit(1)
+                }
             }
         }
     ) {

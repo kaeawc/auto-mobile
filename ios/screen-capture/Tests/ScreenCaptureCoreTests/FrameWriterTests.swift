@@ -115,6 +115,26 @@ final class FrameWriterTests: XCTestCase {
         XCTAssertEqual(helper.terminationStatus, 0)
     }
 
+    /// List modes write their JSON to stdout. A closed stdout reader must end the helper
+    /// with a clean non-zero exit, not an uncatchable `FileHandle.write` exception.
+    func testHelperListDevicesExitsCleanlyOnClosedStdoutPipe() throws {
+        let helperURL = Bundle(for: Self.self).bundleURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("screen-capture-helper")
+        let output = Pipe()
+        output.fileHandleForReading.closeFile()
+        let helper = Process()
+        helper.executableURL = helperURL
+        helper.arguments = ["--list-devices"]
+        helper.standardOutput = output
+        helper.standardError = FileHandle.nullDevice
+
+        try helper.run()
+        helper.waitUntilExit()
+        XCTAssertEqual(helper.terminationReason, .exit)
+        XCTAssertEqual(helper.terminationStatus, 1)
+    }
+
     func testRecordsEncoderDroppedFrameInMetrics() {
         let writer = FrameWriter(sink: BufferSink())
 

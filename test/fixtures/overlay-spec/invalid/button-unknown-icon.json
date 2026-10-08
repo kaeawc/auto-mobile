@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {},
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "B",
+          "icon": "rocket"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].icon"
+}

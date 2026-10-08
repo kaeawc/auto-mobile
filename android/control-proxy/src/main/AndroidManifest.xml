@@ -13,6 +13,14 @@
       android:name="android.permission.QUERY_ALL_PACKAGES"
       tools:ignore="QueryAllPackagesPermission" />
 
+  <!-- Lets get_sdk_capabilities read an app in a work or secondary profile. This is a -->
+  <!-- development permission: declaring it grants nothing at install, but it makes -->
+  <!-- `adb shell pm grant <ctrlproxy> android.permission.INTERACT_ACROSS_USERS` possible. -->
+  <!-- Without the grant, cross-user reads report CROSS_USER_UNSUPPORTED. -->
+  <uses-permission
+      android:name="android.permission.INTERACT_ACROSS_USERS"
+      tools:ignore="ProtectedPermissions" />
+
   <!-- CtrlProxy owns this signature permission; SDK hosts only consume it. -->
   <permission
       android:name="dev.jasonpearson.automobile.ctrlproxy.permission.NETWORK_CONTROL_V2"

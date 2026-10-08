@@ -249,6 +249,20 @@ require an application display ID that differs from the main display ID.
 Current released runners ignore the flag.
 A runner re-cut is required: the newer host alone has no diagnostics to log.
 
+An iPad windowed app (iOS 27 "Windowed Apps", #6635) also produces an app/screen
+size mismatch. There the application frame and the snapshot hierarchy are
+window-relative with origin (0,0), while the app's window element and synthesized
+events use screen space. On the mismatch path the runner reads the observed app's
+`windows.firstMatch.frame` once per gesture. When that window has the app frame's
+size and a different origin, an automatic point-offset tap, swipe, or drag adds the
+window origin: `base` is the window origin and `coordinateConstruction` is
+`windowOriginPlusPointOffset`. Full-screen apps and iPhones have no mismatch and
+perform no extra read. Normalized (multi-panel) selections and a forced `legacy`
+strategy are not translated. SpringBoard alerts merged into a windowed app's
+hierarchy arrive in screen space, so observe subtracts the same translation from
+their bounds (one `windows.firstMatch.frame` read, only when an alert is present).
+Every observed node is then window-relative and the single gesture rule holds.
+
 The points are XCUITest's resolved coordinates immediately before the gesture,
 not measured touch delivery. Screen metrics and scene/interface orientation
 come from the runner process, not the target app; fallback/unknown readings are

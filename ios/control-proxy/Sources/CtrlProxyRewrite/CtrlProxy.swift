@@ -269,6 +269,8 @@ public final class CtrlProxy {
         /// gated on client presence via the server's presence seam (wired in `init`), so an
         /// idle session with no client places no continuous load on the app under test (#5477).
         public func start(bundleId: String? = nil) throws {
+            // Before the first live query, so a suspended app cannot hold main for ~92 s (#10640).
+            XCTestQueryTimeout.applyToRunner()
             let detectedForeground = bundleId == nil ? elementLocator.refreshForegroundBundleId() : nil
             let plan = Self.startupActivationPlan(
                 explicitBundleId: bundleId,

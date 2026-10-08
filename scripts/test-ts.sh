@@ -376,26 +376,272 @@ configure_unit_shard_groups() {
   fi
 }
 
+# Infra-exit retry for unit shards (#10583). A unit shard that hits its
+# wall-clock budget (status 124) or is killed by a signal (status 129-192, for
+# example 137 from the OOM killer or the watchdog's KILL escalation) is re-run
+# ONCE with the same budget before the lane fails. An ordinary failure (exit 1
+# with failing tests) is never retried. A hosted-runner shutdown (exit 143 on
+# the whole job) signals this script as well, so it cannot be retried here;
+# that job must be re-run (see scripts/ci/known-flakes.txt).
+#
+# Wall-time arithmetic (CI sets AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=720):
+#   one attempt <= budget + UNIT_SHARD_ATTEMPT_OVERHEAD_SECONDS (60s covers the
+#                  watchdog's 2s TERM->KILL grace, two calibration probes capped
+#                  at UNIT_CALIBRATION_TIMEOUT_SECONDS each, and the timing
+#                  summary)
+#   lane cap    =  AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS, by default
+#                  2 * (budget + overhead) = 2 * (720 + 60) = 1560s (26 min)
+#   A retry starts only while elapsed + budget + overhead <= lane cap, so the
+#   lane ends within its cap however many shards retry: retries run in
+#   parallel, each launched as soon as its first attempt is reaped. Job
+#   timeouts in pull_request.yml and merge.yml are sized against this cap.
+# Chunked shards (AUTOMOBILE_UNIT_TEST_CHUNK_FILES, nightly macOS) share one
+# lane-wide deadline by design and are not retried; neither is the changed lane.
+UNIT_SHARD_ATTEMPT_OVERHEAD_SECONDS=60
+UNIT_CALIBRATION_TIMEOUT_SECONDS=15
+
+# Runner calibration probe (#10583): a fixed ~50ms CPU/event-loop workload at
+# shard start and end. scripts/validate-bun-test-timings.sh reads the samples
+# (calibration-*.tsv next to the JUnit reports) to scale the first-sample
+# 100ms budget on a starved runner. AUTOMOBILE_RUNNER_CALIBRATION=0 skips it,
+# and so does a chunk deadline (nightly macOS chunk lane).
+run_runner_calibration() {
+  local out="$1" label="$2"
+  if [[ "${AUTOMOBILE_RUNNER_CALIBRATION:-1}" == 0 ]]; then
+    return 0
+  fi
+  # Chunked shards share one lane-wide deadline (chunk_deadline, set by
+  # run_unit_shards) that a probe's own timeout would overrun on a starved
+  # runner, so they run uncalibrated: the gate then keeps the unscaled budget.
+  if [[ -n "${chunk_deadline:-}" ]]; then
+    return 0
+  fi
+  # Best effort: a failed or stalled probe only loses this sample; it must
+  # never fail or stall the shard, so its status is reported and dropped.
+  # shellcheck disable=SC2310 # Deliberate: a probe failure must not exit the shard.
+  if ! run_with_timeout "$UNIT_CALIBRATION_TIMEOUT_SECONDS" \
+    bun "$ROOT/scripts/lib/runner-calibration.ts" probe "$out" "$label"; then
+    printf 'test-ts: runner calibration probe failed (%s); continuing without this sample\n' "$label" >&2
+  fi
+}
+
+# Starts one shard attempt in the background and records its pid. Reads and
+# sets the caller's (run_unit_shards) locals through Bash's dynamic scoping.
+launch_unit_shard() {
+  local shard="$1" attempt="$2" index
+  shard_files=()
+  shard_number="$shard"
+  if [[ "$shard_mode" == "unit" ]]; then
+    for ((index = shard; index < ${#test_files[@]}; index += worker_count)); do
+      shard_files+=("${test_files[$index]}")
+    done
+    report_name="shard-${shard}.xml"
+  else
+    shard_number=$((shard + 1))
+    shard_files=(
+      --path-ignore-patterns "**/*.integration.test.ts"
+      --path-ignore-patterns "test/stress/**"
+      "--changed=${changed_ref}" "--shard=${shard_number}/${worker_count}"
+    )
+    report_name="changed-shard-${shard_number}.xml"
+  fi
+
+  if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
+    printf '%q ' "${BUN_UNIT_TEST_COMMAND[@]}" \
+      ${shard_files[@]+"${shard_files[@]}"}
+    printf '\n'
+    return 0
+  fi
+
+  (
+    shard_started="$(date +%s)"
+    timing_log="$shard_root/timing-shard-${shard}.ndjson"
+    # These exports intentionally belong to the unit-shard subshell.
+    # shellcheck disable=SC2030
+    export AUTOMOBILE_TEST_TIMING_LOG="$timing_log"
+    # shellcheck disable=SC2030
+    export AUTOMOBILE_WATCHDOG_TIMING_LOG="$timing_log"
+    export AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="$shard_root/watchdog-shard-${shard}.txt"
+    # shellcheck disable=SC2030
+    export AUTOMOBILE_WATCHDOG_LABEL="${shard_mode} shard ${shard_number}"
+    export AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1
+    local calibration_file="${AUTOMOBILE_UNIT_JUNIT_DIR:-$shard_root}/calibration-${shard_mode}-shard-${shard}.tsv"
+    local calibration_label="${shard_mode} shard ${shard_number} attempt ${attempt}"
+    shard_args=("${BUN_UNIT_TEST_COMMAND[@]}")
+    if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
+      shard_args+=(
+        --reporter junit
+        --reporter-outfile "$AUTOMOBILE_UNIT_JUNIT_DIR/$report_name"
+      )
+    fi
+    configure_unit_shard_groups "$shard"
+    local shard_budget="${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}"
+    if [[ "$shard_mode" == unit && -n "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ]]; then
+      # One child owns the sequential loop: the watchdog bounds ALL chunks,
+      # including startup/report work, and still signals their process group.
+      shard_args=(bash "$ROOT/scripts/lib/bun-unit-chunks.sh" "$ROOT" "$runner_os"
+        "$AUTOMOBILE_UNIT_TEST_CHUNK_FILES" "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" "$shard")
+      if [[ -n "$chunk_deadline" ]]; then
+        shard_budget=$((chunk_deadline - $(date +%s)))
+        if [[ "$shard_budget" -le 0 ]]; then
+          exit 124
+        fi
+      fi
+    fi
+    run_runner_calibration "$calibration_file" "$calibration_label start"
+    if [[ -n "$shard_budget" ]]; then
+      validate_positive_integer \
+        "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" \
+        "$shard_budget"
+      shard_status=0
+      set +e
+      run_with_timeout "$shard_budget" \
+        ${shard_args[@]+"${shard_args[@]}"} \
+        ${shard_files[@]+"${shard_files[@]}"}
+      shard_status=$?
+      set -e
+    else
+      shard_status=0
+      ${shard_args[@]+"${shard_args[@]}"} \
+        ${shard_files[@]+"${shard_files[@]}"} || shard_status=$?
+    fi
+    # The parent reaps shards in index order, so its clock would report every
+    # shard as finishing with the slowest earlier one (#10583). Record this
+    # attempt's own test wall time before the end probe and timing summary.
+    printf '%s\n' "$(($(date +%s) - shard_started))" > "$shard_root/shard-${shard}.wall"
+    run_runner_calibration "$calibration_file" "$calibration_label end"
+    if [[ -s "$timing_log" ]]; then
+      bun "$ROOT/scripts/lib/test-file-timings.ts" summary "$timing_log" || true
+    fi
+    exit "$shard_status"
+  ) > "$shard_root/shard-${shard}.log" 2>&1 3>&- &
+  pids[shard]=$!
+}
+
+# Succeeds when a reaped first attempt should be retried (see the arithmetic above).
+unit_shard_should_retry() {
+  local shard="$1" status="$2" elapsed
+  if [[ "$shard_mode" != unit || "$unit_shard_retries" -eq 0 || -n "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ]]; then
+    return 1
+  fi
+  if [[ "$status" -ne 124 ]] && ! [[ "$status" -ge 129 && "$status" -le 192 ]]; then
+    return 1
+  fi
+  if [[ -n "$lane_cap" ]]; then
+    elapsed=$(($(date +%s) - lane_start))
+    if ((elapsed + AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS + UNIT_SHARD_ATTEMPT_OVERHEAD_SECONDS > lane_cap)); then
+      printf 'test-ts: not retrying unit shard %d (status %d): a %ss retry at %ss elapsed would pass the %ss lane cap\n' \
+        "$shard" "$status" "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$elapsed" "$lane_cap" >&2
+      return 1
+    fi
+  fi
+  return 0
+}
+
+retry_unit_shard() {
+  local shard="$1" status="$2" elapsed reason failing_lines
+  elapsed=$(($(date +%s) - shard_starts[shard]))
+  if [[ "$status" -eq 124 ]]; then
+    reason="hit its ${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-unbounded}s wall-clock budget (exit 124) after ${elapsed}s"
+  else
+    reason="was killed by signal $((status - 128)) (exit ${status}) after ${elapsed}s"
+  fi
+  # Starved runners also time out individual tests; surface how many so a
+  # retry that hides a real failure is still visible in the attempt-1 log.
+  failing_lines="$(grep -c '(fail)' "$shard_root/shard-${shard}.log" 2> /dev/null || true)"
+  printf 'RETRY: unit shard %d %s; retrying once with the same budget (attempt 1 logged %s failing test line(s); kept as shard-%d.attempt-1.log)\n' \
+    "$shard" "$reason" "${failing_lines:-0}" "$shard" >&2
+  if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+    printf '::warning title=Unit shard retried (infra exit)::unit shard %d %s; retried once with the same budget. Repeated retries mean the runner is starved or a shard hangs (#10583).\n' \
+      "$shard" "$reason" >&2 || true
+  fi
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    printf -- '- Unit shard %d %s; retried once (#10583).\n' "$shard" "$reason" >> "$GITHUB_STEP_SUMMARY" || true
+  fi
+  mv "$shard_root/shard-${shard}.log" "$shard_root/shard-${shard}.attempt-1.log"
+  if [[ -f "$shard_root/watchdog-shard-${shard}.txt" ]]; then
+    mv "$shard_root/watchdog-shard-${shard}.txt" "$shard_root/watchdog-shard-${shard}.attempt-1.txt"
+  fi
+  if [[ -f "$shard_root/timing-shard-${shard}.ndjson" ]]; then
+    mv "$shard_root/timing-shard-${shard}.ndjson" "$shard_root/timing-shard-${shard}.attempt-1.ndjson"
+  fi
+  rm -f "$shard_root/shard-${shard}.wall"
+  # A killed attempt can leave partial reports: the shard's own report and any
+  # per-chunk reports (shard-N-iso-K.xml). Match exact names, never shard-N*,
+  # which would also delete shard-N0.xml of another shard.
+  if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
+    rm -f "$AUTOMOBILE_UNIT_JUNIT_DIR/shard-${shard}.xml" \
+      "$AUTOMOBILE_UNIT_JUNIT_DIR/shard-${shard}-"*.xml
+  fi
+  # launch_unit_shard re-derives the shard groups, so the retry runs the same file set.
+  shard_attempts[shard]=2
+  shard_starts[shard]="$(date +%s)"
+  launch_unit_shard "$shard" 2
+}
+
+finish_unit_shard() {
+  local shard="$1" status="$2" suffix="" number="$1"
+  if [[ "$shard_mode" == "changed" ]]; then
+    number=$((shard + 1))
+  fi
+  if [[ "${shard_attempts[$shard]}" -gt 1 ]]; then
+    suffix=" after a retry"
+  fi
+  shard_elapsed_seconds[shard]=$(($(date +%s) - shard_starts[shard]))
+  # A killed shard writes no record; keep the reap-time upper bound for it.
+  if [[ -f "$shard_root/shard-${shard}.wall" ]]; then
+    shard_wall_record="$(< "$shard_root/shard-${shard}.wall")"
+    if [[ "$shard_wall_record" =~ ^[0-9]+$ ]]; then
+      shard_elapsed_seconds[shard]="$shard_wall_record"
+    fi
+  fi
+  shard_statuses[shard]="$status"
+  if [[ "$status" -eq 124 ]]; then
+    printf 'TIMEOUT: %s shard %d exceeded its wall-clock budget%s\n' "$shard_mode" "$number" "$suffix" >&2
+    rc=124
+  elif [[ "$status" -ne 0 ]]; then
+    # Name every failing shard, even beside a timeout, so a real test failure
+    # is never hidden behind another shard's infra exit; 124 keeps precedence.
+    printf 'FAIL: %s shard %d exited with status %d%s\n' "$shard_mode" "$number" "$status" "$suffix" >&2
+    if [[ "$rc" -ne 124 ]]; then
+      rc=1
+    fi
+  elif [[ "$status" -eq 0 && -n "$suffix" ]]; then
+    printf 'test-ts: %s shard %d passed on its retry\n' "$shard_mode" "$number" >&2
+  fi
+}
+
 run_unit_shards() {
   local shard_mode="$1"
   local changed_ref="${2:-}"
   local shard_root="$ROOT/scratch/test-ts-${shard_mode}-shards"
-  local file index shard shard_number worker_count rc pid shard_status timing_log report_name
-  local lane_start lane_elapsed shard_elapsed shard_wall_record physical_cores
+  local file index shard shard_number worker_count rc shard_status report_name
+  local lane_start lane_elapsed physical_cores lane_cap="" attempts_note
+  local shard_wall_record
   local test_files=()
   local shared_files=()
   local isolated_files=()
   local shared_total=0
+  local shard_files=()
   local pids=()
   local shard_starts=()
+  local shard_attempts=()
   local shard_elapsed_seconds=()
   local shard_statuses=()
+  local retry_shards=()
+  local unit_shard_retries="${AUTOMOBILE_UNIT_SHARD_RETRIES:-1}"
+  if [[ "$unit_shard_retries" != 0 && "$unit_shard_retries" != 1 ]]; then
+    echo "AUTOMOBILE_UNIT_SHARD_RETRIES must be 0 or 1, got: ${unit_shard_retries}" >&2
+    return 2
+  fi
   lane_start=$(date +%s)
   local chunk_deadline=""
   if [[ "$shard_mode" == unit && -n "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" && -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
     validate_positive_integer "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
     chunk_deadline=$(($(date +%s) + AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS))
   fi
+  # shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+  source "$ROOT/scripts/ios/run_with_timeout.sh"
 
   rm -rf "$shard_root"
   mkdir -p "$shard_root"
@@ -439,6 +685,8 @@ run_unit_shards() {
     validate_positive_integer \
       "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" \
       "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
+    lane_cap="${AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS:-$((2 * (AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS + UNIT_SHARD_ATTEMPT_OVERHEAD_SECONDS)))}"
+    validate_positive_integer "AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS" "$lane_cap"
   fi
 
   if [[ "${TEST_TS_PRINT_CMD:-}" == "1" && "$shard_mode" == "unit" ]]; then
@@ -451,92 +699,9 @@ run_unit_shards() {
   fi
 
   for ((shard = 0; shard < worker_count; shard += 1)); do
-    local shard_files=()
-    shard_number="$shard"
-    if [[ "$shard_mode" == "unit" ]]; then
-      for ((index = shard; index < ${#test_files[@]}; index += worker_count)); do
-        shard_files+=("${test_files[$index]}")
-      done
-      report_name="shard-${shard}.xml"
-    else
-      shard_number=$((shard + 1))
-      shard_files=(
-        --path-ignore-patterns "**/*.integration.test.ts"
-        --path-ignore-patterns "test/stress/**"
-        "--changed=${changed_ref}" "--shard=${shard_number}/${worker_count}"
-      )
-      report_name="changed-shard-${shard_number}.xml"
-    fi
-
-    if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
-      printf '%q ' "${BUN_UNIT_TEST_COMMAND[@]}" \
-        ${shard_files[@]+"${shard_files[@]}"}
-      printf '\n'
-      continue
-    fi
-
-    (
-      shard_started="$(date +%s)"
-      timing_log="$shard_root/timing-shard-${shard}.ndjson"
-      # These exports intentionally belong to the unit-shard subshell.
-      # shellcheck disable=SC2030
-      export AUTOMOBILE_TEST_TIMING_LOG="$timing_log"
-      # shellcheck disable=SC2030
-      export AUTOMOBILE_WATCHDOG_TIMING_LOG="$timing_log"
-      export AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="$shard_root/watchdog-shard-${shard}.txt"
-      # shellcheck disable=SC2030
-      export AUTOMOBILE_WATCHDOG_LABEL="${shard_mode} shard ${shard_number}"
-      export AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1
-      shard_args=("${BUN_UNIT_TEST_COMMAND[@]}")
-      if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
-        shard_args+=(
-          --reporter junit
-          --reporter-outfile "$AUTOMOBILE_UNIT_JUNIT_DIR/$report_name"
-        )
-      fi
-      configure_unit_shard_groups "$shard"
-      local shard_budget="${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}"
-      if [[ "$shard_mode" == unit && -n "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ]]; then
-        # One child owns the sequential loop: the watchdog bounds ALL chunks,
-        # including startup/report work, and still signals their process group.
-        shard_args=(bash "$ROOT/scripts/lib/bun-unit-chunks.sh" "$ROOT" "$runner_os"
-          "$AUTOMOBILE_UNIT_TEST_CHUNK_FILES" "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" "$shard")
-        if [[ -n "$chunk_deadline" ]]; then
-          shard_budget=$((chunk_deadline - $(date +%s)))
-          if [[ "$shard_budget" -le 0 ]]; then
-            exit 124
-          fi
-        fi
-      fi
-      if [[ -n "$shard_budget" ]]; then
-        validate_positive_integer \
-          "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" \
-          "$shard_budget"
-        # shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
-        source "$ROOT/scripts/ios/run_with_timeout.sh"
-        shard_status=0
-        set +e
-        run_with_timeout "$shard_budget" \
-          ${shard_args[@]+"${shard_args[@]}"} \
-          ${shard_files[@]+"${shard_files[@]}"}
-        shard_status=$?
-        set -e
-      else
-        shard_status=0
-        ${shard_args[@]+"${shard_args[@]}"} \
-          ${shard_files[@]+"${shard_files[@]}"} || shard_status=$?
-      fi
-      # The parent reaps shards in index order, so its clock would report every
-      # shard as finishing with the slowest earlier one (#10583). Record this
-      # shard's own test wall time before the timing summary runs.
-      printf '%s\n' "$(($(date +%s) - shard_started))" > "$shard_root/shard-${shard}.wall"
-      if [[ -s "$timing_log" ]]; then
-        bun "$ROOT/scripts/lib/test-file-timings.ts" summary "$timing_log" || true
-      fi
-      exit "$shard_status"
-    ) > "$shard_root/shard-${shard}.log" 2>&1 3>&- &
-    pids+=("$!")
-    shard_starts+=("$(date +%s)")
+    shard_attempts[shard]=1
+    shard_starts[shard]="$(date +%s)"
+    launch_unit_shard "$shard" 1
   done
 
   if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
@@ -544,45 +709,43 @@ run_unit_shards() {
   fi
 
   rc=0
-  for ((index = 0; index < ${#pids[@]}; index += 1)); do
-    pid="${pids[$index]}"
-    shard_number="$index"
-    if [[ "$shard_mode" == "changed" ]]; then
-      shard_number=$((index + 1))
-    fi
+  for ((index = 0; index < worker_count; index += 1)); do
     shard_status=0
-    wait "$pid" || shard_status=$?
-    shard_elapsed=$(($(date +%s) - shard_starts[index]))
-    # A killed shard writes no record; keep the reap-time upper bound for it.
-    if [[ -f "$shard_root/shard-${index}.wall" ]]; then
-      shard_wall_record="$(< "$shard_root/shard-${index}.wall")"
-      if [[ "$shard_wall_record" =~ ^[0-9]+$ ]]; then
-        shard_elapsed="$shard_wall_record"
-      fi
+    wait "${pids[$index]}" || shard_status=$?
+    # shellcheck disable=SC2310 # A predicate: a false result is expected control flow.
+    if unit_shard_should_retry "$index" "$shard_status"; then
+      retry_unit_shard "$index" "$shard_status"
+      retry_shards+=("$index")
+      continue
     fi
-    shard_elapsed_seconds+=("$shard_elapsed")
-    shard_statuses+=("$shard_status")
-    if [[ "$shard_status" -eq 124 ]]; then
-      printf 'TIMEOUT: %s shard %d exceeded its wall-clock budget\n' "$shard_mode" "$shard_number" >&2
-      rc=124
-    elif [[ "$shard_status" -ne 0 && "$rc" -ne 124 ]]; then
-      printf 'FAIL: %s shard %d exited with status %d\n' "$shard_mode" "$shard_number" "$shard_status" >&2
-      rc=1
-    fi
+    finish_unit_shard "$index" "$shard_status"
+  done
+  for index in ${retry_shards[@]+"${retry_shards[@]}"}; do
+    shard_status=0
+    wait "${pids[$index]}" || shard_status=$?
+    finish_unit_shard "$index" "$shard_status"
   done
 
   if [[ "$shard_mode" == "unit" ]]; then
     lane_elapsed=$(($(date +%s) - lane_start))
     for ((shard = 0; shard < worker_count; shard += 1)); do
-      printf 'test-ts: unit shard %d/%d wall=%ss status=%s\n' \
+      attempts_note=""
+      if [[ "${shard_attempts[$shard]}" -gt 1 ]]; then
+        attempts_note=" attempts=${shard_attempts[$shard]}"
+      fi
+      printf 'test-ts: unit shard %d/%d wall=%ss status=%s%s\n' \
         "$((shard + 1))" "$worker_count" \
-        "${shard_elapsed_seconds[$shard]}" "${shard_statuses[$shard]}" >&2
+        "${shard_elapsed_seconds[$shard]}" "${shard_statuses[$shard]}" "$attempts_note" >&2
     done
-    printf 'test-ts: unit shards total wall=%ss status=%s\n' \
-      "$lane_elapsed" "$rc" >&2
+    printf 'test-ts: unit shards total wall=%ss status=%s retried=%s\n' \
+      "$lane_elapsed" "$rc" "${#retry_shards[@]}" >&2
   fi
 
   for ((shard = 0; shard < worker_count; shard += 1)); do
+    if [[ -f "$shard_root/shard-${shard}.attempt-1.log" ]]; then
+      printf '\n==> TypeScript %s shard %d/%d (attempt 1 of 2, retried)\n' "$shard_mode" "$((shard + 1))" "$worker_count"
+      command cat "$shard_root/shard-${shard}.attempt-1.log"
+    fi
     printf '\n==> TypeScript %s shard %d/%d\n' "$shard_mode" "$((shard + 1))" "$worker_count"
     command cat "$shard_root/shard-${shard}.log"
   done

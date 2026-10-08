@@ -193,6 +193,25 @@ internal fun activeDeviceConnectionLostEvent(
   }
 }
 
+/**
+ * The daemon session binding for the studio/desktop pane (#10660). Binding reserves the device
+ * against CLI/MCP sessions, so it is derived only from an explicit user pick that is still the
+ * displayed device. The auto-selected first device is display-only: with a null binding the session
+ * loop takes the observer-only `ensureRegistered()` path and never calls `setActiveDevice`, so it
+ * cannot grab a device back after an agent releases it.
+ */
+internal fun desktopSessionBindingFor(
+  isRealMode: Boolean,
+  userSelectedDeviceId: String?,
+  activeDeviceId: String?,
+  isIos: Boolean,
+): DesktopDaemonSessionBinding? {
+  if (!isRealMode || userSelectedDeviceId == null || userSelectedDeviceId != activeDeviceId) {
+    return null
+  }
+  return DesktopDaemonSessionBinding(userSelectedDeviceId, if (isIos) "ios" else "android")
+}
+
 internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String?): Boolean {
   return activeDeviceId != null && deviceId == activeDeviceId
 }
@@ -711,8 +730,10 @@ fun AutoMobileContent(
   var activeDeviceId by activeDeviceIdState
   var isDevicePanelExpanded by isDevicePanelExpandedState
 
-  // Track when user explicitly navigates to device panel (to suppress auto-selection)
-  var userNavigatedToDevices by remember { mutableStateOf(false) }
+  // The device the user explicitly picked (sidebar click). Only this id may become an
+  // allocation-bearing daemon session binding (#10660); `activeDeviceId` also holds the
+  // display-only auto-selected first device, which must never reserve a device on its own.
+  var userSelectedDeviceId by remember { mutableStateOf<String?>(null) }
 
   // Log state changes for debugging
   LaunchedEffect(activeDeviceId, isDevicePanelExpanded) {
@@ -837,24 +858,14 @@ fun AutoMobileContent(
       }
     }
 
-  val selectedDeviceId = activeDeviceId
   val selectedBinding =
-    if (
-      dataSourceMode == DataSourceMode.Real && selectedDeviceId != null && clientProvider != null
-    ) {
-      DesktopDaemonSessionBinding(
-        selectedDeviceId,
-        if (
-          realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical
-        ) {
-          "ios"
-        } else {
-          "android"
-        },
-      )
-    } else {
-      null
-    }
+    desktopSessionBindingFor(
+      isRealMode = dataSourceMode == DataSourceMode.Real && clientProvider != null,
+      userSelectedDeviceId = userSelectedDeviceId,
+      activeDeviceId = activeDeviceId,
+      isIos =
+        realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical,
+    )
   SideEffect { desktopSessionBinding.value = selectedBinding }
   val desktopSessionReady =
     desktopSessionState.boundDeviceId == activeDeviceId && activeDeviceId != null
@@ -1115,6 +1126,12 @@ fun AutoMobileContent(
                 if (activeDeviceId != null && newDevices.none { it.id == activeDeviceId }) {
                   activeDeviceId = null
                   realDevice = null
+                }
+                if (
+                  userSelectedDeviceId != null && newDevices.none { it.id == userSelectedDeviceId }
+                ) {
+                  // A reappearing device must not silently inherit the old explicit pick.
+                  userSelectedDeviceId = null
                 }
               }
               is ResourceReadResult.Error -> {
@@ -2147,6 +2164,7 @@ fun AutoMobileContent(
           dataSourceMode = dataSourceMode,
           onDataSourceModeChanged = { mode ->
             dataSourceMode = mode
+            userSelectedDeviceId = null
             if (mode == DataSourceMode.Real) {
               activeDeviceId = null
               isDevicePanelExpanded = true
@@ -2165,6 +2183,7 @@ fun AutoMobileContent(
             sidebarDevices
               .firstOrNull { it.id == deviceId }
               ?.let { device ->
+                userSelectedDeviceId = device.id
                 activeDeviceId = device.id
                 realDevice = device
                 isDevicePanelExpanded = false

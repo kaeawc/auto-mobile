@@ -1,11 +1,15 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import dev.jasonpearson.automobile.protocol.*
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 
 /** Immutable, device-free inputs for the Compose adapter. All numeric sizes remain dp. */
 data class OverlayRenderStyle(
@@ -18,6 +22,8 @@ data class OverlayRenderStyle(
   val verticalAlignment: Alignment.Vertical,
   val fontWeight: FontWeight,
   val fontFamily: FontFamily,
+  /** Font asset id when `fontFamily` is `{asset}`; [fontFamily] is then only the fallback. */
+  val fontAsset: String? = null,
   val textAlign: TextAlign,
 )
 
@@ -37,6 +43,8 @@ data class OverlayRenderNode(
   val sheetOpen: Boolean = false,
   /** The bound boolean of a `switch` or `checkbox`; false for every other role. */
   val checked: Boolean = false,
+  /** The bound value of a `radioGroup` (the option marked selected); null for every other role. */
+  val selectedValue: String? = null,
   /** The bound number of a `slider`; 0 for every other role. */
   val sliderValue: Double = 0.0,
 )
@@ -134,6 +142,8 @@ private fun mapOverlayNode(
       is OverlaySwitchNode -> "switch"
       is OverlayCheckboxNode -> "checkbox"
       is OverlayButtonNode -> "button"
+      is OverlayRadioGroupNode -> "radioGroup"
+      is OverlayListItemNode -> "listItem"
       is OverlaySliderNode -> "slider"
       is OverlayChipNode -> "chip"
       is OverlayCardNode -> "card"
@@ -150,6 +160,7 @@ private fun mapOverlayNode(
       is OverlaySwitchNode -> node.label.orEmpty()
       is OverlayCheckboxNode -> node.label.orEmpty()
       is OverlayButtonNode -> node.label
+      is OverlayListItemNode -> node.headline
       is OverlaySliderNode -> node.label.orEmpty()
       is OverlayChipNode -> node.label
       is OverlayIconNode -> node.name
@@ -199,7 +210,11 @@ private fun mapOverlayNode(
       state[it.openWhen.key] == OverlayScalar.BooleanValue(it.openWhen.equals)
     } ?: false,
     checked =
-      overlayToggleKey(node)?.let { state[it] == OverlayScalar.BooleanValue(true) } ?: false,
+      (overlayToggleKey(node) ?: overlayListItemToggleKey(node))?.let {
+        state[it] == OverlayScalar.BooleanValue(true)
+      } ?: false,
+    selectedValue =
+      (node as? OverlayRadioGroupNode)?.let { (state[it.stateKey] as? OverlayScalar.Text)?.value },
     sliderValue =
       (node as? OverlaySliderNode)?.let { (state[it.stateKey] as? OverlayScalar.Numeric)?.value }
         ?: 0.0,
@@ -287,12 +302,8 @@ fun mapOverlayStyle(style: OverlayStyle): OverlayRenderStyle =
     overlayHorizontalAlignment(style.alignment),
     overlayVerticalAlignment(style.alignment),
     FontWeight(style.fontWeight ?: 400),
-    when (style.fontFamily) {
-      "sansSerif" -> FontFamily.SansSerif
-      "serif" -> FontFamily.Serif
-      "monospace" -> FontFamily.Monospace
-      else -> FontFamily.Default
-    },
+    builtInFontFamily(style.fontFamily),
+    (style.fontFamily as? OverlayFontFamily.Asset)?.id,
     when (style.textAlign) {
       "center" -> TextAlign.Center
       "end" -> TextAlign.End
@@ -300,6 +311,14 @@ fun mapOverlayStyle(style: OverlayStyle): OverlayRenderStyle =
       else -> TextAlign.Start
     },
   )
+
+private fun builtInFontFamily(family: OverlayFontFamily?): FontFamily =
+  when ((family as? OverlayFontFamily.Named)?.name) {
+    "sansSerif" -> FontFamily.SansSerif
+    "serif" -> FontFamily.Serif
+    "monospace" -> FontFamily.Monospace
+    else -> FontFamily.Default
+  }
 
 private fun overlayAlignment(value: String?): Alignment =
   when (value) {
@@ -336,6 +355,38 @@ private fun overlayVerticalAlignment(value: String?): Alignment.Vertical =
     else -> Alignment.Top
   }
 
+/**
+ * Start and end points of a linear gradient line for a [width] x [height] px box. Angle is degrees
+ * clockwise from "toward the end edge": 0 runs left to right, 90 top to bottom. The line passes
+ * through the center and is long enough that the corners take the first and last stop colors.
+ */
+fun overlayLinearGradientLine(angle: Double, width: Float, height: Float): Pair<Offset, Offset> {
+  val radians = Math.toRadians(angle)
+  val dx = cos(radians).toFloat()
+  val dy = sin(radians).toFloat()
+  val half = (abs(width * dx) + abs(height * dy)) / 2f
+  val center = Offset(width / 2f, height / 2f)
+  return Offset(center.x - dx * half, center.y - dy * half) to
+    Offset(center.x + dx * half, center.y + dy * half)
+}
+
+/**
+ * Stop colors and, only when every stop authors a position, their explicit positions. Positions are
+ * made non-decreasing (a stop never starts before the previous one), which is what Skia does to a
+ * descending list anyway, so the rendered result is deterministic and documented.
+ */
+fun overlayGradientStops(stops: List<OverlayGradientStop>): Pair<List<Color>, List<Float>?> {
+  val colors = stops.map { overlayColor(it.color) }
+  val positions = stops.map { it.position?.toFloat() }
+  if (!positions.all { it != null }) return colors to null
+  var floor = 0f
+  return colors to
+    positions.map {
+      floor = maxOf(floor, checkNotNull(it))
+      floor
+    }
+}
+
 /** Compose uses Float dp; reject unrepresentable values before installing a content lambda. */
 private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
   if (style == null) return
@@ -344,6 +395,9 @@ private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
       "width.dp" to (style.width as? OverlayDimension.Dp)?.dp,
       "height.dp" to (style.height as? OverlayDimension.Dp)?.dp,
       "weight" to style.weight,
+      "elevation" to style.elevation,
+      "aspectRatio" to style.aspectRatio,
+      "gradient.angle" to (style.gradient as? OverlayLinearGradient)?.angle,
       "minWidth" to style.minWidth,
       "maxWidth" to style.maxWidth,
       "minHeight" to style.minHeight,

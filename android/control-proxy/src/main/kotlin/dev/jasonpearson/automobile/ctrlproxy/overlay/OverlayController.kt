@@ -54,11 +54,31 @@ class OverlayController(
   private val hasAsset: (String) -> Boolean = { true },
   /** Decoded-image cache the rendered overlay draws `image` nodes from. */
   private val images: OverlayImageCache? = null,
+  /** Loaded custom fonts the rendered overlay draws `fontFamily: {asset}` text with. */
+  private val fonts: OverlayFontCache? = null,
 ) {
   val isShowing: Boolean
     get() = host.isShowing
 
+  /**
+   * Placement and opacity of the overlay currently drawn, for the hierarchy capture
+   * (`overlay_window_metadata_v1`). Null when nothing is showing or the render model cannot be
+   * derived, so the host falls back to bounds. A snapshot read off the controller mutex.
+   */
+  fun windowMetadata(): OverlayWindowMetadata? {
+    val runtime = activeRuntime ?: return null
+    if (!host.isShowing) return null
+    return try {
+      val current = runtime.current
+      overlayWindowMetadata(mapOverlaySpec(current.spec, current.pages))
+    } catch (error: Exception) {
+      Log.w("OverlayController", "Overlay window metadata unavailable", error)
+      null
+    }
+  }
+
   private val mutex = Mutex()
+  @Volatile
   internal var activeRuntime: OverlayRuntime? = null
     private set
 
@@ -183,7 +203,9 @@ class OverlayController(
         darkTheme = overlayHostDark(mappedSpec),
         onHostDismiss = { interact(runtime, OverlayInteraction.HostDismiss) },
         content = {
-          OverlayRuntimeContent(runtime, images) { interaction -> interact(runtime, interaction) }
+          OverlayRuntimeContent(runtime, images, fonts) { interaction ->
+            interact(runtime, interaction)
+          }
         },
       )
     val blocked = lifecycle.isBlocked()

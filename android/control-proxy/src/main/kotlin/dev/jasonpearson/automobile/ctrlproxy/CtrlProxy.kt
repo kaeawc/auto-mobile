@@ -56,6 +56,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.overlay.AndroidOverlayDisplays
 import dev.jasonpearson.automobile.ctrlproxy.overlay.BitmapOverlayImageDecoder
+import dev.jasonpearson.automobile.ctrlproxy.overlay.ComposeOverlayFontLoader
 import dev.jasonpearson.automobile.ctrlproxy.overlay.CoroutineOverlayScheduler
 import dev.jasonpearson.automobile.ctrlproxy.overlay.DefaultInteractiveOverlayHost
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetController
@@ -64,9 +65,11 @@ import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetStore
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayBase64Decoder
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayController
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayEventSink
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayFontCache
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImageCache
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
+import dev.jasonpearson.automobile.ctrlproxy.overlay.isInteractiveOverlayWindow
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
@@ -993,7 +996,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val recompositionStore = RecompositionStore()
   private val frameMetricsStore = FrameMetricsStore()
   internal val workStats = CtrlProxyWorkStats()
-  private val viewHierarchyExtractor = ViewHierarchyExtractor(recompositionStore, workStats)
+  private val viewHierarchyExtractor =
+    ViewHierarchyExtractor(
+      recompositionStore,
+      workStats,
+      ownOverlayMetadata = { windowPackage, title ->
+        // The overlay-type check already ran in the extractor; this confirms the window is ours.
+        if (
+          isInteractiveOverlayWindow(
+            AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+            title,
+            windowPackage,
+            packageName,
+          ) && ::overlayController.isInitialized
+        )
+          overlayController.windowMetadata()
+        else null
+      },
+    )
   private val jsonCompact = Json {
     prettyPrint = false
     encodeDefaults = true
@@ -1084,10 +1104,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
   // Decoded bitmaps of stored assets, dropped as soon as the store replaces, removes or clears one.
   private val overlayImages by lazy {
-    OverlayImageCache(overlayAssets, BitmapOverlayImageDecoder()).also {
-      overlayAssets.setChangeListener(it::invalidate)
+    OverlayImageCache(overlayAssets, BitmapOverlayImageDecoder()).also { images ->
+      // The store has one listener slot, so fan a change out to both caches.
+      overlayAssets.setChangeListener { ids ->
+        images.invalidate(ids)
+        overlayFonts.invalidate(ids)
+      }
     }
   }
+  // Loaded custom fonts (`fontFamily: {asset}`), dropped when the store changes an asset.
+  private val overlayFonts by lazy { OverlayFontCache(overlayAssets, ComposeOverlayFontLoader()) }
   private val overlayAssetController by lazy {
     OverlayAssetController(
       overlayAssets,
@@ -1769,6 +1795,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             clearAssets = { overlayAssets.clear() },
             hasAsset = { overlayAssets.lookup(it) != null },
             images = overlayImages,
+            fonts = overlayFonts,
           )
         // Service start: drop anything a previous process left in the cache directory.
         overlayAssets.purgeLeftovers()
@@ -3179,12 +3206,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun getSdkCapabilities(requestId: String?, packageName: String) {
+  override fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) {
     asyncActionRunner.launch(requestId, "get_sdk_capabilities") {
       val state =
         dev.jasonpearson.automobile.ctrlproxy.storage.discoverSdkCapabilities(
           this@CtrlProxy,
           packageName,
+          userId,
         )
       resultBroadcaster.guard(requestId, "sdk_capabilities") {
         webSocketServer.broadcast(

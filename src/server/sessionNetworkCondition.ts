@@ -1,4 +1,32 @@
 import type { SessionManager } from "../daemon/sessionManager";
+import type { IosAppNetworkRuleCommandContext } from "../features/network-filter/IosAppNetworkRuleClient";
+import {
+  iosAppNetworkRuleOutcome,
+  type NetworkConditionState,
+} from "../features/utility/DeviceState";
+
+/**
+ * An iOS Simulator per-app rule command (#10264). `apply` publishes the
+ * session's rule slot before the command and renews the lease once the
+ * provider acknowledges it; `reset` drops the slot once the provider confirms.
+ */
+export interface IosAppNetworkRulePlan {
+  platform: "ios";
+  action: "apply" | "reset";
+  target: { udid: string; bundleId: string };
+}
+
+/**
+ * What an iOS rule command did, read from the mutation's `networkCondition`
+ * sub-result the same structural way {@link isTypedFailureResult} reads it.
+ */
+function iosRuleOutcomeOf(value: unknown): "installed" | "removed" | "unchanged" {
+  if (typeof value !== "object" || value === null || !("networkCondition" in value)) {
+    return "unchanged";
+  }
+  const { networkCondition } = value as { networkCondition?: NetworkConditionState };
+  return iosAppNetworkRuleOutcome({ networkCondition });
+}
 
 /**
  * True when `value` shows the network-condition mutation itself did not
@@ -53,13 +81,16 @@ export async function runSessionNetworkMutation<T>(
   sessionManager: SessionManager | undefined,
   sessionUuid: string | undefined,
   deviceId: string,
-  registerRestore: boolean,
-  mutation: () => Promise<T>,
+  registerRestore: boolean | IosAppNetworkRulePlan,
+  mutation: (iosRule?: IosAppNetworkRuleCommandContext) => Promise<T>,
   expiresInSeconds?: number,
 ): Promise<T> {
   if (!sessionManager || !sessionUuid) {
+    // No lifecycle owner: an iOS rule command gets no ownership context, and
+    // the setter refuses it rather than leave an unrenewed rule behind.
     return await mutation();
   }
+  const iosPlan = typeof registerRestore === "object" ? registerRestore : undefined;
   const session = sessionManager.getSession(sessionUuid);
   if (!session) {
     throw new Error(`Cannot mutate network condition: session ${sessionUuid} is no longer active.`);
@@ -142,6 +173,7 @@ export async function runSessionNetworkMutation<T>(
 
     let completed = false;
     let result!: T;
+    let iosRule: IosAppNetworkRuleCommandContext | undefined;
     try {
       await sessionManager.trackSessionSetup(session, async () => {
         // Publish the restore slot at the start of the admitted tracked callback,
@@ -158,10 +190,17 @@ export async function runSessionNetworkMutation<T>(
         // that must hand the NEXT session a clean device, so restoring to `none` is the
         // correct behavior even if a prior condition were knowable. The stored baseline
         // is therefore fixed at `none`.
-        if (registerRestore) {
+        if (iosPlan) {
+          // iOS publishes its own slot (with the rule's owner generation and
+          // revision) before the command; a reset only borrows ownership.
+          iosRule =
+            iosPlan.action === "apply"
+              ? sessionManager.beginIosAppNetworkRule(session, iosPlan.target)
+              : sessionManager.prepareIosAppNetworkReset(session, iosPlan.target);
+        } else if (registerRestore) {
           sessionManager.setNetworkCondition(sessionUuid, { initialProfile: "none" });
         }
-        result = await mutation();
+        result = await mutation(iosRule);
         completed = true;
       });
     } catch (error) {
@@ -173,6 +212,14 @@ export async function runSessionNetworkMutation<T>(
       throw new Error(
         `Cannot mutate network condition: session ${sessionUuid} began releasing before the mutation started.`,
       );
+    }
+    if (iosRule) {
+      const outcome = iosRuleOutcomeOf(result);
+      if (outcome === "installed") {
+        sessionManager.confirmIosAppNetworkRule(session, iosRule.rule);
+      } else if (outcome === "removed") {
+        sessionManager.finishIosAppNetworkReset(session, iosRule.rule);
+      }
     }
     if (isTypedFailureResult(result)) {
       // Restore the prior deadline and STOP (issue #6178 PR #6183 review, P2): a
@@ -189,7 +236,8 @@ export async function runSessionNetworkMutation<T>(
     // a TTL against the replacement (scheduleNetworkConditionExpiry identity-guards
     // on it). A reset, or a degrade with no TTL, arms nothing; the pre-mutation
     // cancel above already cleared any prior timer.
-    if (registerRestore && expiresInSeconds !== undefined && expiresInSeconds > 0) {
+    const registersRestore = iosPlan ? iosPlan.action === "apply" : registerRestore;
+    if (registersRestore && expiresInSeconds !== undefined && expiresInSeconds > 0) {
       sessionManager.scheduleNetworkConditionExpiry(session, expiresInSeconds, generation);
     }
     return result;

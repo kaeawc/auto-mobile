@@ -1,0 +1,31 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {},
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "radioGroup",
+          "stateKey": "k",
+          "options": [
+            {
+              "value": "a",
+              "label": "A"
+            },
+            {
+              "value": "b",
+              "label": "B"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].stateKey"
+}

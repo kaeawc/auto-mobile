@@ -148,6 +148,46 @@ function chromeTargetNode(
   return undefined;
 }
 
+function isInsideScrollContainer(
+  target: SearchableEntry,
+  nodes: readonly SearchableEntry[],
+): boolean {
+  for (
+    let current: SearchableEntry | undefined = target;
+    current;
+    current = current.parentIndex === undefined ? undefined : nodes[current.parentIndex]
+  ) {
+    if (current.categories.scrollable) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The iPad floating tab bar (iOS 18+) sits inside the navigation bar's frame without
+ * being its descendant, and is drawn above it (#10635). App content reaches that
+ * position only by scrolling under the bar, so a target wholly inside the navigation
+ * bar with no scrollable ancestor is bar-level content, not an occluded row.
+ */
+function isBarLevelContentOverNavigationBar(
+  frame: ChromeFrame,
+  target: SearchableEntry,
+  nodes: readonly SearchableEntry[],
+): boolean {
+  const bar = frame.bounds;
+  const bounds = target.bounds;
+  return (
+    frame.region === "navigation bar" &&
+    !!bounds &&
+    bounds.left >= bar.left &&
+    bounds.right <= bar.right &&
+    bounds.top >= bar.top &&
+    bounds.bottom <= bar.bottom &&
+    !isInsideScrollContainer(target, nodes)
+  );
+}
+
 function chromeCoversTarget(
   frame: ChromeFrame,
   target: SearchableEntry | undefined,
@@ -158,6 +198,9 @@ function chromeCoversTarget(
     return false;
   }
   if (target && frame.node.windowRank > target.windowRank) {
+    return false;
+  }
+  if (target && isBarLevelContentOverNavigationBar(frame, target, nodes)) {
     return false;
   }
   let current = target;

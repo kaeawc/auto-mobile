@@ -548,7 +548,7 @@ describe("requests during device session release", () => {
     }
   }
 
-  test("non-releasing heartbeat succeeds and extends deadlines", async () => {
+  test("non-releasing heartbeat succeeds and renews liveness without extending the idle deadline", async () => {
     const session = await manager.createSession(sessionId, deviceId, "android");
     const expiresAt = session.expiresAt;
     timer.advanceTime(1);
@@ -557,8 +557,9 @@ describe("requests during device session release", () => {
       result: { sessionId },
     });
     expect(session.lastHeartbeat).toBe(1);
-    expect(session.lastUsedAt).toBe(1);
-    expect(session.expiresAt).toBe(expiresAt + 1);
+    // A heartbeat proves liveness, not use (#10656).
+    expect(session.lastUsedAt).toBe(0);
+    expect(session.expiresAt).toBe(expiresAt);
     expect(session.hasReceivedHeartbeat).toBe(true);
     expect(persistence.activityWrites).toBe(1);
   });

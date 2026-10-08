@@ -1,9 +1,10 @@
 {
   "limits": {
     "MAX_OVERLAY_ASSET_BYTES": 4194304,
+    "MAX_OVERLAY_FONT_ASSET_BYTES": 2097152,
     "MAX_OVERLAY_ASSET_COUNT": 32,
     "MAX_OVERLAY_ASSET_TOTAL_BYTES": 16777216,
     "MAX_OVERLAY_ASSET_ID_LENGTH": 256
   },
-  "mimeTypes": ["image/png", "image/jpeg", "image/webp"]
+  "mimeTypes": ["image/png", "image/jpeg", "image/webp", "font/ttf", "font/otf"]
 }

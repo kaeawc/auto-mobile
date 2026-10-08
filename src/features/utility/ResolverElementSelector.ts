@@ -21,7 +21,7 @@ import {
   screenSizeForOffscreenCheck,
   type ScreenSizeForOffscreenCheckOptions,
 } from "./ElementGeometry";
-import type { TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
+import type { TextSelectionIntent } from "../../utils/interfaces/TextSelectionIntent";
 import { resolveViewHierarchyForSearch } from "./viewHierarchySearch";
 
 /** A text selector, the kind a client copies from an observed label. */

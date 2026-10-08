@@ -27,8 +27,14 @@ const ENROLLED = "Enrolled via DEP: Yes\nMDM enrollment: Yes (User Approved)\n";
 
 function execReturning(stdout: string | Error) {
   const calls: Array<[string, string[]]> = [];
-  const execFile = async (file: string, args: string[]) => {
+  const signals: Array<AbortSignal | undefined> = [];
+  const execFile = async (
+    file: string,
+    args: string[],
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ) => {
     calls.push([file, args]);
+    signals.push(options?.signal);
     if (stdout instanceof Error) {
       throw stdout;
     }
@@ -40,7 +46,7 @@ function execReturning(stdout: string | Error) {
       includes: (s: string) => stdout.includes(s),
     };
   };
-  return { calls, execFile };
+  return { calls, signals, execFile };
 }
 
 function deps(
@@ -89,10 +95,10 @@ describe("parseMdmEnrollment", () => {
     expect(parseMdmEnrollment(NOT_ENROLLED)).toEqual({ enrolled: false });
   });
 
-  test("MDM enrollment or DEP enrollment alone counts as enrolled", () => {
+  test("only an active MDM enrollment counts as enrolled; DEP assignment alone does not", () => {
     expect(parseMdmEnrollment(ENROLLED).enrolled).toBe(true);
     expect(parseMdmEnrollment("Enrolled via DEP: No\nMDM enrollment: Yes\n").enrolled).toBe(true);
-    expect(parseMdmEnrollment("Enrolled via DEP: Yes\nMDM enrollment: No\n").enrolled).toBe(true);
+    expect(parseMdmEnrollment("Enrolled via DEP: Yes\nMDM enrollment: No\n").enrolled).toBe(false);
   });
 
   test("empty output is not enrolled", () => {
@@ -154,6 +160,13 @@ describe("checkIosNetworkFilter", () => {
     expect(result.recommendation).toContain(NETWORK_FILTER_INSTALL_COMMAND);
     expect(result.recommendation).toContain("Managed Macs can pre-approve it via MDM");
     expect(result.recommendation).not.toContain("mobileconfig");
+  });
+
+  test("the enrollment subprocess receives the probe abort signal", async () => {
+    const { value, exec } = deps(APPROVAL_REQUIRED, "darwin", ENROLLED);
+    const controller = new AbortController();
+    await checkIosNetworkFilter(value, { signal: controller.signal });
+    expect(exec.signals).toEqual([controller.signal]);
   });
 
   test("a failing enrollment probe falls back to the unmanaged hint", async () => {

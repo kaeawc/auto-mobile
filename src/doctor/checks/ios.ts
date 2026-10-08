@@ -1603,6 +1603,7 @@ async function isMdmEnrolled(
     const currentProbe = remainingDoctorProbe(probe);
     const enrollment = await awaitDoctorProbe(currentProbe, () =>
       detectMdmEnrollment(dependencies.execFile, {
+        signal: currentProbe.signal,
         timeoutMs: currentProbe.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS,
       }),
     );

@@ -8,12 +8,11 @@ export interface MdmEnrollment {
 /**
  * Parse `profiles status -type enrollment`, which prints
  * `Enrolled via DEP: <Yes|No>` and `MDM enrollment: <Yes|No> [(User Approved)]`.
- * Either line starting with "Yes" means the Mac is managed.
+ * Only an active `MDM enrollment: Yes` counts: `Enrolled via DEP` records Automated Device
+ * Enrollment assignment, not a completed enrollment that can deliver a profile.
  */
 export function parseMdmEnrollment(stdout: string): MdmEnrollment {
-  const enrolled = stdout
-    .split("\n")
-    .some((line) => /^\s*(Enrolled via DEP|MDM enrollment):\s*Yes\b/i.test(line));
+  const enrolled = stdout.split("\n").some((line) => /^\s*MDM enrollment:\s*Yes\b/i.test(line));
   return { enrolled };
 }
 

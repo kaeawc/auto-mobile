@@ -128,7 +128,7 @@ export async function reportPlanHealth(
     return undefined;
   }
   const source = result ?? { success: false, totalSteps: 0, executedSteps: 0 };
-  const summary = buildPlanHealthSummary(result?.debug?.steps, {
+  const summary = buildPlanHealthSummary(result ? healthStepsOf(result) : undefined, {
     success: source.success,
     totalSteps: source.totalSteps,
     executedSteps: source.executedSteps,
@@ -141,8 +141,45 @@ export async function reportPlanHealth(
 
 type HealthSourceResult = Pick<
   PlanExecutionResult,
-  "success" | "totalSteps" | "executedSteps" | "warnings" | "debug"
+  | "success"
+  | "totalSteps"
+  | "executedSteps"
+  | "warnings"
+  | "debug"
+  | "perDeviceResults"
+  | "failedStep"
 >;
+
+/**
+ * The step trace a summary is built from. A single-device run carries it in `debug.steps`; a
+ * device-labelled run has no `debug`, so the tracks' traces are concatenated in label order.
+ * A track that failed without recording the failing step (an unexpected error, or a failure
+ * before any step ran) still counts as one failed step, so `failedSteps` never reads 0 for a
+ * failed plan.
+ */
+function healthStepsOf(result: HealthSourceResult): ExecutePlanStepDebugInfo[] | undefined {
+  if (result.debug) {
+    return result.debug.steps;
+  }
+  if (!result.perDeviceResults) {
+    return undefined;
+  }
+  return [...result.perDeviceResults.values()].flatMap((track) => {
+    const steps = track.steps ?? [];
+    const failed = track.failedStep;
+    if (!failed || steps.some((step) => step.status === "failed")) {
+      return steps;
+    }
+    return [
+      ...steps,
+      {
+        step: `Execute step ${failed.stepIndex + 1}: ${failed.tool}`,
+        status: "failed" as const,
+        durationMs: 0,
+      },
+    ];
+  });
+}
 
 /** The `healthSummary` response field, omitted entirely when health reporting is off. */
 export function healthSummaryField(summary: PlanHealthSummary | undefined): {

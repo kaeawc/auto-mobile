@@ -592,6 +592,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           executedSteps: result.executedSteps,
           totalSteps: track.length,
           skippedSteps: result.skippedSteps.length > 0 ? result.skippedSteps : undefined,
+          steps: result.steps,
           executionTimeMs: debugMode ? this.timer.now() - deviceStartTime : undefined,
           failedStep: result.failedStep
             ? {
@@ -858,10 +859,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
       participantFailed?: boolean;
     };
     skippedSteps: DeviceSkippedStepResult[];
+    steps: ExecutePlanStepDebugInfo[];
     warnings: PlanStepWarnings[];
     toolResults: PlanStepToolResult[];
   }> {
     let executedSteps = 0;
+    const steps: ExecutePlanStepDebugInfo[] = [];
     const skippedSteps: DeviceSkippedStepResult[] = [];
     const warnings: PlanStepWarnings[] = [];
     const toolResults = new StepToolResultCollector(toolResultsBudget);
@@ -914,6 +917,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
           toolResults.add(planIndex, step.tool, stepResult.toolPayload, device);
         }
 
+        steps.push({
+          step: `Execute step ${planIndex + 1}: ${step.tool}`,
+          status: stepResult.status,
+          durationMs: this.timer.now() - stepStartTime,
+        });
+
         if (stepResult.status === "skipped") {
           logger.warn(
             `[PARALLEL_EXEC][${device}] optional step ${step.tool} failed; skipping and continuing: ${stepResult.error}`,
@@ -946,6 +955,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
               ...(participantFailure ? { participantFailed: true } : {}),
             },
             skippedSteps,
+            steps,
             warnings,
             toolResults: toolResults.toArray() ?? [],
           };
@@ -966,6 +976,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         executedSteps,
         totalSteps: track.length,
         skippedSteps,
+        steps,
         warnings,
         toolResults: toolResults.toArray() ?? [],
       };
@@ -987,6 +998,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           error: errorMsg,
         },
         skippedSteps,
+        steps,
         warnings,
         toolResults: toolResults.toArray() ?? [],
       };

@@ -287,6 +287,26 @@ describe("PlanExecutor — optional steps", () => {
     expect(result.failedStep?.tool).toBe("optionalStepFail");
   });
 
+  test("records each parallel track's step trace for the plan health summary", async () => {
+    const plan: Plan = {
+      name: "parallel-step-trace",
+      devices: ["A"],
+      steps: [
+        { tool: "optionalStepFail", params: { device: "A" }, optional: true },
+        { tool: "optionalStepOk", params: { device: "A" } },
+      ],
+    };
+
+    const result = await planExecutor.executePlan(plan, 0, "ios", "sim-1", "session-1");
+
+    expect(
+      result.perDeviceResults?.get("A")?.steps?.map(({ step, status }) => ({ step, status })),
+    ).toEqual([
+      { step: "Execute step 1: optionalStepFail", status: "skipped" },
+      { step: "Execute step 2: optionalStepOk", status: "completed" },
+    ]);
+  });
+
   test("records skipped optional steps in multi-device per-device results", async () => {
     const plan: Plan = {
       name: "parallel-optional-fail-then-ok",

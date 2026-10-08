@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "k": "on"
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "listItem",
+          "headline": "H",
+          "trailing": {
+            "type": "switch",
+            "stateKey": "k"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].trailing.stateKey"
+}

@@ -150,27 +150,29 @@ layout room.
 
 ## Nodes
 
-| `type`        | Node-specific properties                                                                                                                         |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `box`         | Required `children` array, possibly empty; children stack.                                                                                       |
-| `row`         | Required `children` array, possibly empty; horizontal layout.                                                                                    |
-| `column`      | Required `children` array, possibly empty; vertical layout.                                                                                      |
-| `text`        | Required `text` string, possibly empty.                                                                                                          |
-| `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                        |
-| `icon`        | Required built-in `name`; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                              |
-| `spacer`      | No node-specific properties; size comes from style.                                                                                              |
-| `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.                                      |
-| `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                        |
-| `checkbox`    | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                        |
-| `button`      | Required nonempty `label`; optional `variant`: `filled` (default), `outlined`, `text`. Taps run `onTap`.                                         |
-| `slider`      | Required `stateKey` naming an initialized number within `min`..`max`; required finite `min` < `max`; optional `step`, optional nonempty `label`. |
-| `chip`        | Required nonempty `label`; optional `variant`: `assist`, `filter`; optional `stateKey` naming a boolean (a filter chip).                         |
-| `card`        | Required `children` array; optional `variant`: `filled` (default), `elevated`, `outlined`.                                                       |
-| `scroll`      | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                             |
-| `pager`       | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                                            |
-| `tabBar`      | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                               |
-| `bottomNav`   | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                        |
-| `bottomSheet` | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                            |
+| `type`        | Node-specific properties                                                                                                                                                                                                                    |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `box`         | Required `children` array, possibly empty; children stack.                                                                                                                                                                                  |
+| `row`         | Required `children` array, possibly empty; horizontal layout.                                                                                                                                                                               |
+| `column`      | Required `children` array, possibly empty; vertical layout.                                                                                                                                                                                 |
+| `text`        | Required `text` string, possibly empty.                                                                                                                                                                                                     |
+| `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                                                                                   |
+| `icon`        | Required built-in `name` below; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                                                                                                                   |
+| `spacer`      | No node-specific properties; size comes from style.                                                                                                                                                                                         |
+| `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.                                                                                                                                 |
+| `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
+| `checkbox`    | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
+| `button`      | Required nonempty `label`; optional `variant`: `filled` (default), `tonal`, `elevated`, `outlined`, `text`; optional leading `icon` (built-in name). Taps run `onTap`.                                                                      |
+| `radioGroup`  | Required `stateKey` naming an initialized string state value; required `options`, 2 to 16 `{value, label}` entries with nonempty, unique `value`s.                                                                                          |
+| `listItem`    | Required nonempty `headline`; optional nonempty `supporting`, optional `leadingIcon` (built-in name), optional `trailing`: `{type: switch\|checkbox, stateKey}` bound to an initialized boolean, or `{type: icon, name}`. Taps run `onTap`. |
+| `slider`      | Required `stateKey` naming an initialized number within `min`..`max`; required finite `min` < `max`; optional `step`, optional nonempty `label`.                                                                                            |
+| `chip`        | Required nonempty `label`; optional `variant`: `assist`, `filter`; optional `stateKey` naming a boolean (a filter chip).                                                                                                                    |
+| `card`        | Required `children` array; optional `variant`: `filled` (default), `elevated`, `outlined`.                                                                                                                                                  |
+| `scroll`      | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                                                                                                                        |
+| `pager`       | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                                                                                                                                       |
+| `tabBar`      | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                                                                                                                          |
+| `bottomNav`   | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                                                                                                                   |
+| `bottomSheet` | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                                                                                                                       |
 
 Each nav item is `{label, icon?, image?}`. Label is nonempty; icon uses the same
 closed list as icon nodes; image is an opaque asset ID. Both icon and image may
@@ -205,8 +207,7 @@ non-boolean is rejected like any other binding type change. A button runs its
 node carrying its label as text, a native role (`Switch`, `Checkbox`,
 `Button`), and for switch and checkbox the checkable/checked state, so `observe`
 reports them as controls and `tapOn` by `testTag` or label toggles or presses
-them. Each reserves the Material 48 dp minimum touch target. `radioGroup`,
-`listItem` and the other components in #10439 are later slices.
+them. Each reserves the Material 48 dp minimum touch target.
 
 `slider`, `chip` and `card` are the second slice. A slider is bound to a number
 state key that must already lie within `min`..`max`; `step`, when given, must
@@ -224,6 +225,21 @@ later slices. A card is a Material container whose `children` are laid out as a
 column; its `variant` selects filled, elevated or outlined, a `style.background`
 overrides the container colour, and an `onTap` makes the whole card clickable.
 A card has no accessibility label of its own.
+
+`radioGroup`, `listItem` and the button extras are the third slice of #10439. Button
+`tonal` and `elevated` are Material's filled-tonal and elevated buttons; an
+`icon` draws before the label. A radio group draws one Material radio row per
+option; a tap on a row (or its label) sets the bound string to that option's
+`value`, emits `change` (`{key, value}`) only if the value changed, and then runs
+the group's own `onTap`. A bound value matching no option leaves every option
+unselected. Each option row is its own accessibility node with the `RadioButton`
+role, its label as text and a selected state; when the group has a `testTag`, the
+option's tag is `<testTag>.<value>`. A list item is one accessibility node whose
+text is the headline (and supporting line). With a trailing switch or checkbox it
+is toggleable with the `Switch` or `Checkbox` role and checked state: a tap
+anywhere on the row flips the bound boolean, emits `change`, then runs `onTap`.
+Otherwise a row with `onTap` is a `Button` that runs it, and a row without is
+inert. A trailing `icon` is decorative.
 
 Text interpolation is a renderer concern: `{page}`, `{pageCount}`, and state
 keys may appear in text. No expressions or interpolation parsing occurs during

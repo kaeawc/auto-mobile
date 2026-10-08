@@ -9,7 +9,7 @@
     "root": {
       "type": "button",
       "label": "Save",
-      "variant": "elevated"
+      "variant": "floating"
     }
   },
   "expectedPath": "root.variant"

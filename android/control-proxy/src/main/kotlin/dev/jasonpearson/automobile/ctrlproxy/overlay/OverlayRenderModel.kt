@@ -39,6 +39,8 @@ data class OverlayRenderNode(
   val sheetOpen: Boolean = false,
   /** The bound boolean of a `switch` or `checkbox`; false for every other role. */
   val checked: Boolean = false,
+  /** The bound value of a `radioGroup` (the option marked selected); null for every other role. */
+  val selectedValue: String? = null,
   /** The bound number of a `slider`; 0 for every other role. */
   val sliderValue: Double = 0.0,
 )
@@ -136,6 +138,8 @@ private fun mapOverlayNode(
       is OverlaySwitchNode -> "switch"
       is OverlayCheckboxNode -> "checkbox"
       is OverlayButtonNode -> "button"
+      is OverlayRadioGroupNode -> "radioGroup"
+      is OverlayListItemNode -> "listItem"
       is OverlaySliderNode -> "slider"
       is OverlayChipNode -> "chip"
       is OverlayCardNode -> "card"
@@ -152,6 +156,7 @@ private fun mapOverlayNode(
       is OverlaySwitchNode -> node.label.orEmpty()
       is OverlayCheckboxNode -> node.label.orEmpty()
       is OverlayButtonNode -> node.label
+      is OverlayListItemNode -> node.headline
       is OverlaySliderNode -> node.label.orEmpty()
       is OverlayChipNode -> node.label
       is OverlayIconNode -> node.name
@@ -201,7 +206,11 @@ private fun mapOverlayNode(
       state[it.openWhen.key] == OverlayScalar.BooleanValue(it.openWhen.equals)
     } ?: false,
     checked =
-      overlayToggleKey(node)?.let { state[it] == OverlayScalar.BooleanValue(true) } ?: false,
+      (overlayToggleKey(node) ?: overlayListItemToggleKey(node))?.let {
+        state[it] == OverlayScalar.BooleanValue(true)
+      } ?: false,
+    selectedValue =
+      (node as? OverlayRadioGroupNode)?.let { (state[it.stateKey] as? OverlayScalar.Text)?.value },
     sliderValue =
       (node as? OverlaySliderNode)?.let { (state[it.stateKey] as? OverlayScalar.Numeric)?.value }
         ?: 0.0,

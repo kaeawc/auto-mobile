@@ -214,6 +214,8 @@ private fun RenderOverlayNodeContent(
     "switch",
     "checkbox" -> RenderOverlayToggle(node, modifier, interact)
     "button" -> RenderOverlayButton(node, modifier, interact)
+    "radioGroup" -> RenderOverlayRadioGroup(node, modifier, interact)
+    "listItem" -> RenderOverlayListItem(node, modifier, interact)
     "slider" -> RenderOverlaySlider(node, modifier, interact)
     "chip" -> RenderOverlayChip(node, modifier, interact)
     "card" ->
@@ -438,7 +440,8 @@ private fun overlayNodeModifier(
     actions.isNotEmpty() &&
       node.role != "textField" &&
       node.role != "bottomSheet" &&
-      node.role !in OVERLAY_COMPONENT_ROLES
+      node.role !in OVERLAY_COMPONENT_ROLES &&
+      node.role !in OVERLAY_SELECTION_ROLES
   var modifier: Modifier = Modifier
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).

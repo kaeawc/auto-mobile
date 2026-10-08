@@ -19266,7 +19266,10 @@
                     },
                     "variant": {
                       "type": "string",
-                      "enum": ["filled", "outlined", "text"]
+                      "enum": ["filled", "tonal", "elevated", "outlined", "text"]
+                    },
+                    "icon": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
                     }
                   },
                   "required": ["type", "label"],
@@ -19295,6 +19298,159 @@
                     },
                     "transition": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["radioGroup"]
+                    },
+                    "stateKey": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["value", "label"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 2,
+                      "maxItems": 16
+                    }
+                  },
+                  "required": ["type", "stateKey", "options"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["listItem"]
+                    },
+                    "headline": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "supporting": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "leadingIcon": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                    },
+                    "trailing": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["switch"]
+                            },
+                            "stateKey": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                            }
+                          },
+                          "required": ["type", "stateKey"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["checkbox"]
+                            },
+                            "stateKey": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                            }
+                          },
+                          "required": ["type", "stateKey"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["icon"]
+                            },
+                            "name": {
+                              "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                            }
+                          },
+                          "required": ["type", "name"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["type", "headline"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -19627,7 +19783,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/16/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/18/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -20871,7 +21027,10 @@
                       },
                       "variant": {
                         "type": "string",
-                        "enum": ["filled", "outlined", "text"]
+                        "enum": ["filled", "tonal", "elevated", "outlined", "text"]
+                      },
+                      "icon": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/5/properties/name"
                       }
                     },
                     "required": ["type", "label"],
@@ -20900,6 +21059,159 @@
                       },
                       "transition": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["radioGroup"]
+                      },
+                      "stateKey": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "label": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["value", "label"],
+                          "additionalProperties": false
+                        },
+                        "minItems": 2,
+                        "maxItems": 16
+                      }
+                    },
+                    "required": ["type", "stateKey", "options"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["listItem"]
+                      },
+                      "headline": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "supporting": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "leadingIcon": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/5/properties/name"
+                      },
+                      "trailing": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["switch"]
+                              },
+                              "stateKey": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              }
+                            },
+                            "required": ["type", "stateKey"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["checkbox"]
+                              },
+                              "stateKey": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              }
+                            },
+                            "required": ["type", "stateKey"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["icon"]
+                              },
+                              "name": {
+                                "$ref": "#/properties/variants/items/properties/spec/anyOf/5/properties/name"
+                              }
+                            },
+                            "required": ["type", "name"],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["type", "headline"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -21232,7 +21544,7 @@
                       "items": {
                         "type": "array",
                         "items": {
-                          "$ref": "#/properties/variants/items/properties/spec/anyOf/16/properties/items/items"
+                          "$ref": "#/properties/variants/items/properties/spec/anyOf/18/properties/items/items"
                         },
                         "minItems": 2,
                         "maxItems": 5

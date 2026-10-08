@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "theme": {
+      "mode": "dark",
+      "scale": 1
+    },
+    "root": {
+      "type": "text",
+      "text": "x"
+    }
+  },
+  "expectedPath": "theme.scale"
+}

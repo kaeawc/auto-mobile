@@ -78,6 +78,20 @@ retain JsonElement. Validated integer model fields normalize decimal/exponent
 spellings before Kotlin decoding (e.g. `100.0` and `1e2` both mean 100). The protocol module has no API-dump
 plugin or API-check task; its published artifact includes the contract resource.
 
+## Theme
+
+Optional top-level `theme` sets the Material scheme every built-in component draws
+from. At least one of its fields is required:
+
+| Field           | Meaning                                                                                                                                                   |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`          | `light`, `dark` or `system` (follow the device). Omitted: inferred from the first opaque background on the root's leading chain, else the device setting. |
+| `colors.seed`   | Hex color a full light or dark scheme is generated from.                                                                                                  |
+| `colors.source` | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                      |
+
+An explicit theme wins over the scheme inferred from backgrounds. Type and shape scales
+are a later slice (#10438).
+
 ## Windows
 
 `window` has required `placement` and optional integer `opacity` (0–100, default
@@ -103,6 +117,7 @@ Every node has required `type`. All other common properties are optional:
 | `testTag`         | Nonempty accessibility/test selector tag.                                                          |
 | `onTap`           | Nonempty ordered array of actions, run in order. See "Tap targets" below.                          |
 | `style`           | Strict style object below.                                                                         |
+| `styleWhen`       | Conditional style overrides (see Conditional style below). One to 8 entries.                       |
 | `visibleWhen`     | Condition (see Conditions below). A false condition, or a missing key, means hidden.               |
 | `anchor`          | Bounds or app-element anchor below.                                                                |
 | `safeAreaPadding` | Explicit inset selection below.                                                                    |
@@ -187,22 +202,24 @@ Text size uses sp, so it follows the system font scale. Negative offsets/positio
 are allowed; sizes are nonnegative, except text size and sheet height/detent
 height which must be positive. Positive values use a minimum of 0.000001.
 
-| Property              | Accepted value                                                                                                       |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `width`, `height`     | `"fill"`, `"wrap"`, or strict `{dp: n}`.                                                                             |
-| `padding`             | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                 |
-| `background`, `color` | Strict hex color.                                                                                                    |
-| `cornerRadius`        | Nonnegative dp.                                                                                                      |
-| `border`              | `{width, color}`; nonnegative dp width.                                                                              |
-| `alpha`               | Finite number 0–1; default 1. Multiplies window opacity.                                                             |
-| `alignment`           | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`. |
-| `arrangement`         | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                              |
-| `spacing`             | Nonnegative dp between row/column children; arrangement remains authoritative for distributed free space.            |
-| `textSize`            | Positive sp; scaled by the system font scale.                                                                        |
-| `fontWeight`          | Integer 100–900.                                                                                                     |
-| `textAlign`           | `start`, `center`, `end`, `justify`.                                                                                 |
-| `maxLines`            | Integer 1–2147483647.                                                                                                |
-| `fontFamily`          | Closed system set: `default`, `sansSerif`, `serif`, `monospace`.                                                     |
+| Property                                         | Accepted value                                                                                                               |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `width`, `height`                                | `"fill"`, `"wrap"`, or strict `{dp: n}`.                                                                                     |
+| `weight`                                         | Positive number. A `row`/`column` child fills the remaining main-axis space in proportion to its weight (ignored elsewhere). |
+| `minWidth`, `maxWidth`, `minHeight`, `maxHeight` | Nonnegative dp bounds applied after `width`/`height`, so `fill` and `{dp}` are clamped by them.                              |
+| `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                         |
+| `background`, `color`                            | Strict hex color.                                                                                                            |
+| `cornerRadius`                                   | Nonnegative dp.                                                                                                              |
+| `border`                                         | `{width, color}`; nonnegative dp width.                                                                                      |
+| `alpha`                                          | Finite number 0–1; default 1. Multiplies window opacity.                                                                     |
+| `alignment`                                      | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`.         |
+| `arrangement`                                    | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                                      |
+| `spacing`                                        | Nonnegative dp between row/column children; arrangement remains authoritative for distributed free space.                    |
+| `textSize`                                       | Positive sp; scaled by the system font scale.                                                                                |
+| `fontWeight`                                     | Integer 100–900.                                                                                                             |
+| `textAlign`                                      | `start`, `center`, `end`, `justify`.                                                                                         |
+| `maxLines`                                       | Integer 1–2147483647.                                                                                                        |
+| `fontFamily`                                     | Closed system set: `default`, `sansSerif`, `serif`, `monospace`.                                                             |
 
 Colors accept only `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits.
 No short hex, named colors, CSS functions, or separate color opacity. Style
@@ -333,8 +350,20 @@ contract). `key` takes exactly one comparison, and comparisons need `key`;
 errors point at the offending field (for example `root.visibleWhen.gt`).
 `toggle` and `increment` validate their `key` against the declared `state`
 (`root.onTap[0].key`), run silently like `setState` (no `change` event), and are
-no-ops at runtime if the key's type was changed by other means. `styleWhen`,
-list templates and a `decrement` alias are later slices of #10440.
+no-ops at runtime if the key's type was changed by other means. List templates
+and a `decrement` alias are later slices of #10440.
+
+### Conditional style: styleWhen
+
+Any node may declare `styleWhen`: one to 8 entries of `{when: condition, style: style}`
+(for selected, disabled or error looks without duplicating nodes). `when` takes
+any condition form above; `style` is the same strict style object as `style`, so
+an unknown key fails at `root.styleWhen[0].style.colour`. At render, every entry
+whose condition holds is merged over the node's base `style` in authored order:
+a property set by a later matching entry wins, and properties no entry sets keep
+the base value. Merging is per top-level property, so `padding` and `border`
+replace the base object whole rather than merging edge by edge. Conditions read the
+node's local state, so pager `{page}`/`{pageCount}` keys work inside a pager.
 
 ### Host helper: showVariants
 

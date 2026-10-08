@@ -58,10 +58,11 @@ export interface ReleaseChecksumEntry {
    */
   screenCaptureHelperSha256?: string;
   /**
-   * SHA-256 of the signed, notarized Network Extension app archive
-   * (`automobile-network-filter-macos-universal.zip`, #10586). Optional: an
-   * absent value means no app was published for that version, and the opt-in
-   * installer fails closed instead of fetching another version's build (#10588).
+   * SHA-256 of the signed, notarized universal macOS Network Filter app archive
+   * (`automobile-network-filter-macos-universal.zip`, packed with
+   * `ditto -c -k --keepParent` so the nested system extension keeps its
+   * signature). Optional so releases predating its delivery stay valid; filled
+   * by release automation (scripts/generate-release-constants.sh), never by hand.
    */
   networkFilterSha256?: string;
 }
@@ -903,7 +904,7 @@ export const VIDEO_SERVER_JAR_FILENAME = "automobile-video.jar";
 /** Fixed GitHub Release asset for the signed universal macOS capture helper. */
 export const SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME = "screen-capture-helper-macos-universal.zip";
 
-/** Fixed GitHub Release asset for the signed universal Network Extension app (#10586). */
+/** Fixed GitHub Release asset for the signed, notarized macOS Network Filter app. */
 export const NETWORK_FILTER_ARCHIVE_FILENAME = "automobile-network-filter-macos-universal.zip";
 
 /**
@@ -956,7 +957,7 @@ export function resolveScreenCaptureHelperChecksum(
   return entryForPinnedVersion(env, registry)?.screenCaptureHelperSha256 ?? "";
 }
 
-/** Download URL for the signed Network Extension app archive (#10588). */
+/** Download URL for the signed macOS Network Filter app archive. */
 export function resolveNetworkFilterUrl(
   env: EnvLike = process.env,
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
@@ -969,10 +970,7 @@ export function resolveNetworkFilterUrl(
   );
 }
 
-/**
- * Expected Network Extension app archive SHA-256 for the selected release.
- * Empty when the pin is unknown or the entry predates the app's delivery.
- */
+/** Expected archive SHA-256 for the selected Network Filter release (empty if unknown). */
 export function resolveNetworkFilterChecksum(
   env: EnvLike = process.env,
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,

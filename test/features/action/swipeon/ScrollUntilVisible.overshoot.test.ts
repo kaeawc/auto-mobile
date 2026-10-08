@@ -1100,8 +1100,7 @@ describe("ScrollUntilVisible shared resolver identity", () => {
     },
   });
   test("bare lookFor ID rejects substring near misses", async () => {
-    const { DefaultElementFinder } = await import("../../../../src/features/utility/ElementFinder");
-    const scroll = new ScrollUntilVisible({ finder: new DefaultElementFinder() } as any);
+    const scroll = new ScrollUntilVisible({} as any);
     const result = await scroll.findElementInHierarchy(
       { elementId: "btn_login" },
       hierarchy(["com.app:id/btn_login_help"]) as any,
@@ -1109,8 +1108,7 @@ describe("ScrollUntilVisible shared resolver identity", () => {
     expect(result).toBeNull();
   });
   test("bare lookFor ID reports candidate packages when ambiguous", async () => {
-    const { DefaultElementFinder } = await import("../../../../src/features/utility/ElementFinder");
-    const scroll = new ScrollUntilVisible({ finder: new DefaultElementFinder() } as any);
+    const scroll = new ScrollUntilVisible({} as any);
     await expect(
       scroll.findElementInHierarchy(
         { elementId: "btn_login" },

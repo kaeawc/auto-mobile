@@ -100,6 +100,8 @@ internal constructor(
 
   companion object {
     internal const val MAX_RECONNECT_ATTEMPTS = 5
+    internal const val DEVICE_NOT_LIVE_MESSAGE = "Device session is not registered on the daemon"
+    private const val DEVICE_NOT_LIVE_MARKER = "does not identify a live device session"
 
     private fun getSocketPath(): String = AutoMobileSocketPaths.socketPath("telemetry-push.sock")
 
@@ -148,13 +150,22 @@ internal constructor(
   override val telemetryEvents: SharedFlow<TelemetryDisplayEvent> = _telemetryEvents.asSharedFlow()
 
   private var subscribedDeviceId: String? = null
+  private var subscribedDeviceSessionUuid: String? = null
+
+  /** Set when the daemon refuses a subscribe because the named device has no live session yet. */
+  @Volatile private var deviceNotLive = false
+
+  /** Reconnect with the device arguments of the last [connect] instead of widening to all. */
+  override fun reconnect() = connect(subscribedDeviceId, subscribedDeviceSessionUuid)
 
   /**
    * Connect to the telemetry push socket and subscribe to events.
    *
    * @param deviceId Optional device ID for server-side filtering. Null subscribes to all devices.
+   * @param deviceSessionUuid The device's live session identity, preferred by the daemon over
+   *   [deviceId] when both are sent.
    */
-  override fun connect(deviceId: String?) {
+  override fun connect(deviceId: String?, deviceSessionUuid: String?) {
     if (
       sessionRejected ||
         (options.sessionUuidProvider != null && options.sessionUuidProvider.invoke() == null)
@@ -166,6 +177,7 @@ internal constructor(
         return
       }
       subscribedDeviceId = deviceId
+      subscribedDeviceSessionUuid = deviceSessionUuid
       val generation = ++connectionGeneration
       _state.update { ConnectionState.Connecting }
       connectionJob = scope.launch { connectWithRetry(generation) }
@@ -179,6 +191,7 @@ internal constructor(
     while (_shouldReconnect) {
       log.info("Connecting to telemetry push at $socketPath (attempt ${attempt + 1})")
       var currentSocket: TelemetrySocket? = null
+      deviceNotLive = false
 
       try {
         if (!socketAvailable(socketPath)) {
@@ -210,7 +223,10 @@ internal constructor(
       if (!_shouldReconnect) return
       attempt++
       if (attempt >= MAX_RECONNECT_ATTEMPTS) {
-        _state.value = ConnectionState.Error("Telemetry unavailable on this daemon")
+        _state.value =
+          ConnectionState.Error(
+            if (deviceNotLive) DEVICE_NOT_LIVE_MESSAGE else "Telemetry unavailable on this daemon"
+          )
         return
       }
       val delayMs = calculateBackoff(attempt)
@@ -275,6 +291,7 @@ internal constructor(
       sessionUuid = options.sessionUuidProvider?.invoke(),
       category = null, // subscribe to all categories, filter client-side
       deviceId = subscribedDeviceId,
+      deviceSessionUuid = subscribedDeviceSessionUuid,
     )
 
   private fun subscribe(currentSocket: TelemetrySocket) {
@@ -315,6 +332,9 @@ internal constructor(
           _state.value = ConnectionState.Connected(subscribed = true)
           log.info("Connected to telemetry push")
         }
+        // The device may simply not be registered yet; end this read so the caller backs off
+        // and subscribes again, bounded by MAX_RECONNECT_ATTEMPTS.
+        if (deviceNotLive) break
       }
     } catch (e: CancellationException) {
       throw e
@@ -349,8 +369,11 @@ internal constructor(
       "subscription_response" -> {
         log.info("Telemetry push subscription response: success=${response.success}")
         if (response.success != true) {
+          noteDeviceNotLive(response.error)
           rejectSession(response.error)
-          if (!sessionRejected) log.warn("Telemetry subscription failed: ${response.error}")
+          if (!sessionRejected && !deviceNotLive) {
+            log.warn("Telemetry subscription failed: ${response.error}")
+          }
         }
         response.success == true
       }
@@ -381,14 +404,24 @@ internal constructor(
         false
       }
       "error" -> {
+        noteDeviceNotLive(response.error)
         rejectSession(response.error)
-        if (!sessionRejected) log.warn("Telemetry push error: ${response.error}")
+        if (!sessionRejected && !deviceNotLive) {
+          log.warn("Telemetry push error: ${response.error}")
+        }
         false
       }
       else -> {
         log.warn("Unknown telemetry push message type: ${response.type}")
         false
       }
+    }
+  }
+
+  private fun noteDeviceNotLive(error: String?) {
+    if (error?.contains(DEVICE_NOT_LIVE_MARKER) == true) {
+      deviceNotLive = true
+      log.info("Telemetry device not live yet; will retry: $error")
     }
   }
 

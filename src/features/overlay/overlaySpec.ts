@@ -118,6 +118,11 @@ const styleSchema = z
   .object({
     width: dimensionSchema.optional(),
     height: dimensionSchema.optional(),
+    weight: z.number().finite().min(1e-6).optional(),
+    minWidth: z.number().finite().min(0).optional(),
+    maxWidth: z.number().finite().min(0).optional(),
+    minHeight: z.number().finite().min(0).optional(),
+    maxHeight: z.number().finite().min(0).optional(),
     padding: paddingSchema.optional(),
     background: z
       .string()
@@ -154,6 +159,7 @@ const styleSchema = z
     fontFamily: z.enum(["default", "sansSerif", "serif", "monospace"]).optional(),
   })
   .strict();
+const styleWhenEntrySchema = z.object({ when: conditionSchema, style: styleSchema }).strict();
 const itemSchema = z
   .object({
     label: z.string().min(1),
@@ -288,6 +294,7 @@ const commonNodeShape = {
   testTag: z.string().min(1).optional(),
   onTap: z.array(actionSchema).min(1).max(32).optional(),
   style: styleSchema.optional(),
+  styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
@@ -475,10 +482,28 @@ const windowSchema = z
     opacity: z.number().finite().int().min(0).max(100).default(100),
   })
   .strict();
+const themeColorsSchema = z
+  .object({
+    seed: z
+      .string()
+      .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
+      .optional(),
+    source: z.enum(["device"]).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
+const themeSchema = z
+  .object({
+    mode: z.enum(["light", "dark", "system"]).optional(),
+    colors: themeColorsSchema.optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
 const specSchema = z
   .object({
     id: z.string().min(1),
     window: windowSchema,
+    theme: themeSchema.optional(),
     state: z
       .custom<Record<string, string | number | boolean>>(
         (value) =>

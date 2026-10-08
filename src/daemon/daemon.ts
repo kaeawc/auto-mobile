@@ -694,10 +694,11 @@ export class Daemon {
         }),
       ownerDisconnect: {
         release: async (session, reason) => {
-          // Never release mid-call (#5343): returning with the session still held defers the
-          // release, which is retried once the call settles. The veto is bounded (#10663).
-          if (ownerDisconnectExecutionVeto.keeps(session)) {
-            return;
+          // Never release mid-call (#5343): a deferral keeps the session, and the release is
+          // retried when the call ends or the veto's bound passes (#10663, #10712).
+          const deferral = ownerDisconnectExecutionVeto.keeps(session);
+          if (deferral) {
+            return deferral;
           }
           await this.cancelAndReleaseSession(session.sessionId, reason, false, session);
         },
@@ -766,6 +767,8 @@ export class Daemon {
         for (const sessionId of sessionIds) {
           this.sessionManager.recordToolCallEnded(sessionId);
         }
+        // A deferred owner-disconnect release may be keyed by either id (#10712).
+        this.devicePool.sessionExecutionsEnded(new Set([...sessionUuids, ...sessionIds]));
       },
     );
   }

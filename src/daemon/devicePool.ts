@@ -161,7 +161,11 @@ import {
   getVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
 } from "../devices/virtualDeviceLifecycleCoordinator";
-import { OwnerDisconnectRelease, OWNER_DISCONNECT_GRACE_MS } from "./ownerDisconnectRelease";
+import {
+  OwnerDisconnectRelease,
+  OWNER_DISCONNECT_GRACE_MS,
+  type OwnerDisconnectReleaseDeferral,
+} from "./ownerDisconnectRelease";
 
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 export type { DeviceRecoveryPolicy } from "./poolConfig";
@@ -730,8 +734,11 @@ export type SessionContinuityDevice = AndroidEmulatorContinuityDevice | IOSSimul
  * Works with SessionManager to maintain bidirectional mappings.
  */
 export interface OwnerDisconnectOptions {
-  /** Defaults to an ownership-fenced session release that returns the device to the pool. */
-  release?: (session: Session, reason: string) => Promise<void>;
+  /**
+   * Defaults to an ownership-fenced session release that returns the device to the pool. Resolve
+   * with a deferral to keep the session while in-flight work vetoes the release.
+   */
+  release?: (session: Session, reason: string) => Promise<OwnerDisconnectReleaseDeferral | void>;
   /** Grace before the session is released. Defaults to {@link OWNER_DISCONNECT_GRACE_MS}. */
   graceMs?: number;
 }
@@ -7435,6 +7442,14 @@ export class DevicePool {
         }
       }
     });
+  }
+
+  /**
+   * Tool executions under these session ids ended: retry any owner-disconnect release they
+   * deferred now rather than at the veto's bound (#10712).
+   */
+  sessionExecutionsEnded(sessionIds: Iterable<string>): void {
+    this.ownerDisconnectRelease.executionsEnded(sessionIds);
   }
 
   /** Drop every socket-scoped route and ownership marker for a disconnected MCP client. */

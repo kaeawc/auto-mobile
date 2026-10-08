@@ -3,10 +3,11 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import {
   OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
   OWNER_DISCONNECT_GRACE_MS,
-  OWNER_DISCONNECT_RETRY_MAX_DELAY_MS,
   OWNER_DISCONNECTED_RELEASE_REASON,
   OwnerDisconnectExecutionVeto,
+  OwnerDisconnectRelease,
 } from "../../src/daemon/ownerDisconnectRelease";
+import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettledExecutionVeto";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
@@ -22,8 +23,9 @@ import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerSte
 
 // #10663: the owner-disconnect release was one-shot. The daemon vetoes it while the session has
 // a call in flight (#5343), and the vetoed release was dropped, so the device then waited for
-// the heartbeat path. A deferred release is now retried until the call settles, and a call that
-// never settles keeps the session only up to the execution veto ceiling.
+// the heartbeat path. A deferred release is now retried when the call ends (#10712: re-armed by
+// the execution-end event instead of polling), and a call that never settles keeps the session
+// only up to its request deadline plus grace, or the veto ceiling when it has no deadline.
 
 const DEVICE: BootedDevice = { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" };
 const OWNER_SESSION = "owner-session";
@@ -35,6 +37,7 @@ describe("owner-disconnect release re-arm (#10663)", () => {
   let tracker: ExecutionTracker;
   let devicePool: DevicePool;
   let releaseReasons: string[];
+  let unsubscribeExecutionEnded: () => void;
 
   const settle = (ms: number) =>
     timer.advanceTimeAsync(ms, () => drainMicrotasks(FAKE_TIMER_QUIET_TURNS));
@@ -55,7 +58,14 @@ describe("owner-disconnect release re-arm (#10663)", () => {
       tracker.hasActiveSessionUuidExecutions(sessionId);
     // As in the daemon: the same checker suppresses idle expiry and vetoes the release.
     sessionManager.setActiveSessionExecutionChecker(hasActiveExecutions);
-    const veto = new OwnerDisconnectExecutionVeto(hasActiveExecutions, timer);
+    const veto = new OwnerDisconnectExecutionVeto(
+      {
+        hasActiveExecutions,
+        latestExecutionDeadlineMs: (sessionId) =>
+          tracker.getLatestSessionExecutionDeadlineMs(sessionId),
+      },
+      timer,
+    );
     releaseReasons = [];
     sessionManager.onSessionRelease((_sessionId, _deviceId, reason) => {
       releaseReasons.push(reason);
@@ -71,8 +81,9 @@ describe("owner-disconnect release re-arm (#10663)", () => {
         ownerDisconnect: {
           // Mirrors the daemon's port: defer while a call is in flight, else fenced release.
           release: async (session, reason) => {
-            if (veto.keeps(session)) {
-              return;
+            const deferral = veto.keeps(session);
+            if (deferral) {
+              return deferral;
             }
             await releaseSessionAndDevice(
               sessionManager,
@@ -94,6 +105,10 @@ describe("owner-disconnect release re-arm (#10663)", () => {
         },
       }),
     );
+    // As in the daemon: an execution's end re-arms the releases it deferred.
+    unsubscribeExecutionEnded = tracker.onSessionExecutionEnded((sessionUuids) =>
+      devicePool.sessionExecutionsEnded(sessionUuids),
+    );
     await devicePool.initializeWithDevices([DEVICE]);
     await devicePool.bindOrReuseDeviceSession(
       OWNER_SESSION,
@@ -111,6 +126,7 @@ describe("owner-disconnect release re-arm (#10663)", () => {
   });
 
   afterEach(() => {
+    unsubscribeExecutionEnded();
     sessionManager.stopCleanupTimer();
   });
 
@@ -122,10 +138,13 @@ describe("owner-disconnect release re-arm (#10663)", () => {
     expect(releaseReasons).toEqual([]);
     expect(sessionManager.getSession(OWNER_SESSION)).not.toBeNull();
 
-    // Released within one retry delay of the call settling, without waiting for the heartbeat
-    // monitor (which runs on the real daemon only, and only after the lease lapses).
+    // Only the veto's bound is scheduled while the call runs: nothing polls (#10712).
+    expect(timer.getPendingTimeouts()).toEqual([OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS]);
+
+    // Released as soon as the call ends, without waiting for the heartbeat monitor (which runs
+    // on the real daemon only, and only after the lease lapses).
     tracker.endExecution(call.id);
-    await settle(OWNER_DISCONNECT_RETRY_MAX_DELAY_MS);
+    await settle(0);
 
     expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
     expect(devicePool.getDevice(DEVICE.deviceId)?.sessionId).toBeNull();
@@ -145,7 +164,7 @@ describe("owner-disconnect release re-arm (#10663)", () => {
       expect(releaseReasons).toEqual([]);
 
       tracker.endExecution(call.id);
-      await settle(OWNER_DISCONNECT_RETRY_MAX_DELAY_MS);
+      await settle(0);
 
       expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
       expect(devicePool.getDevice(DEVICE.deviceId)?.sessionId).toBeNull();
@@ -161,7 +180,7 @@ describe("owner-disconnect release re-arm (#10663)", () => {
 
     await devicePool.restoreOwnedDeviceSessionsForMcpSession([OWNER_SESSION], "reconnected");
     tracker.endExecution(call.id);
-    await settle(OWNER_DISCONNECT_RETRY_MAX_DELAY_MS * 4);
+    await settle(20_000);
 
     expect(releaseReasons).toEqual([]);
     expect(ownerSession().assignedDevice).toBe(DEVICE.deviceId);
@@ -173,15 +192,30 @@ describe("owner-disconnect release re-arm (#10663)", () => {
     devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
     await settle(OWNER_DISCONNECT_GRACE_MS);
 
-    await settle(OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS - OWNER_DISCONNECT_RETRY_MAX_DELAY_MS);
+    await settle(OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS - 1);
     expect(releaseReasons).toEqual([]);
     expect(sessionManager.getSession(OWNER_SESSION)).not.toBeNull();
 
-    await settle(OWNER_DISCONNECT_RETRY_MAX_DELAY_MS * 2);
+    await settle(1);
 
     expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
     expect(devicePool.getDevice(DEVICE.deviceId)?.sessionId).toBeNull();
     // The hung call is still tracked: the release did not wait for it to settle.
+    expect(tracker.hasActiveSessionUuidExecutions(OWNER_SESSION)).toBe(true);
+  });
+
+  test("a call that never settles keeps the session only until its request deadline plus grace (#10712)", async () => {
+    const call = tracker.startExecution("tapOn", undefined, OWNER_SESSION);
+    const deadlineMs = OWNER_DISCONNECT_GRACE_MS + 60_000;
+    tracker.setExecutionDeadline(call.id, () => deadlineMs);
+    devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
+    await settle(OWNER_DISCONNECT_GRACE_MS);
+
+    await settle(deadlineMs + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS - 1 - timer.now());
+    expect(releaseReasons).toEqual([]);
+
+    await settle(1);
+    expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
     expect(tracker.hasActiveSessionUuidExecutions(OWNER_SESSION)).toBe(true);
   });
 });
@@ -193,17 +227,61 @@ describe("OwnerDisconnectExecutionVeto (#10663)", () => {
     const veto = new OwnerDisconnectExecutionVeto(() => active, timer, 1_000);
     const session = { sessionId: "s" } as Session;
 
-    expect(veto.keeps(session)).toBe(true);
+    expect(veto.keeps(session)).toEqual({ deferredUntil: 1_000 });
     timer.advanceTime(999);
-    expect(veto.keeps(session)).toBe(true);
+    expect(veto.keeps(session)).toEqual({ deferredUntil: 1_000 });
 
     active = false;
-    expect(veto.keeps(session)).toBe(false);
+    expect(veto.keeps(session)).toBeUndefined();
     active = true;
-    expect(veto.keeps(session)).toBe(true);
+    expect(veto.keeps(session)).toEqual({ deferredUntil: 1_999 });
     timer.advanceTime(999);
-    expect(veto.keeps(session)).toBe(true);
+    expect(veto.keeps(session)).toBeDefined();
     timer.advanceTime(1);
-    expect(veto.keeps(session)).toBe(false);
+    expect(veto.keeps(session)).toBeUndefined();
+  });
+});
+
+describe("OwnerDisconnectRelease execution-end re-arm (#10712)", () => {
+  test("a call that ends while a deferred attempt is in flight retries as soon as it settles", async () => {
+    const timer = new FakeTimer();
+    const session = {
+      sessionId: "s",
+      assignedDevice: "emulator-5554",
+      livenessPolicy: "heartbeat",
+      ownership: "owned",
+    } as unknown as Session;
+    const attempts: Array<(deferral?: { deferredUntil: number }) => void> = [];
+    const release = new OwnerDisconnectRelease(
+      {
+        getSession: () => session,
+        hasConnectedOwner: () => false,
+        release: () => new Promise((resolve) => attempts.push(resolve)),
+      },
+      timer,
+      1_000,
+    );
+    release.ownerDisconnected("s", "conn");
+    // Still inside the disconnect grace: an execution end does not fire it early.
+    release.executionsEnded(["s"]);
+    await timer.advanceTimeAsync(999, () => drainMicrotasks(FAKE_TIMER_QUIET_TURNS));
+    expect(attempts).toHaveLength(0);
+    await timer.advanceTimeAsync(1, () => drainMicrotasks(FAKE_TIMER_QUIET_TURNS));
+    expect(attempts).toHaveLength(1);
+
+    attempts[0]!({ deferredUntil: 60_000 });
+    await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+    expect(timer.getPendingTimeouts()).toEqual([59_000]);
+
+    // The call ends while the retry attempt is in flight: the re-arm is not lost.
+    release.executionsEnded(["s"]);
+    await timer.advanceTimeAsync(0, () => drainMicrotasks(FAKE_TIMER_QUIET_TURNS));
+    expect(attempts).toHaveLength(2);
+    release.executionsEnded(["s"]);
+    attempts[1]!({ deferredUntil: 60_000 });
+    await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+    expect(timer.getPendingTimeouts()).toEqual([0]);
+    await timer.advanceTimeAsync(0, () => drainMicrotasks(FAKE_TIMER_QUIET_TURNS));
+    expect(attempts).toHaveLength(3);
   });
 });

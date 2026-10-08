@@ -69,6 +69,7 @@ import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayFontCache
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImageCache
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
+import dev.jasonpearson.automobile.ctrlproxy.overlay.isInteractiveOverlayWindow
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
@@ -995,7 +996,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val recompositionStore = RecompositionStore()
   private val frameMetricsStore = FrameMetricsStore()
   internal val workStats = CtrlProxyWorkStats()
-  private val viewHierarchyExtractor = ViewHierarchyExtractor(recompositionStore, workStats)
+  private val viewHierarchyExtractor =
+    ViewHierarchyExtractor(
+      recompositionStore,
+      workStats,
+      ownOverlayMetadata = { windowPackage, title ->
+        // The overlay-type check already ran in the extractor; this confirms the window is ours.
+        if (
+          isInteractiveOverlayWindow(
+            AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+            title,
+            windowPackage,
+            packageName,
+          ) && ::overlayController.isInitialized
+        )
+          overlayController.windowMetadata()
+        else null
+      },
+    )
   private val jsonCompact = Json {
     prettyPrint = false
     encodeDefaults = true

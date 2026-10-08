@@ -2346,11 +2346,13 @@ describe("SessionManager", () => {
         manager.recordHeartbeat("session-1");
         repository.finishUpsert();
 
+        // The label write at 100 is session activity; the heartbeat at 150 renews only
+        // liveness and leaves the idle deadline alone (#10656).
         await expect(rebinding).resolves.toMatchObject({
           assignedDevice: "emulator-new",
-          lastUsedAt: 150,
+          lastUsedAt: 100,
           lastHeartbeat: 150,
-          expiresAt: 1_150,
+          expiresAt: 1_000,
           hasReceivedHeartbeat: true,
           cacheData: { deviceLabels: labels },
         });
@@ -3116,7 +3118,7 @@ describe("SessionManager", () => {
         });
         fakeTimer.advanceTime(10);
         manager.recordHeartbeat(session.sessionId);
-        await drainUntil(() => session.lastUsedAt === before.lastUsedAt, {
+        await drainUntil(() => session.lastHeartbeat === before.lastHeartbeat, {
           description: "received heartbeat rollback",
         });
         expect(session).toMatchObject(before);
@@ -3159,7 +3161,7 @@ describe("SessionManager", () => {
           fakeTimer.advanceTime(10);
           if (operation === "heartbeat") {
             manager.recordHeartbeat(session.sessionId);
-            await drainUntil(() => session.lastUsedAt === before.lastUsedAt, {
+            await drainUntil(() => session.lastHeartbeat === before.lastHeartbeat, {
               description: "failed heartbeat timestamp rollback",
             });
           } else {
@@ -3180,18 +3182,22 @@ describe("SessionManager", () => {
             await expect(manager.getOrCreateSession(session.sessionId)).resolves.toBe(session);
           }
           expect(write).toHaveBeenCalledTimes(2);
+          // A heartbeat proves liveness only; a reclaim is tool activity (#10656).
+          const activity =
+            operation === "heartbeat"
+              ? { lastUsedAt: 0, expiresAt: 60_000 }
+              : { lastUsedAt: 20, expiresAt: 60_020 };
           expect(session).toMatchObject({
-            lastUsedAt: 20,
+            ...activity,
             lastHeartbeat: 20,
-            expiresAt: 60_020,
             hasReceivedHeartbeat: operation === "heartbeat",
             ownership: "owned",
             awaitingOwnerSince: undefined,
             activityGeneration: 2,
           });
           expect(await persistence.getSession!(session.sessionId)).toMatchObject({
-            last_used_at_ms: 20,
-            expires_at_ms: 60_020,
+            last_used_at_ms: activity.lastUsedAt,
+            expires_at_ms: activity.expiresAt,
             has_received_heartbeat: operation === "heartbeat" ? 1 : 0,
           });
         } finally {
@@ -3217,7 +3223,7 @@ describe("SessionManager", () => {
         });
         fakeTimer.advanceTime(10);
         manager.recordHeartbeat(session.sessionId);
-        await drainUntil(() => session.lastUsedAt === 0, {
+        await drainUntil(() => session.lastHeartbeat === 0, {
           description: "failed heartbeat rollback",
         });
         const reaped: string[] = [];
@@ -3270,7 +3276,7 @@ describe("SessionManager", () => {
           fakeTimer.advanceTime(10);
           if (operation === "heartbeat") {
             manager.recordHeartbeat(session.sessionId);
-            await drainUntil(() => session.lastUsedAt === 0, {
+            await drainUntil(() => session.lastHeartbeat === 0, {
               description: "failed heartbeat rollback",
             });
           } else {
@@ -3322,18 +3328,22 @@ describe("SessionManager", () => {
           } else {
             await manager.getOrCreateSession(session.sessionId);
           }
+          // A heartbeat proves liveness only; a reclaim is tool activity (#10656).
+          const activity =
+            operation === "heartbeat"
+              ? { lastUsedAt: 0, expiresAt: 60_000 }
+              : { lastUsedAt: 10, expiresAt: 60_010 };
           expect(session).toMatchObject({
-            lastUsedAt: 10,
+            ...activity,
             lastHeartbeat: 10,
-            expiresAt: 60_010,
             hasReceivedHeartbeat: operation === "heartbeat",
             ownership: "owned",
             awaitingOwnerSince: undefined,
             activityGeneration: 1,
           });
           expect(await persistence.getSession!(session.sessionId)).toMatchObject({
-            last_used_at_ms: 10,
-            expires_at_ms: 60_010,
+            last_used_at_ms: activity.lastUsedAt,
+            expires_at_ms: activity.expiresAt,
             has_received_heartbeat: operation === "heartbeat" ? 1 : 0,
           });
         } finally {
@@ -3391,10 +3401,15 @@ describe("SessionManager", () => {
             await expect(firstRefresh).rejects.toBeInstanceOf(SessionActivityPersistenceError);
           }
           await drainMicrotasks(10);
+          // Only the older reclaim was tool activity; its in-memory refresh is not reverted
+          // because a newer write superseded it. Heartbeats never move the idle clocks (#10656).
+          const activity =
+            older === "reclaim"
+              ? { lastUsedAt: 10, expiresAt: 60_010 }
+              : { lastUsedAt: 0, expiresAt: 60_000 };
           const latest = {
-            lastUsedAt: 20,
+            ...activity,
             lastHeartbeat: 20,
-            expiresAt: 60_020,
             hasReceivedHeartbeat: true,
             ownership: "owned",
             awaitingOwnerSince: undefined,
@@ -3409,7 +3424,7 @@ describe("SessionManager", () => {
           await drainMicrotasks(10);
           expect(session).toMatchObject(latest);
           expect(await persistence.getSession!(session.sessionId)).toMatchObject({
-            last_used_at_ms: 20,
+            last_used_at_ms: activity.lastUsedAt,
             has_received_heartbeat: 1,
           });
         } finally {
@@ -3463,10 +3478,17 @@ describe("SessionManager", () => {
         } else {
           await manager.getOrCreateSession(session.sessionId);
         }
+        // The idle clocks follow the latest tool activity (a reclaim); heartbeats never move
+        // them (#10656). A superseded older reclaim keeps its in-memory refresh.
+        const activity =
+          newer === "reclaim"
+            ? { lastUsedAt: 20, expiresAt: 60_020 }
+            : older === "reclaim"
+              ? { lastUsedAt: 10, expiresAt: 60_010 }
+              : { lastUsedAt: 0, expiresAt: 60_000 };
         const latest = {
-          lastUsedAt: 20,
+          ...activity,
           lastHeartbeat: 20,
-          expiresAt: 60_020,
           hasReceivedHeartbeat: older === "heartbeat" || newer === "heartbeat",
           ownership: "owned",
           awaitingOwnerSince: undefined,

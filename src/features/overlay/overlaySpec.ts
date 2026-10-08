@@ -174,6 +174,26 @@ const borderSchema = z
     color: colorValueSchema,
   })
   .strict();
+const hexColorSchema = z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/);
+const gradientStopSchema = z
+  .object({ color: hexColorSchema, position: z.number().finite().min(0).max(1).optional() })
+  .strict();
+const gradientSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.enum(["linear"]),
+      angle: z.number().finite(),
+      stops: z.array(gradientStopSchema).min(2).max(4),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.enum(["radial"]),
+      stops: z.array(gradientStopSchema).min(2).max(4),
+    })
+    .strict(),
+]);
+
 /** Material 3 type roles a text node's `textStyle` can name. */
 const TEXT_STYLE_ROLES = [
   "displayLarge",
@@ -205,6 +225,9 @@ const styleSchema = z
     background: colorValueSchema.optional(),
     cornerRadius: z.union([z.number().finite().min(0), z.enum(CORNER_RADIUS_TOKENS)]).optional(),
     border: borderSchema.optional(),
+    elevation: z.number().finite().min(0).optional(),
+    gradient: gradientSchema.optional(),
+    aspectRatio: z.number().finite().min(1e-6).optional(),
     alpha: z.number().finite().min(0).max(1).optional(),
     alignment: z
       .enum([

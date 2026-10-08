@@ -80,10 +80,11 @@ describe("tapOn controls in a captured in-app iOS overlay window", () => {
     expect(close.points).toEqual([{ x: 171, y: 802 }]);
   });
 
-  test("without window layers the dismiss control reads as covered and is not tapped", async () => {
-    const { result, points } = await tapElement(withoutLayers(), "automobile-overlay-dismiss");
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("covered by the navigation bar");
-    expect(points).toEqual([]);
+  test("without window layers the toolbar clips the close button to its exposed strip", async () => {
+    // The dismiss control in the navigation-bar band no longer depends on the layer: a
+    // non-scrolling control wholly inside the bar is bar-level content (#10635).
+    const { result, points } = await tapElement(withoutLayers(), "close-button");
+    expect(result.success).toBe(true);
+    expect(points).toEqual([{ x: 171, y: 784 }]);
   });
 });

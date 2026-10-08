@@ -35,9 +35,10 @@ enum GestureExecutionBound {
     static let responseReserveMs: Int64 = 500
 }
 
-/// Only request_swipe's wire deadline bounds execution. Tap/drag/pinch can legitimately
-/// run long, so every other command's wire `timeoutMs` only gates whether it may START
-/// (see `queuedCommandDisposition`); it never cuts a running command short.
+/// Only request_swipe's wire deadline bounds gesture execution. Tap/drag/pinch can legitimately
+/// run long, so every other gesture's wire `timeoutMs` only gates whether it may START
+/// (see `queuedCommandDisposition`); it never cuts a running gesture short. Read-only
+/// hierarchy queries get their own response bound (`XCUIQueryBound`, #10640).
 func gestureExecutionBoundMs(deadlineMs: Int64?, executionStartedAtMs: Int64) -> Int64? {
     guard let deadlineMs else { return nil }
     return max(
@@ -497,6 +498,7 @@ final class WebSocketServer: @unchecked Sendable {
                 }
                 await self.handleMessage(
                     data, responder: responder, deadlineMs: deadlineMs, receivedAtMs: receivedAtMs,
+                    startExpiryMs: startExpiryMs,
                     onCompleted: { self.commandState.withLock { $0.inFlight = nil } }
                 )
             }
@@ -548,7 +550,7 @@ final class WebSocketServer: @unchecked Sendable {
     /// silent no-op (§9.5). Runs on the serial command task-chain.
     func handleMessage(
         _ data: Data, responder: any WebSocketResponding, deadlineMs: Int64? = nil, receivedAtMs: Int64? = nil,
-        onCompleted: @Sendable () -> Void = {}
+        startExpiryMs: Int64? = nil, onCompleted: @Sendable () -> Void = {}
     )
         async
     {
@@ -579,13 +581,14 @@ final class WebSocketServer: @unchecked Sendable {
                     self.perf.serial("handleRequest:\(request.typeString)")
                     let startTime = Date()
                     let response: any WebSocketResponsePayload
-                    if let boundMs = gestureExecutionBoundMs(
-                        deadlineMs: deadlineMs, executionStartedAtMs: executionStartedAtMs
+                    if let bound = executionBound(
+                        request, deadlineMs: deadlineMs, startExpiryMs: startExpiryMs,
+                        executionStartedAtMs: executionStartedAtMs
                     ) {
                         let result = await self.handleBoundedCommand(
-                            request, deadlineMs: deadlineMs, boundMs: boundMs,
+                            request, deadlineMs: deadlineMs, boundMs: bound.boundMs,
                             executionStartedAtMs: executionStartedAtMs,
-                            diagnostics: diagnostics, responder: responder
+                            diagnostics: diagnostics, responder: responder, boundError: bound.error
                         )
                         response = result.response
                         earlyResponseSent.withLock { $0 = result.boundHit }
@@ -670,13 +673,36 @@ final class WebSocketServer: @unchecked Sendable {
         }
     }
 
-    /// XCUITest is main-thread-confined: its synchronous swipe cannot be cancelled and
-    /// blocks the main actor. Keep the serial chain and in-flight guard held until it
+    /// A swipe's wire deadline wins; read-only hierarchy queries fall back to `XCUIQueryBound`.
+    private func executionBound(
+        _ request: WebSocketRequest, deadlineMs: Int64?, startExpiryMs: Int64?, executionStartedAtMs: Int64
+    )
+        -> (boundMs: Int64, error: @Sendable (_ phase: String, _ elapsedMs: Int64) -> CommandError)?
+    {
+        let command = request.typeString
+        if let boundMs = gestureExecutionBoundMs(deadlineMs: deadlineMs, executionStartedAtMs: executionStartedAtMs) {
+            return (boundMs, { phase, elapsedMs in
+                .gestureBoundExceeded(command: command, phase: phase, boundMs: boundMs, elapsedMs: elapsedMs)
+            })
+        }
+        if let boundMs = XCUIQueryBound.boundMs(
+            commandType: command, startExpiryMs: startExpiryMs, executionStartedAtMs: executionStartedAtMs
+        ) {
+            return (boundMs, { _, elapsedMs in
+                .queryBoundExceeded(command: command, boundMs: boundMs, elapsedMs: elapsedMs)
+            })
+        }
+        return nil
+    }
+
+    /// XCUITest is main-thread-confined: a synchronous swipe or live query cannot be cancelled
+    /// and blocks the main actor. Keep the serial chain and in-flight guard held until it
     /// returns; releasing them early would silently pile commands onto the blocked actor.
     /// The timeout is a response bound, not an interruption of the underlying call.
     private func handleBoundedCommand(
         _ request: WebSocketRequest, deadlineMs: Int64?, boundMs: Int64, executionStartedAtMs: Int64,
-        diagnostics: GesturePhaseDiagnostics?, responder: any WebSocketResponding
+        diagnostics: GesturePhaseDiagnostics?, responder: any WebSocketResponding,
+        boundError: (_ phase: String, _ elapsedMs: Int64) -> CommandError
     )
         async -> (response: any WebSocketResponsePayload, boundHit: Bool)
     {
@@ -708,9 +734,7 @@ final class WebSocketServer: @unchecked Sendable {
             watchdog.cancel()
             return (await handler.value, false)
         case let .bound(phase, elapsedMs):
-            let error = CommandError.gestureBoundExceeded(
-                command: request.typeString, phase: phase, boundMs: boundMs, elapsedMs: elapsedMs
-            )
+            let error = boundError(phase, elapsedMs)
             let response = WebSocketResponse.error(
                 type: request.requestType.responseType.rawValue,
                 requestId: request.requestId, error: error.errorDescription ?? "Gesture execution bound exceeded"

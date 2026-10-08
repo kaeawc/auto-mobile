@@ -61,6 +61,12 @@ const request = (id: string): DaemonRequest => ({
   params: { uri: `automobile:devices/${id === "A" ? "booted/android" : "images/android"}` },
 });
 
+// Only the socket server's own error logs matter: in the shared-process unit lane an earlier
+// file's late async work can log through the same spied logger while a test here runs.
+function socketErrorLogs(spy: { mock: { calls: unknown[][] } }): unknown[][] {
+  return spy.mock.calls.filter(([message]) => String(message).startsWith("Socket error for"));
+}
+
 afterEach(() => {
   spyOn(logger, "error").mockRestore();
   spyOn(logger, "debug").mockRestore();
@@ -77,7 +83,7 @@ test.each(["EPIPE", "ECONNRESET", "ERR_STREAM_DESTROYED", "ECONNABORTED"])(
     await Promise.all([...internal.activeRequestHandlers]);
     expect(socket.destroyed).toBe(true);
     expect(internal.clientSockets.size).toBe(0);
-    expect(error).not.toHaveBeenCalled();
+    expect(socketErrorLogs(error)).toEqual([]);
     expect(debug.mock.calls.some(([message]) => String(message).includes("Socket"))).toBe(true);
   },
 );
@@ -89,7 +95,7 @@ test("unexpected socket errors retain error logging", async () => {
   socket.emit("error", Object.assign(new Error("bad handle"), { code: "EBADF" }));
   await Promise.all([...internal.activeRequestHandlers]);
   expect(socket.destroyed).toBe(true);
-  expect(error).toHaveBeenCalledTimes(1);
+  expect(socketErrorLogs(error)).toHaveLength(1);
 });
 
 test.each([true, false])(

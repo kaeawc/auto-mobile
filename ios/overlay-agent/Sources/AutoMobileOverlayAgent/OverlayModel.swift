@@ -14,9 +14,20 @@ final class OverlayModel: ObservableObject {
 
     var onEvent: (([String: Any]) -> Void)?
     var onVisibilityChange: ((Bool) -> Void)?
+    /// Resigns keyboard focus inside the overlay window.
+    var onEndEditing: (() -> Void)?
 
     var spec: OverlaySpec? {
         session.spec
+    }
+
+    /// The safe-area insets `safeAreaPadding` sees inside the spec: a fullscreen spec sits below the
+    /// host dismiss bar, which already clears the top inset.
+    var contentSafeInsets: UIEdgeInsets {
+        var insets = safeInsets
+        let chrome = OverlayHostChrome(placementType: spec?.window.placement.type ?? "fullscreen")
+        insets.top = chrome.contentSafeTop(safeTop: insets.top)
+        return insets
     }
 
     var state: [String: JSONValue] {
@@ -107,6 +118,10 @@ final class OverlayModel: ObservableObject {
     /// The dialog scrim: closes the dialog without running any button's actions.
     func closeModal(_ node: OverlayNode) {
         apply { $0.closeModal(node) }
+    }
+
+    func endEditing() {
+        onEndEditing?()
     }
 
     func dismiss(reason: OverlayDismissReason) {

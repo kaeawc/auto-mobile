@@ -518,7 +518,7 @@ struct NodeView: View {
 
     private var safeAreaEdges: UIEdgeInsets {
         guard let edges = node.safeAreaPadding?.edges else { return .zero }
-        let all = model.safeInsets
+        let all = model.contentSafeInsets
         return UIEdgeInsets(
             top: edges.contains("top") ? all.top : 0,
             left: edges.contains("start") ? all.left : 0,

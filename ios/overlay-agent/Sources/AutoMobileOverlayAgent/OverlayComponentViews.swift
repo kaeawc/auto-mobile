@@ -624,6 +624,9 @@ struct OverlayModalLayer: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: modals.dialogIdentities) { before, _ in
+            if overlayModalChangeEndsEditing(from: before, to: modals) { model.endEditing() }
+        }
     }
 }
 
@@ -641,45 +644,79 @@ struct OverlayDialogView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if let icon = node.icon {
-                Image(systemName: overlaySymbol(icon, fallback: "info.circle"))
+                // Decorative, as Android's dialog icon (contentDescription = null). Drawn as a text
+                // glyph: a bare SF Symbol Image still surfaced as an image element on iOS 26 despite
+                // accessibilityHidden.
+                Text(Image(systemName: overlaySymbol(icon, fallback: "info.circle")))
                     .font(.title2)
                     .frame(maxWidth: .infinity)
                     .accessibilityHidden(true)
             }
-            if !title.isEmpty {
-                Text(title).font(.title2).accessibilityAddTraits(.isHeader)
-            }
-            if let text, !text.isEmpty {
-                Text(text).font(.body).foregroundColor(colors.contentVariant)
-            }
-            if let child = node.child {
-                NodeView(node: child, model: model)
+            let parts = node.dialogParts(title: title, text: text)
+            ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
+                partView(part)
             }
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
-                if let dismiss = node.dismiss {
-                    textButton(dismiss, identifier: node.partIdentifier("dismiss"))
-                }
-                if let confirm = node.confirm {
-                    textButton(confirm, identifier: node.partIdentifier("confirm"))
+                ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
+                    if case let .button(part, label, identifier) = part {
+                        textButton(part: part, label: label, identifier: identifier)
+                    }
                 }
             }
         }
         .padding(24)
         .frame(minWidth: 280, maxWidth: 560)
-        .background(RoundedRectangle(cornerRadius: 28).fill(colors.surfaceHigh))
-        .contentShape(Rectangle())
-        // Body taps never reach the scrim; the dialog's own onTap runs instead.
-        .onTapGesture { model.run(node.onTap ?? []) }
+        // Body taps never reach the scrim; the dialog's own onTap runs instead. The gesture sits on
+        // the surface behind the parts, not on the stack: on the stack SwiftUI hands it to every
+        // child as an accessibility action, which surfaced the decorative icon as a tappable image.
+        .background(
+            RoundedRectangle(cornerRadius: 28)
+                .fill(colors.surfaceHigh)
+                .contentShape(Rectangle())
+                .onTapGesture { model.run(node.onTap ?? []) }
+                .accessibilityHidden(true)
+        )
+        // Each part stays its own element (#10439). No `.isModal` trait here: added to this stack
+        // it lands on every child element, and with several modal siblings the accessibility tree
+        // kept only the last one (Save), dropping the title, text, pickers and Cancel. Android's
+        // in-window dialog is not modal to accessibility either; the scrim blocks touches.
+        .accessibilityElement(children: .contain)
         .padding(.horizontal, 24)
-        .accessibilityAddTraits(.isModal)
+        .padding(.vertical, 24)
     }
 
-    private func textButton(_ button: OverlayDialogButton, identifier: String?) -> some View {
-        Button(button.label) { model.activate(.modalButton(node, button)) }
-            .buttonStyle(.borderless)
-            .frame(minHeight: 44)
-            .overlayIdentifier(identifier)
+    /// Title, text and content; the buttons share the trailing row.
+    @ViewBuilder
+    private func partView(_ part: OverlayDialogPart) -> some View {
+        switch part {
+        case let .title(title):
+            Text(title).font(.title2).accessibilityAddTraits(.isHeader)
+        case let .text(text):
+            Text(text).font(.body).foregroundColor(colors.contentVariant)
+        case .content:
+            if let child = node.child {
+                // A child taller than the screen scrolls, so the title and buttons stay on screen
+                // (the alarm fixture's wheel and calendar overflow an iPhone below the host bar).
+                ViewThatFits(in: .vertical) {
+                    NodeView(node: child, model: model)
+                    ScrollView(.vertical) { NodeView(node: child, model: model) }
+                }
+            }
+        case .button:
+            EmptyView()
+        }
+    }
+
+    private func textButton(part: String, label: String, identifier: String?) -> some View {
+        Button(label) {
+            if let button = part == "confirm" ? node.confirm : node.dismiss {
+                model.activate(.modalButton(node, button))
+            }
+        }
+        .buttonStyle(.borderless)
+        .frame(minHeight: 44)
+        .overlayIdentifier(identifier)
     }
 }
 

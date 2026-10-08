@@ -246,3 +246,38 @@ enum OverlayTime {
         String(format: "%02d:%02d", hour, minute)
     }
 }
+
+/// One accessibility element of an open dialog, in reading order. The icon is decorative and never
+/// listed. Each part is its own element, as on Android, so `tapOn` can find a button by its label.
+enum OverlayDialogPart: Equatable {
+    /// The title, exposed as a header.
+    case title(String)
+    /// The body text.
+    case text(String)
+    /// The dialog's `child` subtree (pickers, fields), whose nodes expose themselves.
+    case content
+    /// The `dismiss` or `confirm` button, identified `<tag>.dismiss` / `<tag>.confirm`.
+    case button(part: String, label: String, identifier: String?)
+}
+
+extension OverlayNode {
+    /// The parts a dialog exposes for an already interpolated `title` and `text`: empty title or
+    /// text are not drawn, so they are not listed.
+    func dialogParts(title: String, text: String?) -> [OverlayDialogPart] {
+        var parts: [OverlayDialogPart] = []
+        if !title.isEmpty { parts.append(.title(title)) }
+        if let text, !text.isEmpty { parts.append(.text(text)) }
+        if child != nil { parts.append(.content) }
+        if let dismiss { parts.append(.button(
+            part: "dismiss",
+            label: dismiss.label,
+            identifier: partIdentifier("dismiss")
+        )) }
+        if let confirm { parts.append(.button(
+            part: "confirm",
+            label: confirm.label,
+            identifier: partIdentifier("confirm")
+        )) }
+        return parts
+    }
+}

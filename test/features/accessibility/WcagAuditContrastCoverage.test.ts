@@ -5,7 +5,7 @@
  * keyboard window 550 over y 1517..2400, status bar 537). The screenshot is a synthetic raster the
  * size of that capture, served through the ContrastChecker's ImageBackend/readFile seam.
  */
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import path from "path";
 import { WcagAudit, type WcagBaselineStore } from "../../../src/features/accessibility/WcagAudit";
@@ -92,6 +92,12 @@ const textsOf = (elements: Element[]) => elements.map((element) => element.text)
 const isUnderKeyboard = (element: Element) => element.bounds.bottom > KEYBOARD_TOP;
 const appTextUnderKeyboard = ["Password Field", "Password", "Multiline Text Area"];
 const bottomNavLabels = ["Demos", "Slides", "Settings"];
+
+// The first audit in a process pays one-time module and JIT warm-up for projection, the audit
+// and contrast sampling (~40 ms locally), which is not what these tests measure.
+beforeAll(async () => {
+  await runAudit(capture(), raster(WIDTH, HEIGHT, 0x80));
+});
 
 describe("text under the soft keyboard (#10220)", () => {
   // Same colour everywhere: any text the screenshot shows has a 1:1 ratio and fails.

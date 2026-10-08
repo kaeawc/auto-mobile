@@ -755,8 +755,13 @@ export class Daemon {
     this.unsubscribeSessionExecutionEnded = null;
   }
 
-  /** Idleness counts from the END of the last tool call (owner decision 2026-10-08). */
+  /**
+   * Idleness counts from the END of the last tool call (owner decision 2026-10-08), and a call's
+   * end re-arms the owner-disconnect releases it deferred (#10712). Subscribed by `start()` and
+   * dropped by {@link stopSessionTimers}; idempotent so a retried start cannot stack listeners.
+   */
   private subscribeToolCallEndActivity(): void {
+    this.unsubscribeSessionExecutionEnded?.();
     this.unsubscribeSessionExecutionEnded = executionTracker.onSessionExecutionEnded(
       (sessionUuids) => {
         const sessionIds = new Set(
@@ -788,7 +793,6 @@ export class Daemon {
     this.sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       this.hasActiveSessionExecution(sessionId, query),
     );
-    this.subscribeToolCallEndActivity();
     this.sessionManager.onSessionCreated((session) => {
       NavigationGraphManager.clearReleasedSession(session.sessionId);
       this.setupNavigationGraphUpdateListener(
@@ -960,6 +964,9 @@ export class Daemon {
 
     logger.info("Starting AutoMobile daemon...");
     this.setupShutdownHandlers();
+    // Subscribe here, not in the constructor: only a started daemon is ever stopped, so a
+    // constructed-but-never-started daemon must not leave a listener on the global tracker (#10712).
+    this.subscribeToolCallEndActivity();
     // Record our socket in every CtrlProxy forwarding lease we take, so another
     // AutoMobile process can ask whether we still use the device (#10497).
     setCtrlProxyForwardLeaseOwnerSocketPath(SOCKET_PATH);

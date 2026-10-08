@@ -2944,7 +2944,9 @@ jobs:
   build-playground-app:
     timeout-minutes: 20
     name: "Build Playground App"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
+    # Stays GitHub-hosted: Gradle (5g) + Kotlin daemon (2g) + test workers exceed the
+    # 8 GB Namespace profile and the daemon is OOM-killed.
+    runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
     defaults:

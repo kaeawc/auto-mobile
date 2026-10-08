@@ -126,7 +126,10 @@ describe("proxy stops heartbeating held sessions the conversation abandoned (iss
     await acquire("getApple", "ios-session");
     expect(await tickSessions()).toEqual(["android-session", "ios-session"]);
 
-    await advance(IDLE_WINDOW_MS);
+    // The conversation keeps using only the new device.
+    await advance(IDLE_WINDOW_MS / 2);
+    await proxy.callTool("observe", {});
+    await advance(IDLE_WINDOW_MS / 2);
 
     expect(await tickSessions()).toEqual(["ios-session"]);
     expect(await tickSessions()).toEqual(["ios-session"]);

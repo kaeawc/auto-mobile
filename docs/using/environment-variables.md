@@ -203,8 +203,14 @@ and the client acquires a fresh session when it next needs one.
 changes the window, for example to check idle release live; a value that is not a
 positive base-10 integer is ignored. Set it in both the daemon's and the proxy's
 environment. The proxy's replay of a remembered session binding and its eviction
-of held sessions nothing has named follow the same window: only forwarded tool
-calls refresh them. `session-info` reports `lastUsedAt` as the last tool activity
+of held sessions nothing has used follow the same window: only forwarded tool
+calls refresh them, including a call that selects the device with `platform` or
+`deviceId` instead of naming the session (#10692). Once the window passes, the
+proxy stops heartbeating the binding even if it missed the daemon's release
+notification, and it also stops when the daemon answers a heartbeat with
+`daemon_session_not_found`; a call that names the released session is told to
+call `getAndroid` or `getApple`, which works on the same transport (#10702).
+`session-info` reports `lastUsedAt` as the last tool activity
 and `expiresAt` as the idle deadline. When a session's device restarts, the daemon
 waits up to three minutes for it to come back. Tool calls that start, wait on, or
 fail because of that recovery count as activity, so the idle window only ends the

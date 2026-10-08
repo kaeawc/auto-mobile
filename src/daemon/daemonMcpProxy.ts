@@ -484,8 +484,9 @@ export class DaemonAssetVersionMismatchError extends DaemonUnavailableError {
 
 /**
  * Raised after a daemon release proves that this transport's device-session
- * identity is terminal. A fresh transport may create a new session; this bound
- * transport must never silently resurrect its UUID against another device.
+ * identity is terminal. The transport must never silently resurrect its UUID
+ * against another device; an explicit getAndroid/getApple on the same transport
+ * acquires a new session (#5689), which is what the message tells the agent (#10702).
  */
 export class DaemonBoundSessionExpiredError extends ActionableError {
   readonly sessionUuid: string;
@@ -494,8 +495,8 @@ export class DaemonBoundSessionExpiredError extends ActionableError {
 
   constructor(sessionUuid: string, reason: string, release?: SessionReleaseSnapshot) {
     super(
-      `Device session ${sessionUuid} expired or was released (${reason}). ` +
-        "This MCP transport cannot create a replacement session; start a new transport.",
+      `Device session ${sessionUuid} expired or was released (${reason}) and cannot be used ` +
+        `again. ${DEVICE_SESSION_RECOVERY_PROMPT}`,
     );
     this.name = "DaemonBoundSessionExpiredError";
     this.sessionUuid = sessionUuid;
@@ -1017,6 +1018,11 @@ export class DaemonMcpProxy {
    * Keyed by UUID so a binding change or a successful heartbeat starts a fresh leash.
    */
   private latestBindingConflict: ({ sessionUuid: string } & OwnerConflictLeash) | undefined;
+  /**
+   * The latest binding the daemon answered a heartbeat for with not-found (#10702). It is no
+   * longer heartbeated until a tool call reaches it again.
+   */
+  private latestBindingNotFound: string | undefined;
   /**
    * The `--initial-session-uuid` binding was claimed at startup and no tool call has used it yet.
    * While the previous owner is still heartbeating, its refusals must not fence the binding: the
@@ -3934,6 +3940,7 @@ export class DaemonMcpProxy {
     this.boundSessionFromResultMint = false;
     this.livenessOwnershipClaimSent = false;
     this.latestBindingConflict = undefined;
+    this.latestBindingNotFound = undefined;
     this.recoverableBoundSessionHandoff = undefined;
   }
 
@@ -4964,6 +4971,16 @@ export class DaemonMcpProxy {
     if (!sessionUuid || !this.latestBindingClaimable() || this.closing) {
       return;
     }
+    if (this.isBoundSessionReplayExpired()) {
+      // Backstop for a missed session-released notification (#10702): an idle binding is retired
+      // here, so the keeper stops instead of heartbeating it until the next call arrives.
+      this.fenceBoundSessionUuid(sessionUuid, "replay-lease-expired");
+      return;
+    }
+    if (this.latestBindingNotFound === sessionUuid) {
+      // The daemon answered that it does not know this session; heartbeating it again cannot help.
+      return;
+    }
     // A caller that explicitly schedules heartbeats beyond the lease cannot
     // maintain daemon ownership by cadence. Preserve that opt-out's prior
     // single-flight behavior (used by replay-lease tests).
@@ -5004,12 +5021,38 @@ export class DaemonMcpProxy {
       if (this.absorbOwnershipRefusal(error, sessionUuid, isCurrent)) {
         return;
       }
+      if (this.isDaemonSessionNotFoundError(error) && isCurrent()) {
+        this.stopHeartbeatingUnknownLatestBinding(sessionUuid);
+        return;
+      }
       if (error instanceof DaemonBoundSessionExpiredError) {
         // Terminal fencing already stopped the keeper; this tick has no further work.
         logger.debug(`[DaemonMcpProxy] Bound-session heartbeat stopped: ${error.message}`);
         return;
       }
       throw error;
+    }
+  }
+
+  /**
+   * The daemon answered a heartbeat for the latest binding, retried on a fresh connection, with
+   * not-found: it released the session and this proxy missed the notification (#10702). Stop
+   * heartbeating it rather than every tick resetting the socket to ask again. The binding is not
+   * fenced: a replacement daemon may restore a persisted session when a tool call reaches it, and a
+   * call that does so re-arms the heartbeat; otherwise that call reports the loss.
+   */
+  private stopHeartbeatingUnknownLatestBinding(sessionUuid: string): void {
+    if (this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
+      return;
+    }
+    if (this.latestBindingNotFound !== sessionUuid) {
+      logger.info(
+        `[DaemonMcpProxy] The daemon no longer knows session ${sessionUuid}; no longer heartbeating it`,
+      );
+    }
+    this.latestBindingNotFound = sessionUuid;
+    if (this.otherHeldSessions.size === 0) {
+      void this.stopBoundSessionHeartbeat();
     }
   }
 
@@ -5407,6 +5450,8 @@ export class DaemonMcpProxy {
     this.boundSessionUuid = sessionUuid;
     this.boundSessionUuidAt = this.timer.now();
     this.ownedDeviceSessions.add(sessionUuid);
+    // A call reached the session, so the daemon knows it again: heartbeat it (#10702).
+    this.latestBindingNotFound = undefined;
   }
 
   // Refresh the replay lease for a call that was ADMITTED and forwarded to the

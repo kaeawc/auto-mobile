@@ -10,6 +10,7 @@ import {
   isImeOwnedId,
   resourceIdPackage,
 } from "../observe/android/ImeKeycapIds";
+import { iosWindowLayer, rankWithIosWindowLayer } from "../observe/ios/iosWindowLayer";
 import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "./ElementParser";
@@ -181,6 +182,8 @@ export interface SearchableEntry extends SearchableNode {
   parentIndex?: number;
   rootGroup: number;
   windowRank: number;
+  /** Front-to-back iOS window position when the capture had several windows; see iosWindowLayer.ts. */
+  iosWindowLayer?: number;
   /**
    * Present when the node sits in the soft keyboard's input-method window, the
    * subtree `observe` folds into one `<ime>` row (issues #6871, #10225). The
@@ -289,6 +292,15 @@ function markKeycapFallback(entries: readonly SearchableEntry[]): void {
   }
 }
 
+/** A node's own iOS window layer, else its parent's. */
+function inheritedIosWindowLayer(
+  source: unknown,
+  parent: SearchableEntry | undefined,
+): number | undefined {
+  // iOS converted nodes keep extras beside $, not inside the attribute slot.
+  return iosWindowLayer((source as { extras?: unknown }).extras) ?? parent?.iosWindowLayer;
+}
+
 /** One immutable capture's flattened nodes. The capture object is the cache identity. */
 export class SearchableHierarchy {
   private readonly captures = new WeakMap<ViewHierarchyResult, readonly SearchableEntry[]>();
@@ -322,6 +334,7 @@ export class SearchableHierarchy {
         const element = this.parser.parseNodeBounds(source) ?? undefined;
         const raw = toSearchable({ ...properties, bounds: nodeBounds(source) });
         const marker: unknown = properties.extras?.[IME_PACKAGE_EXTRA];
+        const layer = inheritedIosWindowLayer(source, ancestors.at(-1));
         const entry: SearchableEntry = {
           ...raw,
           bounds: element?.bounds ?? raw.bounds,
@@ -332,7 +345,8 @@ export class SearchableHierarchy {
           index: entries.length,
           parentIndex: ancestors.at(-1)?.index,
           rootGroup: group,
-          windowRank: rank,
+          windowRank: rankWithIosWindowLayer(rank, layer),
+          iosWindowLayer: layer,
           inputMethod:
             typeof marker === "string" && marker.length > 0
               ? { package: marker }

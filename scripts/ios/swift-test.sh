@@ -73,6 +73,7 @@ TESTABLE_PACKAGES=(
     "XCTestRunner"
     "screen-capture"
     "network-filter"
+    "overlay-agent"
 )
 
 # Total tests executed in a `swift test` transcript.

@@ -32,11 +32,10 @@ export class OverlayDetector implements OverlayAnalyzer {
     const containerBounds = containerElement.bounds;
 
     // `containerElement` is whatever findTargetElement's own resolution
-    // (ElementFinder.findElementByResourceId/findElementByText) already
-    // selected for the swipe — an area-sorted pick among possibly several
-    // same-selector matches. finder.findContainerNode() answers a different
-    // question (the first traversal match, used elsewhere to scope nested
-    // searches) and can name a different node than the one actually being
+    // (ElementResolver) already selected for the swipe — a ranked pick among
+    // possibly several same-selector matches. A first-traversal-match container
+    // lookup answers a different question (used to scope nested searches)
+    // and can name a different node than the one actually being
     // swiped when the selector is ambiguous. Anchoring ancestor-exemption to
     // that other node exempted the wrong element's ancestors while treating
     // the real target's ancestor as a full-cover overlay — reproducing the
@@ -442,12 +441,11 @@ export class OverlayDetector implements OverlayAnalyzer {
    * the node actually lives in rather than a different one that would never
    * contain it.
    *
-   * Searches the SAME source set in the SAME order ElementFinder itself
-   * uses to resolve an element: the main hierarchy first, then the
+   * Searches the main hierarchy first, then the
    * per-window hierarchies (topmost-first), stopping at the first source
    * that has any match at all. Scanning only the per-window hierarchies —
    * which is all `rootGroups` holds once any window exists — would miss a
-   * container that the finder actually resolved from the main hierarchy,
+   * container that the resolver actually resolved from the main hierarchy,
    * and a same-id/same-bounds look-alike sitting in a popup window could
    * then be mistaken for the (never-checked) real match.
    *

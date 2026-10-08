@@ -871,7 +871,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!viewHierarchy) {
       return false;
     }
-    // The owner is resolved (ElementFinder) and natively activated across every
+    // The owner is resolved (ElementResolver) and natively activated across every
     // window subtree, so the uniqueness count must span the same node set. Flatten
     // with includeWindows to match — otherwise an owner in a dialog/popup/overlay is
     // miscounted: an ambiguous owner reads as unique, a valid one as absent. See #5618.

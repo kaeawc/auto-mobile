@@ -2,7 +2,6 @@ import capture from "../../../fixtures/android-enabled/playground-disabled-contr
 import { androidControlObservation } from "../../../helpers/androidDisabledControlCapture";
 import { sanitizeObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
 import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
-import { DefaultElementFinder } from "../../../../src/features/utility/ElementFinder";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { STABLE_VIEW_ID_PREFIX } from "../../../../src/features/observe/android/StableNodeIdentity";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
@@ -64,7 +63,7 @@ test.each([false, true])(
     }
     expect(roots[1].node["view-id"]).toStartWith(STABLE_VIEW_ID_PREFIX);
     expect(
-      new DefaultElementFinder().findElementByResourceId(converted, roots[1].node["view-id"]),
+      new ResolverElementSelector().selectByResourceId(converted, roots[1].node["view-id"]).element,
     ).not.toBeNull();
     const projected = projectActionableHierarchy("android", converted);
     expect(projected.windows?.[1].hierarchy).toBe(roots[1]);

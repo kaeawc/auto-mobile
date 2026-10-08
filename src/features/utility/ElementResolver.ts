@@ -398,7 +398,7 @@ function sameReferenceProof(node: SearchableEntry, ref: ElementReference): boole
   return sameBounds && node.label === ref.label && node.nativeId === ref.nativeId;
 }
 
-/** Pure selection over projected capture data. No hierarchy acquisition or legacy finder calls. */
+/** Pure selection over projected capture data. No hierarchy acquisition. */
 /**
  * Bare ids are unique per namespace (app vs IME), so when IME keys are excluded
  * the synthetic-id guard must not count them as family peers.
@@ -1338,7 +1338,7 @@ export class ElementResolver {
   /** Distinct synthetic keys in the capture sharing `base`, bare or suffixed. */
   private stableViewIdFamilyKeys(captureNodes: readonly SearchableEntry[], base: string): string[] {
     // The same element can appear in the main hierarchy and a window copy; count
-    // it once (same object, or same key at the same bounds), as ElementFinder does.
+    // it once (same object, or same key at the same bounds).
     const seen = new Set<string>();
     const seenSources = new Set<unknown>();
     const keys: string[] = [];
@@ -1366,7 +1366,7 @@ export class ElementResolver {
    * Guidance for a bare `s2-<hash>` selector that cannot name one element:
    * a legacy bare-plus-later-ordinal family, or several peers sharing the base
    * (the producer suffixes every duplicate, so the bare id matches none of
-   * them). Counted over the whole capture, like ElementFinder (#10476).
+   * them). Counted over the whole capture (#10476).
    */
   private bareSyntheticIdGuard(
     captureNodes: readonly SearchableEntry[],

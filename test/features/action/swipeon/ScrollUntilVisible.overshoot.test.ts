@@ -9,7 +9,7 @@ import { SwipeSearchCancelledError } from "../../../../src/features/action/swipe
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
-import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
+import { ScriptedElementLookup } from "../../../fakes/ScriptedElementLookup";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeTalkBackSwipeExecutor } from "../../../fakes/FakeTalkBackSwipeExecutor";
 import { FakeOverlayDetector } from "../../../fakes/FakeOverlayDetector";
@@ -141,7 +141,7 @@ const BASE_OPTIONS: SwipeOnResolvedOptions = {
 
 describe("ScrollUntilVisible overshoot recovery", () => {
   let detector: FakeAccessibilityDetector;
-  let finder: FakeElementFinder;
+  let lookup: ScriptedElementLookup;
   let scrollResolver: FakeScrollElementResolver;
   let timer: FakeTimer;
   let accessibilityService: FakeScrollAccessibilityService;
@@ -150,8 +150,8 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   beforeEach(() => {
     detector = new FakeAccessibilityDetector();
     detector.setTalkBackEnabled(false);
-    finder = new FakeElementFinder();
-    scrollResolver = new FakeScrollElementResolver(finder);
+    lookup = new ScriptedElementLookup();
+    scrollResolver = new FakeScrollElementResolver(lookup);
     timer = new FakeTimer();
     timer.enableAutoAdvance();
     accessibilityService = new FakeScrollAccessibilityService();
@@ -380,7 +380,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     // Forward phase: obs[1] same as obs[0] → 1 unchanged scroll → switch to reverseMode
     // Reverse phase: obs[2] is different fingerprint → element found
     let findCount = 0;
-    finder.findElementByText = (_h: any, _t: any) => {
+    lookup.findElementByText = (_h: any, _t: any) => {
       findCount++;
       // found on the 3rd call (initial check + 1 forward miss + found after reverse)
       return findCount >= 3 ? TARGET_ELEMENT : null;
@@ -406,7 +406,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
   test("throws when both forward and reverse directions exhaust without finding element", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
-    finder.nextElementByText = null; // never found
+    lookup.nextElementByText = null; // never found
 
     // All observations identical — both forward and reverse end-of-list trigger
     const sameObs = makeObserveResult(99);
@@ -426,7 +426,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
     let findCount = 0;
-    finder.findElementByText = (_h: any, _t: any) => {
+    lookup.findElementByText = (_h: any, _t: any) => {
       findCount++;
       // found after 2 forward scrolls (findCount=3: initial check + 2 post-swipe checks)
       return findCount >= 3 ? TARGET_ELEMENT : null;
@@ -458,7 +458,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   test("suppresses intermediate evidence and captures only the terminal observation", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     let findCount = 0;
-    finder.findElementByText = (_h: any, _t: any) => {
+    lookup.findElementByText = (_h: any, _t: any) => {
       findCount++;
       return findCount >= 2 ? TARGET_ELEMENT : null;
     };
@@ -493,7 +493,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
     // Forward phase triggers end-of-list (1 same), then reverse finds element
     let findCount = 0;
-    finder.findElementByText = (_h: any, _t: any) => {
+    lookup.findElementByText = (_h: any, _t: any) => {
       findCount++;
       return findCount >= 3 ? TARGET_ELEMENT : null;
     };
@@ -523,7 +523,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   test("stale unchanged observation is re-observed before deciding to reverse", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     // Tie the synthetic target to the final page, regardless of how many earlier pages are searched.
-    finder.findElementByText = (hierarchy) =>
+    lookup.findElementByText = (hierarchy) =>
       hierarchy.hierarchy.node === final.viewHierarchy!.hierarchy.node ? TARGET_ELEMENT : null;
 
     const initial = makeObserveResult(0);
@@ -576,7 +576,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       ++containerLookups === 1 ? firstContainer : shiftedContainer,
     );
     let findCount = 0;
-    finder.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
+    lookup.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
     const sameObs = { ...makeObserveResult(0), freshness: { isFresh: true } };
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
@@ -617,7 +617,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       ++containerLookups === 1 ? firstContainer : shiftedContainer,
     );
     let findCount = 0;
-    finder.findElementByText = () => (++findCount >= 2 ? shiftedTarget : null);
+    lookup.findElementByText = () => (++findCount >= 2 ? shiftedTarget : null);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
       scrollResolver,
@@ -645,7 +645,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       ++containerLookups === 1 ? lastKnownContainer : null,
     );
     let findCount = 0;
-    finder.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
+    lookup.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
     const sameObs = makeObserveResult(0);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
@@ -698,8 +698,8 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     const fakeOverlayDetector = new FakeOverlayDetector();
     const fakeDetector = new FakeAccessibilityDetector();
     fakeDetector.setTalkBackEnabled(false);
-    const fakeFinder = new FakeElementFinder();
-    const fakeResolver = new FakeScrollElementResolver(fakeFinder);
+    const fakeLookup = new ScriptedElementLookup();
+    const fakeResolver = new FakeScrollElementResolver(fakeLookup);
     fakeResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
@@ -708,7 +708,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
     // Element not found initially; found after idle poll settles to obs2settled
     let findCount = 0;
-    fakeFinder.findElementByText = (_h: any, _t: any) => {
+    fakeLookup.findElementByText = (_h: any, _t: any) => {
       findCount++;
       return findCount >= 2 ? TARGET_ELEMENT : null;
     };
@@ -753,7 +753,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
     let findCount = 0;
-    finder.findElementByText = (_h: any, _t: any) => {
+    lookup.findElementByText = (_h: any, _t: any) => {
       findCount++;
       return findCount >= 3 ? TARGET_ELEMENT : null;
     };
@@ -787,7 +787,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
     // Forward phase triggers end-of-list (1 same), reverse finds element
     let findCount = 0;
-    finder.findElementByText = (_h: any, _t: any) => {
+    lookup.findElementByText = (_h: any, _t: any) => {
       findCount++;
       return findCount >= 3 ? TARGET_ELEMENT : null;
     };
@@ -821,7 +821,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
     let findCount = 0;
-    finder.findElementByText = (_h: any, _t: any) => (++findCount >= 2 ? TARGET_ELEMENT : null);
+    lookup.findElementByText = (_h: any, _t: any) => (++findCount >= 2 ? TARGET_ELEMENT : null);
 
     const overlayDetector = new FakeOverlayDetector();
     const candidate: OverlayCandidate = {
@@ -895,7 +895,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   test("one definite Android failure with an unchanged hierarchy does not trigger reverse recovery", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     let findCount = 0;
-    finder.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
+    lookup.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
     talkBackExecutor.setFailureResult({ success: false, error: "gesture rejected" });
     const sameObs = makeObserveResult();
     const suv = makeScrollUntilVisible({
@@ -917,7 +917,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   test("a successful Android swipe resets the consecutive failure allowance", async () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     let findCount = 0;
-    finder.findElementByText = () => (++findCount >= 5 ? TARGET_ELEMENT : null);
+    lookup.findElementByText = () => (++findCount >= 5 ? TARGET_ELEMENT : null);
     const failure = { success: false, error: "gesture rejected" };
     talkBackExecutor.setFailureResult(failure);
     const suv = makeScrollUntilVisible({
@@ -1072,7 +1072,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
     let findCount = 0;
-    finder.findElementByText = (_h: any, _t: any) => (++findCount >= 3 ? TARGET_ELEMENT : null);
+    lookup.findElementByText = (_h: any, _t: any) => (++findCount >= 3 ? TARGET_ELEMENT : null);
 
     talkBackExecutor.setFailureResult({ success: false, error: "gesture rejected" });
 

@@ -508,7 +508,6 @@ test/features/utility/ChangeLocalizationTimeZone.test.ts
 test/features/utility/DeepLinkManagerHostExec.test.ts
 test/features/utility/DeepLinkManagerIos.test.ts
 test/features/utility/DisplayConfig.test.ts
-test/features/utility/ElementFinder.test.ts
 test/features/utility/ElementGeometry.property.test.ts
 test/features/utility/ElementGeometry.test.ts
 test/features/utility/ElementParser.property.test.ts

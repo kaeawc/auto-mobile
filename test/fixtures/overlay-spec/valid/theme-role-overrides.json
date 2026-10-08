@@ -1,0 +1,33 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "theme": {
+    "mode": "light",
+    "colors": {
+      "seed": "#6750A4",
+      "primary": "#B3261E",
+      "onPrimary": "#FFFFFF",
+      "surfaceContainer": "#F3EDF7"
+    }
+  },
+  "root": {
+    "type": "column",
+    "style": {
+      "background": "surfaceContainer"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "Title",
+        "style": {
+          "color": "primary",
+          "textStyle": "titleLarge"
+        }
+      }
+    ]
+  }
+}

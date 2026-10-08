@@ -18209,7 +18209,7 @@
           "enum": ["show", "dismiss", "status", "inspect", "awaitEvent"]
         },
         "spec": {
-          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp or none|extraSmall|small|medium|large|extraLarge|full), optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising overlay_window_options_v1.",
+          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp or none|extraSmall|small|medium|large|extraLarge|full), optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising overlay_window_options_v1.",
           "type": "object",
           "properties": {
             "id": {
@@ -18332,6 +18332,115 @@
                     "source": {
                       "type": "string",
                       "enum": ["device"]
+                    },
+                    "primary": {
+                      "type": "string",
+                      "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                    },
+                    "onPrimary": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "primaryContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onPrimaryContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "inversePrimary": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "secondary": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onSecondary": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "secondaryContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onSecondaryContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "tertiary": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onTertiary": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "tertiaryContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onTertiaryContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "background": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onBackground": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surface": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onSurface": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceVariant": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onSurfaceVariant": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceTint": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "inverseSurface": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "inverseOnSurface": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "error": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onError": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "errorContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onErrorContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "outline": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "outlineVariant": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "scrim": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceBright": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceDim": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceContainerHigh": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceContainerHighest": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceContainerLow": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceContainerLowest": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
                     }
                   },
                   "additionalProperties": false,
@@ -18703,8 +18812,7 @@
                                     "type": "object",
                                     "properties": {
                                       "color": {
-                                        "type": "string",
-                                        "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                                        "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
                                       },
                                       "position": {
                                         "type": "number",

@@ -116,7 +116,7 @@ const paddingSchema = z
   })
   .strict();
 /** Material 3 ColorScheme roles a colour field can name instead of a hex value. */
-const COLOR_ROLES = [
+export const OVERLAY_COLOR_ROLES = [
   "primary",
   "onPrimary",
   "primaryContainer",
@@ -166,7 +166,7 @@ const CORNER_RADIUS_TOKENS = [
 ] as const;
 const colorValueSchema = z.union([
   z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/),
-  z.enum(COLOR_ROLES),
+  z.enum(OVERLAY_COLOR_ROLES),
 ]);
 const borderSchema = z
   .object({
@@ -622,6 +622,13 @@ const windowSchema = z
       ),
   })
   .strict();
+/**
+ * Explicit hex overrides for individual scheme roles, applied over the seed, device or baseline
+ * scheme in both light and dark.
+ */
+const themeColorRoleSchemas = Object.fromEntries(
+  OVERLAY_COLOR_ROLES.map((role) => [role, hexColorSchema.optional()]),
+) as Record<(typeof OVERLAY_COLOR_ROLES)[number], z.ZodOptional<typeof hexColorSchema>>;
 const themeColorsSchema = z
   .object({
     seed: z
@@ -629,6 +636,7 @@ const themeColorsSchema = z
       .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
       .optional(),
     source: z.enum(["device"]).optional(),
+    ...themeColorRoleSchemas,
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0);

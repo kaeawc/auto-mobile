@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { z } from "zod";
 import contract from "../../../schemas/overlay-spec-contract.json";
 import {
+  OVERLAY_COLOR_ROLES,
   OVERLAY_NODE_TYPES,
   overlayNodeSchema,
   overlaySpecSchema,
@@ -61,5 +62,30 @@ describe("overlay node contract parity", () => {
     const candidate = spec({ ...node, transition: "fade" }, { on: false });
     expect(validateOverlaySpec(candidate)).toMatchObject({ success: true });
     expect(overlaySpecSchema.safeParse(candidate).success).toBe(true);
+  });
+
+  test("theme colours have the same fields in Zod and the contract, one per colour role", () => {
+    const colors = overlaySpecSchema.shape.theme.unwrap().innerType().shape.colors.unwrap();
+    const zodFields = Object.keys(colors.innerType().shape).sort();
+    const contractFields = Object.keys(contract.definitions.themeColors.fields).sort();
+    expect(zodFields).toEqual(contractFields);
+    expect(contractFields.filter((field) => field !== "seed" && field !== "source")).toEqual(
+      [...OVERLAY_COLOR_ROLES].sort(),
+    );
+  });
+
+  test("a role override takes hex only in both validators", () => {
+    const themed = (colors: Record<string, string>) => ({
+      ...spec({ type: "text", text: "x" }),
+      theme: { colors },
+    });
+    for (const colors of [{ primary: "#B3261E" }, { seed: "#6750A4", surface: "#FFFFFF" }]) {
+      expect(validateOverlaySpec(themed(colors))).toMatchObject({ success: true });
+      expect(overlaySpecSchema.safeParse(themed(colors)).success).toBe(true);
+    }
+    for (const colors of [{ primary: "onSurface" }, { brand: "#6750A4" }]) {
+      expect(validateOverlaySpec(themed(colors))).toMatchObject({ success: false });
+      expect(overlaySpecSchema.safeParse(themed(colors)).success).toBe(false);
+    }
   });
 });

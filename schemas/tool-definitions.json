@@ -19059,6 +19059,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -19099,6 +19102,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -19138,6 +19144,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -20430,6 +20439,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -20470,6 +20482,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -20509,6 +20524,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"

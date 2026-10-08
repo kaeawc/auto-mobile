@@ -1642,6 +1642,19 @@
               },
               "optional": true
             },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
             "visibleWhen": {
               "rule": {
                 "kind": "ref",
@@ -1719,6 +1732,19 @@
               },
               "optional": true
             },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
             "visibleWhen": {
               "rule": {
                 "kind": "ref",
@@ -1793,6 +1819,19 @@
               "rule": {
                 "kind": "ref",
                 "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
               },
               "optional": true
             },

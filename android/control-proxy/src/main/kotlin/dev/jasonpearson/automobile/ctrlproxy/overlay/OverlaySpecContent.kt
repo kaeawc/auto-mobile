@@ -1,5 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandIn
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,10 +28,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,6 +55,11 @@ internal fun OverlayRuntimeContent(
   interact: suspend (OverlayInteraction) -> Unit,
 ) {
   val snapshot by runtime.snapshots.collectAsState()
+  val resolver = LocalContext.current.contentResolver
+  val motion =
+    remember(snapshot.spec) {
+      overlayMotionEnabled(snapshot.spec.motion, readAnimatorDurationScale(resolver))
+    }
   if (snapshot.active) {
     key(runtime) {
       // One ordered queue drained by one coroutine: interactions reach the controller exactly in
@@ -56,6 +69,7 @@ internal fun OverlayRuntimeContent(
       CompositionLocalProvider(
         LocalOverlayTextEpochs provides snapshot.textEpochs,
         LocalOverlayImageCache provides images,
+        LocalOverlayMotion provides motion,
       ) {
         OverlaySpecContent(
           mapOverlaySpec(snapshot.spec, snapshot.pages).root,
@@ -88,9 +102,34 @@ fun OverlaySpecContent(
 }
 
 @Composable
-private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInteraction) -> Unit) {
-  if (!node.visible) return
-  val modifier = overlayNodeModifier(node, interact)
+private fun RenderOverlayNode(
+  node: OverlayRenderNode,
+  interact: (OverlayInteraction) -> Unit,
+  parentModifier: Modifier = Modifier,
+) {
+  // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
+  if (LocalOverlayMotion.current && node.source?.visibleWhen != null) {
+    // The row/column weight rides on the animated container: it is the Row/Column's direct child.
+    AnimatedVisibility(
+      visible = node.visible,
+      modifier = parentModifier,
+      enter = fadeIn() + expandIn(),
+      exit = fadeOut() + shrinkOut(),
+    ) {
+      RenderOverlayNodeContent(node, interact)
+    }
+  } else if (node.visible) {
+    RenderOverlayNodeContent(node, interact, parentModifier)
+  }
+}
+
+@Composable
+private fun RenderOverlayNodeContent(
+  node: OverlayRenderNode,
+  interact: (OverlayInteraction) -> Unit,
+  parentModifier: Modifier = Modifier,
+) {
+  val modifier = parentModifier.then(overlayNodeModifier(node, interact))
   when (node.role) {
     "box" ->
       Box(modifier, contentAlignment = node.style.alignment) {
@@ -102,7 +141,7 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
         horizontalArrangement = overlayHorizontalArrangement(node.style.source),
         verticalAlignment = node.style.verticalAlignment,
       ) {
-        node.children.forEach { RenderOverlayNode(it, interact) }
+        node.children.forEach { RenderOverlayNode(it, interact, rowWeight(it)) }
       }
     "column" ->
       Column(
@@ -110,7 +149,7 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
         verticalArrangement = overlayVerticalArrangement(node.style.source),
         horizontalAlignment = node.style.horizontalAlignment,
       ) {
-        node.children.forEach { RenderOverlayNode(it, interact) }
+        node.children.forEach { RenderOverlayNode(it, interact, columnWeight(it)) }
       }
     "text" -> {
       val source = node.style.source
@@ -133,7 +172,12 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
     "icon" -> {
       val icon = overlayIcon(node.iconName)
       if (icon != null)
-        Icon(icon, contentDescription = null, modifier = modifier, tint = node.style.color)
+        Icon(
+          icon,
+          contentDescription = null,
+          modifier = modifier,
+          tint = node.style.color.takeOrElse { LocalContentColor.current },
+        )
       else
         Box(
           modifier.defaultMinSize(24.dp, 24.dp).background(node.style.background ?: Color.LightGray)
@@ -154,6 +198,9 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
     "bottomSheet" ->
       Unit // Modal content is hoisted above the whole author tree, within this window.
     "textField" -> RenderOverlayTextField(node, modifier, interact)
+    "switch",
+    "checkbox" -> RenderOverlayToggle(node, modifier, interact)
+    "button" -> RenderOverlayButton(node, modifier, interact)
     // Spacer keeps its size and authored actions.
     else -> Box(modifier)
   }
@@ -214,7 +261,12 @@ private fun RenderOverlayPager(
 ) {
   val source = node.source as? OverlayPagerNode ?: return
   val pager = rememberPagerState(initialPage = node.page) { node.children.size }
-  LaunchedEffect(node.page) { if (pager.currentPage != node.page) pager.scrollToPage(node.page) }
+  val animate = LocalOverlayMotion.current
+  LaunchedEffect(node.page) {
+    if (pager.currentPage != node.page) {
+      if (animate) pager.animateScrollToPage(node.page) else pager.scrollToPage(node.page)
+    }
+  }
   LaunchedEffect(pager) {
     snapshotFlow { pager.isScrollInProgress to pager.settledPage }
       .distinctUntilChanged()
@@ -348,7 +400,7 @@ private fun RenderOverlaySheet(
             .size(32.dp, 4.dp)
             .background(Color.Gray, RoundedCornerShape(2.dp))
         )
-      node.children.forEach { RenderOverlayNode(it, interact) }
+      node.children.forEach { RenderOverlayNode(it, interact, columnWeight(it)) }
     }
   }
 }
@@ -360,7 +412,11 @@ private fun overlayNodeModifier(
 ): Modifier {
   val style = node.style.source
   val actions = node.source?.onTap.orEmpty()
-  val tappable = actions.isNotEmpty() && node.role != "textField" && node.role != "bottomSheet"
+  val tappable =
+    actions.isNotEmpty() &&
+      node.role != "textField" &&
+      node.role != "bottomSheet" &&
+      node.role !in OVERLAY_COMPONENT_ROLES
   var modifier: Modifier = Modifier
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).
@@ -368,6 +424,7 @@ private fun overlayNodeModifier(
   modifier = dimensionModifier(modifier, style.width, horizontal = true)
   modifier = dimensionModifier(modifier, style.height, horizontal = false)
   modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
+  modifier = sizeConstraintModifier(modifier, style)
   val shape = RoundedCornerShape((style.cornerRadius ?: 0.0).toFloat().dp)
   if (style.cornerRadius != null) modifier = modifier.clip(shape)
   node.style.background?.let { modifier = modifier.background(it, shape) }
@@ -468,3 +525,28 @@ private fun dimensionModifier(
     OverlayDimension.Wrap,
     null -> if (horizontal) modifier.wrapContentWidth() else modifier.wrapContentHeight()
   }
+
+/** Child `weight` takes the remaining main-axis space; only meaningful inside a Row. */
+private fun RowScope.rowWeight(child: OverlayRenderNode): Modifier =
+  child.style.source.weight?.let { Modifier.weight(it.toFloat()) } ?: Modifier
+
+/** Child `weight` takes the remaining main-axis space; only meaningful inside a Column. */
+private fun ColumnScope.columnWeight(child: OverlayRenderNode): Modifier =
+  child.style.source.weight?.let { Modifier.weight(it.toFloat()) } ?: Modifier
+
+/** Applied after width/height so `fill` and `dp` are clamped by the authored min/max. */
+private fun sizeConstraintModifier(modifier: Modifier, style: OverlayStyle): Modifier =
+  if (
+    style.minWidth == null &&
+      style.maxWidth == null &&
+      style.minHeight == null &&
+      style.maxHeight == null
+  )
+    modifier
+  else
+    modifier.sizeIn(
+      minWidth = style.minWidth?.toFloat()?.dp ?: Dp.Unspecified,
+      minHeight = style.minHeight?.toFloat()?.dp ?: Dp.Unspecified,
+      maxWidth = style.maxWidth?.toFloat()?.dp ?: Dp.Unspecified,
+      maxHeight = style.maxHeight?.toFloat()?.dp ?: Dp.Unspecified,
+    )

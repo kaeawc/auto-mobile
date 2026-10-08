@@ -6,7 +6,8 @@
     "MAX_OVERLAY_SPEC_BYTES": 262144,
     "MAX_OVERLAY_EMIT_PAYLOAD_BYTES": 4096,
     "MAX_OVERLAY_EMIT_PAYLOAD_DEPTH": 24,
-    "MAX_OVERLAY_SELECTOR_DEPTH": 8
+    "MAX_OVERLAY_SELECTOR_DEPTH": 8,
+    "MAX_OVERLAY_CONDITION_DEPTH": 8
   },
   "definitions": {
     "offset": {
@@ -96,18 +97,75 @@
     },
     "condition": {
       "kind": "object",
+      "exactlyOne": ["key", "all", "any", "not"],
+      "dependents": {
+        "key": ["equals", "notEquals", "gt", "lt"]
+      },
       "fields": {
         "key": {
           "rule": {
             "kind": "key"
           },
-          "optional": false
+          "optional": true
         },
         "equals": {
           "rule": {
             "kind": "scalar"
           },
-          "optional": false
+          "optional": true
+        },
+        "notEquals": {
+          "rule": {
+            "kind": "scalar"
+          },
+          "optional": true
+        },
+        "gt": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        },
+        "lt": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        },
+        "all": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "condition"
+            },
+            "min": 1,
+            "max": 16,
+            "unique": false
+          },
+          "optional": true
+        },
+        "any": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "condition"
+            },
+            "min": 1,
+            "max": 16,
+            "unique": false
+          },
+          "optional": true
+        },
+        "not": {
+          "rule": {
+            "kind": "ref",
+            "name": "condition"
+          },
+          "optional": true
         }
       }
     },
@@ -273,6 +331,46 @@
           "rule": {
             "kind": "ref",
             "name": "dimension"
+          },
+          "optional": true
+        },
+        "weight": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 1e-6
+          },
+          "optional": true
+        },
+        "minWidth": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "maxWidth": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "minHeight": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "maxHeight": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
           },
           "optional": true
         },
@@ -706,6 +804,49 @@
                 "kind": "scalar"
               },
               "optional": false
+            }
+          }
+        },
+        "toggle": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["toggle"]
+              },
+              "optional": false
+            },
+            "key": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            }
+          }
+        },
+        "increment": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["increment"]
+              },
+              "optional": false
+            },
+            "key": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            },
+            "by": {
+              "rule": {
+                "kind": "number",
+                "integer": false
+              },
+              "optional": true
             }
           }
         },
@@ -1359,6 +1500,238 @@
             }
           }
         },
+        "switch": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["switch"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            },
+            "label": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            }
+          }
+        },
+        "checkbox": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["checkbox"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            },
+            "label": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            }
+          }
+        },
+        "button": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["button"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "label": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "variant": {
+              "rule": {
+                "kind": "enum",
+                "values": ["filled", "outlined", "text"]
+              },
+              "optional": true
+            }
+          }
+        },
         "scroll": {
           "kind": "object",
           "fields": {
@@ -1865,6 +2238,13 @@
             "item": {
               "kind": "scalar"
             }
+          },
+          "optional": true
+        },
+        "motion": {
+          "rule": {
+            "kind": "enum",
+            "values": ["none", "standard"]
           },
           "optional": true
         },

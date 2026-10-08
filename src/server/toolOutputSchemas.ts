@@ -1678,6 +1678,15 @@ const deviceStateOutputFields = {
     })
     .passthrough()
     .optional(),
+  cameraPoster: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      mode: z.enum(["image", "qr", "clear"]).optional(),
+      surface: z.enum(["wall", "table"]).optional(),
+      path: z.string().optional(),
+    })
+    .passthrough()
+    .optional(),
   clock: z
     .object({
       ...deviceStateFieldOutputFields,

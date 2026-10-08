@@ -173,7 +173,8 @@ fun rememberDesktopDaemonSession(
     var refused = false
     var failedBinds = 0
     // Set when this session must be replaced by a fresh one before anything else happens: it still
-    // holds a device the pane no longer controls (#10682 C3).
+    // holds a device the pane no longer controls (#10682 C3), or the daemon released its UUID
+    // terminally (idle release, heartbeat expiry) so it can never bind again (C4).
     var rotateSession = false
     while (isActive && bindingGeneration.get() == generation) {
       val registered = runCatching {
@@ -189,6 +190,15 @@ fun rememberDesktopDaemonSession(
                   bindingAcknowledged = true
                   failedBinds = 0
                   session.deviceBound(held = true)
+                }
+                result.refusal == SetActiveDeviceRefusal.SESSION_RELEASED -> {
+                  // A released UUID is terminal on the daemon; re-sending it would fail forever.
+                  // Mint a fresh session (as closing the last pane does) and bind under it.
+                  LOG.info(
+                    "Desktop session ${session.sessionUuid} was released by the daemon; " +
+                      "re-registering a fresh session: ${result.message}"
+                  )
+                  rotateSession = true
                 }
                 result.refusal == SetActiveDeviceRefusal.HELD_BY_ANOTHER_SESSION &&
                   session.holdsDevice -> {

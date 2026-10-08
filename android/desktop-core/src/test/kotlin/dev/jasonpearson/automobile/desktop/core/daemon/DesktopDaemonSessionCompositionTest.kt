@@ -365,6 +365,55 @@ class DesktopDaemonSessionCompositionTest {
     }
 
   @Test
+  fun `an idle-released session re-registers a fresh uuid instead of viewing`() = runComposeUiTest {
+    // #10682 C4: the daemon idle-releases a passive viewer's session; its UUID is terminal.
+    val transport = RecordingDaemonTransport()
+    val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+    var state: DesktopDaemonSessionState? = null
+    setContent { state = sessionHost(transport, binding) }
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeByFrame()
+    repeat(2) { tick() }
+
+    transport.releasedSessions += "session-1"
+    tick()
+    mainClock.advanceTimeByFrame()
+    mainClock.advanceTimeByFrame()
+    repeat(3) { tick() }
+
+    // session-1's re-bind is refused as terminal exactly once; session-2 binds the device.
+    assertEquals(3, transport.boundDevices().size)
+    assertEquals(null, state?.viewingDeviceId)
+    assertEquals(null, state?.bindErrorMessage)
+    assertEquals("emulator-5554", state?.boundDeviceId)
+    assertEquals(3, transport.sessionsFor("daemon/heartbeat").count { it == "session-2" })
+  }
+
+  @Test
+  fun `take control with a released session uuid binds under a fresh session`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport().apply { heldByAnotherSession = true }
+    val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+    var state: DesktopDaemonSessionState? = null
+    setContent { state = sessionHost(transport, binding) }
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeByFrame()
+    repeat(2) { tick() }
+    transport.heldByAnotherSession = false
+    transport.releasedSessions += "session-1"
+
+    state.takeControl()
+    mainClock.advanceTimeByFrame()
+    mainClock.advanceTimeByFrame()
+    mainClock.advanceTimeByFrame()
+    repeat(2) { tick() }
+
+    assertEquals(null, state?.viewingDeviceId)
+    assertEquals(null, state?.bindErrorMessage)
+    assertEquals("emulator-5554", state?.boundDeviceId)
+    assertEquals(3, transport.boundDevices().size)
+  }
+
+  @Test
   fun `a refused bind is not a device hold so unfocusing releases nothing`() = runComposeUiTest {
     val transport = RecordingDaemonTransport(rejectBindsUntilAttempt = 99)
     val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)

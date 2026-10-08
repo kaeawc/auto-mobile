@@ -25,6 +25,39 @@ final class OverlaySpecDecodingTests: XCTestCase {
         }
     }
 
+    /// Every spec the shared validator accepts must decode on iOS too (#10440).
+    func testEverySharedValidFixtureDecodes() throws {
+        let dir = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("test/fixtures/overlay-spec/valid")
+        let files = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }
+        XCTAssertGreaterThan(files.count, 20)
+        for file in files {
+            XCTAssertNoThrow(
+                try JSONDecoder().decode(OverlaySpec.self, from: Data(contentsOf: file)),
+                file.lastPathComponent
+            )
+        }
+    }
+
+    func testStyleFormsAddedAfterThePrototypeDecode() throws {
+        let node = try JSONDecoder().decode(OverlayNode.self, from: Data("""
+        {"type":"text","text":"x","style":{"fontFamily":{"asset":"brand"},"cornerRadius":{"topStart":4},
+         "shadowColor":"primary","offset":{"x":1,"y":2},"lineHeight":20,"letterSpacing":-1,
+         "textDecoration":"underline","fontStyle":"italic","overflow":"ellipsis","elevation":3}}
+        """.utf8))
+        let style = try XCTUnwrap(node.style)
+        XCTAssertEqual(style.fontFamily, .asset("brand"))
+        XCTAssertEqual(style.cornerRadius, .corners(topStart: 4, topEnd: 0, bottomEnd: 0, bottomStart: 0))
+        XCTAssertEqual(style.offset?.y, 2)
+        XCTAssertEqual(style.textDecoration, "underline")
+        let token = try JSONDecoder().decode(Style.self, from: Data(#"{"cornerRadius":"large","fontFamily":"serif"}"#.utf8))
+        XCTAssertEqual(token.cornerRadius, .uniform(16))
+        XCTAssertEqual(token.fontFamily, .keyword("serif"))
+    }
+
     func testConditionWithoutAComparisonIsRejected() {
         XCTAssertThrowsError(try condition(#"{"key":"ready"}"#))
     }

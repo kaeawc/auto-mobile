@@ -79,8 +79,8 @@ final class OverlayModel: ObservableObject {
         apply { $0.toggle(key: key, then: actions) }
     }
 
-    func select(index: Int, pager: String?, key: String?) {
-        apply { $0.select(index: index, pager: pager, key: key) }
+    func select(index: Int, pager: String?, key: String?, then actions: [OverlayAction] = []) {
+        apply { $0.select(index: index, pager: pager, key: key, then: actions) }
     }
 
     func dismiss(reason: OverlayDismissReason) {

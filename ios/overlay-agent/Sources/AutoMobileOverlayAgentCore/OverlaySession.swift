@@ -191,11 +191,17 @@ struct OverlaySession {
         return change(key: key, value: .bool(!stored)) + run(actions)
     }
 
-    /// A `tabBar`/`bottomNav` selection drives its pager when it has one, else its state key.
-    mutating func select(index: Int, pager: String?, key: String?) -> [OverlayEvent] {
-        if let pager { return setPage(pager, index) }
-        if let key { return change(key: key, value: .number(Double(index))) }
-        return []
+    /// A `tabBar`/`bottomNav` selection drives its pager when it has one, else its state key, then
+    /// runs the node's `onTap` actions, as Android's selection does.
+    mutating func select(index: Int, pager: String?, key: String?, then actions: [OverlayAction] = []) -> [OverlayEvent] {
+        guard isShown else { return [] }
+        var events: [OverlayEvent] = []
+        if let pager {
+            events = setPage(pager, index)
+        } else if let key {
+            events = change(key: key, value: .number(Double(index)))
+        }
+        return events + run(actions)
     }
 
     /// The terminal event: every dismissal emits exactly one `dismissed`, carrying its reason.

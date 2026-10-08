@@ -14,9 +14,12 @@
   "root": {
     "type": "box",
     "anchor": {
-      "type": "element",
-      "selector": {
-        "testTag": "buy"
+      "type": "bounds",
+      "bounds": {
+        "x": 24,
+        "y": 120,
+        "width": 160,
+        "height": 48
       },
       "alignment": "cover"
     },

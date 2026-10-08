@@ -87,7 +87,7 @@ class DesktopDaemonSessionCompositionTest {
     }
 
   @Test
-  fun `a rejected bind result is retried on the next tick`() = runComposeUiTest {
+  fun `a rejected bind result is not retried on later ticks`() = runComposeUiTest {
     val transport = RecordingDaemonTransport(rejectBindsUntilAttempt = 2)
     val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
     setContent { sessionHost(transport, binding) }
@@ -96,7 +96,99 @@ class DesktopDaemonSessionCompositionTest {
 
     repeat(4) { tick() }
 
-    assertEquals(2, transport.boundDevices().size)
+    assertEquals(1, transport.boundDevices().size)
+  }
+
+  @Test
+  fun `a bind refused because another session holds the device never re-sends it`() =
+    runComposeUiTest {
+      val transport = RecordingDaemonTransport().apply { heldByAnotherSession = true }
+      val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+      var state: DesktopDaemonSessionState? = null
+      setContent { state = sessionHost(transport, binding) }
+      mainClock.autoAdvance = false
+      mainClock.advanceTimeByFrame()
+
+      repeat(10) { tick() }
+
+      assertEquals(listOf("emulator-5554"), transport.boundDevices())
+      // Viewing keeps the session alive as an observer instead of allocating the device.
+      assertEquals(1, transport.count("daemon/registerSession"))
+      assertEquals(10, transport.count("daemon/heartbeat"))
+      assertEquals("emulator-5554", state?.viewingDeviceId)
+      assertEquals(null, state?.boundDeviceId)
+    }
+
+  @Test
+  fun `the holder releasing the device does not grab it`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport().apply { heldByAnotherSession = true }
+    val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+    var state: DesktopDaemonSessionState? = null
+    setContent { state = sessionHost(transport, binding) }
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeByFrame()
+    repeat(2) { tick() }
+
+    transport.heldByAnotherSession = false
+    repeat(10) { tick() }
+
+    assertEquals(listOf("emulator-5554"), transport.boundDevices())
+    assertEquals("emulator-5554", state?.viewingDeviceId)
+  }
+
+  @Test
+  fun `a heartbeat lapse while viewing re-registers without binding`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport().apply { heldByAnotherSession = true }
+    val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+    setContent { sessionHost(transport, binding) }
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeByFrame()
+    tick()
+    transport.heldByAnotherSession = false
+
+    transport.failNext("daemon/heartbeat")
+    repeat(3) { tick() }
+
+    assertEquals(listOf("emulator-5554"), transport.boundDevices())
+    assertEquals(2, transport.count("daemon/registerSession"))
+  }
+
+  @Test
+  fun `take control makes exactly one bind attempt`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport().apply { heldByAnotherSession = true }
+    val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+    var state: DesktopDaemonSessionState? = null
+    setContent { state = sessionHost(transport, binding) }
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeByFrame()
+    repeat(2) { tick() }
+    transport.heldByAnotherSession = false
+
+    state.takeControl()
+    mainClock.advanceTimeByFrame()
+    repeat(5) { tick() }
+
+    assertEquals(listOf("emulator-5554", "emulator-5554"), transport.boundDevices())
+    assertEquals(null, state?.viewingDeviceId)
+    assertEquals("emulator-5554", state?.boundDeviceId)
+  }
+
+  @Test
+  fun `take control refused again stays viewing after one attempt`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport().apply { heldByAnotherSession = true }
+    val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+    var state: DesktopDaemonSessionState? = null
+    setContent { state = sessionHost(transport, binding) }
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeByFrame()
+    tick()
+
+    state.takeControl()
+    mainClock.advanceTimeByFrame()
+    repeat(5) { tick() }
+
+    assertEquals(listOf("emulator-5554", "emulator-5554"), transport.boundDevices())
+    assertEquals("emulator-5554", state?.viewingDeviceId)
   }
 
   @Test
@@ -117,6 +209,8 @@ class DesktopDaemonSessionCompositionTest {
       assertEquals(listOf("emulator-5554"), transport.boundDevices())
     }
 
+  private fun DesktopDaemonSessionState?.takeControl() = requireNotNull(this).requestControl()
+
   private fun ComposeUiTest.tick() {
     mainClock.advanceTimeBy(HEARTBEAT_MS)
     mainClock.advanceTimeByFrame()
@@ -126,8 +220,8 @@ class DesktopDaemonSessionCompositionTest {
   private fun sessionHost(
     transport: RecordingDaemonTransport,
     binding: MutableState<DesktopDaemonSessionBinding?>,
-  ) {
-    rememberDesktopDaemonSession(
+  ): DesktopDaemonSessionState {
+    return rememberDesktopDaemonSession(
       socketPath = "in-memory",
       binding = binding,
       sessionFactory = {

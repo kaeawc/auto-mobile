@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -34,6 +35,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.rememberDesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.daemon.rememberPaneSessionUuidProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
+import dev.jasonpearson.automobile.desktop.core.layout.DeviceViewingNotice
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
@@ -603,10 +605,14 @@ fun AutoMobileDesktopApp(
                     //    pane arming can't silently steal keystrokes mid-type (#5217). Click a pane
                     // to
                     //    focus (and thus drive) it; the single-device case is always focused.
+                    // Viewing (#10660): another session holds this device, so the pane mirrors
+                    // it without control until the user explicitly takes control.
+                    val viewingOnly = desktopSessionState.viewingDeviceId == column.deviceId
                     val controlActive =
                       graph.autoMobileClient.transportName == "Unix Socket" &&
                         (workspaceState as? WorkspaceUiState.Content)?.focusedDeviceId ==
-                          column.deviceId
+                          column.deviceId &&
+                        !viewingOnly
                     val control =
                       rememberWorkspaceDeviceControl(
                         column = column,
@@ -614,16 +620,24 @@ fun AutoMobileDesktopApp(
                         enabled = controlActive,
                         sessionUuidProvider = paneSessionUuidProvider,
                       )
-                    DeviceStreamView(
-                      column,
-                      sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
-                      enableDeviceControl = controlActive,
-                      control = control,
-                      // Wires the per-pane quality overlay (manual Low/Medium/High + live FPS +
-                      // auto-adjust) and persists the choice across sessions.
-                      settings = settings,
-                      streamingEnabled = streamingEnabled,
-                    )
+                    Box {
+                      DeviceStreamView(
+                        column,
+                        sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+                        enableDeviceControl = controlActive,
+                        control = control,
+                        // Wires the per-pane quality overlay (manual Low/Medium/High + live FPS +
+                        // auto-adjust) and persists the choice across sessions.
+                        settings = settings,
+                        streamingEnabled = streamingEnabled,
+                      )
+                      if (viewingOnly) {
+                        DeviceViewingNotice(
+                          onTakeControl = desktopSessionState.requestControl,
+                          modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                        )
+                      }
+                    }
                   },
                 )
                 if (paletteOpen) {

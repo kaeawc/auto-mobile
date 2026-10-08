@@ -14,6 +14,13 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
   private val failures = CopyOnWriteArrayList<String>()
   private var bindAttempts = 0
 
+  /**
+   * While true, every `setActiveDevice` is refused the way the daemon refuses a device another live
+   * session owns: an `isError` tool result naming the holder (#10660). Flip it to false to model
+   * the holder releasing the device.
+   */
+  @Volatile var heldByAnotherSession: Boolean = false
+
   fun failNext(key: String) {
     failures.add(key)
   }
@@ -51,13 +58,20 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
 
   private fun resultFor(key: String): String =
     when (key) {
-      "tools/call:setActiveDevice" -> {
-        bindAttempts++
-        val success = bindAttempts >= rejectBindsUntilAttempt
-        """{"content":[{"type":"text","text":"{\"success\":$success}"}]}"""
-      }
+      "tools/call:setActiveDevice" ->
+        if (heldByAnotherSession) {
+          HELD_REFUSAL
+        } else {
+          bindAttempts++
+          val success = bindAttempts >= rejectBindsUntilAttempt
+          """{"content":[{"type":"text","text":"{\"success\":$success}"}]}"""
+        }
       "daemon/registerSession" ->
         """{"accepted":true,"heartbeatTimeoutMs":10000,"expiresAtMs":12345}"""
       else -> "{}"
     }
 }
+
+private const val HELD_REFUSAL =
+  """{"isError":true,"content":[{"type":"text","text":""" +
+    """"Error: Device 'emulator-5554' is already assigned to session agent-session"}]}"""

@@ -4593,6 +4593,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           signal,
           deferPredictionOutcome: true,
           deferPostActionScreenshot: true,
+          resolvesTargetFromRead: true,
           ...(options.ensureChecked !== undefined
             ? { observationHostTimestampProvider: () => ensureCheckedTapTimestamp }
             : {}),

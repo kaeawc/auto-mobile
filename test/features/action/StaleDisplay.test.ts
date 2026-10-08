@@ -1,4 +1,11 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { FakeGestureExecutor } from "../../fakes/FakeGestureExecutor";
+import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
+import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
+import { FakeWindow } from "../../fakes/FakeWindow";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { SendKeys } from "../../../src/features/action/SendKeys";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -547,15 +554,20 @@ describe("tapOn fresh hierarchy transition fence", () => {
 });
 
 // #9847: after a fold the caller's stamp is behind, but a selector is not a coordinate.
-describe("unscoped selector tapOn re-resolves against a new display generation", () => {
-  function staleCallerHarness(platform: "android" | "ios") {
-    const h = harness(cases[0], platform);
-    h.transitions.transition(1);
-    const fresh = {
-      ...h.screen,
-      displayRevision: h.transitions.fullRevision,
-      display: { key: "cover", role: "cover", posture: "closed", generation: 8 },
-    } as ObserveResult;
+function staleCallerHarness(platform: "android" | "ios") {
+  const h = harness(cases[0], platform);
+  h.transitions.transition(1);
+  const fresh = {
+    ...h.screen,
+    displayRevision: h.transitions.fullRevision,
+    display: { key: "cover", role: "cover", posture: "closed", generation: 8 },
+  } as ObserveResult;
+  return { h, fresh };
+}
+
+describe("unscoped selector actions re-resolve against a new display generation", () => {
+  function baseHarness(platform: "android" | "ios") {
+    const { h, fresh } = staleCallerHarness(platform);
     const action = new BaseVisualChange(
       h.targetDevice,
       h.adb,
@@ -566,15 +578,16 @@ describe("unscoped selector tapOn re-resolves against a new display generation",
     action.observeScreen = h.observe;
     return { h, fresh, action };
   }
-  const options = (toolName: string) => ({
+  const options = (toolName: string, resolvesTargetFromRead = true) => ({
     changeExpected: false,
     skipUiStability: true,
+    resolvesTargetFromRead,
     predictionContext: { toolName, toolArgs: {} },
   });
 
   for (const platform of ["android", "ios"] as const) {
     test(`${platform}: one fresh read at the new generation, then the block runs`, async () => {
-      const { h, fresh, action } = staleCallerHarness(platform);
+      const { h, fresh, action } = baseHarness(platform);
       h.observe.setObserveResult(fresh);
       const seen: ObserveResult[] = [];
       const result = await action.observedInteraction(async (observation) => {
@@ -588,7 +601,7 @@ describe("unscoped selector tapOn re-resolves against a new display generation",
   }
 
   test("a read still at the old revision keeps the refusal", async () => {
-    const { action } = staleCallerHarness("android");
+    const { action } = baseHarness("android");
     let calls = 0;
     const run = () =>
       action.observedInteraction(async () => {
@@ -600,7 +613,7 @@ describe("unscoped selector tapOn re-resolves against a new display generation",
   });
 
   test("a transition after the re-read is fenced at the re-read generation", async () => {
-    const { h, fresh, action } = staleCallerHarness("android");
+    const { h, fresh, action } = baseHarness("android");
     h.observe.setObserveResult(fresh);
     spyOn(h.adb, "getDeviceTimestampMs").mockImplementation(async () => {
       h.transitions.transition(1);
@@ -610,13 +623,13 @@ describe("unscoped selector tapOn re-resolves against a new display generation",
     assertStale(await rejection(run), 8, 9);
   });
 
-  for (const toolName of ["tapAt", "tapAny", "swipeOn"]) {
-    test(`${toolName} keeps refusing caller coordinates`, async () => {
-      const { h, fresh, action } = staleCallerHarness("android");
+  for (const toolName of ["tapAt", "tapAny", "swipeOn", "dragAndDrop"]) {
+    test(`${toolName} without a read-resolved target keeps refusing`, async () => {
+      const { h, fresh, action } = baseHarness("android");
       h.observe.setObserveResult(fresh);
       assertStale(
         await rejection(() =>
-          action.observedInteraction(async () => ({ success: true }), options(toolName)),
+          action.observedInteraction(async () => ({ success: true }), options(toolName, false)),
         ),
         7,
         8,
@@ -624,4 +637,105 @@ describe("unscoped selector tapOn re-resolves against a new display generation",
       expect(h.observe.getExecuteCallCount()).toBe(0);
     });
   }
+});
+
+type SelectorTool = "tapOn" | "tapAny" | "swipeOn" | "dragAndDrop";
+
+// Each selector tool reaches the shared re-read; screen swipes and tapAt still refuse (#9847).
+describe("selector tools retry once after a fold", () => {
+  const restores: Array<{ mockRestore(): void }> = [];
+  beforeEach(() => {
+    restores.push(
+      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
+        isAvailable: async () => true,
+      } as unknown as AndroidCtrlProxyManager),
+      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+        new FakeCtrlProxy() as unknown as AndroidCtrlProxyClient,
+      ),
+    );
+  });
+  afterEach(() => {
+    restores.splice(0).forEach((restore) => restore.mockRestore());
+  });
+
+  async function runSelectorTool(
+    name: SelectorTool,
+    h: ReturnType<typeof harness>,
+  ): Promise<BaseActionResult> {
+    switch (name) {
+      case "tapOn":
+      case "tapAny":
+      case "dragAndDrop":
+        return caughtAction(name, h);
+      case "swipeOn": {
+        const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, {
+          ...h.deps,
+          executeGesture: new FakeGestureExecutor(),
+          accessibilityDetector: new FakeAccessibilityDetector(),
+        });
+        action.observeScreen = h.observe;
+        action.awaitIdle = new FakeAwaitIdle();
+        action.window = new FakeWindow();
+        return action.execute({ direction: "up", container: { text: "List" } });
+      }
+    }
+  }
+  const selectorTools: SelectorTool[] = ["tapOn", "tapAny", "swipeOn", "dragAndDrop"];
+
+  for (const name of selectorTools) {
+    test(`${name}: one fresh read at the new generation passes the caller fence`, async () => {
+      const { h, fresh } = staleCallerHarness("android");
+      h.observe.setObserveResult(fresh);
+      const result = await runSelectorTool(name, h);
+      expect(result.staleDisplay).toBeUndefined();
+      expect(result.error ?? "").not.toContain("Display changed");
+      const reads = h.observe.getExecuteOptions();
+      expect(reads[0]?.freshness).toBe("fresh");
+    });
+
+    test(`${name}: a change after the re-read still refuses`, async () => {
+      const { h, fresh } = staleCallerHarness("android");
+      h.observe.setObserveResult(fresh);
+      spyOn(h.adb, "getDeviceTimestampMs").mockImplementation(async () => {
+        h.transitions.transition(1);
+        return h.timer.now();
+      });
+      const result = await runSelectorTool(name, h);
+      expect(result.success).toBe(false);
+      expect(result.staleDisplay).toMatchObject({ observedGeneration: 8, currentGeneration: 9 });
+    });
+  }
+
+  test("a screen swipe without a selector keeps refusing", async () => {
+    const { h, fresh } = staleCallerHarness("android");
+    h.observe.setObserveResult(fresh);
+    const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, h.deps);
+    action.observeScreen = h.observe;
+    const result = await action.execute({ direction: "up", autoTarget: false });
+    assertResult(result, 7, 8);
+    expect(h.observe.getExecuteCallCount()).toBe(0);
+  });
+
+  test("tapAt coordinates keep refusing", async () => {
+    const { h, fresh } = staleCallerHarness("android");
+    h.observe.setObserveResult(fresh);
+    let dispatches = 0;
+    const dispatch = async () => {
+      dispatches++;
+    };
+    const client = { requestTapCoordinates: async () => ({ success: true }) };
+    const action = new TapAtCoordinate(h.targetDevice, h.adb, {
+      ...h.deps,
+      androidClient: client,
+      iosClient: client,
+      dispatchAndroidCoordinateTap: dispatch,
+      dispatchIosCoordinateTap: dispatch,
+      invalidateIosCache: () => {},
+    });
+    setFakeTapAtWindow(action);
+    action.observeScreen = h.observe;
+    const result = await action.execute({ x: 20, y: 30 });
+    assertResult(result, 7, 8);
+    expect(dispatches).toBe(0);
+  });
 });

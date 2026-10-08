@@ -1729,6 +1729,7 @@ export class SwipeOn extends BaseVisualChange {
       },
       {
         previousObservation: selected?.observation,
+        resolvesTargetFromRead: true,
         queryOptions:
           selected || usesScopedSwipeContainer(options.container)
             ? undefined

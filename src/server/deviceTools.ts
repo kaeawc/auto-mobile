@@ -726,7 +726,8 @@ const FORCE_SKIP_AVD_VERIFICATION_DESCRIPTION =
   "it override the refusal raised when this daemon's pool entry for the serial was retired and " +
   "replaced while the action was being prepared, or deleteDevice's refusal to delete a stopped " +
   "image while a booted emulator that cannot be identified at all is attached. Android " +
-  "emulators only; accepted and ignored for iOS and physical devices.";
+  "emulators only; accepted and ignored for iOS and physical devices. Separately, on any " +
+  "platform, force also stops a device another session holds, which is otherwise refused.";
 
 export const killDeviceSchema = z
   .object({

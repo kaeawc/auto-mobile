@@ -1875,7 +1875,8 @@ function deviceAwareHandlerArgs(
  * deliberately drops a stray `deviceId`) and a call with no `deviceId` are not
  * checked. Tools registered with `ToolRegistry.register` (setActiveDevice,
  * startDevice, killDevice, listDevices, ...) never reach this resolver and keep
- * naming other devices freely.
+ * naming other devices freely; killDevice and deleteDevice check device ownership
+ * themselves (`assertLifecycleCallerHoldsDevice`, #10785).
  */
 function assertSessionDeviceRouting(
   toolName: string,

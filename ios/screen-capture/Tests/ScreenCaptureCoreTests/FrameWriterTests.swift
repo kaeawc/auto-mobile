@@ -94,6 +94,27 @@ final class FrameWriterTests: XCTestCase {
         XCTAssertEqual(helper.terminationStatus, 0)
     }
 
+    /// The helper writes capability markers (and, while capturing, a frame-metrics
+    /// line every second) to stderr. A closed stderr reader must not terminate it:
+    /// `FileHandle.write(_:)` raised there and killed a live capture with SIGTRAP (#7604).
+    func testHelperHelpSurvivesClosedStderrPipe() throws {
+        let helperURL = Bundle(for: Self.self).bundleURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("screen-capture-helper")
+        let diagnostics = Pipe()
+        diagnostics.fileHandleForReading.closeFile()
+        let helper = Process()
+        helper.executableURL = helperURL
+        helper.arguments = ["--help"]
+        helper.standardOutput = FileHandle.nullDevice
+        helper.standardError = diagnostics
+
+        try helper.run()
+        helper.waitUntilExit()
+        XCTAssertEqual(helper.terminationReason, .exit)
+        XCTAssertEqual(helper.terminationStatus, 0)
+    }
+
     func testRecordsEncoderDroppedFrameInMetrics() {
         let writer = FrameWriter(sink: BufferSink())
 

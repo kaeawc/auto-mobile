@@ -24,7 +24,7 @@ final class PermissionHintTimer: @unchecked Sendable {
                 return { timer.cancel() }
             },
         output: @escaping @Sendable (String) -> Void = { line in
-            FileHandle.standardError.write(Data("\(line)\n".utf8))
+            DescriptorWrite.writeDiagnostic("\(line)\n")
         }
     ) {
         self.firstFrameSignal = firstFrameSignal

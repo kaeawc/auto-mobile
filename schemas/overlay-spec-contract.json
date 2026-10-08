@@ -6,7 +6,8 @@
     "MAX_OVERLAY_SPEC_BYTES": 262144,
     "MAX_OVERLAY_EMIT_PAYLOAD_BYTES": 4096,
     "MAX_OVERLAY_EMIT_PAYLOAD_DEPTH": 24,
-    "MAX_OVERLAY_SELECTOR_DEPTH": 8
+    "MAX_OVERLAY_SELECTOR_DEPTH": 8,
+    "MAX_OVERLAY_CONDITION_DEPTH": 8
   },
   "definitions": {
     "offset": {
@@ -96,18 +97,75 @@
     },
     "condition": {
       "kind": "object",
+      "exactlyOne": ["key", "all", "any", "not"],
+      "dependents": {
+        "key": ["equals", "notEquals", "gt", "lt"]
+      },
       "fields": {
         "key": {
           "rule": {
             "kind": "key"
           },
-          "optional": false
+          "optional": true
         },
         "equals": {
           "rule": {
             "kind": "scalar"
           },
-          "optional": false
+          "optional": true
+        },
+        "notEquals": {
+          "rule": {
+            "kind": "scalar"
+          },
+          "optional": true
+        },
+        "gt": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        },
+        "lt": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        },
+        "all": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "condition"
+            },
+            "min": 1,
+            "max": 16,
+            "unique": false
+          },
+          "optional": true
+        },
+        "any": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "condition"
+            },
+            "min": 1,
+            "max": 16,
+            "unique": false
+          },
+          "optional": true
+        },
+        "not": {
+          "rule": {
+            "kind": "ref",
+            "name": "condition"
+          },
+          "optional": true
         }
       }
     },
@@ -683,6 +741,49 @@
                 "kind": "scalar"
               },
               "optional": false
+            }
+          }
+        },
+        "toggle": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["toggle"]
+              },
+              "optional": false
+            },
+            "key": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            }
+          }
+        },
+        "increment": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["increment"]
+              },
+              "optional": false
+            },
+            "key": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            },
+            "by": {
+              "rule": {
+                "kind": "number",
+                "integer": false
+              },
+              "optional": true
             }
           }
         },
@@ -1849,6 +1950,13 @@
             "item": {
               "kind": "scalar"
             }
+          },
+          "optional": true
+        },
+        "motion": {
+          "rule": {
+            "kind": "enum",
+            "values": ["none", "standard"]
           },
           "optional": true
         },

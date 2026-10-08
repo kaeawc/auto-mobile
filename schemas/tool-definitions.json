@@ -18110,6 +18110,10 @@
               "additionalProperties": false
             },
             "state": {},
+            "motion": {
+              "type": "string",
+              "enum": ["none", "standard"]
+            },
             "root": {
               "anyOf": [
                 {
@@ -18197,6 +18201,39 @@
                               }
                             },
                             "required": ["type", "key", "value"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["toggle"]
+                              },
+                              "key": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              }
+                            },
+                            "required": ["type", "key"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["increment"]
+                              },
+                              "key": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              },
+                              "by": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["type", "key"],
                             "additionalProperties": false
                           },
                           {
@@ -18349,28 +18386,111 @@
                       "additionalProperties": false
                     },
                     "visibleWhen": {
-                      "type": "object",
-                      "properties": {
-                        "key": {
-                          "type": "string",
-                          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
-                        },
-                        "equals": {
-                          "anyOf": [
-                            {
-                              "type": "string"
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
                             },
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "boolean"
+                            "equals": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ]
                             }
-                          ]
+                          },
+                          "required": ["key", "equals"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "key": {
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
+                            },
+                            "notEquals": {
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen/anyOf/0/properties/equals"
+                            }
+                          },
+                          "required": ["key", "notEquals"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "key": {
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
+                            },
+                            "gt": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["key", "gt"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "key": {
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
+                            },
+                            "lt": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["key", "lt"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "all": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                              },
+                              "minItems": 1,
+                              "maxItems": 16
+                            }
+                          },
+                          "required": ["all"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "any": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                              },
+                              "minItems": 1,
+                              "maxItems": 16
+                            }
+                          },
+                          "required": ["any"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "not": {
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                            }
+                          },
+                          "required": ["not"],
+                          "additionalProperties": false
                         }
-                      },
-                      "required": ["key", "equals"],
-                      "additionalProperties": false
+                      ]
                     },
                     "anchor": {
                       "anyOf": [
@@ -19255,6 +19375,39 @@
                               "properties": {
                                 "type": {
                                   "type": "string",
+                                  "enum": ["toggle"]
+                                },
+                                "key": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                }
+                              },
+                              "required": ["type", "key"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["increment"]
+                                },
+                                "key": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                },
+                                "by": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": ["type", "key"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
                                   "enum": ["dismiss"]
                                 }
                               },
@@ -19400,28 +19553,111 @@
                         "additionalProperties": false
                       },
                       "visibleWhen": {
-                        "type": "object",
-                        "properties": {
-                          "key": {
-                            "type": "string",
-                            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
-                          },
-                          "equals": {
-                            "anyOf": [
-                              {
-                                "type": "string"
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
                               },
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "boolean"
+                              "equals": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
                               }
-                            ]
+                            },
+                            "required": ["key", "equals"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
+                              },
+                              "notEquals": {
+                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen/anyOf/0/properties/equals"
+                              }
+                            },
+                            "required": ["key", "notEquals"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
+                              },
+                              "gt": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["key", "gt"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
+                              },
+                              "lt": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["key", "lt"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "all": {
+                                "type": "array",
+                                "items": {
+                                  "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                                },
+                                "minItems": 1,
+                                "maxItems": 16
+                              }
+                            },
+                            "required": ["all"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "any": {
+                                "type": "array",
+                                "items": {
+                                  "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                                },
+                                "minItems": 1,
+                                "maxItems": 16
+                              }
+                            },
+                            "required": ["any"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "not": {
+                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                              }
+                            },
+                            "required": ["not"],
+                            "additionalProperties": false
                           }
-                        },
-                        "required": ["key", "equals"],
-                        "additionalProperties": false
+                        ]
                       },
                       "anchor": {
                         "anyOf": [

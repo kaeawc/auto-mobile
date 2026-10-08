@@ -36,6 +36,7 @@ blanket focusability proposal).
 | `id`     | Required nonempty overlay identifier string.                      |
 | `window` | Required window configuration below.                              |
 | `state`  | Optional flat object of string, finite number, or boolean values. |
+| `motion` | Optional `none` or `standard` (default). See Motion below.        |
 | `root`   | Required single node.                                             |
 
 All numeric values are finite. State keys (including action/binding/condition
@@ -121,7 +122,7 @@ Every node has required `type`. All other common properties are optional:
 | `testTag`         | Nonempty accessibility/test selector tag.                                                          |
 | `onTap`           | Nonempty ordered array of actions, run in order. See "Tap targets" below.                          |
 | `style`           | Strict style object below.                                                                         |
-| `visibleWhen`     | `{key, equals}`; equals is a scalar. Missing key or unequal value means hidden.                    |
+| `visibleWhen`     | Condition (see Conditions below). A false condition, or a missing key, means hidden.               |
 | `anchor`          | Bounds or app-element anchor below.                                                                |
 | `safeAreaPadding` | Explicit inset selection below.                                                                    |
 
@@ -285,19 +286,57 @@ successful result is returned with `missingAssets` and a `warning` on the tool o
 Ids the call did not supply are only reported. See `docs/tools.md` for the result and
 deadline model.
 
+## Motion
+
+Overlay state changes animate by default (#10442). A node with `visibleWhen`
+fades and expands in and fades and shrinks out; a pager page change driven by
+`setPage` animates the scroll instead of jumping. Spec-level `motion: "none"`
+opts out and keeps every change instant. Motion is also off when the system
+animator duration scale is 0 (`adb shell settings put global
+animator_duration_scale 0`), so `observe` screenshots are settled with no
+extra waits; other scales are honored by Compose's animation clock. The scale is
+read when the spec changes. Only nodes with `visibleWhen` get an animation
+wrapper. Size-change animation, `transition` variants and `pressScale` are
+follow-ups.
+
 ## Actions and state
 
-| Action `type` | Properties                                                                                                                                        |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `emit`        | Required nonempty `name`; optional arbitrary JSON `payload` up to the 4 KiB conservative compact JSON budget (null and nested JSON allowed).      |
-| `setPage`     | Required existing `pager` ID; required `page`: `next`, `prev`, or nonnegative integer index up to 2147483647. Renderer clamps to available pages. |
-| `setState`    | Required state `key` and scalar `value`; creates or replaces a key.                                                                               |
-| `dismiss`     | No additional properties.                                                                                                                         |
+| Action `type` | Properties                                                                                                                                                 |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `emit`        | Required nonempty `name`; optional arbitrary JSON `payload` up to the 4 KiB conservative compact JSON budget (null and nested JSON allowed).               |
+| `setPage`     | Required existing `pager` ID; required `page`: `next`, `prev`, or nonnegative integer index up to 2147483647. Renderer clamps to available pages.          |
+| `setState`    | Required state `key` and scalar `value`; creates or replaces a key.                                                                                        |
+| `toggle`      | Required `key` that the spec's `state` declares as a boolean; flips it.                                                                                    |
+| `increment`   | Required `key` that `state` declares as a finite number; adds optional finite `by` (default 1, negative values decrement). Non-finite results are ignored. |
+| `dismiss`     | No additional properties.                                                                                                                                  |
 
 No scripts, callbacks, expressions, or implicit navigation. `setState` must
 preserve any text-field, selection, or sheet binding's scalar type at runtime;
 renderer enforcement is part of #9300. Event sequence and transmission are
 #9298/#9303. Dismissal does not remove the host's safety responsibilities.
+
+### Conditions
+
+A condition is exactly one of these forms. `visibleWhen` takes any of them;
+`bottomSheet.openWhen` keeps the boolean `{key, equals}` form.
+
+| Form                       | Holds when                                                               |
+| -------------------------- | ------------------------------------------------------------------------ |
+| `{key, equals: scalar}`    | The state value is exactly equal (same type). A missing key never holds. |
+| `{key, notEquals: scalar}` | The state value differs, including when the key is missing.              |
+| `{key, gt: number}`        | The state value is a number greater than `gt`. Any other type is false.  |
+| `{key, lt: number}`        | The state value is a number less than `lt`. Any other type is false.     |
+| `{all: [condition, ...]}`  | Every member holds. One to 16 members.                                   |
+| `{any: [condition, ...]}`  | At least one member holds. One to 16 members.                            |
+| `{not: condition}`         | The member does not hold.                                                |
+
+Conditions nest to a depth of 8 (`MAX_OVERLAY_CONDITION_DEPTH` in the shared
+contract). `key` takes exactly one comparison, and comparisons need `key`;
+errors point at the offending field (for example `root.visibleWhen.gt`).
+`toggle` and `increment` validate their `key` against the declared `state`
+(`root.onTap[0].key`), run silently like `setState` (no `change` event), and are
+no-ops at runtime if the key's type was changed by other means. `styleWhen`,
+list templates and a `decrement` alias are later slices of #10440.
 
 ### Host helper: showVariants
 

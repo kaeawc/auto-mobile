@@ -56,12 +56,27 @@ const selectorSchema = z
     container: containerSchema.optional(),
   })
   .strict();
-const conditionSchema = z
-  .object({
-    key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
-    equals: z.union([z.string(), z.number().finite(), z.boolean()]),
-  })
-  .strict();
+const stateKeySchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
+const scalarSchema = z.union([z.string(), z.number().finite(), z.boolean()]);
+export type OverlayCondition =
+  | { key: string; equals: string | number | boolean }
+  | { key: string; notEquals: string | number | boolean }
+  | { key: string; gt: number }
+  | { key: string; lt: number }
+  | { all: OverlayCondition[] }
+  | { any: OverlayCondition[] }
+  | { not: OverlayCondition };
+const conditionSchema: z.ZodType<OverlayCondition> = z.lazy(() =>
+  z.union([
+    z.object({ key: stateKeySchema, equals: scalarSchema }).strict(),
+    z.object({ key: stateKeySchema, notEquals: scalarSchema }).strict(),
+    z.object({ key: stateKeySchema, gt: z.number().finite() }).strict(),
+    z.object({ key: stateKeySchema, lt: z.number().finite() }).strict(),
+    z.object({ all: z.array(conditionSchema).min(1).max(16) }).strict(),
+    z.object({ any: z.array(conditionSchema).min(1).max(16) }).strict(),
+    z.object({ not: conditionSchema }).strict(),
+  ]),
+);
 const sheetConditionSchema = z
   .object({ key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/), equals: z.boolean() })
   .strict();
@@ -253,6 +268,19 @@ export const actionSchema = z.discriminatedUnion("type", [
       value: z.union([z.string(), z.number().finite(), z.boolean()]),
     })
     .strict(),
+  z
+    .object({
+      type: z.enum(["toggle"]),
+      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.enum(["increment"]),
+      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      by: z.number().finite().optional(),
+    })
+    .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
 ]);
 const commonNodeShape = {
@@ -441,6 +469,7 @@ const specSchema = z
             .safeParse(value).success,
       )
       .optional(),
+    motion: z.enum(["none", "standard"]).optional(),
     root: z.lazy(() => overlayNodeSchema),
   })
   .strict();
@@ -461,5 +490,12 @@ export const OVERLAY_NODE_TYPES = [
   "bottomNav",
   "bottomSheet",
 ] as const;
-export const OVERLAY_ACTION_TYPES = ["emit", "setPage", "setState", "dismiss"] as const;
+export const OVERLAY_ACTION_TYPES = [
+  "emit",
+  "setPage",
+  "setState",
+  "toggle",
+  "increment",
+  "dismiss",
+] as const;
 export const OVERLAY_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;

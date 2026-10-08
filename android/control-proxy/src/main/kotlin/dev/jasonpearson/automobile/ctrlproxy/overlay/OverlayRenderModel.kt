@@ -44,6 +44,7 @@ data class OverlayRenderModel(
   val hasTextField: Boolean = false,
   val layer: OverlayWindowLayer = OverlayWindowLayer.SYSTEM,
   val persistent: Boolean = false,
+  val motion: String? = null,
 ) {
   fun request() =
     InteractiveOverlayRequest(
@@ -94,6 +95,7 @@ fun mapOverlaySpec(spec: OverlaySpec, pages: Map<String, Int> = emptyMap()): Ove
     hasVisibleTextField(mapped),
     OverlayWindowLayer.fromWire(spec.window.layer),
     isDevicePersistent(spec),
+    spec.motion,
   )
 }
 
@@ -169,7 +171,7 @@ private fun mapOverlayNode(
     role,
     text,
     node.testTag,
-    node.visibleWhen?.let { localState[it.key] == it.equals } ?: true,
+    node.visibleWhen?.holds(localState) ?: true,
     mapOverlayStyle(node.style ?: OverlayStyle()),
     node.safeAreaPadding,
     (node as? OverlayIconNode)?.name,

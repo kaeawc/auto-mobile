@@ -47,6 +47,19 @@ Use `listDevices` to inspect them and `setActiveDevice` to select one. For
 repeatable CLI calls, associate calls with the session UUID returned when you
 acquire a device and pass it with `--session-uuid`.
 
+## When does the daemon release a device session?
+
+An MCP client's session is released about 10 s after its owner's last heartbeat
+(a 4 s lease, a 4 s grace, then at most one 2 s sweep), or 2 minutes after the
+end of its last tool call while heartbeats keep arriving. A tool call in flight
+is activity, so a session is never released mid-call. Heartbeats prove the client
+is alive, not that it is using the device, so they never extend the 2-minute idle
+window. If the device restarts mid-session, the daemon waits up to three minutes
+for it to come back while the client keeps calling, and calls that wait on or fail
+because of the restart count as activity. Change the idle window with
+`AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` — see
+[environment variables](using/environment-variables.md#session-heartbeat-timeout).
+
 ## How long does a device session survive between `--cli` calls?
 
 Two minutes of idleness by default, measured from the end of the last call.

@@ -204,7 +204,10 @@ positive base-10 integer is ignored. Set it in both the daemon's and the proxy's
 environment. The proxy's replay of a remembered session binding and its eviction
 of held sessions nothing has named follow the same window: only forwarded tool
 calls refresh them. `session-info` reports `lastUsedAt` as the last tool activity
-and `expiresAt` as the idle deadline.
+and `expiresAt` as the idle deadline. When a session's device restarts, the daemon
+waits up to three minutes for it to come back. Tool calls that start, wait on, or
+fail because of that recovery count as activity, so the idle window only ends the
+recovery once the client has made no calls for the whole window.
 
 A rejected claim returns
 `{ success: false, code: "liveness_owner_conflict", error: "..." }` naming the

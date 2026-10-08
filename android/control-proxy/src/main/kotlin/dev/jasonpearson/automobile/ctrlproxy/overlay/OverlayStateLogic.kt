@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy.overlay
 import dev.jasonpearson.automobile.protocol.OverlayCondition
 import dev.jasonpearson.automobile.protocol.OverlayIncrementAction
 import dev.jasonpearson.automobile.protocol.OverlayScalar
+import dev.jasonpearson.automobile.protocol.OverlayStyle
+import dev.jasonpearson.automobile.protocol.OverlayStyleWhen
 import dev.jasonpearson.automobile.protocol.OverlayToggleAction
 
 /**
@@ -40,3 +42,41 @@ internal fun OverlayIncrementAction.nextValue(state: Map<String, OverlayScalar>)
   val next = current + (by ?: 1.0)
   return if (next.isFinite()) OverlayScalar.Numeric(next) else null
 }
+
+/**
+ * The base style with every `styleWhen` entry whose condition holds merged over it, in authored
+ * order, so a later matching entry wins per property. A present property replaces the base value as
+ * a whole (`padding` and `border` are replaced, not merged edge by edge).
+ */
+internal fun resolveOverlayStyle(
+  base: OverlayStyle?,
+  styleWhen: List<OverlayStyleWhen>?,
+  state: Map<String, OverlayScalar>,
+): OverlayStyle {
+  var resolved = base ?: OverlayStyle()
+  for (entry in styleWhen.orEmpty()) {
+    if (entry.`when`.holds(state)) resolved = resolved.mergedOver(entry.style)
+  }
+  return resolved
+}
+
+/** Properties set on [overlay] win; unset ones keep this style's value. */
+private fun OverlayStyle.mergedOver(overlay: OverlayStyle): OverlayStyle =
+  OverlayStyle(
+    width = overlay.width ?: width,
+    height = overlay.height ?: height,
+    padding = overlay.padding ?: padding,
+    background = overlay.background ?: background,
+    cornerRadius = overlay.cornerRadius ?: cornerRadius,
+    border = overlay.border ?: border,
+    alpha = overlay.alpha ?: alpha,
+    alignment = overlay.alignment ?: alignment,
+    arrangement = overlay.arrangement ?: arrangement,
+    spacing = overlay.spacing ?: spacing,
+    textSize = overlay.textSize ?: textSize,
+    fontWeight = overlay.fontWeight ?: fontWeight,
+    color = overlay.color ?: color,
+    textAlign = overlay.textAlign ?: textAlign,
+    maxLines = overlay.maxLines ?: maxLines,
+    fontFamily = overlay.fontFamily ?: fontFamily,
+  )

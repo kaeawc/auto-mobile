@@ -119,6 +119,137 @@ class TelemetryPushSocketClientTest {
     client.dispose()
   }
 
+  private class RecordingSocket(lines: List<String> = emptyList()) : TelemetrySocket {
+    private val remaining = ArrayDeque(lines)
+    val written = mutableListOf<String>()
+
+    override fun readLine(): String? = remaining.removeFirstOrNull()
+
+    override fun writeLine(line: String) {
+      written.add(line)
+    }
+
+    override fun close() = Unit
+  }
+
+  private val notLiveError =
+    """{"type":"error","success":false,"error":"deviceId 'emulator-5554' does not identify a live device session; subscribe with a current deviceSessionUuid or omit deviceId for an all-devices subscription"}"""
+
+  @Test
+  fun `subscribe sends deviceSessionUuid alongside deviceId`() = runTest {
+    val socket = RecordingSocket()
+    val client = TelemetryPushSocketClient({ socket }, {}, backgroundScope, { true })
+
+    client.connect(deviceId = "emulator-5554", deviceSessionUuid = "uuid-a")
+    runCurrent()
+
+    val frame = socket.written.first()
+    assertTrue(frame, frame.contains("\"deviceId\":\"emulator-5554\""))
+    assertTrue(frame, frame.contains("\"deviceSessionUuid\":\"uuid-a\""))
+    client.dispose()
+  }
+
+  @Test
+  fun `reconnect reuses the last subscription's device arguments`() = runTest {
+    val sockets = mutableListOf<RecordingSocket>()
+    val client =
+      TelemetryPushSocketClient(
+        { RecordingSocket().also { sockets.add(it) } },
+        { kotlinx.coroutines.awaitCancellation() },
+        backgroundScope,
+        { true },
+      )
+
+    client.connect(deviceId = "emulator-5554", deviceSessionUuid = "uuid-a")
+    runCurrent()
+    client.disconnect()
+    client.reconnect()
+    runCurrent()
+
+    assertEquals(2, sockets.size)
+    val frame = sockets.last().written.first()
+    assertTrue(frame, frame.contains("\"deviceId\":\"emulator-5554\""))
+    assertTrue(frame, frame.contains("\"deviceSessionUuid\":\"uuid-a\""))
+    client.dispose()
+  }
+
+  @Test
+  fun `reconnect without a prior device subscription stays all-devices`() = runTest {
+    val socket = RecordingSocket()
+    val client = TelemetryPushSocketClient({ socket }, {}, backgroundScope, { true })
+
+    client.reconnect()
+    runCurrent()
+
+    assertFalse(socket.written.first().contains("deviceId"))
+    client.dispose()
+  }
+
+  @Test
+  fun `device not yet live is retried with backoff then connects`() = runTest {
+    val delays = FakeRetryDelay()
+    val sockets = mutableListOf<RecordingSocket>()
+    val states = mutableListOf<ConnectionState>()
+    val client =
+      TelemetryPushSocketClient(
+        {
+          val socket =
+            when (sockets.size) {
+              0 -> RecordingSocket(listOf(notLiveError))
+              1 -> RecordingSocket(listOf("""{"type":"subscription_response","success":true}"""))
+              else -> RecordingSocket()
+            }
+          sockets.add(socket)
+          socket
+        },
+        delays,
+        backgroundScope,
+        { true },
+      )
+    backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+      client.connectionState.collect { states.add(it) }
+    }
+
+    client.connect(deviceId = "emulator-5554")
+    runCurrent()
+    client.connectionState.first { it is ConnectionState.Error }
+
+    assertTrue(states.contains(ConnectionState.Connected(subscribed = true)))
+    assertTrue(sockets[0].written.first().contains("emulator-5554"))
+    assertTrue(sockets[1].written.first().contains("emulator-5554"))
+    assertTrue(delays.calls.isNotEmpty())
+    assertEquals(ConnectionState.Reconnecting(1, delays.calls.first()), states[2])
+    client.dispose()
+  }
+
+  @Test
+  fun `device that never becomes live ends in a bounded descriptive error`() = runTest {
+    var opens = 0
+    val delays = FakeRetryDelay()
+    val client =
+      TelemetryPushSocketClient(
+        {
+          opens++
+          FakeSocket(listOf(notLiveError))
+        },
+        delays,
+        backgroundScope,
+        { true },
+      )
+
+    client.connect(deviceId = "emulator-5554")
+    runCurrent()
+    client.connectionState.first { it is ConnectionState.Error }
+
+    assertEquals(TelemetryPushSocketClient.MAX_RECONNECT_ATTEMPTS, opens)
+    assertEquals(TelemetryPushSocketClient.MAX_RECONNECT_ATTEMPTS - 1, delays.calls.size)
+    assertEquals(
+      ConnectionState.Error(TelemetryPushSocketClient.DEVICE_NOT_LIVE_MESSAGE),
+      client.connectionState.replayCache.single(),
+    )
+    client.dispose()
+  }
+
   private class FakeRetryDelay : TelemetryRetryDelay {
     val calls = mutableListOf<Long>()
 

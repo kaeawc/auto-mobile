@@ -8,8 +8,7 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { DefaultElementFinder } from "../utility/ElementFinder";
-import { nodeAttributes } from "../../models/ViewHierarchyResult";
+import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { logger } from "../../utils/logger";
@@ -110,13 +109,12 @@ export class RecentApps extends BaseVisualChange {
     if (!packageName) {
       return false;
     }
-    const finder = new DefaultElementFinder();
     // Reuse the launcher surface vocabulary used by HomeScreen. Home and all-apps
     // share the launcher window, so its package alone is insufficient evidence.
-    const overview = finder.findContainerNode(hierarchy, {
+    const overview = new ResolverElementSelector().resolveContainerMatch(hierarchy, {
       elementId: `${packageName}:id/overview_panel`,
     });
-    if (!overview || nodeAttributes(overview)["visible-to-user"] !== true) {
+    if (overview?.visibleToUser !== true) {
       return false;
     }
     return isForegroundLauncher(

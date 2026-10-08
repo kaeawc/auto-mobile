@@ -57,6 +57,14 @@ export interface ReleaseChecksumEntry {
    * their prior, explicit development-only fallback behavior.
    */
   screenCaptureHelperSha256?: string;
+  /**
+   * SHA-256 of the signed, notarized universal macOS Network Filter app archive
+   * (`automobile-network-filter-macos-universal.zip`, packed with
+   * `ditto -c -k --keepParent` so the nested system extension keeps its
+   * signature). Optional so releases predating its delivery stay valid; filled
+   * by release automation (scripts/generate-release-constants.sh), never by hand.
+   */
+  networkFilterSha256?: string;
 }
 
 /**
@@ -572,11 +580,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  */
 export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
   version: "nightly",
-  apkSha256: "8480cb401bf042908eb32e28bbe02f4af7f97114f35f348f4770477ce81b2453",
-  ipaSha256: "1ccb8f8529d4cf10b0ae83c8de2906b5ee6220168e91373aab67d456504d5704",
+  apkSha256: "59b58ac1e17dba3185ca57a0fb09b716fcfe0c946c440c399fe1dc01050adf4a",
+  ipaSha256: "24e847228db1d14eb3c8e2db0b2218455d7ccf3215eff38adc9a82bb2bba2359",
   runnerSha256Target: "xctest",
   videoJarSha256: "ff288b15e0720a02a831a8c166f5c63e580e1242c641a62ed8b03973fd6ebe11",
-  runnerSha256: "322e9cdf6bc0c26db357eb30f9340bab31813030bb14220c6edde3b250701092",
+  runnerSha256: "cc867b56a60b0ed7237abf18b80bea504690dca5b3a4ff98cc62276480c4e65f",
 };
 
 /**
@@ -896,6 +904,9 @@ export const VIDEO_SERVER_JAR_FILENAME = "automobile-video.jar";
 /** Fixed GitHub Release asset for the signed universal macOS capture helper. */
 export const SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME = "screen-capture-helper-macos-universal.zip";
 
+/** Fixed GitHub Release asset for the signed, notarized macOS Network Filter app. */
+export const NETWORK_FILTER_ARCHIVE_FILENAME = "automobile-network-filter-macos-universal.zip";
+
 /**
  * video-server jar download URL honoring `AUTOMOBILE_VERSION` +
  * `AUTOMOBILE_ASSET_BASE_URL`, mirroring `resolveApkUrl`/`resolveIpaUrl`.
@@ -944,6 +955,27 @@ export function resolveScreenCaptureHelperChecksum(
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.screenCaptureHelperSha256 ?? "";
+}
+
+/** Download URL for the signed macOS Network Filter app archive. */
+export function resolveNetworkFilterUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    NETWORK_FILTER_ARCHIVE_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected archive SHA-256 for the selected Network Filter release (empty if unknown). */
+export function resolveNetworkFilterChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return entryForPinnedVersion(env, registry)?.networkFilterSha256 ?? "";
 }
 
 /**

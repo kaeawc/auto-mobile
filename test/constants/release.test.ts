@@ -27,10 +27,13 @@ import {
   resolvePinnedVersion,
   resolveRunnerChecksum,
   resolveRunnerChecksumTarget,
+  resolveNetworkFilterChecksum,
+  resolveNetworkFilterUrl,
   resolveScreenCaptureHelperChecksum,
   resolveScreenCaptureHelperUrl,
   resolveVideoJarChecksum,
   resolveVideoJarUrl,
+  NETWORK_FILTER_ARCHIVE_FILENAME,
   SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME,
   VIDEO_SERVER_JAR_FILENAME,
   type ReleaseChecksumEntry,
@@ -508,6 +511,41 @@ describe("screen-capture-helper release delivery", function () {
     expect(RELEASE_CHECKSUM_REGISTRY.length).toBeGreaterThan(0);
     for (const entry of RELEASE_CHECKSUM_REGISTRY) {
       const checksum = entry.screenCaptureHelperSha256 ?? "";
+      expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
+    }
+  });
+});
+
+describe("network-filter release delivery", function () {
+  const registry: ReleaseChecksumEntry[] = [
+    {
+      version: "0.0.46",
+      apkSha256: "apk46",
+      ipaSha256: "ipa46",
+      runnerSha256: "runner46",
+      networkFilterSha256: "filter46",
+    },
+    { version: "0.0.45", apkSha256: "apk45", ipaSha256: "ipa45", runnerSha256: "runner45" },
+  ];
+
+  test("uses the fixed release asset name", function () {
+    expect(NETWORK_FILTER_ARCHIVE_FILENAME).toBe("automobile-network-filter-macos-universal.zip");
+  });
+
+  test("builds a version-pinned release URL", function () {
+    expect(resolveNetworkFilterUrl({}, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.46/${NETWORK_FILTER_ARCHIVE_FILENAME}`,
+    );
+  });
+
+  test("resolves the matching checksum and leaves pre-delivery releases unverifiable", function () {
+    expect(resolveNetworkFilterChecksum({}, registry)).toBe("filter46");
+    expect(resolveNetworkFilterChecksum({ AUTOMOBILE_VERSION: "0.0.45" }, registry)).toBe("");
+  });
+
+  test("registry network-filter checksums are empty or SHA-256 values", function () {
+    for (const entry of RELEASE_CHECKSUM_REGISTRY) {
+      const checksum = entry.networkFilterSha256 ?? "";
       expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
     }
   });

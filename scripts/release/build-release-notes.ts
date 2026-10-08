@@ -25,6 +25,7 @@ interface ReleaseNotesInput {
     ipa: string;
     videoJar: string;
     screenCaptureHelper: string;
+    networkFilter: string;
   };
 }
 
@@ -56,6 +57,7 @@ export function buildReleaseNotes(input: ReleaseNotesInput): string {
     `\n\n## CtrlProxy iOS IPA\n\n**SHA256 Checksum:** \`${checksums.ipa}\`\n\nDownload the IPA from the release assets below.` +
     `\n\n## video-server jar\n\n**SHA256 Checksum:** \`${checksums.videoJar}\`\n\nDownload automobile-video.jar from the release assets below.` +
     `\n\n## macOS screen-capture-helper\n\n**SHA256 Checksum:** \`${checksums.screenCaptureHelper}\`\n\nDownload screen-capture-helper-macos-universal.zip from the release assets below.` +
+    `\n\n## macOS network-filter\n\n**SHA256 Checksum:** \`${checksums.networkFilter}\`\n\nDownload automobile-network-filter-macos-universal.zip from the release assets below.` +
     "\n\n## Desktop App\n\nNative installers are attached below: macOS `.dmg` (signed & notarized), Windows `.msi`, and Linux `.deb`.";
   if (changelogPart.length + tail.length <= RELEASE_NOTES_BUDGET) {
     return changelogPart + tail;
@@ -106,6 +108,7 @@ if (import.meta.main) {
     ipa: requiredEnv("IPA_CHECKSUM"),
     videoJar: requiredEnv("VIDEO_JAR_CHECKSUM"),
     screenCaptureHelper: requiredEnv("SCREEN_CAPTURE_HELPER_CHECKSUM"),
+    networkFilter: requiredEnv("NETWORK_FILTER_CHECKSUM"),
   };
   const changelogPath = process.env.CHANGELOG_PATH || "CHANGELOG.md";
   const body = buildReleaseNotes({

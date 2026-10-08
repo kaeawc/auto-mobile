@@ -4,7 +4,8 @@ import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import { getHierarchySnapshot } from "../observe/HierarchyCapture";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
-import type { ViewHierarchyResult } from "../../models";
+import type { Element, ViewHierarchyResult } from "../../models";
+import { nodeAttributes } from "../../models/ViewHierarchyResult";
 import { ActionableError, type ContainerFailure } from "../../models/ActionableError";
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
 import {
@@ -21,7 +22,7 @@ import {
   screenSizeForOffscreenCheck,
   type ScreenSizeForOffscreenCheckOptions,
 } from "./ElementGeometry";
-import type { TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
+import type { TextSelectionIntent } from "../../utils/interfaces/TextSelectionIntent";
 import { resolveViewHierarchyForSearch } from "./viewHierarchySearch";
 
 /** A text selector, the kind a client copies from an observed label. */
@@ -61,6 +62,13 @@ function resolutionIntent(
     // The client picked this label from `observe`, which folds the keyboard into one row.
     excludeImeKeys: selectsByText(selector),
   };
+}
+
+/** A resolved container plus the capture's visibility flag for its node. */
+export interface ContainerMatch {
+  element?: Element;
+  /** The node's captured `visible-to-user` flag; absent when the capture carries none. */
+  visibleToUser?: boolean;
 }
 
 /** Compatibility at the injected selector boundary; all matching belongs to ElementResolver. */
@@ -157,7 +165,24 @@ export class ResolverElementSelector implements ElementSelector {
     container: ElementContainerSelector,
     strategy?: ElementSelectionStrategy,
   ) {
-    return this.containerResolution(capture, container, strategy).scope?.element;
+    return this.resolveContainerMatch(capture, container, strategy)?.element;
+  }
+
+  /** Like `resolveContainer`, but also reports whether the capture marks the node visible. */
+  resolveContainerMatch(
+    capture: ViewHierarchyResult,
+    container: ElementContainerSelector,
+    strategy?: ElementSelectionStrategy,
+  ): ContainerMatch | undefined {
+    const scope = this.containerResolution(capture, container, strategy).scope;
+    if (!scope) {
+      return undefined;
+    }
+    const visibleToUser = nodeAttributes(scope.source)["visible-to-user"];
+    return {
+      element: scope.element,
+      ...(typeof visibleToUser === "boolean" ? { visibleToUser } : {}),
+    };
   }
 
   private containerResolution(

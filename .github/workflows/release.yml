@@ -181,7 +181,7 @@ jobs:
             '.tag == $tag
               and .tag_sha == $tag_sha
               and .prepare_run_id == $prepare_run_id
-              and .artifacts == ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]' \
+              and .artifacts == ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]' \
             /tmp/release-artifact-provenance.json >/dev/null
 
       - name: "Download CtrlProxy APK"
@@ -215,6 +215,15 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: screen-capture-helper
+          path: /tmp
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.prepare_run_id }}
+
+      - name: "Download network-filter"
+        uses: actions/download-artifact@v7
+        with:
+          name: network-filter
           path: /tmp
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
@@ -282,6 +291,7 @@ jobs:
               ipa: entry.ipaSha256,
               video_jar: entry.videoJarSha256,
               screen_capture_helper: entry.screenCaptureHelperSha256,
+              network_filter: entry.networkFilterSha256,
             };
             const missing = Object.entries(checksums)
               .filter(([, value]) => !value)
@@ -302,6 +312,7 @@ jobs:
           IPA_CHECKSUM: ${{ steps.prepared_checksums.outputs.ipa }}
           VIDEO_JAR_CHECKSUM: ${{ steps.prepared_checksums.outputs.video_jar }}
           SCREEN_CAPTURE_HELPER_CHECKSUM: ${{ steps.prepared_checksums.outputs.screen_capture_helper }}
+          NETWORK_FILTER_CHECKSUM: ${{ steps.prepared_checksums.outputs.network_filter }}
           VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ steps.version.outputs.tag }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -345,6 +356,7 @@ jobs:
             /tmp/control-proxy.ipa
             /tmp/automobile-video.jar
             /tmp/screen-capture-helper-macos-universal.zip
+            /tmp/automobile-network-filter-macos-universal.zip
             /tmp/desktop/AutoMobile-${VERSION}-windows.msi
           )
           # macOS .dmg + Linux .deb are attached by jpackage in the default path, or by
@@ -582,6 +594,7 @@ jobs:
           IPA_CHECKSUM: ${{ steps.prepared_checksums.outputs.ipa }}
           VIDEO_JAR_CHECKSUM: ${{ steps.prepared_checksums.outputs.video_jar }}
           SCREEN_CAPTURE_HELPER_CHECKSUM: ${{ steps.prepared_checksums.outputs.screen_capture_helper }}
+          NETWORK_FILTER_CHECKSUM: ${{ steps.prepared_checksums.outputs.network_filter }}
           REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
@@ -597,6 +610,8 @@ jobs:
           echo "**video-server jar SHA256:** \`$VIDEO_JAR_CHECKSUM\`" >> "$S"
           echo "**screen-capture-helper Built:** screen-capture-helper-macos-universal.zip" >> "$S"
           echo "**screen-capture-helper SHA256:** \`$SCREEN_CAPTURE_HELPER_CHECKSUM\`" >> "$S"
+          echo "**network-filter Built:** automobile-network-filter-macos-universal.zip" >> "$S"
+          echo "**network-filter SHA256:** \`$NETWORK_FILTER_CHECKSUM\`" >> "$S"
           echo "" >> "$S"
           echo "### Published Artifacts" >> "$S"
           N="https://www.npmjs.com/package"

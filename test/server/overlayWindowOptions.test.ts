@@ -8,7 +8,10 @@ import {
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 import { validateOverlaySpec } from "../../src/features/overlay/overlayValidation";
-import { OVERLAY_APP_LAYER_APPOP_COMMAND } from "../../src/features/overlay/overlayWindowOptions";
+import {
+  grantOverlayAppLayer,
+  OVERLAY_APP_LAYER_APPOP_COMMAND,
+} from "../../src/features/overlay/overlayWindowOptions";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
@@ -102,6 +105,32 @@ describe("overlay window.layer and window.persistence", () => {
     const payload = await call({ action: "show", spec: spec({ layer: "app" }) });
     expect(payload.success).toBe(true);
     expect(client.getOverlayHistory()).toHaveLength(1);
+  });
+
+  test("a cancelled appop grant is rethrown, not treated as a failed grant", async () => {
+    adb.setThrowOnAbortedSignal();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(grantOverlayAppLayer(adb, controller.signal)).rejects.toThrow();
+    // Without cancellation a failing grant is still only logged.
+    adb.setCommandError(OVERLAY_APP_LAYER_APPOP_COMMAND, new Error("adb down"));
+    await expect(grantOverlayAppLayer(adb)).resolves.toBeUndefined();
+  });
+
+  test("a request cancelled before the grant never sends the overlay", async () => {
+    adb.setThrowOnAbortedSignal();
+    const controller = new AbortController();
+    controller.abort();
+    const handler = ToolRegistry.getTool("overlay")!.deviceAwareHandler!;
+    await expect(
+      handler(
+        device,
+        { action: "show", spec: spec({ layer: "app" }) },
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toThrow();
+    expect(client.getOverlayHistory()).toEqual([]);
   });
 
   test("device persistence needs no grant", async () => {

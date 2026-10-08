@@ -4,6 +4,8 @@ import dev.jasonpearson.automobile.protocol.OverlayAction
 import dev.jasonpearson.automobile.protocol.OverlayBottomNavNode
 import dev.jasonpearson.automobile.protocol.OverlayBottomSheetNode
 import dev.jasonpearson.automobile.protocol.OverlayBoxNode
+import dev.jasonpearson.automobile.protocol.OverlayButtonNode
+import dev.jasonpearson.automobile.protocol.OverlayCheckboxNode
 import dev.jasonpearson.automobile.protocol.OverlayColumnNode
 import dev.jasonpearson.automobile.protocol.OverlayCondition
 import dev.jasonpearson.automobile.protocol.OverlayEmitAction
@@ -20,6 +22,7 @@ import dev.jasonpearson.automobile.protocol.OverlayScrollNode
 import dev.jasonpearson.automobile.protocol.OverlaySetStateAction
 import dev.jasonpearson.automobile.protocol.OverlaySpacerNode
 import dev.jasonpearson.automobile.protocol.OverlayStyleWhen
+import dev.jasonpearson.automobile.protocol.OverlaySwitchNode
 import dev.jasonpearson.automobile.protocol.OverlayTabBarNode
 import dev.jasonpearson.automobile.protocol.OverlayTextFieldNode
 import dev.jasonpearson.automobile.protocol.OverlayTextNode
@@ -134,6 +137,9 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
     is OverlayTextFieldNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlayTabBarNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlayBottomNavNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlaySwitchNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayCheckboxNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayButtonNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
   }
 }
 

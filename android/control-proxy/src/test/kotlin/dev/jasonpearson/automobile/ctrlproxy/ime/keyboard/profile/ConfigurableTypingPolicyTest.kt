@@ -378,6 +378,47 @@ class ConfigurableTypingPolicyTest {
     assertEquals(12, editor.composingEnd)
   }
 
+  // Automation commits one grapheme per onText call in a synchronous run, before the editor's
+  // selection echo for the previous grapheme arrives; each call must insert after the last one.
+  @Test
+  fun `consecutive inserts into a recomposed word ignore a stale snapshot caret`() {
+    for (profile in listOf(KeyboardProfiles.GBOARD, KeyboardProfiles.SAMSUNG)) {
+      val policy = policy(profile)
+      val editor = FakeEditor("hello world")
+      editor.setSelection(8)
+      editor.apply(policy.onSelectionChanged(editor.snapshot()))
+      val stale = editor.snapshot()
+
+      "XYZ".forEach { editor.apply(policy.onText(it.toString(), stale)) }
+
+      assertEquals(profile.id, "hello woXYZrld", editor.text)
+      assertEquals(profile.id, 11, editor.selectionStart)
+    }
+  }
+
+  @Test
+  fun `stale composing echoes after an automation finish do not recompose`() {
+    val policy = policy(KeyboardProfiles.GBOARD)
+    val editor = FakeEditor()
+    val echoes = mutableListOf<TextSnapshot>()
+    "abc"
+      .forEach {
+        editor.apply(policy.onText(it.toString(), editor.snapshot()))
+        echoes += editor.snapshot()
+      }
+    editor.apply(policy.finishComposingForAutomation())
+    echoes += editor.snapshot()
+
+    echoes.forEach { echo ->
+      assertTrue("unexpected ops for $echo", policy.onSelectionChanged(echo).isEmpty())
+    }
+    editor.setSelection(1)
+    assertEquals(
+      listOf(ImeOp.SetComposingRegion(0, 3)),
+      policy.onSelectionChanged(editor.snapshot()),
+    )
+  }
+
   @Test
   fun `samsung recomposition keeps combining marks inside the word`() {
     val policy = policy(KeyboardProfiles.SAMSUNG)

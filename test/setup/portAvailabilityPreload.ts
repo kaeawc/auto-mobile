@@ -14,6 +14,7 @@
  */
 import { afterEach, beforeEach } from "bun:test";
 import { FakePortAvailabilityChecker } from "../fakes/FakePortAvailabilityChecker";
+import { setCtrlProxyHostPortProbeForTesting } from "../../src/features/observe/android/ctrlProxyHostPortProbe";
 import { PortManager } from "../../src/utils/PortManager";
 import { isUnitTestPath } from "./realDeviceToolSpawnGuard";
 import { clearCtrlProxyRegistries } from "./ctrlProxyRegistryCleanup";
@@ -31,6 +32,8 @@ screenshotPathProtection.sweep = (directory, fileSystem) =>
 const installFake = (): void => {
   if (isUnitTestPath(Bun.main)) {
     PortManager.setPortAvailabilityCheckerForTesting(new FakePortAvailabilityChecker());
+    // The pre-forward bind probe must not touch real sockets either (#10795).
+    setCtrlProxyHostPortProbeForTesting({ isPortFree: async () => true });
   }
 };
 

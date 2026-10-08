@@ -215,6 +215,46 @@ describe("GrantAndroidPermissions", () => {
     expect(adb.getExecutedCommands()).toEqual(["shell dumpsys package 'com.example.app; id #'"]);
   });
 
+  test("expands a short permission name before the requested check", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
+    adb.setCommandResponseSequence(
+      "shell dumpsys package",
+      snapshots("grant", 0).map((stdout) => ({ stdout, stderr: "" })),
+    );
+    const action = new GrantAndroidPermissions(
+      androidDevice,
+      new FakeAdbClientFactory(adb),
+      () => new NoOpPerformanceTracker(),
+    );
+    const result = await action.execute("com.example.app", {
+      permissions: ["READ_EXTERNAL_STORAGE"],
+      userId: 0,
+    });
+    expect(result.success).toBe(true);
+    expect(result.results[0].permission).toBe("android.permission.READ_EXTERNAL_STORAGE");
+    expect(adb.getExecutedCommands()).toContain(
+      "shell pm grant --user 0 'com.example.app' 'android.permission.READ_EXTERNAL_STORAGE'",
+    );
+  });
+
+  test("still refuses a short name the app does not request", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell dumpsys package", {
+      stdout: egg.replaceAll("com.android.egg", "com.example.app"),
+      stderr: "",
+    });
+    const action = new GrantAndroidPermissions(
+      androidDevice,
+      new FakeAdbClientFactory(adb),
+      () => new NoOpPerformanceTracker(),
+    );
+    const result = await action.execute("com.example.app", { permissions: ["CAMERA"], userId: 0 });
+    expect(result.success).toBe(false);
+    expect(result.results[0].error).toContain("android.permission.CAMERA is not requested");
+    expect(adb.getExecutedCommands()).toEqual(["shell dumpsys package 'com.example.app'"]);
+  });
+
   test("resets all Android runtime permissions through pm reset-permissions", async () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();

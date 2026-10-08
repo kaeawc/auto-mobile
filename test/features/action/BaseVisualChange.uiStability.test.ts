@@ -75,9 +75,9 @@ describe("BaseVisualChange UI stability platform guard", () => {
       platform: "android",
       deviceId: "device-123",
     };
-    const instance = new BaseVisualChange(device, fakeAdb as unknown as any, fakeTimer);
-    (instance as any).observeScreen = fakeObserveScreen;
-    (instance as any).window = fakeWindow;
+    const instance = new BaseVisualChange(device, fakeAdb, fakeTimer);
+    instance.observeScreen = fakeObserveScreen;
+    instance.window.getCachedActiveWindow = fakeWindow.getCachedActiveWindow.bind(fakeWindow);
 
     await instance.observedInteraction(async () => ({ success: true }), { changeExpected: false });
 

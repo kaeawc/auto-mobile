@@ -18736,7 +18736,25 @@
                       "properties": {
                         "items": {
                           "type": "array",
-                          "items": {},
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ]
+                            },
+                            "propertyNames": {
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                            }
+                          },
                           "minItems": 1,
                           "maxItems": 32
                         },
@@ -20105,7 +20123,25 @@
                         "properties": {
                           "items": {
                             "type": "array",
-                            "items": {},
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
+                              },
+                              "propertyNames": {
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              }
+                            },
                             "minItems": 1,
                             "maxItems": 32
                           },

@@ -56,6 +56,28 @@ function checkString(text: unknown, path: string, scope: Scope): RepeatError | u
   return undefined;
 }
 
+/** The text with `{index}` and `{alias.field}` bound to one item; unknown fields stay literal. */
+function renderForItem(text: string, scope: Scope, item: Raw, index: number): string {
+  return text.replace(/\{([^{}]*)\}/g, (token, inner: string) => {
+    if (inner === "index") {
+      return String(index);
+    }
+    const name = inner.startsWith(`${scope.alias}.`) ? inner.slice(scope.alias.length + 1) : "";
+    return FIELD_NAME.test(name) && Object.hasOwn(item, name) ? String(item[name]) : token;
+  });
+}
+
+/** An emit name must stay non-empty for every item once its placeholders are bound. */
+function checkEmitName(name: unknown, path: string, scope: Scope): RepeatError | undefined {
+  if (typeof name !== "string") {
+    return undefined;
+  }
+  const empty = scope.items.findIndex(
+    (item, index) => renderForItem(name, scope, item, index) === "",
+  );
+  return empty < 0 ? undefined : fail(path, `Expanded emit name is empty for item ${empty}`);
+}
+
 function checkCondition(value: unknown, path: string, scope: Scope): RepeatError | undefined {
   const condition = record(value);
   if (!condition) {
@@ -85,7 +107,10 @@ function checkAction(value: unknown, path: string, scope: Scope): RepeatError | 
   if (action?.type === "setState") {
     return checkString(action.value, `${path}.value`, scope);
   }
-  return action?.type === "emit" ? checkString(action.name, `${path}.name`, scope) : undefined;
+  return action?.type === "emit"
+    ? (checkString(action.name, `${path}.name`, scope) ??
+        checkEmitName(action.name, `${path}.name`, scope))
+    : undefined;
 }
 
 function checkList(

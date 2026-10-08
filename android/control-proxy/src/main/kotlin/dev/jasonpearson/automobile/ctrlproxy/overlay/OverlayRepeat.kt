@@ -26,7 +26,7 @@ import dev.jasonpearson.automobile.protocol.OverlaySwitchNode
 import dev.jasonpearson.automobile.protocol.OverlayTabBarNode
 import dev.jasonpearson.automobile.protocol.OverlayTextFieldNode
 import dev.jasonpearson.automobile.protocol.OverlayTextNode
-import kotlin.math.abs
+import java.math.BigDecimal
 
 /** A child to render and the path it is rendered under (also its stable Compose identity). */
 internal data class OverlayChildEntry(val node: OverlayNode, val path: String)
@@ -193,8 +193,9 @@ private fun OverlayScalar.rendered(): String =
     is OverlayScalar.Text -> value
     is OverlayScalar.BooleanValue -> value.toString()
     is OverlayScalar.Numeric ->
-      if (value.isFinite() && value == Math.floor(value) && abs(value) < 1e15) {
-        value.toLong().toString()
+      // Integral values render without a decimal point or exponent at any magnitude.
+      if (value.isFinite() && value == Math.floor(value)) {
+        BigDecimal(value).toPlainString()
       } else {
         value.toString()
       }

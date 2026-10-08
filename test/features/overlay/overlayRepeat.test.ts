@@ -58,6 +58,16 @@ describe("repeatErrors", () => {
       message: "Expanded node limit exceeded",
     });
   });
+  test("an emit name that expands to empty for any item is rejected at the name", () => {
+    const emit = (name: string) => ({ type: "text", text: "x", onTap: [{ type: "emit", name }] });
+    const items = [{ id: "a" }, { id: "" }];
+    expect(repeatErrors(spec(list([emit("{item.id}")], items)))).toEqual({
+      path: "root.children[0].onTap[0].name",
+      message: "Expanded emit name is empty for item 1",
+    });
+    expect(repeatErrors(spec(list([emit("row-{item.id}")], items)))).toBeUndefined();
+    expect(repeatErrors(spec(list([emit("{index}")], items)))).toBeUndefined();
+  });
   test("tab item images in a template count once per instance", () => {
     const nav = { type: "tabBar", stateKey: "t", items: [{ label: "a", image: "x" }] };
     const items = Array.from({ length: 33 }, (_, n) => ({ n }));
@@ -76,6 +86,21 @@ describe("repeatErrors", () => {
     expect(validateOverlaySpec(spec(node)).success).toBe(true);
     expect(validateOverlaySpec(spec({ type: "box", children: [node] })).success).toBe(false);
   });
+});
+
+test("the public schema constrains repeat items to flat scalar maps", () => {
+  const repeatItems = (value: unknown) =>
+    validateOverlaySpec(
+      spec({
+        type: "column",
+        repeat: { items: [value], as: "item" },
+        children: [{ type: "spacer" }],
+      }),
+    );
+  expect(repeatItems({ a: 1, b: "x", c: true }).success).toBe(true);
+  for (const bad of [[1], null, { nested: { a: 1 } }, { "bad key": 1 }, { list: [1] }]) {
+    expect(repeatItems(bad).success).toBe(false);
+  }
 });
 
 test("the documented repeat snippet is a valid spec root", () => {

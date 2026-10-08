@@ -294,10 +294,9 @@ const commonNodeShape = {
   safeAreaPadding: safeAreaPaddingSchema.optional(),
 };
 // A literal list template: the container's children are instantiated once per item.
-const repeatItemSchema = z.custom<Record<string, string | number | boolean>>(
-  (value) =>
-    z.record(keySchema, z.union([z.string(), z.number().finite(), z.boolean()])).safeParse(value)
-      .success,
+const repeatItemSchema = z.record(
+  keySchema,
+  z.union([z.string(), z.number().finite(), z.boolean()]),
 );
 const repeatSchema = z
   .object({ items: z.array(repeatItemSchema).min(1).max(32), as: keySchema })

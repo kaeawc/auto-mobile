@@ -92,6 +92,24 @@ internal object OverlayRepeatValidator {
     return null
   }
 
+  /** An emit name must stay non-empty for every item once its placeholders are bound. */
+  private fun checkEmitName(value: JsonElement?, path: String, scope: Scope): OverlaySpecError? {
+    val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+    val segments = OverlayRepeatTemplate.segments(text, scope.alias)
+    val empty =
+      scope.items.indexOfFirst { item ->
+        segments.all { segment ->
+          when (segment) {
+            is OverlayRepeatSegment.Literal -> segment.text.isEmpty()
+            is OverlayRepeatSegment.Index -> false
+            is OverlayRepeatSegment.Field ->
+              (item[segment.name] as? JsonPrimitive)?.content.orEmpty().isEmpty()
+          }
+        }
+      }
+    return if (empty < 0) null else fail(path, "Expanded emit name is empty for item $empty")
+  }
+
   private fun checkCondition(value: JsonElement?, path: String, scope: Scope): OverlaySpecError? {
     val condition = value as? JsonObject ?: return null
     checkString(condition["equals"], "$path.equals", scope)?.let {
@@ -118,7 +136,9 @@ internal object OverlayRepeatValidator {
     val action = value as? JsonObject ?: return null
     return when (action.text("type")) {
       "setState" -> checkString(action["value"], "$path.value", scope)
-      "emit" -> checkString(action["name"], "$path.name", scope)
+      "emit" ->
+        checkString(action["name"], "$path.name", scope)
+          ?: checkEmitName(action["name"], "$path.name", scope)
       else -> null
     }
   }

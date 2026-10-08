@@ -162,4 +162,39 @@ class OverlayRepeatTest {
       OverlayRepeatTemplate.segments("a {index} {item.f} {state}", "item"),
     )
   }
+
+  @Test
+  fun `integral values render without a decimal point or exponent at any magnitude`() {
+    val big =
+      listOf(
+        mapOf(
+          "a" to OverlayScalar.Numeric(999_999_999_999_999.0),
+          "b" to OverlayScalar.Numeric(1e15),
+          "c" to OverlayScalar.Numeric(1e21),
+          "d" to OverlayScalar.Numeric(-2.5),
+        )
+      )
+    val model =
+      mapOverlaySpec(
+        spec(list(OverlayTextNode(text = "{item.a} {item.b} {item.c} {item.d}"), repeat = big))
+      )
+    assertEquals(
+      "999999999999999 1000000000000000 1000000000000000000000 -2.5",
+      model.root.children.single().text,
+    )
+  }
+
+  @Test
+  fun `an emit name that expands to empty for any item fails validation at the name`() {
+    fun json(name: String) =
+      """{"id":"r","window":{"placement":{"type":"fullscreen"}},"root":{"type":"column",""" +
+        """"repeat":{"items":[{"id":"a"},{"id":""}],"as":"item"},"children":[{"type":"text",""" +
+        """"text":"x","onTap":[{"type":"emit","name":"$name"}]}]}}"""
+    val failure = OverlaySpecValidator.validate(json("{item.id}")) as OverlaySpecValidation.Failure
+    assertEquals("root.children[0].onTap[0].name", failure.error.path)
+    assertEquals("Expanded emit name is empty for item 1", failure.error.message)
+    assertTrue(
+      OverlaySpecValidator.validate(json("row-{item.id}")) is OverlaySpecValidation.Success
+    )
+  }
 }

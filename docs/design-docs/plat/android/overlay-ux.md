@@ -424,12 +424,15 @@ list is a `column` with `repeat` whose single child is the row template).
   key named `index`. A string that is exactly one placeholder keeps the item's own
   type, so `equals: "{item.id}"` matches a numeric state value when `id` is a number;
   a placeholder inside a longer string renders to text (integral numbers without a
-  decimal point). `emit.payload` is not interpolated.
+  decimal point). `emit.payload` is not interpolated. Bound values are plain text, but a
+  `text` node is then interpolated against state as usual, so an item string that itself
+  reads `{status}` shows the state value; item values cannot be escaped.
 - Validation, with the same paths in TypeScript and Kotlin: a placeholder naming a
   field that is missing from any item fails at the string (for example
   `root.children[0].text`, message `Unknown repeat field "nme"`); a template may not
   contain another `repeat` (`root.children[0].repeat`) or a `pager`
-  (`root.children[0]`); `repeat` on a leaf node is an unknown property.
+  (`root.children[0]`); `repeat` on a leaf node is an unknown property; an `emit.name`
+  that binds to an empty string for any item fails at the name (`root.children[0].onTap[0].name`).
 - Limits count the expanded tree. `MAX_OVERLAY_NODES` and `MAX_OVERLAY_IMAGES` are
   checked against every instance, and an overflow fails at the container's
   `repeat` (for example `root.children[2].repeat`, `Expanded node limit exceeded`).

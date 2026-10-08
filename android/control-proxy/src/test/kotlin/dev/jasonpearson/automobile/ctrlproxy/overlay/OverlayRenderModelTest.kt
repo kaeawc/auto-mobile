@@ -101,6 +101,58 @@ class OverlayRenderModelTest {
   }
 
   @Test
+  fun `styleWhen resolves against state into the render style`() {
+    val node =
+      OverlayTextNode(
+        text = "text",
+        style = OverlayStyle(background = "#111111", color = "#222222"),
+        styleWhen =
+          listOf(
+            OverlayStyleWhen(
+              OverlayCondition("selected", equals = OverlayScalar.BooleanValue(true)),
+              OverlayStyle(background = "#2255CC"),
+            )
+          ),
+      )
+    fun rendered(selected: Boolean) =
+      mapOverlaySpec(
+          OverlaySpec(
+            "panel",
+            OverlayWindow(OverlayFullscreenPlacement()),
+            root = node,
+            state = mapOf("selected" to OverlayScalar.BooleanValue(selected)),
+          )
+        )
+        .root
+        .style
+    assertEquals(overlayColor("#2255CC"), rendered(true).background)
+    assertEquals(overlayColor("#222222"), rendered(true).color)
+    assertEquals(overlayColor("#111111"), rendered(false).background)
+  }
+
+  @Test
+  fun `unrepresentable styleWhen size is rejected with its path`() {
+    val error =
+      assertThrows(IllegalArgumentException::class.java) {
+        mapOverlaySpec(
+          spec(
+            OverlayTextNode(
+              text = "text",
+              styleWhen =
+                listOf(
+                  OverlayStyleWhen(
+                    OverlayCondition("k", equals = OverlayScalar.Numeric(1.0)),
+                    OverlayStyle(width = OverlayDimension.Dp(Double.MAX_VALUE)),
+                  )
+                ),
+            )
+          )
+        )
+      }
+    assertTrue(error.message.orEmpty().contains("root.styleWhen[0].style.width.dp"))
+  }
+
+  @Test
   fun `unrepresentable Compose size is rejected before content installation`() {
     val error =
       assertThrows(IllegalArgumentException::class.java) {

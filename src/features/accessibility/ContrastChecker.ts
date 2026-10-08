@@ -16,8 +16,15 @@ import { resolveImageBackend } from "../../utils/image/backend/resolveImageBacke
 
 /** Android mdpi baseline: 1dp == 1px at 160 dpi. */
 const BASELINE_DENSITY_DPI = 160;
-/** WCAG large text (18pt regular, 14pt bold) is about 24dp of text height on Android. */
-const LARGE_TEXT_MIN_HEIGHT_DP = 24;
+/** WCAG large text (18pt regular, 14pt bold) is about 24dp of text size on Android. */
+const LARGE_TEXT_MIN_SIZE_DP = 24;
+/**
+ * Single-line box height that implies 24dp text: a line box is about 1.33x the font
+ * size (Material headlineSmall: 24sp text in a 32dp line). The 24dp *text size* is not
+ * the box height; a 24dp box holds 16sp body text (bodyLarge), which is normal text
+ * needing 4.5:1 (#10134).
+ */
+const LARGE_TEXT_MIN_BOX_HEIGHT_DP = 32;
 /**
  * Without a reported text size the box height is only a proxy, and only for a box
  * that holds a single line. Two lines of 14sp text need about 40dp, and 48dp is
@@ -1392,12 +1399,12 @@ export class ContrastChecker {
     }
     const textSizePx = reportedTextSizePx(element);
     if (textSizePx !== null) {
-      return (textSizePx * BASELINE_DENSITY_DPI) / density >= LARGE_TEXT_MIN_HEIGHT_DP;
+      return (textSizePx * BASELINE_DENSITY_DPI) / density >= LARGE_TEXT_MIN_SIZE_DP;
     }
     const heightPx = element.bounds.bottom - element.bounds.top;
     const heightDp = (heightPx * BASELINE_DENSITY_DPI) / density;
     return (
-      heightDp >= LARGE_TEXT_MIN_HEIGHT_DP && heightDp < LARGE_TEXT_BOX_INFERENCE_MAX_HEIGHT_DP
+      heightDp >= LARGE_TEXT_MIN_BOX_HEIGHT_DP && heightDp < LARGE_TEXT_BOX_INFERENCE_MAX_HEIGHT_DP
     );
   }
 

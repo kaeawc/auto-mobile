@@ -135,19 +135,19 @@ describe("ContrastChecker", function () {
     it("should handle large text vs normal text thresholds", async function () {
       const screenshotPath = path.join(fixturesDir, "wcag-aa-large-text.png");
 
-      // Small text element (height < 24px) - requires 4.5:1 for AA
+      // Small text element (box < 32px) - requires 4.5:1 for AA
       const smallTextElement: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 20 },
         text: "Small",
       };
 
-      // Large text element (height >= 24px) - requires 3.0:1 for AA
+      // Large text element (single-line box >= 32px) - requires 3.0:1 for AA
       const largeTextElement: Element = {
-        bounds: { left: 0, top: 0, right: 100, bottom: 30 },
+        bounds: { left: 0, top: 0, right: 100, bottom: 34 },
         text: "Large",
       };
 
-      // Density 160 (mdpi): 1px == 1dp, so the 24dp large-text cutoff is 24px.
+      // Density 160 (mdpi): 1px == 1dp, so the 32dp single-line box cutoff is 32px.
       const smallResult = await checker.checkContrast(screenshotPath, smallTextElement, "AA", 160);
       const largeResult = await checker.checkContrast(screenshotPath, largeTextElement, "AA", 160);
 
@@ -210,7 +210,7 @@ describe("ContrastChecker", function () {
     it("should use 3.0:1 for AA large text", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
       const element: Element = {
-        bounds: { left: 0, top: 0, right: 100, bottom: 30 }, // Large size (>= 24px)
+        bounds: { left: 0, top: 0, right: 100, bottom: 34 }, // Large-text line box (>= 32px)
         text: "Large Text",
       };
 
@@ -236,7 +236,7 @@ describe("ContrastChecker", function () {
     it("should use 4.5:1 for AAA large text", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
       const element: Element = {
-        bounds: { left: 0, top: 0, right: 100, bottom: 30 }, // Large size (>= 24px)
+        bounds: { left: 0, top: 0, right: 100, bottom: 34 }, // Large-text line box (>= 32px)
         text: "Large Text",
       };
 
@@ -488,9 +488,9 @@ describe("ContrastChecker", function () {
   });
 
   describe("Required ratio (parameterized)", function () {
-    // getRequiredContrastRatio keys off isLargeText (height >= 24dp, density 160
+    // getRequiredContrastRatio keys off isLargeText (box height >= 32dp, density 160
     // here so 1px == 1dp) and the level.
-    // 23/24/25 straddle the large-text boundary; level "A" falls through to the
+    // 31/32/33 straddle the large-text boundary; level "A" falls through to the
     // same ratios as AA. requiredRatio is independent of the sampled contrast,
     // so a uniform fake image is sufficient and keeps this fast.
     function ratioChecker(): ContrastChecker {
@@ -502,15 +502,17 @@ describe("ContrastChecker", function () {
     }
 
     it.each([
-      [23, "A", 4.5],
-      [24, "A", 3.0],
-      [25, "A", 3.0],
-      [23, "AA", 4.5],
-      [24, "AA", 3.0],
-      [25, "AA", 3.0],
-      [23, "AAA", 7.0],
-      [24, "AAA", 4.5],
-      [25, "AAA", 4.5],
+      [24, "A", 4.5],
+      [31, "A", 4.5],
+      [32, "A", 3.0],
+      [24, "AA", 4.5],
+      [31, "AA", 4.5],
+      [32, "AA", 3.0],
+      [33, "AA", 3.0],
+      [24, "AAA", 7.0],
+      [31, "AAA", 7.0],
+      [32, "AAA", 4.5],
+      [33, "AAA", 4.5],
     ])("height %i at level %s requires %f:1", async function (height, level, expected) {
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: height as number },
@@ -562,11 +564,13 @@ describe("ContrastChecker", function () {
     );
 
     // Without a reported text size the box height only counts when it fits a single
-    // line: at mdpi (1px == 1dp) that is [24dp, 40dp). A 48dp button or a taller
-    // (multi-line) box is normal text, the conservative ratio.
+    // line: at mdpi (1px == 1dp) that is [32dp, 40dp). A 24dp box holds 16sp body text
+    // (#10134); a 48dp button or a taller (multi-line) box is normal text too.
     it.each([
       [23, 4.5],
-      [24, 3.0],
+      [24, 4.5],
+      [31, 4.5],
+      [32, 3.0],
       [39, 3.0],
       [40, 4.5],
       [48, 4.5],

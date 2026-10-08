@@ -1,98 +1,84 @@
-import { drainUntil } from "../helpers/fakeTimerStepping";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { describe, it, expect, afterEach } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
-import { SessionManager } from "../../src/daemon/sessionManager";
-import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { afterEach, describe, expect, it } from "bun:test";
+import {
+  AUTOLOCK_WINDOW_MS,
+  KEEPER_INTERVAL_MS,
+  LivenessScenario,
+  RELEASE_SLACK_MS,
+} from "../helpers/livenessScenarioHarness";
 
-const AUTOLOCK_ENV_KEYS = [
-  "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
-  "AUTO_MOBILE_DEVICE_POOL_AUTOLOCK",
-] as const;
-const TIMEOUT_ENV_KEYS = [
-  "AUTOMOBILE_DEVICE_POOL_TIMEOUT",
-  "AUTO_MOBILE_DEVICE_POOL_TIMEOUT",
-] as const;
+// Autolock idle release with a heartbeating stdio proxy (#10658, umbrella #10655). The proxy's
+// own keeper sends the heartbeats (the real DaemonMcpProxy at its production cadence, owner
+// token and ownership claim), through the real daemon heartbeat handler, SessionManager,
+// heartbeat monitor and DevicePool. The earlier version of this file called
+// SessionManager.recordHeartbeat by hand, which hid the real cadence and never asserted why the
+// device was released (#10667, #10705).
 
-function clearAutolockEnv(): void {
-  for (const key of [...AUTOLOCK_ENV_KEYS, ...TIMEOUT_ENV_KEYS]) {
-    delete process.env[key];
-  }
-}
-
-const HEARTBEAT_INTERVAL_MS = 5_000;
+const IDLE_REASONS = ["cleanup-expired", "lazy-expiry"];
 
 describe("autolock idle release with a heartbeating stdio proxy (#10658)", () => {
-  let pool: DevicePool;
-  let sessionManager: SessionManager;
-  let timer: FakeTimer;
-  const androidDevice = {
-    name: "Pixel 7",
-    platform: "android" as const,
-    deviceId: "emulator-5554",
-  };
+  let scenario: LivenessScenario;
 
-  const heartbeatFor = (sessionId: string, ms: number): void => {
-    for (let elapsed = 0; elapsed < ms; elapsed += HEARTBEAT_INTERVAL_MS) {
-      timer.advanceTime(HEARTBEAT_INTERVAL_MS);
-      sessionManager.recordHeartbeat(sessionId);
-    }
-  };
-
-  const setup = async (autolock: boolean): Promise<string | undefined> => {
-    clearAutolockEnv();
-    if (autolock) {
-      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
-      process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT = "60";
-    }
-    timer = new FakeTimer();
-    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const fakeDeviceUtils = new FakeDeviceUtils();
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session-1", {
-        timer,
-        deviceManager: fakeDeviceUtils,
-      }),
-    );
-    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
-    await pool.initializeWithDevices([androidDevice]);
-    return autolock ? pool.autolockDevice("emulator-5554", "android") : undefined;
-  };
-
-  afterEach(() => {
-    clearAutolockEnv();
+  afterEach(async () => {
+    await scenario.stop();
   });
 
-  it("releases the device after the idle timeout although the proxy keeps heartbeating", async () => {
-    const sessionId = (await setup(true))!;
-    heartbeatFor(sessionId, 90_000);
+  it("releases the device after the idle timeout although the proxy keeps heartbeating, as an idle expiry", async () => {
+    scenario = await LivenessScenario.start({ autolock: true });
+    const acquiredAt = scenario.timer.now();
+    const session = await scenario.acquire();
+    expect(scenario.poolState()).toMatchObject({ status: "busy", autolockSessionId: session });
 
-    expect(sessionManager.getSession(sessionId)).toBeNull();
-    await drainUntil(() => pool.getDevice("emulator-5554")!.status === "idle", {
-      description: "idle autolocked device released",
+    // Held side: just inside the window the keeper has been ticking all along and the session
+    // is still held, so the later release cannot be a dead-owner reap.
+    await scenario.idle(AUTOLOCK_WINDOW_MS - KEEPER_INTERVAL_MS);
+    expect(scenario.isHeld(session)).toBe(true);
+    expect(scenario.heartbeatsBySession.get(session)).toBeGreaterThan(
+      AUTOLOCK_WINDOW_MS / KEEPER_INTERVAL_MS - 5,
+    );
+
+    // Released side: freed by the idle deadline, with no stale autolock owner left on the device.
+    const releasedAt = await scenario.idleUntilReleased(session, 2 * RELEASE_SLACK_MS);
+    expect(releasedAt).toBeGreaterThan(acquiredAt + AUTOLOCK_WINDOW_MS);
+    expect(releasedAt).toBeLessThanOrEqual(acquiredAt + AUTOLOCK_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
+    expect(scenario.reaped).toEqual([]);
+    expect(scenario.poolState()).toEqual({
+      status: "idle",
+      sessionId: null,
+      autolockSessionId: undefined,
     });
-    expect(pool.getDevice("emulator-5554")!.autolockSessionId).toBeUndefined();
   });
 
   it("a tool call resets the idle window while heartbeats continue", async () => {
-    const sessionId = (await setup(true))!;
-    heartbeatFor(sessionId, 50_000);
-    await sessionManager.getOrCreateSession(sessionId);
-    heartbeatFor(sessionId, 50_000);
+    scenario = await LivenessScenario.start({ autolock: true });
+    const session = await scenario.acquire();
+    await scenario.idle(50_000);
+    await scenario.toolCall(session);
+    const usedAt = scenario.timer.now();
+    await scenario.idle(50_000);
 
     // 100 s since acquisition but only 50 s since the last tool call.
-    expect(sessionManager.getSession(sessionId)).not.toBeNull();
-    expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
+    expect(scenario.isHeld(session)).toBe(true);
+    expect(scenario.poolState().status).toBe("busy");
 
-    heartbeatFor(sessionId, 40_000);
-    expect(sessionManager.getSession(sessionId)).toBeNull();
+    const releasedAt = await scenario.idleUntilReleased(session, 2 * RELEASE_SLACK_MS);
+    expect(releasedAt).toBeGreaterThan(usedAt + AUTOLOCK_WINDOW_MS);
+    expect(releasedAt).toBeLessThanOrEqual(usedAt + AUTOLOCK_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
   });
 
   it("leaves the pool unlocked when autolock is off", async () => {
-    await setup(false);
-    expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
-    expect(pool.getDevice("emulator-5554")!.autolockSessionId).toBeUndefined();
+    scenario = await LivenessScenario.start({ autolock: false });
+    expect(scenario.poolState()).toEqual({
+      status: "idle",
+      sessionId: null,
+      autolockSessionId: undefined,
+    });
+    const session = await scenario.acquire();
+    expect(scenario.poolState()).toMatchObject({
+      status: "busy",
+      sessionId: session,
+      autolockSessionId: undefined,
+    });
   });
 });

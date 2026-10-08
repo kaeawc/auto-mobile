@@ -151,6 +151,18 @@ runner-readiness budget vs ~85s cold CtrlProxy launch — fixed by CI
 _ordering_, not budget inflation), #5248/#5393 (macOS runner contention
 flake classification).
 
+## 2026-10 liveness vs activity clocks (#10655)
+
+Devices stayed held for minutes to hours with no tool use because a heartbeat
+also renewed the idle deadline (#10656; related #10657, #10658, #10050/#10051,
+#9335, #10115). Each earlier fix pinned only "kept while the owner heartbeats".
+The investigation produced the two-sided scenario matrix
+(`test/daemon/livenessScenarioMatrix.test.ts`, #10667) and extended the
+seeded expiry properties with a real `DevicePool`, daemon restart and
+known-failure properties (#10705). Open from it: #10699 (host sleep vs daemon
+stall), and autolock sessions keep a 60 s heartbeat lease, so a dead autolock
+owner holds its device for the autolock window instead of ~10 s.
+
 ## Cross-index: bug class → instances
 
 1. **Release/teardown asymmetry**: #2445, #5266, #5287, #5302, #5303
@@ -163,3 +175,5 @@ flake classification).
    #5298
 7. **Readiness budget vs cold start**: #3110, #5376, #4989
 8. **Daemon process identity/replacement**: #2444, #2599, #2732, #5419
+9. **Liveness clock conflated with activity clock**: #10656, #10658, #10657,
+   #10699, #10667

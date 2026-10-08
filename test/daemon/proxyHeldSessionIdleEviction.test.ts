@@ -8,6 +8,7 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
 // Issue #10657 (child of #10655): a held session no tool call names for the idle window is
 // abandoned and the proxy stops heartbeating it. Issue #9335 (child of #10049): a proxy owns liveness for every device session it
@@ -15,6 +16,8 @@ import { logger } from "../../src/utils/logger";
 // session on each acquisition, so the earlier sessions used to receive no
 // heartbeat and were reaped with `heartbeat-timeout` while the proxy was healthy.
 
+/** Microtask turns for one keeper round trip to settle before the next tick. */
+const KEEPER_TURNS = 32;
 const INTERVAL_MS = 2_000;
 const TIMEOUT_MS = 10_000;
 
@@ -70,10 +73,18 @@ describe("proxy stops heartbeating held sessions the conversation abandoned (iss
       }));
   }
 
+  /**
+   * Advance fake time, settling each keeper round trip on microtasks. The default per-event
+   * real event-loop turn made a 2-minute advance (60 ticks) cost 60 turns, which pushed the
+   * longest tests of this file toward the 100 ms unit budget (#10705).
+   */
+  const advance = (ms: number): Promise<void> =>
+    timer.advanceTimeAsync(ms, () => drainMicrotasks(KEEPER_TURNS));
+
   /** Heartbeat session ids sent by the next keeper tick only. */
   async function tickSessions(): Promise<string[]> {
     const before = heartbeats().length;
-    await timer.advanceTimeAsync(INTERVAL_MS);
+    await advance(INTERVAL_MS);
     return heartbeats()
       .slice(before)
       .map((call) => call.sessionId)
@@ -115,7 +126,7 @@ describe("proxy stops heartbeating held sessions the conversation abandoned (iss
     await acquire("getApple", "ios-session");
     expect(await tickSessions()).toEqual(["android-session", "ios-session"]);
 
-    await timer.advanceTimeAsync(IDLE_WINDOW_MS);
+    await advance(IDLE_WINDOW_MS);
 
     expect(await tickSessions()).toEqual(["ios-session"]);
     expect(await tickSessions()).toEqual(["ios-session"]);
@@ -124,12 +135,12 @@ describe("proxy stops heartbeating held sessions the conversation abandoned (iss
   test("keeps both devices heartbeating while each was used within the idle window", async () => {
     await acquire("getAndroid", "android-session");
     await acquire("getApple", "ios-session");
-    await timer.advanceTimeAsync(IDLE_WINDOW_MS / 2);
+    await advance(IDLE_WINDOW_MS / 2);
     await acquire("getAndroid", "android-session");
     await acquire("getApple", "ios-session");
 
     // Past the window measured from the first acquisition, inside it from the second.
-    await timer.advanceTimeAsync((IDLE_WINDOW_MS * 3) / 4);
+    await advance((IDLE_WINDOW_MS * 3) / 4);
 
     expect(await tickSessions()).toEqual(["android-session", "ios-session"]);
   });
@@ -138,7 +149,7 @@ describe("proxy stops heartbeating held sessions the conversation abandoned (iss
     await acquire("getAndroid", "android-session");
     await acquire("getApple", "ios-session");
     client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "ios-session", "device-killed");
-    await timer.advanceTimeAsync(IDLE_WINDOW_MS);
+    await advance(IDLE_WINDOW_MS);
 
     expect(await tickSessions()).toEqual([]);
   });

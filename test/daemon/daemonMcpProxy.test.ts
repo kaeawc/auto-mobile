@@ -47,6 +47,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
 const OLDER_VERSION = "0.0.1";
 const NEWER_VERSION = "9999.0.0";
@@ -4477,12 +4478,16 @@ describe("DaemonMcpProxy", () => {
       });
 
       try {
+        // Settle each keeper round trip on microtasks: the default real event-loop turn per
+        // tick made these two 2-minute advances the slowest part of the file (#10705).
+        const advance = (ms: number): Promise<void> =>
+          timer.advanceTimeAsync(ms, () => drainMicrotasks(32));
         await proxy.callTool("getAndroid", {});
-        await timer.advanceTimeAsync(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await advance(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await expect(proxy.callTool("tapOn", {})).rejects.toBeInstanceOf(
           DaemonToolOutcomeUnknownError,
         );
-        await timer.advanceTimeAsync(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await advance(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         // The binding was minted from a result, so an unscoped call gets the connection state
         // rather than the stale UUID (#5689).
         const retired = proxy.callTool("observe", {});

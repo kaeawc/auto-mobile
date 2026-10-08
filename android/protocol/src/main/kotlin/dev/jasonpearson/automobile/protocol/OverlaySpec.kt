@@ -401,4 +401,6 @@ data class OverlaySpec(
   val window: OverlayWindow,
   val state: Map<String, OverlayScalar>? = null,
   val root: OverlayNode,
+  /** `none` opts out of overlay animation; absent or `standard` follows the system scale. */
+  val motion: String? = null,
 )

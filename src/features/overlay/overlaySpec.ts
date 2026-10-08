@@ -482,6 +482,7 @@ const specSchema = z
             .safeParse(value).success,
       )
       .optional(),
+    motion: z.enum(["none", "standard"]).optional(),
     root: z.lazy(() => overlayNodeSchema),
   })
   .strict();

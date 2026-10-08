@@ -2173,6 +2173,13 @@
           },
           "optional": true
         },
+        "motion": {
+          "rule": {
+            "kind": "enum",
+            "values": ["none", "standard"]
+          },
+          "optional": true
+        },
         "root": {
           "rule": {
             "kind": "ref",

@@ -18100,6 +18100,10 @@
               "additionalProperties": false
             },
             "state": {},
+            "motion": {
+              "type": "string",
+              "enum": ["none", "standard"]
+            },
             "root": {
               "anyOf": [
                 {

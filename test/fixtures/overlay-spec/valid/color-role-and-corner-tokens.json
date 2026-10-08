@@ -1,0 +1,38 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "style": {
+      "background": "surfaceContainer",
+      "cornerRadius": "extraLarge",
+      "border": {
+        "width": 1,
+        "color": "outline"
+      }
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "Title",
+        "style": {
+          "color": "onPrimary",
+          "background": "#FF6200EE",
+          "cornerRadius": 8
+        }
+      },
+      {
+        "type": "text",
+        "text": "Pill",
+        "style": {
+          "color": "primary",
+          "cornerRadius": "full"
+        }
+      }
+    ]
+  }
+}

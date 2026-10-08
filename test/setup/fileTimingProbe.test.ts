@@ -103,7 +103,10 @@ test("actual preload END event includes RSS bytes without changing START", () =>
 });
 
 test("actual preload names the test file, or the shared-process group when labelled", () => {
-  expect(probeEvents.map((event) => event.file)).toEqual([probeFixture, probeFixture]);
+  // Windows tmpdir() can be an 8.3 short path (RUNNER~1) while Bun reports the long form.
+  const nativePath = (path: string) => realpathSync.native(path);
+  const expectedFile = nativePath(probeFixture);
+  expect(probeEvents.map((event) => nativePath(event.file))).toEqual([expectedFile, expectedFile]);
   expect(labelledEvents.map((event) => event.file)).toEqual([
     "unit shard 0 shared process (2 files)",
     "unit shard 0 shared process (2 files)",

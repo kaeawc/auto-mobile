@@ -10,7 +10,12 @@ import { isImeKeyEntry, toSearchable } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { compareSelectionRank, selectableCandidates } from "../../utility/selectionRank";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
-import { isFullyCoveredByApplicationWindow } from "../ApplicationWindowCover";
+import {
+  isFullyCoveredByApplicationWindow,
+  isFullyCoveredByOwnOverlay,
+  ownOverlayNodeSources,
+} from "../ApplicationWindowCover";
+import { OVERLAY_LAYOUT_KINDS } from "../ownOverlayFocus";
 import type { Element } from "../../../models/Element";
 import { isFalsy, isTruthy } from "../../../models/Element";
 import {
@@ -367,14 +372,43 @@ function shouldKeep(acc: SkeletonAccumulator, clickable: SkeletonAccumulator[]):
 function hoistContainerLabels(
   accumulators: SkeletonAccumulator[],
   clickable: SkeletonAccumulator[],
+  overlaySources: ReadonlySet<object>,
 ): void {
   if (clickable.length === 0) {
     return;
   }
   for (const [container, texts] of groupTextByContainer(accumulators, clickable)) {
     texts.sort(byReadingOrder);
-    applyHoistedLabels(container, distinctHoistParts(container, texts));
+    const parts = distinctHoistParts(container, texts);
+    applyHoistedLabels(container, parts);
+    adoptOverlayIconLabel(container, parts, overlaySources);
   }
+}
+
+/**
+ * A tappable overlay container (a FAB) is labelled by its node kind ("box"), with its icon name
+ * relegated to `sublabel`. When the icon is the container's only accessible content, the icon name
+ * is the label and the kind label goes away. Only overlay rows qualify, so an app control that
+ * happens to read "box" keeps its own label.
+ */
+function adoptOverlayIconLabel(
+  container: SkeletonAccumulator,
+  parts: string[],
+  overlaySources: ReadonlySet<object>,
+): void {
+  const source = container.target && getHierarchyNodeSource(container.target);
+  const kind = container.label?.trim();
+  if (!source || !kind || !overlaySources.has(source) || !OVERLAY_LAYOUT_KINDS.has(kind)) {
+    return;
+  }
+  const content = parts.filter(
+    (part) => !OVERLAY_LAYOUT_KINDS.has(part.trim()) && part.trim() !== "icon",
+  );
+  if (content.length !== 1 || content.length !== parts.length) {
+    return;
+  }
+  container.label = content[0];
+  delete container.sublabel;
 }
 
 /**
@@ -1410,7 +1444,11 @@ function markAppRowsCoveredByApplicationWindow(
       continue;
     }
     const [left, top, right, bottom] = acc.bounds;
-    if (isFullyCoveredByApplicationWindow(hierarchy, acc.target, { left, top, right, bottom })) {
+    const bounds = { left, top, right, bottom };
+    if (
+      isFullyCoveredByApplicationWindow(hierarchy, acc.target, bounds) ||
+      isFullyCoveredByOwnOverlay(hierarchy, acc.target, bounds)
+    ) {
       acc.affordances.clear();
       acc.occluded = true;
     }
@@ -1435,7 +1473,7 @@ export function projectSkeleton(
   const clickable = accumulators.filter((acc) => acc.affordances.has("tap"));
   // Hoist descendant text onto labelless/underlabelled clickable rows (issue
   // #5869) before the keep filter suppresses the now-folded text accumulators.
-  hoistContainerLabels(accumulators, clickable);
+  hoistContainerLabels(accumulators, clickable, ownOverlayNodeSources(androidHierarchy));
   applyEditableHintFallback(accumulators);
   // …then attribute an owning row's label to the state-carrying containers that
   // hoisting deliberately never folds into (issue #6871).

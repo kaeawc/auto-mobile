@@ -17,12 +17,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isSpecified
+import dev.jasonpearson.automobile.protocol.OverlayCornerRadius
 import dev.jasonpearson.automobile.protocol.OverlaySpecTheme
 import dev.jasonpearson.automobile.protocol.OverlaySpecThemeShapes
 import dev.jasonpearson.automobile.protocol.OverlaySpecThemeTypography
@@ -337,6 +339,75 @@ internal fun overlayShapes(spec: OverlaySpecThemeShapes?): Shapes {
   val (xs, s, m, l, xl) = steps.map { RoundedCornerShape(it.dp) }
   return Shapes(extraSmall = xs, small = s, medium = m, large = l, extraLarge = xl)
 }
+
+/**
+ * The Material 3 [ColorScheme] colour a spec role name (`primary`, `surfaceContainer`...) names.
+ */
+internal fun overlayColorRole(scheme: ColorScheme, role: String): Color? =
+  when (role) {
+    "primary" -> scheme.primary
+    "onPrimary" -> scheme.onPrimary
+    "primaryContainer" -> scheme.primaryContainer
+    "onPrimaryContainer" -> scheme.onPrimaryContainer
+    "inversePrimary" -> scheme.inversePrimary
+    "secondary" -> scheme.secondary
+    "onSecondary" -> scheme.onSecondary
+    "secondaryContainer" -> scheme.secondaryContainer
+    "onSecondaryContainer" -> scheme.onSecondaryContainer
+    "tertiary" -> scheme.tertiary
+    "onTertiary" -> scheme.onTertiary
+    "tertiaryContainer" -> scheme.tertiaryContainer
+    "onTertiaryContainer" -> scheme.onTertiaryContainer
+    "background" -> scheme.background
+    "onBackground" -> scheme.onBackground
+    "surface" -> scheme.surface
+    "onSurface" -> scheme.onSurface
+    "surfaceVariant" -> scheme.surfaceVariant
+    "onSurfaceVariant" -> scheme.onSurfaceVariant
+    "surfaceTint" -> scheme.surfaceTint
+    "inverseSurface" -> scheme.inverseSurface
+    "inverseOnSurface" -> scheme.inverseOnSurface
+    "error" -> scheme.error
+    "onError" -> scheme.onError
+    "errorContainer" -> scheme.errorContainer
+    "onErrorContainer" -> scheme.onErrorContainer
+    "outline" -> scheme.outline
+    "outlineVariant" -> scheme.outlineVariant
+    "scrim" -> scheme.scrim
+    "surfaceBright" -> scheme.surfaceBright
+    "surfaceDim" -> scheme.surfaceDim
+    "surfaceContainer" -> scheme.surfaceContainer
+    "surfaceContainerHigh" -> scheme.surfaceContainerHigh
+    "surfaceContainerHighest" -> scheme.surfaceContainerHighest
+    "surfaceContainerLow" -> scheme.surfaceContainerLow
+    "surfaceContainerLowest" -> scheme.surfaceContainerLowest
+    else -> null
+  }
+
+/** [literal] is the parsed hex colour; a role name in [spec] takes the active scheme's colour. */
+internal fun overlayResolveColor(scheme: ColorScheme, literal: Color?, spec: String?): Color? =
+  spec?.takeIf { !it.startsWith("#") }?.let { overlayColorRole(scheme, it) } ?: literal
+
+/** [overlayResolveColor] against the active overlay MaterialTheme. */
+@Composable
+internal fun overlayThemedColor(literal: Color?, spec: String?): Color? =
+  overlayResolveColor(MaterialTheme.colorScheme, literal, spec)
+
+/** A `cornerRadius` as a shape: dp as a rounded corner, a token as the theme's Shapes step. */
+internal fun overlayCornerShape(shapes: Shapes, radius: OverlayCornerRadius): Shape =
+  when (radius) {
+    is OverlayCornerRadius.Dp -> RoundedCornerShape(radius.dp.toFloat().dp)
+    is OverlayCornerRadius.Token ->
+      when (radius.name) {
+        "extraSmall" -> shapes.extraSmall
+        "small" -> shapes.small
+        "medium" -> shapes.medium
+        "large" -> shapes.large
+        "extraLarge" -> shapes.extraLarge
+        "full" -> RoundedCornerShape(percent = FULL_CORNER_PERCENT)
+        else -> RoundedCornerShape(0.dp)
+      }
+  }
 
 /** Material You colours need API 31; older devices fall through to the seed or baseline. */
 private fun overlayDynamicScheme(context: Context, theme: OverlayThemeSpec): ColorScheme? =

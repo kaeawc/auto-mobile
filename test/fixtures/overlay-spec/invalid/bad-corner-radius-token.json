@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "box",
+      "children": [],
+      "style": {
+        "cornerRadius": "huge"
+      }
+    }
+  },
+  "expectedPath": "root.style.cornerRadius"
+}

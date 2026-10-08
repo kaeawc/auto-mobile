@@ -1,0 +1,96 @@
+{
+  "id": "alarm-editor",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "volume": 7,
+    "snooze": 10,
+    "mon": true,
+    "tue": false
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "card",
+        "variant": "elevated",
+        "testTag": "alarm_card",
+        "children": [
+          {
+            "type": "slider",
+            "stateKey": "volume",
+            "label": "Volume",
+            "min": 0,
+            "max": 10,
+            "step": 1,
+            "testTag": "volume_slider"
+          },
+          {
+            "type": "slider",
+            "stateKey": "snooze",
+            "min": 5,
+            "max": 30,
+            "onTap": [
+              {
+                "type": "emit",
+                "name": "snoozeChanged"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "card",
+        "variant": "outlined",
+        "children": [
+          {
+            "type": "chip",
+            "label": "Add label",
+            "onTap": [
+              {
+                "type": "emit",
+                "name": "addLabel"
+              }
+            ],
+            "testTag": "add_label_chip"
+          }
+        ]
+      },
+      {
+        "type": "card",
+        "children": []
+      },
+      {
+        "type": "row",
+        "children": [
+          {
+            "type": "chip",
+            "label": "Mon",
+            "stateKey": "mon",
+            "testTag": "mon_chip"
+          },
+          {
+            "type": "chip",
+            "label": "Tue",
+            "variant": "filter",
+            "stateKey": "tue",
+            "onTap": [
+              {
+                "type": "emit",
+                "name": "tueTapped"
+              }
+            ]
+          },
+          {
+            "type": "chip",
+            "label": "Ring",
+            "variant": "assist"
+          }
+        ]
+      }
+    ]
+  }
+}

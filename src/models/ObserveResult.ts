@@ -117,6 +117,13 @@ export interface SkeletonElement {
   occluded?: true;
   /** Present only for a `toggle` affordance: the current checked state. */
   checked?: boolean;
+  /**
+   * AutoMobile overlay rows only (rows from CtrlProxy's own overlay windows): the selected tab or
+   * option (#10446). App rows never carry it, as observe output for apps is unchanged.
+   */
+  selected?: true;
+  /** AutoMobile overlay rows only: the node's state description, e.g. a pager's `Page 1 of 3`. */
+  state?: string;
   /** Explicit disabled state on either platform; omitted means enabled. */
   enabled?: false;
   /**

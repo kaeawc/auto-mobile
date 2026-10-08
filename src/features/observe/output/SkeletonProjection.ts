@@ -181,6 +181,25 @@ export function projectSkeletonElement(element: Element): SkeletonElement | unde
   return entry;
 }
 
+/**
+ * Surface `selected` and the state description for AutoMobile's own overlay nodes only (#10446).
+ * Whether app rows should report them is an open owner decision, so app output is unchanged.
+ */
+function copyOverlayState(
+  element: Element,
+  row: Pick<SkeletonAccumulator, "selected" | "stateDescription">,
+  overlaySources: ReadonlySet<object>,
+): void {
+  const source = getHierarchyNodeSource(element);
+  if (!source || !overlaySources.has(source)) {
+    return;
+  }
+  if (isTruthy(element.selected)) {
+    row.selected = true;
+  }
+  row.stateDescription ??= nonEmptyString(element["state-description"]);
+}
+
 /** Working accumulator for one merged skeleton row, keyed by `(elementId, label, bounds)`. */
 interface SkeletonAccumulator {
   elementId?: string;
@@ -197,6 +216,9 @@ interface SkeletonAccumulator {
   bounds: SkeletonElement["bounds"];
   affordances: Set<Affordance>;
   checked?: boolean;
+  /** AutoMobile overlay rows only: the selected tab or option, and the node's state description. */
+  selected?: true;
+  stateDescription?: string;
   enabled?: false;
   /** The Android IME or an application window covers every coordinate action on this app row. */
   occluded?: true;
@@ -269,6 +291,7 @@ function newAccumulator(
 function accumulateByIdentity(
   elements: ObserveElements,
   ime: ImeWindow | undefined,
+  overlaySources: ReadonlySet<object>,
 ): SkeletonAccumulator[] {
   const byIdentity = new Map<string, SkeletonAccumulator>();
   const appElements = allElements(elements).filter((element) => !isImeKeycap(element, ime));
@@ -297,6 +320,7 @@ function accumulateByIdentity(
       acc.checked = isTruthy(el.checked);
     }
     copyDisabledState(el, acc);
+    copyOverlayState(el, acc, overlaySources);
     if (acc.testTag === undefined) {
       acc.testTag = nonEmptyString(el["test-tag"]);
     }
@@ -341,6 +365,9 @@ function shouldKeep(acc: SkeletonAccumulator, clickable: SkeletonAccumulator[]):
     return true;
   }
   if (acc.semanticLinks?.length) {
+    return true;
+  }
+  if (acc.stateDescription !== undefined) {
     return true;
   }
   if (acc.label === undefined) {
@@ -562,6 +589,12 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   }
   if (acc.checked !== undefined) {
     entry.checked = acc.checked;
+  }
+  if (acc.selected !== undefined) {
+    entry.selected = acc.selected;
+  }
+  if (acc.stateDescription !== undefined) {
+    entry.state = acc.stateDescription;
   }
   if (acc.enabled !== undefined) {
     entry.enabled = acc.enabled;
@@ -1472,11 +1505,12 @@ export function projectSkeleton(
   androidHierarchy?: ViewHierarchyResult,
 ): SkeletonProjectionResult {
   const ime = detectImeWindow(elements);
-  const accumulators = accumulateByIdentity(elements, ime);
+  const overlaySources = ownOverlayNodeSources(androidHierarchy);
+  const accumulators = accumulateByIdentity(elements, ime, overlaySources);
   const clickable = accumulators.filter((acc) => acc.affordances.has("tap"));
   // Hoist descendant text onto labelless/underlabelled clickable rows (issue
   // #5869) before the keep filter suppresses the now-folded text accumulators.
-  hoistContainerLabels(accumulators, clickable, ownOverlayNodeSources(androidHierarchy));
+  hoistContainerLabels(accumulators, clickable, overlaySources);
   applyEditableHintFallback(accumulators);
   // …then attribute an owning row's label to the state-carrying containers that
   // hoisting deliberately never folds into (issue #6871).

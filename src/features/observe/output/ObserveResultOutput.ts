@@ -938,6 +938,10 @@ export interface ObserveDiff {
    * settled capture from a half-inflated one.
    */
   settled?: boolean;
+  /** Same as a full observation's `settleMs` (#9591); copied from the post-action observation. */
+  settleMs?: number;
+  /** Same as a full observation's `settlePolls` (#9591); copied from the post-action observation. */
+  settlePolls?: number;
   added: ObserveDiffNode[];
   removed: ObserveDiffNode[];
   changed: ObserveDiffNodeChange[];

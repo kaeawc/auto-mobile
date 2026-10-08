@@ -1098,6 +1098,18 @@ export const observationSummarySchema = z
       .describe(
         "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
       ),
+    settleMs: z
+      .number()
+      .optional()
+      .describe(
+        "Milliseconds the hierarchy-stability gate spent re-observing (issue #9591). Present only when the gate ran. With `settled: false`, a value near the gate's budget means the screen kept changing or each read was slow; a value well below it means the gate stopped early.",
+      ),
+    settlePolls: z
+      .number()
+      .optional()
+      .describe(
+        "Re-observations the hierarchy-stability gate took (issue #9591). Two are needed to settle; fewer at the budget means reads were too slow to compare.",
+      ),
     accessibilityAuditSkipped: z
       .literal("settled_capture_adopted")
       .optional()
@@ -1400,6 +1412,18 @@ export const observeDiffSchema = z
           "the observation this diff was computed from passed the hierarchy-stability " +
           "gate. Populated from the post-action observation, not by `diffObserveResult` " +
           "itself, so a diff-mode client has the same accessor as a full-mode one.",
+      ),
+    settleMs: z
+      .number()
+      .optional()
+      .describe(
+        "Same name/meaning as a full observation's `settleMs` (issue #9591), copied from the post-action observation.",
+      ),
+    settlePolls: z
+      .number()
+      .optional()
+      .describe(
+        "Same name/meaning as a full observation's `settlePolls` (issue #9591), copied from the post-action observation.",
       ),
     accessibilityAuditSkipped: z
       .literal("settled_capture_adopted")

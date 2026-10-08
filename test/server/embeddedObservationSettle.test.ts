@@ -1675,11 +1675,13 @@ describe("explicit-display embedded observation", () => {
     settled.display = { ...action.display };
     let requestedDisplay: string | undefined;
     const response = createStructuredToolResponse({ success: true, observation: action });
+    const timer = new FakeTimer();
 
     await settleEmbeddedObservationInResponse(response, {
       name: "tapOn",
       args: { display: "external" },
       internal: false,
+      timer,
       createSettleObserve: () => ({
         execute: async (options) => {
           requestedDisplay = options?.display;
@@ -1690,7 +1692,7 @@ describe("explicit-display embedded observation", () => {
 
     expect(requestedDisplay).toBe("external-key");
     const payload = JSON.parse(response.content[0].text);
-    expect(payload.observation).toEqual({ ...settled, settled: true });
+    expect(payload.observation).toEqual({ ...settled, settled: true, settleMs: 0, settlePolls: 2 });
     expect(payload.observation.display).not.toHaveProperty("pinned");
   });
 

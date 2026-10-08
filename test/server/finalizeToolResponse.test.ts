@@ -1736,6 +1736,8 @@ describe("finalizeToolResponse", () => {
         screenshotFormat: "png",
         screenshotMimeType: "image/png",
         settled: true,
+        settleMs: 550,
+        settlePolls: 2,
         accessibilityAuditSkipped: "settled_capture_adopted",
       });
 

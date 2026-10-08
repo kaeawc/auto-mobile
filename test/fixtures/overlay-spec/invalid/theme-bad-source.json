@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "theme": {
+      "colors": {
+        "source": "wallpaper"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x"
+    }
+  },
+  "expectedPath": "theme.colors.source"
+}

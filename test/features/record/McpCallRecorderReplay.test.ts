@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import * as yaml from "js-yaml";
 import { ResetKeychain } from "../../../src/features/action/ResetKeychain";
 import {
@@ -233,10 +233,19 @@ test.each([
   }
 });
 
+// The interaction tools module graph is large; load it once outside the timed test (the 100 ms
+// unit budget excludes beforeAll), so a cold import on a loaded runner can't breach the budget.
+let interactionTools: typeof import("../../../src/server/interactionTools");
+let tapAtCoordinate: typeof import("../../helpers/tapAtCoordinate");
+beforeAll(async () => {
+  interactionTools = await import("../../../src/server/interactionTools");
+  tapAtCoordinate = await import("../../helpers/tapAtCoordinate");
+});
+
 test("executor passes step geometry through the real tapAt handler", async () => {
   const { tapAtHandler, tapAtSchema, setTapAtElementFactory, resetTapAtElementFactory } =
-    await import("../../../src/server/interactionTools");
-  const { createTapAt } = await import("../../helpers/tapAtCoordinate");
+    interactionTools;
+  const { createTapAt } = tapAtCoordinate;
   const fake = createTapAt(SIMULATOR);
   setTapAtElementFactory(() => fake.tapAt);
   try {

@@ -1,0 +1,18 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "theme": {
+    "mode": "dark",
+    "colors": {
+      "seed": "#6750A4"
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "x"
+  }
+}

@@ -11,6 +11,7 @@ const checksums = {
   ipa: "b".repeat(64),
   videoJar: "c".repeat(64),
   screenCaptureHelper: "d".repeat(64),
+  networkFilter: "e".repeat(64),
 };
 const input = { version: "0.0.82", tag: "0.0.82", repository: "kaeawc/auto-mobile", checksums };
 // Literal legacy template, independent of the builder's assembly.
@@ -39,6 +40,12 @@ Download automobile-video.jar from the release assets below.
 **SHA256 Checksum:** \`${checksums.screenCaptureHelper}\`
 
 Download screen-capture-helper-macos-universal.zip from the release assets below.
+
+## macOS network-filter
+
+**SHA256 Checksum:** \`${checksums.networkFilter}\`
+
+Download automobile-network-filter-macos-universal.zip from the release assets below.
 
 ## Desktop App
 

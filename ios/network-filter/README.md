@@ -14,8 +14,9 @@ at runtime, and network isolation still require native integration evidence.
   Controller output distinguishes `installation_required`, `approval_required`,
   `unavailable`, and `ready`. Ready means the allow-only provider replied over
   authenticated XPC, not that any traffic behavior has been verified.
-- Version 1 read-only Codable/XPC snapshots. Both peers require an Apple-signed
-  executable with the expected bundle identifier and their own signing team.
+- Version 2 read-only Codable/XPC snapshots (version 1 payloads still decode).
+  Both peers require an Apple-signed executable with the expected bundle
+  identifier and their own signing team.
 - New socket flows always receive `allow()`. The callback copies audit tokens
   into a lock-protected history of at most 128 entries. It never resolves process
   metadata, reads payloads, records network addresses, pauses, or drops a flow.
@@ -23,6 +24,34 @@ at runtime, and network isolation still require native integration evidence.
   source-process code metadata. Complete audit tokens retain process generation;
   bundle identifiers and PIDs are not interpreted as simulator identity.
   Missing/malformed tokens and failed metadata lookup remain unattributed.
+- Per-simulator attribution (#10589) runs at snapshot time, never in the flow
+  callback. `SimulatorFlowResolver` maps each flow's audit tokens to one
+  simulator (device set and UDID), app executable and process generation (pid
+  plus pid version, never the pid alone), through a fakeable `ProcessTable`
+  (`DarwinProcessTable` uses `proc_pidpath_audittoken`, `proc_pidinfo`
+  `PROC_PIDTBSDINFO`, `KERN_PROCARGS2`, and libbsm's `audit_token_to_pid` and
+  `audit_token_to_pidversion`). Each flow reports `attribution`
+  (`attributed`, `unattributed`, `conflicting`), `method` (`executable_path`,
+  `launchd_sim_ancestor`, `unattributed`), `simulator`, `app`, and a `reason`
+  when it is not attributed:
+  - App processes: the UDID comes from an executable under
+    `<deviceSet>/<UDID>/data/Containers/Bundle/Application/`.
+  - Runtime-hosted helpers (`nsurlsessiond`, WebKit networking) share one path
+    per runtime, so the resolver walks the parent chain to that simulator's
+    `launchd_sim` and reads the device path from its arguments. A parent that
+    started after its child (a reused pid) stops the walk.
+  - Delegated flows attribute through `sourceAppAuditToken`. If the app and
+    process tokens resolve to different simulators the flow is `conflicting`.
+  - Only simulators the host names are selectable:
+    `network-filter-controller status|snapshot --managed <device-set-path> <udid>`
+    (repeatable). Device-set paths are resolved with `realpath` because the
+    kernel reports executable paths with symlinks resolved. The default device
+    set is never assumed. Native Mac processes, unmanaged simulators and every
+    lookup failure are reported `unattributed` and allowed.
+  These methods are hypotheses until the signed run in #10263 confirms them,
+  including whether the sandboxed provider may read other processes' paths and
+  `launchd_sim` arguments, and whether `launchd_sim` names a custom device set in
+  the same (realpath) form the host passes.
 - Restart discards the diagnostic history. There is no persisted impairment,
   delayed flow verdict, control-channel bypass, or target-app instrumentation.
 

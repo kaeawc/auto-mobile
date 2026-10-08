@@ -1,0 +1,11 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": { "placement": { "type": "fullscreen" } },
+    "root": {
+      "type": "row",
+      "children": [{ "type": "text", "text": "hello", "style": { "weight": 0 } }]
+    }
+  },
+  "expectedPath": "root.children[0].style.weight"
+}

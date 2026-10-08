@@ -22,8 +22,7 @@ import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { sequenceBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { DefaultElementFinder } from "../utility/ElementFinder";
-import { nodeAttributes } from "../../models/ViewHierarchyResult";
+import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import {
   wasHierarchyReadDuringCall,
   withObservationReadScope,
@@ -214,25 +213,25 @@ export class HomeScreen extends BaseVisualChange {
     ) {
       return false;
     }
-    const finder = new DefaultElementFinder();
+    const selector = new ResolverElementSelector();
     // Overlays outrank a workspace that remains visible underneath (#9762).
     if (
       ANDROID_LAUNCHER_OVERLAY_MARKERS.some((marker) =>
-        finder.hasContainerElement(viewHierarchy, { elementId: `${launcherPackage}:id/${marker}` }),
+        selector.hasContainer(viewHierarchy, { elementId: `${launcherPackage}:id/${marker}` }),
       )
     ) {
       return false;
     }
-    const workspace = finder.findContainerNode(viewHierarchy, {
+    const workspace = selector.resolveContainerMatch(viewHierarchy, {
       elementId: `${launcherPackage}:id/workspace`,
     });
     // Partial occlusion is normal on Home (system bars), so do not exclude it.
-    if (workspace !== null && nodeAttributes(workspace)["visible-to-user"] === true) {
+    if (workspace?.visibleToUser === true) {
       return true;
     }
     // Preserve already-home handling for launchers with a different vocabulary.
     // An existing but hidden workspace still requires a visual change (#9762).
-    return workspace === null;
+    return workspace === undefined;
   }
 
   private async executeAndroidHome(requestSignal?: AbortSignal): Promise<string | undefined> {

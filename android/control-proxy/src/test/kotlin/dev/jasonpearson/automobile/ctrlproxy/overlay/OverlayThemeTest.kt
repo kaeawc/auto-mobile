@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import dev.jasonpearson.automobile.protocol.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -8,6 +11,8 @@ import org.junit.Test
 class OverlayThemeTest {
   private fun model(root: OverlayNode) =
     mapOverlaySpec(OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), root = root))
+
+  private val hiddenCondition = OverlayCondition("show", OverlayScalar.BooleanValue(true))
 
   private fun styled(background: String?) = OverlayStyle(background = background)
 
@@ -47,6 +52,122 @@ class OverlayThemeTest {
     assertTrue(overlayThemeSpec(root, true).dark)
     assertFalse(overlayThemeSpec(root, false).dark)
     assertNull(overlayThemeSpec(root, true).surface)
+  }
+
+  private fun themed(mode: String? = null, seed: String? = null, source: String? = null) =
+    OverlaySpecTheme(
+      mode,
+      if (seed != null || source != null) OverlaySpecThemeColors(seed, source) else null,
+    )
+
+  @Test
+  fun `an explicit mode wins over the authored background`() {
+    val dark = model(OverlayBoxNode(style = styled("#121316"), children = emptyList())).root
+    val light = overlayThemeSpec(dark, true, themed(mode = "light"))
+    assertFalse(light.dark)
+    assertNull(light.surface) // a dark background must not paint a light scheme
+    assertTrue(overlayThemeSpec(dark, false, themed(mode = "dark")).dark)
+    assertEquals(Color(0xFF121316), overlayThemeSpec(dark, false, themed(mode = "dark")).surface)
+    assertTrue(overlayThemeSpec(dark, true, themed(mode = "system")).dark)
+    assertFalse(overlayThemeSpec(dark, false, themed(mode = "system")).dark)
+  }
+
+  @Test
+  fun `a seed colour generates a scheme that replaces the authored surface`() {
+    val root = model(OverlayBoxNode(style = styled("#121316"), children = emptyList())).root
+    val theme = overlayThemeSpec(root, false, themed(seed = "#6750A4"))
+    assertNull(theme.surface)
+    val light = overlayColorScheme(theme.copy(dark = false))
+    val dark = overlayColorScheme(theme.copy(dark = true))
+    assertNotEquals(light.primary, dark.primary)
+    assertTrue(light.surface.luminance() > 0.5f)
+    assertTrue(dark.surface.luminance() < 0.5f)
+    assertTrue(light.primary.luminance() < light.primaryContainer.luminance())
+  }
+
+  @Test
+  fun `a seed keeps its hue in the primary colour`() {
+    val scheme = overlaySeedColorScheme(Color(0xFF0000FF), dark = false)
+    assertTrue(
+      scheme.primary.blue > scheme.primary.red && scheme.primary.blue > scheme.primary.green
+    )
+  }
+
+  @Test
+  fun `device colour uses the dynamic scheme only when one is supplied`() {
+    val root = model(OverlaySpacerNode()).root
+    val theme = overlayThemeSpec(root, false, themed(seed = "#6750A4", source = "device"))
+    assertTrue(theme.dynamicColor)
+    val dynamic = darkColorScheme(primary = Color(0xFF123456))
+    assertSame(dynamic, overlayColorScheme(theme, dynamic))
+    // Below API 31 no dynamic scheme exists: the seed is the fallback.
+    assertEquals(
+      overlaySeedColorScheme(Color(0xFF6750A4), false).primary,
+      overlayColorScheme(theme, null).primary,
+    )
+    assertEquals(
+      lightColorScheme().primary,
+      overlayColorScheme(overlayThemeSpec(root, false, themed(source = "device"))).primary,
+    )
+  }
+
+  @Test
+  fun `the host chrome follows an explicit mode`() {
+    val dark = model(OverlayBoxNode(style = styled("#121316"), children = emptyList()))
+    assertEquals(true, overlayHostDark(dark))
+    assertEquals(false, overlayHostDark(dark.copy(theme = themed(mode = "light"))))
+    assertNull(overlayHostDark(model(OverlaySpacerNode())))
+  }
+
+  @Test
+  fun `a system mode leaves the host chrome to the device even over an authored background`() {
+    val dark = model(OverlayBoxNode(style = styled("#121316"), children = emptyList()))
+    assertNull(overlayHostDark(dark.copy(theme = themed(mode = "system"))))
+  }
+
+  @Test
+  fun `a mid light surface selects the light scheme so its text stays readable`() {
+    val root = model(OverlayBoxNode(style = styled("#BBBBBB"), children = emptyList())).root
+    val theme = overlayThemeSpec(root, false)
+    assertFalse(theme.dark)
+    val scheme = overlayColorScheme(theme)
+    assertTrue(scheme.onSurface.contrastWith(scheme.surface) >= 4.5f)
+  }
+
+  @Test
+  fun `hidden nodes do not decide the authored theme`() {
+    val hidden =
+      OverlayBoxNode(
+        children =
+          listOf(
+            OverlayBoxNode(
+              style = styled("#101010"),
+              visibleWhen = hiddenCondition,
+              children = emptyList(),
+            ),
+            OverlayBoxNode(style = styled("#FFFFFF"), children = emptyList()),
+          )
+      )
+    assertEquals(false, overlayAuthoredTheme(model(hidden).root)?.dark)
+  }
+
+  @Test
+  fun `a grey seed stays grey`() {
+    val scheme = overlaySeedColorScheme(Color(0xFF808080), dark = false)
+    assertEquals(scheme.primary.red, scheme.primary.green, 0.01f)
+    assertEquals(scheme.primary.green, scheme.primary.blue, 0.01f)
+  }
+
+  @Test
+  fun `a bright seed still gives a legible primary and content colour`() {
+    for (dark in listOf(false, true)) {
+      val scheme = overlaySeedColorScheme(Color(0xFFFFFF00), dark)
+      assertTrue(
+        "primary on surface, dark=$dark",
+        scheme.primary.contrastWith(scheme.surface) >= 3f,
+      )
+      assertTrue("onPrimary, dark=$dark", scheme.onPrimary.contrastWith(scheme.primary) >= 4.5f)
+    }
   }
 
   @Test

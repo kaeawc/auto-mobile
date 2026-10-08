@@ -640,6 +640,15 @@ no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
 scroll/pager/tabBar/bottomNav/bottomSheet; actions are emit/setPage/setState/dismiss.
 See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).
 
+#### iOS simulators
+
+On iOS simulators `prototype` is backed by an overlay agent injected into the app at launch
+(`launchApp { overlay: true }`), with no SDK in the app. It works on simulators only, only for
+apps launched with the agent (a relaunch loses app state; SpringBoard is not covered), and
+offers `show`, `dismiss`, `status` and `awaitEvent` but not `showVariants` or `update`; showing
+the same `id` again updates the overlay. For apps run from Xcode, add `DYLD_INSERT_LIBRARIES`
+to the scheme. See the [iOS overlay agent](design-docs/plat/ios/overlay-agent.md).
+
 `show` (and `showVariants`) accepts the same optional `display` selector as the tap tools (a panel
 key, a role such as `inner` or `cover`, or `active`), resolved with the same
 precedence: an explicit `display`, then the session display pin, then the default
@@ -1473,7 +1482,9 @@ Physical iOS has no production `putAppFile` app-container or media-library
 provider. user_files writes support Android Downloads and iOS Simulator managed
 fixture-app namespaces; user_files list/read resources remain Android-only.
 Media libraries have no list/read resource.
-Use `storage/capabilities` for provider-derived operations and prerequisite states;
+Use `sdk/capabilities` to read the app SDK's capability states and capture policy
+(see [SDK capabilities](using/sdk-capabilities.md)). Use `storage/capabilities` for
+provider-derived operations and prerequisite states;
 inspect structured per-file `effects` for indexing/import/discoverability outcomes.
 These provider contracts do not establish device verification of legacy replacement.
 

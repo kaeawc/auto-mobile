@@ -149,6 +149,7 @@ describe("CtrlProxy command support", () => {
         // Newer than the old-APK fixture: no older APK advertises it.
         "overlay_display_id_v1",
         "overlay_window_options_v1",
+        "get_sdk_capabilities",
         "network_mock_rules_report_v1",
         "ime_clear_field_v1",
         "ime_password_commit_v1",

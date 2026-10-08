@@ -26,6 +26,7 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
   let fakeAccessibilityDetector: FakeAccessibilityDetector;
   let fakeCtrlProxy: FakeCtrlProxy;
   let finder: FakeElementFinder;
+  let scrollResolver: FakeScrollElementResolver;
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
 
   const container: Element = {
@@ -58,7 +59,7 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
-      resolver: new FakeScrollElementResolver(finder),
+      resolver: scrollResolver,
     });
     (swipeOn as any).awaitIdle = fakeAwaitIdle;
     (swipeOn as any).window = fakeWindow;
@@ -86,7 +87,8 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
     fakeTimer.enableAutoAdvance();
     fakeWindow.configureCachedActiveWindow(null);
     finder = new FakeElementFinder();
-    finder.nextScrollableContainer = container;
+    scrollResolver = new FakeScrollElementResolver(finder);
+    scrollResolver.setNextScrollableContainer(container);
     finder.nextElementByResourceId = container;
   });
 

@@ -50,14 +50,4 @@ export class FakeElementFinder implements ElementFinder {
   ): boolean {
     return this.nextHasContainer;
   }
-
-  /**
-   * Scripted scroll-container lookup for `FakeScrollElementResolver` only. Not part of
-   * `ElementFinder`: production scroll resolution goes through the resolver.
-   */
-  nextScrollableContainer: Element | null = null;
-
-  findScrollableContainer(_viewHierarchy: ViewHierarchyResult): Element | null {
-    return this.nextScrollableContainer;
-  }
 }

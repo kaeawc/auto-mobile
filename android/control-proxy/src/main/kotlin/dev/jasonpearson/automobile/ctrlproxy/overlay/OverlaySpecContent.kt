@@ -1,10 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandIn
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -113,8 +109,8 @@ private fun RenderOverlayNode(
     AnimatedVisibility(
       visible = node.visible,
       modifier = parentModifier,
-      enter = fadeIn() + expandIn(),
-      exit = fadeOut() + shrinkOut(),
+      enter = overlayEnterTransition(node.source.transition),
+      exit = overlayExitTransition(node.source.transition),
     ) {
       RenderOverlayNodeContent(node, interact)
     }
@@ -130,14 +126,16 @@ private fun RenderOverlayNodeContent(
   parentModifier: Modifier = Modifier,
 ) {
   val modifier = parentModifier.then(overlayNodeModifier(node, interact))
+  // Containers whose children can appear, disappear or change animate their size with them.
+  val containerModifier = modifier.overlayAnimateSize(LocalOverlayMotion.current)
   when (node.role) {
     "box" ->
-      Box(modifier, contentAlignment = node.style.alignment) {
+      Box(containerModifier, contentAlignment = node.style.alignment) {
         node.children.forEach { RenderOverlayNode(it, interact) }
       }
     "row" ->
       Row(
-        modifier,
+        containerModifier,
         horizontalArrangement = overlayHorizontalArrangement(node.style.source),
         verticalAlignment = node.style.verticalAlignment,
       ) {
@@ -145,7 +143,7 @@ private fun RenderOverlayNodeContent(
       }
     "column" ->
       Column(
-        modifier,
+        containerModifier,
         verticalArrangement = overlayVerticalArrangement(node.style.source),
         horizontalAlignment = node.style.horizontalAlignment,
       ) {
@@ -154,10 +152,14 @@ private fun RenderOverlayNodeContent(
     "text" -> {
       val source = node.style.source
       val role = overlayTextRole(MaterialTheme.typography, source.textStyle)
+      // A styled text node with no colour of its own reads as on-surface text, not black.
+      val textColor =
+        if (source.color == null && role != null) MaterialTheme.colorScheme.onSurface
+        else overlayThemedColor(node.style.color, source.color) ?: node.style.color
       Text(
         node.text,
         modifier,
-        color = node.style.color,
+        color = textColor,
         // sp, so overlay text follows the system font scale like the app it prototypes (#10436).
         // A `textStyle` role supplies size, weight and family; explicit style fields still win.
         fontSize =
@@ -176,11 +178,18 @@ private fun RenderOverlayNodeContent(
           icon,
           contentDescription = null,
           modifier = modifier,
-          tint = node.style.color.takeOrElse { LocalContentColor.current },
+          tint =
+            (overlayThemedColor(node.style.color, node.style.source.color) ?: node.style.color)
+              .takeOrElse { LocalContentColor.current },
         )
       else
         Box(
-          modifier.defaultMinSize(24.dp, 24.dp).background(node.style.background ?: Color.LightGray)
+          modifier
+            .defaultMinSize(24.dp, 24.dp)
+            .background(
+              overlayThemedColor(node.style.background, node.style.source.background)
+                ?: Color.LightGray
+            )
         )
     }
     "image" -> OverlayImageContent(node, modifier)
@@ -201,6 +210,12 @@ private fun RenderOverlayNodeContent(
     "switch",
     "checkbox" -> RenderOverlayToggle(node, modifier, interact)
     "button" -> RenderOverlayButton(node, modifier, interact)
+    "slider" -> RenderOverlaySlider(node, modifier, interact)
+    "chip" -> RenderOverlayChip(node, modifier, interact)
+    "card" ->
+      RenderOverlayCard(node, modifier) {
+        node.children.forEach { RenderOverlayNode(it, interact, columnWeight(it)) }
+      }
     // Spacer keeps its size and authored actions.
     else -> Box(modifier)
   }
@@ -370,7 +385,10 @@ private fun RenderOverlaySheet(
         .align(Alignment.BottomCenter)
         .fillMaxWidth()
         .height((height - drag).coerceIn(0.0, maxHeight.value.toDouble()).toFloat().dp)
-        .background(node.style.background ?: MaterialTheme.colorScheme.surface)
+        .background(
+          overlayThemedColor(node.style.background, node.style.source.background)
+            ?: MaterialTheme.colorScheme.surface
+        )
         .pointerInput(heights, height, source.dismissOnSwipe) {
           detectVerticalDragGestures(
             onDragStart = { drag = 0.0 },
@@ -425,11 +443,15 @@ private fun overlayNodeModifier(
   modifier = dimensionModifier(modifier, style.height, horizontal = false)
   modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
   modifier = sizeConstraintModifier(modifier, style)
-  val shape = RoundedCornerShape((style.cornerRadius ?: 0.0).toFloat().dp)
+  val shape =
+    overlayCornerShape(MaterialTheme.shapes, style.cornerRadius ?: OverlayCornerRadius.Dp(0.0))
   if (style.cornerRadius != null) modifier = modifier.clip(shape)
-  node.style.background?.let { modifier = modifier.background(it, shape) }
+  overlayThemedColor(node.style.background, style.background)?.let {
+    modifier = modifier.background(it, shape)
+  }
   style.border?.let {
-    modifier = modifier.border(it.width.toFloat().dp, checkNotNull(node.style.borderColor), shape)
+    val borderColor = overlayThemedColor(node.style.borderColor, it.color)
+    modifier = modifier.border(it.width.toFloat().dp, checkNotNull(borderColor), shape)
   }
   // Click handling and semantics go before the inset and authored padding, so the whole drawn node
   // is tappable, its ripple covers it, and its accessibility bounds are its drawn bounds (#10435).
@@ -487,7 +509,8 @@ private fun overlayNodeModifier(
   return modifier
 }
 
-private val SEMANTICS_FREE_CONTAINERS = setOf("box", "row", "column", "scroll", "pager", "spacer")
+private val SEMANTICS_FREE_CONTAINERS =
+  setOf("box", "row", "column", "scroll", "pager", "spacer", "card")
 
 /**
  * The accessible label for an overlay node. Authored text wins; an icon-only tappable node reads as

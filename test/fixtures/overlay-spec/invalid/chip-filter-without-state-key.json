@@ -1,0 +1,17 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {},
+    "root": {
+      "type": "chip",
+      "label": "Mon",
+      "variant": "filter"
+    }
+  },
+  "expectedPath": "root.stateKey"
+}

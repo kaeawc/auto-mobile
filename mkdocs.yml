@@ -135,7 +135,9 @@ nav:
       - "iOS Playground theme parity": design-docs/plat/ios/playground-theme-parity.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Android overlay specification": design-docs/plat/android/overlay-ux.md
+      - "iOS simulator overlay agent": design-docs/plat/ios/overlay-agent.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
+      - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Daemon": design-docs/mcp/daemon.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md

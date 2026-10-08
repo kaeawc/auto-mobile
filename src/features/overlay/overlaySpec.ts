@@ -115,10 +115,63 @@ const paddingSchema = z
     end: z.number().finite().min(0).optional(),
   })
   .strict();
+/** Material 3 ColorScheme roles a colour field can name instead of a hex value. */
+const COLOR_ROLES = [
+  "primary",
+  "onPrimary",
+  "primaryContainer",
+  "onPrimaryContainer",
+  "inversePrimary",
+  "secondary",
+  "onSecondary",
+  "secondaryContainer",
+  "onSecondaryContainer",
+  "tertiary",
+  "onTertiary",
+  "tertiaryContainer",
+  "onTertiaryContainer",
+  "background",
+  "onBackground",
+  "surface",
+  "onSurface",
+  "surfaceVariant",
+  "onSurfaceVariant",
+  "surfaceTint",
+  "inverseSurface",
+  "inverseOnSurface",
+  "error",
+  "onError",
+  "errorContainer",
+  "onErrorContainer",
+  "outline",
+  "outlineVariant",
+  "scrim",
+  "surfaceBright",
+  "surfaceDim",
+  "surfaceContainer",
+  "surfaceContainerHigh",
+  "surfaceContainerHighest",
+  "surfaceContainerLow",
+  "surfaceContainerLowest",
+] as const;
+/** Material 3 Shapes steps a `cornerRadius` can name instead of a dp number. */
+const CORNER_RADIUS_TOKENS = [
+  "none",
+  "extraSmall",
+  "small",
+  "medium",
+  "large",
+  "extraLarge",
+  "full",
+] as const;
+const colorValueSchema = z.union([
+  z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/),
+  z.enum(COLOR_ROLES),
+]);
 const borderSchema = z
   .object({
     width: z.number().finite().min(0),
-    color: z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/),
+    color: colorValueSchema,
   })
   .strict();
 /** Material 3 type roles a text node's `textStyle` can name. */
@@ -149,11 +202,8 @@ const styleSchema = z
     minHeight: z.number().finite().min(0).optional(),
     maxHeight: z.number().finite().min(0).optional(),
     padding: paddingSchema.optional(),
-    background: z
-      .string()
-      .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
-      .optional(),
-    cornerRadius: z.number().finite().min(0).optional(),
+    background: colorValueSchema.optional(),
+    cornerRadius: z.union([z.number().finite().min(0), z.enum(CORNER_RADIUS_TOKENS)]).optional(),
     border: borderSchema.optional(),
     alpha: z.number().finite().min(0).max(1).optional(),
     alignment: z
@@ -175,10 +225,7 @@ const styleSchema = z
     spacing: z.number().finite().min(0).optional(),
     textSize: z.number().finite().min(1e-6).optional(),
     fontWeight: z.number().finite().int().min(100).max(900).optional(),
-    color: z
-      .string()
-      .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
-      .optional(),
+    color: colorValueSchema.optional(),
     textAlign: z.enum(["start", "center", "end", "justify"]).optional(),
     maxLines: z.number().finite().int().min(1).max(2147483647).optional(),
     fontFamily: z.enum(["default", "sansSerif", "serif", "monospace"]).optional(),
@@ -283,6 +330,7 @@ const commonNodeShape = {
   style: styleSchema.optional(),
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
+  transition: z.enum(["none", "fade", "expand", "slide"]).optional(),
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
 };
@@ -339,6 +387,36 @@ const buttonBaseSchema = z
     type: z.enum(["button"]),
     label: z.string().min(1),
     variant: z.enum(["filled", "outlined", "text"]).optional(),
+  })
+  .strict();
+const sliderBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["slider"]),
+    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    label: z.string().min(1).optional(),
+    min: z.number().finite(),
+    max: z.number().finite(),
+    step: z.number().finite().optional(),
+  })
+  .strict();
+const chipBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["chip"]),
+    label: z.string().min(1),
+    variant: z.enum(["assist", "filter"]).optional(),
+    stateKey: z
+      .string()
+      .regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/)
+      .optional(),
+  })
+  .strict();
+const cardBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["card"]),
+    variant: z.enum(["filled", "elevated", "outlined"]).optional(),
   })
   .strict();
 const scrollBaseSchema = z
@@ -402,6 +480,9 @@ export type OverlayNode =
   | z.infer<typeof switchBaseSchema>
   | z.infer<typeof checkboxBaseSchema>
   | z.infer<typeof buttonBaseSchema>
+  | z.infer<typeof sliderBaseSchema>
+  | z.infer<typeof chipBaseSchema>
+  | (z.infer<typeof cardBaseSchema> & { children: OverlayNode[] })
   | (z.infer<typeof scrollBaseSchema> & { child: OverlayNode })
   | (z.infer<typeof pagerBaseSchema> & { children: OverlayNode[] })
   | z.infer<typeof tabBarBaseSchema>
@@ -420,6 +501,9 @@ export const overlayNodeSchema: z.ZodType<OverlayNode, z.ZodTypeDef, unknown> = 
     switchBaseSchema,
     checkboxBaseSchema,
     buttonBaseSchema,
+    sliderBaseSchema,
+    chipBaseSchema,
+    cardBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
     scrollBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
     pagerBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(1) }),
     tabBarBaseSchema,
@@ -496,6 +580,9 @@ export const OVERLAY_NODE_TYPES = [
   "switch",
   "checkbox",
   "button",
+  "slider",
+  "chip",
+  "card",
   "scroll",
   "pager",
   "tabBar",

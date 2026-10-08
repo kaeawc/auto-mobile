@@ -57,6 +57,13 @@ import {
   type NetworkFilterStatus,
 } from "../network-filter/NetworkFilterBridge";
 import {
+  IOS_APP_NETWORK_RULE_LEASE_MS,
+  IosAppNetworkRuleClient,
+  type IosAppNetworkApplyResult,
+  type IosAppNetworkResetResult,
+  type IosAppNetworkRuleCommandContext,
+} from "../network-filter/IosAppNetworkRuleClient";
+import {
   consolePortFromSerial,
   type EmulatorConsoleClient,
 } from "../../utils/android-cmdline-tools/EmulatorConsoleClient";
@@ -259,8 +266,8 @@ export const NETWORK_CONDITION_PROFILES: Record<NetworkConditionProfile, Network
 export const MAX_NETWORK_CONDITION_TTL_SECONDS = Math.floor(2_147_483_647 / 1000);
 
 /**
- * State of the iOS Simulator network-extension backend (#10590). Reported for
- * availability only: the backend applies nothing until offline/reset (#10264).
+ * State of the iOS Simulator network-extension backend (#10590): whether the
+ * controller is installed, approved and answering.
  */
 export interface NetworkConditionBackendState {
   state: NetworkFilterState;
@@ -272,6 +279,20 @@ export interface NetworkConditionBackendState {
   nextStep: string;
 }
 
+/** One leased per-app rule the iOS Simulator provider enforces (#10264). */
+export interface IosAppNetworkRuleState {
+  appId: string;
+  profile: "offline";
+  revision: number;
+  ownerGeneration: number;
+  /** The owning daemon session (reads only). */
+  owner?: string;
+  /** Milliseconds until the provider ends the rule unless the session renews it. */
+  leaseExpiresInMs?: number;
+  /** New flows of the app the provider refused under this revision (reads only). */
+  droppedFlows?: number;
+}
+
 export interface NetworkConditionState {
   supported: boolean;
   capability?: NetworkConditionCapability;
@@ -280,6 +301,26 @@ export interface NetworkConditionState {
   backend?: "network-extension";
   /** iOS Simulator only: the backend's install/approval state and next step. */
   controller?: NetworkConditionBackendState;
+  /**
+   * What the condition applies to. iOS Simulator is always `app` (one app on
+   * one simulator); a request without `appId` is `device` and refused there.
+   */
+  scope?: "device" | "app";
+  /** iOS Simulator writes: the targeted app's bundle id. */
+  appId?: string;
+  /** iOS Simulator writes: the rule the provider acknowledged. */
+  rule?: IosAppNetworkRuleState;
+  /** iOS Simulator reads: every rule the provider enforces on this simulator. */
+  rules?: IosAppNetworkRuleState[];
+  /**
+   * The provider acknowledged the configuration. Acknowledgement is not proof
+   * of traffic behaviour, so `verified` stays unset.
+   */
+  acknowledged?: boolean;
+  /** `partial`: flows the filter cannot attribute to the app are allowed. */
+  coverage?: "partial";
+  /** What the applied condition does and does not cover. */
+  limitations?: string[];
   /** The profile the platform actually applied (writes) or the baseline (reads). */
   profile?: NetworkConditionProfile;
   requestedProfile?: NetworkConditionProfile;
@@ -318,6 +359,11 @@ interface NetworkConditionResultBase {
 
 export interface SetNetworkConditionInput {
   profile?: NetworkConditionProfile;
+  /**
+   * iOS Simulator only, and required there: the bundle id of the one app to take
+   * offline (`profile: "offline"`) or restore (`profile: "none"`/reset) (#10264).
+   */
+  appId?: string;
   /** Reset to normal connectivity (equivalent to `profile: "none"`). */
   cancel?: boolean;
   /** Alias of `cancel`. */
@@ -516,6 +562,12 @@ export interface DeviceStateDependencies {
   ) => Promise<RequestedDeviceStates>;
   /** iOS Simulator network-extension controller; defaults to the installed controller. */
   networkFilterBridge?: NetworkFilterBridge;
+  /**
+   * iOS Simulator per-app rules: the session ownership for the rule command in
+   * flight. Absent (or returning `undefined`) outside a session, where iOS app
+   * conditions are refused because nothing would renew or remove the rule.
+   */
+  iosAppNetworkRule?: () => IosAppNetworkRuleCommandContext | undefined;
 }
 
 type RequestedDeviceStates = Pick<
@@ -579,15 +631,65 @@ const IOS_PHYSICAL_NETWORK_CONDITION_UNSUPPORTED_ERROR =
 
 /**
  * iOS Simulator network conditions run through the opt-in macOS Network
- * Extension backend (#6298). It reports availability today but applies nothing
- * until offline/reset ships (#10264), so every simulator read and write stays
- * unsupported with a message for the backend's current state.
+ * Extension backend (#6298). Until it is installed, approved and answering,
+ * every simulator read and write is unsupported with a message for its state.
  */
 function iosSimulatorNetworkConditionError(state: NetworkFilterState): string {
   const prefix =
     "Network-condition simulation on iOS Simulator uses AutoMobile's macOS network-extension " +
-    "backend, which cannot apply conditions yet.";
+    "backend, which is not ready.";
   return `${prefix} ${networkFilterNextStep(state)}`;
+}
+
+/** A simulator shares the Mac's network stack, so only one app at a time is selectable (#10264). */
+const IOS_SIMULATOR_NETWORK_CONDITION_APP_REQUIRED_ERROR =
+  "On iOS Simulator, networkCondition applies to one app, never the whole simulator: pass " +
+  "networkCondition.appId (the app's bundle id) with profile `offline`, or `none` to restore it. " +
+  "The simulator shares the Mac's network stack, so a device-wide condition is not supported.";
+
+const IOS_SIMULATOR_NETWORK_CONDITION_SESSION_REQUIRED_ERROR =
+  "Taking an iOS Simulator app offline needs a daemon session: the session renews the network " +
+  "filter's lease and removes the rule on release, rebind or expiry. Run this call within a session.";
+
+/** What a per-app iOS offline rule does and does not cover (#10264). */
+export const IOS_APP_NETWORK_CONDITION_LIMITATIONS: readonly string[] = Object.freeze([
+  "Only new connections of the app are refused; connections already open keep working until they close.",
+  "Flows the filter cannot attribute to this app on this simulator are allowed, so coverage is partial.",
+  "The provider acknowledged the rule; AutoMobile does not verify traffic behaviour.",
+  `The rule ends on its own unless the session renews it within ${IOS_APP_NETWORK_RULE_LEASE_MS / 1000}s.`,
+  "Latency, bandwidth and packet-loss profiles are not supported on iOS Simulator (#10265).",
+]);
+
+function iosUnsupportedNetworkConditionError(input: SetNetworkConditionInput): string {
+  const named = [
+    ...(input.profile !== undefined && input.profile !== "offline" && input.profile !== "none"
+      ? [`profile \`${input.profile}\``]
+      : []),
+    ...(["delayMs", "downloadKbps", "uploadKbps", "packetLossPercent"] as const)
+      .filter((field) => input[field] !== undefined && input[field] !== 0)
+      .map((field) => `\`${field}\``),
+  ];
+  return (
+    `iOS Simulator supports only profile \`offline\` and \`none\` for one app; ` +
+    `${named.join(", ") || "this request"} cannot be applied (latency and bandwidth shaping is #10265).`
+  );
+}
+
+/**
+ * What an iOS per-app write did to the session's rule, for the session layer:
+ * the provider installed it, removed it, or neither.
+ */
+export function iosAppNetworkRuleOutcome(
+  result: Pick<DeviceStateResult, "networkCondition">,
+): "installed" | "removed" | "unchanged" {
+  const state = result.networkCondition;
+  if (!state || state.scope !== "app" || state.error || !state.acknowledged) {
+    return "unchanged";
+  }
+  if (state.appliedProfile === "offline") {
+    return "installed";
+  }
+  return state.appliedProfile === "none" ? "removed" : "unchanged";
 }
 
 /**
@@ -1370,6 +1472,7 @@ export class DeviceState {
   private readonly clockMutation: NonNullable<DeviceStateDependencies["clockMutation"]>;
   private readonly invalidateClockCaches: (deviceId: string) => void;
   private injectedNetworkFilterBridge?: NetworkFilterBridge;
+  private readonly iosAppNetworkRule?: () => IosAppNetworkRuleCommandContext | undefined;
 
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
@@ -1399,6 +1502,7 @@ export class DeviceState {
     this.canWriteLocation = dependencies.canWriteLocation ?? (() => true);
     this.onLocationApplied = dependencies.onLocationApplied;
     this.injectedNetworkFilterBridge = dependencies.networkFilterBridge;
+    this.iosAppNetworkRule = dependencies.iosAppNetworkRule;
   }
 
   /** Created on first iOS Simulator network read so other paths never touch it. */
@@ -2378,19 +2482,47 @@ export class DeviceState {
       };
     }
     const status = await this.readNetworkFilterStatus();
+    const controller = this.networkFilterController(status);
+    if (status.state !== "ready") {
+      return {
+        supported: false,
+        capability: "unsupported",
+        backend: "network-extension",
+        controller,
+        error: iosSimulatorNetworkConditionError(status.state),
+      };
+    }
+    // Read from the provider, never echoed from the last request.
+    const udid = this.device.deviceId.toUpperCase();
+    const rules = (status.rules ?? [])
+      .filter((rule) => rule.target.simulator.udid.toUpperCase() === udid)
+      .map((rule): IosAppNetworkRuleState => ({
+        appId: rule.target.bundleId,
+        profile: rule.condition,
+        revision: rule.revision,
+        ownerGeneration: rule.ownerGeneration,
+        owner: rule.owner,
+        leaseExpiresInMs: rule.leaseRemainingMilliseconds,
+        droppedFlows: rule.droppedFlows,
+      }));
     return {
-      supported: false,
-      capability: "unsupported",
+      supported: true,
+      capability: "partial",
       backend: "network-extension",
-      controller: {
-        state: status.state,
-        ...(status.contractVersion !== undefined
-          ? { contractVersion: status.contractVersion }
-          : {}),
-        detail: status.detail,
-        nextStep: networkFilterNextStep(status.state),
-      },
-      error: iosSimulatorNetworkConditionError(status.state),
+      controller,
+      scope: "app",
+      rules,
+      coverage: "partial",
+      limitations: [...IOS_APP_NETWORK_CONDITION_LIMITATIONS],
+    };
+  }
+
+  private networkFilterController(status: NetworkFilterStatus): NetworkConditionBackendState {
+    return {
+      state: status.state,
+      ...(status.contractVersion !== undefined ? { contractVersion: status.contractVersion } : {}),
+      detail: status.detail,
+      nextStep: networkFilterNextStep(status.state),
     };
   }
 
@@ -2407,6 +2539,16 @@ export class DeviceState {
   private async setAndroidNetworkCondition(
     input: SetNetworkConditionInput,
   ): Promise<NetworkConditionState> {
+    if (input.appId !== undefined) {
+      return {
+        supported: false,
+        capability: "unsupported",
+        requestedProfile: resolveNetworkProfile(input),
+        verified: false,
+        error:
+          "networkCondition.appId applies only to iOS Simulator; Android network conditions are device-wide.",
+      };
+    }
     const kind = classifyNetworkConditionRequest(input);
     // A reset restores normal connectivity, so shaping overrides on the same
     // request are contradictory — drop them rather than apply latency while
@@ -2651,17 +2793,177 @@ export class DeviceState {
     }
   }
 
+  /**
+   * iOS Simulator: take one explicitly named app offline, or restore it, through
+   * the leased network-extension rule (#10264). Device-wide requests and every
+   * profile but `offline`/`none` are refused without contacting the controller.
+   */
   private async setIosNetworkCondition(
     input: SetNetworkConditionInput,
   ): Promise<NetworkConditionState> {
     const profile = resolveNetworkProfile(input);
-    // Nothing is applied on any iOS target; the backend state only picks the message.
-    const backend = await this.getIosNetworkCondition();
-    return {
-      ...backend,
+    if (!isIosSimulatorDevice(this.device)) {
+      return {
+        ...(await this.getIosNetworkCondition()),
+        requestedProfile: profile,
+        verified: false,
+      };
+    }
+    const refused = (
+      error: string,
+      extra: Partial<NetworkConditionState> = {},
+    ): NetworkConditionState => ({
+      supported: false,
+      capability: "unsupported",
+      backend: "network-extension",
       requestedProfile: profile,
-      values: resolveNetworkValues(profile, input),
       verified: false,
+      ...extra,
+      error,
+    });
+    if (!input.appId) {
+      return refused(IOS_SIMULATOR_NETWORK_CONDITION_APP_REQUIRED_ERROR, { scope: "device" });
+    }
+    const kind = classifyNetworkConditionRequest(input);
+    const isReset = kind === "reset";
+    if (!isReset && !(kind === "degrade" && profile === "offline")) {
+      return refused(iosUnsupportedNetworkConditionError(input), {
+        scope: "app",
+        appId: input.appId,
+      });
+    }
+    const base: NetworkConditionState = {
+      supported: true,
+      capability: "partial",
+      backend: "network-extension",
+      scope: "app",
+      appId: input.appId,
+      requestedProfile: profile,
+      coverage: "partial",
+      limitations: [...IOS_APP_NETWORK_CONDITION_LIMITATIONS],
     };
+    const context = this.iosAppNetworkRule?.();
+    if (!context) {
+      return { ...base, error: IOS_SIMULATOR_NETWORK_CONDITION_SESSION_REQUIRED_ERROR };
+    }
+    const client = new IosAppNetworkRuleClient(this.networkFilterBridge);
+    return isReset
+      ? this.iosResetResult(base, context, await client.reset(context.rule))
+      : this.iosApplyResult(
+          base,
+          context,
+          await client.applyOffline(
+            context.rule,
+            IOS_APP_NETWORK_RULE_LEASE_MS,
+            context.nextRevision,
+          ),
+        );
+  }
+
+  private iosApplyResult(
+    base: NetworkConditionState,
+    context: IosAppNetworkRuleCommandContext,
+    result: IosAppNetworkApplyResult,
+  ): NetworkConditionState {
+    const { rule } = context;
+    switch (result.kind) {
+      case "applied":
+        return {
+          ...base,
+          profile: "offline",
+          appliedProfile: "offline",
+          acknowledged: true,
+          rule: {
+            appId: rule.bundleId,
+            profile: "offline",
+            revision: result.installedRevision,
+            ownerGeneration: rule.ownerGeneration,
+            ...(result.leaseRemainingMs !== undefined
+              ? { leaseExpiresInMs: result.leaseRemainingMs }
+              : {}),
+          },
+          ...(result.reconciled
+            ? {
+                warning:
+                  "The controller's answer was lost; a status read-back found the rule installed.",
+              }
+            : {}),
+        };
+      case "refused":
+        return {
+          ...base,
+          verified: false,
+          error: iosRuleRefusalError(rule.bundleId, result.outcome),
+        };
+      case "not_ready":
+        return {
+          ...base,
+          supported: false,
+          capability: "unsupported",
+          controller: this.networkFilterController({ state: result.state, detail: result.detail }),
+          verified: false,
+          error: iosSimulatorNetworkConditionError(result.state),
+        };
+      case "failed":
+        return {
+          ...base,
+          verified: false,
+          controller: this.networkFilterController({ state: result.state, detail: result.detail }),
+          error:
+            `The network filter did not confirm taking ${rule.bundleId} offline (${result.detail}), ` +
+            `and a read-back did not find the rule; ${result.rolledBack ? "it was rolled back" : "a rollback was sent but not confirmed, so any late rule ends with its lease"}. ` +
+            networkFilterNextStep(result.state),
+        };
+    }
+  }
+
+  private iosResetResult(
+    base: NetworkConditionState,
+    context: IosAppNetworkRuleCommandContext,
+    result: IosAppNetworkResetResult,
+  ): NetworkConditionState {
+    const { rule } = context;
+    switch (result.kind) {
+      case "reset":
+        return {
+          ...base,
+          profile: "none",
+          appliedProfile: "none",
+          acknowledged: true,
+          ...(result.reconciled
+            ? { warning: "The controller's answer was lost; a status read-back found no rule." }
+            : {}),
+        };
+      case "refused":
+        return {
+          ...base,
+          verified: false,
+          error: iosRuleRefusalError(rule.bundleId, result.outcome),
+        };
+      case "failed":
+        return {
+          ...base,
+          verified: false,
+          controller: this.networkFilterController({ state: result.state, detail: result.detail }),
+          error:
+            `The network filter did not confirm restoring ${rule.bundleId} (${result.detail}). ` +
+            `Any rule this session holds ends with its lease. ${networkFilterNextStep(result.state)}`,
+        };
+    }
+  }
+}
+
+function iosRuleRefusalError(bundleId: string, outcome: string): string {
+  switch (outcome) {
+    case "owned_by_another_session":
+      return (
+        `Another session holds the offline rule for ${bundleId} on this simulator; it was not ` +
+        "changed. It ends when that session resets or releases it, or its lease expires."
+      );
+    case "stale_generation":
+    case "stale_revision":
+      return `A newer command from this session for ${bundleId} superseded this one (${outcome}); nothing changed.`;
+    default:
+      return `The network filter refused the rule for ${bundleId}: ${outcome}.`;
   }
 }

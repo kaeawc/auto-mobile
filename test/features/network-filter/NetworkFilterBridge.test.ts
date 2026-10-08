@@ -199,7 +199,7 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
     });
   }
 
-  test("snapshot returns the provider snapshot when ready; status omits it", async () => {
+  test("snapshot returns the provider snapshot when ready; status keeps only its rules", async () => {
     exec.succeed(fixture("ready"));
 
     const snapshot = await bridge().snapshot();
@@ -208,9 +208,9 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
     expect(exec.calls.map((call) => call.args)).toEqual([["snapshot"], ["status"]]);
     expect(snapshot.state).toBe("ready");
     expect(snapshot.snapshot).toMatchObject({
-      version: 2,
+      version: 3,
       backend: "macos_network_extension",
-      mode: "allow_only",
+      mode: "app_offline",
       observedFlows: 1,
       discardedFlows: 0,
     });
@@ -220,7 +220,25 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
       state: "ready",
       detail: snapshot.detail,
       contractVersion: NETWORK_FILTER_CONTRACT_VERSION,
+      rules: snapshot.snapshot?.rules,
     });
+    expect(status.rules).toEqual([
+      {
+        target: {
+          simulator: {
+            deviceSet: "/fixture/Devices",
+            udid: "DFBF2D27-6674-42EA-AFC4-AB702275D1D4",
+          },
+          bundleId: "dev.jasonpearson.automobile.fixture",
+        },
+        owner: "fixture-session",
+        ownerGeneration: 1759900000000,
+        revision: 3,
+        condition: "offline",
+        leaseRemainingMilliseconds: 14000,
+        droppedFlows: 2,
+      },
+    ]);
   });
 
   test("decodes v2 per-flow attribution and the managed simulators", async () => {
@@ -282,13 +300,13 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
 
   test("a contract version mismatch is unavailable with a reinstall step", async () => {
     const line = JSON.parse(fixture("ready"));
-    exec.succeed(`${JSON.stringify({ ...line, version: 3 })}\n`);
+    exec.succeed(`${JSON.stringify({ ...line, version: 4 })}\n`);
 
     const status = await bridge().status();
 
     expect(status.state).toBe("unavailable");
-    expect(status.contractVersion).toBe(3);
-    expect(status.detail).toContain("contract version 3");
+    expect(status.contractVersion).toBe(4);
+    expect(status.detail).toContain("contract version 4");
     expect(status.detail).toContain(`expects version ${NETWORK_FILTER_CONTRACT_VERSION}`);
     expect(status.detail).toContain(NETWORK_FILTER_INSTALL_COMMAND);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -307,7 +325,9 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
   });
 
   test("an unknown state is unavailable and logged", async () => {
-    exec.succeed('{"detail":"x","state":"installed","version":2}\n');
+    exec.succeed(
+      `{"detail":"x","state":"installed","version":${NETWORK_FILTER_CONTRACT_VERSION}}\n`,
+    );
 
     const status = await bridge().status();
 

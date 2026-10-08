@@ -253,7 +253,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6
+                "min": 0.000001
               },
               "optional": false
             }
@@ -447,7 +447,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 1e-6
+            "min": 0.000001
           },
           "optional": true
         },
@@ -486,6 +486,29 @@
           "rule": {
             "kind": "enum",
             "values": ["default", "sansSerif", "serif", "monospace"]
+          },
+          "optional": true
+        },
+        "textStyle": {
+          "rule": {
+            "kind": "enum",
+            "values": [
+              "displayLarge",
+              "displayMedium",
+              "displaySmall",
+              "headlineLarge",
+              "headlineMedium",
+              "headlineSmall",
+              "titleLarge",
+              "titleMedium",
+              "titleSmall",
+              "bodyLarge",
+              "bodyMedium",
+              "bodySmall",
+              "labelLarge",
+              "labelMedium",
+              "labelSmall"
+            ]
           },
           "optional": true
         }
@@ -670,7 +693,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 1e-6
+                "min": 0.000001
               },
               "optional": false
             }
@@ -2536,6 +2559,55 @@
           "rule": {
             "kind": "ref",
             "name": "themeColors"
+          },
+          "optional": true
+        },
+        "typography": {
+          "rule": {
+            "kind": "ref",
+            "name": "themeTypography"
+          },
+          "optional": true
+        },
+        "shapes": {
+          "rule": {
+            "kind": "ref",
+            "name": "themeShapes"
+          },
+          "optional": true
+        }
+      },
+      "atLeastOne": true
+    },
+    "themeTypography": {
+      "kind": "object",
+      "fields": {
+        "scale": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0.75,
+            "max": 1.5
+          },
+          "optional": true
+        },
+        "fontFamily": {
+          "rule": {
+            "kind": "enum",
+            "values": ["sans", "serif", "mono"]
+          },
+          "optional": true
+        }
+      },
+      "atLeastOne": true
+    },
+    "themeShapes": {
+      "kind": "object",
+      "fields": {
+        "corner": {
+          "rule": {
+            "kind": "enum",
+            "values": ["none", "small", "medium", "large", "full"]
           },
           "optional": true
         }

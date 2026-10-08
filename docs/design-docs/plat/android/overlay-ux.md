@@ -89,8 +89,19 @@ from. At least one of its fields is required:
 | `colors.seed`   | Hex color a full light or dark scheme is generated from.                                                                                                  |
 | `colors.source` | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                      |
 
-An explicit theme wins over the scheme inferred from backgrounds. Type and shape scales
-are a later slice (#10438).
+| `typography.scale` | Number 0.75–1.5 multiplying the size and line height of every Material type role. Default 1. |
+| `typography.fontFamily` | `sans`, `serif` or `mono`: the family of every Material type role. |
+| `shapes.corner` | `none`, `small`, `medium` (the stock Material 3 scale), `large` or `full` (pill). Shifts every corner family built-in components use. |
+
+`typography` and `shapes` each need at least one field. An explicit theme wins over the scheme
+inferred from backgrounds.
+
+A text node's `style.textStyle` names a Material 3 type role (`displayLarge` … `labelSmall`, 15
+in all) and so follows the theme's scale and family. It supplies size, weight and family; an
+explicit `textSize`, `fontWeight` or `fontFamily` on the same node still wins. Plain text
+without `textStyle` keeps its authored 14 sp default and is not scaled; it takes the theme's
+`typography.fontFamily` only when it names no `fontFamily` of its own. Colour tokens and
+`cornerRadius` tokens are a later slice (#10438).
 
 ## Windows
 

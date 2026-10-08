@@ -1041,6 +1041,11 @@ topmost first. `observe` applies it to the returned hierarchy and to `waitFor`
 element conditions. `dragAndDrop.layer` scopes both the `source` and the `target`
 drop-target resolution; `swipeOn.layer` scopes `container`, auto-target, and
 `lookFor` resolution; `pinchOn.layer` scopes `container` and auto-target resolution.
+The device cannot hide its own overlay for a capture, so an `observe` screenshot
+or crop taken with `layer: "app"` while an overlay is showing still includes the
+overlay; the result says so with `screenshotIncludesOverlay: true`. Navigation-graph
+screen identity always uses the app's windows only, so showing, paging, or
+dismissing an overlay records no navigation.
 
 Touches go to the window under the point where a finger goes down, so gestures
 are checked there before dispatch: the tap point (`tapAt`, `tapOn`, `tapAny`), the

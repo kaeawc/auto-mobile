@@ -4086,6 +4086,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -5200,6 +5203,9 @@
                 "screenshotScaleProvenance": {
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
+                },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
                 },
                 "screenshotSettled": {
                   "type": "boolean"
@@ -10598,6 +10604,9 @@
           "type": "string",
           "enum": ["raster-dimensions", "native-scale-confirmed"]
         },
+        "screenshotIncludesOverlay": {
+          "type": "boolean"
+        },
         "screenshotSettled": {
           "type": "boolean"
         },
@@ -15277,6 +15286,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -16391,6 +16403,9 @@
                 "screenshotScaleProvenance": {
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
+                },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
                 },
                 "screenshotSettled": {
                   "type": "boolean"
@@ -22820,6 +22835,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -23934,6 +23952,9 @@
                 "screenshotScaleProvenance": {
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
+                },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
                 },
                 "screenshotSettled": {
                   "type": "boolean"
@@ -30240,6 +30261,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -31354,6 +31378,9 @@
                 "screenshotScaleProvenance": {
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
+                },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
                 },
                 "screenshotSettled": {
                   "type": "boolean"
@@ -33941,6 +33968,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -35055,6 +35085,9 @@
                 "screenshotScaleProvenance": {
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
+                },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
                 },
                 "screenshotSettled": {
                   "type": "boolean"

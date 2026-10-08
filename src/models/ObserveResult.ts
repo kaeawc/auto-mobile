@@ -213,6 +213,14 @@ export type ObserveResult = {
    */
   screenshotCaptureAttempted?: boolean;
 
+  /**
+   * Set by `observe` with `layer: "app"` while an AutoMobile overlay is on screen and the
+   * observation carries a screenshot (issue #9305): the hierarchy is scoped to the app, but the
+   * device cannot hide its own overlay for the capture, so the screenshot and any crop still show
+   * the overlay over the app.
+   */
+  screenshotIncludesOverlay?: boolean;
+
   /** Whether this observation's requested settled screenshot was validated on disk. */
   screenshotSettled?: boolean;
   /** Short capture failure detail when an env/flag-driven settled capture fails. */

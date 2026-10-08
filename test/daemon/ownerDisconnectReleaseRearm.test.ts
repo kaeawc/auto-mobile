@@ -131,6 +131,29 @@ describe("owner-disconnect release re-arm (#10663)", () => {
     expect(devicePool.getDevice(DEVICE.deviceId)?.sessionId).toBeNull();
   });
 
+  test("the call end restarting the idle window does not cancel the deferred release", async () => {
+    // As in the daemon: a call's end restarts the session's idle window and activity clock.
+    const unsubscribe = tracker.onSessionExecutionEnded((sessionUuids) => {
+      for (const sessionUuid of sessionUuids) {
+        sessionManager.recordToolCallEnded(sessionUuid);
+      }
+    });
+    try {
+      const call = tracker.startExecution("tapOn", undefined, OWNER_SESSION);
+      devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
+      await settle(OWNER_DISCONNECT_GRACE_MS + 10_000);
+      expect(releaseReasons).toEqual([]);
+
+      tracker.endExecution(call.id);
+      await settle(OWNER_DISCONNECT_RETRY_MAX_DELAY_MS);
+
+      expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
+      expect(devicePool.getDevice(DEVICE.deviceId)?.sessionId).toBeNull();
+    } finally {
+      unsubscribe();
+    }
+  });
+
   test("an owner that reconnects while the release is deferred keeps its session", async () => {
     const call = tracker.startExecution("tapOn", undefined, OWNER_SESSION);
     devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);

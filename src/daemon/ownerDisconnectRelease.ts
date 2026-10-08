@@ -108,10 +108,22 @@ export function ownerDisconnectReleaseBlocker(
   if (session.livenessOwnerToken === undefined && session.livenessOwnershipClaims?.size) {
     return "liveness ownership handoff in progress";
   }
-  if (ownerLeaseHeartbeat(session) > closedAt) {
+  if (ownerHeartbeatSince(session) > closedAt) {
     return "owner heartbeated after the connection closed";
   }
   return undefined;
+}
+
+/**
+ * The owner lease's start, counting only the owner's own heartbeats (and a daemon stall). Unlike
+ * {@link ownerLeaseHeartbeat} it never falls back to the activity clock: the end of a call the
+ * owner started before its connection closed refreshes `lastHeartbeat` (the idle window restarts
+ * from a call's end), and that is not evidence the owner is still alive.
+ */
+function ownerHeartbeatSince(session: OwnerSession): number {
+  return session.lastOwnerHeartbeat === undefined
+    ? (session.stallForgivenAt ?? Number.NEGATIVE_INFINITY)
+    : ownerLeaseHeartbeat(session);
 }
 
 /**

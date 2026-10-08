@@ -359,6 +359,30 @@ const textFieldBaseSchema = z
     placeholder: z.string().optional(),
   })
   .strict();
+const switchBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["switch"]),
+    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    label: z.string().min(1).optional(),
+  })
+  .strict();
+const checkboxBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["checkbox"]),
+    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    label: z.string().min(1).optional(),
+  })
+  .strict();
+const buttonBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["button"]),
+    label: z.string().min(1),
+    variant: z.enum(["filled", "outlined", "text"]).optional(),
+  })
+  .strict();
 const scrollBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -417,6 +441,9 @@ export type OverlayNode =
   | z.infer<typeof iconBaseSchema>
   | z.infer<typeof spacerBaseSchema>
   | z.infer<typeof textFieldBaseSchema>
+  | z.infer<typeof switchBaseSchema>
+  | z.infer<typeof checkboxBaseSchema>
+  | z.infer<typeof buttonBaseSchema>
   | (z.infer<typeof scrollBaseSchema> & { child: OverlayNode })
   | (z.infer<typeof pagerBaseSchema> & { children: OverlayNode[] })
   | z.infer<typeof tabBarBaseSchema>
@@ -432,6 +459,9 @@ export const overlayNodeSchema: z.ZodType<OverlayNode, z.ZodTypeDef, unknown> = 
     iconBaseSchema,
     spacerBaseSchema,
     textFieldBaseSchema,
+    switchBaseSchema,
+    checkboxBaseSchema,
+    buttonBaseSchema,
     scrollBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
     pagerBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(1) }),
     tabBarBaseSchema,
@@ -472,6 +502,9 @@ export const OVERLAY_NODE_TYPES = [
   "icon",
   "spacer",
   "textField",
+  "switch",
+  "checkbox",
+  "button",
   "scroll",
   "pager",
   "tabBar",

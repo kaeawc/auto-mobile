@@ -283,6 +283,48 @@ data class OverlayTextFieldNode(
   val placeholder: String? = null,
 ) : OverlayNode()
 
+@SerialName("switch")
+@Serializable
+data class OverlaySwitchNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val stateKey: String,
+  val label: String? = null,
+) : OverlayNode()
+
+@SerialName("checkbox")
+@Serializable
+data class OverlayCheckboxNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val stateKey: String,
+  val label: String? = null,
+) : OverlayNode()
+
+@SerialName("button")
+@Serializable
+data class OverlayButtonNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val label: String,
+  val variant: String = "filled",
+) : OverlayNode()
+
 @SerialName("scroll")
 @Serializable
 data class OverlayScrollNode(

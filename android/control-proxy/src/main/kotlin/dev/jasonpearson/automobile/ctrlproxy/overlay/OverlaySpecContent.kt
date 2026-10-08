@@ -170,6 +170,9 @@ private fun RenderOverlayNodeContent(
     "bottomSheet" ->
       Unit // Modal content is hoisted above the whole author tree, within this window.
     "textField" -> RenderOverlayTextField(node, modifier, interact)
+    "switch",
+    "checkbox" -> RenderOverlayToggle(node, modifier, interact)
+    "button" -> RenderOverlayButton(node, modifier, interact)
     // Spacer keeps its size and authored actions.
     else -> Box(modifier)
   }
@@ -381,7 +384,11 @@ private fun overlayNodeModifier(
 ): Modifier {
   val style = node.style.source
   val actions = node.source?.onTap.orEmpty()
-  val tappable = actions.isNotEmpty() && node.role != "textField" && node.role != "bottomSheet"
+  val tappable =
+    actions.isNotEmpty() &&
+      node.role != "textField" &&
+      node.role != "bottomSheet" &&
+      node.role !in OVERLAY_COMPONENT_ROLES
   var modifier: Modifier = Modifier
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).

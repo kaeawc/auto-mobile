@@ -128,6 +128,9 @@ layout room.
 | `icon`        | Required built-in `name` below.                                                                                      |
 | `spacer`      | No node-specific properties; size comes from style.                                                                  |
 | `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.          |
+| `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                            |
+| `checkbox`    | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                            |
+| `button`      | Required nonempty `label`; optional `variant`: `filled` (default), `outlined`, `text`. Taps run `onTap`.             |
 | `scroll`      | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping. |
 | `pager`       | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                |
 | `tabBar`      | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                   |
@@ -156,6 +159,20 @@ outside author content (#9307). Detents are unique values: positive `{dp: n}`,
 window's height. Sheet node scrim applies inside that window, not beyond a
 floating or sheet window's bounds. A modal sheet intercepts touches inside the
 window while open; a sheet placement is only a window placement.
+
+`switch`, `checkbox` and `button` are Material 3 components (#10439, first
+slice). A switch or checkbox draws the bound boolean; a tap anywhere on the
+control, including its label, flips that state value, emits a `change` event
+(`{key, value}`) like a text field or `stateKey` selection, and then runs the
+node's own `onTap`, if any. A `setState` that would make the bound value
+non-boolean is rejected like any other binding type change. A button runs its
+`onTap`; without one it is drawn but inert. Each component is one accessibility
+node carrying its label as text, a native role (`Switch`, `Checkbox`,
+`Button`), and for switch and checkbox the checkable/checked state, so `observe`
+reports them as controls and `tapOn` by `testTag` or label toggles or presses
+them. Each reserves the Material 48 dp minimum touch target. `radioGroup`,
+`slider`, `chip`, `card`, `listItem` and the other components in #10439 are
+later slices.
 
 Text interpolation is a renderer concern: `{page}`, `{pageCount}`, and state
 keys may appear in text. No expressions or interpolation parsing occurs during

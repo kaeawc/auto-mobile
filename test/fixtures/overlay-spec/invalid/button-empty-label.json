@@ -1,14 +1,15 @@
 {
   "spec": {
-    "id": "prototype",
+    "id": "a",
     "window": {
       "placement": {
         "type": "fullscreen"
       }
     },
     "root": {
-      "type": "marquee"
+      "type": "button",
+      "label": ""
     }
   },
-  "expectedPath": "root.type"
+  "expectedPath": "root.label"
 }

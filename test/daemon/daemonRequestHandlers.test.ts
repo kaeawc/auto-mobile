@@ -317,6 +317,7 @@ describe("handleDaemonRequest", () => {
       const state = new FakeDaemonState(sessionManager, devicePool);
       const sessionId = "liveness-owner-session";
       await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
+      const lastToolActivity = fakeTimer.now();
 
       await handleDaemonRequest(
         buildRequest("daemon/heartbeat", {
@@ -345,7 +346,8 @@ describe("handleDaemonRequest", () => {
         livenessPolicy: secondPolicy === "cli" ? "cli-idle" : "heartbeat",
         livenessOwnerToken: second,
         lastHeartbeat: fakeTimer.now(),
-        lastUsedAt: fakeTimer.now(),
+        // Claims and heartbeats prove liveness, not use (#10656).
+        lastUsedAt: lastToolActivity,
       });
       const beforeStaleKeeper = {
         livenessPolicy: cliOwned.livenessPolicy,
@@ -410,11 +412,10 @@ describe("handleDaemonRequest", () => {
           state,
         ),
       ).toEqual({ success: true, result: { sessionId } });
+      // The current owner's tick renews only liveness; the idle clocks stay put (#10656).
       expect(sessionManager.getSession(sessionId)).toMatchObject({
         ...beforeStaleKeeper,
-        lastUsedAt: fakeTimer.now(),
         lastHeartbeat: fakeTimer.now(),
-        expiresAt: fakeTimer.now() + cliOwned.sessionTimeoutMs,
       });
     },
   );
@@ -817,6 +818,7 @@ describe("handleDaemonRequest", () => {
       const beforeHeartbeat = restartedManager.getSession(sessionId)!;
       expect(beforeHeartbeat.livenessOwnerToken).toBeUndefined();
       expect(beforeHeartbeat.hasReceivedHeartbeat).toBe(false);
+      const recoveredAt = fakeTimer.now();
 
       fakeTimer.advanceTime(1_000);
       await expect(
@@ -834,7 +836,8 @@ describe("handleDaemonRequest", () => {
         livenessOwnerToken: "surviving-proxy-token",
         hasReceivedHeartbeat: true,
         lastHeartbeat: fakeTimer.now(),
-        lastUsedAt: fakeTimer.now(),
+        // The keeper's tick proves liveness; the recovery call was the last use (#10656).
+        lastUsedAt: recoveredAt,
       });
     } finally {
       restartedManager.stopCleanupTimer();

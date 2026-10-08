@@ -1040,9 +1040,10 @@ export class DaemonMcpProxy {
   // a replacement socket without sharing the binding with other proxies.
   private boundSessionUuid: string | undefined;
   // When the binding above was last set/refreshed, on the injected clock. Once
-  // the daemon's session idle window elapses with no explicit-sessionUuid call
-  // refreshing it, the remembered UUID is treated as retired so a sessionless
-  // call is not rewritten to a released session (issue #4610).
+  // the daemon's session idle window elapses with no forwarded call (explicit or
+  // injected sessionUuid) refreshing it, the remembered UUID is treated as
+  // retired so a sessionless call is not rewritten to a released session (issue
+  // #4610). Heartbeat acks never refresh it: they prove liveness, not use (#10656).
   private boundSessionUuidAt: number | undefined;
   // Whether the current binding was minted by a device-acquisition RESULT
   // (getAndroid/getApple/startDevice), i.e. never named by the client, versus
@@ -3945,7 +3946,7 @@ export class DaemonMcpProxy {
       );
       if (this.boundSessionUuid === sessionUuid && !this.terminalBoundSession) {
         this.livenessOwnershipClaimSent = true;
-        this.boundSessionUuidAt = this.timer.now();
+        // A heartbeat ack proves liveness, not use: it must not refresh the replay lease (#10656).
         this.livenessAcks.set(sessionUuid, this.timer.now());
       }
     } catch (error) {
@@ -4817,7 +4818,8 @@ export class DaemonMcpProxy {
       this.livenessOwnershipClaimSent = true;
     }
     this.livenessConflictLogged.delete(sessionUuid);
-    this.boundSessionUuidAt = this.timer.now();
+    // Only a forwarded call refreshes the replay lease (`boundSessionUuidAt`); an ack proves the
+    // daemon still holds the session, not that the agent is using it (#10656).
     this.livenessAcks.set(sessionUuid, this.timer.now());
   }
 

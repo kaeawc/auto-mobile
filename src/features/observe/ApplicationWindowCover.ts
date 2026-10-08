@@ -1,6 +1,6 @@
 import type { Element, ElementBounds, ViewHierarchyResult } from "../../models";
 import type { ViewHierarchyWindowInfo } from "../../models/ViewHierarchyResult";
-import { ownOverlayHidesApp, ownOverlayWindows } from "./ownOverlayFocus";
+import { hostsNodes, ownOverlayHidesApp, ownOverlayWindows } from "./ownOverlayFocus";
 import { boundsArea } from "../../utils/bounds";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -172,11 +172,6 @@ export function ownOverlayNodeSources(
     }
   }
   return sources;
-}
-
-function hostsNodes(window: ViewHierarchyWindowInfo): boolean {
-  const children = window.hierarchy?.node;
-  return Array.isArray(children) ? children.length > 0 : children !== undefined;
 }
 
 function windowContains(window: ViewHierarchyWindowInfo, bounds: ElementBounds): boolean {

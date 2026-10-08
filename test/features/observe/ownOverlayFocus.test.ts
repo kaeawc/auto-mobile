@@ -217,8 +217,29 @@ describe("ownOverlayWindows: app-layer prototype windows (aovl D4)", () => {
     expect(ownOverlayWindows({ packageName: CTRL_PROXY_PACKAGE, windows: [statusBar] })).toEqual(
       [],
     );
-    const own = { id: 4, type: 3, isFocused: true, packageName: CTRL_PROXY_PACKAGE, bounds };
+    const own = {
+      id: 4,
+      type: 3,
+      isFocused: true,
+      packageName: CTRL_PROXY_PACKAGE,
+      bounds,
+      hierarchy: { node: { text: "Bump" } },
+    };
     expect(isOwnOverlayFocused({ packageName: "com.example.app", windows: [own] })).toBe(true);
+  });
+
+  test("CtrlProxy's highlight window (TYPE_SYSTEM once SYSTEM_ALERT_WINDOW is granted, no nodes) is not an overlay", () => {
+    const highlight = { id: 6, type: 3, isActive: true, packageName: CTRL_PROXY_PACKAGE, bounds };
+    const emptyRoot = { ...highlight, id: 7, hierarchy: { node: [] } };
+    expect(
+      ownOverlayWindows({ packageName: "com.example.app", windows: [highlight, emptyRoot] }),
+    ).toEqual([]);
+    // The captured app-layer overlay still counts beside a highlight.
+    const hierarchy = capturedAppLayerOverlayHierarchy();
+    hierarchy.windows = [...hierarchy.windows!, highlight];
+    expect(ownOverlayWindows(hierarchy).map((window) => window.id)).toEqual([
+      PROTOTYPE_CAPTURE.appLayerOverlayWindowId,
+    ]);
   });
 
   test("overlay metadata on a CtrlProxy window decides over the window type", () => {

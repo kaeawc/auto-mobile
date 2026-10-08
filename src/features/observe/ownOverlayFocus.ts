@@ -15,7 +15,9 @@ const ACCESSIBILITY_WINDOW_TYPE_ACCESSIBILITY_OVERLAY = 4;
  * AccessibilityWindowInfo.TYPE_SYSTEM — how accessibility reports a
  * `WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY` window, which is what a prototype shown with
  * `window.layer: "app"` uses (#10496). The status and navigation bars are TYPE_SYSTEM too, so
- * only an entry whose own root package is CtrlProxy's counts.
+ * only an entry whose own root package is CtrlProxy's counts. CtrlProxy's full-screen highlight
+ * window uses the same type once SYSTEM_ALERT_WINDOW is granted, so the entry must also host nodes
+ * (the highlight hosts none) or carry overlay metadata.
  */
 const ACCESSIBILITY_WINDOW_TYPE_SYSTEM = 3;
 
@@ -59,7 +61,9 @@ export function isOwnOverlayFocused(
  * - an accessibility-overlay window (the system layer) is CtrlProxy's when its own package says so,
  *   and older APKs that omit it fall back to the capture's package;
  * - a TYPE_SYSTEM window (the app layer, `TYPE_APPLICATION_OVERLAY`) is CtrlProxy's only when its
- *   own package says so, because SystemUI's bars share that type (aovl D4).
+ *   own package says so, because SystemUI's bars share that type (aovl D4), and only when it hosts
+ *   nodes, because CtrlProxy's node-free highlight window shares it too once SYSTEM_ALERT_WINDOW is
+ *   granted.
  * CtrlProxy's activity (an application window) and its keyboard (an input-method window) never count.
  */
 export function ownOverlayWindows(
@@ -73,9 +77,17 @@ export function ownOverlayWindows(
       return (window.packageName ?? hierarchy?.packageName) === CTRL_PROXY_PACKAGE;
     }
     return (
-      window.type === ACCESSIBILITY_WINDOW_TYPE_SYSTEM && window.packageName === CTRL_PROXY_PACKAGE
+      window.type === ACCESSIBILITY_WINDOW_TYPE_SYSTEM &&
+      window.packageName === CTRL_PROXY_PACKAGE &&
+      hostsNodes(window)
     );
   });
+}
+
+/** Whether a captured window carries any hierarchy nodes; CtrlProxy's highlight window has none. */
+export function hostsNodes(window: Pick<ViewHierarchyWindowInfo, "hierarchy">): boolean {
+  const children = window.hierarchy?.node;
+  return Array.isArray(children) ? children.length > 0 : children !== undefined;
 }
 
 function hasOverlayMetadata(

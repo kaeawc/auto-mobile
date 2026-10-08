@@ -300,6 +300,26 @@ process is about 0.36 s locally. That is much higher than the 86 ms of the
 60-file batches in section 1, which suggests long isolated processes slow down
 as they grow (compare #10213).
 
+### Chunking the isolated group
+
+The isolated group of a shard now runs in sequential `bun test --isolate`
+processes of `AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE` files (`0` = one process),
+with JUnit reports `shard-N-iso-K.xml` (`scripts/lib/bun-unit-groups.sh`).
+Measured locally on shard 0's 211 isolated files (4 shards), run
+sequentially, each size twice in opposite order on a loaded machine (load
+35–83), wall seconds:
+
+| Chunk size      | Run 1 | Run 2 |
+| --------------- | ----- | ----- |
+| 0 (one process) | 78.3  | 97.0  |
+| 120             | 51.2  | 49.0  |
+| 60              | 35.6  | 45.2  |
+| 30              | 28.0  | 34.3  |
+
+Smaller chunks were faster at every size measured, so the default is 30. The
+absolute numbers are noisy because other lanes shared the host, but the order
+held in both passes.
+
 ## Summary of the decisions this informs
 
 | Question                      | Finding                                                                                                                                                  |

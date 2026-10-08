@@ -2060,6 +2060,101 @@ fixture_list() {
   [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
 }
 
+@test "isolated chunk size splits a shard's isolated group into sequential processes with distinct reports" {
+  stub_chunk_discovery
+  reports="$BATS_TEST_TMPDIR/reports"
+  record="$BATS_TEST_TMPDIR/chunks"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=5 STUB_CHUNK_RECORD="$record" \
+    AUTOMOBILE_UNIT_JUNIT_DIR="$reports" bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test-ts: unit shard 0 isolated chunk 2: 2 of 12 files"* ]]
+  flags="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-iso"
+  [ "$(sed -n 1p "$BUN_ARGS_FILE")" = "$flags-0.xml$(fixture_list 0 1 2 3 4)" ]
+  [ "$(sed -n 2p "$BUN_ARGS_FILE")" = "$flags-1.xml$(fixture_list 5 6 7 8 9)" ]
+  [ "$(sed -n 3p "$BUN_ARGS_FILE")" = "$flags-2.xml$(fixture_list 10 11)" ]
+  [ ! -e "$reports/shard-0.xml" ]
+  # All chunks share the shard's timing log and watchdog environment.
+  timing="$PWD/scratch/test-ts-unit-shards/timing-shard-0.ndjson"
+  [ "$(grep -Fxc "true|$timing|$timing" "$record")" -eq 3 ]
+  # The timing gate globs *.xml, so every chunk report is read.
+  run "$REAL_BUN" run scripts/lib/junit-testcase-timings.ts "$reports"/*.xml
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <<< "$output")" -eq 3 ]
+}
+
+@test "isolated chunks follow the shared process and never mix the groups" {
+  stub_chunk_discovery
+  write_shared_allowlist
+  reports="$BATS_TEST_TMPDIR/reports"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=3 AUTOMOBILE_UNIT_JUNIT_DIR="$reports" \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 4 ]
+  isolated="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-iso"
+  [ "$(sed -n 1p "$BUN_ARGS_FILE")" = "test --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-shared.xml$(fixture_list 1 2 5 8 11)" ]
+  [ "$(sed -n 2p "$BUN_ARGS_FILE")" = "$isolated-0.xml$(fixture_list 0 3 4)" ]
+  [ "$(sed -n 3p "$BUN_ARGS_FILE")" = "$isolated-1.xml$(fixture_list 6 7 9)" ]
+  [ "$(sed -n 4p "$BUN_ARGS_FILE")" = "$isolated-2.xml$(fixture_list 10)" ]
+}
+
+@test "isolated chunk size 0 or a group that fits keeps one isolated process and shard-N.xml" {
+  stub_chunk_discovery
+  reports="$BATS_TEST_TMPDIR/reports"
+  # Unset uses the default, which is larger than these twelve files.
+  for setting in unset 0; do
+    : > "$BUN_ARGS_FILE"
+    if [[ "$setting" == unset ]]; then
+      run env -u AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE PATH="$STUB_BIN:$PATH" \
+        AUTOMOBILE_UNIT_TEST_WORKERS=1 AUTOMOBILE_UNIT_JUNIT_DIR="$reports" bash "$SCRIPT" unit
+    else
+      run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+        AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=0 AUTOMOBILE_UNIT_JUNIT_DIR="$reports" bash "$SCRIPT" unit
+    fi
+    [ "$status" -eq 0 ]
+    [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 1 ]
+    expected="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0.xml$(fixture_list 0 1 2 3 4 5 6 7 8 9 10 11)"
+    [ "$(sed -n 1p "$BUN_ARGS_FILE")" = "$expected" ]
+  done
+}
+
+@test "a failing isolated chunk fails the shard while later chunks still run" {
+  stub_chunk_discovery
+  record="$BATS_TEST_TMPDIR/chunks"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=5 STUB_CHUNK_RECORD="$record" STUB_CHUNK_FAIL=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 1 ]
+  [ "$(wc -l < "$record")" -eq 3 ]
+  [[ "$output" == *"FAIL: unit shard 0 exited with status 7"* ]]
+}
+
+@test "isolated chunk size rejects non-integers before invoking Bun" {
+  stub_chunk_discovery
+  for value in '' abc 1.5 -1 05; do
+    run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE="$value" \
+      bash "$SCRIPT" unit
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE must be a non-negative integer"* ]]
+  done
+  [ ! -s "$BUN_ARGS_FILE" ]
+}
+
+@test "one watchdog bounds all isolated chunks of a shard" {
+  stub_chunk_discovery
+  record="$BATS_TEST_TMPDIR/chunks"
+  # See the chunk watchdog test above for the margins.
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=5 STUB_CHUNK_RECORD="$record" \
+    STUB_BUN_SLEEP_SECONDS=1.5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=2 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 124 ]
+  started=0
+  if [ -e "$record" ]; then started="$(wc -l < "$record" | tr -d ' ')"; fi
+  [ "$started" -lt 3 ]
+}
+
 @test "timing gate summary records ordered samples and both median verdicts" {
   for times in "0.010 0.012 0.011" "0.010 0.150 0.160"; do
     seed_outlier_report

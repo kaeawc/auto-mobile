@@ -6,12 +6,15 @@
 #
 # The first AUTOMOBILE_UNIT_SHARED_FILE_COUNT files are on
 # test/shared-process-allowlist.txt: they run together in ONE `bun test`
-# process without --isolate. The remaining files then run in one
-# `bun test --isolate` process, exactly as an unsplit shard does. Both use the
-# canonical unit flags, preloads and timing probe. With REPORT_DIR set, JUnit
-# goes to REPORT_DIR/shard-SHARD-shared.xml and REPORT_DIR/shard-SHARD.xml.
-# The isolated group still runs after a shared-group failure; the first
-# non-zero status is the exit status.
+# process without --isolate. The remaining files then run in sequential
+# `bun test --isolate` processes of at most AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE
+# files each (0 = a single process), because a long isolated process slows down
+# as it ages. All use the canonical unit flags, preloads and timing probe. With
+# REPORT_DIR set, JUnit goes to REPORT_DIR/shard-SHARD-shared.xml, then to
+# REPORT_DIR/shard-SHARD.xml for an unsplit isolated group or to
+# REPORT_DIR/shard-SHARD-iso-K.xml (K from 0) per isolated chunk. The isolated
+# chunks still run after a shared-group failure and after a failed chunk; the
+# first non-zero status is the exit status.
 set -euo pipefail
 root="$1" runner_os="$2" report_dir="$3" shard="$4"
 shift 4
@@ -45,16 +48,36 @@ if [[ "${#shared_files[@]}" -gt 0 ]]; then
     status="$group_status"
   fi
 fi
-if [[ "${#isolated_files[@]}" -gt 0 ]]; then
+isolated_chunk="$(unit_isolated_chunk_size)"
+if ! [[ "$isolated_chunk" =~ ^(0|[1-9][0-9]*)$ ]]; then
+  echo "AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE must be a non-negative integer, got: ${isolated_chunk}" >&2
+  exit 2
+fi
+isolated_total="${#isolated_files[@]}"
+split=0
+if [[ "$isolated_chunk" -eq 0 || "$isolated_chunk" -ge "$isolated_total" ]]; then
+  isolated_chunk="$isolated_total"
+else
+  split=1
+fi
+for ((offset = 0, chunk = 0; offset < isolated_total; offset += isolated_chunk, chunk += 1)); do
+  slice=("${isolated_files[@]:offset:isolated_chunk}")
   args=("${BUN_UNIT_TEST_COMMAND[@]}")
-  if [[ -n "$report_dir" ]]; then
-    args+=(--reporter junit --reporter-outfile "$report_dir/shard-${shard}.xml")
+  report_name="shard-${shard}.xml"
+  if [[ "$split" -eq 1 ]]; then
+    report_name="shard-${shard}-iso-${chunk}.xml"
+    printf 'test-ts: unit shard %s isolated chunk %d: %d of %d files\n' \
+      "$shard" "$chunk" "${#slice[@]}" "$isolated_total"
+  else
+    printf 'test-ts: unit shard %s isolated process: %d files\n' "$shard" "$isolated_total"
   fi
-  printf 'test-ts: unit shard %s isolated process: %d files\n' "$shard" "${#isolated_files[@]}"
+  if [[ -n "$report_dir" ]]; then
+    args+=(--reporter junit --reporter-outfile "$report_dir/$report_name")
+  fi
   group_status=0
-  "${args[@]}" "${isolated_files[@]}" || group_status=$?
+  "${args[@]}" "${slice[@]}" || group_status=$?
   if [[ "$status" -eq 0 ]]; then
     status="$group_status"
   fi
-fi
+done
 exit "$status"

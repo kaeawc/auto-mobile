@@ -78,6 +78,20 @@ retain JsonElement. Validated integer model fields normalize decimal/exponent
 spellings before Kotlin decoding (e.g. `100.0` and `1e2` both mean 100). The protocol module has no API-dump
 plugin or API-check task; its published artifact includes the contract resource.
 
+## Theme
+
+Optional top-level `theme` sets the Material scheme every built-in component draws
+from. At least one of its fields is required:
+
+| Field           | Meaning                                                                                                                                                   |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`          | `light`, `dark` or `system` (follow the device). Omitted: inferred from the first opaque background on the root's leading chain, else the device setting. |
+| `colors.seed`   | Hex color a full light or dark scheme is generated from.                                                                                                  |
+| `colors.source` | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                      |
+
+An explicit theme wins over the scheme inferred from backgrounds. Type and shape scales
+are a later slice (#10438).
+
 ## Windows
 
 `window` has required `placement` and optional integer `opacity` (0–100, default
@@ -128,6 +142,9 @@ layout room.
 | `icon`        | Required built-in `name`; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                  |
 | `spacer`      | No node-specific properties; size comes from style.                                                                  |
 | `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.          |
+| `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                            |
+| `checkbox`    | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                            |
+| `button`      | Required nonempty `label`; optional `variant`: `filled` (default), `outlined`, `text`. Taps run `onTap`.             |
 | `scroll`      | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping. |
 | `pager`       | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                |
 | `tabBar`      | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                   |
@@ -157,6 +174,20 @@ window's height. Sheet node scrim applies inside that window, not beyond a
 floating or sheet window's bounds. A modal sheet intercepts touches inside the
 window while open; a sheet placement is only a window placement.
 
+`switch`, `checkbox` and `button` are Material 3 components (#10439, first
+slice). A switch or checkbox draws the bound boolean; a tap anywhere on the
+control, including its label, flips that state value, emits a `change` event
+(`{key, value}`) like a text field or `stateKey` selection, and then runs the
+node's own `onTap`, if any. A `setState` that would make the bound value
+non-boolean is rejected like any other binding type change. A button runs its
+`onTap`; without one it is drawn but inert. Each component is one accessibility
+node carrying its label as text, a native role (`Switch`, `Checkbox`,
+`Button`), and for switch and checkbox the checkable/checked state, so `observe`
+reports them as controls and `tapOn` by `testTag` or label toggles or presses
+them. Each reserves the Material 48 dp minimum touch target. `radioGroup`,
+`slider`, `chip`, `card`, `listItem` and the other components in #10439 are
+later slices.
+
 Text interpolation is a renderer concern: `{page}`, `{pageCount}`, and state
 keys may appear in text. No expressions or interpolation parsing occurs during
 validation. Pager context is the nearest enclosing pager; outside a pager those
@@ -170,22 +201,24 @@ Text size uses sp, so it follows the system font scale. Negative offsets/positio
 are allowed; sizes are nonnegative, except text size and sheet height/detent
 height which must be positive. Positive values use a minimum of 0.000001.
 
-| Property              | Accepted value                                                                                                       |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `width`, `height`     | `"fill"`, `"wrap"`, or strict `{dp: n}`.                                                                             |
-| `padding`             | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                 |
-| `background`, `color` | Strict hex color.                                                                                                    |
-| `cornerRadius`        | Nonnegative dp.                                                                                                      |
-| `border`              | `{width, color}`; nonnegative dp width.                                                                              |
-| `alpha`               | Finite number 0–1; default 1. Multiplies window opacity.                                                             |
-| `alignment`           | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`. |
-| `arrangement`         | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                              |
-| `spacing`             | Nonnegative dp between row/column children; arrangement remains authoritative for distributed free space.            |
-| `textSize`            | Positive sp; scaled by the system font scale.                                                                        |
-| `fontWeight`          | Integer 100–900.                                                                                                     |
-| `textAlign`           | `start`, `center`, `end`, `justify`.                                                                                 |
-| `maxLines`            | Integer 1–2147483647.                                                                                                |
-| `fontFamily`          | Closed system set: `default`, `sansSerif`, `serif`, `monospace`.                                                     |
+| Property                                         | Accepted value                                                                                                               |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `width`, `height`                                | `"fill"`, `"wrap"`, or strict `{dp: n}`.                                                                                     |
+| `weight`                                         | Positive number. A `row`/`column` child fills the remaining main-axis space in proportion to its weight (ignored elsewhere). |
+| `minWidth`, `maxWidth`, `minHeight`, `maxHeight` | Nonnegative dp bounds applied after `width`/`height`, so `fill` and `{dp}` are clamped by them.                              |
+| `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                         |
+| `background`, `color`                            | Strict hex color.                                                                                                            |
+| `cornerRadius`                                   | Nonnegative dp.                                                                                                              |
+| `border`                                         | `{width, color}`; nonnegative dp width.                                                                                      |
+| `alpha`                                          | Finite number 0–1; default 1. Multiplies window opacity.                                                                     |
+| `alignment`                                      | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`.         |
+| `arrangement`                                    | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                                      |
+| `spacing`                                        | Nonnegative dp between row/column children; arrangement remains authoritative for distributed free space.                    |
+| `textSize`                                       | Positive sp; scaled by the system font scale.                                                                                |
+| `fontWeight`                                     | Integer 100–900.                                                                                                             |
+| `textAlign`                                      | `start`, `center`, `end`, `justify`.                                                                                         |
+| `maxLines`                                       | Integer 1–2147483647.                                                                                                        |
+| `fontFamily`                                     | Closed system set: `default`, `sansSerif`, `serif`, `monospace`.                                                             |
 
 Colors accept only `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits.
 No short hex, named colors, CSS functions, or separate color opacity. Style

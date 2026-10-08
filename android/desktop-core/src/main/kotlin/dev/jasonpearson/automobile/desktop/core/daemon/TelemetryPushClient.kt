@@ -16,8 +16,17 @@ interface TelemetryPushClient {
    * Connect to the telemetry push socket and subscribe to events.
    *
    * @param deviceId Optional device ID to filter server-side. Null receives all devices.
+   * @param deviceSessionUuid The daemon-minted identity of the device's live session, when known.
+   *   The daemon prefers it over [deviceId], which it must otherwise resolve itself.
    */
-  fun connect(deviceId: String? = null)
+  fun connect(deviceId: String? = null, deviceSessionUuid: String? = null)
+
+  /**
+   * Re-establish a dropped connection with the device arguments of the last [connect], so a health
+   * check never widens a per-device subscription to all devices. Defaults to [connect] for clients
+   * that do not remember their arguments.
+   */
+  fun reconnect() = connect()
 
   /** Disconnect from the telemetry push socket. */
   fun disconnect()

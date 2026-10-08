@@ -1167,4 +1167,11 @@ describe("overlay CLI and advertised schema registration", () => {
     expect(definition.name).toBe("prototype");
     expect(definition.outputSchema).toBeDefined();
   });
+  test("the advertised theme objects reject empty objects like the validator does", () => {
+    type Node = { minProperties?: number; properties: Record<string, Node> };
+    const root = definition.inputSchema as unknown as Node;
+    const theme = root.properties.spec.properties.theme;
+    expect(theme.minProperties).toBe(1);
+    expect(theme.properties.colors.minProperties).toBe(1);
+  });
 });

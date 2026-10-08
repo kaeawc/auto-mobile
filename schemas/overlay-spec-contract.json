@@ -334,6 +334,46 @@
           },
           "optional": true
         },
+        "weight": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 1e-6
+          },
+          "optional": true
+        },
+        "minWidth": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "maxWidth": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "minHeight": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "maxHeight": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
         "padding": {
           "rule": {
             "kind": "ref",
@@ -1370,6 +1410,238 @@
             }
           }
         },
+        "switch": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["switch"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            },
+            "label": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            }
+          }
+        },
+        "checkbox": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["checkbox"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "stateKey": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            },
+            "label": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            }
+          }
+        },
+        "button": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["button"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "label": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "variant": {
+              "rule": {
+                "kind": "enum",
+                "values": ["filled", "outlined", "text"]
+              },
+              "optional": true
+            }
+          }
+        },
         "scroll": {
           "kind": "object",
           "fields": {
@@ -1862,6 +2134,13 @@
             "name": "window"
           },
           "optional": false
+        },
+        "theme": {
+          "rule": {
+            "kind": "ref",
+            "name": "theme"
+          },
+          "optional": true
         },
         "state": {
           "rule": {
@@ -4013,6 +4292,45 @@
     "iconVariant": {
       "kind": "enum",
       "values": ["filled", "outlined", "rounded", "sharp", "twoTone"]
+    },
+    "themeColors": {
+      "kind": "object",
+      "fields": {
+        "seed": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "source": {
+          "rule": {
+            "kind": "enum",
+            "values": ["device"]
+          },
+          "optional": true
+        }
+      },
+      "atLeastOne": true
+    },
+    "theme": {
+      "kind": "object",
+      "fields": {
+        "mode": {
+          "rule": {
+            "kind": "enum",
+            "values": ["light", "dark", "system"]
+          },
+          "optional": true
+        },
+        "colors": {
+          "rule": {
+            "kind": "ref",
+            "name": "themeColors"
+          },
+          "optional": true
+        }
+      },
+      "atLeastOne": true
     }
   }
 }

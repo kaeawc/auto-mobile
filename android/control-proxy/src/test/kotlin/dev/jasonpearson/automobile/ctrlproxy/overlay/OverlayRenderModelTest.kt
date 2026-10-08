@@ -28,6 +28,12 @@ class OverlayRenderModelTest {
     OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), root = root)
 
   @Test
+  fun `an unstyled node has no fixed colour so the theme content colour applies`() {
+    val node = mapOverlaySpec(spec(OverlayTextNode(text = "plain"))).root
+    assertEquals(Color.Unspecified, node.style.color)
+  }
+
+  @Test
   fun `all static primitives expose roles text and tags`() {
     val nodes =
       listOf(
@@ -111,11 +117,33 @@ class OverlayRenderModelTest {
   }
 
   @Test
+  fun `unrepresentable weight and size bounds are rejected before content installation`() {
+    val styles =
+      mapOf(
+        "weight" to OverlayStyle(weight = Double.MAX_VALUE),
+        "maxWidth" to OverlayStyle(maxWidth = Double.MAX_VALUE),
+        "minHeight" to OverlayStyle(minHeight = Double.MAX_VALUE),
+      )
+    for ((key, style) in styles) {
+      val error =
+        assertThrows(IllegalArgumentException::class.java) {
+          mapOverlaySpec(spec(OverlayTextNode(text = "text", style = style)))
+        }
+      assertTrue(error.message.orEmpty().contains("root.style.$key"))
+    }
+  }
+
+  @Test
   fun `every style property and safe area selection survive pure mapping`() {
     val style =
       OverlayStyle(
         width = OverlayDimension.Fill,
         height = OverlayDimension.Dp(40.5),
+        weight = 2.5,
+        minWidth = 10.0,
+        maxWidth = 200.5,
+        minHeight = 20.0,
+        maxHeight = 90.0,
         padding = OverlayPadding(1.0, 2.0, 3.0, 4.0),
         background = "#112233",
         cornerRadius = 6.0,

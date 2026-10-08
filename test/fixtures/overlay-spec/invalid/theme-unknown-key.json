@@ -6,9 +6,14 @@
         "type": "fullscreen"
       }
     },
+    "theme": {
+      "mode": "dark",
+      "scale": 1
+    },
     "root": {
-      "type": "marquee"
+      "type": "text",
+      "text": "x"
     }
   },
-  "expectedPath": "root.type"
+  "expectedPath": "theme.scale"
 }

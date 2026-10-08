@@ -280,6 +280,38 @@ describe("overlay display targeting", () => {
     expect(Object.hasOwn(overlays?.[0] ?? {}, "displayId")).toBe(false);
   });
 
+  test("a same-id show superseded during its display lookup is never sent (#10641)", async () => {
+    const lookupStarted: Array<() => void> = [];
+    const releaseLookup: Array<() => void> = [];
+    const lookup = adb.executeCommand.bind(adb);
+    let lookups = 0;
+    adb.executeCommand = async (...args) => {
+      if (lookups++ === 0) {
+        // The first show's display lookup stalls until a newer same-id show has landed.
+        await new Promise<void>((resolve) => {
+          releaseLookup.push(resolve);
+          lookupStarted.forEach((notify) => notify());
+        });
+      }
+      return lookup(...args);
+    };
+    const stalled = new Promise<void>((resolve) => lookupStarted.push(resolve));
+    const older = call({ action: "show", spec, display: "inner" });
+    await stalled;
+    const newer = await call({ action: "show", spec });
+    expect(newer.success).toBe(true);
+    releaseLookup[0]();
+    const olderPayload = await older;
+    expect(olderPayload.success).toBe(false);
+    expect(olderPayload.error).toContain("newer show");
+    // The device still shows the newer overlay on the default display, matching host status.
+    expect(client.getOverlayHistory()).toHaveLength(1);
+    expect(client.getOverlayHistory()[0].displayId).toBeUndefined();
+    const overlays = (await call({ action: "status" })).overlays;
+    expect(overlays).toHaveLength(1);
+    expect(Object.hasOwn(overlays?.[0] ?? {}, "displayId")).toBe(false);
+  });
+
   test("a disconnected panel is refused with posture guidance and nothing is sent", async () => {
     adb.setCommandResponse("cmd display get-displays", { stdout: COVER_ONLY, stderr: "" });
     const payload = await call({ action: "show", spec, display: "inner" });

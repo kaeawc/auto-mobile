@@ -699,18 +699,40 @@ interface MutationOutcome {
   warning?: string;
 }
 
+/**
+ * A newer show of the same id on this device started while this one resolved its display or
+ * staged assets (#10641). Sending now would put this older spec on screen, possibly on another
+ * display, while host status records the newer one, so the older show is never sent.
+ */
+function supersededBeforeSend(args: { spec?: unknown }): OverlayResult {
+  const id = (args.spec as OverlaySpec | undefined)?.id;
+  return {
+    success: false,
+    error: `Overlay ${id ?? ""} was not sent: a newer show of the same id on this device started first and is the one on screen.`,
+  };
+}
+
+/** A re-send after a newer same-id show landed would replace it with this older spec. */
+function needsAssetResend(first: OverlayResult, superseded: () => boolean): boolean {
+  return first.success && (first.missingAssets?.length ?? 0) > 0 && !superseded();
+}
+
 async function sendOverlay(
   target: OverlayTarget,
   args: z.infer<typeof overlaySchema>,
   stage: AssetStage,
   signal: AbortSignal | undefined,
   displayId: number | undefined,
+  superseded: () => boolean = () => false,
 ): Promise<MutationOutcome> {
   if (stage.failure) {
     return { result: stage.failure };
   }
+  if (superseded()) {
+    return { result: supersededBeforeSend(args) };
+  }
   const first = await runMutation(target, args, displayId);
-  if (!first.success || !first.missingAssets?.length) {
+  if (!needsAssetResend(first, superseded)) {
     return { result: first };
   }
   const retry = await retryMissingAssets(target, args, stage, first, signal, displayId);
@@ -908,7 +930,9 @@ async function performMutation(
     assetReaders,
     signal,
   );
-  const { result, warning } = await sendOverlay(overlayTarget, args, stage, signal, displayId);
+  const { result, warning } = await sendOverlay(overlayTarget, args, stage, signal, displayId, () =>
+    isSuperseded(commits, scope, target, generation),
+  );
   retireObservation(dependencies.cacheInvalidator, device, result);
   const placed = placedDisplay(args, shown, comparable, result.success);
   const lastResult = isSuperseded(commits, scope, target, generation)

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -14,6 +14,7 @@ import type {
 } from "../../src/features/observe/shared/ctrlProxyForwardLeaseOwnership";
 import {
   readExclusiveLockContent,
+  releaseExclusiveLock,
   takeOverExclusiveLock,
   tryAcquireExclusiveLock,
   type LockContent,
@@ -376,6 +377,7 @@ describe("daemons in different coordination directories on one adb server (#1070
         return tryAcquireExclusiveLock(path, { ...owner, isProcessRunning });
       },
       takeOver: (path, observed, owner) => takeOverExclusiveLock(path, observed, owner),
+      release: (path, owner) => releaseExclusiveLock(path, owner.pid, owner.ownerToken),
     };
     return source;
   }
@@ -414,6 +416,34 @@ describe("daemons in different coordination directories on one adb server (#1070
     expect(await second.claim("emulator-5554")).toBe(true);
     await first.refresh(["emulator-5554"]);
     expect(first.foreignOwnerPid("emulator-5554")).toBeUndefined();
+  });
+
+  test("a session claim is written and withdrawn at the ADB-server location, never the legacy one (#10708, #10709)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "foreign-ownership-10709-"));
+    roots.push(root);
+    const home = join(root, "home");
+    const coordinationDir = join(root, "coord");
+    const ownership = new ForwardLeaseForeignDeviceOwnership(
+      SELF_PID,
+      daemon(home, coordinationDir, new Set([SELF_PID])),
+      new FakeOwnerProbe(),
+      () => SELF_SOCKET,
+      new FakeTimer(),
+    );
+    const claimPath = deviceAllocationClaimPath(
+      "emulator-5554",
+      { AUTOMOBILE_COORDINATION_DIR: coordinationDir },
+      home,
+    );
+    const legacyPath = join(coordinationDir, "device-allocations", "emulator-5554.lock");
+
+    expect(await ownership.claim("emulator-5554")).toBe(true);
+    expect(readExclusiveLockContent(claimPath)?.pid).toBe(SELF_PID);
+    expect(existsSync(legacyPath)).toBe(false);
+
+    ownership.release("emulator-5554");
+    expect(existsSync(claimPath)).toBe(false);
+    expect(existsSync(legacyPath)).toBe(false);
   });
 
   test("an unwritable claim directory is logged and does not block allocation", async () => {

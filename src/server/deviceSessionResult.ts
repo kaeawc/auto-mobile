@@ -109,6 +109,16 @@ export function getDeviceIdFromResult(result: unknown): string | undefined {
 }
 
 /**
+ * The platform a device-start tool result describes (the device description's top-level
+ * `platform`). A proxy records it so a call routed by a `platform` selector can tell which of its
+ * sessions it reached (#10692).
+ */
+export function getDevicePlatformFromResult(result: unknown): "android" | "ios" | undefined {
+  const platform = readToolEnvelopePayload(result)?.payload?.platform;
+  return platform === "android" || platform === "ios" ? platform : undefined;
+}
+
+/**
  * Whether a tool RESULT is the daemon's refusal of a session held inside its suspect window
  * (#10051). The session still exists and its owner can restore it, so unlike
  * {@link declaresDeviceSessionInvalid} this is evidence recovery is still possible.

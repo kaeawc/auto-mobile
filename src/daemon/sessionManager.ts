@@ -64,10 +64,12 @@ import {
   effectiveLastHeartbeat,
   isLivenessOwnerLeaseLive,
   livenessLeaseState,
+  livenessOwnerHold,
   sessionLeaseSnapshot,
   sessionOwnerLeaseSnapshot,
   suspectGraceMsFor,
   type LivenessLeaseState,
+  type LivenessOwnerHold,
 } from "./livenessOwnerLease";
 import { OWNER_DISCONNECTED_RELEASE_REASON } from "./ownerDisconnectRelease";
 import { isReleaseVetoedByExecutions } from "./unsettledExecutionVeto";
@@ -6194,6 +6196,19 @@ export class SessionManager {
     }
     // The owner's own heartbeats decide this, not tool activity by whoever else names the session.
     return isLivenessOwnerLeaseLive(sessionOwnerLeaseSnapshot(session, this.timer.now()));
+  }
+
+  /**
+   * The current owner's hold on the session, judged as a claim is (on the owner's own
+   * heartbeats), for a refused claim to report (#10701). Undefined for an unknown session and for
+   * a `cli-idle` session, which has no lease.
+   */
+  getOwnerLeaseHold(sessionId: string): LivenessOwnerHold | undefined {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.livenessPolicy === "cli-idle") {
+      return undefined;
+    }
+    return livenessOwnerHold(sessionOwnerLeaseSnapshot(session, this.timer.now()));
   }
 
   /**

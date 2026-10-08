@@ -482,6 +482,8 @@ describe("handleDaemonRequest", () => {
             success: false,
             code: "liveness_owner_conflict",
             error: expect.stringContaining(sessionId),
+            // The owner's hold, so the challenger waits out the daemon's lease (#10701).
+            result: { liveness: { state: "live", remainingMs: 0, holdRemainingMs: 4_000 } },
           });
           expect(snapshotOf(sessionId)).toEqual(before);
         }

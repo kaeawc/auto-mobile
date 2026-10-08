@@ -7,7 +7,9 @@ import { z } from "zod";
 import { logger } from "../utils/logger";
 import { encodeNonFinite } from "../utils/nonFiniteJson";
 import { ActionableError } from "../models";
+import type { LivenessOwnerHold } from "./livenessOwnerLease";
 import {
+  DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
   DaemonRequest,
   DaemonResponse,
   DaemonNotification,
@@ -258,7 +260,23 @@ function daemonFallbackResponseError(response: DaemonResponse): Error {
   return new ActionableError(response.error || "Unknown error from daemon", { cause });
 }
 
-function daemonResponseError(response: DaemonResponse): Error {
+const livenessOwnerHoldSchema = z.object({
+  state: z.enum(["live", "suspect", "lapsed"]),
+  remainingMs: z.number().finite().nonnegative(),
+  holdRemainingMs: z.number().finite().nonnegative(),
+});
+
+/**
+ * The owner's hold a `liveness_owner_conflict` refusal reports (#10701), when well-formed. A
+ * challenger waits it out instead of guessing the daemon's lease from its own configuration.
+ */
+function livenessOwnerHoldFromResponse(response: DaemonResponse): LivenessOwnerHold | undefined {
+  const parsed = livenessOwnerHoldSchema.safeParse(response.result?.liveness);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** The error a failed daemon response rejects with, carrying its structured code and details. */
+export function daemonResponseError(response: DaemonResponse): Error {
   const error =
     daemonLifecycleResponseError(response) ??
     daemonSessionResponseError(response) ??
@@ -272,7 +290,14 @@ function daemonResponseError(response: DaemonResponse): Error {
     response.boundSessionLoss?.code,
     response.transportFailure?.code,
   ].find((value) => value !== undefined);
-  return code === undefined ? error : Object.assign(error, { code });
+  if (code === undefined) {
+    return error;
+  }
+  const livenessOwnerHold =
+    code === DAEMON_LIVENESS_OWNER_CONFLICT_CODE
+      ? livenessOwnerHoldFromResponse(response)
+      : undefined;
+  return Object.assign(error, { code, ...(livenessOwnerHold ? { livenessOwnerHold } : {}) });
 }
 
 /**

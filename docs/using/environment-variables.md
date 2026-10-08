@@ -203,8 +203,14 @@ and the client acquires a fresh session when it next needs one.
 changes the window, for example to check idle release live; a value that is not a
 positive base-10 integer is ignored. Set it in both the daemon's and the proxy's
 environment. The proxy's replay of a remembered session binding and its eviction
-of held sessions nothing has named follow the same window: only forwarded tool
-calls refresh them. `session-info` reports `lastUsedAt` as the last tool activity
+of held sessions nothing has used follow the same window: only forwarded tool
+calls refresh them, including a call that selects the device with `platform` or
+`deviceId` instead of naming the session (#10692). Once the window passes, the
+proxy stops heartbeating the binding even if it missed the daemon's release
+notification, and it also stops when the daemon answers a heartbeat with
+`daemon_session_not_found`; a call that names the released session is told to
+call `getAndroid` or `getApple`, which works on the same transport (#10702).
+`session-info` reports `lastUsedAt` as the last tool activity
 and `expiresAt` as the idle deadline. When a session's device restarts, the daemon
 waits up to three minutes for it to come back. Tool calls that start, wait on, or
 fail because of that recovery count as activity, so the idle window only ends the
@@ -228,7 +234,12 @@ cannot inherit a session another owner holds, even after that owner's lease
 lapses (#10664). A proxy bound with `--initial-session-uuid` claims on its first
 heartbeat and restores the strict heartbeat policy. By default the proxy mints a
 new owner token per process, so a restarted proxy is a different token and is
-locked out while the previous process's lease is live. A harness that restarts
+locked out while the previous process's lease is live. It keeps claiming for as
+long as the daemon reports the previous owner's hold (the daemon's lease for the
+session plus its suspect grace, whatever the proxy's own lease setting) and wins
+once that hold lapses. Only a previous owner that is still renewing its lease a
+minute after the conflict began counts as a live owner; the new proxy then stops
+claiming and its tool calls report the session as lost (#10701). A harness that restarts
 its proxy passes a stable token with `--liveness-owner-token <token>` (alongside
 `--initial-session-uuid`); the restarted proxy then claims with the same token
 and resumes the session without a conflict. Use a distinct token per harness. A

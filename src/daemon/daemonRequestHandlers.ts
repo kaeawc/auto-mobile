@@ -27,7 +27,11 @@ import {
   Session,
   type SessionReleaseSnapshot,
 } from "./sessionManager";
-import type { LivenessLeasePhase, LivenessLeaseState } from "./livenessOwnerLease";
+import type {
+  LivenessLeasePhase,
+  LivenessLeaseState,
+  LivenessOwnerHold,
+} from "./livenessOwnerLease";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
 import type { DeviceSessionRecord, RetiredDeviceSession } from "./deviceSessionRegistry";
 import type { BootedDevice } from "../models";
@@ -91,6 +95,8 @@ export interface DaemonStateAccess {
     hasLivenessOwnership?(sessionId: string, ownerToken: string): boolean;
     /** Lease phase (live, suspect, lapsed) and time remaining in it; absent for `cli-idle` (#10051). */
     getSessionLeaseState?(sessionId: string): LivenessLeaseState | undefined;
+    /** The current owner's hold, reported with a refused claim (#10701). */
+    getOwnerLeaseHold?(sessionId: string): LivenessOwnerHold | undefined;
     /** Recover daemon-local ownership only when no token is currently recorded. */
     claimUnownedLivenessOwnership?(sessionId: string, ownerToken: string): boolean;
     /** Opt a one-shot `--cli`-owned session out of the heartbeat contract (#6870). */
@@ -526,6 +532,7 @@ function rejectHeartbeatWithoutOwnership(
     outcome === "claimed" && !stillOwns ? "superseded" : outcome,
     sessionId,
     currentSession.livenessOwnerToken !== undefined,
+    () => manager.getOwnerLeaseHold?.(sessionId),
   );
 }
 
@@ -548,12 +555,17 @@ function livenessOwnershipFailure(
   outcome: LivenessClaimOutcome,
   sessionId: string,
   hasOwner: boolean,
+  ownerHold: () => LivenessOwnerHold | undefined,
 ): DaemonMethodResult | undefined {
   if (outcome === "conflict") {
+    const liveness = ownerHold();
     return {
       success: false,
       code: DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
       error: `Session ${sessionId} is owned by another liveness owner whose lease is still live, so this claim was rejected and nothing changed. Retry after the owner's lease expires, or claim with the owner's stable token.`,
+      // How long the owner's hold lasts, so a challenger waits out the daemon's lease rather than
+      // its own idea of it (#10701).
+      ...(liveness ? { result: { liveness } } : {}),
     };
   }
   if (outcome === "superseded" && !hasOwner) {

@@ -64,6 +64,7 @@ import {
   readDeviceSessionSuspectRefusal,
   type DeviceSessionSuspectRefusal,
   getDeviceIdFromResult,
+  getDevicePlatformFromResult,
   getDeviceSessionIdFromResult,
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
@@ -109,6 +110,9 @@ import {
   livenessHandoverPayload,
   livenessRecoveryCallWaitMs,
   ownershipConflictLeashMs,
+  advanceOwnerConflictLeash,
+  type OwnerConflictLeash,
+  type ReportedOwnerHold,
   type LivenessHandover,
   type RecoveryAttemptOutcome,
 } from "./proxyLivenessRecovery";
@@ -313,6 +317,20 @@ function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
   return Math.max(1, interval);
 }
 
+/** The owner's hold a conflict refusal reports (#10701); absent from an older daemon. */
+function reportedOwnerHold(error: unknown): ReportedOwnerHold | undefined {
+  if (error === null || typeof error !== "object" || !("livenessOwnerHold" in error)) {
+    return undefined;
+  }
+  const hold = error.livenessOwnerHold;
+  return hold !== null &&
+    typeof hold === "object" &&
+    "holdRemainingMs" in hold &&
+    typeof hold.holdRemainingMs === "number"
+    ? { holdRemainingMs: hold.holdRemainingMs }
+    : undefined;
+}
+
 function isLivenessOwnerConflictError(error: unknown): boolean {
   return (
     error !== null &&
@@ -466,8 +484,9 @@ export class DaemonAssetVersionMismatchError extends DaemonUnavailableError {
 
 /**
  * Raised after a daemon release proves that this transport's device-session
- * identity is terminal. A fresh transport may create a new session; this bound
- * transport must never silently resurrect its UUID against another device.
+ * identity is terminal. The transport must never silently resurrect its UUID
+ * against another device; an explicit getAndroid/getApple on the same transport
+ * acquires a new session (#5689), which is what the message tells the agent (#10702).
  */
 export class DaemonBoundSessionExpiredError extends ActionableError {
   readonly sessionUuid: string;
@@ -476,8 +495,8 @@ export class DaemonBoundSessionExpiredError extends ActionableError {
 
   constructor(sessionUuid: string, reason: string, release?: SessionReleaseSnapshot) {
     super(
-      `Device session ${sessionUuid} expired or was released (${reason}). ` +
-        "This MCP transport cannot create a replacement session; start a new transport.",
+      `Device session ${sessionUuid} expired or was released (${reason}) and cannot be used ` +
+        `again. ${DEVICE_SESSION_RECOVERY_PROMPT}`,
     );
     this.name = "DaemonBoundSessionExpiredError";
     this.sessionUuid = sessionUuid;
@@ -979,8 +998,8 @@ export class DaemonMcpProxy {
        * evicted, so a conversation that moved to another device stops pinning the old one.
        */
       lastUsedAt: number;
-      /** When the daemon first refused this session's claim as a live-owner conflict (#10050). */
-      conflictSince?: number;
+      /** The daemon's refusals of this session's claim as a live-owner conflict (#10050, #10701). */
+      conflict?: OwnerConflictLeash;
     }
   >();
   /** Supersession is informational; report it at most once per proxy instance. */
@@ -998,7 +1017,12 @@ export class DaemonMcpProxy {
    * When the daemon first refused the latest binding's claim as a live-owner conflict (#10664).
    * Keyed by UUID so a binding change or a successful heartbeat starts a fresh leash.
    */
-  private latestBindingConflict: { sessionUuid: string; since: number } | undefined;
+  private latestBindingConflict: ({ sessionUuid: string } & OwnerConflictLeash) | undefined;
+  /**
+   * The latest binding the daemon answered a heartbeat for with not-found (#10702). It is no
+   * longer heartbeated until a tool call reaches it again.
+   */
+  private latestBindingNotFound: string | undefined;
   /**
    * The `--initial-session-uuid` binding was claimed at startup and no tool call has used it yet.
    * While the previous owner is still heartbeating, its refusals must not fence the binding: the
@@ -1015,6 +1039,11 @@ export class DaemonMcpProxy {
   private readonly livenessAcks = new Map<string, number>();
   /** Device each held session runs on, learned from acquisition results and explicit calls. */
   private readonly sessionDeviceIds = new Map<string, string>();
+  /**
+   * Platform of each session, learned from acquisition results, so a call routed by a `platform`
+   * selector can tell which of this proxy's sessions it reached (#10692).
+   */
+  private readonly sessionPlatforms = new Map<string, "android" | "ios">();
   /**
    * Handovers awaiting delivery, per affected session. The first tool call that names the session
    * (or reaches it implicitly) returns the structured error; naming it again attempts an
@@ -3373,11 +3402,11 @@ export class DaemonMcpProxy {
     // An omitted `sessionUuid` on the control tool means the connection profile,
     // not the proxy's retained device-routing session. Preserve that distinction
     // after a device has been bound.
-    const { forwardedArgs: routedArgs, allowReleasedSession } = this.prepareToolRoutingArgs(
-      name,
-      callerArgs,
-      isSessionAcquisition,
-    );
+    const {
+      forwardedArgs: routedArgs,
+      allowReleasedSession,
+      usesDeviceSelector,
+    } = this.prepareToolRoutingArgs(name, callerArgs, isSessionAcquisition);
     const forwardedArgs = this.withAcceptanceConfiguration(routedArgs);
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
@@ -3394,7 +3423,10 @@ export class DaemonMcpProxy {
     this.retainAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
     let registeredRequestId: string | undefined;
     let registeredClient: DaemonClientLike | undefined;
-    const trackedSessionUuid = this.beginSessionCall(name, forwardedSessionUuid);
+    const trackedSessionUuids = this.beginSessionCall(
+      name,
+      this.sessionsUsedByCall(forwardedSessionUuid, usesDeviceSelector, callerArgs),
+    );
     let callReachedSession = true;
     try {
       const forwarding = this.withRecoverableReconnect(
@@ -3500,7 +3532,7 @@ export class DaemonMcpProxy {
       }
       throw error;
     } finally {
-      this.endSessionCall(trackedSessionUuid, callReachedSession);
+      this.endSessionCall(trackedSessionUuids, callReachedSession);
       this.releaseReleaseEpochReference(forwardedSessionUuid);
       this.releaseAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
       this.removeProgressListener(registeredClient, registeredRequestId);
@@ -3523,7 +3555,11 @@ export class DaemonMcpProxy {
     name: string,
     callerArgs: Record<string, unknown>,
     isSessionAcquisition: boolean,
-  ): { forwardedArgs: Record<string, unknown>; allowReleasedSession: boolean } {
+  ): {
+    forwardedArgs: Record<string, unknown>;
+    allowReleasedSession: boolean;
+    usesDeviceSelector: boolean;
+  } {
     const isTerminalSessionlessDiscovery =
       this.terminalBoundSession !== undefined &&
       this.sessionUuidFromArgs(callerArgs) === undefined &&
@@ -3545,6 +3581,7 @@ export class DaemonMcpProxy {
       forwardedArgs,
       allowReleasedSession:
         isSessionAcquisition || isTerminalSessionlessDiscovery || canUseSurvivingSession,
+      usesDeviceSelector,
     };
   }
 
@@ -3590,6 +3627,7 @@ export class DaemonMcpProxy {
     const sessionUuid = getDeviceSessionIdFromResult(result);
     if (sessionUuid) {
       this.throwIfSessionReleasedSince(sessionUuid, releaseEpoch);
+      this.rememberSessionPlatform(sessionUuid, result);
       this.rememberSessionUuid(
         name,
         { sessionUuid, deviceId: getDeviceIdFromResult(result) },
@@ -3625,7 +3663,9 @@ export class DaemonMcpProxy {
     // as retired.
     const explicitSessionUuid = this.sessionUuidFromArgs(args);
     if (!this.canUseSurvivingSession(args, usesDeviceSelector)) {
-      this.throwIfBoundSessionUnavailable(explicitSessionUuid);
+      this.throwIfBoundSessionUnavailable(explicitSessionUuid, () =>
+        this.canUseSurvivingSession(args, usesDeviceSelector),
+      );
     }
     const normalizedArgs =
       explicitSessionUuid && explicitSessionUuid !== args.sessionUuid
@@ -3669,12 +3709,20 @@ export class DaemonMcpProxy {
     return explicit ? liveOwned.includes(explicit) : liveOwned.length > 0 && usesDeviceSelector;
   }
 
-  private throwIfBoundSessionUnavailable(explicitSessionUuid?: string): void {
+  private throwIfBoundSessionUnavailable(
+    explicitSessionUuid?: string,
+    survivingSessionUsable?: () => boolean,
+  ): void {
     this.throwIfFencedForCaller(explicitSessionUuid);
     if (!this.isBoundSessionReplayExpired()) {
       return;
     }
     this.fenceBoundSessionUuid(this.boundSessionUuid!, "replay-lease-expired");
+    // The latest binding idled out, but a selector call may still reach another live session
+    // this proxy holds (#10692): only the idle binding is retired, not the caller's device.
+    if (survivingSessionUsable?.()) {
+      return;
+    }
     this.throwIfFencedForCaller(explicitSessionUuid);
   }
 
@@ -3795,19 +3843,61 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * Count a forwarded call against the session it uses; returns the UUID to pass to
+   * Count a forwarded call against the sessions it uses; returns the UUIDs to pass to
    * {@link endSessionCall}. Inventory observation never uses the session it names, so it neither
    * holds nor refreshes it.
    */
-  private beginSessionCall(name: string, sessionUuid: string | undefined): string | undefined {
-    if (sessionUuid === undefined || isDeviceInventoryTool(name)) {
-      return undefined;
+  private beginSessionCall(name: string, sessionUuids: readonly string[]): readonly string[] {
+    if (isDeviceInventoryTool(name)) {
+      return [];
     }
-    this.sessionCallsInFlight.set(
-      sessionUuid,
-      (this.sessionCallsInFlight.get(sessionUuid) ?? 0) + 1,
-    );
-    return sessionUuid;
+    for (const sessionUuid of sessionUuids) {
+      this.sessionCallsInFlight.set(
+        sessionUuid,
+        (this.sessionCallsInFlight.get(sessionUuid) ?? 0) + 1,
+      );
+    }
+    return sessionUuids;
+  }
+
+  /** The sessions a forwarded call uses: the one it names, or the ones its device selector reaches. */
+  private sessionsUsedByCall(
+    forwardedSessionUuid: string | undefined,
+    usesDeviceSelector: boolean,
+    callerArgs: Record<string, unknown>,
+  ): string[] {
+    if (forwardedSessionUuid !== undefined) {
+      return [forwardedSessionUuid];
+    }
+    return usesDeviceSelector ? this.sessionsReachedBySelector(callerArgs) : [];
+  }
+
+  /**
+   * The sessions a call routed by a `deviceId`/`platform` selector reaches (#10692). Such a call
+   * carries no session UUID: the daemon resolves the selector among the sessions this proxy owns.
+   * A session matches when its recorded device (or platform) is the one selected; when nothing is
+   * recorded for the only live session, that session is the one the daemon can reach.
+   */
+  private sessionsReachedBySelector(args: Record<string, unknown>): string[] {
+    const live = [
+      ...(this.boundSessionUuid !== undefined && !this.terminalBoundSession
+        ? [this.boundSessionUuid]
+        : []),
+      ...this.otherHeldSessions.keys(),
+    ];
+    const selected = (sessionUuid: string): boolean | undefined => {
+      if (typeof args.deviceId === "string") {
+        const deviceId = this.sessionDeviceIds.get(sessionUuid);
+        return deviceId === undefined ? undefined : deviceId === args.deviceId;
+      }
+      const platform = this.sessionPlatforms.get(sessionUuid);
+      return platform === undefined ? undefined : platform === args.platform;
+    };
+    const matches = live.filter((sessionUuid) => selected(sessionUuid) === true);
+    if (matches.length > 0) {
+      return matches;
+    }
+    return live.length === 1 && selected(live[0]) === undefined ? live : [];
   }
 
   /**
@@ -3816,10 +3906,13 @@ export class DaemonMcpProxy {
    * session 2 min after the END of its last tool call, however long that call ran. A call that never reached a
    * live session (a transport or pre-dispatch failure) used nothing, so it leaves the clock alone.
    */
-  private endSessionCall(sessionUuid: string | undefined, reachedSession: boolean): void {
-    if (sessionUuid === undefined) {
-      return;
+  private endSessionCall(sessionUuids: readonly string[], reachedSession: boolean): void {
+    for (const sessionUuid of sessionUuids) {
+      this.endOneSessionCall(sessionUuid, reachedSession);
     }
+  }
+
+  private endOneSessionCall(sessionUuid: string, reachedSession: boolean): void {
     const remaining = (this.sessionCallsInFlight.get(sessionUuid) ?? 1) - 1;
     if (remaining > 0) {
       this.sessionCallsInFlight.set(sessionUuid, remaining);
@@ -3847,6 +3940,7 @@ export class DaemonMcpProxy {
     this.boundSessionFromResultMint = false;
     this.livenessOwnershipClaimSent = false;
     this.latestBindingConflict = undefined;
+    this.latestBindingNotFound = undefined;
     this.recoverableBoundSessionHandoff = undefined;
   }
 
@@ -4744,7 +4838,7 @@ export class DaemonMcpProxy {
       held.claimSent = true;
     }
     if (held) {
-      held.conflictSince = undefined;
+      held.conflict = undefined;
     }
     this.livenessAcks.set(sessionUuid, this.timer.now());
     this.livenessConflictLogged.delete(sessionUuid);
@@ -4770,7 +4864,7 @@ export class DaemonMcpProxy {
       return;
     }
     if (isLivenessOwnerConflictError(error)) {
-      this.handleHeldSessionOwnerConflict(sessionUuid);
+      this.handleHeldSessionOwnerConflict(sessionUuid, reportedOwnerHold(error));
       return;
     }
     if (error instanceof DaemonBoundSessionExpiredError) {
@@ -4791,18 +4885,27 @@ export class DaemonMcpProxy {
    * The daemon refused this held session's claim because another token owns it
    * with a live lease (#10050). The claim stays unsent so each tick retries it,
    * which succeeds once that lease lapses. The other owner's session stays refused for
-   * its lease plus the suspect grace window (#10051), so a refusal is only given up on
-   * after {@link ownershipConflictLeashMs}: one that outlasts it means this proxy cannot
-   * own the session, so it stops heartbeating that session alone; siblings are unaffected.
+   * its lease plus the suspect grace window (#10051), which the refusal reports, so it is only
+   * given up on once that owner keeps renewing past the handoff allowance (#10701): then this
+   * proxy cannot own the session and stops heartbeating that session alone; siblings are
+   * unaffected.
    */
-  private handleHeldSessionOwnerConflict(sessionUuid: string): void {
+  private handleHeldSessionOwnerConflict(
+    sessionUuid: string,
+    hold: ReportedOwnerHold | undefined,
+  ): void {
     const held = this.otherHeldSessions.get(sessionUuid);
     if (!held) {
       return;
     }
-    const now = this.timer.now();
-    held.conflictSince ??= now;
-    if (now - held.conflictSince >= this.ownershipConflictLeashMs) {
+    const { leash, exhausted } = advanceOwnerConflictLeash(
+      held.conflict,
+      this.timer.now(),
+      hold,
+      this.ownershipConflictLeashMs,
+    );
+    held.conflict = leash;
+    if (exhausted) {
       logger.warn(
         `[DaemonMcpProxy] Held session ${sessionUuid} is owned by another live liveness owner; no longer heartbeating it`,
       );
@@ -4833,6 +4936,7 @@ export class DaemonMcpProxy {
     this.livenessConflictLogged.delete(sessionUuid);
     if (!keepHandover) {
       this.sessionDeviceIds.delete(sessionUuid);
+      this.sessionPlatforms.delete(sessionUuid);
       this.stallHandovers.delete(sessionUuid);
     }
   }
@@ -4865,6 +4969,16 @@ export class DaemonMcpProxy {
   private async runLatestBindingHeartbeatTick(): Promise<void> {
     const sessionUuid = this.boundSessionUuid;
     if (!sessionUuid || !this.latestBindingClaimable() || this.closing) {
+      return;
+    }
+    if (this.isBoundSessionReplayExpired()) {
+      // Backstop for a missed session-released notification (#10702): an idle binding is retired
+      // here, so the keeper stops instead of heartbeating it until the next call arrives.
+      this.fenceBoundSessionUuid(sessionUuid, "replay-lease-expired");
+      return;
+    }
+    if (this.latestBindingNotFound === sessionUuid) {
+      // The daemon answered that it does not know this session; heartbeating it again cannot help.
       return;
     }
     // A caller that explicitly schedules heartbeats beyond the lease cannot
@@ -4907,12 +5021,38 @@ export class DaemonMcpProxy {
       if (this.absorbOwnershipRefusal(error, sessionUuid, isCurrent)) {
         return;
       }
+      if (this.isDaemonSessionNotFoundError(error) && isCurrent()) {
+        this.stopHeartbeatingUnknownLatestBinding(sessionUuid);
+        return;
+      }
       if (error instanceof DaemonBoundSessionExpiredError) {
         // Terminal fencing already stopped the keeper; this tick has no further work.
         logger.debug(`[DaemonMcpProxy] Bound-session heartbeat stopped: ${error.message}`);
         return;
       }
       throw error;
+    }
+  }
+
+  /**
+   * The daemon answered a heartbeat for the latest binding, retried on a fresh connection, with
+   * not-found: it released the session and this proxy missed the notification (#10702). Stop
+   * heartbeating it rather than every tick resetting the socket to ask again. The binding is not
+   * fenced: a replacement daemon may restore a persisted session when a tool call reaches it, and a
+   * call that does so re-arms the heartbeat; otherwise that call reports the loss.
+   */
+  private stopHeartbeatingUnknownLatestBinding(sessionUuid: string): void {
+    if (this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
+      return;
+    }
+    if (this.latestBindingNotFound !== sessionUuid) {
+      logger.info(
+        `[DaemonMcpProxy] The daemon no longer knows session ${sessionUuid}; no longer heartbeating it`,
+      );
+    }
+    this.latestBindingNotFound = sessionUuid;
+    if (this.otherHeldSessions.size === 0) {
+      void this.stopBoundSessionHeartbeat();
     }
   }
 
@@ -4950,18 +5090,23 @@ export class DaemonMcpProxy {
       // (no local acknowledgement either), the claim stays unsent so the next
       // tick retries it, and the keeper is not failed by the refusal.
       this.noteLivenessOwnerConflict(sessionUuid);
-      this.leashLatestBindingConflict(sessionUuid, isCurrent);
+      this.leashLatestBindingConflict(sessionUuid, isCurrent, reportedOwnerHold(error));
       return true;
     }
     return false;
   }
 
   /**
-   * Give the latest binding the same leash held sessions have (#10664): a refusal that outlasts
-   * the other owner's lease plus grace means this proxy cannot own the session, so it stops
-   * claiming and fences the binding instead of inheriting another proxy's session.
+   * Give the latest binding the same leash held sessions have (#10664): an owner that keeps
+   * renewing past the handoff allowance means this proxy cannot own the session, so it stops
+   * claiming and fences the binding instead of inheriting another proxy's session. An owner that
+   * stopped is waited out for the hold the daemon reports, however long its lease (#10701).
    */
-  private leashLatestBindingConflict(sessionUuid: string, isCurrent: () => boolean): void {
+  private leashLatestBindingConflict(
+    sessionUuid: string,
+    isCurrent: () => boolean,
+    hold: ReportedOwnerHold | undefined,
+  ): void {
     if (!isCurrent() || this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
       return;
     }
@@ -4972,11 +5117,16 @@ export class DaemonMcpProxy {
       this.latestBindingConflict = undefined;
       return;
     }
-    const now = this.timer.now();
-    if (this.latestBindingConflict?.sessionUuid !== sessionUuid) {
-      this.latestBindingConflict = { sessionUuid, since: now };
-    }
-    if (now - this.latestBindingConflict.since < this.ownershipConflictLeashMs) {
+    const { leash, exhausted } = advanceOwnerConflictLeash(
+      this.latestBindingConflict?.sessionUuid === sessionUuid
+        ? this.latestBindingConflict
+        : undefined,
+      this.timer.now(),
+      hold,
+      this.ownershipConflictLeashMs,
+    );
+    this.latestBindingConflict = { sessionUuid, ...leash };
+    if (!exhausted) {
       return;
     }
     logger.warn(
@@ -5169,6 +5319,7 @@ export class DaemonMcpProxy {
     }
     this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
     this.rememberSessionDevice(mintedSessionUuid, getDeviceIdFromResult(result));
+    this.rememberSessionPlatform(mintedSessionUuid, result);
     // A prior binding's keeper must not outlive the rebind to a fresh session.
     // (A terminal fence already stopped it; this covers re-acquiring over a live
     // binding.)
@@ -5210,6 +5361,14 @@ export class DaemonMcpProxy {
     // can arrive while it is in flight, fence and clear the binding, and make
     // this acquisition result stale before it reaches the caller.
     this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
+  }
+
+  /** Learn a session's platform so a `platform` selector can be matched to it (#10692). */
+  private rememberSessionPlatform(sessionUuid: string, result: unknown): void {
+    const platform = getDevicePlatformFromResult(result);
+    if (platform) {
+      this.sessionPlatforms.set(sessionUuid, platform);
+    }
   }
 
   /** Learn which device a session runs on so a liveness handover can name it (#10053). */
@@ -5291,6 +5450,8 @@ export class DaemonMcpProxy {
     this.boundSessionUuid = sessionUuid;
     this.boundSessionUuidAt = this.timer.now();
     this.ownedDeviceSessions.add(sessionUuid);
+    // A call reached the session, so the daemon knows it again: heartbeat it (#10702).
+    this.latestBindingNotFound = undefined;
   }
 
   // Refresh the replay lease for a call that was ADMITTED and forwarded to the
@@ -5696,6 +5857,7 @@ export class DaemonMcpProxy {
     this.otherHeldSessions.clear();
     this.livenessAcks.clear();
     this.sessionDeviceIds.clear();
+    this.sessionPlatforms.clear();
     this.stallHandovers.clear();
     this.pendingSessionLosses.clear();
     this.livenessHandoverListeners.clear();

@@ -66,6 +66,27 @@ export function livenessLeaseState(snapshot: LivenessOwnerLeaseSnapshot): Livene
 }
 
 /**
+ * The owner's hold reported with a refused claim (#10701): the lease phase, the time left in it,
+ * and the time until the hold ends entirely (lease plus suspect grace), after which a claim wins.
+ */
+export interface LivenessOwnerHold {
+  state: LivenessLeasePhase;
+  remainingMs: number;
+  holdRemainingMs: number;
+}
+
+/** Where the owner's hold stands, judged on the same snapshot the claim path judges. */
+export function livenessOwnerHold(snapshot: LivenessOwnerLeaseSnapshot): LivenessOwnerHold {
+  const { phase, remainingMs } = livenessLeaseState(snapshot);
+  const holdEnd = snapshot.heartbeatTimeoutMs + (snapshot.graceMs ?? 0);
+  return {
+    state: phase,
+    remainingMs,
+    holdRemainingMs: Math.max(0, holdEnd - (snapshot.now - snapshot.lastHeartbeat)),
+  };
+}
+
+/**
  * Whether the owner still holds the session: its lease is live or it is inside
  * the suspect window.
  *

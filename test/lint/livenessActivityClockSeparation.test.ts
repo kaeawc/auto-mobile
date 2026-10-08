@@ -26,8 +26,9 @@ import { join, relative, sep } from "node:path";
  *
  * 1. No liveness-only function writes an activity clock, directly or through a
  *    same-file helper it calls (`this.m()` or a module function), transitively.
- *    A write is an assignment (`=`, compound, `++`/`--`) or an `Object.assign`
- *    whose source object literal (inline or a local `const`) carries the clock.
+ *    A write is an assignment (`=`, compound, `++`/`--`), an `Object.assign`
+ *    whose source object literal (inline or a local `const`) carries the clock,
+ *    or a `map.set(key, value)` whose value object literal carries it.
  *    Retiring a clock (`= undefined`, `delete`) is not a write: it can only end
  *    a lease, never extend one.
  * 2. The one sanctioned exception: a policy change (CLI adoption/restoration)
@@ -46,7 +47,10 @@ const ROOT = join(import.meta.dir, "..", "..");
 
 /** The daemon session's idle clocks. */
 const DAEMON_ACTIVITY_CLOCKS = ["lastUsedAt", "expiresAt"] as const;
-/** The stdio proxy's replay-lease clock. */
+/**
+ * The stdio proxy's replay-lease clock. A held session's `lastUsedAt` (#10677) is covered by the
+ * daemon clock name above: only a tool call naming the session may stamp it.
+ */
 const PROXY_ACTIVITY_CLOCKS = ["boundSessionUuidAt"] as const;
 const ACTIVITY_CLOCKS: ReadonlySet<string> = new Set([
   ...DAEMON_ACTIVITY_CLOCKS,
@@ -154,6 +158,13 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "Tool usage: a device-acquisition result (getAndroid/getApple/startDevice) binds.",
   },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdPreviousBinding": {
+    writes: 1,
+    reason:
+      "Tool usage: a newer binding demotes the previous one to a held session whose lastUsedAt " +
+      "carries that binding's replay lease (boundSessionUuidAt, itself only stamped by tool " +
+      "calls), so held-session idle eviction keys off tool use, never heartbeat acks (#10677).",
+  },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.updateBoundSessionUuid": {
     writes: 1,
     reason: "Tool usage: a forwarded call (explicit or injected sessionUuid) renews the lease.",
@@ -161,8 +172,19 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
 
   // --- Same names, different clocks -----------------------------------------
   "src/daemon/devicePool.ts DevicePool.addDevice": {
+    writes: 2,
+    reason:
+      "PooledDevice.lastUsedAt is the pool's LRU order (assigned, or stored with a new pool " +
+      "entry), not a session idle clock.",
+  },
+  "src/daemon/devicePool.ts DevicePool.initializeWithDevices": {
     writes: 1,
-    reason: "PooledDevice.lastUsedAt is the pool's LRU order, not a session idle clock.",
+    reason: "PooledDevice LRU order seeded for each discovered device, not a session idle clock.",
+  },
+  "src/daemon/devicePoolRefresh.ts DevicePoolRefresh.refreshDevicesInternal": {
+    writes: 1,
+    reason:
+      "PooledDevice LRU order seeded for a newly discovered device, not a session idle clock.",
   },
   "src/daemon/devicePool.ts DevicePool.bindOrReuseDeviceSession": {
     writes: 1,
@@ -189,8 +211,18 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     reason: "PooledDevice LRU order on autolock assignment, not a session idle clock.",
   },
   "src/server/webrtcStreamManager.ts acquireLease": {
+    writes: 2,
+    reason:
+      "WebRTC stream subscription lease expiry (renewed, or stored with a new lease), unrelated " +
+      "to device sessions.",
+  },
+  "src/server/webrtcStreamManager.ts endLease": {
     writes: 1,
-    reason: "WebRTC stream subscription lease expiry, unrelated to device sessions.",
+    reason: "WebRTC stream end-of-lease record expiry, unrelated to device sessions.",
+  },
+  "src/server/appResources.ts getAppMetadataResource": {
+    writes: 1,
+    reason: "App-metadata resource cache TTL, unrelated to device sessions.",
   },
 };
 
@@ -371,6 +403,19 @@ function isObjectAssign(call: ts.CallExpression): boolean {
   );
 }
 
+/**
+ * `<map>.set(key, { …clock })`: a keyed record stored with an activity clock, such as the proxy's
+ * held-session `lastUsedAt` (#10677). Storing it stamps the clock just like an assignment.
+ */
+function isMapEntrySet(call: ts.CallExpression): boolean {
+  const callee = unwrap(call.expression);
+  return (
+    ts.isPropertyAccessExpression(callee) &&
+    callee.name.text === "set" &&
+    call.arguments.length === 2
+  );
+}
+
 function lineOf(source: ts.SourceFile, node: ts.Node): number {
   return source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
 }
@@ -420,6 +465,10 @@ function clocksWrittenBy(node: ts.Node, source: ts.SourceFile): string[] {
   if (ts.isCallExpression(node) && isObjectAssign(node)) {
     const scope = enclosingFunctionNode(node) ?? source;
     return node.arguments.slice(1).flatMap((argument) => objectClockKeys(argument, scope));
+  }
+  if (ts.isCallExpression(node) && isMapEntrySet(node)) {
+    const scope = enclosingFunctionNode(node) ?? source;
+    return objectClockKeys(node.arguments[1]!, scope);
   }
   return [];
 }
@@ -821,6 +870,21 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       );
       expect(crossFileCalls(handler, ["onBeat"], new Set(["getSessionCache"]))).toEqual([
         "handler.ts onBeat:1 calls getSessionCache",
+      ]);
+    });
+
+    test("reports a keyed record stored with an activity clock", () => {
+      const held = parse(
+        "held.ts",
+        [
+          "class Proxy {",
+          "  ack(id) { this.held.set(id, { claimSent: true, lastUsedAt: 4 }); }",
+          "  claim(id) { const entry = { claimSent: true }; this.held.set(id, entry); }",
+          "}",
+        ].join("\n"),
+      );
+      expect(summary(livenessViolations(held, ["Proxy.ack", "Proxy.claim"], new Set()))).toEqual([
+        "Proxy.ack:lastUsedAt",
       ]);
     });
 

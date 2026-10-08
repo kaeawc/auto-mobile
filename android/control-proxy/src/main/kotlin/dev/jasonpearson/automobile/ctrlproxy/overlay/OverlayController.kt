@@ -180,7 +180,7 @@ class OverlayController(
     val interactive =
       request.copy(
         hasTextField = mappedSpec.hasTextField,
-        darkTheme = overlayAuthoredTheme(mappedSpec.root)?.dark,
+        darkTheme = overlayHostDark(mappedSpec),
         onHostDismiss = { interact(runtime, OverlayInteraction.HostDismiss) },
         content = {
           OverlayRuntimeContent(runtime, images) { interaction -> interact(runtime, interaction) }

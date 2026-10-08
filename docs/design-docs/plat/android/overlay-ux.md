@@ -78,6 +78,20 @@ retain JsonElement. Validated integer model fields normalize decimal/exponent
 spellings before Kotlin decoding (e.g. `100.0` and `1e2` both mean 100). The protocol module has no API-dump
 plugin or API-check task; its published artifact includes the contract resource.
 
+## Theme
+
+Optional top-level `theme` sets the Material scheme every built-in component draws
+from. At least one of its fields is required:
+
+| Field           | Meaning                                                                                                                                                   |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`          | `light`, `dark` or `system` (follow the device). Omitted: inferred from the first opaque background on the root's leading chain, else the device setting. |
+| `colors.seed`   | Hex color a full light or dark scheme is generated from.                                                                                                  |
+| `colors.source` | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                      |
+
+An explicit theme wins over the scheme inferred from backgrounds. Type and shape scales
+are a later slice (#10438).
+
 ## Windows
 
 `window` has required `placement` and optional integer `opacity` (0–100, default

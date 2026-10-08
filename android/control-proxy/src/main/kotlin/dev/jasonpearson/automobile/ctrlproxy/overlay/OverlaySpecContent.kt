@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -68,7 +69,10 @@ internal fun OverlayRuntimeContent(
         LocalOverlayImageCache provides images,
         LocalOverlayMotion provides motion,
       ) {
-        OverlaySpecContent(mapOverlaySpec(snapshot.spec, snapshot.pages).root) { interaction ->
+        OverlaySpecContent(
+          mapOverlaySpec(snapshot.spec, snapshot.pages).root,
+          snapshot.spec.theme,
+        ) { interaction ->
           queue.trySend(interaction)
         }
       }
@@ -78,8 +82,12 @@ internal fun OverlayRuntimeContent(
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun OverlaySpecContent(root: OverlayRenderNode, interact: (OverlayInteraction) -> Unit = {}) {
-  OverlayTheme(root) {
+fun OverlaySpecContent(
+  root: OverlayRenderNode,
+  theme: OverlaySpecTheme? = null,
+  interact: (OverlayInteraction) -> Unit = {},
+) {
+  OverlayTheme(root, theme) {
     Box(Modifier.semantics { testTagsAsResourceId = true }) {
       RenderOverlayNode(root, interact)
       modalOverlaySheets(root).forEach { node ->
@@ -149,7 +157,12 @@ private fun RenderOverlayNodeContent(
     "icon" -> {
       val icon = overlayIcon(node.iconName)
       if (icon != null)
-        Icon(icon, contentDescription = null, modifier = modifier, tint = node.style.color)
+        Icon(
+          icon,
+          contentDescription = null,
+          modifier = modifier,
+          tint = node.style.color.takeOrElse { LocalContentColor.current },
+        )
       else
         Box(
           modifier.defaultMinSize(24.dp, 24.dp).background(node.style.background ?: Color.LightGray)

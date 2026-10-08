@@ -2162,6 +2162,13 @@
           },
           "optional": false
         },
+        "theme": {
+          "rule": {
+            "kind": "ref",
+            "name": "theme"
+          },
+          "optional": true
+        },
         "state": {
           "rule": {
             "kind": "map",
@@ -2228,6 +2235,45 @@
         }
       },
       "exclusive": ["elementId", "text"]
+    },
+    "themeColors": {
+      "kind": "object",
+      "fields": {
+        "seed": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "source": {
+          "rule": {
+            "kind": "enum",
+            "values": ["device"]
+          },
+          "optional": true
+        }
+      },
+      "atLeastOne": true
+    },
+    "theme": {
+      "kind": "object",
+      "fields": {
+        "mode": {
+          "rule": {
+            "kind": "enum",
+            "values": ["light", "dark", "system"]
+          },
+          "optional": true
+        },
+        "colors": {
+          "rule": {
+            "kind": "ref",
+            "name": "themeColors"
+          },
+          "optional": true
+        }
+      },
+      "atLeastOne": true
     }
   }
 }

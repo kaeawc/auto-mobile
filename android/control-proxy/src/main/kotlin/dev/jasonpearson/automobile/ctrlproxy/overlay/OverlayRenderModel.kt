@@ -44,6 +44,7 @@ data class OverlayRenderModel(
   val opacityPercent: Int,
   val root: OverlayRenderNode,
   val hasTextField: Boolean = false,
+  val theme: OverlaySpecTheme? = null,
   val motion: String? = null,
 ) {
   fun request() =
@@ -52,7 +53,7 @@ data class OverlayRenderModel(
       opacityPercent = opacityPercent,
       hasTextField = hasTextField,
     ) {
-      OverlaySpecContent(root)
+      OverlaySpecContent(root, theme = theme)
     }
 }
 
@@ -91,6 +92,7 @@ fun mapOverlaySpec(spec: OverlaySpec, pages: Map<String, Int> = emptyMap()): Ove
     spec.window.opacity,
     mapped,
     hasVisibleTextField(mapped),
+    spec.theme,
     spec.motion,
   )
 }
@@ -261,7 +263,8 @@ fun mapOverlayStyle(style: OverlayStyle): OverlayRenderStyle =
     style,
     style.background?.let(::overlayColor),
     style.border?.color?.let(::overlayColor),
-    style.color?.let(::overlayColor) ?: Color.Black,
+    // Unspecified: an unstyled node takes the theme's content colour, not a fixed black.
+    style.color?.let(::overlayColor) ?: Color.Unspecified,
     overlayAlignment(style.alignment),
     overlayHorizontalAlignment(style.alignment),
     overlayVerticalAlignment(style.alignment),

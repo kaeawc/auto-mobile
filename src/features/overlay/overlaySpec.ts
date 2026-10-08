@@ -475,10 +475,28 @@ const windowSchema = z
     opacity: z.number().finite().int().min(0).max(100).default(100),
   })
   .strict();
+const themeColorsSchema = z
+  .object({
+    seed: z
+      .string()
+      .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
+      .optional(),
+    source: z.enum(["device"]).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
+const themeSchema = z
+  .object({
+    mode: z.enum(["light", "dark", "system"]).optional(),
+    colors: themeColorsSchema.optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
 const specSchema = z
   .object({
     id: z.string().min(1),
     window: windowSchema,
+    theme: themeSchema.optional(),
     state: z
       .custom<Record<string, string | number | boolean>>(
         (value) =>

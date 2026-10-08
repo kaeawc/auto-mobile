@@ -407,12 +407,29 @@ data class OverlayWindow(
   val opacity: Int = 100,
 )
 
+/**
+ * `source = "device"` asks for Android 12+ dynamic colour; `seed` generates a scheme from one
+ * colour.
+ */
+@Serializable
+data class OverlaySpecThemeColors(
+  val seed: String? = null,
+  val source: String? = null,
+)
+
+@Serializable
+data class OverlaySpecTheme(
+  val mode: String? = null,
+  val colors: OverlaySpecThemeColors? = null,
+)
+
 @Serializable
 data class OverlaySpec(
   val id: String,
   val window: OverlayWindow,
   val state: Map<String, OverlayScalar>? = null,
   val root: OverlayNode,
+  val theme: OverlaySpecTheme? = null,
   /** `none` opts out of overlay animation; absent or `standard` follows the system scale. */
   val motion: String? = null,
 )

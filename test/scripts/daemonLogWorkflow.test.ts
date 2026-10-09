@@ -4,6 +4,7 @@ import { loadJobSteps, loadWorkflow, stepNamed } from "../helpers/workflowSteps"
 
 const PULL_REQUEST_WORKFLOW = ".github/workflows/pull_request.yml";
 const MERGE_WORKFLOW = ".github/workflows/merge.yml";
+const XCTESTRUNNER_WORKFLOW = ".github/workflows/xctestrunner-simulator-tests.yml";
 const CI_LOG_DIR = "${{ github.workspace }}/ci-logs/daemon-logs";
 const BENCHMARK_SCRIPT = "scripts/benchmark-startup.sh";
 
@@ -17,8 +18,8 @@ describe("daemon log artifact wiring", () => {
   });
 
   test("XCTestRunner uploads the same explicit directory inherited by AutoMobile", () => {
-    const job = loadWorkflow(PULL_REQUEST_WORKFLOW).jobs?.["ios-xctest-runner-simulator-tests"];
-    const steps = loadJobSteps(PULL_REQUEST_WORKFLOW, "ios-xctest-runner-simulator-tests");
+    const job = loadWorkflow(XCTESTRUNNER_WORKFLOW).jobs?.["ios-xctest-runner-simulator-tests"];
+    const steps = loadJobSteps(XCTESTRUNNER_WORKFLOW, "ios-xctest-runner-simulator-tests");
 
     expect(job?.env?.AUTOMOBILE_LOG_DIR).toBe(CI_LOG_DIR);
     expect(stepNamed(steps, "Collect AutoMobile daemon logs")).toBeUndefined();

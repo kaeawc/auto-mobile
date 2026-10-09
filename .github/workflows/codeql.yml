@@ -1,0 +1,59 @@
+name: "CodeQL"
+
+# CodeQL was the single largest pull-request job (~14 min median, ~12% of PR
+# Linux minutes) and is not a required check, so it runs on push to main and
+# weekly instead of on every PR (#10888). Code scanning still records alerts
+# against main; PR-time alerts are intentionally given up.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  schedule:
+    # Mondays 06:00 UTC, clear of the nightly run at 00:00.
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  codeql-node:
+    name: "CodeQL Analysis - Node.js/TypeScript"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["typescript"]
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Initialize CodeQL"
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Build TypeScript"
+        env:
+          TURBO_TELEMETRY_DISABLED: "1"
+          TURBO_NO_UPDATE_NOTIFIER: "1"
+          DO_NOT_TRACK: "1"
+          NO_COLOR: "1"
+        run: turbo run build --output-logs=errors-only
+
+      - name: "Perform CodeQL Analysis"
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{matrix.language}}"

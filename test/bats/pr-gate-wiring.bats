@@ -106,11 +106,85 @@ wiring_requires_yq() {
   [[ "$block" != *"bats-integration-tests"* ]]
 }
 
-@test "Android emulator compile smoke includes test-source compilation" {
-  block="$(job_block android-emulator-compile-smoke)"
-  [[ -n "$block" ]]
-  [[ "$block" == *":junit-runner:compileTestKotlin"* ]]
-  [[ "$block" == *":playground:app:compileDebugUnitTestKotlin"* ]]
+@test "BATS runs only on shell-relevant changes while Shell Tests always reports (#10889)" {
+  wiring_requires_yq
+  local condition
+  condition="$(yq -r '.jobs."bats-tests".if' "$WF")"
+  [[ "$condition" == *"needs.detect-changes.outputs.shell_changed == 'true'"* ]]
+  # The required roll-up must not inherit the path filter: it always posts, and a
+  # skipped bats-tests is not a failure.
+  condition="$(yq -r '.jobs."shell-tests-gate".if' "$WF")"
+  [[ "$condition" == "always()"* ]]
+  [[ "$condition" != *"shell_changed"* ]]
+  [[ "$(job_block shell-tests-gate)" == *'"$r" == "failure" || "$r" == "cancelled"'* ]]
+
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-shell")
+    | (.with.filters | from_yaml | .shell[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  local path
+  for path in "scripts/**" "test/bats/**" ".github/**" "package.json" "bun.lock" "skills/**" ".agents/**" "oxlint-plugins/**"; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
+  done
+  # A TypeScript-only change must not trigger the suite.
+  [[ $'\n'"$output"$'\n' != *$'\n'"src/**"$'\n'* ]]
+  [[ "$(yq -r '.jobs."detect-changes".outputs.shell_changed' "$WF")" == *"steps.filter-shell.outputs.shell"* ]]
+}
+
+@test "host :junit-runner:test runs in exactly one PR job (#10892)" {
+  wiring_requires_yq
+  # gradle-task-run invocations only; the emulator suites drive the same task
+  # against a booted device through the android-emulator action's script.
+  run yq -r '
+    .jobs[]
+    | select([.steps[]? | select(.uses == "./.github/actions/gradle-task-run" and ((.with."gradle-tasks" // "") | test("(^| ):junit-runner:test( |$)")))] | length > 0)
+    | key
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "junit-runner-unit-tests" ]
+  [[ "$(yq -r '.jobs."junit-runner-unit-tests".name' "$WF")" == "Run JUnit Runner Unit Tests" ]]
+}
+
+@test "emulator lanes fail fast on compile errors through the build jobs (#10890)" {
+  wiring_requires_yq
+  [[ -z "$(job_block android-emulator-compile-smoke)" ]]
+  # Each module the removed compile smoke compiled is compiled by a build job
+  # the emulator lanes depend on.
+  [[ "$(job_block build-android-control-proxy)" == *":control-proxy:assembleDebug"* ]]
+  [[ "$(job_block build-playground-app)" == *":playground:app:assembleDebug"* ]]
+  [[ "$(job_block build-playground-app)" == *":playground:app:compileDebugUnitTestKotlin"* ]]
+  [[ "$(job_block junit-runner-unit-tests)" == *'gradle-tasks: ":junit-runner:test"'* ]]
+  local job needs
+  for job in android-emulator-tests; do
+    needs="$(yq -r ".jobs.\"${job}\".needs[]" "$WF")"
+    [[ $'\n'"$needs"$'\n' == *$'\n'"build-android-control-proxy"$'\n'* ]]
+    [[ $'\n'"$needs"$'\n' == *$'\n'"build-playground-app"$'\n'* ]]
+    [[ $'\n'"$needs"$'\n' == *$'\n'"junit-runner-unit-tests"$'\n'* ]]
+  done
+  # The SDK Debug Inspector Consumer guard the smoke carried stays on PRs.
+  [[ "$(job_block jvm-consumer-checks)" == *"validate-sdk-debug-inspector-consumer.sh --skip-publish"* ]]
+}
+
+@test "both emulator suites share one booted emulator with separate reports (#10891)" {
+  wiring_requires_yq
+  [[ -z "$(job_block junit-runner-emulator-tests)" ]]
+  [[ -z "$(job_block playground-automobile-emulator-tests)" ]]
+  # Exactly one PR job boots an emulator for these suites (the WHEP capture job
+  # boots its own for a different test).
+  run yq -r '
+    .jobs[]
+    | select([.steps[]? | select(.uses == "./.github/actions/android-emulator" and ((.with.script // "") | test("junit-runner|playground|run-emulator-suites")))] | length > 0)
+    | key
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "android-emulator-tests" ]
+  run yq -r '.jobs."android-emulator-tests".steps[] | select(.uses == "./.github/actions/android-emulator") | .with.script' "$WF"
+  [[ "$output" == "../scripts/android/run-emulator-suites.sh "* ]]
+  run yq -r '.jobs."android-emulator-tests".steps[] | select(.uses == "mikepenz/action-junit-report@v6") | .with.check_name + "|" + .with.report_paths' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'JUnit Runner Emulator Test Report|android/junit-runner/build/test-results/**/*.xml\nPlayground Automobile Emulator Test Report|android/playground/**/build/test-results/**/*.xml' ]
 }
 
 @test "portable PR matrices leave macOS coverage to nightly" {
@@ -121,22 +195,27 @@ wiring_requires_yq() {
     [ "$status" -eq 0 ]
     [ "$output" = "ubuntu-latest" ]
   done
-  for job in node-unit-tests node-host-integration-tests; do
-    run yq -r ".jobs.\"${job}\".strategy.matrix.os[]" "$WF"
-    [ "$status" -eq 0 ]
-    [ "$output" = $'ubuntu-latest\nwindows-latest' ]
-  done
+  # The Windows host-integration leg runs inside the required Windows build job
+  # (#10894); the Linux unit run lives in ts-build-and-test (#10893).
+  run yq -r '.jobs."node-host-integration-tests".strategy.matrix.os[]' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ubuntu-latest" ]
+  [[ -z "$(job_block node-unit-tests)" ]]
 }
 
 @test "unit, integration, and stress jobs invoke their canonical lanes" {
-  local unit host bats_unit
-  unit="$(job_block node-unit-tests)"
+  local unit windows host bats_unit
+  unit="$(job_block ts-build-and-test)"
+  windows="$(job_block mcp-build-and-test)"
   host="$(job_block node-host-integration-tests)"
   bats_unit="$(job_block bats-tests)"
 
   [[ "$unit" == *"bash scripts/test-ts.sh unit"* ]]
   [[ "$host" == *"bash scripts/test-ts.sh integration"* ]]
   [[ "$host" == *"bash scripts/test-ts.sh stress"* ]]
+  [[ "$windows" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$windows" == *"bash scripts/test-ts.sh integration"* ]]
+  [[ "$windows" == *"bash scripts/test-ts.sh stress"* ]]
   [[ "$bats_unit" == *"scripts/ci/run-bats.sh unit"* ]]
   [[ "$bats_unit" == *"scripts/ci/run-bats.sh integration"* ]]
   [[ "$bats_unit" != *"AUTOMOBILE_BATS_SERIAL_ONLY"* ]]
@@ -152,14 +231,33 @@ wiring_requires_yq() {
   [ "$dependencies" = $'detect-changes\nfast-validation' ]
 }
 
-@test "PR and merge TypeScript coverage have setup headroom beyond the 12 minute wall budget" {
+@test "merge TypeScript coverage has setup headroom beyond the 12 minute wall budget" {
   wiring_requires_yq
-  local workflow
-  for workflow in "$WF" .github/workflows/merge.yml; do
-    run yq -r '.jobs."ts-code-coverage"."timeout-minutes" >= 20' "$workflow"
-    [ "$status" -eq 0 ]
-    [ "$output" = "true" ]
-  done
+  run yq -r '.jobs."ts-code-coverage"."timeout-minutes" >= 20' .github/workflows/merge.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
+@test "PRs run the Node unit suite once on Linux; coverage stays on merge (#10893)" {
+  wiring_requires_yq
+  # The required check name survives on the lint/typecheck/build job.
+  run yq -r '.jobs."ts-build-and-test".name' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "Node TypeScript Build and Test (ubuntu-latest)" ]
+  [[ -z "$(job_block ts-code-coverage)" ]]
+  # No PR job runs the suite under coverage.
+  [[ "$(cat "$WF")" != *"run-ts-coverage.sh"* ]]
+  [[ "$(cat "$WF")" != *"test-ts.sh coverage"* ]]
+  # The required Ubuntu job is the one Linux unit run, with the 100ms budget;
+  # the Node Unit Tests matrix no longer has an Ubuntu leg. merge.yml keeps
+  # producing coverage for the README badge.
+  local ubuntu
+  ubuntu="$(job_block ts-build-and-test)"
+  [[ "$ubuntu" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$ubuntu" == *"scripts/validate-bun-test-timings.sh"* ]]
+  [[ "$(yq -r '.jobs."node-unit-tests".strategy.matrix.os[]' "$WF")" != *"ubuntu"* ]]
+  [[ "$(job_block node-unit-tests)" != *"validate-bun-test-timings.sh"* ]]
+  [[ "$(job_block ts-code-coverage .github/workflows/merge.yml)" == *"run-ts-coverage.sh"* ]]
 }
 
 @test "merge TypeScript coverage uploads diagnostics after failures with bounded retention" {
@@ -295,11 +393,10 @@ wiring_requires_yq() {
   done
 }
 
-@test "runtime-graph-verification runs the clean-room pinned-graph check exactly once (#5421)" {
-  # The heavy pack+install verification must live in its own required-able job
-  # and NOT be duplicated back into the benchmarks job (it was extracted from
-  # there). Read parsed `run` fields so a commented-out command cannot satisfy
-  # the guard.
+@test "node-checks runs the clean-room pinned-graph check exactly once (#5421, #10894)" {
+  # The heavy pack+install verification runs exactly once per PR, as its own
+  # step of the combined Node Checks job. Read parsed `run` fields so a
+  # commented-out command cannot satisfy the guard.
   wiring_requires_yq
   run yq -r '
     [.jobs[] | .steps[]? | .run? | select(. == "bash scripts/ci/verify-pinned-runtime-graph.sh")]
@@ -309,27 +406,58 @@ wiring_requires_yq() {
   [ "$output" -eq 1 ]
 
   run yq -r '
-    .jobs."runtime-graph-verification".steps[]
+    .jobs."node-checks".steps[]
     | select(.name == "Verify pinned runtime dependency graph (#5421)")
     | .run
   ' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = "bash scripts/ci/verify-pinned-runtime-graph.sh" ]
 
-  # Gated to the same source/dependency surface as benchmarks, minus the
-  # automated sha256-only chores.
-  run yq -r '.jobs."runtime-graph-verification".if' "$WF"
+  # Gated to the source/dependency surface (ts_changed, via the job env), and
+  # the job skips the automated sha256-only chores.
+  run yq -r '.jobs."node-checks".if' "$WF"
   [ "$status" -eq 0 ]
-  [ "$output" = "needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'" ]
+  [[ "$output" == *"needs.detect-changes.outputs.sha256_only != 'true'"* ]]
+  run yq -r '.jobs."node-checks".env.TS_CHANGED' "$WF"
+  [ "$output" = '${{ needs.detect-changes.outputs.ts_changed }}' ]
+  run yq -r '.jobs."node-checks".steps[] | select(.name == "Verify pinned runtime dependency graph (#5421)") | .if' "$WF"
+  [[ "$output" == *"env.TS_CHANGED == 'true'"* ]]
 
   # Preserves the ci-logs artifact upload.
   run yq -r '
-    .jobs."runtime-graph-verification".steps[]
+    .jobs."node-checks".steps[]
     | select(.name == "Upload Pinned Runtime Graph Report")
     | .with.name
   ' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = "pinned-runtime-graph-report" ]
+}
+
+@test "small Node and JVM checks share runner slots; each check still runs (#10894)" {
+  wiring_requires_yq
+  local job
+  for job in bun-audit memory-leak-detection benchmarks runtime-graph-verification junit-runner-kotlin-consumer-compatibility node-unit-tests build-junit-runner-library; do
+    [[ -z "$(job_block "$job")" ]]
+  done
+  [ "$(yq -r '.jobs."node-checks".name' "$WF")" = "Node Checks" ]
+  [ "$(yq -r '.jobs."jvm-consumer-checks".name' "$WF")" = "JVM Consumer Checks" ]
+  local checks
+  checks="$(job_block node-checks)"
+  [[ "$checks" == *"bun pm audit"* ]]
+  [[ "$checks" == *"bun run test:memory-leaks"* ]]
+  [[ "$checks" == *"bun run benchmark-context"* ]]
+  [[ "$checks" == *"verify-pinned-runtime-graph.sh"* ]]
+  checks="$(job_block jvm-consumer-checks)"
+  [[ "$checks" == *":junitRunner:assemble"* ]]
+  [[ "$checks" == *"validate-sdk-debug-inspector-consumer.sh"* ]]
+  [[ "$checks" == *"validate-junit-runner-kotlin-consumer.sh"* ]]
+  # A failed check must not skip the checks after it.
+  run yq -r '.jobs."node-checks".steps[] | select(.name == "Run Memory Leak Detection" or .name == "Run MCP Benchmarks" or .name == "Verify pinned runtime dependency graph (#5421)") | .if' "$WF"
+  [ "$(grep -c '!cancelled()' <<< "$output")" -eq 3 ]
+  run yq -r '.jobs."jvm-consumer-checks".steps[] | select(.name == "Validate Kotlin 2.2 consumer compatibility" or .name == "Publish SDK and check its public API") | .if' "$WF"
+  [ "$(grep -c '!cancelled()' <<< "$output")" -eq 2 ]
+  run yq -r '.jobs."mcp-build-and-test".steps[] | select(.name == "Run complete unit lane" or .name == "Run host integration lane" or .name == "Run stress lane") | .if' "$WF"
+  [ "$(grep -c "!cancelled() && steps.mcp-build.outcome == 'success'" <<< "$output")" -eq 3 ]
 }
 
 @test "runtime-graph verification runs when its workflow wiring changes (#5421)" {

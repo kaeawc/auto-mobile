@@ -54,8 +54,8 @@ describe("#4130 cache fan-out (mcp-build-and-test)", () => {
   });
 });
 
-describe("#4130 turbo cache barrier (ts-code-coverage)", () => {
-  const steps = loadJobSteps(PR_WORKFLOW, "ts-code-coverage");
+describe("#4130 turbo cache barrier (ts-build-and-test)", () => {
+  const steps = loadJobSteps(PR_WORKFLOW, "ts-build-and-test");
 
   test("restores .turbo in the background without a Bun dependency cache", () => {
     // Linux frozen installs take ~1 s; the PR-scoped Bun cache was never

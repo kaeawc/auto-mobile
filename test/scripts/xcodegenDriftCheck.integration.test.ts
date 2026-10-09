@@ -409,7 +409,7 @@ describe("xcodegen drift check", () => {
   test("pull request workflow gates both Xcode project jobs on the drift check", () => {
     const xcodeBuildSteps = loadJobSteps(".github/workflows/pull_request.yml", "ios-xcode-build");
     const xctestRunnerSteps = loadJobSteps(
-      ".github/workflows/pull_request.yml",
+      ".github/workflows/xctestrunner-simulator-tests.yml",
       "ios-xctest-runner-simulator-tests",
     );
     const indexOfRun = (steps: typeof xcodeBuildSteps, command: string) =>

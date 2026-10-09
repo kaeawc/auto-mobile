@@ -20,7 +20,7 @@ import { indexOfNamed, indexOfWaitOn, loadJobSteps, stepNamed } from "../helpers
 // pin the job's actual `steps` semantics — a comment, a reflow, or text inside
 // some other step's block scalar can neither satisfy nor break them.
 
-const WORKFLOW = ".github/workflows/pull_request.yml";
+const WORKFLOW = ".github/workflows/xctestrunner-simulator-tests.yml";
 const JOB_ID = "ios-xctest-runner-simulator-tests";
 
 const steps = loadJobSteps(WORKFLOW, JOB_ID);

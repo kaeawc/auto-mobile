@@ -440,7 +440,7 @@ The following scripts are invoked by GitHub Actions workflows:
 
 - `benchmark-context-thresholds.ts` - Runs in `.github/workflows/merge.yml`
 - `benchmark-startup.sh` - Runs in `.github/workflows/pull_request.yml`
-- `measure-cold-imports.sh` - Advisory cold-import timing (median/min/max ms, module count) for slow action suites; runs non-failing on Linux in the `node-unit-tests` job of `.github/workflows/pull_request.yml`
+- `measure-cold-imports.sh` - Advisory cold-import timing (median/min/max ms, module count) for slow action suites; runs non-failing on Linux in the `ts-build-and-test` job of `.github/workflows/pull_request.yml`
 - `benchmark-npm-unpacked-size.ts` - Runs in `.github/workflows/pull_request.yml`
 - `validate_*.sh` - Various validation workflows in `.github/workflows/pull_request.yml`
 

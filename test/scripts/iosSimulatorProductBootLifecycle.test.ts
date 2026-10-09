@@ -30,7 +30,7 @@ describe("iOS CI product boot lifecycle", () => {
 
   test("keeps the shared CtrlProxy simulator stable while isolating odd-width coverage", () => {
     const steps = loadJobSteps(
-      ".github/workflows/pull_request.yml",
+      ".github/workflows/xctestrunner-simulator-tests.yml",
       "ios-xctest-runner-simulator-tests",
     );
     const boot = stepNamed(steps, "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.5)");

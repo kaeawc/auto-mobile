@@ -254,7 +254,8 @@ and `testDebugUnitTest --tests '*.automobiletest.*'` runs the AutoMobile tests.
 
 ## Caching strategy
 
-The `ios-xctest-runner-simulator-tests` job restores two cache layers before its
+The `ios-xctest-runner-simulator-tests` job (`.github/workflows/xctestrunner-simulator-tests.yml`,
+run nightly and on PRs labelled `run-ios-sim`) restores two cache layers before its
 `build-for-testing` invocation. It resolves the CtrlProxy package after restore, so a manifest
 change still fetches any newly introduced dependency before the cached DerivedData is reused:
 

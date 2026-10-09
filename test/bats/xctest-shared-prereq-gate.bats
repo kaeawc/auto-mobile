@@ -12,7 +12,7 @@
 # The fix gates every such step additionally on the shared CtrlProxy build
 # succeeding. This test pins both halves of that invariant.
 
-WORKFLOW=".github/workflows/pull_request.yml"
+WORKFLOW=".github/workflows/xctestrunner-simulator-tests.yml"
 
 @test "the shared CtrlProxy build step carries the build-ctrlproxy id" {
   # The step the 26.5 leg keys off of must exist and be identified.

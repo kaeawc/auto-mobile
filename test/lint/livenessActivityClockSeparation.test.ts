@@ -134,6 +134,18 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
+/**
+ * Rule 7 (#11105): functions that compare session stamps (`lastHeartbeat`, `expiresAt`,
+ * `released_at_ms`, ...) with "now". Session stamps are on the steady session clock, so these
+ * read `sessionNow()` / `recoveryNow()`, never the raw wall clock `timer.now()`, which a wall
+ * step moves away from them.
+ */
+const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
+  "src/daemon/sessionManager.ts": ["SessionManager.isSessionExpired"],
+  "src/daemon/ownerDisconnectRelease.ts": ["ownerDisconnectReleaseBlocker"],
+  "src/daemon/devicePool.ts": ["DevicePool.recoveryAssignmentError", "DevicePool.recoveryNow"],
+};
+
 /** Rule 5: lease judgements read only liveness clocks. */
 const LEASE_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
   "src/daemon/livenessOwnerLease.ts": [
@@ -836,12 +848,39 @@ function rederivationProblems(model: FileModel, helper: string): string[] {
   return problems;
 }
 
+function readNameOf(node: ts.Node): string | undefined {
+  return ts.isPropertyAccessExpression(node)
+    ? node.name.text
+    : ts.isIdentifier(node) && !ts.isPropertyAccessExpression(node.parent)
+      ? node.text
+      : undefined;
+}
+
+/** `timer.now` / `this.timer.now`: the raw wall clock a wall step moves (#11105). */
+function wallTimerReadOf(node: ts.Node): string | undefined {
+  if (!ts.isPropertyAccessExpression(node) || node.name.text !== "now") {
+    return undefined;
+  }
+  const owner = node.expression;
+  const ownerName = ts.isPropertyAccessExpression(owner)
+    ? owner.name.text
+    : ts.isIdentifier(owner)
+      ? owner.text
+      : undefined;
+  return ownerName === "timer" ? "timer.now" : undefined;
+}
+
 /**
  * Rule 5: names from `forbidden` a judgement reads, directly or through same-file callees, as
  * `<function>:<line> reads <name>`. A read is a property access (`session.lastHeartbeat`) or an
  * identifier (`effectiveLastHeartbeat(...)`); type positions do not count.
  */
-function forbiddenReads(model: FileModel, root: string, forbidden: ReadonlySet<string>): string[] {
+function forbiddenReads(
+  model: FileModel,
+  root: string,
+  forbidden: ReadonlySet<string>,
+  nameOf: (node: ts.Node) => string | undefined = readNameOf,
+): string[] {
   const found: string[] = [];
   const seen = new Set<string>([root]);
   const queue = [root];
@@ -855,11 +894,7 @@ function forbiddenReads(model: FileModel, root: string, forbidden: ReadonlySet<s
       if (ts.isTypeNode(node)) {
         return;
       }
-      const name = ts.isPropertyAccessExpression(node)
-        ? node.name.text
-        : ts.isIdentifier(node) && !ts.isPropertyAccessExpression(node.parent)
-          ? node.text
-          : undefined;
+      const name = nameOf(node);
       if (name !== undefined && forbidden.has(name)) {
         found.push(`${model.path} ${key}:${lineOf(model.source, node)} reads ${name}`);
       }
@@ -999,6 +1034,7 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       ...Object.keys(DEADLINE_REDERIVATION_HELPERS),
       ...Object.keys(EXPIRY_JUDGEMENTS),
       ...Object.keys(LEASE_JUDGEMENTS),
+      ...Object.keys(SESSION_CLOCK_JUDGEMENTS),
     ]) {
       if (!models.has(path)) {
         models.set(path, parse(path, readFileSync(join(ROOT, path), "utf8")));
@@ -1103,6 +1139,25 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       roots.flatMap((root) => forbiddenReads(models.get(path)!, root, ACTIVITY_CLOCKS)),
     );
     expect(reads).toEqual([]);
+  });
+
+  test("session-stamp judgements read the session clock, never the raw wall clock (#11105)", () => {
+    const reads = Object.entries(SESSION_CLOCK_JUDGEMENTS).flatMap(([path, roots]) =>
+      roots.flatMap((root) =>
+        forbiddenReads(models.get(path)!, root, new Set(["timer.now"]), wallTimerReadOf),
+      ),
+    );
+    expect(reads).toEqual([]);
+  });
+
+  test("the session-clock guard sees a raw wall-clock read", () => {
+    const model = parse(
+      "fixture.ts",
+      "class A { timer: { now(): number }; judge(s: { expiresAt: number }) { return this.timer.now() > s.expiresAt; } }",
+    );
+    expect(forbiddenReads(model, "A.judge", new Set(["timer.now"]), wallTimerReadOf)).toHaveLength(
+      1,
+    );
   });
 
   test("the CLI idle release is judged on the tool-activity clock, never a heartbeat clock", () => {

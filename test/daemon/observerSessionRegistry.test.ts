@@ -224,3 +224,21 @@ describe("ObserverSessionRegistry", () => {
     expect(registry.list()).toHaveLength(1);
   });
 });
+
+describe("ObserverSessionRegistry gone callback", () => {
+  test("fires on explicit release and heartbeat expiry but not on promotion", () => {
+    const timer = new FakeTimer();
+    const gone: string[] = [];
+    const registry = new ObserverSessionRegistry(timer, 10000, (id) => gone.push(id));
+    registry.register("a", "c");
+    registry.register("b", "c");
+    registry.register("c", "c");
+    registry.release("a");
+    registry.release("b", "promotion");
+    expect(gone).toEqual(["a"]);
+    timer.advanceTime(10000);
+    registry.list();
+    expect(gone).toEqual(["a", "c"]);
+    registry.dispose();
+  });
+});

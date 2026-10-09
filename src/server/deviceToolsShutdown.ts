@@ -1736,9 +1736,12 @@ export async function shutdownDevice(
     timeoutMs: number;
     retainLifecycleUntil?: (operation: Promise<unknown>) => void;
     pooledAvdIdentity?: PooledAvdKillIdentity;
+    /** Re-checks the caller still holds the device; runs under the pool's assignment mutex. */
+    assertHolder?: () => void;
   },
 ): Promise<ShutdownResult> {
-  const { strictDeadline, timeoutMs, retainLifecycleUntil, pooledAvdIdentity } = options;
+  const { strictDeadline, timeoutMs, retainLifecycleUntil, pooledAvdIdentity, assertHolder } =
+    options;
   const { device, requestAbortSignal } = context;
   const shutdownDeadlineMs = context.deadlineMs;
   const perf = createPerformanceTracker(true);
@@ -1760,7 +1763,12 @@ export async function shutdownDevice(
           {
             requestAbortSignal: requestAbortSignal,
             operation: async (signal) =>
-              await devicePool?.reserveDeviceForShutdown(device.deviceId, signal),
+              await devicePool?.reserveDeviceForShutdown(
+                device.deviceId,
+                signal,
+                undefined,
+                assertHolder,
+              ),
             timeoutMs: timeoutMs,
           },
         );

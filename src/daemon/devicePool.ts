@@ -6865,11 +6865,13 @@ export class DevicePool {
     deviceId: string,
     abortSignal?: AbortSignal,
     autolockClient?: AutolockClient,
+    assertHolder?: () => void,
   ): Promise<ShutdownDeviceReservation | undefined> {
     return this.shutdownReservationCoordinator.reserveDeviceForShutdown(
       deviceId,
       abortSignal,
       autolockClient,
+      assertHolder,
     );
   }
 

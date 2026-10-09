@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { describe, expect, spyOn, test } from "bun:test";
+import { promises as fsPromises, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BootedDevice } from "../../../src/models";
 import {
+  AdbPullApkFetcher,
   InspectPackageSigning,
   selectSigners,
   type ApkFetcher,
@@ -181,5 +182,30 @@ describe("selectSigners", () => {
     expect(
       selectSigners({ v2: [{ sha256: "b" }, { sha256: "a" }, { sha256: "b" }] }, 30),
     ).toMatchObject({ signerSha256: ["a", "b"] });
+  });
+});
+
+describe("AdbPullApkFetcher", () => {
+  test("closes the pulled APK's handle when stat fails (#11058)", async () => {
+    let closed = 0;
+    const handle = {
+      stat: async () => {
+        throw new Error("EIO");
+      },
+      close: async () => {
+        closed++;
+      },
+    };
+    const open = spyOn(fsPromises, "open").mockResolvedValue(
+      handle as unknown as Awaited<ReturnType<typeof fsPromises.open>>,
+    );
+    try {
+      await expect(new AdbPullApkFetcher().open(new FakeAdbClient(), APK_PATH)).rejects.toThrow(
+        "EIO",
+      );
+      expect(closed).toBe(1);
+    } finally {
+      open.mockRestore();
+    }
   });
 });

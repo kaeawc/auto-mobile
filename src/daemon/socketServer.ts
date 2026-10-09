@@ -64,6 +64,7 @@ import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+  DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS,
 } from "./constants";
 import {
   isHostInventoryCall,
@@ -1326,7 +1327,29 @@ export class UnixSocketServer {
       framer.push(data);
     });
 
+    // The peer closed its side (#11058). Replies already queued may still flush within the grace;
+    // past it the socket is destroyed, because a reply queued to a peer that is gone can stay
+    // unflushed without an error, so the automatic end would never complete and `close` (and the
+    // owner-disconnect release it triggers) would never run.
+    let peerEndGrace: NodeJS.Timeout | undefined;
+    socket.on("end", () => {
+      if (socket.destroyed || peerEndGrace) {
+        return;
+      }
+      peerEndGrace = this.timer.setTimeout(() => {
+        if (!socket.destroyed) {
+          logger.debug(
+            `Daemon RPC socket ${sessionId} peer closed with ${socket.writableLength} bytes unflushed; destroying`,
+          );
+          socket.destroy();
+        }
+      }, DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS);
+    });
+
     socket.on("close", (hadError) => {
+      if (peerEndGrace) {
+        this.timer.clearTimeout(peerEndGrace);
+      }
       if (idleTimeout) {
         this.timer.clearTimeout(idleTimeout);
       }

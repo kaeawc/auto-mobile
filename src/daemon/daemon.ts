@@ -115,6 +115,7 @@ import {
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { announceSessionRelease } from "./announceSessionRelease";
 import { clearSessionAppearanceConfig } from "../server/appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { NetworkState } from "../server/NetworkState";
@@ -905,21 +906,24 @@ export class Daemon {
     // for every released key — base and derived `${base}:${label}` alike; the
     // proxy matches its bound (base) UUID by exact equality (issue #4610).
     this.sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason, snapshot) => {
-      if (this.shutdownFallbackReleaseNotifications?.has(sessionId)) {
-        return;
-      }
-      if (releaseReason === "daemon-shutdown") {
-        this.shutdownReleaseNotifications?.add(sessionId);
-      }
       // Name the recordings this release is finalizing so the previous owner can fetch them
       // (#10958); the recording cleanup captured them when the release began.
-      const recordingIds = takeRecordingIdsFinalizedByRelease(sessionId);
-      SessionReleaseBroadcaster.emit(
+      announceSessionRelease(
+        {
+          takeRecordingIds: takeRecordingIdsFinalizedByRelease,
+          emit: (...args) => SessionReleaseBroadcaster.emit(...args),
+        },
+        {
+          fallbacks: this.shutdownFallbackReleaseNotifications,
+          announced: this.shutdownReleaseNotifications,
+        },
         sessionId,
         releaseReason,
         snapshot,
-        recordingIds.length > 0 ? { recordingIds } : undefined,
       );
+      if (this.shutdownFallbackReleaseNotifications?.has(sessionId)) {
+        return;
+      }
       // A session that is gone for good takes its appearance config with it (#10976). A derived
       // `${base}:${label}` session stores none, so its release clears nothing.
       if (snapshot.terminal) {

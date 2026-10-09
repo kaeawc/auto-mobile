@@ -2,6 +2,8 @@ import { Timer, defaultTimer, monotonicClockSemanticsDrift } from "../utils/Syst
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
+  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+  SESSION_RELEASE_TEARDOWN_CAP_MS,
   getDefaultPreFirstHeartbeatGraceMs,
   getDefaultSessionHeartbeatTimeoutMs,
   type Session,
@@ -105,12 +107,16 @@ export { UNSETTLED_EXECUTION_VETO_CEILING_MS };
 const DEFAULT_CHECK_INTERVAL_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 /** How long shutdown waits for releases a scan started before giving up on them. */
 const REAP_STOP_TIMEOUT_MS = 5_000;
+/** Slack past a release's own worst case before it counts as stuck (#11058). */
+const STUCK_REAP_MARGIN_MS = 10_000;
 /**
- * How long a release may stay unsettled before the monitor reports it as stuck (#10704). Its
- * session is skipped meanwhile, never released twice, but other sessions are still judged on
- * schedule; this only makes a wedged teardown visible.
+ * How long a release may stay unsettled before the monitor reports it as stuck (#10704) and
+ * forces it (#10963). Its session is skipped meanwhile, never released twice, but other sessions
+ * are still judged on schedule. Above a release's own allowed worst case — the capped teardown
+ * plus its two bounded writes (#11058) — so a release still within its bounds is never forced.
  */
-export const STUCK_REAP_WARN_MS = 30_000;
+export const STUCK_REAP_WARN_MS =
+  SESSION_RELEASE_TEARDOWN_CAP_MS + 2 * SESSION_RELEASE_PERSIST_TIMEOUT_MS + STUCK_REAP_MARGIN_MS;
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
 
 function readPositiveMsEnv(primaryName: string, legacyName: string): number | undefined {

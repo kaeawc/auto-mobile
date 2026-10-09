@@ -24,6 +24,7 @@ import {
   defaultAdbClientFactory,
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import {
   getSharedDevicectlDeviceLister,
   type IosPhysicalDeviceLister,
@@ -1451,6 +1452,20 @@ export class DeviceSessionManager implements DeviceSessionManager {
    */
   public async verifyIosDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void> {
     options?.signal?.throwIfAborted();
+    if (isIosPhysicalUdid(deviceId)) {
+      return await this.verifyPhysicalIosDevice(
+        deviceId,
+        options?.readiness ?? "automationReady",
+        options,
+      );
+    }
+    return await this.verifySimulatorIosDevice(deviceId, options);
+  }
+
+  private async verifySimulatorIosDevice(
+    deviceId: string,
+    options?: DeviceReadyOptions,
+  ): Promise<void> {
     const readiness = options?.readiness ?? "automationReady";
     // An explicit runner override that cannot be used must fail closed before any
     // other path, whatever the simulator/runner state. Every downstream branch
@@ -1491,6 +1506,49 @@ export class DeviceSessionManager implements DeviceSessionManager {
     };
 
     await this.ensureIosRunnerReady(deviceId, device, options);
+  }
+
+  /**
+   * Readiness for a physical iPhone UDID (#11075). The simulator checks do not
+   * apply: connection is proven by the shared devicectl listing, and automation
+   * readiness needs the signed on-device runner, whose setup belongs to a session
+   * acquired through getApple.
+   */
+  private async verifyPhysicalIosDevice(
+    deviceId: string,
+    readiness: DeviceReadinessLevel,
+    options?: DeviceReadyOptions,
+  ): Promise<void> {
+    const device = await this.findConnectedPhysicalIosDevice(deviceId, options?.signal);
+    if (readiness === "automationReady" && !options?.sessionId) {
+      throw new ActionableError(
+        `Physical iPhone ${deviceId} is connected but has no prepared CtrlProxy runner. ` +
+          "Acquire the iPhone with getApple first; signed-runner setup cannot run on a sessionless call.",
+      );
+    }
+    if (readiness === "booted") {
+      return;
+    }
+    this.assertUsableIosOverride(await checkIosCtrlProxyOverride());
+    await this.ensureIosRunnerReady(deviceId, device, options);
+  }
+
+  private async findConnectedPhysicalIosDevice(
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<BootedDevice> {
+    const discovery = await this.provider.getIosPhysicalDeviceLister?.()?.listConnectedDevices();
+    signal?.throwIfAborted();
+    const device = discovery?.devices.find((candidate) => candidate.deviceId === deviceId);
+    if (device) {
+      return device;
+    }
+    const incomplete =
+      discovery && !discovery.complete ? ` (devicectl: ${discovery.error.message})` : "";
+    throw new ActionableError(
+      `Physical iPhone ${deviceId} is not connected or not reachable through devicectl${incomplete}. ` +
+        "Connect, unlock, and trust the device, then acquire it with getApple.",
+    );
   }
 
   private assertIosDeviceAvailable(

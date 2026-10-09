@@ -119,7 +119,7 @@ commit_changed_swift_file() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"swiftformat --version"* ]]
   [[ "$output" == *"swiftformat --lint --config ${repo_root}/.swiftformat ${repo_root}/ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"* ]]
-  [[ "$output" == *"swiftlint lint --config ${repo_root}/.swiftlint.yml ${repo_root}/ios/XCTestRunner/Sources/XCTestRunnerTests/AutoMobileVersionTests.swift"* ]]
+  [[ "$output" == *"swiftlint lint --config ${repo_root}/.swiftlint.yml --quiet ${repo_root}/ios"* ]]
   [[ "$output" == *"swift build"* ]]
   [[ "$output" == *"swift test -Xswiftc -warnings-as-errors --filter"* ]]
 }
@@ -157,7 +157,7 @@ commit_changed_swift_file() {
   run cat "${command_log}"
   [ "$status" -eq 0 ]
   [[ "$output" == *"swiftformat --lint --config ${fixture_root}/.swiftformat ${fixture_root}/ios/Nested/Bar.swift"* ]]
-  [[ "$output" == *"swiftlint lint --config ${fixture_root}/.swiftlint.yml ${fixture_root}/ios/Nested/Bar.swift"* ]]
+  [[ "$output" == *"swiftlint lint --config ${fixture_root}/.swiftlint.yml --quiet ${fixture_root}/ios"* ]]
   [[ "$output" != *"No changed Swift files"* ]]
 }
 
@@ -175,8 +175,7 @@ commit_changed_swift_file() {
   run cat "${command_log}"
   [ "$status" -eq 0 ]
   [[ "$output" == *"swiftformat --lint --config ${fixture_root}/.swiftformat ${fixture_root}/ios/Foo.swift ${fixture_root}/ios/Nested/Bar.swift"* ]]
-  [[ "$output" == *"swiftlint lint --config ${fixture_root}/.swiftlint.yml ${fixture_root}/ios/Foo.swift"* ]]
-  [[ "$output" == *"swiftlint lint --config ${fixture_root}/.swiftlint.yml ${fixture_root}/ios/Nested/Bar.swift"* ]]
+  [[ "$output" == *"swiftlint lint --config ${fixture_root}/.swiftlint.yml --quiet ${fixture_root}/ios"* ]]
 }
 
 @test "finds a changed Swift file with a non-ASCII filename" {

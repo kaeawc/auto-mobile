@@ -215,9 +215,10 @@ export type ObserveResult = {
 
   /**
    * Set by `observe` with `layer: "app"` while an AutoMobile overlay is on screen and the
-   * observation carries a screenshot (issue #9305): the hierarchy is scoped to the app, but the
-   * device cannot hide its own overlay for the capture, so the screenshot and any crop still show
-   * the overlay over the app.
+   * observation carries a screenshot (issue #9305). False when the capture was taken with the
+   * overlay hidden device-side (`screenshot_hide_overlay_v1`); true when the device could not hide
+   * it, so the screenshot and any crop still show the overlay over the app. The capture stamps
+   * false when it asks for hiding; observe reports the field only in the overlay-showing case.
    */
   screenshotIncludesOverlay?: boolean;
 

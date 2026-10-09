@@ -81,6 +81,12 @@ export interface ScreenshotOptions {
   lossless?: boolean;
   /** Android logical display selected by observe. */
   displayId?: number;
+  /**
+   * Android: capture through CtrlProxy with its overlay hidden (#9305). Set only for a device that
+   * advertises `screenshot_hide_overlay_v1`. There is no ADB fallback: a capture that cannot
+   * confirm the overlay was hidden fails rather than return an image that shows it.
+   */
+  hideOverlays?: boolean;
 }
 
 async function encodeScreenshot(
@@ -450,6 +456,10 @@ export class TakeScreenshot implements ScreenshotService {
   ): Promise<ScreenshotResult> {
     logger.info(`[SCREENSHOT] Starting screenshot capture with format: ${options.format}`);
 
+    if (options.hideOverlays === true) {
+      return this.captureScreenshotWithOverlayHidden(finalPath, options, signal);
+    }
+
     if (
       options.format === undefined ||
       (options.format === "jpeg" && options.quality === undefined)
@@ -546,6 +556,7 @@ export class TakeScreenshot implements ScreenshotService {
   private async requestCtrlProxyCapture(
     signal?: AbortSignal,
     displayId?: number,
+    hideOverlays = false,
   ): Promise<CtrlProxyScreenshotResult | null> {
     const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     try {
@@ -557,7 +568,7 @@ export class TakeScreenshot implements ScreenshotService {
       // (re)connection completes, burning the shared screenshot rate limit and
       // pushing a late observation-stream frame (#6605).
       const result = await awaitWhileRequestIsLive(
-        client.requestScreenshot(10000, undefined, false, signal, displayId),
+        client.requestScreenshot(10000, undefined, false, signal, displayId, hideOverlays),
         signal,
       );
       return signal?.aborted ? null : result;
@@ -604,6 +615,56 @@ export class TakeScreenshot implements ScreenshotService {
       success: true,
       path: screenshotPath,
       screenshotImageSize: readImageHeaderDimensions(imageBuffer) ?? undefined,
+      ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, format),
+    };
+  }
+
+  /**
+   * Hide-capture-restore happens on the device in the one CtrlProxy request (#9305). The image is
+   * encoded to the requested format; without a requested format the device's own bytes are kept.
+   */
+  private async captureScreenshotWithOverlayHidden(
+    finalPath: string,
+    options: ScreenshotOptions,
+    signal?: AbortSignal,
+  ): Promise<ScreenshotResult> {
+    const result = await this.requestCtrlProxyCapture(signal, options.displayId, true);
+    if (!result) {
+      return { success: false, error: OPERATION_CANCELLED_MESSAGE };
+    }
+    if (!result.success || !result.data) {
+      return {
+        success: false,
+        error: `Screenshot with the overlay hidden failed: ${result.error ?? "no image data returned from Android CtrlProxy"}`,
+      };
+    }
+    if (result.overlaysHidden !== true) {
+      return {
+        success: false,
+        error:
+          "Android CtrlProxy could not confirm its overlay was hidden for the capture; retry the observe",
+      };
+    }
+    const deviceBytes = Buffer.from(result.data, "base64");
+    const format = options.format ?? ctrlProxyScreenshotFormat(result, deviceBytes, true);
+    const imageBuffer =
+      options.format === undefined
+        ? deviceBytes
+        : await encodeScreenshot(deviceBytes, encodingOptions(options));
+    const screenshotPath = replaceScreenshotExtension(
+      finalPath,
+      screenshotExtensionForFormat(format),
+    );
+    await this.writeScreenshot(screenshotPath, imageBuffer);
+    if (signal?.aborted) {
+      await this.removeUnpublishedScreenshot(screenshotPath);
+      return { success: false, error: OPERATION_CANCELLED_MESSAGE };
+    }
+    return {
+      success: true,
+      path: screenshotPath,
+      screenshotImageSize: readImageHeaderDimensions(imageBuffer) ?? undefined,
+      overlaysHidden: true,
       ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, format),
     };
   }

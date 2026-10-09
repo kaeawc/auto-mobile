@@ -11,6 +11,7 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { OverlayAssetRequestOptions } from "../../observe/android/CtrlProxyOverlays";
 import { overlayEventSchema } from "../../observe/android/CtrlProxyOverlays";
+import { SCREENSHOT_HIDE_OVERLAY_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
 import type {
   OverlayAssetResult,
   OverlayDismiss,
@@ -43,8 +44,11 @@ export interface OverlayAgentConnections {
 /** No injected agents: every iOS device reports no agent connection. */
 export const noOverlayAgentConnections: OverlayAgentConnections = { get: () => undefined };
 
-/** Capability the agent advertises when it can hide itself around a host screenshot (#9305). */
-export const SCREENSHOT_HIDE_OVERLAY_CAPABILITY = "screenshot_hide_overlay_v1";
+/**
+ * Capability the agent advertises when it can hide itself around a host screenshot (#9305); one
+ * string shared with Android CtrlProxy, defined with the other overlay capability flags.
+ */
+export { SCREENSHOT_HIDE_OVERLAY_CAPABILITY };
 
 /** The agent restores the overlay by itself after this long, even if the host never asks. */
 export const DEFAULT_CAPTURE_HIDE_DEADLINE_MS = 1500;

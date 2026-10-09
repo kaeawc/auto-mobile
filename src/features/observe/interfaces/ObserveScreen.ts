@@ -3,7 +3,7 @@ import type { ObserveResult } from "../../../models";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { ScreenshotMode } from "../automaticScreenshotPolicy";
-import type { ScreenshotEncodingOptions } from "../screenshot/screenshotOptions";
+import type { ObserveScreenshotOptions } from "../screenshot/screenshotOptions";
 
 /** Options for a session-free device observation. */
 export interface DeviceReadOptions {
@@ -35,7 +35,7 @@ export interface ObserveScreenExecuteOptions {
   skipCache?: boolean;
   /** Per-call override; omitted reads the env and persisted flag. */
   screenshot?: ScreenshotMode;
-  screenshotOptions?: ScreenshotEncodingOptions;
+  screenshotOptions?: ObserveScreenshotOptions;
   /** Physical panel key or role; "active" follows focus, Android "all" adds panel observations. */
   display?: string;
   /** Skip screenshot-dependent accessibility auditing for intermediate observations. */
@@ -79,7 +79,7 @@ export interface ObserveScreen {
     signal?: AbortSignal,
     observation?: ObserveResult,
     screenshot?: ScreenshotMode,
-    screenshotOptions?: ScreenshotEncodingOptions,
+    screenshotOptions?: ObserveScreenshotOptions,
   ): Promise<void>;
 
   /**

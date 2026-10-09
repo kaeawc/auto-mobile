@@ -263,6 +263,40 @@ describe("ObserveScreen skip options", () => {
     expect(result.screenshotOrientation).toBeUndefined();
   });
 
+  test("an async capture asked to hide the overlay passes it on and marks the observation (#9305)", async () => {
+    const result = await observeScreen.execute({
+      screenshot: "async",
+      screenshotOptions: { hideOverlays: true },
+    });
+    expect(fakeScreenshotRecorder.captureOptions).toEqual([{ hideOverlays: true }]);
+    expect(result.screenshotIncludesOverlay).toBe(false);
+  });
+
+  test("a settled capture asked to hide the overlay passes it with the encoding (#9305)", async () => {
+    const result = await observeScreen.execute({
+      screenshot: "settled",
+      screenshotOptions: { format: "jpeg", hideOverlays: true },
+    });
+    expect(fakeScreenshotRecorder.settledOptions).toEqual([{ format: "jpeg", hideOverlays: true }]);
+    expect(result.screenshotIncludesOverlay).toBe(false);
+  });
+
+  test("a capture not asked to hide the overlay leaves the observation unmarked (#9305)", async () => {
+    const result = await observeScreen.execute({ screenshot: "async" });
+    expect(fakeScreenshotRecorder.captureOptions).toEqual([undefined]);
+    expect(result.screenshotIncludesOverlay).toBeUndefined();
+  });
+
+  test("a later capture without hiding clears an earlier hidden mark (#9305)", async () => {
+    const result = await observeScreen.execute({
+      screenshot: "async",
+      screenshotOptions: { hideOverlays: true },
+    });
+    await observeScreen.captureScreenshot(undefined, undefined, result, "async");
+    expect(fakeScreenshotRecorder.captureOptions).toEqual([{ hideOverlays: true }, undefined]);
+    expect(result.screenshotIncludesOverlay).toBeUndefined();
+  });
+
   test("explicit settled capture reaches the wire with validated screenshot scalars", async () => {
     const result = await observeScreen.execute({ screenshot: "settled" });
     expect(fakeScreenshotRecorder.captureSettledCalls).toBe(1);

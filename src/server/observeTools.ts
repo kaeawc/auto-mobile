@@ -18,7 +18,12 @@ import {
 } from "../utils/deviceMatcher";
 import type { DisplayPanel } from "../models/DisplayPanel";
 import { z } from "zod/v4";
-import { screenshotOptionsSchema } from "../features/observe/screenshot/screenshotOptions";
+import {
+  screenshotOptionsSchema,
+  type ObserveScreenshotOptions,
+} from "../features/observe/screenshot/screenshotOptions";
+import { AndroidCtrlProxyClient } from "../features/observe/android";
+import { SCREENSHOT_HIDE_OVERLAY_CAPABILITY } from "../features/observe/android/ctrlProxyProtocol";
 import { ToolRegistry } from "./toolRegistry";
 import { stripInternalToolParams } from "./internalToolParams";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -1719,7 +1724,7 @@ export const waitForObservation = async (
   timer: Timer = defaultTimer,
   platform?: BootedDevice["platform"],
   screenshot?: ScreenshotMode,
-  screenshotOptions?: z.infer<typeof screenshotOptionsSchema>,
+  screenshotOptions?: ObserveScreenshotOptions,
   displayInventory: DisplayInventoryClassification = "unavailable",
   displayPanels: readonly Pick<DisplayPanel, "key" | "role">[] = [],
 ): Promise<WaitForObservationOutcome> => {
@@ -1938,6 +1943,45 @@ interface ObserveToolDependencies {
   > &
     Pick<ObserveScreen, "captureScreenshot">;
   deviceReadAccess?: DeviceObservationAccess;
+  /** Whether the device can hide its own overlay for a capture (#9305); defaults to CtrlProxy's. */
+  hidesOverlayForScreenshot?: (device: BootedDevice) => Promise<boolean>;
+}
+
+/** Android CtrlProxy advertising `screenshot_hide_overlay_v1`; the iOS agent hide is not wired here. */
+async function ctrlProxyHidesOverlayForScreenshot(device: BootedDevice): Promise<boolean> {
+  if (device.platform !== "android") {
+    return false;
+  }
+  try {
+    return await AndroidCtrlProxyClient.getInstance(device).supportsCommand(
+      SCREENSHOT_HIDE_OVERLAY_CAPABILITY,
+    );
+  } catch (error) {
+    // Unknown capability keeps today's capture, which observe reports as including the overlay.
+    logger.debug(`[OBSERVE] Overlay-hiding capability unavailable: ${errorMessage(error)}`);
+    return false;
+  }
+}
+
+/**
+ * The screenshot options observe captures with: the caller's encoding, plus `hideOverlays` for a
+ * `layer: "app"` capture on a device that hides its overlay device-side in the one request (#9305).
+ * Device reads never use CtrlProxy for the capture, so they keep the overlay.
+ */
+async function observeScreenshotOptions(
+  args: ObserveArgs,
+  device: BootedDevice,
+  deviceRead: boolean,
+  screenshotMode: ScreenshotMode | undefined,
+  dependencies: ObserveToolDependencies,
+): Promise<ObserveScreenshotOptions | undefined> {
+  if (args.layer !== "app" || deviceRead || screenshotMode === "none") {
+    return args.screenshotOptions;
+  }
+  const hides = await (
+    dependencies.hidesOverlayForScreenshot ?? ctrlProxyHidesOverlayForScreenshot
+  )(device);
+  return hides ? { ...args.screenshotOptions, hideOverlays: true } : args.screenshotOptions;
 }
 
 function screenForObserve(
@@ -2151,16 +2195,18 @@ function layerScopedObserveResult(
   if (requireOverlay && result.viewHierarchy) {
     scopeHierarchyForSelector(result.viewHierarchy, layer);
   }
-  const scoped = scopeObserveResultToLayer(result, layer, platform);
+  const { screenshotIncludesOverlay: capturedWithoutOverlay, ...scoped } =
+    scopeObserveResultToLayer(result, layer, platform);
+  // A capture taken with the overlay hidden device-side is marked false by the capture itself;
+  // any other `layer: "app"` screenshot still shows the overlay, and observe says so.
   return layer === "app" && carriesScreenshot(result) && hasOwnOverlay(result.viewHierarchy)
-    ? { ...scoped, screenshotIncludesOverlay: true }
+    ? { ...scoped, screenshotIncludesOverlay: capturedWithoutOverlay !== false }
     : scoped;
 }
 
 /**
- * Whether the observation carries a screenshot or crop. Neither the Android CtrlProxy nor the iOS
- * overlay agent can hide its overlay window for a capture, so a `layer: "app"` screenshot still
- * shows the overlay and `observe` says so instead of implying an app-only image (issue #9305).
+ * Whether the observation carries a screenshot or crop, so `observe` can say whether a
+ * `layer: "app"` image shows the overlay instead of implying an app-only image (issue #9305).
  */
 function carriesScreenshot(result: ObserveResult): boolean {
   return (
@@ -2203,19 +2249,22 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     );
     try {
       const observeScreen = screenForObserve(device, args, dependencies);
+      const screenshotOptions = await observeScreenshotOptions(
+        args,
+        device,
+        deviceRead,
+        screenshotMode,
+        dependencies,
+      );
       // ObserveScreen.execute() rejects stale cross-platform hierarchies at the
       // source, so every observation reaching here is already platform-validated
       // (raw-mode append below is likewise gated on a validated primary hierarchy).
       const waitOutcome = observeWaitRequested(deviceRead, args)
         ? await waitForObservation(
-            ...observeWaitParameters(
-              observeScreen,
-              args,
-              signal,
-              dependencies,
-              device,
-              screenshotMode,
-            ),
+            ...observeWaitParameters(observeScreen, args, signal, dependencies, device, {
+              mode: screenshotMode,
+              options: screenshotOptions,
+            }),
           )
         : null;
       const result = deviceRead
@@ -2231,7 +2280,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
               verifyCachedHierarchy: true,
               signal,
               screenshot: screenshotMode,
-              screenshotOptions: args.screenshotOptions,
+              screenshotOptions,
               timeoutMs,
             });
 
@@ -2496,7 +2545,7 @@ function createWaitCompletion({
   screenshot: ScreenshotMode | undefined;
   observeScreen: ObserveScreen;
   signal: AbortSignal | undefined;
-  screenshotOptions: z.infer<typeof screenshotOptionsSchema> | undefined;
+  screenshotOptions: ObserveScreenshotOptions | undefined;
 }) {
   return async (outcome: WaitForObservationOutcome): Promise<WaitForObservationOutcome> => {
     if (outcome.timedOut && waitFor.posture !== undefined) {
@@ -2790,7 +2839,7 @@ function observeWaitParameters(
   signal: AbortSignal | undefined,
   dependencies: ObserveToolDependencies,
   device: BootedDevice,
-  screenshotMode: ScreenshotMode | undefined,
+  screenshot: { mode: ScreenshotMode | undefined; options: ObserveScreenshotOptions | undefined },
 ): Parameters<typeof waitForObservation> {
   return [
     observeScreen,
@@ -2799,8 +2848,8 @@ function observeWaitParameters(
     args.skipBackStack ?? false,
     dependencies.timer ?? defaultTimer,
     device.platform,
-    screenshotMode,
-    args.screenshotOptions,
+    screenshot.mode,
+    screenshot.options,
     ...displayWaitInventory(device),
   ];
 }

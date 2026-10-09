@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { executionTracker } from "../../src/server/executionTracker";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -53,6 +54,8 @@ describe("daemon transport callback rejection ownership", () => {
     expect(unhandled).toEqual([]);
     warnings.mockRestore();
     timer.reset();
+    // Constructing a Daemon initializes the process-wide DaemonState; do not leak it to later files.
+    DaemonState.getInstance().reset();
   });
 
   test("onclose logs cancellation rejection without an unhandled rejection", async () => {

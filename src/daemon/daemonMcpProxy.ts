@@ -71,6 +71,8 @@ import {
   getDeviceSessionIdFromResult,
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
+  isDeviceBindingTool,
+  readDeviceCleanupInProgressRefusal,
 } from "../server/deviceSessionResult";
 import { routedSessionUuidFromResult } from "../server/routedSessionMeta";
 import {
@@ -86,6 +88,7 @@ import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../con
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { getDefaultSessionHeartbeatTimeoutMs, type SessionReleaseSnapshot } from "./sessionManager";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { exponentialBackoff } from "../utils/Backoff";
 import {
   type BuildIdentity,
   buildIdentitiesMatch,
@@ -767,6 +770,8 @@ export interface DaemonMcpProxyConfig {
   daemonOptions?: DaemonOptions;
   /** Timer for restart cooldown checks and bound-session heartbeats. */
   timer?: Timer;
+  /** Total wait for a bind refused as `device_cleanup_in_progress` (#10960); 0 disables it. */
+  cleanupWaitBudgetMs?: number;
   /** Daemon session heartbeat timeout used to derive a safe cadence when unset. */
   heartbeatTimeoutMs?: number;
   /** Explicit bound-session heartbeat cadence; defaults to half the timeout or 2s. */
@@ -1080,6 +1085,19 @@ export function mergeDaemonOptions(
  * - Forwarding MCP resource requests to the daemon
  * - Caching tool/resource definitions from daemon
  */
+/**
+ * Longest a bind waits out a `device_cleanup_in_progress` refusal: the recording-finalize cap
+ * (about 120 s, #10957) plus slack for the restores around it.
+ */
+export const DEVICE_CLEANUP_WAIT_BUDGET_MS = 150_000;
+
+/** Floor under the daemon's `retryAfterMs` so a refusal that hints 0 ms is not busy-polled. */
+const DEVICE_CLEANUP_BACKOFF = exponentialBackoff({
+  initialDelayMs: 250,
+  multiplier: 2,
+  maxDelayMs: 5_000,
+});
+
 export class DaemonMcpProxy {
   private client: DaemonClientLike | null = null;
   private config: DaemonMcpProxyConfig;
@@ -3494,7 +3512,10 @@ export class DaemonMcpProxy {
     onProgress?: DaemonProxyProgressCallback,
     signal?: AbortSignal,
   ): Promise<any> {
-    const first = await this.forwardToolCall(name, args, progressToken, onProgress, signal, true);
+    let first = await this.forwardToolCall(name, args, progressToken, onProgress, signal, true);
+    if (isDeviceBindingTool(name)) {
+      first = await this.waitOutDeviceCleanup(first, name, args, progressToken, onProgress, signal);
+    }
     const refusal = first.retryableSuspectRefusal;
     if (!refusal || !(await this.awaitSuspectSessionRecovery(refusal, signal))) {
       return this.withPendingResumedNotice(args, first.result);
@@ -3511,6 +3532,45 @@ export class DaemonMcpProxy {
       false,
     );
     return this.withPendingResumedNotice(args, retried.result);
+  }
+
+  /**
+   * A bind refused as `device_cleanup_in_progress` never reached a device, so it is forwarded
+   * again once the daemon says the previous session's cleanup should be done (#10960). The wait is
+   * bounded by the cleanup budget; when it runs out the last refusal is returned unchanged.
+   */
+  private async waitOutDeviceCleanup(
+    first: ForwardedToolCall,
+    name: string,
+    args: Record<string, unknown>,
+    progressToken: string | number | undefined,
+    onProgress: DaemonProxyProgressCallback | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<ForwardedToolCall> {
+    const budgetMs = this.config.cleanupWaitBudgetMs ?? DEVICE_CLEANUP_WAIT_BUDGET_MS;
+    const deadline = this.timer.now() + budgetMs;
+    let current = first;
+    for (let attempt = 1; !this.closing; attempt++) {
+      const refusal = readDeviceCleanupInProgressRefusal(current.result);
+      const remaining = deadline - this.timer.now();
+      if (!refusal || remaining <= 0) {
+        return current;
+      }
+      const delayMs = Math.min(
+        remaining,
+        Math.max(refusal.retryAfterMs ?? 0, DEVICE_CLEANUP_BACKOFF.delayForAttempt(attempt)),
+      );
+      logger.info(
+        `[DaemonMcpProxy] ${name} refused while the device finishes its previous session's cleanup; retrying in ${delayMs}ms`,
+      );
+      await raceWithDeadline(this.timer.sleep(delayMs), {
+        timer: this.timer,
+        signal,
+        label: "Device cleanup wait",
+      });
+      current = await this.forwardToolCall(name, args, progressToken, onProgress, signal, false);
+    }
+    return current;
   }
 
   /**

@@ -363,6 +363,7 @@ private fun DeviceGrid(
         selected = device.uiKey in content.selectedIds,
         booting = device.state == DeviceState.Booting || device.uiKey in content.bootingIds,
         error = content.bootErrors[device.uiKey],
+        finishingPreviousSession = device.uiKey in content.finishingPreviousSessionIds,
         thumbnail = thumbnail,
         onClick = { multiSelect ->
           when {
@@ -388,6 +389,7 @@ private fun DeviceCard(
   selected: Boolean,
   booting: Boolean,
   error: String?,
+  finishingPreviousSession: Boolean,
   thumbnail: @Composable (PickerDevice, Boolean) -> Unit,
   onClick: (multiSelect: Boolean) -> Unit,
 ) {
@@ -455,7 +457,7 @@ private fun DeviceCard(
     )
     if (!booted) {
       Text(
-        bootAffordance(booting, error),
+        bootAffordance(booting, error, finishingPreviousSession),
         style = MaterialTheme.typography.labelSmall,
         color = if (error != null) MaterialTheme.colorScheme.error else Accent,
       )
@@ -476,8 +478,13 @@ private fun cardDescription(
     else -> "Boot $displayName"
   }
 
-private fun bootAffordance(booting: Boolean, error: String?): String =
+private fun bootAffordance(
+  booting: Boolean,
+  error: String?,
+  finishingPreviousSession: Boolean = false,
+): String =
   when {
+    booting && finishingPreviousSession -> "Finishing previous session…"
     booting -> "Booting…"
     error != null -> "Boot failed · Click to retry"
     else -> "Click to boot"

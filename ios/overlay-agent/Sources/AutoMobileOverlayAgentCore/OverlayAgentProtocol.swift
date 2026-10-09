@@ -19,11 +19,16 @@ enum OverlayAgentProtocol {
         "put_overlay_asset",
         "remove_overlay_asset",
         "get_overlay_status",
+        showInPlaceCapability,
         anchorCapability,
         hideForCaptureRequest,
         restoreAfterCaptureRequest,
         screenshotHideCapability,
     ]
+    /// A same-id `show_overlay` replaces the overlay in place keeping pager pages, and
+    /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
+    /// `reset` on an agent that does not advertise it.
+    static let showInPlaceCapability = "overlay_show_in_place_v1"
     /// Positions `{type: "bounds"}` node anchors (#9316). The host refuses anchors on an agent that
     /// does not advertise it, which would draw the node at its normal position. Same name as the
     /// CtrlProxy capability.

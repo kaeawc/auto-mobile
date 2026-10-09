@@ -3,7 +3,7 @@
  *
  * The agent speaks the CtrlProxy overlay message names, so requests and `overlay_event` pushes
  * map one to one. It has no `update_overlay` (#10550): a same-id `show` replaces the overlay.
- * It has no display targeting. Per-call `timeoutMs` is not forwarded: the agent client applies
+ * It has no display targeting. `reset` is forwarded to start a same-id show fresh. Per-call `timeoutMs` is not forwarded: the agent client applies
  * its own request timeout to every request.
  */
 import { ActionableError } from "../../../models/ActionableError";
@@ -11,7 +11,10 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { OverlayAssetRequestOptions } from "../../observe/android/CtrlProxyOverlays";
 import { overlayEventSchema } from "../../observe/android/CtrlProxyOverlays";
-import { SCREENSHOT_HIDE_OVERLAY_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
+import {
+  OVERLAY_SHOW_IN_PLACE_CAPABILITY,
+  SCREENSHOT_HIDE_OVERLAY_CAPABILITY,
+} from "../../observe/android/ctrlProxyProtocol";
 import type {
   OverlayAssetResult,
   OverlayDismiss,
@@ -24,7 +27,11 @@ import {
   type OverlayAssetUpload,
 } from "../overlayAssets";
 import type { OverlaySpec } from "../overlaySpec";
-import type { OverlayDeviceStatus, OverlayTransport } from "../OverlayTransport";
+import type {
+  OverlayDeviceStatus,
+  OverlayShowOptions,
+  OverlayTransport,
+} from "../OverlayTransport";
 import type {
   OverlayAgentClient,
   OverlayAgentMessage,
@@ -146,8 +153,25 @@ export class IosOverlayTransport implements OverlayTransport {
     }
   }
 
-  async show(spec: OverlaySpec): Promise<OverlayResult> {
-    return toOverlayResult(await this.agent.request("show_overlay", { spec }));
+  /**
+   * A same-id show replaces the overlay in place; `reset: true` starts it fresh (pager pages from
+   * the spec). The field is sent only when true, as on Android. An agent that predates it would
+   * silently keep the pages, so `reset` is refused unless the handshake advertises
+   * `overlay_show_in_place_v1`.
+   */
+  async show(spec: OverlaySpec, options: OverlayShowOptions = {}): Promise<OverlayResult> {
+    if (options.reset === true && !this.supportsCapability(OVERLAY_SHOW_IN_PLACE_CAPABILITY)) {
+      throw new ActionableError(
+        `Overlay agent ${this.agent.handshake.agentVersion} does not support reset; relaunch ` +
+          "the app with launchApp overlay: true to load the agent built for this AutoMobile version.",
+      );
+    }
+    return toOverlayResult(
+      await this.agent.request("show_overlay", {
+        spec,
+        ...(options.reset === true ? { reset: true } : {}),
+      }),
+    );
   }
 
   async dismiss(target: OverlayDismiss): Promise<OverlayResult> {

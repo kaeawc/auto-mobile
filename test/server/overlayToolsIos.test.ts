@@ -146,14 +146,25 @@ describe("prototype tool on an iOS simulator", () => {
     expect(relaunched.requests.map((request) => request.type)).toEqual(["show_overlay"]);
   });
 
-  test.each([
-    [{ action: "show", spec, reset: true }, "reset is Android only"],
-    [{ action: "show", spec, display: "inner" }, "display is Android only"],
-  ])("%o is refused before any agent request", async (input, message) => {
-    const { response, payload } = await call(input);
-    expect(response.isError).toBe(true);
-    expect(payload.error).toContain(message);
-    expect(agent.requests).toEqual([]);
+  test.each([[{ action: "show", spec, display: "inner" }, "display is Android only"]])(
+    "%o is refused before any agent request",
+    async (input, message) => {
+      const { response, payload } = await call(input);
+      expect(response.isError).toBe(true);
+      expect(payload.error).toContain(message);
+      expect(agent.requests).toEqual([]);
+    },
+  );
+
+  test("reset is forwarded to the agent only when true", async () => {
+    await call({ action: "show", spec });
+    await call({ action: "show", spec, reset: false });
+    await call({ action: "show", spec, reset: true });
+    expect(agent.requests.map((request) => request.body.reset)).toEqual([
+      undefined,
+      undefined,
+      true,
+    ]);
   });
 
   test("a simulator with no agent connection gets launchApp overlay guidance", async () => {

@@ -12,6 +12,7 @@ export const FAKE_OVERLAY_AGENT_CAPABILITIES = [
   "put_overlay_asset",
   "remove_overlay_asset",
   "get_overlay_status",
+  "overlay_show_in_place_v1",
 ];
 
 type Reply = Partial<Omit<OverlayAgentResult, "type" | "requestId">> | Error;

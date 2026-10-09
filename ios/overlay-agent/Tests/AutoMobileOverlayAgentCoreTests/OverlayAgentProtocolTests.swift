@@ -117,6 +117,11 @@ final class OverlayConnectionGateTests: XCTestCase {
         XCTAssertTrue(OverlayAgentProtocol.capabilities.contains("show_overlay"))
     }
 
+    func testAdvertisesInPlaceShowWithReset() {
+        XCTAssertEqual(OverlayAgentProtocol.showInPlaceCapability, "overlay_show_in_place_v1")
+        XCTAssertTrue(OverlayAgentProtocol.capabilities.contains(OverlayAgentProtocol.showInPlaceCapability))
+    }
+
     func testWrongTokenClosesWithoutReply() throws {
         var gate = OverlayConnectionGate(token: token)
         let action = try gate.receive(line: line(["type": "hello", "token": token + "x"]))

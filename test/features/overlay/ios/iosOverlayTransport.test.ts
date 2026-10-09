@@ -104,4 +104,40 @@ describe("IosOverlayTransport.captureWithOverlayHidden", () => {
     const result = await transport.captureWithOverlayHidden(async () => "png");
     expect(result).toEqual({ value: "png", screenshotIncludesOverlay: false });
   });
+
+  describe("show reset", () => {
+    const spec = {
+      id: "panel",
+      window: { placement: { type: "fullscreen" as const } },
+      root: { type: "text" as const, text: "hi" },
+    };
+    function recording(capabilities: string[]) {
+      const bodies: OverlayAgentMessage[] = [];
+      const agent = fakeAgent(capabilities, []);
+      const request = agent.request.bind(agent);
+      agent.request = async (type, body) => {
+        bodies.push(body ?? {});
+        return request(type, body);
+      };
+      return { agent, bodies };
+    }
+
+    test("reset true is sent on the wire; absent or false keeps the wire unchanged", async () => {
+      const { agent, bodies } = recording(["show_overlay", "overlay_show_in_place_v1"]);
+      const transport = new IosOverlayTransport(agent);
+      await transport.show(spec);
+      await transport.show(spec, { reset: false });
+      await transport.show(spec, { reset: true });
+      expect(bodies).toEqual([{ spec }, { spec }, { spec, reset: true }]);
+    });
+
+    test("an agent without the capability refuses reset before sending anything", async () => {
+      const { agent, bodies } = recording(["show_overlay"]);
+      const transport = new IosOverlayTransport(agent);
+      await expect(transport.show(spec, { reset: true })).rejects.toThrow("does not support reset");
+      expect(bodies).toEqual([]);
+      await transport.show(spec);
+      expect(bodies).toEqual([{ spec }]);
+    });
+  });
 });

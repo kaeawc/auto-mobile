@@ -43,7 +43,33 @@ extension OverlayMotion {
     }
 }
 
+extension OverlayMotion {
+    /// Seconds the press-scale feedback (`pressScale`) springs for; nil snaps instantly under spec
+    /// `motion: "none"` or Reduce Motion, as every other animation does (#10885).
+    var pressScaleDuration: Double? {
+        enabled ? 0.2 : nil
+    }
+}
+
 extension OverlayNode {
+    /// Whether the node takes a slot in its parent's stack: not hidden by `visibleWhen`, not drawn
+    /// elsewhere (an anchored node is drawn by the anchor layer, a dialog or snackbar by the modal
+    /// layer) and not a closed `bottomSheet`. A stack puts its spacing around every child it is
+    /// given, even an empty one, so a parent leaves these out (#10912).
+    func drawsInPlace(holds: (Condition) -> Bool) -> Bool {
+        if let visibleWhen, !holds(visibleWhen) { return false }
+        if anchor != nil || overlayModalTypes.contains(type) { return false }
+        if type == "bottomSheet", !(openWhen.map(holds) ?? false) { return false }
+        return true
+    }
+
+    /// The `children` a container lays out, each with its position among all of them (a stable
+    /// identity across show and hide); those that do not draw in place are left out.
+    func drawnChildren(holds: (Condition) -> Bool) -> [(offset: Int, node: OverlayNode)] {
+        Array((children ?? []).enumerated()).filter { $0.element.drawsInPlace(holds: holds) }
+            .map { (offset: $0.offset, node: $0.element) }
+    }
+
     /// What decides a container's size from its direct children: whether each one is shown and the
     /// width and height its style resolves to under the current state. The renderer animates size
     /// changes only when this changes, so text edits and other content updates stay unanimated.

@@ -152,8 +152,9 @@ A segmented `Picker` cannot carry per-segment accessibility identifiers, so segm
 are drawn as a row of buttons. A dialog's scrim covers the whole window (below the dismiss
 bar in fullscreen) and takes every touch while it is open, even for floating or sheet
 placements; a snackbar takes touches only on itself. A dialog's title (a header), text, child
-controls and buttons are each their own accessibility element, and the dialog is not marked
-modal, as on Android. Opening or closing a dialog drops keyboard focus in the overlay unless the
+controls and buttons are each their own accessibility element. While a dialog is open the page
+behind it (the spec tree and its anchor layer) is hidden from accessibility, as it is inert to
+touches; the dialog itself is not marked modal (#10912). Opening or closing a dialog drops keyboard focus in the overlay unless the
 dialog holds a text field; a child taller than the screen scrolls. Material icon names map to
 SF Symbols; a name without a mapping draws a placeholder.
 

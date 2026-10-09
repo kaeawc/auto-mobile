@@ -7,33 +7,64 @@ import SwiftUI
 /// which is below the dismiss bar for a fullscreen overlay), so its touch target and accessibility
 /// frame are where it is drawn. Only the window and the content area clip it.
 struct OverlayAnchorLayer: View {
+    /// A `sheet` placement's edge and height: the layer draws and takes touches only inside that
+    /// strip of the window, as Android clips everything outside a sheet window (#10912).
+    struct Sheet: Equatable {
+        let edge: String?
+        let height: Double?
+    }
+
     let entries: [OverlayAnchoredNode]
     @ObservedObject var model: OverlayModel
+    var sheet: Sheet?
     @Environment(\.layoutDirection) private var direction
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         if !entries.isEmpty {
             GeometryReader { proxy in
                 let frame = proxy.frame(in: .global)
-                ZStack(alignment: .topLeading) {
+                let region = sheet.map {
+                    OverlaySheetFrame.rect(
+                        containerWidth: frame.width, containerHeight: frame.height,
+                        edge: $0.edge, height: $0.height
+                    )
+                } ?? OverlayRect(x: 0, y: 0, width: frame.width, height: frame.height)
+                let clip = sheet == nil ? nil : CGRect(
+                    x: frame.minX + region.x, y: frame.minY + region.y, width: region.width, height: region.height
+                )
+                let origin = CGPoint(
+                    x: model.windowOrigin.x + frame.minX + region.x,
+                    y: model.windowOrigin.y + frame.minY + region.y
+                )
+                let content = ZStack(alignment: .topLeading) {
                     ForEach(entries, id: \.path) { entry in
-                        anchored(entry, layerOrigin: CGPoint(
-                            x: model.windowOrigin.x + frame.minX,
-                            y: model.windowOrigin.y + frame.minY
-                        ))
+                        anchored(entry, layerOrigin: origin, clip: clip)
                     }
                 }
-                .frame(width: frame.width, height: frame.height, alignment: .topLeading)
+                .frame(width: region.width, height: region.height, alignment: .topLeading)
+                if sheet == nil {
+                    content
+                } else {
+                    content
+                        .clipped()
+                        .offset(x: region.x, y: region.y)
+                        .frame(width: frame.width, height: frame.height, alignment: .topLeading)
+                }
             }
             // Positions are screen coordinates; start and end are resolved from `direction` instead.
             .environment(\.layoutDirection, .leftToRight)
         }
     }
 
-    private func anchored(_ entry: OverlayAnchoredNode, layerOrigin: CGPoint) -> some View {
+    /// The anchored node fades with the ancestor that hides it (Android's #10897): it stays drawn
+    /// through that ancestor's exit, its opacity driven by the same 0.25 s ease, and stops taking
+    /// touches and reading to accessibility the moment the ancestor hides.
+    private func anchored(_ entry: OverlayAnchoredNode, layerOrigin: CGPoint, clip: CGRect?) -> some View {
         let cover = entry.anchor.covers
             ? entry.anchor.bounds.map { CGSize(width: $0.width, height: $0.height) }
             : nil
+        let fade = OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).containerSizeDuration
         return OverlayAnchorPlacement(
             anchor: entry.anchor,
             layerOrigin: layerOrigin,
@@ -41,8 +72,12 @@ struct OverlayAnchorLayer: View {
         ) {
             NodeView(node: entry.node, model: model, anchorPlaced: true, coverSize: cover)
                 .environment(\.layoutDirection, direction)
-                .reportFrame(key: "anchor.\(entry.path)", model: model)
+                .reportFrame(key: "anchor.\(entry.path)", model: model, clip: clip, enabled: entry.ancestorsShown)
         }
+        .opacity(entry.ancestorsShown ? 1 : 0)
+        .animation(fade.map { .easeInOut(duration: $0) }, value: entry.ancestorsShown)
+        .allowsHitTesting(entry.ancestorsShown)
+        .accessibilityHidden(!entry.ancestorsShown)
     }
 }
 

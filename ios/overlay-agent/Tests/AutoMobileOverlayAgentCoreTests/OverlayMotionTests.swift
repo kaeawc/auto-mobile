@@ -178,4 +178,35 @@ final class OverlayMotionTests: XCTestCase {
         }
         XCTAssertEqual(sig([:]), sig(["typed": .string("hello")]))
     }
+
+    // MARK: Press scale and stack slots (#10912)
+
+    func testPressScaleSnapsUnderSpecMotionNoneOrReduceMotion() {
+        XCTAssertEqual(OverlayMotion(specMotion: nil, reduceMotion: false).pressScaleDuration, 0.2)
+        XCTAssertNil(OverlayMotion(specMotion: "none", reduceMotion: false).pressScaleDuration)
+        XCTAssertNil(OverlayMotion(specMotion: nil, reduceMotion: true).pressScaleDuration)
+    }
+
+    func testOnlyNodesThatDrawInPlaceTakeAStackSlot() throws {
+        func node(_ json: String) throws -> OverlayNode {
+            try JSONDecoder().decode(OverlayNode.self, from: Data(json.utf8))
+        }
+        let anchor = #""anchor": {"type": "bounds", "bounds": {"x": 0, "y": 0, "width": 1, "height": 1}}"#
+        let column = try node("""
+        {"type": "column", "children": [
+          {"type": "text", "text": "shown"},
+          {"type": "text", "text": "hidden", "visibleWhen": {"key": "on", "equals": true}},
+          {"type": "text", "text": "anchored", \(anchor)},
+          {"type": "dialog", "title": "d", "openWhen": {"key": "on", "equals": true}},
+          {"type": "bottomSheet", "openWhen": {"key": "on", "equals": true}, "child": {"type": "text", "text": "s"}},
+          {"type": "text", "text": "last", "visibleWhen": {"key": "on", "equals": false}}
+        ]}
+        """)
+        func offsets(_ state: [String: JSONValue]) -> [Int] {
+            column.drawnChildren { $0.holds(state) }.map(\.offset)
+        }
+        XCTAssertEqual(offsets([:]), [0])
+        XCTAssertEqual(offsets(["on": .bool(true)]), [0, 1, 4])
+        XCTAssertEqual(offsets(["on": .bool(false)]), [0, 5])
+    }
 }

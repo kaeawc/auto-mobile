@@ -117,6 +117,7 @@ struct OverlayChipView: View {
 /// `style.background` replaces the container colour; an `onTap` makes the whole card tappable.
 struct OverlayCardView: View {
     @Environment(\.overlayPalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: OverlayNode
     @ObservedObject var model: OverlayModel
@@ -128,10 +129,15 @@ struct OverlayCardView: View {
             ? colors.surfaceHigh
             : colors.surface
         VStack(alignment: .leading, spacing: style?.spacing ?? 0) {
-            ForEach(Array((node.children ?? []).enumerated()), id: \.offset) { _, child in
-                NodeView(node: child, model: model)
+            ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+                NodeView(node: entry.node, model: model, inStackSlot: true)
             }
         }
+        .animation(
+            OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+                .containerSizeDuration.map { .easeInOut(duration: $0) },
+            value: node.containerLayoutSignature(state: model.state) { model.holds($0) }
+        )
         .frame(minWidth: 0, alignment: .leading)
         .background(shape.fill(colors.authored(style?.background) ?? defaultFill))
         .overlay(shape.stroke(node.variant == "outlined" ? colors.outline : .clear, lineWidth: 1))
@@ -633,6 +639,7 @@ struct OverlayDatePickerView: View {
 /// snackbar takes touches only on itself.
 struct OverlayModalLayer: View {
     @Environment(\.overlayPalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     @ObservedObject var model: OverlayModel
 
@@ -660,7 +667,8 @@ struct OverlayModalLayer: View {
                     entries: OverlayNode.layeredAnchors(
                         in: node.childEntries(path: "modal\(index)"),
                         state: model.state,
-                        pages: model.pages
+                        pages: model.pages,
+                        retainExiting: OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled
                     ),
                     model: model
                 )

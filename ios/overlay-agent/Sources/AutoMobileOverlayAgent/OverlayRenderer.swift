@@ -119,6 +119,8 @@ struct NodeView: View {
     var anchorPlaced = false
     /// A `cover` anchor's size, which replaces the authored width and height.
     var coverSize: CGSize?
+    /// Set by a parent that lays its children out through `OverlayNode.drawnChildren`.
+    var inStackSlot = false
     @Environment(\.pagerContext) private var pager
     @Environment(\.overlayPalette) private var palette
     @Environment(\.overlayTypography) private var typography
@@ -126,20 +128,42 @@ struct NodeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        // `visibleWhen` appears and disappears with the node's `transition`; instant when motion is
-        // off (spec `motion: "none"` or the system's Reduce Motion), as on Android (#10442).
-        let motion = OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
-        let transition = node.visibleWhen == nil ? .instant : motion.visibility(transition: node.transition)
-        // The conditional lives in a stable ZStack so the insertion/removal has a container whose
-        // animation is driven by `isVisible`; a bare `Group` is flattened into the parent's
-        // children, which left a trailing conditional child undrawn and its transition
-        // un-animated (#10898). An empty ZStack is zero-sized, so a hidden node takes no space.
-        ZStack {
-            if isVisible, presentedAsModal || !overlayModalTypes.contains(node.type), drawnHere {
-                styled(content).transition(transition.swiftUITransition)
+        // A node that draws nothing here (hidden, anchored elsewhere, a modal not yet in its layer)
+        // returns no view at all: a stack puts its spacing around an empty ZStack too, which left
+        // a gap Android does not (#10912). Container parents also leave such children out.
+        if !drawsNow {
+            EmptyView()
+        } else if inStackSlot || node.visibleWhen == nil {
+            // A parent that lays children out through `drawnChildren` inserts and removes this node
+            // itself, inside its own `.animation(value: layoutSignature)`, so the transition rides
+            // on the node and the parent drives the animation.
+            ZStack { styled(content) }.transition(transition.swiftUITransition)
+        } else {
+            // Parents without that filter (a root, a scroll child, a pager page): the conditional
+            // lives in a stable ZStack so the insertion/removal has a container whose animation is
+            // driven by `isVisible`; a bare `Group` is flattened into the parent's children, which
+            // left a trailing conditional child undrawn and its transition un-animated (#10898).
+            ZStack {
+                if isVisible {
+                    styled(content).transition(transition.swiftUITransition)
+                }
             }
+            .animation(transition == .instant ? nil : .easeInOut(duration: 0.25), value: isVisible)
         }
-        .animation(transition == .instant ? nil : .easeInOut(duration: 0.25), value: isVisible)
+    }
+
+    /// `visibleWhen` appears and disappears with the node's `transition`; instant when motion is
+    /// off (spec `motion: "none"` or the system's Reduce Motion), as on Android (#10442).
+    private var transition: OverlayVisibilityTransition {
+        let motion = OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+        return node.visibleWhen == nil ? .instant : motion.visibility(transition: node.transition)
+    }
+
+    /// Whether anything is drawn for the node in the slot this view occupies. Unfiltered parents
+    /// still hold a hidden `visibleWhen` node's stable (empty) container for its animation.
+    private var drawsNow: Bool {
+        guard presentedAsModal || !overlayModalTypes.contains(node.type), drawnHere else { return false }
+        return isVisible || !inStackSlot && node.visibleWhen != nil
     }
 
     /// Siblings slide into freed space when a child appears, disappears or resizes (Android's
@@ -263,8 +287,8 @@ struct NodeView: View {
     }
 
     @ViewBuilder private var children: some View {
-        ForEach(Array((node.children ?? []).enumerated()), id: \.offset) { _, child in
-            NodeView(node: child, model: model)
+        ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+            NodeView(node: entry.node, model: model, inStackSlot: true)
         }
     }
 
@@ -272,13 +296,13 @@ struct NodeView: View {
     /// wrap-sized row or column does not grow to fill its parent.
     @ViewBuilder
     private func arranged(horizontal _: Bool) -> some View {
-        let nodes = node.children ?? []
+        let nodes = node.drawnChildren(holds: model.holds)
         let mode = style?.arrangement ?? "start"
         let outer = mode == "spaceAround" || mode == "spaceEvenly"
         if outer { Spacer(minLength: 0) }
-        ForEach(Array(nodes.enumerated()), id: \.offset) { index, child in
+        ForEach(Array(nodes.enumerated()), id: \.element.offset) { index, entry in
             if index > 0, mode.hasPrefix("space") { Spacer(minLength: 0) }
-            NodeView(node: child, model: model)
+            NodeView(node: entry.node, model: model, inStackSlot: true)
         }
         if outer { Spacer(minLength: 0) }
     }
@@ -420,21 +444,30 @@ struct NodeView: View {
                 // its label rather than also exposing the icon's name (#10899).
                 HStack(spacing: 6) {
                     OverlayGlyph(symbol: overlaySymbol(icon))
-                    Text(node.label ?? "")
+                    buttonLabel
                 }
             } else {
-                Text(node.label ?? "")
+                buttonLabel
             }
         }
         .accessibilityLabel(node.label ?? "")
-        // Never truncate the label ("Save" -> "Sa...") in a tight row (#10899).
-        .fixedSize(horizontal: true, vertical: false)
+        // A button claims its label's width before its siblings shrink, so a tight row never cuts
+        // "Save" to "Sa..." (#10899); a label wider than the row wraps rather than overflowing,
+        // as on Android (#10912).
+        .layoutPriority(1)
         switch node.variant {
         case "outlined", "tonal": button.buttonStyle(.bordered)
         case "elevated": button.buttonStyle(.bordered).shadow(color: .black.opacity(0.2), radius: 2, y: 1)
         case "text": button.buttonStyle(.borderless)
         default: button.buttonStyle(.borderedProminent)
         }
+    }
+
+    /// Wraps onto more lines when the row is narrower than the label, never truncating.
+    private var buttonLabel: some View {
+        Text(node.label ?? "")
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var navSelection: Int {
@@ -627,13 +660,16 @@ private struct TapModifier: ViewModifier {
     func body(content: Content) -> some View {
         if let actions {
             let scale = style?.scale(pressed: pressed) ?? 1
+            // Spec `motion: "none"` snaps like Reduce Motion (#10885).
+            let spring = OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+                .pressScaleDuration.map { Animation.spring(duration: $0) }
             // Whole padded frame is tappable, with a 44 pt minimum target (Android bug #10435).
             content
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
-                // Scales the drawn node only; Reduce Motion snaps instead of springing.
+                // Scales the drawn node only; motion off snaps instead of springing.
                 .scaleEffect(scale)
-                .animation(reduceMotion ? nil : .spring(duration: 0.2), value: scale)
+                .animation(spring, value: scale)
                 .onTapGesture { model.run(actions) }
                 .simultaneousGesture(
                     LongPressGesture(minimumDuration: 0, maximumDistance: 10)

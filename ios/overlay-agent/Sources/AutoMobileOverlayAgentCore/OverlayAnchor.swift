@@ -23,6 +23,32 @@ struct OverlayRect: Decodable, Equatable {
     let height: Double
 }
 
+extension OverlayRect {
+    /// The overlap with `other`, or nil when they do not meet. Used to clip an anchored node's touch
+    /// target to the area it may draw in (a sheet's frame).
+    func intersection(_ other: OverlayRect) -> OverlayRect? {
+        let left = Swift.max(x, other.x)
+        let top = Swift.max(y, other.y)
+        let right = Swift.min(x + width, other.x + other.width)
+        let bottom = Swift.min(y + height, other.y + other.height)
+        guard right > left, bottom > top else { return nil }
+        return OverlayRect(x: left, y: top, width: right - left, height: bottom - top)
+    }
+}
+
+/// Where a `sheet` placement sits in the overlay window: full width, `height` tall (200 pt when the
+/// spec sets none, never taller than the window), against the top or bottom edge. Android clips
+/// everything outside a sheet window, so the anchor layer is clipped to this rectangle (#10912).
+enum OverlaySheetFrame {
+    static let defaultHeight = 200.0
+
+    static func rect(containerWidth: Double, containerHeight: Double, edge: String?, height: Double?) -> OverlayRect {
+        let sheetHeight = Swift.min(Swift.max(height ?? defaultHeight, 0), containerHeight)
+        let y = edge == "top" ? 0 : containerHeight - sheetHeight
+        return OverlayRect(x: 0, y: y, width: containerWidth, height: sheetHeight)
+    }
+}
+
 /// A node's `anchor` as the wire carries it. Only a bounds anchor can be drawn; an element anchor
 /// that reaches the agent was never resolved by the host and is refused (see `unresolvedAnchorPath`).
 struct OverlayAnchor: Decodable, Equatable {
@@ -125,6 +151,9 @@ struct OverlayAnchoredNode {
     let node: OverlayNode
     let path: String
     let anchor: OverlayAnchor
+    /// False while an animated `visibleWhen` ancestor is hiding: the node stays listed so it can
+    /// fade out with that ancestor (and back in) instead of vanishing on the first frame (#10912).
+    var ancestorsShown = true
 }
 
 /// Roles that render their children inline through `NodeView`; other roles never draw children, so
@@ -154,8 +183,32 @@ extension OverlayNode {
     /// on its pager's current page, an open `bottomSheet`, and not inside a modal (modals list their
     /// own through `layeredAnchors(in:)`). The anchored node's own `visibleWhen` is left to the
     /// renderer. This node itself is never listed: a window root keeps its own anchored placement.
-    func layeredAnchors(path: String = "root", state: [String: JSONValue], pages: [String: Int]) -> [OverlayAnchoredNode] {
-        if let visibleWhen, !visibleWhen.holds(state) { return [] }
+    ///
+    /// With `retainExiting`, a node below an ancestor whose `visibleWhen` fails is still listed, as
+    /// `ancestorsShown == false`, so the renderer can fade it with that ancestor's exit (Android's
+    /// #10897). The outermost hidden ancestor decides: a `none` transition removes its subtree at
+    /// once, so nothing below it is retained. Callers pass `retainExiting` only when motion is on.
+    func layeredAnchors(
+        path: String = "root",
+        state: [String: JSONValue],
+        pages: [String: Int],
+        retainExiting: Bool = false
+    ) -> [OverlayAnchoredNode] {
+        layeredAnchors(path: path, state: state, pages: pages, retainExiting: retainExiting, shown: true)
+    }
+
+    private func layeredAnchors(
+        path: String,
+        state: [String: JSONValue],
+        pages: [String: Int],
+        retainExiting: Bool,
+        shown: Bool
+    ) -> [OverlayAnchoredNode] {
+        var shown = shown
+        if shown, let visibleWhen, !visibleWhen.holds(state) {
+            guard retainExiting, transition != "none" else { return [] }
+            shown = false
+        }
         guard overlayInlineContainerTypes.contains(type) else { return [] }
         if type == "bottomSheet", !(openWhen?.holds(state) ?? false) { return [] }
         var entries = childEntries(path: path)
@@ -164,25 +217,37 @@ extension OverlayNode {
             let page = Swift.min(id.flatMap { pages[$0] } ?? 0, Swift.max(entries.count - 1, 0))
             entries = entries.indices.contains(page) ? [entries[page]] : []
         }
-        return OverlayNode.layeredAnchors(in: entries, state: state, pages: pages)
+        return OverlayNode.layeredAnchors(
+            in: entries, state: state, pages: pages, retainExiting: retainExiting, ancestorsShown: shown
+        )
     }
 
     /// `layeredAnchors` for content drawn as `entries`, such as a modal's body.
     static func layeredAnchors(
         in entries: [(node: OverlayNode, path: String)],
         state: [String: JSONValue],
-        pages: [String: Int]
+        pages: [String: Int],
+        retainExiting: Bool = false,
+        ancestorsShown: Bool = true
     ) -> [OverlayAnchoredNode] {
         entries.flatMap { entry -> [OverlayAnchoredNode] in
-            let own = entry.node.anchor.map { [OverlayAnchoredNode(node: entry.node, path: entry.path, anchor: $0)] } ?? []
-            return own + entry.node.layeredAnchors(path: entry.path, state: state, pages: pages)
+            let own = entry.node.anchor.map {
+                [OverlayAnchoredNode(node: entry.node, path: entry.path, anchor: $0, ancestorsShown: ancestorsShown)]
+            } ?? []
+            return own + entry.node.layeredAnchors(
+                path: entry.path, state: state, pages: pages, retainExiting: retainExiting, shown: ancestorsShown
+            )
         }
     }
 
     /// Everything the shown spec draws in its window-level anchor layer: the root when it is
     /// anchored (iOS has no window to move onto it, so the layer places it), then the layered nodes.
-    func windowAnchorLayer(state: [String: JSONValue], pages: [String: Int]) -> [OverlayAnchoredNode] {
+    func windowAnchorLayer(
+        state: [String: JSONValue],
+        pages: [String: Int],
+        retainExiting: Bool = false
+    ) -> [OverlayAnchoredNode] {
         let own = anchor.map { [OverlayAnchoredNode(node: self, path: "root", anchor: $0)] } ?? []
-        return own + layeredAnchors(state: state, pages: pages)
+        return own + layeredAnchors(state: state, pages: pages, retainExiting: retainExiting)
     }
 }

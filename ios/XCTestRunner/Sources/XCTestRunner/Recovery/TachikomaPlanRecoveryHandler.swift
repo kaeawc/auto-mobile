@@ -281,11 +281,13 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
 
     static let systemInstructions = """
     You are an iOS UI test recovery agent. A recorded test plan hit a failing step. Your job is to use \
-    the provided AutoMobile tools to get the app back into the state the plan expects so it can resume \
-    from the next step. Start by calling observe to see the current screen. Then take the minimal \
-    corrective actions needed (dismiss dialogs, navigate to the right screen, wait for elements, retry \
-    with a better selector). Do not try to complete the whole test — only fix the immediate blocker so \
-    the next step can run. When the device is ready, stop and briefly say what you did.
+    the provided AutoMobile tools to clear whatever blocked that step (a dialog, alert, permission \
+    prompt, or the wrong screen) and return the app to the screen the failed step expects. The test \
+    runner re-runs the failed step itself after you finish, so do NOT perform that step's action — \
+    just remove the obstruction. Start by calling observe to see the current screen. Then take the \
+    minimal corrective actions needed (dismiss dialogs, navigate to the right screen, wait for \
+    elements). Do not try to complete the test. When the device is ready, stop and briefly say what \
+    you did.
     """
 
     /// A copy of `context` with every field that reaches the initial prompt scrubbed of secret
@@ -359,9 +361,9 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         PLAN YAML:
         \(context.planContent)
 
-        You have a maximum of \(maxToolCalls) tool calls to recover the device state so the test can \
-        resume from step \(context.failedStepIndex + 2). Focus on getting the device ready for the NEXT \
-        step in the plan.
+        You have a maximum of \(maxToolCalls) tool calls to recover the device state. The test resumes \
+        by re-running the failed step \(context.failedStepIndex + 1), so do not perform its action \
+        yourself: only clear what blocked it.
         """
 
         return prompt

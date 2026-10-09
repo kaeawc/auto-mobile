@@ -202,7 +202,7 @@ public final class AutoMobilePlanExecutor: Sendable {
 
     /// Execute the plan once from `startStep`. On a step failure, if AI recovery is enabled and has not
     /// yet been attempted for this test, hand the failure to the recovery handler and — on success —
-    /// resume from the step after the failed one (see `handleFailure`). `sessionUuidOverride` lets a
+    /// resume by re-running the failed step (see `handleFailure`). `sessionUuidOverride` lets a
     /// resume reuse the failed attempt's session so it continues on the same device; the transient
     /// retry loop also reuses the one explicit session value captured by execute().
     private func executeAttempt(
@@ -343,7 +343,7 @@ public final class AutoMobilePlanExecutor: Sendable {
     }
 
     /// Handle a failed `executePlan` result: gate AI recovery, and on a successful recovery resume the
-    /// plan from the step after the failed one. Mirrors the Android runner's `handleFailure`. When
+    /// plan by re-running the failed step. Mirrors the Android runner's `handleFailure`. When
     /// recovery is not eligible or does not succeed, throws the same `ExecutorError.executionFailed` the
     /// executor threw before this feature existed.
     private func handleFailure(
@@ -434,10 +434,13 @@ public final class AutoMobilePlanExecutor: Sendable {
             throw ExecutorError.executionFailed("\(failureMessage)\n  AI recovery attempted but did not succeed.")
         }
 
-        // Recovery succeeded — resume from the next step, pinned to the recovered device and the same
-        // session. `recoveryAlreadyAttempted: true` prevents a second recovery within this attempt.
-        let resumeStep = failedStep.stepIndex + 1
-        logger.info("AI recovery succeeded, resuming plan from step \(resumeStep + 1)")
+        // Recovery only cleared whatever blocked the failed step; that step's own action has NOT run,
+        // so resume by RE-RUNNING it (parity with the Android runner, #4394). Resuming after it would
+        // skip the step and leave the app on the wrong screen. The re-run is also the check that
+        // recovery worked. Pinned to the recovered device and the same session;
+        // `recoveryAlreadyAttempted: true` prevents a second recovery within this attempt.
+        let resumeStep = failedStep.stepIndex
+        logger.info("AI recovery succeeded, re-running failed step \(resumeStep + 1) and resuming")
         var resumeResult = try await executeAttempt(
             startStep: resumeStep,
             recoveryAlreadyAttempted: true,

@@ -17,7 +17,7 @@ final class RecoveryExecutorTests: XCTestCase {
       - tool: inputText
     """
 
-    func testRecoverySucceedsAndResumesFromNextStep() async throws {
+    func testRecoverySucceedsAndResumesByReRunningTheFailedStep() async throws {
         let client = RecoveryMCPClient()
         client.queueExecutePlan(planJSON(
             success: false, executedSteps: 2, totalSteps: 4,
@@ -46,7 +46,8 @@ final class RecoveryExecutorTests: XCTestCase {
         let executePlanCalls = client.executePlanCalls
         XCTAssertEqual(executePlanCalls.count, 2)
         XCTAssertEqual(executePlanCalls[0].arguments["startStep"] as? Int, 0)
-        XCTAssertEqual(executePlanCalls[1].arguments["startStep"] as? Int, 3)
+        // The failed step itself is re-run (parity with Android #4394); recovery only cleared its blocker.
+        XCTAssertEqual(executePlanCalls[1].arguments["startStep"] as? Int, 2)
         XCTAssertEqual(executePlanCalls[1].arguments["deviceId"] as? String, "sim-1")
     }
 
@@ -131,7 +132,7 @@ final class RecoveryExecutorTests: XCTestCase {
         await assertAsyncThrowsError { try await executor.execute(testMetadata: nil) }
         XCTAssertEqual(handler.receivedContexts.count, 1, "recovery is allowed at most once per test")
         XCTAssertEqual(client.executePlanCalls.count, 2, "initial attempt + one resume")
-        XCTAssertEqual(client.executePlanCalls[1].arguments["startStep"] as? Int, 2)
+        XCTAssertEqual(client.executePlanCalls[1].arguments["startStep"] as? Int, 1)
     }
 
     // MARK: - Held session for recovery (#10834 / #11072)
@@ -446,6 +447,19 @@ final class TachikomaPlanRecoveryHandlerTests: XCTestCase {
             deviceId: "dev-1",
             failureObservation: nil
         )
+    }
+
+    /// The executor re-runs the failed step after recovery (#11139, parity with Android #4394), so the
+    /// prompt must ask only to clear its blocker and must not point the agent at the step after it.
+    func testRecoveryPromptSaysTheFailedStepIsReRun() {
+        let prompt = TachikomaPlanRecoveryHandler.buildRecoveryPrompt(context: makeContext(), maxToolCalls: 5)
+
+        XCTAssertTrue(prompt.contains("re-running the failed step 3"), prompt)
+        XCTAssertFalse(prompt.contains("resume from step 4"), prompt)
+        XCTAssertFalse(prompt.contains("NEXT"), prompt)
+        let system = TachikomaPlanRecoveryHandler.systemInstructions
+        XCTAssertTrue(system.contains("re-runs the failed step itself"), system)
+        XCTAssertFalse(system.contains("next step"), system)
     }
 
     func testHandlerRunsToolLoopThenVerifiesWithObserve() async {

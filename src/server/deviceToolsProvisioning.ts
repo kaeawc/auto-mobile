@@ -363,6 +363,9 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
       // A rollback error's own lifecycle is newer than the last one recorded.
       lifecycle: lifecycle ?? operation.lifecycleEvidence?.lifecycle,
+      ...(operation.lifecycleEvidence?.lifecycleDurable === false
+        ? { lifecycleDurable: false }
+        : {}),
       ...(ownership ? { ownership } : {}),
       originalError: { code, message: errorMessage(failure) },
       ...(retryable !== undefined ? { retryable } : {}),
@@ -405,6 +408,9 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       nowMs: getDeviceToolsDependencies().timer.now(),
       daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
       lifecycle: operation.lifecycleEvidence?.lifecycle,
+      ...(operation.lifecycleEvidence?.lifecycleDurable === false
+        ? { lifecycleDurable: false }
+        : {}),
       ...(operation.lifecycleEvidence?.ownership
         ? { ownership: operation.lifecycleEvidence.ownership }
         : {}),
@@ -426,11 +432,16 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     // expiry sweep) must not stamp its result over the attempt that replaced
     // it.
     const attemptId = deps.idGenerator.next();
-    const recordLifecycle: RecordProvisionDeviceLifecycle = async (lifecycle) => {
-      if (!(await store.recordLifecycleOutcome(args.operationId, attemptId, lifecycle))) {
+    const recordLifecycle: RecordProvisionDeviceLifecycle = async (lifecycle, options) => {
+      const durable = options?.durable !== false;
+      if (
+        durable &&
+        !(await store.recordLifecycleOutcome(args.operationId, attemptId, lifecycle))
+      ) {
         throw new ProvisionDeviceOperationSupersededError(args.operationId);
       }
       lifecycleEvidence.lifecycle = lifecycle;
+      lifecycleEvidence.lifecycleDurable = durable;
       if (lifecycle.phase === "created" || lifecycle.phase === "adopted") {
         lifecycleEvidence.ownership =
           lifecycle.phase === "created" ? "created_by_operation" : "adopted";
@@ -1943,20 +1954,24 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       createdDevice,
       observedRuntimeDevice,
     );
-    if (!preserveRetryability) {
-      await recordLifecycle({
-        state: "cleanup_in_progress",
-        phase: "cleanup",
-        device: lifecycleDevice,
-        reason: provisionDeviceLifecycleReason(provisionFailure),
-        cleanup: { status: "in_progress", reason: "readiness_timeout" },
-      });
-    }
+    // A cancelled attempt keeps its operation row retryable, so its cleanup is
+    // noted only in the in-memory evidence: the `request_cancelled` recovery
+    // must still report a device this rollback removed (#11064).
+    const recordRollbackLifecycle: RecordProvisionDeviceLifecycle = preserveRetryability
+      ? async (lifecycle) => await recordLifecycle(lifecycle, { durable: false })
+      : recordLifecycle;
+    await recordRollbackLifecycle({
+      state: "cleanup_in_progress",
+      phase: "cleanup",
+      device: lifecycleDevice,
+      reason: provisionDeviceLifecycleReason(provisionFailure),
+      cleanup: { status: "in_progress", reason: "readiness_timeout" },
+    });
     throw await cleanupFailedProvisionDevice(args, deps, createdDevice, provisionFailure, {
       lifecycleLease: takeLifecycleLease(),
       pendingMutationSettlement: pendingMutationSettlement,
-      recordLifecycle: preserveRetryability ? undefined : recordLifecycle,
-      lifecycleDevice: preserveRetryability ? undefined : lifecycleDevice,
+      recordLifecycle: recordRollbackLifecycle,
+      lifecycleDevice: lifecycleDevice,
     });
   }
 

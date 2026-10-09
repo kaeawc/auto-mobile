@@ -4836,6 +4836,58 @@ describe("provisionDevice handler", () => {
     expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
   });
 
+  // #11064: a cancelled attempt keeps its row retryable, so the rollback is not
+  // recorded durably -- but its response must not tell the caller to reacquire
+  // the device the rollback just destroyed.
+  test("a cancelled provision whose rollback removed the device reports it removed", async () => {
+    const platform = "android" as const;
+    const provisioned = provisionedTestDevice(platform, true);
+    configureProvisionBootAndTeardown(deviceManager, platform);
+    const readinessEntered = deferred();
+    const releaseReadiness = deferred();
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages(platform, [provisioned.device]);
+          return provisioned;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        readinessEntered.resolve();
+        await releaseReadiness.promise;
+        throw new Error("readiness aborted by cancellation");
+      },
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = provisionTestArgs(platform, "operation-cancelled-rollback-removed");
+
+    const caller = new AbortController();
+    const call = tool.handler(args, undefined, caller.signal);
+    await readinessEntered.promise;
+    caller.abort(new Error("client went away"));
+    releaseReadiness.resolve();
+    const response = JSON.parse(((await call) as { content: { text: string }[] }).content[0].text);
+
+    expect(response).toMatchObject({
+      error: { code: "request_cancelled" },
+      operationContinues: false,
+      recovery: {
+        boundary: "caller_cancellation",
+        phaseReached: "cleanup",
+        outcomes: { settlement: "settled" },
+        cleanup: { status: "reported_complete_unverified" },
+        // The row was never stamped terminal, so the original id is still admitted.
+        nextAction: { action: "retry_original_operation", automaticRetrySafe: true },
+      },
+    });
+    expect(response.recovery.nextAction.action).not.toBe("reacquire_retained_device");
+  });
+
   test("releases the stable lifecycle lease when the cold-boot settlement rejects", async () => {
     const platform = "android" as const;
     const timer = new FakeTimer();

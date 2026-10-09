@@ -4,8 +4,39 @@ import XCTest
 final class OverlayCaptureHoldTests: XCTestCase {
     private var time: TimeInterval = 100
 
-    private func makeHold() -> OverlayCaptureHold {
-        OverlayCaptureHold(now: { self.time })
+    private func makeHold(tokenSeed: Int = 0) -> OverlayCaptureHold {
+        OverlayCaptureHold(now: { self.time }, tokenSeed: tokenSeed)
+    }
+
+    func testTokensFollowTheInjectedSeed() {
+        var hold = makeHold(tokenSeed: 41)
+        XCTAssertEqual(hold.hide(deadlineMs: 1500).token, 42)
+        XCTAssertEqual(hold.hide(deadlineMs: 1500).token, 43)
+    }
+
+    func testAStaleTokenFromAPreviousAgentProcessCannotReleaseALiveHold() {
+        // The host captured with the old agent and kept its token across an agent relaunch.
+        var previousProcess = makeHold(tokenSeed: 0)
+        let staleToken = previousProcess.hide(deadlineMs: 1500).token
+        var relaunched = makeHold(tokenSeed: 9_000_000)
+        let live = relaunched.hide(deadlineMs: 1500)
+        XCTAssertNotEqual(live.token, staleToken)
+        XCTAssertEqual(relaunched.restore(token: staleToken), .init(released: false, shouldShow: false))
+        XCTAssertTrue(relaunched.isHiding, "the live capture's hold survives the stale restore")
+        XCTAssertEqual(relaunched.restore(token: live.token), .init(released: true, shouldShow: true))
+    }
+
+    func testRandomSeedsDifferPerProcessAndStayExactInTheJavaScriptHost() {
+        var generator = SplitMix64(state: 7)
+        let seeds = (0 ..< 64).map { _ in OverlayCaptureHold.randomTokenSeed(using: &generator) }
+        XCTAssertEqual(Set(seeds).count, seeds.count)
+        let maxSafeJavaScriptInteger = (1 << 53) - 1
+        for seed in seeds {
+            XCTAssertGreaterThanOrEqual(seed, 0)
+            XCTAssertLessThan(seed, OverlayCaptureHold.maxTokenSeed)
+            XCTAssertLessThan(seed + OverlayCaptureHold.maxTokenSeed, maxSafeJavaScriptInteger)
+        }
+        XCTAssertLessThan(OverlayCaptureHold.randomTokenSeed(), OverlayCaptureHold.maxTokenSeed)
     }
 
     func testHidesUntilRestore() {
@@ -107,5 +138,18 @@ final class OverlayCaptureHoldTests: XCTestCase {
         for name in ["hide_for_capture", "restore_after_capture", "screenshot_hide_overlay_v1"] {
             XCTAssertTrue(OverlayAgentProtocol.capabilities.contains(name), name)
         }
+    }
+}
+
+/// Deterministic generator for the seed-range test.
+private struct SplitMix64: RandomNumberGenerator {
+    var state: UInt64
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var value = state
+        value = (value ^ (value >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        value = (value ^ (value >> 27)) &* 0x94D0_49BB_1331_11EB
+        return value ^ (value >> 31)
     }
 }

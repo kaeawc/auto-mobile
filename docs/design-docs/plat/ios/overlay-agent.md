@@ -135,7 +135,7 @@ transition as a real tap, including on a part identifier.
 
 | Node                            | iOS drawing                                                                                                      |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `switch`, `checkbox`            | `Toggle`; a checkbox is a button whose square reads as selected                                                  |
+| `switch`, `checkbox`            | One toggle element with a SwiftUI-drawn track (no `UISwitch`); a checkbox is a button that reads as selected     |
 | `button`                        | `.borderedProminent` filled, `.bordered` tonal/outlined/elevated, `.borderless` text; optional leading SF Symbol |
 | `slider`                        | `Slider` with `step` snapping, one adjustable element labelled by `label`                                        |
 | `chip`                          | Rounded button; a filter chip toggles its key and reads as selected                                              |
@@ -153,8 +153,11 @@ are drawn as a row of buttons. A dialog's scrim covers the whole window (below t
 bar in fullscreen) and takes every touch while it is open, even for floating or sheet
 placements; a snackbar takes touches only on itself. A dialog's title (a header), text, child
 controls and buttons are each their own accessibility element. While a dialog is open the page
-behind it (the spec tree and its anchor layer) is hidden from accessibility, as it is inert to
-touches; the dialog itself is not marked modal (#10912). Opening or closing a dialog drops keyboard focus in the overlay unless the
+behind it (the spec tree and its anchor layer) is collapsed out of the accessibility tree, as it
+is inert to touches; `accessibilityHidden` alone did not keep it out of the XCUITest snapshot
+(#10899). The dialog itself is not marked modal (#10912). Otherwise each layer is its own
+accessibility container, so a page whose only element is one node reports that node at its own
+frame, not the whole page's (#10898). Opening or closing a dialog drops keyboard focus in the overlay unless the
 dialog holds a text field; a child taller than the screen scrolls. Material icon names map to
 SF Symbols; a name without a mapping draws a placeholder.
 

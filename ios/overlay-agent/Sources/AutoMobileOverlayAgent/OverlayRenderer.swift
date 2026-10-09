@@ -136,14 +136,17 @@ struct NodeView: View {
         } else if inStackSlot || node.visibleWhen == nil {
             // A parent that lays children out through `drawnChildren` inserts and removes this node
             // itself, inside its own `.animation(value: layoutSignature)`, so the transition rides
-            // on the node and the parent drives the animation.
-            ZStack { styled(content) }.transition(transition.swiftUITransition)
+            // on the node and the parent drives the animation. No wrapping ZStack: a ZStack places
+            // its child at the size it measured, and a row re-laid out at exactly its ideal width
+            // shares that width out evenly, cutting "Edit"/"Save" short (#10899).
+            styled(content).transition(transition.swiftUITransition)
         } else {
             // Parents without that filter (a root, a scroll child, a pager page): the conditional
-            // lives in a stable ZStack so the insertion/removal has a container whose animation is
+            // lives in a stable container so the insertion/removal has one whose animation is
             // driven by `isVisible`; a bare `Group` is flattened into the parent's children, which
             // left a trailing conditional child undrawn and its transition un-animated (#10898).
-            ZStack {
+            // The container passes its parent's proposal through, unlike a ZStack (see above).
+            OverlayLayeredLayout(alignment: .topLeading) {
                 if isVisible {
                     styled(content).transition(transition.swiftUITransition)
                 }
@@ -207,7 +210,8 @@ struct NodeView: View {
     @ViewBuilder private var content: some View {
         switch node.type {
         case "box":
-            ZStack(alignment: swiftUIAlignment(style?.alignment)) { children }
+            // Layered like a ZStack, but a row inside keeps the width it measured (#10899).
+            OverlayLayeredLayout(alignment: swiftUIAlignment(style?.alignment)) { children }
                 .animation(sizeAnimation, value: layoutSignature)
         case "row":
             HStack(alignment: .center, spacing: style?.spacing ?? 0) { arranged(horizontal: true) }
@@ -408,17 +412,25 @@ struct NodeView: View {
         model.toggle(key, then: node.onTap ?? [])
     }
 
-    @ViewBuilder private var switchView: some View {
-        let binding = Binding(get: { isOn }, set: { _ in toggleBound() })
-        // One element per switch: the toggle's label text and switch are combined so the tree
-        // does not list them separately at identical bounds (#10899).
-        if let label = node.label {
-            Toggle(label, isOn: binding)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(label)
-        } else {
-            Toggle("", isOn: binding).labelsHidden().accessibilityElement(children: .combine)
+    /// One element per switch, like a switch list row: a button with the toggle trait, the label
+    /// and an on/off value. The track is drawn in SwiftUI; a `Toggle` hosts a `UISwitch` whose own
+    /// elements XCUITest listed beside the combined one (#10899).
+    private var switchView: some View {
+        Button(action: toggleBound) {
+            HStack(spacing: 8) {
+                if let label = node.label {
+                    Text(label).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                OverlaySwitchTrack(isOn: isOn)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(node.label ?? "")
+        .accessibilityValue(isOn ? "1" : "0")
+        .accessibilityAddTraits(.isToggle)
     }
 
     /// iOS has no checkbox control: a button whose checked square reads as selected.
@@ -625,17 +637,10 @@ private struct SizeModifier: ViewModifier {
     let fillsByDefault: Bool
 
     func body(content: Content) -> some View {
-        content
-            .frame(
-                width: fixed(width),
-                height: fixed(height),
-                alignment: alignment
-            )
-            .frame(
-                maxWidth: fills(width) ? .infinity : nil,
-                maxHeight: fills(height) ? .infinity : nil,
-                alignment: alignment
-            )
+        // Not `frame(maxWidth: nil, maxHeight: nil)`: see `OverlayLayeredLayout` (#10899).
+        OverlayLayeredLayout(fillsWidth: fills(width), fillsHeight: fills(height), alignment: alignment) {
+            content.frame(width: fixed(width), height: fixed(height), alignment: alignment)
+        }
     }
 
     private func fixed(_ dimension: Dimension?) -> CGFloat? {

@@ -184,6 +184,15 @@ function createDeleteDeviceWorkflow(
               capture: target.pooledAvdCapture,
               force: args.force ?? false,
             },
+            assertHolder: requester
+              ? () =>
+                  assertLifecycleCallerHoldsDevice({
+                    toolName: "deleteDevice",
+                    device: target.bootedDevice,
+                    requester,
+                    force: args.force ?? false,
+                  })
+              : undefined,
           },
         );
         stop = stopped.alreadyStoppedMessage ? "not_required" : "accepted";
@@ -254,7 +263,10 @@ function createDeleteDeviceWorkflow(
         // generic operation failure (#6863 review).
         effectiveError instanceof PooledAvdIdentityError
           ? "target_identity_unresolved"
-          : "operation_failed",
+          : effectiveError instanceof InputDeviceOwnedError
+            ? // Ownership was lost between the entry check and the shutdown reservation.
+              effectiveError.code
+            : "operation_failed",
         String(effectiveError instanceof Error ? effectiveError.message : effectiveError),
         state?.target.device,
       );
@@ -333,6 +345,14 @@ export function createLifecycleHandlers() {
           timeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
           retainLifecycleUntil,
           pooledAvdIdentity: pooledAvdKillIdentity(pooledAvdCapture, args.force ?? false),
+          // The entry check predates the lease wait; re-check under the assignment mutex.
+          assertHolder: () =>
+            assertLifecycleCallerHoldsDevice({
+              toolName: "killDevice",
+              device: args.device,
+              requester: lifecycleRequester(args),
+              force: args.force ?? false,
+            }),
         },
       );
       return createKillDeviceResponse(args, result.timing, result.alreadyStoppedMessage);

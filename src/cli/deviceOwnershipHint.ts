@@ -2,6 +2,7 @@ import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../daemon/inputDeviceOwnersh
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+  DEVICE_SHUTTING_DOWN_CODE,
 } from "../daemon/deviceAcquisitionRefusals";
 
 /** Tools that stop a device and therefore accept `force` to override a held-device refusal. */
@@ -31,6 +32,12 @@ export function cliDeviceOwnershipHint(payload: unknown, toolName: string): stri
     return (
       "Hint: the device's previous session is still finishing its cleanup. Re-run the command " +
       "after the retryAfterMs in the error has passed; nothing else needs to change."
+    );
+  }
+  if (code === DEVICE_SHUTTING_DOWN_CODE) {
+    return (
+      "Hint: the device is being shut down. Re-run the command after the retryAfterMs in the " +
+      "error has passed, once the shutdown has finished."
     );
   }
   if (code === DEVICE_OWNED_BY_OTHER_DAEMON_CODE) {

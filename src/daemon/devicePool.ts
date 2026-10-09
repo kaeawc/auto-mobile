@@ -2,6 +2,7 @@ import type { Environment } from "./poolConfig";
 import {
   DeviceCleanupInProgressError,
   DeviceOwnedByOtherDaemonError,
+  DeviceShuttingDownError,
 } from "./deviceAcquisitionRefusals";
 import {
   currentAllocationCancellationScope,
@@ -6865,11 +6866,13 @@ export class DevicePool {
     deviceId: string,
     abortSignal?: AbortSignal,
     autolockClient?: AutolockClient,
+    assertHolder?: () => void,
   ): Promise<ShutdownDeviceReservation | undefined> {
     return this.shutdownReservationCoordinator.reserveDeviceForShutdown(
       deviceId,
       abortSignal,
       autolockClient,
+      assertHolder,
     );
   }
 
@@ -7077,9 +7080,9 @@ export class DevicePool {
     );
   }
 
-  private assertNotReservedForShutdown(device: PooledDevice, unavailableMessage: string): void {
+  private assertNotReservedForShutdown(device: PooledDevice, detail: string): void {
     if (this.isReservedForShutdown(device)) {
-      throw new ActionableError(unavailableMessage);
+      throw new DeviceShuttingDownError(device.id, detail);
     }
   }
 
@@ -7117,10 +7120,7 @@ export class DevicePool {
           throw new ActionableError(`Device '${deviceId}' is not available in the device pool.`);
         }
         this.runtimeIdentity.assertRuntimeIdentity(device, expectedIdentity);
-        this.assertNotReservedForShutdown(
-          device,
-          `Device '${deviceId}' is shutting down and cannot be assigned.`,
-        );
+        this.assertNotReservedForShutdown(device, "and cannot be assigned");
         if (alreadyPooled) {
           this.recordSourceAndroidAvd(deviceId, androidAvdIdentity);
           this.notifyTargetDeviceReady({ device, snapshot });

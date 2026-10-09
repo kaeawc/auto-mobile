@@ -1169,12 +1169,16 @@ internal object AutoMobilePlanExecutor {
   /** Typed code for a bind refused because another AutoMobile daemon claims the device (#10980). */
   internal const val DEVICE_OWNED_BY_OTHER_DAEMON_CODE = "device_owned_by_other_daemon"
 
+  /** Typed code for a bind refused while the device is under a kill reservation (#11088). */
+  internal const val DEVICE_SHUTTING_DOWN_CODE = "device_shutting_down"
+
   /** Refusals the runner waits out with the bounded held-device wait. */
   private val DEVICE_WAIT_CODES =
     setOf(
       DEVICE_OWNED_BY_OTHER_SESSION_CODE,
       DEVICE_CLEANUP_IN_PROGRESS_CODE,
       DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+      DEVICE_SHUTTING_DOWN_CODE,
     )
 
   private const val DEVICE_OWNED_INITIAL_DELAY_MS = 500L
@@ -1207,6 +1211,7 @@ internal object AutoMobilePlanExecutor {
         "Device is still finishing its previous session's cleanup ($DEVICE_CLEANUP_IN_PROGRESS_CODE)"
       DEVICE_OWNED_BY_OTHER_DAEMON_CODE ->
         "Device is claimed by another AutoMobile daemon ($DEVICE_OWNED_BY_OTHER_DAEMON_CODE)"
+      DEVICE_SHUTTING_DOWN_CODE -> "Device is shutting down ($DEVICE_SHUTTING_DOWN_CODE)"
       else -> "Device is held by another session ($DEVICE_OWNED_BY_OTHER_SESSION_CODE)"
     }) +
       (parsed.daemonMessage?.let { ": $it" } ?: "") +

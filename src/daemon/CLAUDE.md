@@ -230,7 +230,7 @@ owner's (#10964); a read on a held device is connect-only, on its own lane (#109
 A recording stops and finalizes on its session's release, capped near 120 s (#10957),
 and an owner-less one stops on acquisition (#10961). Acquisition refusals that can
 clear on their own are typed and retryable: `device_cleanup_in_progress` (#10960)
-and `device_owned_by_other_daemon`. See `docs/using/device-ownership.md`.
+`device_owned_by_other_daemon`, and `device_shutting_down` (#11088). See `docs/using/device-ownership.md`.
 
 Open owner question: is non-persistence acceptable? Clients must register again
 after daemon restart. (Resolved question: watching is allowed on any device and

@@ -207,10 +207,7 @@ export class DeviceAutolockManager {
     }
     this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);
     this.pool.assertRuntimeIdentity(device, expectedIdentity);
-    this.pool.assertNotReservedForShutdown(
-      device,
-      `Device '${deviceId}' is shutting down and cannot be autolocked.`,
-    );
+    this.pool.assertNotReservedForShutdown(device, "and cannot be autolocked");
     if (alreadyPooled) {
       this.pool.recordSourceAndroidAvd(deviceId, androidAvdIdentity);
       this.pool.notifyTargetDeviceReady({ device, snapshot });

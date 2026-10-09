@@ -242,11 +242,14 @@ final class OverlayAnchorTests: XCTestCase {
 
     func testAnchorsAreDroppedAtOnceWithoutMotionOrForANoneTransition() throws {
         XCTAssertTrue(try fadingSpec(transition: nil).layeredAnchors(state: [:], pages: [:]).isEmpty)
-        XCTAssertTrue(try fadingSpec(transition: "none")
-            .layeredAnchors(state: [:], pages: [:], retainExiting: true).isEmpty)
+        XCTAssertTrue(
+            try fadingSpec(transition: "none")
+                .layeredAnchors(state: [:], pages: [:], retainExiting: true).isEmpty
+        )
         for transition in ["fade", "expand", "slide"] {
             XCTAssertEqual(
-                try fadingSpec(transition: transition).layeredAnchors(state: [:], pages: [:], retainExiting: true).count,
+                try fadingSpec(transition: transition).layeredAnchors(state: [:], pages: [:], retainExiting: true)
+                    .count,
                 1,
                 transition
             )
@@ -299,6 +302,9 @@ final class OverlayAnchorTests: XCTestCase {
         let straddling = OverlayRect(x: 300, y: 550, width: 200, height: 100)
         XCTAssertEqual(straddling.intersection(sheet), OverlayRect(x: 300, y: 600, width: 100, height: 50))
         XCTAssertNil(OverlayRect(x: 10, y: 100, width: 50, height: 50).intersection(sheet))
-        XCTAssertNil(OverlayRect(x: 0, y: 500, width: 50, height: 100).intersection(sheet), "touching edges do not overlap")
+        XCTAssertNil(
+            OverlayRect(x: 0, y: 500, width: 50, height: 100).intersection(sheet),
+            "touching edges do not overlap"
+        )
     }
 }

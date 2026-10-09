@@ -1,6 +1,12 @@
 import { spyOn } from "bun:test";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import {
+  CLI_KEEPER_LIVENESS_OWNER_KIND,
+  CLI_SESSION_LIVENESS_POLICY,
+  DAEMON_OWNED_SESSIONS_PARAM,
+  DAEMON_VERSION,
+  getCliSessionIdleTimeoutMs,
+} from "../../src/daemon/constants";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import {
   handleDaemonRequest,
@@ -37,7 +43,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "./devicePoolDependencies";
 import { drainMicrotasks } from "./fakeTimerStepping";
-import { RealToolCallPath } from "./realToolCallPath";
+import { RealToolCallPath, type DeviceToolRun } from "./realToolCallPath";
 
 // Two-sided liveness scenario harness (#10667, umbrella #10655).
 //
@@ -64,6 +70,8 @@ export const NO_HEARTBEAT_BUDGET_MS = NO_HEARTBEAT_RELEASE_BUDGET_MS;
 /** The latest an idle release lands after its deadline: suspect grace, one scan, one keeper tick. */
 export const RELEASE_SLACK_MS = SUSPECT_GRACE_MS + SCAN_MS + KEEPER_INTERVAL_MS;
 /** The autolock window the scenarios configure (AUTOMOBILE_DEVICE_POOL_TIMEOUT, in seconds). */
+/** A JUnit runner heartbeats its session every second (android/junit-runner DaemonHeartbeat.kt). */
+export const JUNIT_HEARTBEAT_MS = 1_000;
 export const AUTOLOCK_WINDOW_MS = 60_000;
 
 /** Microtask turns per fake-timer event so a keeper round trip settles before the next tick. */
@@ -109,6 +117,22 @@ interface LongCall {
 function deviceStartResult(sessionUuid: string) {
   return {
     content: [{ type: "text", text: JSON.stringify({ runtime: { session: { sessionUuid } } }) }],
+  };
+}
+
+/** provisionDevice's shape: the description nests under `device` beside a top-level `sessionId`. */
+function provisionDeviceResult(sessionUuid: string, deviceId: string) {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          device: { name: `Pixel_${deviceId}`, platform: PLATFORM, runtime: { deviceId } },
+          sessionId: sessionUuid,
+          source: "created",
+        }),
+      },
+    ],
   };
 }
 
@@ -251,8 +275,15 @@ export class LivenessScenario {
   private createProxy(token = OWNER_TOKEN, initialSessionUuid?: string): DaemonMcpProxy {
     const client = new FakeDaemonClient({
       onCallTool: (tool, params) => this.runDeviceTool(tool, params),
-      toolResultFor: (tool) =>
-        tool === "getAndroid" && this.minted ? deviceStartResult(this.minted) : undefined,
+      toolResultFor: (tool, params) => {
+        if (!this.minted) {
+          return undefined;
+        }
+        if (tool === "provisionDevice") {
+          return provisionDeviceResult(this.minted, String(params.deviceId));
+        }
+        return tool === "getAndroid" ? deviceStartResult(this.minted) : undefined;
+      },
       onCallDaemonMethod: async (method, params) => {
         if (method !== "daemon/heartbeat") {
           return;
@@ -297,9 +328,9 @@ export class LivenessScenario {
    */
   private async runDeviceTool(tool: string, params: Record<string, unknown>): Promise<unknown> {
     const { manager, pool } = this.daemon;
-    if (tool === "getAndroid") {
+    if (tool === "getAndroid" || tool === "provisionDevice") {
       const deviceId = typeof params.deviceId === "string" ? params.deviceId : this.deviceIds[0]!;
-      if (this.autolock) {
+      if (this.autolock && tool === "getAndroid") {
         this.minted = await pool.autolockDevice(deviceId, PLATFORM, CONNECTION);
       } else {
         this.minted = `scenario-session-${++this.mintCount}`;
@@ -321,7 +352,30 @@ export class LivenessScenario {
       manager.setDeviceReadiness(this.minted, "automationReady");
       return undefined;
     }
-    return await this.tools.call(tool, params);
+    return await this.tools.call(tool, this.resolveSelectorRoute(params));
+  }
+
+  /**
+   * The daemon resolves a selector-routed call (`deviceId`/`platform`, no `sessionUuid`) to one of
+   * the sessions the proxy says it owns before the tool runs (`DAEMON_OWNED_SESSIONS_PARAM`). This
+   * stands in for that resolution, which lives in the socket server: it picks the owned session
+   * bound to the selected device (or platform) and drops the proxy's routing marker.
+   */
+  private resolveSelectorRoute(params: Record<string, unknown>): Record<string, unknown> {
+    const { [DAEMON_OWNED_SESSIONS_PARAM]: owned, ...rest } = params;
+    if (rest.sessionUuid !== undefined || !Array.isArray(owned)) {
+      return rest;
+    }
+    const sessions = owned.flatMap((id) => {
+      const session = typeof id === "string" ? this.daemon.manager.getSession(id) : null;
+      return session ? [session] : [];
+    });
+    const reached = sessions.find((session) =>
+      typeof rest.deviceId === "string"
+        ? session.assignedDevice === rest.deviceId
+        : session.platform === rest.platform,
+    );
+    return reached ? { ...rest, sessionUuid: reached.sessionId } : rest;
   }
 
   daemonMethod(method: string, params: Record<string, unknown> = {}) {
@@ -381,6 +435,11 @@ export class LivenessScenario {
     return await this.runDeviceTool(tool, { sessionUuid: sessionId });
   }
 
+  /** A daemon-side tool call with exactly these arguments (no proxy in front, no routing markers). */
+  async daemonToolCallWith(args: Record<string, unknown>, tool = "observe"): Promise<unknown> {
+    return await this.runDeviceTool(tool, args);
+  }
+
   /** A tool call that stays in flight until `settle()`. */
   startLongCall(sessionId: string, tool = "observe"): LongCall {
     let open!: () => void;
@@ -420,6 +479,60 @@ export class LivenessScenario {
       void this.daemonMethod("daemon/heartbeat", { sessionId });
     }, cadenceMs);
     return { stop: () => this.timer.clearInterval(handle) };
+  }
+
+  /**
+   * A `--daemon heartbeat` keeper (#10054, #6870): the first tick claims `token` and moves the
+   * session to the `cli-idle` policy, later ticks prove the token. It is tokened liveness only,
+   * never use: it must not restart the idle window.
+   */
+  startCliKeeper(
+    sessionId: string,
+    token = "cli-keeper-token",
+    cadenceMs = 5_000,
+  ): { stop(): void } {
+    let claimed = false;
+    const handle = this.timer.setInterval(() => {
+      void this.daemonMethod("daemon/heartbeat", {
+        sessionId,
+        livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+        livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
+        idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+        livenessOwnerToken: token,
+        ...(claimed ? {} : { claimLivenessOwnership: true }),
+      });
+      claimed = true;
+    }, cadenceMs);
+    return { stop: () => this.timer.clearInterval(handle) };
+  }
+
+  /**
+   * A JUnit runner's HTTP heartbeat loop: tokenless beats every second (DEFAULT_INTERVAL_MS in
+   * `DaemonHeartbeat.kt`) for the session under test, alongside its own tool calls
+   * ({@link daemonToolCall}).
+   */
+  startJunitHeartbeats(sessionId: string): { stop(): void } {
+    return this.startTokenlessHeartbeats(sessionId, JUNIT_HEARTBEAT_MS);
+  }
+
+  /** A device tool call the agent routes by `deviceId`, with no session UUID. */
+  async selectorCall(deviceId: string, tool = "observe"): Promise<void> {
+    await this.proxy.callTool(tool, { deviceId });
+  }
+
+  /**
+   * An agent acquires through `provisionDevice` (result shape `{device, sessionId}`) instead of
+   * `getAndroid`, returning the session UUID the daemon minted.
+   */
+  async provision(deviceId: string = this.deviceIds[0]!): Promise<string> {
+    await this.proxy.callTool("provisionDevice", { deviceId });
+    await drainMicrotasks(TURNS_PER_EVENT);
+    return this.minted!;
+  }
+
+  /** Tool bodies that reached the device boundary (what actually drove a device). */
+  get driven(): readonly DeviceToolRun[] {
+    return this.tools.runs;
   }
 
   /** The MCP host closes the proxy's stdin: the keeper stops and the connection drops. */

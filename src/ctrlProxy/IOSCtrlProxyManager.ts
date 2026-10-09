@@ -1,6 +1,7 @@
 import { buildSimctlArgs } from "../utils/ios-cmdline-tools/simctlArgs";
 import { DefaultIosTunnelClient, type IosTunnelClient } from "./ios/IosTunnelClient";
 import { runnerQueryTimeoutEnv } from "./ios/runnerQueryTimeoutEnv";
+import { runnerHierarchyPairCaptureEnv } from "./ios/runnerHierarchyPairCaptureEnv";
 import type { DoctorProbeOptions } from "../doctor/types";
 import { createDoctorDeadline, remainingDoctorProbe, awaitDoctorProbe } from "../doctor/deadline";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -2408,6 +2409,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       CTRL_PROXY_IOS_TIMEOUT: timeout,
       AUTOMOBILE_DEVICE_ID: this.device.deviceId,
       ...runnerQueryTimeoutEnv(process.env),
+      // Simulator only: a physical device cannot write to a host path.
+      ...runnerHierarchyPairCaptureEnv(process.env),
     };
     if (bundleId) {
       runnerEnv.CTRL_PROXY_IOS_BUNDLE_ID = bundleId;

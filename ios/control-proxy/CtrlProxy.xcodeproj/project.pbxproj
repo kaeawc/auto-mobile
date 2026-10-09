@@ -72,11 +72,13 @@
 		4A99C099F2E5C6589CC24FB8 /* RequestClearText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83F1048EB07A1C40FEE1C6E8 /* RequestClearText.swift */; };
 		4D62313547088F8C9BD70258 /* HingeAngleSetting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7366D3444D35815F837642AA /* HingeAngleSetting.swift */; };
 		4D8DDC63179B6DD8B112A3F2 /* DisplayTargetedGesture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B65FC27015169FCB3C9030A /* DisplayTargetedGesture.swift */; };
+		504F1A038D41E217F149B67A /* HierarchyPair.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ACEF5AE24942F84EA44BF00 /* HierarchyPair.swift */; };
 		51172531044918A0248559AE /* ObjCExceptionCatcher.h in Headers */ = {isa = PBXBuildFile; fileRef = D219492B8663B05AFF608428 /* ObjCExceptionCatcher.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		51FEF589F67C8A78E299A91A /* HierarchyIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 401502F4542F2B4B460018E9 /* HierarchyIntegrationTests.swift */; };
 		543CE5608AD59EF3C64CE382 /* RequestGetPreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5F8F7BAAAAC5FEA95C9792 /* RequestGetPreference.swift */; };
 		5692771B573105C9FBDE383C /* SdkDatabaseError.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACA8A585999962DCE24C448D /* SdkDatabaseError.swift */; };
 		579AF3D84686D37CF9479097 /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17455E7D73C8111F059D3318 /* OSLogReader.swift */; };
+		58E315C6517C75D869FF92E2 /* HierarchyPairFileRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AD55771C5495F6D750A9DD1 /* HierarchyPairFileRecorder.swift */; };
 		5938B43016EBBC580A0538E1 /* SdkEventBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9780A20937F392C5E3A0692 /* SdkEventBuffer.swift */; };
 		5991D8066DB5DE253A239900 /* WebSocketResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CCEFD4CB913D94A8DF9707E /* WebSocketResponse.swift */; };
 		59A5A86AEBC4573A6CD96DFE /* WireError.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5861E84E2E5E07B1F45E48D /* WireError.swift */; };
@@ -142,6 +144,7 @@
 		97EAAC89501A682F6B97E655 /* SdkEndpointResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D360F9D9789EBB26ADD8FA97 /* SdkEndpointResolver.swift */; };
 		982B72985B6426E4DAE02A8A /* RequestSetText.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF22C1D3B8693A321680EC6B /* RequestSetText.swift */; };
 		98F705C8C54057FCB4B0CEDF /* SdkExecuteSqlResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = B94462B9A346CFA47B40D98F /* SdkExecuteSqlResult.swift */; };
+		99140F38B3898B7357495DD6 /* HierarchyPairRecording.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C7B6815D9CA4E05DC50708F /* HierarchyPairRecording.swift */; };
 		9941387A8DC3AD269B9858D5 /* TapDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 754597427372B30B2E66A93D /* TapDiagnostics.swift */; };
 		9A4BB68D82D6B6C48EA4A7F2 /* RequestPressKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C2287CAA890BFCEDF55788 /* RequestPressKey.swift */; };
 		9BBC8A7F2FA54B9DA9F31120 /* ElementLocator+Optimization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15A4BFCA620883B2BA4D2B11 /* ElementLocator+Optimization.swift */; };
@@ -327,7 +330,9 @@
 		259652401D400F3259B0DF5C /* RequestListDatabases.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestListDatabases.swift; sourceTree = "<group>"; };
 		265B28E26CC26E14AFAF3099 /* PerfProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfProvider.swift; sourceTree = "<group>"; };
 		28A1CE333BCB168F784CAB21 /* ElementLocating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementLocating.swift; sourceTree = "<group>"; };
+		2ACEF5AE24942F84EA44BF00 /* HierarchyPair.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyPair.swift; sourceTree = "<group>"; };
 		2B65FC27015169FCB3C9030A /* DisplayTargetedGesture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayTargetedGesture.swift; sourceTree = "<group>"; };
+		2C7B6815D9CA4E05DC50708F /* HierarchyPairRecording.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyPairRecording.swift; sourceTree = "<group>"; };
 		2CB2A539D17E4F7310DC27AA /* SemanticLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticLink.swift; sourceTree = "<group>"; };
 		2D080A36B99C83DCA108ABE3 /* RequestRemovePreference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestRemovePreference.swift; sourceTree = "<group>"; };
 		3240EAF1FF9AF78B790635AA /* SdkHierarchyExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyExtractor.swift; sourceTree = "<group>"; };
@@ -398,6 +403,7 @@
 		754597427372B30B2E66A93D /* TapDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapDiagnostics.swift; sourceTree = "<group>"; };
 		76D1AFB114A68CF3595A65DB /* SdkGestureInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkGestureInfo.swift; sourceTree = "<group>"; };
 		7946430E328DC8DE651C1693 /* WebSocketConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketConnection.swift; sourceTree = "<group>"; };
+		7AD55771C5495F6D750A9DD1 /* HierarchyPairFileRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyPairFileRecorder.swift; sourceTree = "<group>"; };
 		7C7D0326E1B35DF9109E8677 /* SdkHierarchyCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyCache.swift; sourceTree = "<group>"; };
 		7C95B6E321D8F8293BED77B9 /* SetNetworkFaultRulesResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetNetworkFaultRulesResponse.swift; sourceTree = "<group>"; };
 		7E32A6E418A2A1CC37E9FAE0 /* SdkCapabilitiesResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkCapabilitiesResponse.swift; sourceTree = "<group>"; };
@@ -599,6 +605,9 @@
 				BCB8F3CBE9F59194D59D6D75 /* HierarchyDebouncing.swift */,
 				4DCBF492D0805C0F1317728E /* HierarchyExtracting.swift */,
 				0D5271665E4DA850CE98A15F /* HierarchyMerger.swift */,
+				2ACEF5AE24942F84EA44BF00 /* HierarchyPair.swift */,
+				7AD55771C5495F6D750A9DD1 /* HierarchyPairFileRecorder.swift */,
+				2C7B6815D9CA4E05DC50708F /* HierarchyPairRecording.swift */,
 				8231D36A91EF815130B3C965 /* HierarchyResult.swift */,
 				20D2973D1552196510C60019 /* HingeAngleError.swift */,
 				7366D3444D35815F837642AA /* HingeAngleSetting.swift */,
@@ -1081,6 +1090,9 @@
 				AEDF42DBD9FBE3231F1071AD /* HierarchyExtracting.swift in Sources */,
 				51FEF589F67C8A78E299A91A /* HierarchyIntegrationTests.swift in Sources */,
 				0DF936A0A44D72C5082C0B22 /* HierarchyMerger.swift in Sources */,
+				504F1A038D41E217F149B67A /* HierarchyPair.swift in Sources */,
+				58E315C6517C75D869FF92E2 /* HierarchyPairFileRecorder.swift in Sources */,
+				99140F38B3898B7357495DD6 /* HierarchyPairRecording.swift in Sources */,
 				5ED1131AD64B510B6A1896F7 /* HierarchyResult.swift in Sources */,
 				5AB632C7B0EADA658817B7F7 /* HierarchyUpdateResponse.swift in Sources */,
 				215D4082B1E54F460C713BE9 /* Highlight.swift in Sources */,

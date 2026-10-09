@@ -41,6 +41,9 @@ struct ComponentColors {
     var error: Color { role("error", .red) }
     var onError: Color { role("onError", .white) }
     var scrim: Color { role("scrim", .black).opacity(0.32) }
+    var switchOn: Color { role("primary", Color(UIColor.systemGreen)) }
+    var switchOff: Color { role("surfaceContainerHighest", Color(UIColor.systemFill)) }
+    var switchThumb: Color { role("onPrimary", .white) }
 }
 
 // MARK: Slider, chip, card
@@ -232,7 +235,7 @@ struct OverlayListItemView: View {
     private func trailing(isOn: Bool) -> some View {
         switch node.trailing?.type {
         case "switch":
-            Toggle("", isOn: .constant(isOn)).labelsHidden().allowsHitTesting(false)
+            OverlaySwitchTrack(isOn: isOn)
         case "checkbox":
             OverlayGlyph(symbol: isOn ? "checkmark.square.fill" : "square")
         case "icon":
@@ -247,6 +250,29 @@ struct OverlayListItemView: View {
 
 /// An icon-only button: standard (default), filled, tonal or outlined. Its label comes from the
 /// node (`contentDescription`, else the icon name) via `IdentifierModifier`.
+/// A switch's track and thumb drawn in SwiftUI. A `Toggle` with the switch style hosts a UIKit
+/// `UISwitch`, which XCUITest still lists as its own switch elements under `accessibilityHidden`
+/// and inside a combined parent, so one switch row came back as three nodes (#10899). The
+/// control that draws this owns the single accessibility element.
+struct OverlaySwitchTrack: View {
+    @Environment(\.overlayPalette) private var palette
+    private var colors: ComponentColors { ComponentColors(palette: palette) }
+    let isOn: Bool
+
+    var body: some View {
+        Capsule()
+            .fill(isOn ? colors.switchOn : colors.switchOff)
+            .frame(width: 51, height: 31)
+            .overlay(alignment: isOn ? .trailing : .leading) {
+                Circle()
+                    .fill(colors.switchThumb)
+                    .shadow(color: .black.opacity(0.2), radius: 1, y: 1)
+                    .padding(2)
+            }
+            .accessibilityHidden(true)
+    }
+}
+
 /// A decorative or button-internal SF Symbol drawn as a text glyph. A bare `Image(systemName:)`
 /// still surfaces as an image element on iOS 26 even under `accessibilityHidden(true)`; a `Text`
 /// glyph with the symbol inline does not, so the parent control's label stays the only element.
@@ -556,17 +582,23 @@ struct OverlayTimePickerView: View {
             wheel(OverlayTime.hourLabel, selection: Binding(
                 get: { use24 ? hour : OverlayTime.hour12(of: hour) },
                 set: { picked in
-                    commit(hour: use24 ? picked : OverlayTime.hour24(hour12: picked, pm: OverlayTime.isPM(hour: hour)), minute: minute)
+                    commit(
+                        hour: use24 ? picked : OverlayTime.hour24(hour12: picked, pm: OverlayTime.isPM(hour: hour)),
+                        minute: minute
+                    )
                 }
-            ), values: use24 ? Array(0..<24) : Array(1...12), format: use24 ? "%02d" : "%d")
+            ), values: use24 ? Array(0 ..< 24) : Array(1 ... 12), format: use24 ? "%02d" : "%d")
             wheel(OverlayTime.minuteLabel, selection: Binding(
                 get: { minute },
                 set: { commit(hour: hour, minute: $0) }
-            ), values: Array(0..<60), format: "%02d")
+            ), values: Array(0 ..< 60), format: "%02d")
             if !use24 {
                 Picker(OverlayTime.meridiemLabel, selection: Binding(
                     get: { OverlayTime.isPM(hour: hour) ? 1 : 0 },
-                    set: { commit(hour: OverlayTime.hour24(hour12: OverlayTime.hour12(of: hour), pm: $0 == 1), minute: minute) }
+                    set: { commit(
+                        hour: OverlayTime.hour24(hour12: OverlayTime.hour12(of: hour), pm: $0 == 1),
+                        minute: minute
+                    ) }
                 )) {
                     Text("AM").tag(0)
                     Text("PM").tag(1)
@@ -600,10 +632,10 @@ struct OverlayTimePickerView: View {
     private var use24: Bool {
         switch node.is24Hour {
         case let explicit?: explicit
-        case nil: !(DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .autoupdatingCurrent) ?? "").contains("a")
+        case nil: !(DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .autoupdatingCurrent) ?? "")
+            .contains("a")
         }
     }
-
 }
 
 /// A calendar bound to a `YYYY-MM-DD` string key; picking another day binds it.

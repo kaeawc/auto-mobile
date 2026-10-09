@@ -192,7 +192,10 @@ final class OverlayAgent {
                 // The host resolves element anchors to bounds (#9316); drawing one that it did not
                 // would silently misplace the node, so the show is refused and nothing changes.
                 if let path = spec.root.unresolvedAnchorPath() {
-                    return result(false, "\(path): Element anchors must be resolved to bounds by the host; update the AutoMobile host")
+                    return result(
+                        false,
+                        "\(path): Element anchors must be resolved to bounds by the host; update the AutoMobile host"
+                    )
                 }
                 model.show(spec, reset: message["reset"] as? Bool == true)
                 warnAboutFontAssets(for: spec)
@@ -264,7 +267,7 @@ struct OverlayRootView: View {
     var body: some View {
         let palette = OverlayPalette.make(theme: model.spec?.theme, systemDark: systemScheme == .dark)
         // An open dialog makes the page behind it inert for accessibility, as it is for touches (#10899).
-        let pageInert = model.spec?.root.blocksPage(state: model.state, pages: model.pages) ?? false
+        let layer = model.spec?.root.layerAccessibility(state: model.state, pages: model.pages) ?? .container
         ZStack {
             if let spec = model.spec {
                 let chrome = OverlayHostChrome(placementType: spec.window.placement.type)
@@ -279,12 +282,11 @@ struct OverlayRootView: View {
                         // taller than that area neither pushes the bar up nor moves the spec.
                         Color.clear
                             .overlay {
-                                placed(spec).opacity(Double(spec.window.opacity ?? 100) / 100)
-                                    .accessibilityHidden(pageInert)
+                                placed(spec, layer: layer).opacity(Double(spec.window.opacity ?? 100) / 100)
                             }
                             .overlay {
                                 anchorLayer(spec).opacity(Double(spec.window.opacity ?? 100) / 100)
-                                    .accessibilityHidden(pageInert)
+                                    .overlayLayerAccessibility(layer)
                             }
                             .overlay {
                                 OverlayModalLayer(model: model)
@@ -293,12 +295,11 @@ struct OverlayRootView: View {
                             .clipped()
                     }
                 } else {
-                    placed(spec)
+                    placed(spec, layer: layer)
                         .opacity(Double(spec.window.opacity ?? 100) / 100)
-                        .accessibilityHidden(pageInert)
                     anchorLayer(spec)
                         .opacity(Double(spec.window.opacity ?? 100) / 100)
-                        .accessibilityHidden(pageInert)
+                        .overlayLayerAccessibility(layer)
                     OverlayModalLayer(model: model)
                         .opacity(Double(spec.window.opacity ?? 100) / 100)
                     dismissControl()
@@ -334,9 +335,11 @@ struct OverlayRootView: View {
     }
 
     @ViewBuilder
-    private func placed(_ spec: OverlaySpec) -> some View {
+    private func placed(_ spec: OverlaySpec, layer: OverlayLayerAccessibility) -> some View {
         let placement = spec.window.placement
-        let root = NodeView(node: spec.root, model: model)
+        // The boundary sits on the root itself, inside the placement's fill frames, so a lone
+        // node keeps its own accessibility frame (#10898).
+        let root = NodeView(node: spec.root, model: model).overlayLayerAccessibility(layer)
         // There is no window to move onto an anchored root: the anchor layer places it, and an
         // empty sheet or floating slot must not catch touches meant for the app.
         let rootAnchored = spec.root.anchor != nil
@@ -407,6 +410,13 @@ struct OverlayRootView: View {
 }
 
 extension View {
+    /// Applies a layer's accessibility shape. The child behaviour is a value rather than a
+    /// branch, so the layer keeps its view identity (and scroll positions) when a dialog opens.
+    func overlayLayerAccessibility(_ layer: OverlayLayerAccessibility) -> some View {
+        accessibilityElement(children: layer == .collapsed ? .ignore : .contain)
+            .accessibilityHidden(layer == .collapsed)
+    }
+
     /// Keeps `model.hitRects[key]` at this view's window frame while it is on screen.
     /// With `clip`, only the part of the frame inside it takes touches; `enabled: false` withdraws
     /// the rect while the view stays on screen (an anchored node fading out with its ancestor).

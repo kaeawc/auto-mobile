@@ -58,6 +58,11 @@ extension OverlayNode {
         openModals(state: state, pages: pages).contains { $0.type == "dialog" }
     }
 
+    /// How the page and the anchor layer expose their nodes to accessibility under this root.
+    func layerAccessibility(state: [String: JSONValue], pages: [String: Int]) -> OverlayLayerAccessibility {
+        OverlayLayerAccessibility(inert: blocksPage(state: state, pages: pages))
+    }
+
     /// The node or composite part whose identifier is `identifier`, depth-first in tree order.
     /// Parts of a closed dialog or snackbar are not on screen, so they never match.
     func tapTarget(identifier wanted: String, state: [String: JSONValue]) -> OverlayTapTarget? {
@@ -303,5 +308,22 @@ extension OverlayNode {
             identifier: partIdentifier("confirm")
         )) }
         return parts
+    }
+}
+
+/// How a drawn layer (the spec's page, its anchor layer) exposes its nodes to accessibility.
+enum OverlayLayerAccessibility: Equatable {
+    /// The layer is its own accessibility container. Without one, a page whose only element is a
+    /// single node (a lone button or text) reported that node at the whole layer's frame, because
+    /// the layer's fill frame wraps it directly; a tap at that frame's centre then missed the
+    /// node, so `[Toggle, hidden text]` never toggled (#10898).
+    case container
+    /// One empty, hidden element with no children. `accessibilityHidden` alone did not keep the
+    /// page out of the XCUITest snapshot under an open dialog (#10899); collapsing the layer's
+    /// children removes them from the tree itself.
+    case collapsed
+
+    init(inert: Bool) {
+        self = inert ? .collapsed : .container
     }
 }

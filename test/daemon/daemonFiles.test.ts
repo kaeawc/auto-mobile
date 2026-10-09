@@ -523,8 +523,8 @@ describe("listDaemonPidFilePathsOrThrow", () => {
   test("an aux-isolated PID file in the default directory lists only this uid's own names (#10906)", () => {
     // #10881 puts an AUTOMOBILE_AUX_SOCKET_DIR daemon's PID file at
     // /tmp/auto-mobile-daemon-<uid>-<hash>.pid, so its own-directory scan is /tmp.
-    const isolatedPidFile = "/tmp/auto-mobile-daemon-1000-0123456789.pid";
-    const defaultPidFile = "/tmp/auto-mobile-daemon-1000.pid";
+    const isolatedPidFile = join("/tmp", "auto-mobile-daemon-1000-0123456789.pid");
+    const defaultPidFile = join("/tmp", "auto-mobile-daemon-1000.pid");
     const listed: string[] = [];
     const discovered = listDaemonPidFilePathsOrThrow(isolatedPidFile, defaultPidFile, (dir) => {
       listed.push(dir);
@@ -540,12 +540,17 @@ describe("listDaemonPidFilePathsOrThrow", () => {
       ];
     });
 
-    expect(listed).toEqual(["/tmp"]);
-    expect([...discovered].sort()).toEqual([
-      "/tmp/auto-mobile-daemon-1000-0123456789.pid",
-      "/tmp/auto-mobile-daemon-1000-abcdefabcd.pid",
-      "/tmp/auto-mobile-daemon-1000.pid",
-    ]);
+    expect(listed).toEqual([join("/tmp")]);
+    // Platform-native separators: production joins with node:path.
+    expect([...discovered].sort()).toEqual(
+      [
+        "auto-mobile-daemon-1000-0123456789.pid",
+        "auto-mobile-daemon-1000-abcdefabcd.pid",
+        "auto-mobile-daemon-1000.pid",
+      ]
+        .map((name) => join("/tmp", name))
+        .sort(),
+    );
   });
 
   test("a foreign uid's unreadable PID file in /tmp cannot make isolated startup fatal (#10906)", () => {

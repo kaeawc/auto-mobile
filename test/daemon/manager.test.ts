@@ -6197,6 +6197,24 @@ describe("Daemon manager process detection", () => {
         socketPath,
         processFinder,
         processSpawner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        // The default probe would open a real client connection to the socket
+        // file; with a long macOS tmpdir path the connect fails synchronously and
+        // the auto-advancing FakeTimer can fire the connect timeout in the same
+        // tick, before the client's socket binding exists.
+        {
+          socketExists: () => existsSync(socketPath),
+          readRecord: () => readPidFileDataSync(pidFilePath),
+          probe: async () => ({ running: false }),
+        },
       );
 
       await manager.start();

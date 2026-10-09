@@ -1,8 +1,9 @@
 # Moving GitHub-hosted macOS jobs to CircleCI (#10887)
 
-Status: draft plan, 2026-10-08. The CircleCI mirrors of the always-hosted PR jobs
-are in `.circleci/continue_config.yml` and run alongside the GitHub jobs. Nothing
-on GitHub has been removed or re-gated yet.
+Status: superseded 2026-10-09 by the [macOS CI capacity plan](macos-capacity-plan.md)
+(#11010, #11011, #11012). CircleCI now carries one PR job (Playground) plus all
+post-merge and nightly macOS work, and the PR mirrors described below were
+removed. The plan numbers and the release/signing analysis below still apply.
 
 ## 1. CircleCI's macOS allowance (checked 2026-10-08)
 

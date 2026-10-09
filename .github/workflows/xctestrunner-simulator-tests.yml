@@ -3,8 +3,10 @@ name: "XCTestRunner Simulator Tests"
 # The advisory iOS simulator integration lane (CtrlProxy UI tests, the
 # videoRecording MP4 integration, the navigation-graph Simulator workflow and
 # the odd-width screenshot test). It used ~85% of PR hosted-macOS minutes, so it
-# is off the default PR path (#10895): nightly.yml calls it every night and
-# pull_request.yml calls it only when the PR carries the `run-ios-sim` label.
+# is off the default PR path (#10895): pull_request.yml calls it only when the PR
+# carries the `run-ios-sim` label. The nightly run is CircleCI's
+# xctestrunner-simulator-tests job (.circleci/continue_config.yml, #11010), which
+# test/scripts/circleciMacosMigrationPolicy.test.ts keeps in step with this file.
 # Callers see the check as "XCTestRunner Simulator Tests / Simulator Tests".
 on:
   workflow_call:

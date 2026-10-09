@@ -9,7 +9,8 @@ import type {
   ServerResponse,
 } from "node:http";
 import { logger } from "../../src/utils/logger";
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { Daemon } from "../../src/daemon/daemon";
 import { MCP_STREAMABLE_PATH } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -157,6 +158,11 @@ async function harness(
   await internals.startHttpServer();
   return { server, transport };
 }
+
+// harness() constructs a Daemon, which initializes the process-wide DaemonState.
+afterEach(() => {
+  DaemonState.getInstance().reset();
+});
 
 describe("Daemon HTTP request admission", () => {
   test.each(["evil.com:41321", "127.0.0.1:41322", undefined])(

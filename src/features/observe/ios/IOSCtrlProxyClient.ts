@@ -4349,16 +4349,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     databasePath: string,
     query: string,
     timeoutMs?: number,
+    readOnly?: boolean,
   ): Promise<import("../../database/DatabaseInspector").SQLResult> {
     await this.requireSdkCapability("database", appId);
-    return this.database.executeSQL(
-      appId,
-      databasePath,
-      query,
-      timeoutMs,
-      this.boundSessionId ?? undefined,
-      iosMutationTokens.get(this.device.deviceId, appId),
-    );
+    return this.database.executeSQL(appId, databasePath, query, timeoutMs, {
+      sessionId: this.boundSessionId ?? undefined,
+      mutationToken: iosMutationTokens.get(this.device.deviceId, appId),
+      readOnly,
+    });
   }
 
   async listDatabasesForIos(

@@ -3,8 +3,10 @@ import { logger } from "../utils/logger";
 
 /** What the watchdog observes about this daemon process. */
 export interface PrivateDaemonOrphanPort {
-  /** Current parent PID; 1 once the launching parent has exited and init adopted us. */
+  /** Current parent PID; changes (to 1, or to a subreaper's pid) once the launcher exits. */
   parentPid(): number;
+  /** The parent PID recorded when this daemon started: the launcher. */
+  launcherPid(): number;
   /** Open control-socket and auxiliary-socket connections and in-flight HTTP requests. */
   clientCount(): number;
   /**
@@ -28,6 +30,23 @@ export function resolvePrivateDaemonOrphanIdleMs(env: NodeJS.ProcessEnv = proces
   const raw = env[PRIVATE_DAEMON_ORPHAN_IDLE_MS_ENV];
   const parsed = raw === undefined ? Number.NaN : Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS;
+}
+
+/** A launcher that knows its own pid can pass it explicitly, which wins over the parent pid. */
+export const DAEMON_LAUNCHER_PID_ENV = "AUTOMOBILE_DAEMON_LAUNCHER_PID";
+
+/**
+ * The launcher pid the orphan watchdog compares the parent against: the launcher-provided
+ * `AUTOMOBILE_DAEMON_LAUNCHER_PID` when it is a valid pid, else the parent pid captured at
+ * process entry (#11041).
+ */
+export function resolveLauncherPid(
+  entryParentPid: number,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env[DAEMON_LAUNCHER_PID_ENV]?.trim() ?? "";
+  const parsed = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed > 1 ? parsed : entryParentPid;
 }
 
 /** Explicit harness marker: `1` arms the orphan watchdog, `0` opts a daemon out of it. */
@@ -105,6 +124,16 @@ export class PrivateDaemonOrphanWatchdog {
     }
   }
 
+  /**
+   * The launcher is gone once init adopted us or any other process did: under a
+   * Linux subreaper (systemd --user, container inits) the new parent is not pid 1
+   * but is still not the launcher we recorded at start.
+   */
+  private isOrphaned(): boolean {
+    const parent = this.port.parentPid();
+    return parent === INIT_PID || parent !== this.port.launcherPid();
+  }
+
   /** One check; returns true when it requested shutdown. */
   check(): boolean {
     if (this.shutdownRequested) {
@@ -115,7 +144,7 @@ export class PrivateDaemonOrphanWatchdog {
       this.lastClientActivityCount !== null && activityCount !== this.lastClientActivityCount;
     this.lastClientActivityCount = activityCount;
     const orphanedAndIdle =
-      this.port.parentPid() === INIT_PID &&
+      this.isOrphaned() &&
       !clientSinceLastCheck &&
       this.port.clientCount() === 0 &&
       this.port.liveSessionCount() === 0;

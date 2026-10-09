@@ -9,8 +9,10 @@ import Foundation
 ///
 /// Bound per instance, as on Android: a `text` node's `text`, the component label, title and
 /// button fields listed on `bindComponentFields`; `setState` values and `emit` names in
-/// `onTap`; and the `equals`/`notEquals` operands of `visibleWhen` and `styleWhen` conditions,
-/// recursively through `all`/`any`/`not`. A string that is exactly one placeholder keeps the
+/// `onTap`; the `equals`/`notEquals` operands of `visibleWhen` and `styleWhen` conditions,
+/// recursively through `all`/`any`/`not`; and every state key (#11051): `stateKey`,
+/// `hourKey`/`minuteKey`, a list item's trailing key, `openWhen.key`, condition keys and the keys
+/// of `setState`, `toggle`, `increment` and `decrement`. A string that is exactly one placeholder keeps the
 /// item's own type, so `equals: "{item.id}"` can match a numeric state value.
 enum OverlayRepeat {
     /// One piece of a string with `{as.field}` / `{index}` placeholders resolved.
@@ -102,6 +104,7 @@ private struct Instance {
             fields["text"] = .string(interpolate(text))
         }
         bindComponentFields(&fields)
+        bindStateKeys(&fields)
         if case let .array(actions)? = fields["onTap"] {
             fields["onTap"] = .array(actions.map(bindAction))
         }
@@ -148,6 +151,19 @@ private struct Instance {
         }
     }
 
+    /// State-key fields bind to text (#11051): the node's own keys, a list item's trailing control
+    /// and a sheet, dialog or snackbar `openWhen`. Condition and action keys bind with their owners.
+    private func bindStateKeys(_ fields: inout [String: JSONValue]) {
+        for key in ["stateKey", "hourKey", "minuteKey"] {
+            bindString(key, in: &fields)
+        }
+        for (part, key) in [("trailing", "stateKey"), ("openWhen", "key")] {
+            guard case var .object(partFields)? = fields[part] else { continue }
+            bindString(key, in: &partFields)
+            fields[part] = .object(partFields)
+        }
+    }
+
     private func bindString(_ key: String, in fields: inout [String: JSONValue]) {
         if case let .string(text)? = fields[key] { fields[key] = .string(interpolate(text)) }
     }
@@ -181,7 +197,10 @@ private struct Instance {
         guard case var .object(fields) = action else { return action }
         switch fields["type"] {
         case .string("setState")?:
+            bindString("key", in: &fields)
             if let value = fields["value"] { fields["value"] = interpolateScalar(value) }
+        case .string("toggle")?, .string("increment")?, .string("decrement")?:
+            bindString("key", in: &fields)
         case .string("emit")?:
             if case let .string(name)? = fields["name"] { fields["name"] = .string(interpolate(name)) }
         default:
@@ -192,6 +211,7 @@ private struct Instance {
 
     private func bindCondition(_ condition: JSONValue) -> JSONValue {
         guard case var .object(fields) = condition else { return condition }
+        bindString("key", in: &fields)
         for operand in ["equals", "notEquals"] {
             if let value = fields[operand] { fields[operand] = interpolateScalar(value) }
         }

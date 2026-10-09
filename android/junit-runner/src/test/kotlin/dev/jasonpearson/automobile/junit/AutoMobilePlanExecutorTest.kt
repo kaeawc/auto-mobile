@@ -65,6 +65,40 @@ class AutoMobilePlanExecutorTest {
   }
 
   @Test
+  fun `a device still finishing cleanup is waited on like a held device`() {
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    repeat(2) {
+      fakeDaemonClient.queueExecutePlanResponse(
+        buildDaemonResponse(deviceCleanupPayload(), isError = true),
+      )
+    }
+    fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+
+    assertEquals(true, result.success)
+    assertEquals(listOf(500L, 1000L), waits)
+    assertEquals(3, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `a device another daemon claims is waited on like a held device`() {
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    fakeDaemonClient.queueExecutePlanResponse(
+      buildDaemonResponse(otherDaemonPayload(), isError = true),
+    )
+    fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+
+    assertEquals(true, result.success)
+    assertEquals(listOf(500L), waits)
+    assertEquals(2, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
   fun `a held device that never frees fails with a clear error after the wait budget`() {
     val waits = mutableListOf<Long>()
     AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
@@ -587,6 +621,18 @@ class AutoMobilePlanExecutorTest {
   private fun deviceOwnedPayload(): JsonObject =
     payload(
       """{"success":false,"error":"executePlan refused: device 'emulator-5554' is held by another session.","code":"device_owned_by_other_session","deviceId":"emulator-5554","retryable":false}""",
+    )
+
+  // Shape of shapeToolCallError for a DeviceCleanupInProgressError (#10960).
+  private fun deviceCleanupPayload(): JsonObject =
+    payload(
+      """{"success":false,"error":"Device 'emulator-5554' is still completing the previous session's cleanup","code":"device_cleanup_in_progress","deviceId":"emulator-5554","retryable":true,"retryAfterMs":4000}""",
+    )
+
+  // Shape of shapeToolCallError for a DeviceOwnedByOtherDaemonError (#10980).
+  private fun otherDaemonPayload(): JsonObject =
+    payload(
+      """{"success":false,"error":"Device 'emulator-5554' is claimed by another AutoMobile daemon (PID 4242)","code":"device_owned_by_other_daemon","deviceId":"emulator-5554","retryable":true,"retryAfterMs":2000}""",
     )
 
   private fun deviceLostPayload(): JsonObject =

@@ -45,6 +45,7 @@ class PlanRecoveryInteractionTest {
   private val json = Json { ignoreUnknownKeys = true }
   private lateinit var daemon: PlanInteractionDaemon
   private lateinit var recordingAgent: PlanInteractionRecordingAgent
+  private lateinit var heartbeat: PlanInteractionHeartbeat
 
   @Before
   fun setup() {
@@ -52,7 +53,8 @@ class PlanRecoveryInteractionTest {
     recordingAgent = PlanInteractionRecordingAgent()
     DaemonSocketClientManager.testClient = daemon
     AutoMobileSharedUtils.testDeviceChecker = PlanInteractionDeviceChecker()
-    DaemonHeartbeat.testController = PlanInteractionHeartbeat()
+    heartbeat = PlanInteractionHeartbeat()
+    DaemonHeartbeat.testController = heartbeat
     AutoMobilePlanExecutor.testAgent = recordingAgent
     System.setProperty("automobile.ci.mode", "false")
   }
@@ -197,6 +199,48 @@ class PlanRecoveryInteractionTest {
       listOf("daemon/releaseSession" to daemon.sessionUuidArgs[0]),
       daemon.daemonMethodCalls,
     )
+  }
+
+  // ── #11072: a session the daemon released is never driven again ──
+
+  @Test
+  fun `a session the daemon released before recovery fails fast with the daemon's reason`() {
+    daemon.cannedFailure = failedPayload { it }
+    heartbeat.onRegister = { sessionId ->
+      // The executePlan heartbeat got a 404 while the plan ran.
+      heartbeat.losses[sessionId] =
+        DaemonSessionLoss(sessionId, "heartbeat-timeout", "Session not found: $sessionId")
+    }
+
+    val result = executeSimplePlan()
+
+    assertFalse(result.success)
+    assertTrue("recovery never ran on a freed device", recordingAgent.contexts.isEmpty())
+    assertFalse(result.aiRecoveryAttempted)
+    assertEquals("no resume on the released session", 1, daemon.startSteps.size)
+    assertTrue(result.errorMessage.orEmpty().contains("releaseReason: heartbeat-timeout"))
+    assertEquals(
+      "the daemon already freed it; nothing to release",
+      emptyList<Pair<String, String?>>(),
+      daemon.daemonMethodCalls,
+    )
+  }
+
+  @Test
+  fun `a session released while recovery runs is never resumed`() {
+    daemon.cannedFailure = failedPayload { it }
+    recordingAgent.onRecovery = { context ->
+      val sessionId = checkNotNull(context.sessionUuid)
+      heartbeat.losses[sessionId] = DaemonSessionLoss(sessionId, "idle", "Session not found")
+    }
+
+    val result = executeSimplePlan()
+
+    assertFalse(result.success)
+    assertTrue(result.aiRecoveryAttempted)
+    assertFalse(result.aiRecoverySuccessful)
+    assertEquals("no resume on the released session", 1, daemon.startSteps.size)
+    assertTrue(result.errorMessage.orEmpty().contains("releaseReason: idle"))
   }
 
   @Test
@@ -547,12 +591,14 @@ private class PlanInteractionRecordingAgent :
   AutoMobileAgent(recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = true)) {
   val contexts = mutableListOf<FailedStepContext>()
   var recoverySucceeds = true
+  var onRecovery: (FailedStepContext) -> Unit = {}
 
   override fun attemptAiRecovery(
     context: FailedStepContext,
     secretValues: List<String>,
   ): RecoveryOutcome {
     contexts.add(context)
+    onRecovery(context)
     return RecoveryOutcome(
       success = recoverySucceeds,
       recoveryTimeMs = 1,
@@ -570,9 +616,14 @@ private class PlanInteractionDeviceChecker : DeviceChecker {
 }
 
 private class PlanInteractionHeartbeat : DaemonHeartbeatController {
+  val losses = mutableMapOf<String, DaemonSessionLoss>()
+  var onRegister: (String) -> Unit = {}
+
   override fun startBackground(intervalMs: Long) = java.io.Closeable {}
 
-  override fun registerSession(sessionId: String) = Unit
+  override fun registerSession(sessionId: String) = onRegister(sessionId)
 
   override fun unregisterSession(sessionId: String) = Unit
+
+  override fun sessionLoss(sessionId: String): DaemonSessionLoss? = losses[sessionId]
 }

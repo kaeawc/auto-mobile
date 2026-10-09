@@ -473,9 +473,10 @@ internal object AutoMobilePlanExecutor {
       }
 
       val errorMessage = response.error ?: parsed.errorMessage
-      if (parsed.code == DEVICE_OWNED_BY_OTHER_SESSION_CODE) {
-        // Another session holds the device (typically a concurrent test attempt in this runner).
-        // Wait for it to release it, within its own bounded budget, without spending maxRetries.
+      if (parsed.code in DEVICE_WAIT_CODES) {
+        // Another session holds the device (typically a concurrent test attempt in this runner),
+        // or its previous session is still finishing cleanup (#10960). Wait for it to free up,
+        // within its own bounded budget, without spending maxRetries.
         val delayMs = deviceOwnedBackoffDelayMs(deviceOwnedWaits, deviceOwnedWaitMs)
         if (delayMs == null) {
           parsed = parsed.copy(errorMessage = deviceOwnedGiveUpMessage(parsed, deviceOwnedWaitMs))
@@ -556,6 +557,32 @@ internal object AutoMobilePlanExecutor {
 
   // ── Failure handling & recovery ───────────────────────────────────────────
 
+  /**
+   * The failure to report when the daemon released [sessionUuid] while the runner heartbeated it
+   * (#11072), or null while the session is still held. The daemon already freed the session, so
+   * there is nothing to release.
+   */
+  private fun sessionLossFailure(
+    sessionUuid: String?,
+    result: CommandResult,
+    errorMessage: String,
+    toolResults: List<ToolResultEntry>,
+    recoveryAttempted: Boolean,
+  ): InternalExecutionResult? {
+    val loss = sessionUuid?.let { DaemonHeartbeat.sessionLoss(it) } ?: return null
+    val reason = "AI recovery cannot continue: ${loss.describe()}"
+    System.err.println(reason)
+    return InternalExecutionResult(
+      success = false,
+      exitCode = result.exitCode,
+      output = result.output,
+      errorMessage = "$errorMessage\n$reason",
+      aiRecoveryAttempted = recoveryAttempted,
+      aiRecoverySuccessful = false,
+      toolResults = toolResults,
+    )
+  }
+
   private fun handleFailure(
     result: CommandResult,
     options: AutoMobilePlanExecutionOptions,
@@ -612,6 +639,18 @@ internal object AutoMobilePlanExecutor {
     // The failed attempt unregistered its session when executePlan returned; keep it heartbeating
     // while recovery's calls (which carry it) hold the device, or the daemon idle-releases it.
     val recoverySession = failedStepContext.sessionUuid
+    // The daemon already released the failed attempt's session (#11072): recovery would drive a
+    // device the runner no longer holds, so fail now with the daemon's reason.
+    sessionLossFailure(
+        recoverySession,
+        result,
+        errorMessage,
+        toolResults,
+        recoveryAttempted = false,
+      )
+      ?.let {
+        return it
+      }
     if (recoverySession != null) DaemonHeartbeat.registerSession(recoverySession)
     val recoveryOutcome =
       try {
@@ -621,6 +660,12 @@ internal object AutoMobilePlanExecutor {
         throw error
       } finally {
         if (recoverySession != null) DaemonHeartbeat.unregisterSession(recoverySession)
+      }
+
+    // Released while recovery ran: never resume on it, whatever recovery reported.
+    sessionLossFailure(recoverySession, result, errorMessage, toolResults, recoveryAttempted = true)
+      ?.let {
+        return it
       }
 
     if (!recoveryOutcome.success) {
@@ -1116,6 +1161,22 @@ internal object AutoMobilePlanExecutor {
   /** Typed code for a device-mutating call refused because another session holds it (#10783). */
   internal const val DEVICE_OWNED_BY_OTHER_SESSION_CODE = "device_owned_by_other_session"
 
+  /**
+   * Typed code for a bind refused while the device's previous session finishes cleanup (#10960).
+   */
+  internal const val DEVICE_CLEANUP_IN_PROGRESS_CODE = "device_cleanup_in_progress"
+
+  /** Typed code for a bind refused because another AutoMobile daemon claims the device (#10980). */
+  internal const val DEVICE_OWNED_BY_OTHER_DAEMON_CODE = "device_owned_by_other_daemon"
+
+  /** Refusals the runner waits out with the bounded held-device wait. */
+  private val DEVICE_WAIT_CODES =
+    setOf(
+      DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+      DEVICE_CLEANUP_IN_PROGRESS_CODE,
+      DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+    )
+
   private const val DEVICE_OWNED_INITIAL_DELAY_MS = 500L
   private const val DEVICE_OWNED_MAX_DELAY_MS = 4_000L
   private const val DEVICE_OWNED_DEFAULT_BUDGET_MS = 30_000L
@@ -1141,7 +1202,13 @@ internal object AutoMobilePlanExecutor {
   private const val RELEASE_SESSION_TIMEOUT_MS = 10_000L
 
   private fun deviceOwnedGiveUpMessage(parsed: ParsedToolResult, waitedMs: Long): String =
-    "Device is held by another session ($DEVICE_OWNED_BY_OTHER_SESSION_CODE)" +
+    (when (parsed.code) {
+      DEVICE_CLEANUP_IN_PROGRESS_CODE ->
+        "Device is still finishing its previous session's cleanup ($DEVICE_CLEANUP_IN_PROGRESS_CODE)"
+      DEVICE_OWNED_BY_OTHER_DAEMON_CODE ->
+        "Device is claimed by another AutoMobile daemon ($DEVICE_OWNED_BY_OTHER_DAEMON_CODE)"
+      else -> "Device is held by another session ($DEVICE_OWNED_BY_OTHER_SESSION_CODE)"
+    }) +
       (parsed.daemonMessage?.let { ": $it" } ?: "") +
       "\nThe runner waited ${waitedMs}ms for it to be released. Another test attempt or tool " +
       "session is using this device; give each concurrent test its own device, or run them " +

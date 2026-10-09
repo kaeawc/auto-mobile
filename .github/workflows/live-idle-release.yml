@@ -1,7 +1,9 @@
 name: "Live Idle Release"
 
-# Opt-in, on-demand check of the device-session release windows (#10840, parent #10655).
-# Dispatch only: it never runs on pull requests, merges or schedules. It boots one
+# Check of the device-session release windows (#10840, parent #10655), on demand and nightly
+# (#10983). It never runs on pull requests or merges. The nightly run is advisory: the check job
+# is continue-on-error until it has been green twice in a row, then drop that line to make a red
+# night visible. Nothing depends on it, so it cannot block a merge either way. It boots one
 # emulator and runs scripts/live-idle-release-check.sh against a private daemon with a
 # short idle window; each scenario's ground truth (daemon `active-sessions` snapshots,
 # daemon log lines, observation-stream frames) is uploaded as an artifact.
@@ -10,6 +12,9 @@ name: "Live Idle Release"
 # does not boot; run it locally with --second-serial.
 
 on:
+  schedule:
+    # Nightly, away from the 00:00 UTC nightly.yml burst.
+    - cron: "30 3 * * *"
   workflow_dispatch:
     inputs:
       scenario:
@@ -17,7 +22,8 @@ on:
         required: false
         default: "all"
         type: choice
-        options: [all, active, no-heartbeat, idle, stdin-eof, selector, stream, provision]
+        options:
+          [all, active, no-heartbeat, idle, stdin-eof, selector, observe-only, stream, provision]
       idle-timeout-ms:
         description: "AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS for the private daemon"
         required: false
@@ -30,7 +36,7 @@ permissions:
 
 jobs:
   build-control-proxy-apk:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.repository == 'kaeawc/auto-mobile')
     uses: ./.github/workflows/build-control-proxy-apk.yml
     secrets:
       GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
@@ -41,9 +47,11 @@ jobs:
 
   live-idle-release:
     name: "Live Idle Release Check"
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.repository == 'kaeawc/auto-mobile')
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Advisory until green twice in a row (#10983); the evidence artifact is uploaded either way.
+    continue-on-error: true
     needs: build-control-proxy-apk
     steps:
       - name: "Git Checkout"
@@ -73,7 +81,7 @@ jobs:
           script: |
             cd "$GITHUB_WORKSPACE"
             sudo apt-get install -y --no-install-recommends netcat-openbsd jq > /dev/null
-            IDLE_SCENARIO='${{ inputs.scenario }}' IDLE_TIMEOUT_MS='${{ inputs.idle-timeout-ms }}' \
+            IDLE_SCENARIO='${{ inputs.scenario || 'all' }}' IDLE_TIMEOUT_MS='${{ inputs.idle-timeout-ms || '20000' }}' \
               bash scripts/ci/run-live-idle-release.sh
 
       - name: "Upload Idle Release Evidence"

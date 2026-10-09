@@ -203,8 +203,12 @@ class DatabaseInspectorProvider : ContentProvider() {
     val databasePath =
       extras?.getString("databasePath") ?: throw IllegalArgumentException("databasePath required")
     val query = extras.getString("query") ?: throw IllegalArgumentException("query required")
+    // The host sets this when it classified the query as a read. The SDK then runs it on the
+    // read-only path whatever the policy allows, so a host classifier gap cannot become a write.
+    val hostRequestedReadOnly = extras.getString("readOnly") == "true"
     val mutationsAllowed =
-      capabilities.policy.allowMutations &&
+      !hostRequestedReadOnly &&
+        capabilities.policy.allowMutations &&
         capabilities.capabilities.any {
           it.id == "storage.mutation" && it.state == SdkCapabilityState.SUPPORTED
         }

@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "components": {
+      "post": {
+        "root": {
+          "type": "spacer"
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "use",
+          "component": "card"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].component",
+  "expectedMessage": "Unknown component \"card\""
+}

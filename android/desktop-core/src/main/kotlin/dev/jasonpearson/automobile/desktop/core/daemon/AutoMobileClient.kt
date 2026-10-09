@@ -17,6 +17,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 
@@ -312,10 +313,23 @@ data class StartDeviceResult(
   val deviceId: String? = null,
   val runtime: StartDeviceRuntime? = null,
   val message: String? = null,
+  /**
+   * Set when the daemon refused the start as `device_cleanup_in_progress` (#10960): the wait in
+   * milliseconds before retrying, once the device's previous session finishes cleaning up.
+   */
+  @Transient val cleanupRetryAfterMs: Long? = null,
 ) {
   val resolvedDeviceId: String?
     get() = runtime?.deviceId ?: deviceId
 }
+
+/** The failed [StartDeviceResult] for [error], keeping a cleanup refusal's retry hint. */
+internal fun startDeviceFailure(error: Exception): StartDeviceResult =
+  StartDeviceResult(
+    success = false,
+    message = error.message ?: "Failed to start device",
+    cleanupRetryAfterMs = error.deviceCleanupRetryAfterMs(),
+  )
 
 @Serializable
 data class SetActiveDeviceResult(
@@ -582,6 +596,7 @@ private fun toolError(json: Json, text: String, cause: Throwable? = null): McpTo
     code = code,
     deviceId = (payloadObject?.get("deviceId") as? JsonPrimitive)?.contentOrNull,
     cause = cause,
+    retryAfterMs = (payloadObject?.get("retryAfterMs") as? JsonPrimitive)?.longOrNull,
   )
 }
 

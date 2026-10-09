@@ -132,15 +132,30 @@ describe("idle-expiry release cancels the executions it overrides (#10820)", () 
     expect(releases.map((release) => release.reason)).toEqual(["cleanup-expired"]);
   });
 
-  it("never cancels inside the veto window, even when a new-execution lookup expires the session", async () => {
+  it("a routing lookup (no execution) keeps the session while the veto holds (#10956)", async () => {
     const idleDeadline = startHungCall();
+    const requestDeadline = idleDeadline + 10 * 60_000;
+    tracker.setExecutionDeadline(hung!.id, () => requestDeadline);
 
+    // The idle deadline has passed but the long call's deadline has not: the sweep and a routing
+    // lookup agree that the session is still held.
     timer.setCurrentTime(idleDeadline + 1);
-    expect(manager.getSessionForNewExecution(SESSION)).toBeNull();
+    manager.cleanupExpiredSessions();
+    expect(manager.getSessionForNewExecution(SESSION)).not.toBeNull();
+    timer.setCurrentTime(requestDeadline + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS - 1);
+    expect(manager.getSessionForNewExecution(SESSION)).not.toBeNull();
     await settle();
     expect(hung!.abortController.signal.aborted).toBe(false);
     expect(cancelCalls).toEqual([]);
-    expect(releases).toEqual([{ reason: "lazy-expiry", abortedAtRelease: false }]);
+    expect(releases).toEqual([]);
+
+    // Once the veto lapses, the lookup releases, aborting the call before the device is freed.
+    timer.setCurrentTime(requestDeadline + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS);
+    expect(manager.getSessionForNewExecution(SESSION)).toBeNull();
+    expect(hung!.abortController.signal.aborted).toBe(true);
+    await settle();
+    expect(cancelCalls).toEqual([{ sessionId: SESSION, reason: "lazy-expiry" }]);
+    expect(releases).toEqual([{ reason: "lazy-expiry", abortedAtRelease: true }]);
   });
 
   it("does not cancel the late execution whose own lookup expires the session", async () => {

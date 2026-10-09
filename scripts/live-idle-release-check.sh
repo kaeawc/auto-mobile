@@ -4,7 +4,7 @@
 # Drives a private AutoMobile daemon against one emulator and checks both sides
 # of the device-session release windows (src/daemon/sessionLivenessWindows.ts):
 #
-#   active        A stdio proxy that heartbeats AND makes tool calls keeps the
+#   active        A stdio proxy that heartbeats AND makes control calls keeps the
 #                 device past the idle window.
 #   no-heartbeat  When the proxy's heartbeats stop (the process is suspended
 #                 with SIGSTOP, so its socket stays open), the device is
@@ -13,9 +13,13 @@
 #                 the device until the idle window ends, and then loses it.
 #   stdin-eof     A proxy whose stdin closes (the MCP host went away) exits on its
 #                 own and its device is released within the no-heartbeat budget.
-#   selector      Calls that name only `deviceId` (no sessionUuid) are credited to
-#                 the session holding that device (#10692): it outlives the idle
-#                 window, and lastToolActivityAt advances with each call.
+#   selector      Control calls that name only `deviceId` (no sessionUuid) are
+#                 credited to the session holding that device (#10692): it
+#                 outlives the idle window, and lastToolActivityAt advances with
+#                 each call.
+#   observe-only  No read counts as activity, not even the owner's own (#10964):
+#                 an owner that only observes by deviceId loses the device at the
+#                 idle window, and lastToolActivityAt never moves.
 #   two-devices   One proxy holds two emulators (needs --second-serial). Using
 #                 only B lets A go at its own idle deadline while B stays held.
 #   stream        An observation-stream subscriber (nc -U on the aux socket) stays
@@ -38,8 +42,8 @@
 # daemon: CtrlProxy forwarding is leased per device.
 #
 # This is a live, opt-in check. It never runs on pull requests or in fast
-# validation; the only CI entry point is the dispatch-only workflow
-# .github/workflows/live-idle-release.yml.
+# validation; the only CI entry point is the dispatch and
+# advisory-nightly workflow .github/workflows/live-idle-release.yml.
 #
 # Status-returning helpers (proxy_alive, wait_for_release, daemon_cmd,
 # active_sessions_json, stop_daemon, stop_proxy) are called in conditions on
@@ -64,6 +68,8 @@ NC="${AUTOMOBILE_IDLE_CHECK_NC:-nc}"
 SUSPECT_GRACE_MS=4000
 MONITOR_SCAN_MS=2000
 NO_HEARTBEAT_BUDGET_MS=10000
+# Only control calls are activity (#10964); a read such as observe never extends the idle window.
+CONTROL_TOOL=homeScreen
 
 serial=""
 second_serial=""
@@ -110,12 +116,12 @@ Required:
 Options:
   --idle-timeout-ms <ms>     AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS for the private daemon (default 20000).
   --active-ms <ms>           How long the active scenario keeps calling (default idle + 10000).
-  --call-interval-ms <ms>    Gap between observe calls in the active scenario (default 5000).
+  --call-interval-ms <ms>    Gap between tool calls in the call-driven scenarios (default 5000).
   --slack-ms <ms>            Tolerance added to every release bound (default 5000).
   --acquire-timeout-s <s>    Timeout for getAndroid (default 600).
-  --scenario <name>          all, active, no-heartbeat, idle, stdin-eof, selector, stream, two-devices
-                             or provision (default all; all omits two-devices without --second-serial,
-                             and never runs provision).
+  --scenario <name>          all, active, no-heartbeat, idle, stdin-eof, selector, observe-only, stream,
+                             two-devices or provision (default all; all omits two-devices without
+                             --second-serial, and never runs provision).
   --server <path>            Server entry (default dist/src/index.js; run `bun run build` first).
   --work-dir <dir>           Private daemon directory (default a fresh /tmp/am-idle.XXXXXX).
   --evidence-dir <dir>       Where evidence is kept (default scratch/live-idle-release-check/<time>).
@@ -282,9 +288,9 @@ validate_args() {
     exit 2
   fi
   case "${scenario}" in
-    all | active | no-heartbeat | idle | stdin-eof | selector | stream | two-devices | provision) ;;
+    all | active | no-heartbeat | idle | stdin-eof | selector | observe-only | stream | two-devices | provision) ;;
     *)
-      log "error: --scenario must be all, active, no-heartbeat, idle, stdin-eof, selector, stream, two-devices or provision."
+      log "error: --scenario must be all, active, no-heartbeat, idle, stdin-eof, selector, observe-only, stream, two-devices or provision."
       exit 2
       ;;
   esac
@@ -426,8 +432,11 @@ proxy_alive() {
 start_proxy() {
   rm -f "${work_dir}/mcp.in" "${work_dir}/mcp.out"
   mkfifo "${work_dir}/mcp.in" "${work_dir}/mcp.out"
-  "${BUN}" "${server}" --port "${port}" --strict-port \
-    < "${work_dir}/mcp.in" > "${work_dir}/mcp.out" 2>> "${work_dir}/proxy.stderr" &
+  # stdin reaches the proxy through an anonymous pipe (`cat` reads the FIFO): Bun on macOS never
+  # delivers `end` for a named FIFO, so the proxy would not see this script close its stdin and
+  # stop_proxy would wait out its full timeout (#11073). $! is the proxy, the last command.
+  cat "${work_dir}/mcp.in" | "${BUN}" "${server}" --port "${port}" --strict-port \
+    > "${work_dir}/mcp.out" 2>> "${work_dir}/proxy.stderr" &
   proxy_pid=$!
   # Open the writer first: the proxy opens its stdin before its stdout.
   exec 7> "${work_dir}/mcp.in"
@@ -466,9 +475,10 @@ stop_proxy() {
   proxy_pid=""
 }
 
-# Send one JSON-RPC request and wait for its response; any error fails the scenario.
+# Send one JSON-RPC request and wait for its response; any error fails the scenario, except a
+# tool error naming the optional 4th argument (e.g. no_active_device_session), which returns 3.
 mcp_request() {
-  local method="$1" params="$2" timeout_s="$3"
+  local method="$1" params="$2" timeout_s="$3" tolerate="${4:-}"
   request_id=$((request_id + 1))
   jq -cn --argjson id "${request_id}" --arg method "${method}" --argjson params "${params}" \
     '{jsonrpc: "2.0", id: $id, method: $method, params: $params}' >&7 ||
@@ -483,6 +493,9 @@ mcp_request() {
         die "${method} failed: $(jq -c '.error' <<< "${line}")"
       fi
       if jq -e '.result.isError == true' <<< "${line}" > /dev/null; then
+        if [[ -n "${tolerate}" && "${line}" == *"${tolerate}"* ]]; then
+          return 3
+        fi
         die "${method} returned an error: $(jq -c '.result.content' <<< "${line}")"
       fi
       return 0
@@ -492,16 +505,19 @@ mcp_request() {
 }
 
 call_tool() {
-  local name="$1" arguments="$2" timeout_s="$3"
+  local name="$1" arguments="$2" timeout_s="$3" tolerate="${4:-}"
   mcp_request tools/call "$(jq -cn --arg name "${name}" --argjson arguments "${arguments}" \
-    '{name: $name, arguments: $arguments}')" "${timeout_s}"
+    '{name: $name, arguments: $arguments}')" "${timeout_s}" "${tolerate}"
 }
 
 # Through the running proxy, acquire `device` with `tool` (getAndroid or provisionDevice) and
-# set session_id/entry to the session holding it.
+# set session_id/entry to the session holding it. `arguments` defaults to {deviceId: device}.
 acquire_with() {
-  local tool="$1" device="$2"
-  call_tool "${tool}" "$(jq -cn --arg device "${device}" '{deviceId: $device}')" "${acquire_timeout_s}"
+  local tool="$1" device="$2" arguments="${3:-}"
+  if [[ -z "${arguments}" ]]; then
+    arguments="$(jq -cn --arg device "${device}" '{deviceId: $device}')"
+  fi
+  call_tool "${tool}" "${arguments}" "${acquire_timeout_s}"
   local attempts=0
   query_device_entry "${device}"
   while [[ -z "${entry}" ]] && ((attempts < 30)); do
@@ -574,7 +590,7 @@ scenario_active() {
   start="$(now_ms)"
   now="${start}"
   while ((now - start < active_ms)); do
-    call_tool observe "$(jq -cn --arg session "${session_id}" '{sessionUuid: $session}')" 120
+    call_tool "${CONTROL_TOOL}" "$(jq -cn --arg session "${session_id}" '{sessionUuid: $session}')" 120
     query_device_entry
     [[ -n "${entry}" ]] || die "${serial} was released after $((now - start)) ms while the proxy heartbeated and called tools"
     sleep_ms "${call_interval_ms}"
@@ -644,15 +660,15 @@ scenario_idle() {
   finish_scenario
 }
 
-# Call observe by device id only, every call interval for active_ms, requiring the device to stay
-# held and lastToolActivityAt to advance with the calls (the proxy credited them to the session).
+# Make a control call by device id only, every call interval for active_ms, requiring the device to
+# stay held and lastToolActivityAt to advance with the calls (they were credited to the session).
 drive_selector_calls() {
   local start now before after
   start="$(now_ms)"
   now="${start}"
   before="$(entry_field "${entry}" lastToolActivityAt)"
   while ((now - start < active_ms)); do
-    call_tool observe "$(jq -cn --arg device "${serial}" '{deviceId: $device}')" 120
+    call_tool "${CONTROL_TOOL}" "$(jq -cn --arg device "${serial}" '{deviceId: $device}')" 120
     query_device_entry
     [[ -n "${entry}" ]] || die "${serial} was released after $((now - start)) ms of calls that named only its deviceId"
     after="$(entry_field "${entry}" lastToolActivityAt)"
@@ -674,10 +690,90 @@ scenario_selector() {
   finish_scenario
 }
 
+# The owner only observes its device by deviceId, every call interval. Reads are not activity
+# (#10964), so lastToolActivityAt never moves and the device goes at the idle window from
+# acquisition while the proxy is still alive and heartbeating.
+scenario_observe_only() {
+  current_scenario="observe-only"
+  acquire_device
+  local acquired first now call_status
+  acquired="$(now_ms)"
+  query_device_entry
+  first="${entry}"
+  [[ -n "${first}" ]] || die "${serial} released right after getAndroid"
+  local deadline=$((acquired + idle_timeout_ms + SUSPECT_GRACE_MS + MONITOR_SCAN_MS + slack_ms))
+  released_at=""
+  while [[ -z "${released_at}" ]]; do
+    # After the release the owner's next call is refused (lazy expiry): that refusal is the
+    # release signal, not a failure (#11073). The entry query below confirms it.
+    call_status=0
+    call_tool observe "$(jq -cn --arg device "${serial}" '{deviceId: $device}')" 120 no_active_device_session ||
+      call_status=$?
+    now="$(now_ms)"
+    query_device_entry
+    if ((call_status == 3)) && [[ -n "${entry}" ]]; then
+      die "observe was refused with no_active_device_session while ${serial} is still held"
+    elif [[ -z "${entry}" ]]; then
+      released_at="${now}"
+    elif [[ "$(entry_field "${entry}" lastToolActivityAt)" != "$(entry_field "${first}" lastToolActivityAt)" ]]; then
+      die "an observe moved lastToolActivityAt; a read must not count as use"
+    elif ((now >= deadline)); then
+      die "${serial} still held after its ${idle_timeout_ms} ms idle window although its owner only observed"
+    else
+      sleep_ms "${call_interval_ms}"
+    fi
+  done
+  if ((released_at - acquired < idle_timeout_ms - slack_ms)); then
+    die "${serial} was released only $((released_at - acquired)) ms after acquisition, before its ${idle_timeout_ms} ms idle window"
+  fi
+  proxy_alive || die "the proxy exited before the release, so this was not an idle release"
+  log "observe-only: released $((released_at - acquired)) ms after acquisition while observing (idle window ${idle_timeout_ms} ms)"
+  stop_proxy
+  finish_scenario
+}
+
+# Print the value of `key` in an AVD config.ini (plain key=value lines).
+avd_config_value() {
+  local config="$1" key="$2" line name
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    name="${line%%=*}"
+    name="${name%"${name##*[![:space:]]}"}"
+    if [[ "${line}" == *=* && "${name}" == "${key}" ]]; then
+      line="${line#*=}"
+      printf '%s\n' "${line#"${line%%[![:space:]]*}"}"
+      return 0
+    fi
+  done < "${config}"
+  return 1
+}
+
+# Set provision_args to provisionDevice arguments that adopt the emulator's own AVD
+# (device {platform, name, spec}; #11065 removed operationId). The exact AVD name comes from
+# the emulator console and the system image and device profile from that AVD's config.ini.
+provision_args=""
+set_provision_args() {
+  local avd_name config sysdir device_type
+  avd_name="$("${ADB}" -s "${serial}" emu avd name 2> /dev/null | sed -n '1s/\r$//p' || true)"
+  [[ -n "${avd_name}" ]] || die "could not read the AVD name of ${serial} (adb emu avd name)"
+  config="${ANDROID_AVD_HOME:-${HOME}/.android/avd}/${avd_name}.avd/config.ini"
+  [[ -f "${config}" ]] || die "no config.ini for AVD ${avd_name} at ${config}"
+  sysdir="$(avd_config_value "${config}" image.sysdir.1 || true)"
+  device_type="$(avd_config_value "${config}" hw.device.name || true)"
+  [[ -n "${sysdir}" ]] || die "${config} has no image.sysdir.1"
+  [[ -n "${device_type}" ]] || die "${config} has no hw.device.name"
+  # system-images/android-36/google_apis/arm64-v8a/ -> system-images;android-36;google_apis;arm64-v8a
+  sysdir="${sysdir%/}"
+  provision_args="$(jq -cn --arg name "${avd_name}" --arg runtime "${sysdir//\//;}" \
+    --arg deviceType "${device_type}" \
+    '{device: {platform: "android", name: $name, spec: {runtime: $runtime, deviceType: $deviceType}}}')"
+}
+
 scenario_provision() {
   current_scenario="provision"
+  set_provision_args
   start_proxy
-  acquire_with provisionDevice "${serial}"
+  acquire_with provisionDevice "${serial}" "${provision_args}"
   drive_selector_calls
   release_by_proxy_exit
   finish_scenario
@@ -686,7 +782,7 @@ scenario_provision() {
 scenario_stdin_eof() {
   current_scenario="stdin-eof"
   acquire_device
-  call_tool observe "$(jq -cn --arg session "${session_id}" '{sessionUuid: $session}')" 120
+  call_tool "${CONTROL_TOOL}" "$(jq -cn --arg session "${session_id}" '{sessionUuid: $session}')" 120
   query_device_entry
   [[ -n "${entry}" ]] || die "${serial} was released right after a tool call"
   # Closing stdin is the MCP host going away; the proxy has to notice and exit by itself.
@@ -719,7 +815,7 @@ scenario_two_devices() {
   local now="${acquired_a}" released_a=""
   local deadline=$((acquired_a + idle_timeout_ms + SUSPECT_GRACE_MS + MONITOR_SCAN_MS + slack_ms))
   while [[ -z "${released_a}" ]]; do
-    call_tool observe "$(jq -cn --arg session "${session_b}" '{sessionUuid: $session}')" 120
+    call_tool "${CONTROL_TOOL}" "$(jq -cn --arg session "${session_b}" '{sessionUuid: $session}')" 120
     now="$(now_ms)"
     query_device_entry "${second_serial}"
     [[ -n "${entry}" ]] || die "${second_serial} was released while it was in use"
@@ -763,7 +859,10 @@ start_stream_subscriber() {
   subscriber_pid=$!
   exec 9> "${work_dir}/stream.in"
   subscriber_fd_open=true
-  jq -cn --arg device "${serial}" '{id: "1", command: "subscribe", deviceId: $device}' >&9 ||
+  # The stream socket rejects an unauthenticated subscribe (STREAM_SOCKET_AUTH_ENV), so name the
+  # holder's session, as a real viewer connected through the daemon would.
+  jq -cn --arg device "${serial}" --arg session "${session_id}" \
+    '{id: "1", command: "subscribe", deviceId: $device, sessionUuid: $session}' >&9 ||
     die "could not subscribe to the observation stream"
 }
 
@@ -838,6 +937,36 @@ cleanup() {
   exit "${status}"
 }
 
+# Run every scenario, each in its own subshell, so one failing scenario (its die exits only that
+# subshell) does not hide the verdict of the scenarios after it. The run still fails if any did.
+run_all_scenarios() {
+  local names=(active no-heartbeat idle stdin-eof selector observe-only stream)
+  local name status failed=()
+  if [[ -n "${second_serial}" ]]; then
+    names+=(two-devices)
+  fi
+  for name in "${names[@]}"; do
+    # errexit is off around the subshell (a `||` would disable it inside too), then back on in it.
+    set +e
+    (
+      set -e
+      trap 'stop_stream_subscriber || true; stop_proxy || true; close_proxy_fds' EXIT
+      "scenario_${name//-/_}"
+    )
+    status=$?
+    set -e
+    if ((status != 0)); then
+      failed+=("${name}")
+      # The failed scenario's proxy is gone; give its device time to release before the next one.
+      wait_for_release $(($(now_ms) + NO_HEARTBEAT_BUDGET_MS + slack_ms)) || true
+    fi
+  done
+  if ((${#failed[@]} > 0)); then
+    log "FAILED scenarios: ${failed[*]}"
+    exit 1
+  fi
+}
+
 main() {
   parse_args "$@"
   validate_args
@@ -851,22 +980,13 @@ main() {
   setup_private_namespace
   start_daemon
   case "${scenario}" in
-    all)
-      scenario_active
-      scenario_no_heartbeat
-      scenario_idle
-      scenario_stdin_eof
-      scenario_selector
-      scenario_stream
-      if [[ -n "${second_serial}" ]]; then
-        scenario_two_devices
-      fi
-      ;;
+    all) run_all_scenarios ;;
     active) scenario_active ;;
     no-heartbeat) scenario_no_heartbeat ;;
     idle) scenario_idle ;;
     stdin-eof) scenario_stdin_eof ;;
     selector) scenario_selector ;;
+    observe-only) scenario_observe_only ;;
     stream) scenario_stream ;;
     two-devices) scenario_two_devices ;;
     provision) scenario_provision ;;

@@ -1,5 +1,9 @@
 import type { Environment } from "./poolConfig";
 import {
+  DeviceCleanupInProgressError,
+  DeviceOwnedByOtherDaemonError,
+} from "./deviceAcquisitionRefusals";
+import {
   currentAllocationCancellationScope,
   withAllocationCancellationScope,
 } from "./allocationCancellationScope";
@@ -13,6 +17,7 @@ import { isSessionReleasing } from "./sessionReleaseState";
 import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
 import {
   ForwardLeaseForeignDeviceOwnership,
+  iosDeviceOwnershipFileSource,
   type ForeignDeviceOwnership,
 } from "./foreignDeviceOwnership";
 import {
@@ -30,6 +35,8 @@ import { truncateBodyText } from "../utils/truncateBodyText";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import { getObserveCacheStore } from "../features/observe/cache/ObserveCacheRegistry";
 import {
+  ANONYMOUS_ACQUISITION_SESSION_SOURCE,
+  isAnonymousAcquisitionSession,
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   SessionManager,
@@ -38,7 +45,10 @@ import {
   type SessionRecoveryTarget,
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
-import { deviceAssignedToOtherSessionError } from "./inputDeviceOwnership";
+import {
+  deviceAlreadyAssignedToAnotherSessionError,
+  deviceAssignedToOtherSessionError,
+} from "./inputDeviceOwnership";
 import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import {
   SessionRecoveryAssignmentError,
@@ -765,6 +775,8 @@ export interface DevicePoolDependencies {
    * `DevicePool.create` reads CtrlProxy forwarding leases; a directly built pool sees none.
    */
   foreignDeviceOwnership?: ForeignDeviceOwnership;
+  /** The same for iOS simulators, claimed by UDID (#10980). */
+  iosForeignDeviceOwnership?: ForeignDeviceOwnership;
   env?: Environment;
   deviceHealthMarkers?: DeviceHealthMarkers;
   deviceHealthRecoveryBackoff?: BackoffPolicy;
@@ -897,6 +909,24 @@ interface StopDiscoveredEmulatorOptions {
   handoffOwner: symbol;
   preservedSessionId: string | undefined;
   preservedSession: Session | undefined;
+}
+
+/**
+ * The persisted creator kind of a session a pool bind creates (#11071): an acquisition (not a
+ * caller-chosen session rebind or a recovery) with no MCP connection id is anonymous, and only
+ * another anonymous acquisition may reuse it, keeping repeated `--cli` startDevice idempotent
+ * (#2421).
+ */
+function creatorPersistenceSource(
+  mcpSessionId: string | undefined,
+  allowSessionRebind: boolean,
+  expectedExistingSessionDeviceId: string | undefined,
+): string | undefined {
+  return mcpSessionId === undefined &&
+    !allowSessionRebind &&
+    expectedExistingSessionDeviceId === undefined
+    ? ANONYMOUS_ACQUISITION_SESSION_SOURCE
+    : undefined;
 }
 
 export class DevicePool {
@@ -1062,16 +1092,21 @@ export class DevicePool {
   static create(deps: DevicePoolDependencies): DevicePool {
     return new DevicePool({
       foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(),
+      iosForeignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(
+        process.pid,
+        iosDeviceOwnershipFileSource,
+      ),
       ...deps,
     });
   }
 
   private readonly deviceHealthMarkers: DeviceHealthMarkers;
   private readonly foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
+  private readonly iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
   /** Last foreign owner PID logged per device, so a waiting allocation logs each owner once. */
   private readonly loggedForeignDeviceOwners = new Map<string, number>();
-  /** Android devices whose allocation claim this daemon published and has not withdrawn. */
-  private readonly claimedDeviceIds = new Set<string>();
+  /** Devices whose allocation claim this daemon published and has not withdrawn, by claim store. */
+  private readonly claimedDeviceIds = new Map<string, ForeignDeviceOwnership>();
 
   constructor({
     env,
@@ -1108,9 +1143,11 @@ export class DevicePool {
     deviceSessionContinuityEnabled,
     androidAdbFactory,
     foreignDeviceOwnership,
+    iosForeignDeviceOwnership,
   }: DevicePoolDependencies) {
     this.sessionManager = sessionManager;
     this.foreignDeviceOwnership = foreignDeviceOwnership;
+    this.iosForeignDeviceOwnership = iosForeignDeviceOwnership;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;
     this.androidTransportAliases = createAndroidTransportAliases(androidAdbFactory);
@@ -1119,19 +1156,7 @@ export class DevicePool {
       maxEntries: 1,
     });
     this.deviceHealthMarkers = resolveDeviceHealthMarkers(deviceHealthMarkers, timer);
-    sessionManager.setDeviceHealthMarkers(
-      this.deviceHealthMarkers,
-      (id) => this.getDeviceIncarnation(id),
-      (id) => {
-        const device = this.devices.get(id);
-        return (
-          device?.status === "idle" &&
-          !device.sessionId &&
-          !sessionManager.hasDeviceCleanupInProgress(id)
-        );
-      },
-      deviceHealthRecoveryBackoff,
-    );
+    this.wireSessionDeviceHealth(deviceHealthRecoveryBackoff);
     this.refreshMissingDeviceMisses = resolveMissingDeviceMisses(missingDeviceMisses);
     this.idGenerator = idGenerator;
     this.consoleBusyRegistry = resolveConsoleBusyRegistry(consoleBusyRegistry);
@@ -1226,6 +1251,23 @@ export class DevicePool {
       });
     this.ownerDisconnectRelease = this.createOwnerDisconnectRelease(ownerDisconnect);
     this.registerSessionReleaseHandlers();
+  }
+
+  /** Health recovery may only act on an idle, unowned device with no cleanup in flight. */
+  private wireSessionDeviceHealth(backoff: BackoffPolicy | undefined): void {
+    this.sessionManager.setDeviceHealthMarkers(
+      this.deviceHealthMarkers,
+      (id) => this.getDeviceIncarnation(id),
+      (id) => {
+        const device = this.devices.get(id);
+        return (
+          device?.status === "idle" &&
+          !device.sessionId &&
+          !this.sessionManager.hasDeviceCleanupInProgress(id)
+        );
+      },
+      backoff,
+    );
   }
 
   private createOwnerDisconnectRelease(
@@ -1542,6 +1584,13 @@ export class DevicePool {
         getPooledSessionIdentity: (device) => this.pooledSessionIdentities.get(device),
         getMcpSessionRecoveryDevice: (client) => this.mcpSessionRecoveryDevices.get(client)?.device,
         isAdbServerResetQuarantined: (id) => this.adbServerResetQuarantinedSessions.has(id),
+        assertNotClaimedByForeignDaemon: (deviceId, platform) =>
+          this.assertNotClaimedByForeignDaemon(deviceId, platform),
+        claimAcquiredDevice: async (sessionId, deviceId, heldBefore, platform) => {
+          if (this.foreignOwnershipFor(platform)) {
+            await this.claimExplicitlyBoundDevice(sessionId, deviceId, heldBefore);
+          }
+        },
       },
       this.deviceSessionRepository,
       this.idGenerator,
@@ -5232,7 +5281,7 @@ export class DevicePool {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
-    if (!recoveryTarget && this.foreignDeviceOwnership) {
+    if (!recoveryTarget && this.tracksForeignOwnership(platform)) {
       return this.tryAssignUnclaimedDevice(sessionId, platform);
     }
     if (!recoveryTarget) {
@@ -5244,6 +5293,10 @@ export class DevicePool {
         () => this.hasPendingAndroidRecovery(platform),
       );
     }
+    const ownership = this.foreignOwnershipFor(recoveryTarget.platform);
+    if (ownership) {
+      await this.assertRecoveryTargetNotForeignOwned(sessionId, recoveryTarget, ownership);
+    }
     const result = await this.tryAssignFrom(
       sessionId,
       () => this.getDevicesMatchingRecoveryTarget(recoveryTarget),
@@ -5252,11 +5305,65 @@ export class DevicePool {
       recoveryTarget,
       settledRecoveryLoss,
     );
-    if (result.success && result.deviceId !== undefined && this.foreignDeviceOwnership) {
-      // Recovery rebinds the session's own device; publish the claim without giving it back.
-      await this.publishDeviceClaimBestEffort(sessionId, result.deviceId);
+    if (ownership && result.success && result.deviceId !== undefined && result.session) {
+      await this.claimRecoveredDevice(
+        sessionId,
+        recoveryTarget,
+        ownership,
+        result.deviceId,
+        result.session,
+      );
     }
     return result;
+  }
+
+  /**
+   * A restarted daemon must not rehydrate a session onto a device another live daemon took over
+   * while it was down (#11076): both would drive it. The persisted session is terminal then.
+   */
+  private async assertRecoveryTargetNotForeignOwned(
+    sessionId: string,
+    target: SessionRecoveryTarget,
+    ownership: ForeignDeviceOwnership,
+  ): Promise<void> {
+    const idle = this.getDevicesMatchingRecoveryTarget(target).filter(
+      (device) => device.sessionId === null,
+    );
+    if (idle.length === 0) {
+      return;
+    }
+    await ownership.refresh(idle.map((device) => device.id));
+    const foreign = idle.find((device) => this.isDrivenByForeignDaemon(device));
+    if (foreign) {
+      throw new SessionRecoveryIdentityLossError(sessionId, target, "owned-by-other-daemon", {
+        deviceId: foreign.id,
+        ownerPid: ownership.foreignOwnerPid(foreign.id),
+      });
+    }
+  }
+
+  /**
+   * Publish this daemon's claim on the device recovery just rebound. When another live daemon's
+   * claim won the race, give the device back and terminalize the session (#11076).
+   */
+  private async claimRecoveredDevice(
+    sessionId: string,
+    target: SessionRecoveryTarget,
+    ownership: ForeignDeviceOwnership,
+    deviceId: string,
+    session: Session,
+  ): Promise<void> {
+    if (await this.publishDeviceClaim(sessionId, deviceId)) {
+      return;
+    }
+    logger.warn(
+      `[DevicePool] Another AutoMobile process claims ${deviceId}; rolling back recovery of session ${sessionId}`,
+    );
+    await this.rollbackAssignments(new Map([[sessionId, { deviceId, session }]]));
+    throw new SessionRecoveryIdentityLossError(sessionId, target, "owned-by-other-daemon", {
+      deviceId,
+      ownerPid: ownership.foreignOwnerPid(deviceId),
+    });
   }
 
   /**
@@ -5314,8 +5421,7 @@ export class DevicePool {
       !result.success ||
       deviceId === undefined ||
       !result.session ||
-      !this.foreignDeviceOwnership ||
-      this.devices.get(deviceId)?.platform !== "android"
+      !this.foreignOwnershipFor(this.devices.get(deviceId)?.platform)
     ) {
       return result;
     }
@@ -5335,33 +5441,61 @@ export class DevicePool {
    * the device go is withdrawn again, so it never outlives the assignment.
    */
   private async publishDeviceClaim(sessionId: string, deviceId: string): Promise<boolean> {
-    const ownership = this.foreignDeviceOwnership;
-    if (!ownership || this.devices.get(deviceId)?.platform !== "android") {
+    const ownership = this.foreignOwnershipFor(this.devices.get(deviceId)?.platform);
+    if (!ownership) {
       return true;
     }
     if (!(await ownership.claim(deviceId))) {
       return false;
     }
-    this.claimedDeviceIds.add(deviceId);
+    this.claimedDeviceIds.set(deviceId, ownership);
     if (this.devices.get(deviceId)?.sessionId !== sessionId) {
       this.releaseDeviceClaim(deviceId);
     }
     return true;
   }
 
-  /** Publish a claim for a device the caller keeps either way (explicit bind, recovery). */
-  private async publishDeviceClaimBestEffort(sessionId: string, deviceId: string): Promise<void> {
-    if (!(await this.publishDeviceClaim(sessionId, deviceId))) {
-      logger.warn(
-        `[DevicePool] Another AutoMobile process still claims ${deviceId}; session ${sessionId} keeps it as requested`,
-      );
+  /** Withdraw this daemon's claim once no session of this daemon holds the device. */
+  private releaseDeviceClaim(deviceId: string): void {
+    const ownership = this.claimedDeviceIds.get(deviceId);
+    if (ownership) {
+      this.claimedDeviceIds.delete(deviceId);
+      ownership.release(deviceId);
     }
   }
 
-  /** Withdraw this daemon's claim once no session of this daemon holds the device. */
-  private releaseDeviceClaim(deviceId: string): void {
-    if (this.claimedDeviceIds.delete(deviceId)) {
-      this.foreignDeviceOwnership?.release(deviceId);
+  /** Who else drives devices of `platform`: Android by adb server, iOS by UDID (#10980). */
+  private foreignOwnershipFor(platform: Platform | undefined): ForeignDeviceOwnership | undefined {
+    if (platform === "android") {
+      return this.foreignDeviceOwnership;
+    }
+    return platform === "ios" ? this.iosForeignDeviceOwnership : undefined;
+  }
+
+  /** Whether allocation for `platform` (either, when unset) must honour other daemons' claims. */
+  private tracksForeignOwnership(platform?: Platform): boolean {
+    return platform === undefined
+      ? this.foreignDeviceOwnership !== undefined || this.iosForeignDeviceOwnership !== undefined
+      : this.foreignOwnershipFor(platform) !== undefined;
+  }
+
+  /**
+   * An explicit bind (startDevice, setActiveDevice, getAndroid/getApple with a deviceId) of a
+   * device this daemon does not already hold is refused while another live daemon claims it
+   * (#10980, owner decision 2026-10-09): two daemons must never drive the same device.
+   */
+  private async assertNotClaimedByForeignDaemon(
+    deviceId: string,
+    platform: Platform,
+  ): Promise<void> {
+    const ownership = this.foreignOwnershipFor(platform);
+    if (!ownership || this.devices.get(deviceId)?.sessionId) {
+      return;
+    }
+    await ownership.refresh([deviceId]);
+    const ownerPid = ownership.foreignOwnerPid(deviceId);
+    if (ownerPid !== undefined) {
+      throw new DeviceOwnedByOtherDaemonError(deviceId, ownerPid);
     }
   }
 
@@ -5370,18 +5504,21 @@ export class DevicePool {
    * sessions are released; a crashed daemon's claims lapse through the owner-socket check.
    */
   releaseDeviceClaimsForShutdown(): void {
-    for (const deviceId of [...this.claimedDeviceIds]) {
+    for (const deviceId of [...this.claimedDeviceIds.keys()]) {
       this.releaseDeviceClaim(deviceId);
     }
   }
 
   /** Re-read which idle Android devices other daemons drive, for this allocation pass. */
   private async refreshForeignOwnership(): Promise<void> {
-    await this.foreignDeviceOwnership?.refresh(
-      this.getDevicesByPlatform("android")
+    const idle = (platform: Platform) =>
+      this.getDevicesByPlatform(platform)
         .filter((device) => device.sessionId === null)
-        .map((device) => device.id),
-    );
+        .map((device) => device.id);
+    await Promise.all([
+      this.foreignDeviceOwnership?.refresh(idle("android")),
+      this.iosForeignDeviceOwnership?.refresh(idle("ios")),
+    ]);
   }
 
   private countForeignDrivenDevices(platform?: Platform): number {
@@ -5941,8 +6078,10 @@ export class DevicePool {
       throw this.unhealthyDevicesError([device]);
     }
     if (this.sessionManager.hasDeviceCleanupInProgress(deviceId)) {
-      throw new ActionableError(
-        `Device '${deviceId}' is still completing session cleanup; retry after cleanup finishes.`,
+      // Typed and retryable: clients wait on it like a held device (#10960).
+      throw new DeviceCleanupInProgressError(
+        deviceId,
+        this.sessionManager.getDeviceCleanupRetryAfterMs(deviceId),
       );
     }
   }
@@ -6962,6 +7101,8 @@ export class DevicePool {
     expectedExistingSessionDeviceId?: string,
     mcpSessionId?: string,
   ): Promise<string> {
+    await this.assertNotClaimedByForeignDaemon(deviceId, platform);
+    const heldBefore = this.devices.get(deviceId)?.sessionId ?? null;
     const boundSessionId = await this.withTargetDeviceDiscovery({
       deviceId,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
@@ -7041,7 +7182,8 @@ export class DevicePool {
             );
             return this.reuseExistingDeviceSession(
               deviceId,
-              existingSession.sessionId,
+              existingSession,
+              sessionId,
               sourceImage,
               confirmedSameOwner,
             );
@@ -7081,7 +7223,14 @@ export class DevicePool {
             deviceId,
             platform,
             allowSessionRebind,
-            this.stableDeviceIdFor(device),
+            {
+              stableDeviceId: this.stableDeviceIdFor(device),
+              persistenceSource: creatorPersistenceSource(
+                mcpSessionId,
+                allowSessionRebind,
+                expectedExistingSessionDeviceId,
+              ),
+            },
           ),
         );
         this.recordMcpSessionOwnership(mcpSessionId, sessionId);
@@ -7089,11 +7238,40 @@ export class DevicePool {
         return sessionId;
       },
     });
-    if (this.foreignDeviceOwnership) {
-      // The caller named this device, so another daemon's claim is reported, not enforced.
-      await this.publishDeviceClaimBestEffort(boundSessionId, deviceId);
+    if (this.foreignOwnershipFor(platform)) {
+      await this.claimExplicitlyBoundDevice(boundSessionId, deviceId, heldBefore);
     }
     return boundSessionId;
+  }
+
+  /**
+   * Publish this daemon's claim on an explicitly bound device. Another daemon can claim it between
+   * the pre-bind check and here; then a fresh bind is rolled back and refused like the check
+   * (#10980). A device this daemon already held keeps its session.
+   */
+  private async claimExplicitlyBoundDevice(
+    sessionId: string,
+    deviceId: string,
+    heldBefore: string | null,
+  ): Promise<void> {
+    if (await this.publishDeviceClaim(sessionId, deviceId)) {
+      return;
+    }
+    const session = this.sessionManager.getSession(sessionId);
+    if (heldBefore === sessionId || !session) {
+      logger.warn(
+        `[DevicePool] Another AutoMobile process still claims ${deviceId}; session ${sessionId} already held it here`,
+      );
+      return;
+    }
+    logger.info(
+      `[DevicePool] Another AutoMobile process claimed ${deviceId} first; releasing it from session ${sessionId}`,
+    );
+    await this.rollbackAssignments(new Map([[sessionId, { deviceId, session }]]));
+    throw new DeviceOwnedByOtherDaemonError(
+      deviceId,
+      this.foreignOwnershipFor(this.devices.get(deviceId)?.platform)?.foreignOwnerPid(deviceId),
+    );
   }
 
   private assertExpectedRecoverySession(
@@ -7277,8 +7455,9 @@ export class DevicePool {
     deviceId: string,
     platform: Platform,
     allowSessionRebind: boolean,
-    stableDeviceId: string | undefined,
+    creation: { stableDeviceId: string | undefined; persistenceSource: string | undefined },
   ): () => Promise<Session> {
+    const { stableDeviceId, persistenceSource } = creation;
     const previousDeviceId = previousSession?.assignedDevice;
     if (!previousDeviceId || previousDeviceId === deviceId) {
       return async () => {
@@ -7289,6 +7468,9 @@ export class DevicePool {
           undefined,
           undefined,
           stableDeviceId,
+          undefined,
+          undefined,
+          persistenceSource,
         );
         if (previousSession && platform === "android") {
           this.sessionManager.invalidateAutomationReadiness(
@@ -7369,15 +7551,28 @@ export class DevicePool {
 
   private async reuseExistingDeviceSession(
     deviceId: string,
-    existingSessionId: string,
+    existingSession: Session,
+    requestedSessionId: string,
     sourceImage?: DeviceInfo,
     confirmedSameOwner = false,
   ): Promise<string> {
+    const existingSessionId = existingSession.sessionId;
     if (sourceImage && !confirmedSameOwner) {
       throw new ActionableError(
         `Freshly started device '${deviceId}' was assigned to session ` +
           `${existingSessionId} before its owning session could reserve it.`,
       );
+    }
+    // A caller that proved it owns the holder (its MCP connection acquired it) may reuse another
+    // session, and so may an anonymous caller when an anonymous acquisition created that session,
+    // which keeps repeated `--cli` startDevice idempotent (#2421). Any other anonymous caller is
+    // refused rather than handed the holder's UUID (#11071).
+    if (
+      !confirmedSameOwner &&
+      existingSessionId !== requestedSessionId &&
+      !isAnonymousAcquisitionSession(existingSession)
+    ) {
+      throw deviceAssignedToOtherSessionError(deviceId, existingSessionId, requestedSessionId);
     }
     const refreshedSession = await this.sessionManager.getOrCreateSession(existingSessionId);
     logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);
@@ -7398,10 +7593,7 @@ export class DevicePool {
       !this.isSessionAssignmentCurrent(device, session) ||
       !this.sessionManager.isAdmittedForAutomation(session)
     ) {
-      throw new ActionableError(
-        `Device '${device.id}' is already assigned to another session. ` +
-          "Acquire a different device or wait for its owner to release it.",
-      );
+      throw deviceAlreadyAssignedToAnotherSessionError(device.id);
     }
     return true;
   }
@@ -7571,6 +7763,30 @@ export class DevicePool {
     ...args: Parameters<DeviceAutolockManager["resolveAutolockSessionForMcpSession"]>
   ): string | undefined {
     return this.autolockManager.resolveAutolockSessionForMcpSession(...args);
+  }
+
+  /**
+   * The live device session that holds `deviceId` and that the MCP connection `mcpSessionId`
+   * acquired (or restored as its own), or undefined (#10994). A deviceId-only call from the
+   * holder's own connection is that session's use; any other caller is not the holder.
+   */
+  resolveOwnedDeviceSessionForMcpSession(
+    mcpSessionId: string | undefined,
+    deviceId: string,
+  ): string | undefined {
+    const acquired = mcpSessionId ? this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId) : null;
+    const device = acquired ? this.devices.get(deviceId) : undefined;
+    const session = device?.sessionId ? this.sessionManager.getSession(device.sessionId) : null;
+    if (
+      !device ||
+      !session ||
+      !acquired?.has(session.sessionId) ||
+      !this.isSessionAssignmentCurrent(device, session) ||
+      !this.sessionManager.isAdmittedForAutomation(session)
+    ) {
+      return undefined;
+    }
+    return session.sessionId;
   }
 
   restoreAutolockSessionsForMcpSession(
@@ -7927,10 +8143,10 @@ export class DevicePool {
    * holds no session on it, so multi-device allocation must not hand it to a plan.
    */
   private isDrivenByForeignDaemon(device: PooledDevice): boolean {
-    if (device.platform !== "android" || device.sessionId !== null) {
+    if (device.sessionId !== null) {
       return false;
     }
-    const ownerPid = this.foreignDeviceOwnership?.foreignOwnerPid(device.id);
+    const ownerPid = this.foreignOwnershipFor(device.platform)?.foreignOwnerPid(device.id);
     if (ownerPid === undefined) {
       this.loggedForeignDeviceOwners.delete(device.id);
       return false;

@@ -2,6 +2,10 @@ import { drainUntil } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
+import {
+  DEVICE_CLEANUP_IN_PROGRESS_CODE,
+  DeviceCleanupInProgressError,
+} from "../../src/daemon/deviceAcquisitionRefusals";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -101,7 +105,18 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
                     true,
                   )
                 : pool.autolockDevice(device.deviceId, "android", "new-client");
-          await expect(acquire()).rejects.toThrow("cleanup");
+          // Typed and retryable, so clients wait on it like a held device (#10960).
+          const refusal = await acquire().then(
+            () => undefined,
+            (error: unknown) => error,
+          );
+          expect(refusal).toBeInstanceOf(DeviceCleanupInProgressError);
+          expect(refusal).toMatchObject({
+            code: DEVICE_CLEANUP_IN_PROGRESS_CODE,
+            retryable: true,
+            deviceId: device.deviceId,
+          });
+          expect((refusal as DeviceCleanupInProgressError).retryAfterMs).toBeGreaterThan(0);
           expect(pool.getDevice(device.deviceId)?.sessionId).toBe("old-owner");
           if (phase === "pending-cleanup") {
             expect(manager.getPendingDeviceCleanup(device.deviceId)).not.toBeNull();
@@ -135,3 +150,52 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
     }
   }
 }
+
+test("a bind during a capped pending cleanup is refused with the cleanup's remaining time (#10960)", async () => {
+  const timer = new FakeTimer();
+  const manager = new SessionManager(
+    timer,
+    new FakeDeviceSessionPersistence(),
+    () => new FakeDbWriteBarrier(),
+  );
+  const utils = new FakeDeviceUtils();
+  const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
+  utils.setBootedDevices("android", [device]);
+  PlatformDeviceManagerFactory.setInstance(utils);
+  const pool = new DevicePool(
+    createDevicePoolDependencies(manager, "daemon-test", { timer, deviceManager: utils }),
+  );
+  const cleanup = Promise.withResolvers<void>();
+  try {
+    await pool.initializeWithDevices([device]);
+    await pool.bindOrReuseDeviceSession("test-1", device.deviceId, "android");
+    // A 12 s finalize (e.g. a recording) registered when test-1 is released.
+    manager.onSessionRelease((_sessionId, deviceId) => {
+      manager.registerPendingDeviceCleanup(deviceId, cleanup.promise, 12_000);
+    });
+    await manager.releaseSession("test-1", "released", true);
+    await pool.releaseDevice(device.deviceId, "test-1");
+    timer.advanceTime(2_000);
+
+    const bind = () => pool.bindOrReuseDeviceSession("test-2", device.deviceId, "android");
+    const refusal = await bind().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(refusal).toBeInstanceOf(DeviceCleanupInProgressError);
+    expect(refusal).toMatchObject({
+      code: DEVICE_CLEANUP_IN_PROGRESS_CODE,
+      retryable: true,
+      retryAfterMs: 10_000,
+    });
+
+    cleanup.resolve();
+    await manager.getPendingDeviceCleanup(device.deviceId);
+    await bind();
+    expect(pool.getDevice(device.deviceId)?.sessionId).toBe("test-2");
+  } finally {
+    cleanup.resolve();
+    manager.stopCleanupTimer();
+    PlatformDeviceManagerFactory.reset();
+  }
+});

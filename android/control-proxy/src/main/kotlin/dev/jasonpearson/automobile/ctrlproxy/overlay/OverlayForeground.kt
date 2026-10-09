@@ -48,19 +48,18 @@ internal data class OverlayForegroundWindow(
 
 /**
  * The foreground app among [windows] (z-ordered, topmost first): the active application window if
- * it qualifies, otherwise the topmost qualifying one. Null when no application window qualifies,
- * in which case the overlay is not scoped to any app.
+ * it qualifies, otherwise the topmost qualifying one. Null when no application window qualifies, in
+ * which case the overlay is not scoped to any app.
  */
 internal fun overlayForegroundFromWindows(
   windows: List<OverlayForegroundWindow>,
   ownPackage: String,
 ): String? {
-  val candidates =
-    windows.mapNotNull { window ->
-      overlayForegroundCandidate(window.packageName, window.type, ownPackage)?.let {
-        it to window.active
-      }
+  val candidates = windows.mapNotNull { window ->
+    overlayForegroundCandidate(window.packageName, window.type, ownPackage)?.let {
+      it to window.active
     }
+  }
   return (candidates.firstOrNull { it.second } ?: candidates.firstOrNull())?.first
 }
 
@@ -74,7 +73,16 @@ interface OverlayForegroundScope {
 
   /** The overlay ended (or is not app-scoped): forget the anchor and any suspension. */
   fun release()
+
+  /** The anchor and suspension now, so a show the host rejects can put them back. */
+  fun capture(): OverlayForegroundState = OverlayForegroundState(null, false)
+
+  /** Put back what [capture] returned: a rejected show keeps the previous window's scoping. */
+  fun restore(state: OverlayForegroundState) = Unit
 }
+
+/** An opaque snapshot of foreground scoping taken by [OverlayForegroundScope.capture]. */
+data class OverlayForegroundState(val anchor: String?, val suspended: Boolean)
 
 object NoOverlayForegroundScope : OverlayForegroundScope {
   override val suspended = false
@@ -122,6 +130,17 @@ class OverlayForegroundTracker(
       cancelPending()
       anchor = null
       suspended = false
+    }
+  }
+
+  override fun capture(): OverlayForegroundState =
+    synchronized(lock) { OverlayForegroundState(anchor, suspended) }
+
+  override fun restore(state: OverlayForegroundState) {
+    synchronized(lock) {
+      cancelPending()
+      anchor = state.anchor
+      suspended = state.suspended
     }
   }
 

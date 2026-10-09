@@ -31,6 +31,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.CoalescingRecoveryLauncher
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBinding
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopInputAllocation
 import dev.jasonpearson.automobile.desktop.core.daemon.InputAllocatingClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
@@ -155,9 +156,8 @@ fun AutoMobileDesktopApp(
       desktopSocketPath,
       desktopSessionPanes,
       hostVisible = windowVisible,
-    ) {
-      refreshAfterDaemonRecovery()
-    }
+      onDaemonRecovered = { refreshAfterDaemonRecovery() },
+    )
   val desktopDaemonSession = desktopSessionState.session
   // Identity changes only with the session or its registration (#10231), never on an unrelated
   // root recomposition, so the facets' sockets stay connected while a divider is dragged.
@@ -600,6 +600,7 @@ fun AutoMobileDesktopApp(
                       // A newly registered session recomposes the facets because the provider's
                       // identity changes with registration; unrelated root recompositions do not.
                       sessionUuidProvider = paneSessionUuidProvider,
+                      inputAllocation = inputAllocation,
                     )
                   },
                   observationStreamFactory = {
@@ -826,12 +827,20 @@ private fun WorkspaceFacet(
   column: DeviceColumn,
   tool: Tool,
   sessionUuidProvider: () -> String? = { null },
+  inputAllocation: DesktopInputAllocation? = null,
 ) {
   when (tool) {
     Tool.Logs -> LogsFacet(column, sessionUuidProvider = sessionUuidProvider)
     // Storage works on both platforms now that iOS key-value mutations carry the platform to the
     // daemon and target the correct iOS device (#4708).
-    Tool.Storage -> StorageFacet(column, sessionUuidProvider = sessionUuidProvider)
+    Tool.Storage ->
+      StorageFacet(
+        column,
+        sessionUuidProvider = sessionUuidProvider,
+        // Storage edits are device mutations: they allocate the pane's device and carry the
+        // desktop session (#10977).
+        inputAllocation = inputAllocation,
+      )
     // Network reads per-device via the getNetworkGraph MCP tool call (deviceId is an argument),
     // not the broadcast observation stream, so panes don't cross-contaminate.
     Tool.Network -> NetworkFacet(column)

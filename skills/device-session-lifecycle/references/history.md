@@ -174,6 +174,13 @@ released after ~10 s, not the 60 s autolock window. Later hold-policy work:
 per-adb-server device claims (#10708, #10709) and CtrlProxy forward ownership
 (#10690).
 
+Owner decisions 2026-10-09 (#10982): ownership is a cooperative guard, not a
+local security boundary; streams keep a lightweight observer registration that is
+not a session; reads are free and never activity, control is owned (#10964,
+#10969); recordings stop on release (#10957, #10961, #10958); acquisition
+refusals are typed and retryable (#10960); appearance config is per session; the
+CLI idle default stays 2 minutes. Canonical text: `docs/using/device-ownership.md`.
+
 ## Cross-index: bug class → instances
 
 1. **Release/teardown asymmetry**: #2445, #5266, #5287, #5302, #5303

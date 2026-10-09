@@ -1,0 +1,178 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "tab": 0,
+    "liked_a": false,
+    "liked_b": true,
+    "saved_1": false,
+    "saved_2": true
+  },
+  "components": {
+    "avatar": {
+      "root": {
+        "type": "text",
+        "text": "{props.initial}",
+        "style": {
+          "background": "primaryContainer",
+          "cornerRadius": "full",
+          "padding": {
+            "start": 8,
+            "end": 8,
+            "top": 4,
+            "bottom": 4
+          }
+        }
+      }
+    },
+    "postCard": {
+      "root": {
+        "type": "card",
+        "visibleWhen": {
+          "key": "tab",
+          "equals": "{props.tab}"
+        },
+        "children": [
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "use",
+                "component": "avatar",
+                "props": {
+                  "initial": "{props.initial}"
+                }
+              },
+              {
+                "type": "text",
+                "text": "{props.name}",
+                "style": {
+                  "textStyle": "titleMedium"
+                }
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": "{props.body}"
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "button",
+                "label": "Like",
+                "variant": "text",
+                "onTap": [
+                  {
+                    "type": "toggle",
+                    "key": "{props.likeKey}"
+                  },
+                  {
+                    "type": "emit",
+                    "name": "like-{props.likeKey}"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "text": "Liked by you",
+                "visibleWhen": {
+                  "key": "{props.likeKey}",
+                  "equals": true
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "jobRow": {
+      "root": {
+        "type": "row",
+        "children": [
+          {
+            "type": "column",
+            "children": [
+              {
+                "type": "text",
+                "text": "{props.title}"
+              },
+              {
+                "type": "text",
+                "text": "{props.company}",
+                "style": {
+                  "textStyle": "bodySmall"
+                }
+              }
+            ]
+          },
+          {
+            "type": "checkbox",
+            "stateKey": "{props.saveKey}"
+          }
+        ]
+      }
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "use",
+        "component": "postCard",
+        "props": {
+          "tab": 0,
+          "initial": "A",
+          "name": "Alexey",
+          "body": "Shipped the overlay components.",
+          "likeKey": "liked_a"
+        }
+      },
+      {
+        "type": "use",
+        "component": "postCard",
+        "props": {
+          "tab": 0,
+          "initial": "B",
+          "name": "Bea",
+          "body": "Reviewing the spec today.",
+          "likeKey": "liked_b"
+        }
+      },
+      {
+        "type": "column",
+        "repeat": {
+          "items": [
+            {
+              "id": 1,
+              "title": "Android engineer",
+              "company": "Acme"
+            },
+            {
+              "id": 2,
+              "title": "iOS engineer",
+              "company": "Globex"
+            }
+          ],
+          "as": "job"
+        },
+        "children": [
+          {
+            "type": "use",
+            "component": "jobRow",
+            "props": {
+              "title": "{job.title}",
+              "company": "{job.company}",
+              "saveKey": "saved_{job.id}"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

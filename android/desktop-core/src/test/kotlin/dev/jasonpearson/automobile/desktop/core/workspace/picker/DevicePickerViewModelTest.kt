@@ -610,6 +610,25 @@ class DevicePickerViewModelTest {
     }
 
   @Test
+  fun `a boot waiting on the previous session's cleanup is flagged, then proceeds`() =
+    testScope.runTest {
+      val resources = fake()
+      val boot =
+        FakeDeviceBootController().apply {
+          result = Result.success("emulator-5556")
+          onSuccess = { resources.bootedDevicesResponse = TWO_BOOTED_PIXEL8_AND_6 }
+        }
+      val seen = mutableListOf<Set<String>>()
+      val v = vm(resourceClient = resources, bootController = boot)
+      boot.onFinishing = { seen += content(v).finishingPreviousSessionIds }
+      boot.finishingPreviousSessionWaits = 1
+      v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
+      assertEquals(listOf(setOf("android:Pixel_6_API_33"), emptySet()), seen)
+      assertTrue(content(v).finishingPreviousSessionIds.isEmpty())
+      assertTrue(content(v).bootingIds.isEmpty())
+    }
+
+  @Test
   fun `failed boot clears booting and exposes a retryable error`() = testScope.runTest {
     val boot =
       FakeDeviceBootController().apply { result = Result.failure(RuntimeException("boom")) }

@@ -23,6 +23,7 @@ import type {
   DeviceSessionRetireReason,
 } from "./deviceSessionRegistry";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "./daemonFiles";
+import { ObserverReleaseBroadcaster, type ObserverReleaseSource } from "./observerReleaseBroadcast";
 import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
@@ -476,6 +477,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    */
   private readonly storageSubscriptions = new Map<string, StorageSubscriptionState>();
   private readonly storageSubscriptionKeysBySocket = new Map<Socket, Set<string>>();
+  /** Identities each connection was admitted with, so a gone observer's streams end (#11076). */
+  private readonly identitiesBySocket = new Map<Socket, Set<string>>();
+  private removeObserverReleaseListener: (() => void) | null = null;
   /** Serializes lifecycle operations for one device-side storage observer. */
   private readonly storageOperations = new Map<string, Promise<void>>();
   private observationRequestTimeoutMs = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS;
@@ -498,8 +502,65 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       "observationStream",
       { allowObserverSessions: true },
     ),
+    private readonly observerReleases: ObserverReleaseSource = ObserverReleaseBroadcaster,
   ) {
     super(socketPath, timer, "DeviceDataStream");
+  }
+
+  protected override onServerStarted(): void {
+    super.onServerStarted();
+    this.removeObserverReleaseListener?.();
+    this.removeObserverReleaseListener = this.observerReleases.subscribe((sessionId) => {
+      this.revokeIdentity(sessionId);
+    });
+  }
+
+  /**
+   * End every connection admitted with `sessionUuid` (an observer whose registration was released
+   * or expired, #11076): its subscriptions and storage observers are dropped and the client gets a
+   * terminal `SESSION_ENDED` frame. Returns how many connections ended.
+   */
+  revokeIdentity(sessionUuid: string): number {
+    const sockets = [...this.identitiesBySocket]
+      .filter(([, identities]) => identities.has(sessionUuid))
+      .map(([socket]) => socket);
+    for (const socket of sockets) {
+      logger.info("[DeviceDataStream] ending connection: reason=session_ended");
+      try {
+        if (!socket.destroyed) {
+          this.sendJson(socket, {
+            type: "error",
+            success: false,
+            code: "SESSION_ENDED",
+            error: "Observation stream ended: session_ended",
+          } satisfies SubscriptionResponse);
+        }
+      } catch (error) {
+        // The peer may already be gone; its subscriptions are released below either way.
+        logger.debug(`[DeviceDataStream] session_ended notice failed: ${errorMessage(error)}`);
+      }
+      this.onConnectionClose(socket);
+      this.endRevokedSocket(socket);
+    }
+    return sockets.length;
+  }
+
+  private endRevokedSocket(socket: Socket): void {
+    try {
+      socket.end();
+    } catch (error) {
+      logger.warn(`[DeviceDataStream] Failed to end revoked connection: ${errorMessage(error)}`);
+      socket.destroy();
+    }
+  }
+
+  private recordSocketIdentity(socket: Socket, sessionUuid: string | undefined): void {
+    if (typeof sessionUuid !== "string" || sessionUuid.length === 0 || socket.destroyed) {
+      return;
+    }
+    const identities = this.identitiesBySocket.get(socket) ?? new Set<string>();
+    identities.add(sessionUuid);
+    this.identitiesBySocket.set(socket, identities);
   }
 
   /** Wire the serial↔`deviceSessionUuid` resolver used to stamp frames and route on the epoch key. */
@@ -1270,6 +1331,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     }
 
     // Let base class handle the subscription
+    this.recordSocketIdentity(socket, request.sessionUuid);
     await super.processLine(socket, line);
 
     // The wire now targets a deviceSessionUuid; the cadence/connect machinery is
@@ -1393,11 +1455,15 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   protected onServerClosing(): void {
+    this.removeObserverReleaseListener?.();
+    this.removeObserverReleaseListener = null;
+    this.identitiesBySocket.clear();
     super.onServerClosing();
     this.abortRemovedInitialFrameWaiters();
   }
 
   protected onConnectionClose(socket: Socket): void {
+    this.identitiesBySocket.delete(socket);
     const filters = this.getSubscribersForSocket(socket).map((subscriber) => subscriber.filter);
     super.onConnectionClose(socket);
     this.abortRemovedInitialFrameWaiters();
@@ -1408,6 +1474,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   protected onConnectionError(socket: Socket, error: Error): void {
+    this.identitiesBySocket.delete(socket);
     const filters = this.getSubscribersForSocket(socket).map((subscriber) => subscriber.filter);
     super.onConnectionError(socket, error);
     this.abortRemovedInitialFrameWaiters();
@@ -1812,6 +1879,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // The CtrlProxy observer is keyed by serial/package/file, not by the session epoch. A
     // reconnecting pane receives a new session UUID for the same serial; keeping UUIDs in this
     // ownership key lets the retired pane's teardown unregister the refreshed pane's observer.
+    if (subscribe) {
+      this.recordSocketIdentity(socket, request.sessionUuid);
+    }
     const key = `${storageDeviceId ?? "all"}:${packageName}:${fileName}`;
     const storageRequest = {
       deviceId: storageDeviceId,

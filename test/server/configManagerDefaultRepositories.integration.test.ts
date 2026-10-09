@@ -8,7 +8,11 @@ import type {
   DeviceSnapshotConfig,
   VideoRecordingConfig,
 } from "../../src/models";
-import { getAppearanceConfig } from "../../src/server/appearanceManager";
+import {
+  clearSessionAppearanceConfig,
+  getAppearanceConfig,
+  updateAppearanceConfig,
+} from "../../src/server/appearanceManager";
 import {
   getDeviceSnapshotConfig,
   resetDeviceSnapshotManagerDependencies,
@@ -63,6 +67,34 @@ describe("config manager default repositories", () => {
     await seedConfig("appearance_configs", config);
 
     expect(await getAppearanceConfig()).toEqual(config);
+  });
+
+  test("appearance config is stored per session and never leaks to another session (#10976)", async () => {
+    await updateAppearanceConfig({ syncWithHost: false, defaultMode: "dark" }, "session-a");
+
+    expect((await getAppearanceConfig("session-a")).defaultMode).toBe("dark");
+    expect((await getAppearanceConfig("session-a")).syncWithHost).toBe(false);
+    // B has stored nothing, so it sees the defaults, not A's choice.
+    expect((await getAppearanceConfig("session-b")).defaultMode).toBe("auto");
+    expect((await getAppearanceConfig("session-b")).syncWithHost).toBe(true);
+    expect((await getAppearanceConfig()).defaultMode).toBe("auto");
+  });
+
+  test("a session without its own row falls back to the global row, and clearing drops only its own", async () => {
+    const global: AppearanceConfig = {
+      syncWithHost: false,
+      defaultMode: "light",
+      applyOnConnect: true,
+    };
+    await seedConfig("appearance_configs", global);
+    expect(await getAppearanceConfig("session-a")).toEqual(global);
+
+    await updateAppearanceConfig({ defaultMode: "dark" }, "session-a");
+    await updateAppearanceConfig({ defaultMode: "dark" }, "session-b");
+    await clearSessionAppearanceConfig("session-a");
+
+    expect(await getAppearanceConfig("session-a")).toEqual(global);
+    expect((await getAppearanceConfig("session-b")).defaultMode).toBe("dark");
   });
 
   test("device snapshot manager reads the shared repository's snapshot table by default", async () => {

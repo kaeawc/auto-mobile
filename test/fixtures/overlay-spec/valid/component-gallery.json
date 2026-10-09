@@ -1,0 +1,199 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "tab": 0,
+    "liked_a": false,
+    "liked_b": true,
+    "saved_1": false,
+    "saved_2": true
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "card",
+        "visibleWhen": {
+          "key": "tab",
+          "equals": 0
+        },
+        "children": [
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "text",
+                "text": "A",
+                "style": {
+                  "background": "primaryContainer",
+                  "cornerRadius": "full",
+                  "padding": {
+                    "start": 8,
+                    "end": 8,
+                    "top": 4,
+                    "bottom": 4
+                  }
+                }
+              },
+              {
+                "type": "text",
+                "text": "Alexey",
+                "style": {
+                  "textStyle": "titleMedium"
+                }
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": "Shipped the overlay components."
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "button",
+                "label": "Like",
+                "variant": "text",
+                "onTap": [
+                  {
+                    "type": "toggle",
+                    "key": "liked_a"
+                  },
+                  {
+                    "type": "emit",
+                    "name": "like-liked_a"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "text": "Liked by you",
+                "visibleWhen": {
+                  "key": "liked_a",
+                  "equals": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "card",
+        "visibleWhen": {
+          "key": "tab",
+          "equals": 0
+        },
+        "children": [
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "text",
+                "text": "B",
+                "style": {
+                  "background": "primaryContainer",
+                  "cornerRadius": "full",
+                  "padding": {
+                    "start": 8,
+                    "end": 8,
+                    "top": 4,
+                    "bottom": 4
+                  }
+                }
+              },
+              {
+                "type": "text",
+                "text": "Bea",
+                "style": {
+                  "textStyle": "titleMedium"
+                }
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": "Reviewing the spec today."
+          },
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "button",
+                "label": "Like",
+                "variant": "text",
+                "onTap": [
+                  {
+                    "type": "toggle",
+                    "key": "liked_b"
+                  },
+                  {
+                    "type": "emit",
+                    "name": "like-liked_b"
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "text": "Liked by you",
+                "visibleWhen": {
+                  "key": "liked_b",
+                  "equals": true
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "column",
+        "repeat": {
+          "items": [
+            {
+              "id": 1,
+              "title": "Android engineer",
+              "company": "Acme"
+            },
+            {
+              "id": 2,
+              "title": "iOS engineer",
+              "company": "Globex"
+            }
+          ],
+          "as": "job"
+        },
+        "children": [
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "column",
+                "children": [
+                  {
+                    "type": "text",
+                    "text": "{job.title}"
+                  },
+                  {
+                    "type": "text",
+                    "text": "{job.company}",
+                    "style": {
+                      "textStyle": "bodySmall"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "checkbox",
+                "stateKey": "saved_{job.id}"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

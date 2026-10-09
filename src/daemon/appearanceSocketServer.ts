@@ -69,8 +69,11 @@ const defaultDeviceSource: AppearanceDeviceSource = {
 };
 
 export interface AppearanceSocketServerDependencies {
-  getConfig: () => Promise<AppearanceConfig>;
-  updateConfig: (update: AppearanceConfigInput | null) => Promise<AppearanceConfig>;
+  getConfig: (sessionKey?: string) => Promise<AppearanceConfig>;
+  updateConfig: (
+    update: AppearanceConfigInput | null,
+    sessionKey?: string,
+  ) => Promise<AppearanceConfig>;
   resolveMode: (config: AppearanceConfig) => Promise<AppearanceMode>;
   applyToDevice: (device: BootedDevice, mode: AppearanceMode) => Promise<void>;
   triggerSync: () => Promise<void>;
@@ -100,6 +103,8 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
     timer: Timer = defaultTimer,
     private readonly authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
       "appearance",
+      // An observer may store its own config; it applies once the observer holds a device (#10976).
+      { allowObserverSessions: true },
     ),
     private readonly deviceSource: AppearanceDeviceSource = defaultDeviceSource,
     private readonly dependencies: AppearanceSocketServerDependencies = defaultDependencies,
@@ -121,7 +126,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
 
     switch (command) {
       case "get_appearance_config": {
-        const config = await this.dependencies.getConfig();
+        const config = await this.dependencies.getConfig(this.configKey(request.sessionUuid));
         return {
           id: request.id,
           type: "appearance_response",
@@ -146,7 +151,10 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
     if (typeof enabled !== "boolean") {
       throw new Error("set_appearance_sync requires enabled boolean");
     }
-    const config = await this.dependencies.updateConfig({ syncWithHost: enabled });
+    const config = await this.dependencies.updateConfig(
+      { syncWithHost: enabled },
+      this.configKey(request.sessionUuid),
+    );
     const appliedMode = await this.applyToTargets(config, request.sessionUuid);
     await this.dependencies.triggerSync();
     return {
@@ -170,10 +178,13 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
       throw new Error("set_appearance requires mode: light | dark | auto");
     }
     const normalizedMode = String(mode).toLowerCase();
-    const config = await this.dependencies.updateConfig({
-      defaultMode: normalizedMode,
-      syncWithHost: normalizedMode === "auto",
-    });
+    const config = await this.dependencies.updateConfig(
+      {
+        defaultMode: normalizedMode,
+        syncWithHost: normalizedMode === "auto",
+      },
+      this.configKey(request.sessionUuid),
+    );
     const appliedMode = await this.applyToTargets(config, request.sessionUuid, normalizedMode);
     await this.dependencies.triggerSync();
     return {
@@ -236,6 +247,19 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
     return mode;
   }
 
+  /**
+   * The key the caller's config is stored under: its base session identity. With no verified
+   * identity (auth off, or no session) the single global config is used.
+   */
+  private configKey(sessionUuid: string | undefined): string | undefined {
+    if (this.authenticator.isAuthenticationEnforced?.() === false) {
+      return undefined;
+    }
+    return (
+      this.authenticator.resolveSessionIdentity?.(sessionUuid) ?? (sessionUuid?.trim() || undefined)
+    );
+  }
+
   private getTargets(sessionUuid: string | undefined): BootedDevice[] {
     const targets = new Map<string, BootedDevice>();
 
@@ -254,8 +278,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
       return [...targets.values()];
     }
 
-    const callerBase =
-      this.authenticator.resolveSessionIdentity?.(sessionUuid) ?? sessionUuid?.trim();
+    const callerBase = this.configKey(sessionUuid);
     const owned = [...targets.values()].filter((device) => {
       const owner = this.deviceSource.getSessionForDevice(device.deviceId);
       if (!callerBase || !owner) {

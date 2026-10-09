@@ -32,6 +32,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import { cliStderr, cliStdout, renderCliToolOutput, type CliByteSink } from "./toolOutput";
 import type { CliTerminationRequest } from "./termination";
 import { cliDeviceOwnershipHint } from "./deviceOwnershipHint";
+import { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS } from "../daemon/constants";
 import {
   ensureCliToolSelectionProfileStoreWritable,
   loadPersistedCliToolSelectionProfile,
@@ -44,6 +45,11 @@ interface CliHelpParameterInfo {
   isOptional: boolean;
   typeName: string;
   description?: string;
+}
+
+function formatIdleMinutes(ms: number): string {
+  const minutes = ms / 60_000;
+  return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
 }
 
 export function parseCliArgs(args: string[]): {
@@ -642,17 +648,21 @@ Session-based Execution:
   When using --session-uuid, the tool will be executed on the device assigned to that session.
   This allows multiple tool calls to target the same device in parallel.
   A session acquired or used from the CLI is held on a wall-clock idle timeout
-  (10 minutes by default, AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS) rather than the
+  (${formatIdleMinutes(DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS)} by default; override with
+  AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS) rather than the
   heartbeat contract a long-running MCP connection keeps, so it survives the gap
-  between one-shot invocations. Every call refreshes it.
+  between one-shot invocations. Every control call refreshes it; reads do not.
 
 Device ownership:
-  A device a session holds takes calls only from that session. A call without
-  --session-uuid (or with another session's) on a held device is refused with
-  code device_owned_by_other_session. Pass the sessionUuid that getAndroid,
-  getApple or startDevice returned, or wait for the holder to release the device.
-  Tools that only watch (observe, identifyInteractions, hitTest) are allowed on any
-  device. killDevice and deleteDevice also accept --force true to stop a held device.
+  A device a session holds takes control calls only from that session. A control
+  call without --session-uuid (or with another session's) on a held device is
+  refused with code device_owned_by_other_session. Pass the sessionUuid that
+  getAndroid, getApple or startDevice returned, or wait for the holder to release
+  the device. Reads need no session and are allowed on any device: observe, hitTest,
+  identifyInteractions, listApps, getDeviceState, a read-only sqlQuery, and the read
+  forms of keyboard, clipboard, displayConfig, accessibility and prototype. A read
+  never counts as use. killDevice and deleteDevice also accept --force true to stop
+  a held device.
 `);
 
   // Show categorized tools

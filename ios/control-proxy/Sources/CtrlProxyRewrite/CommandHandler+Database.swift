@@ -35,7 +35,8 @@ extension CommandHandler {
                 databasePath: databasePath,
                 query: query,
                 sessionId: request.sessionId,
-                mutationToken: request.mutationToken
+                mutationToken: request.mutationToken,
+                readOnly: request.readOnly
             )
             if let error = result.error {
                 return ExecuteSqlResponse(

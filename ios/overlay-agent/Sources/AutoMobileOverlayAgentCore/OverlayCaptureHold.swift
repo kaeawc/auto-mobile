@@ -1,30 +1,56 @@
 import Foundation
 
 /// State machine behind `hide_for_capture` / `restore_after_capture` (#9305): the overlay is
-/// hidden for the host's screenshot and comes back on `restore_after_capture` or when the
-/// deadline passes, whichever is first. The deadline is the safety net for a host that is
-/// cancelled between hide and restore. UIKit-free: the agent supplies timers, tests a clock.
+/// hidden for the host's screenshot and comes back when the last hold is released or expires.
+/// Holds are token-counted (#10995) so overlapping captures cannot show the overlay during each
+/// other: each `hide` returns its own token with its own deadline, and the window is shown again
+/// only once no token is left. The deadline is the safety net for a host that is cancelled between
+/// hide and restore. UIKit-free: the agent supplies timers, tests a clock.
+///
+/// Tokens start from a random per-process seed (#11018), so a host still holding a token from a
+/// previous agent process cannot release a live hold in a relaunched one: the stale token is
+/// unknown, `restore` answers `restored: false`, and the host treats that capture as unconfirmed.
 struct OverlayCaptureHold {
     static let defaultDeadlineMs = 1500
-    /// Upper bound so a bad request cannot keep the overlay hidden for long.
-    static let maxDeadlineMs = 5000
+    /// Upper bound so a bad request cannot keep the overlay hidden for long. It must cover the
+    /// host's iOS screenshot timeout (10 s, `IOS_SCREENSHOT_TIMEOUT_MS`) plus its margin, or a slow
+    /// capture would outlive its hold.
+    static let maxDeadlineMs = 15000
 
     /// Handed to the timer the agent schedules; an expiry only counts for the hold that set it.
     struct Ticket: Equatable {
-        let generation: Int
+        let token: Int
         let deadlineMs: Int
     }
 
-    private let now: () -> TimeInterval
-    private var generation = 0
-    private var deadline: TimeInterval?
+    /// Largest token seed. The host reads tokens as JSON numbers in JavaScript, which are exact
+    /// only up to 2^53 - 1, so seeds stay below 2^52 and leave 2^52 tokens of headroom; a full
+    /// 64-bit seed would round in the host and make every restore miss its hold.
+    static let maxTokenSeed = 1 << 52
 
-    init(now: @escaping () -> TimeInterval) {
+    /// A fresh seed from the system's cryptographically secure generator.
+    static func randomTokenSeed() -> Int {
+        var generator = SystemRandomNumberGenerator()
+        return randomTokenSeed(using: &generator)
+    }
+
+    static func randomTokenSeed(using generator: inout some RandomNumberGenerator) -> Int {
+        Int.random(in: 0 ..< maxTokenSeed, using: &generator)
+    }
+
+    private let now: () -> TimeInterval
+    private var lastToken: Int
+    private var deadlines: [Int: TimeInterval] = [:]
+
+    /// `tokenSeed` is the value the first token follows; tests inject it, the agent leaves the
+    /// random per-process default.
+    init(now: @escaping () -> TimeInterval, tokenSeed: Int = OverlayCaptureHold.randomTokenSeed()) {
         self.now = now
+        lastToken = tokenSeed
     }
 
     var isHiding: Bool {
-        deadline != nil
+        !deadlines.isEmpty
     }
 
     static func clampedDeadlineMs(_ requested: Any?) -> Int {
@@ -32,24 +58,40 @@ struct OverlayCaptureHold {
         return min(max(number.intValue, 1), maxDeadlineMs)
     }
 
-    /// Starts (or extends) a hold. A second hide while hidden replaces the first deadline and
-    /// invalidates its timer.
+    /// Starts a hold with its own token and deadline; other holds are untouched.
     mutating func hide(deadlineMs: Int) -> Ticket {
-        generation += 1
-        deadline = now() + Double(deadlineMs) / 1000
-        return Ticket(generation: generation, deadlineMs: deadlineMs)
+        lastToken += 1
+        deadlines[lastToken] = now() + Double(deadlineMs) / 1000
+        return Ticket(token: lastToken, deadlineMs: deadlineMs)
     }
 
-    /// Ends the hold; `true` when something was hidden and the overlay must be restored.
-    mutating func restore() -> Bool {
-        defer { deadline = nil }
-        return deadline != nil
+    /// Result of releasing a hold.
+    struct Release: Equatable {
+        /// A hold was released (the token was still live, or any hold existed for a tokenless restore).
+        let released: Bool
+        /// No hold is left, so the overlay must be shown again.
+        let shouldShow: Bool
     }
 
-    /// The timer for `ticket` fired: restores only if that hold is still the current one.
+    /// Releases `token`'s hold; a restore without a token (an older host) releases every hold.
+    /// A token that already expired or was released releases nothing.
+    mutating func restore(token: Int?) -> Release {
+        guard let token else {
+            let had = isHiding
+            deadlines.removeAll()
+            return Release(released: had, shouldShow: had)
+        }
+        guard deadlines.removeValue(forKey: token) != nil else {
+            return Release(released: false, shouldShow: false)
+        }
+        return Release(released: true, shouldShow: deadlines.isEmpty)
+    }
+
+    /// The timer for `ticket` fired: drops that hold if still live and due. `true` when it was the
+    /// last one, so the overlay must be shown again.
     mutating func expire(_ ticket: Ticket) -> Bool {
-        guard ticket.generation == generation, let deadline, now() >= deadline else { return false }
-        self.deadline = nil
-        return true
+        guard let deadline = deadlines[ticket.token], now() >= deadline else { return false }
+        deadlines.removeValue(forKey: ticket.token)
+        return deadlines.isEmpty
     }
 }

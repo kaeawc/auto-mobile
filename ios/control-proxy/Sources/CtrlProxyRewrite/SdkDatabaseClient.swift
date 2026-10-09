@@ -41,7 +41,8 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
         databasePath: String,
         query: String,
         sessionId: String? = nil,
-        mutationToken: String? = nil
+        mutationToken: String? = nil,
+        readOnly: Bool? = nil
     )
         async throws -> SdkExecuteSqlResult
     {
@@ -52,6 +53,7 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
                 query: query,
                 sessionId: sessionId,
                 mutationToken: mutationToken,
+                readOnly: readOnly,
                 relayTimeoutMs: Int(Self.requestTimeout * 1000)
             )
         )
@@ -169,6 +171,7 @@ private struct ExecuteSqlRequest: Codable {
     let query: String
     let sessionId: String?
     let mutationToken: String?
+    let readOnly: Bool?
     let relayTimeoutMs: Int
 }
 

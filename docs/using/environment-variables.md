@@ -74,6 +74,7 @@ unset.
 | `AUTOMOBILE_CTRL_PROXY_LEASE_IDLE_MS`                                                                       | Idle period after which a daemon closes a device's CtrlProxy connection and gives up its forwarding lease (no session, stream, tool call or CtrlProxy request); also how recent its own use must be for it to refuse another process's request to give the lease up; positive number of milliseconds, otherwise the default.                                                                                                            | `60000` ms                                      |
 | `AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS`                                                                  | Idle timeout after which a harness private daemon (`AUTOMOBILE_HARNESS_PRIVATE_DAEMON=1`, or an explicit non-default `AUTOMOBILE_DAEMON_SOCKET_PATH` with `AUTOMOBILE_AUX_SOCKET_DIR` set) whose launching parent exited, with no clients or sessions, shuts itself down; non-negative milliseconds, `0` disables.                                                                                                                      | `900000` ms                                     |
 | `AUTOMOBILE_HARNESS_PRIVATE_DAEMON`                                                                         | Marks a test/lane private daemon for the orphan watchdog; `1` arms it, `0` exempts a daemon that would otherwise qualify.                                                                                                                                                                                                                                                                                                               | unset                                           |
+| `AUTOMOBILE_DAEMON_LAUNCHER_PID`                                                                            | Pid of the process that launched a private daemon, for the orphan watchdog; defaults to the parent pid read at process entry. Values that are not a pid above 1 are ignored.                                                                                                                                                                                                                                                            | unset                                           |
 
 </div>
 
@@ -191,9 +192,14 @@ invocations, so the next invocation's new token can always claim it.
 
 Heartbeats prove liveness, not use (owner decision 2026-10-08, #10656). A
 heartbeat-policy session also has a 2-minute idle window measured from the end
-of its last tool call, and heartbeats never extend it: they renew only the owner
-lease and its grace window. Only tool usage extends the idle deadline, so a
-heartbeat from an idle but live owner does not. A tool call in flight is
+of its last control call, and heartbeats never extend it: they renew only the owner
+lease and its grace window. Only control calls extend the idle deadline, so a
+heartbeat from an idle but live owner does not. No read counts as activity, not
+even the owner's own (owner decision 2026-10-09, #10964): `observe` and the other
+read-only tools never extend the idle window, so an agent that only observes its
+device for longer than the window loses it. Read-only access never requires a
+session (#10965); see [device ownership](device-ownership.md) for which tools and
+argument forms are reads. A tool call in flight is
 activity, so the idle window does not release a session mid-call, and it
 restarts when the call ends (#10694). That hold is bounded: it lasts until the
 latest in-flight call's request deadline plus 10 s, or 30 minutes after it began
@@ -226,6 +232,9 @@ proxy stops heartbeating the binding even if it missed the daemon's release
 notification, and it also stops when the daemon answers a heartbeat with
 `daemon_session_not_found`; a call that names the released session is told to
 call `getAndroid` or `getApple`, which works on the same transport (#10702).
+A session held from the CLI keeps its own 2-minute default idle window
+(`AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS`); the owner chose not to raise it
+(2026-10-09, #10982), and `--cli help` prints the same value.
 `session-info` reports `lastUsedAt` as the last tool activity
 and `expiresAt` as the idle deadline. When a session's device restarts, the daemon
 waits up to three minutes for it to come back. Tool calls that start, wait on, or
@@ -402,9 +411,15 @@ the harness only when recovery has failed. Recovery always fits inside the lease
 plus the grace window (8 s at the default 4 s timeout) at the default 2 s
 heartbeat cadence. The proxy applies this to every session it holds, one
 session at a time. The daemon does not hold its own stalls against owners: when
-its heartbeat monitor runs more than 2 s later than scheduled it moves every
+its heartbeat monitor runs more than 2 s later than scheduled it moves a
 session's lease forward by exactly that lateness, so a daemon stall of a few
-seconds cannot push a heartbeating owner past lease plus grace.
+seconds cannot push a heartbeating owner past lease plus grace. Only owners whose
+lease was still live when the stall began (within one lease of their last
+heartbeat) are excused (#11080): an owner that had already gone silent is
+released near the usual 10 s even while every scan runs late. Lease and idle
+time are measured on the monotonic clock, so stepping the wall clock (an NTP
+correction) neither extends nor shortens them; on macOS a forward step cannot
+be told from host sleep and counts as sleep.
 
 Idle time is wall-clock, host sleep included (owner decision 2026-10-08,
 #10661; classification of sleep versus a daemon stall in #10699). A stall that on its own outlasts a
@@ -588,25 +603,26 @@ export AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT=true
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                              | Use and accepted values                                                                                                                                          | Default                                                           |
-| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `AUTOMOBILE_IOS_WARMUP_DEVICES`                                                       | Comma-separated simulator UDIDs allowed passive startup warm-up and observation streams without sessions.                                                        | empty list                                                        |
-| `AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES`                                          | Comma-separated Android serials allowed appearance sync without sessions.                                                                                        | empty list                                                        |
-| `AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES`                                       | Comma-separated Android serials allowed passive observation streams without sessions.                                                                            | empty list                                                        |
-| `AUTOMOBILE_APPEARANCE_SYNC`                                                          | Enable appearance sync; `0`, `false`, `off`, `no` disable (case-insensitive, trimmed).                                                                           | on                                                                |
-| `AUTOMOBILE_ALLOW_DEVICE_CREATE`                                                      | Permit emulator/simulator creation; `1`/`true` enable (case-insensitive, trimmed). Explicit creation flag wins.                                                  | off                                                               |
-| `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS`, `AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS`           | Exact `0` disables session continuity; exact `1` additionally opts eligible Android emulators into active restart. Other values warn and disable active restart. | passive continuity on; active restart off                         |
-| `AUTOMOBILE_ANDROID_REBOOT_ON_DEATH`, `AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH`           | Deprecated fallback for device recovery on loss, after both platform-neutral spellings; same `0`/`1` semantics.                                                  | unset                                                             |
-| `AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS`, `AUTO_MOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` | Rolling active restart budget; integer `1..10`, invalid values fall back.                                                                                        | `2`                                                               |
-| `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`, `AUTO_MOBILE_DEVICE_RECOVERY_WINDOW_MS`       | Rolling recovery budget window; positive integer milliseconds (digits, no leading zero).                                                                         | `900000` ms                                                       |
-| `AUTOMOBILE_DEVICE_POOL_MATCHING`, `AUTO_MOBILE_DEVICE_POOL_MATCHING`                 | Device selection: exact `LATEST`, `RANDOM`, `MINIMUM`; invalid values fall back.                                                                                 | `LATEST`                                                          |
-| `AUTOMOBILE_DEVICE_POOL_AUTOLOCK`, `AUTO_MOBILE_DEVICE_POOL_AUTOLOCK`                 | Require acquired device session UUID and auto-release on idle; exact `1` enables.                                                                                | off                                                               |
-| `AUTOMOBILE_DEVICE_POOL_TIMEOUT`, `AUTO_MOBILE_DEVICE_POOL_TIMEOUT`                   | Autolock idle timeout in **seconds**, parsed as a positive base-10 integer prefix.                                                                               | `60` seconds                                                      |
-| `AUTOMOBILE_EMULATOR_HEADLESS`                                                        | Exact `true` forces headless, `false` forces windowed; other values use platform detection.                                                                      | headless on macOS and Linux without a display; otherwise windowed |
-| `AUTOMOBILE_EMULATOR_AUDIO`                                                           | Exact `false` adds `-no-audio`; other values keep emulator audio.                                                                                                | audio on                                                          |
-| `AUTOMOBILE_EMULATOR_ARGS`                                                            | Extra emulator argv as a JSON array of nonempty strings; malformed JSON/entries fail.                                                                            | empty array                                                       |
-| `AUTOMOBILE_IOS_HEADLESS`                                                             | On macOS exact `true`/`1` forces headless; any other set value forces windowed. Non-macOS is always headless.                                                    | detect graphical login session                                    |
-| `AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS`                                            | Android work-profile package polling interval; base-10 integer milliseconds. Use positive values; this read has no invalid-value fallback.                       | `5000` ms                                                         |
+| Variable                                                                              | Use and accepted values                                                                                                                                          | Default                                                            |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `AUTOMOBILE_IOS_WARMUP_DEVICES`                                                       | Comma-separated simulator UDIDs allowed passive startup warm-up and observation streams without sessions.                                                        | empty list                                                         |
+| `AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES`                                          | Comma-separated Android serials allowed appearance sync without sessions.                                                                                        | empty list                                                         |
+| `AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES`                                       | Comma-separated Android serials allowed passive observation streams without sessions.                                                                            | empty list                                                         |
+| `AUTOMOBILE_APPEARANCE_SYNC`                                                          | Enable appearance sync; `0`, `false`, `off`, `no` disable (case-insensitive, trimmed).                                                                           | on                                                                 |
+| `AUTOMOBILE_ALLOW_DEVICE_CREATE`                                                      | Permit emulator/simulator creation; `1`/`true` enable (case-insensitive, trimmed). Explicit creation flag wins.                                                  | off                                                                |
+| `AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS`, `AUTO_MOBILE_DEVICE_RECOVERY_ON_LOSS`           | Exact `0` disables session continuity; exact `1` additionally opts eligible Android emulators into active restart. Other values warn and disable active restart. | passive continuity on; active restart off                          |
+| `AUTOMOBILE_ANDROID_REBOOT_ON_DEATH`, `AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH`           | Deprecated fallback for device recovery on loss, after both platform-neutral spellings; same `0`/`1` semantics.                                                  | unset                                                              |
+| `AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS`, `AUTO_MOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS` | Rolling active restart budget; integer `1..10`, invalid values fall back.                                                                                        | `2`                                                                |
+| `AUTOMOBILE_DEVICE_RECOVERY_WINDOW_MS`, `AUTO_MOBILE_DEVICE_RECOVERY_WINDOW_MS`       | Rolling recovery budget window; positive integer milliseconds (digits, no leading zero).                                                                         | `900000` ms                                                        |
+| `AUTOMOBILE_DEVICE_POOL_MATCHING`, `AUTO_MOBILE_DEVICE_POOL_MATCHING`                 | Device selection: exact `LATEST`, `RANDOM`, `MINIMUM`; invalid values fall back.                                                                                 | `LATEST`                                                           |
+| `AUTOMOBILE_DEVICE_POOL_AUTOLOCK`, `AUTO_MOBILE_DEVICE_POOL_AUTOLOCK`                 | Require acquired device session UUID and auto-release on idle; exact `1` enables.                                                                                | off                                                                |
+| `AUTOMOBILE_DEVICE_POOL_TIMEOUT`, `AUTO_MOBILE_DEVICE_POOL_TIMEOUT`                   | Autolock idle timeout in **seconds**, parsed as a positive base-10 integer prefix.                                                                               | `60` seconds                                                       |
+| `AUTOMOBILE_EMULATOR_HEADLESS`                                                        | Exact `true` forces headless, `false` forces windowed; other values use platform detection.                                                                      | headless on macOS and Linux without a display; otherwise windowed  |
+| `AUTOMOBILE_EMULATOR_AUDIO`                                                           | Exact `false` adds `-no-audio`; other values keep emulator audio.                                                                                                | audio on                                                           |
+| `AUTOMOBILE_EMULATOR_ARGS`                                                            | Extra emulator argv as a JSON array of nonempty strings; malformed JSON/entries fail.                                                                            | empty array                                                        |
+| `AUTOMOBILE_IOS_HEADLESS`                                                             | On macOS exact `true`/`1` forces headless; any other set value forces windowed. Non-macOS is always headless.                                                    | detect graphical login session                                     |
+| `AUTOMOBILE_IOS_SIM_MAX_BOOTED`                                                       | Cap on concurrently booted iOS Simulators used by the fleet capacity report and gate; positive integer. Invalid values are ignored with a warning.               | min(RAM x 0.5 / measured per-simulator RSS, cores / 2), at least 1 |
+| `AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS`                                            | Android work-profile package polling interval; base-10 integer milliseconds. Use positive values; this read has no invalid-value fallback.                       | `5000` ms                                                          |
 
 </div>
 

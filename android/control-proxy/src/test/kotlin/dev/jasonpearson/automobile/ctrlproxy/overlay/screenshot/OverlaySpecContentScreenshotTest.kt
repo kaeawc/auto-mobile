@@ -68,6 +68,18 @@ class OverlaySpecContentScreenshotTest {
       validOverlayFixture("material-slider-chip-card"),
     )
 
+  /**
+   * Repeated like rows whose toggle, style and visibility keys bind `liked_{item.id}` (#11051): the
+   * first row unliked and the second liked, so one capture covers both states.
+   */
+  @Test
+  fun repeatStateKeys() =
+    overlayScreenshotTest(
+      "repeat_state_keys",
+      validOverlayFixture("repeat-state-keys"),
+      pending = true,
+    )
+
   /** Radio group, list items, checkbox, switch and icon buttons. */
   @Test
   fun selectionControls() =
@@ -112,8 +124,7 @@ class OverlaySpecContentScreenshotTest {
 
   /** Shadow colour, offset, per-corner radii and the text polish styles (#10441). */
   @Test
-  fun stylePolish() =
-    overlayScreenshotTest("style_polish", validOverlayFixture("style-polish"))
+  fun stylePolish() = overlayScreenshotTest("style_polish", validOverlayFixture("style-polish"))
 
   /** Component labels, titles and button actions bound from repeat items. */
   @Test

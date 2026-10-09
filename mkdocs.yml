@@ -121,6 +121,7 @@ nav:
       - "Live device acceptance": using/live-device-acceptance.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "Environment variables": using/environment-variables.md
+      - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md
       - "Device ownership": using/device-ownership.md
       - "Managed Macs and CI runners": using/managed-macs.md
@@ -140,6 +141,7 @@ nav:
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
+      - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Daemon": design-docs/mcp/daemon.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md

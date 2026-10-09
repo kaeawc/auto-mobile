@@ -51,6 +51,10 @@ import {
  *    liveness path that persists the session cannot write fresh activity.
  * 5. The read side (#10700, #10703): an idle-expiry judgement reads only
  *    activity clocks, and a lease judgement reads only liveness clocks.
+ * 6. Reads are not use (#10964): in the device-tool registry, every
+ *    `markSessionAdmitted` call (which makes the call's end session activity) is
+ *    in the then-branch of an `if` that negates the call's read classification,
+ *    so a `deviceReadOnly` call can never be credited.
  *
  * The clock names come from `src/daemon/sessionClocks.ts`, which checks them
  * against the `Session` fields, so a rename cannot silently escape this guard.
@@ -122,6 +126,12 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     "SessionManager.isSessionExpired",
     "SessionManager.isSessionExpiredForNewExecution",
   ],
+  "src/daemon/sessionHoldDiagnostics.ts": ["idleReleaseAt", "vetoedIdleReleaseAt"],
+  "src/daemon/daemonMcpProxy.ts": [
+    "DaemonMcpProxy.evictAbandonedHeldSessions",
+    // The replay-lease TTL (#10656): a heartbeat ack must not keep a dead binding replayable.
+    "DaemonMcpProxy.isBoundSessionReplayExpired",
+  ],
 };
 
 /** Rule 5: lease judgements read only liveness clocks. */
@@ -131,6 +141,8 @@ const LEASE_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     "isLivenessOwnerLeaseLive",
     "effectiveLastHeartbeat",
     "ownerLeaseHeartbeat",
+    // #11080: whether an owner was live when a daemon stall began, for narrow forgiveness.
+    "ownerLeaseLiveAt",
   ],
   "src/daemon/SessionHeartbeatMonitor.ts": [
     "SessionHeartbeatMonitor.heartbeatLeaseStaleReason",
@@ -168,6 +180,14 @@ const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
       "expiresAt by at most the lost interval (never to a full window from resume), so it grants " +
       "no hold time a non-stalled session would not have had. #10835: a cli-idle session's " +
       "idleStallForgivenAt moves by the same bounded lost interval.",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdTokenOwnedSession": {
+    writes: 1,
+    reason:
+      "#10990: any connection, including one a keeper heartbeat re-establishes, resumes the " +
+      "sessions the proxy's stable owner token holds. The held session's lastUsedAt is copied " +
+      "from the daemon's own last-tool-use clock, never the current time, so resuming grants no " +
+      "idle time.",
   },
 };
 
@@ -220,13 +240,14 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "Tool usage: a device-acquisition result (getAndroid/getApple/startDevice) binds.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.endOneSessionCall": {
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.creditSessionUse": {
     writes: 2,
     reason:
       "Tool usage: the end of a forwarded call that reached the session restarts the latest " +
       "binding's replay lease and a held session's lastUsedAt, so idleness counts from the end " +
-      "of the last call however long it ran. A call routed by a deviceId/platform selector " +
-      "counts against the session the selector reached (#10692).",
+      "of the last call however long it ran. Called for the session a call named " +
+      "(endOneSessionCall) and for the session the daemon echoed as the one it routed an " +
+      "admitted control call to (#10692, #10974); a read or refused call carries no echo.",
   },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdPreviousBinding": {
     writes: 1,
@@ -234,6 +255,34 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "Tool usage: a newer binding demotes the previous one to a held session whose lastUsedAt " +
       "carries that binding's replay lease (boundSessionUuidAt, itself only stamped by tool " +
       "calls), so held-session idle eviction keys off tool use, never heartbeat acks (#10677).",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdTokenOwnedSession": {
+    writes: 1,
+    reason:
+      "Resume (#10990): a session the stable owner token holds is held with the daemon's own " +
+      "lastUsedAt, listed in KNOWN_LIVENESS_WRITES.",
+  },
+  "src/daemon/daemonMcpProxy.ts <module>": {
+    writes: 1,
+    reason: "The tokenOwnedSessions answer schema (zod) declares lastUsedAt, not a clock value.",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.stallRestoreSnapshot": {
+    writes: 1,
+    reason:
+      "Rollback record: a daemon_stalled handover copies the session's tool-use clock " +
+      "(boundSessionUuidAt or the held lastUsedAt) unchanged, so a resume can put it back (#10989).",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.restoreResumedSession": {
+    writes: 1,
+    reason:
+      "Rollback: a session resumed after a daemon_stalled handover is held again with the " +
+      "lastUsedAt it had before the handover; the heartbeat ack that resumed it renews nothing (#10989).",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.rebindResumedSession": {
+    writes: 1,
+    reason:
+      "Rollback: a latest binding resumed after a daemon_stalled handover gets back the replay " +
+      "lease it had before the handover; the heartbeat ack that resumed it renews nothing (#10989).",
   },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.updateBoundSessionUuid": {
     writes: 1,
@@ -766,8 +815,10 @@ function rederivationProblems(model: FileModel, helper: string): string[] {
     if (ts.isPropertyAccessExpression(node) && node.name.text === "lastUsedAt") {
       readsLastUsedAt = true;
     }
+    // `sessionNow` is the session clock (#11080), a clock read like `now`.
     const readsClock =
-      (ts.isPropertyAccessExpression(node) && node.name.text === "now") ||
+      (ts.isPropertyAccessExpression(node) &&
+        (node.name.text === "now" || node.name.text === "sessionNow")) ||
       (ts.isIdentifier(node) && (node.text === "Date" || node.text === "now"));
     if (readsClock) {
       problems.push(`${helper} reads the current time at line ${lineOf(model.source, node)}`);
@@ -823,6 +874,64 @@ function forbiddenReads(model: FileModel, root: string, forbidden: ReadonlySet<s
 }
 
 /** The innermost named function enclosing `node`, or `<module>`. */
+/** The device-tool admission sites, and the read-classification names their guard must negate. */
+const ADMISSION_SITES: Readonly<Record<string, readonly string[]>> = {
+  "src/server/toolRegistry.ts": ["readOnly", "readSession"],
+};
+
+/** Whether `condition` contains `!name` for one of `names`, possibly among `&&` operands. */
+function negatesOneOf(condition: ts.Expression, names: readonly string[]): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isPrefixUnaryExpression(node) &&
+      node.operator === ts.SyntaxKind.ExclamationToken &&
+      ts.isIdentifier(unwrap(node.operand)) &&
+      names.includes((unwrap(node.operand) as ts.Identifier).text)
+    ) {
+      found = true;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(condition);
+  return found;
+}
+
+/** Rule 6: `markSessionAdmitted` calls not guarded by a negated read classification. */
+function unguardedAdmissions(model: FileModel, readNames: readonly string[]): string[] {
+  const problems: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "markSessionAdmitted"
+    ) {
+      let guarded = false;
+      for (let child: ts.Node = node, parent = node.parent; parent;) {
+        if (
+          ts.isIfStatement(parent) &&
+          parent.thenStatement === child &&
+          negatesOneOf(parent.expression, readNames)
+        ) {
+          guarded = true;
+          break;
+        }
+        if (ts.isFunctionLike(parent)) {
+          break;
+        }
+        child = parent;
+        parent = parent.parent;
+      }
+      if (!guarded) {
+        problems.push(`${model.path}:${lineOf(model.source, node)} credits a read`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(model.source);
+  return problems;
+}
+
 function enclosingKey(model: FileModel, node: ts.Node): string {
   for (let current: ts.Node | undefined = node; current; current = current.parent) {
     const key = model.keyByNode.get(current);
@@ -1061,6 +1170,14 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     expect(problems).toEqual([]);
   });
 
+  test("a device-tool admission is credited only for a control call, never a read (#10964)", () => {
+    for (const [path, readNames] of Object.entries(ADMISSION_SITES)) {
+      const model = parse(path, readFileSync(join(ROOT, path), "utf8"));
+      expect(model.source.text).toContain("markSessionAdmitted");
+      expect(unguardedAdmissions(model, readNames)).toEqual([]);
+    }
+  });
+
   describe("rule coverage on a seeded source", () => {
     const SEEDED = `
       function widen(session) { session.expiresAt = Math.max(session.expiresAt, session.lastUsedAt + 1); }
@@ -1193,6 +1310,23 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       expect(forbiddenReads(judgements, "Monitor.isIdle", LIVENESS_READS)).toEqual([]);
       expect(forbiddenReads(judgements, "Monitor.leaseLapsed", ACTIVITY_CLOCKS)).toEqual([
         "judgements.ts Monitor.leaseLapsed:5 reads lastUsedAt",
+      ]);
+    });
+
+    test("reports an admission credited without negating the read classification (#10964)", () => {
+      const admissions = parse(
+        "admissions.ts",
+        [
+          "async function resolve(readOnly, execution, tracker) {",
+          "  if (execution && !readOnly) { tracker.markSessionAdmitted(execution.id); }",
+          "  if (execution) { tracker.markSessionAdmitted(execution.id); }",
+          "  if (!readOnly) {} else { tracker.markSessionAdmitted(execution.id); }",
+          "}",
+        ].join("\n"),
+      );
+      expect(unguardedAdmissions(admissions, ["readOnly"])).toEqual([
+        "admissions.ts:3 credits a read",
+        "admissions.ts:4 credits a read",
       ]);
     });
 

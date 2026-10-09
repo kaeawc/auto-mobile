@@ -245,13 +245,20 @@ class OverlayController(
         },
       )
     // A device-persistent overlay is a standalone mock with no app to follow.
+    val scopeBefore = foreground.capture()
     if (isDevicePersistent(validated)) foreground.release() else foreground.anchor()
     val blocked = lifecycle.isBlocked()
-    check(
-      if (blocked) host.dismiss()
-      else if (replace) host.replace(interactive) else host.show(interactive),
-    ) {
-      "Overlay host failed to render window"
+    // A rejected or throwing host leaves the previous window up, so it keeps its own scoping.
+    try {
+      check(
+        if (blocked) host.dismiss()
+        else if (replace) host.replace(interactive) else host.show(interactive),
+      ) {
+        "Overlay host failed to render window"
+      }
+    } catch (error: Throwable) {
+      foreground.restore(scopeBefore)
+      throw error
     }
     if (blocked) notifyDetached()
     previous?.close()

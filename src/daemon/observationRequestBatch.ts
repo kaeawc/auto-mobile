@@ -32,6 +32,16 @@ export interface PooledObservationDeps<TDevice extends ObservationRequestDevice>
     device: TDevice,
     options: { minTimestamp: number; signal: AbortSignal },
   ) => Promise<ObserveResult>;
+  /** The read path for a requester that only watches a held device (#10967). */
+  viewerRead?: {
+    /** The device is held by a session other than the requester's; checked as its step starts. */
+    applies: (device: TDevice) => boolean;
+    /**
+     * The connect-only read the `observe` tool's deviceId read uses: no service rebind, CtrlProxy
+     * setup or recovery on the holder's device.
+     */
+    observe: (device: TDevice, signal: AbortSignal) => Promise<ObserveResult>;
+  };
 }
 
 /**
@@ -42,6 +52,10 @@ export interface PooledObservationDeps<TDevice extends ObservationRequestDevice>
  * current capture as stale when the device clock is behind and admits an old one
  * when it is ahead (issue #9895, same class as #6430/#9878). Android therefore
  * reads its own clock once, in parallel with its siblings. iOS keeps the host floor.
+ *
+ * A viewer's request on a device another session holds takes `viewerRead` instead (#10967): the
+ * session observe pipeline can rebind the accessibility service or set up CtrlProxy, which only
+ * the holder may do. The observer read captures fresh, so it needs no floor.
  */
 export function createPooledObservationExecutor<
   TDevice extends ObservationRequestDevice & { platform: string },
@@ -49,6 +63,9 @@ export function createPooledObservationExecutor<
   deps: PooledObservationDeps<TDevice>,
 ): (device: TDevice, signal: AbortSignal) => Promise<ObserveResult> {
   return async (device, signal) => {
+    if (deps.viewerRead?.applies(device)) {
+      return deps.viewerRead.observe(device, signal);
+    }
     const minTimestamp =
       device.platform === "android"
         ? await deps.readAndroidDeviceClockMs(device, signal)

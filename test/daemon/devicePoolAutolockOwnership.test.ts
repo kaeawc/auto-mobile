@@ -1,4 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { expect, spyOn, test } from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
 import { Kysely } from "kysely";
@@ -324,7 +325,11 @@ test.each(["agent-B", "agent-A"])(
           __mcpSessionId: client,
         });
         if (client === "agent-B") {
-          await expect(acquiring).rejects.toThrow("another session");
+          // Typed so the JUnit held-device wait and the CLI hint recognize it (#11071).
+          await expect(acquiring).rejects.toMatchObject({
+            code: DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+            message: expect.stringContaining("another session"),
+          });
           expect(readinessAttempts).toBe(0);
           expect(deviceUtils.getExecutedOperations()).not.toContain(`killDevice:${device.name}`);
           expect(h.manager.getSession(owner!)?.assignedDevice).toBe(device.deviceId);
@@ -391,7 +396,10 @@ test("System UI recovery rejects a remapped client while its first target is idl
           deviceId: device.deviceId,
           __mcpSessionId: "agent-A",
         }),
-      ).rejects.toThrow("another session");
+      ).rejects.toMatchObject({
+        code: DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+        message: expect.stringContaining("another session"),
+      });
       expect(readinessAttempts).toBe(1);
       expect(secondOwner).toBeDefined();
       expect(deviceUtils.getExecutedOperations()).not.toContain(`killDevice:${device.name}`);

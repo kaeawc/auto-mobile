@@ -33,7 +33,9 @@ describe("DeviceSessionManager platform scan status", () => {
       const scanSpy =
         failedPlatform === "android"
           ? spyOn(adb, "getBootedAndroidDevices").mockRejectedValue(new Error("adb scan failed"))
-          : spyOn(simctl, "getBootedSimulators").mockRejectedValue(new Error("simctl scan failed"));
+          : spyOn(simctl, "getBootedSimulatorsChecked").mockRejectedValue(
+              new Error("simctl scan failed"),
+            );
 
       try {
         const scan = await manager.detectConnectedPlatformsWithStatus();

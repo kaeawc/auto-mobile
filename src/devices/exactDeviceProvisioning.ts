@@ -1,3 +1,4 @@
+import type { DeviceResourceDrift } from "../models/DeviceResourceReconciliation";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +15,18 @@ import { parseAndroidSystemImageRuntime } from "../utils/android-cmdline-tools/A
 import { AvdManagerClient } from "../utils/android-cmdline-tools/AvdManagerClient";
 import { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/AndroidInventoryInvalidation";
 import type { CreateAvdParams } from "../utils/android-cmdline-tools/avdmanager";
-import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import {
+  SimCtlClient,
+  type AppleDeviceRuntime,
+  type AppleDeviceType,
+} from "../utils/ios-cmdline-tools/SimCtlClient";
+import {
+  evaluateRuntimeCompatibility,
+  type DeviceTypeRuntimeBounds,
+} from "../utils/ios-cmdline-tools/runtimeCompatibility";
+import type { ProvisionDeviceRecoveryEvidence } from "../server/provisionDeviceRecoveryEvidence";
+import { errorMessage } from "../utils/describeUnknownError";
+import { logger } from "../utils/logger";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../utils/toolUtils";
 import { trackAmbient } from "../utils/PerfContext";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -62,10 +74,8 @@ export interface ExactDeviceProvisionRequest {
   name: string;
   deviceId?: string;
   spec: ExactDeviceSpecification;
-  /** Reconcile mutable configuration only for a replay of the same operation. */
-  reconcileExistingConfiguration?: boolean;
-  /** Persist ownership immediately before creating a previously absent device. */
-  onBeforeCreate?: () => Promise<void>;
+  /** Note ownership immediately before creating a previously absent device. */
+  onBeforeCreate?: () => void;
   /** Shared lifecycle lease held by a higher-level operation through boot/readiness. */
   lifecycleLease?: VirtualDeviceLifecycleLease;
   /** Absolute deadline for acquiring lifecycle coordination. */
@@ -83,12 +93,15 @@ export type ProvisionDeviceFailureCode =
   | "cleanup_failed"
   | "creation_not_allowed"
   | "device_lost"
+  | "device_owned_by_other_session"
   | "device_offline"
   | "discovery_incomplete"
   | "identity_conflict"
   | "timeout"
   | "unsupported"
-  | "platform_command_failed";
+  | "platform_command_failed"
+  | "resource_profile_unproven"
+  | "runtime_incompatible";
 
 export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   Record<ProvisionDeviceFailureCode, boolean>
@@ -96,12 +109,17 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   cleanup_failed: false,
   creation_not_allowed: false,
   device_lost: true,
+  // Transient: the holder can release the device, after which the same operation can succeed.
+  device_owned_by_other_session: true,
   device_offline: true,
   discovery_incomplete: true,
   identity_conflict: false,
   timeout: true,
   unsupported: false,
   platform_command_failed: false,
+  resource_profile_unproven: false,
+  // A proven model/runtime mismatch is a property of the request; only a different pair can succeed.
+  runtime_incompatible: false,
 };
 
 interface ProvisionDeviceErrorDiagnostics {
@@ -110,6 +128,21 @@ interface ProvisionDeviceErrorDiagnostics {
   attempt?: number;
   incidentId?: string;
   deviceId?: string;
+  /** Requested resources that could not be proven applied (iOS Simulator profiles). */
+  resourceDrift?: DeviceResourceDrift[];
+  /** Proven iOS model/runtime mismatch: requested pair, known bounds, installed alternatives. */
+  runtimeCompatibility?: IosRuntimeIncompatibility;
+  /** Structured recovery evidence delivered with the error (a snapshot, not live state). */
+  recovery?: ProvisionDeviceRecoveryEvidence;
+}
+
+export interface IosRuntimeIncompatibility {
+  requestedRuntime: string;
+  requestedDeviceType: string;
+  /** Normalized inclusive bounds of the model; `maxVersion: null` is unbounded. */
+  bounds?: DeviceTypeRuntimeBounds;
+  /** Installed, available runtimes that do support the requested model. */
+  compatibleRuntimes: Array<{ id: string; version: string }>;
 }
 
 export class ProvisionDeviceError extends ActionableError {
@@ -138,6 +171,12 @@ export interface ExactIosSimulatorClient {
     runtime: string,
     signal?: AbortSignal,
   ): Promise<string>;
+}
+
+/** Read-only simctl catalog used to validate an exact pair before creation. */
+export interface ExactIosRuntimeCatalog {
+  getRuntimesChecked(timeoutMs?: number, signal?: AbortSignal): Promise<AppleDeviceRuntime[]>;
+  getDeviceTypesChecked(signal?: AbortSignal): Promise<AppleDeviceType[]>;
 }
 
 export interface AndroidAvdConfigWriteOptions {
@@ -271,6 +310,8 @@ export interface DefaultExactDeviceProvisionerDependencies {
   androidConfigReader: AvdConfigReader;
   androidConfigWriter: AndroidAvdConfigWriter;
   iosSimulator: ExactIosSimulatorClient;
+  /** When absent, exact iOS pairs are not pre-validated (compatibility unknown). */
+  iosRuntimeCatalog?: ExactIosRuntimeCatalog;
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   timer?: Pick<Timer, "now">;
 }
@@ -450,7 +491,11 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       );
     }
 
-    await request.onBeforeCreate?.();
+    if (request.platform === "ios") {
+      await this.assertIosPairCompatible(request, request.spec as IosDeviceSpecification);
+    }
+
+    request.onBeforeCreate?.();
     if (request.platform === "android") {
       return await trackAmbient("provision:createAndroid", () =>
         this.createAndroid(request, request.spec as AndroidDeviceSpecification, displayCutout),
@@ -459,6 +504,68 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     return await trackAmbient("provision:createIos", () =>
       this.createIos(request, request.spec as IosDeviceSpecification, displayCutout),
     );
+  }
+
+  /**
+   * Reject a pair that CoreSimulator evidence proves incompatible before any
+   * creation side effect. Missing, malformed, or unreadable evidence is unknown,
+   * not unsupported, so creation proceeds and simctl remains the authority.
+   */
+  private async readIosCompatibilityCatalog(
+    catalog: ExactIosRuntimeCatalog,
+    signal: AbortSignal | undefined,
+  ): Promise<{ runtimes: AppleDeviceRuntime[]; deviceTypes: AppleDeviceType[] } | undefined> {
+    try {
+      const [runtimes, deviceTypes] = await Promise.all([
+        catalog.getRuntimesChecked(undefined, signal),
+        catalog.getDeviceTypesChecked(signal),
+      ]);
+      return { runtimes, deviceTypes };
+    } catch (error) {
+      throwIfAborted(signal);
+      // Incomplete discovery is not proof of incompatibility; let simctl decide.
+      logger.warn(`iOS runtime compatibility check skipped: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+  }
+
+  private async assertIosPairCompatible(
+    request: ExactDeviceProvisionRequest,
+    spec: IosDeviceSpecification,
+  ): Promise<void> {
+    const catalog = this.dependencies.iosRuntimeCatalog;
+    if (!catalog) {
+      return;
+    }
+    const discovered = await this.readIosCompatibilityCatalog(catalog, request.signal);
+    if (!discovered) {
+      return;
+    }
+    const { runtimes, deviceTypes } = discovered;
+    const runtime = runtimes.find((entry) => entry.identifier === spec.runtime);
+    const deviceType = deviceTypes.find((entry) => entry.identifier === spec.deviceType);
+    if (!runtime || !deviceType) {
+      return;
+    }
+    const evaluation = evaluateRuntimeCompatibility(deviceType, runtime.version);
+    const unavailable = !runtime.isAvailable;
+    if (!unavailable && evaluation.status !== "unsupported") {
+      return;
+    }
+    const compatibleRuntimes = runtimes
+      .filter(
+        (entry) =>
+          entry.isAvailable &&
+          evaluateRuntimeCompatibility(deviceType, entry.version).status === "supported",
+      )
+      .map((entry) => ({ id: entry.identifier, version: entry.version }));
+    throw runtimeIncompatibleError(request, spec, {
+      reason: unavailable
+        ? `Runtime '${spec.runtime}' is not available (${runtime.availabilityError ?? "CoreSimulator marked it unavailable"}), so iOS simulator '${request.name}' with device type '${spec.deviceType}' cannot be created.`
+        : `Device type '${spec.deviceType}' does not support runtime '${spec.runtime}' (version ${runtime.version}; supported ${describeBounds(evaluation.bounds)}), so iOS simulator '${request.name}' was not created.`,
+      bounds: evaluation.bounds,
+      compatibleRuntimes,
+    });
   }
 
   private resolveDisplayCutout(request: ExactDeviceProvisionRequest): DisplayCutoutClassification {
@@ -555,19 +662,6 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     if (sameAndroidSpecification(spec, config)) {
       return;
     }
-    if (
-      request.reconcileExistingConfiguration &&
-      spec.configuration !== undefined &&
-      existing.isRunning === false &&
-      existing.isRunningStateKnown !== false &&
-      sameAndroidDeviceIdentity(spec, config)
-    ) {
-      await this.configureAndroid(existing.name, spec.configuration, request.signal);
-      const reconciled = await this.dependencies.androidConfigReader.readConfig(existing.name);
-      if (sameAndroidSpecification(spec, reconciled)) {
-        return;
-      }
-    }
     throw new ProvisionDeviceError(
       "identity_conflict",
       `Existing Android AVD '${existing.name}' does not match the requested runtime, device type, and configuration.`,
@@ -653,6 +747,37 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
   }
 }
 
+function describeBounds(bounds: DeviceTypeRuntimeBounds | undefined): string {
+  return bounds ? `${bounds.minVersion} to ${bounds.maxVersion ?? "no maximum"}` : "unknown bounds";
+}
+
+function runtimeIncompatibleError(
+  request: ExactDeviceProvisionRequest,
+  spec: IosDeviceSpecification,
+  details: {
+    reason: string;
+    bounds: DeviceTypeRuntimeBounds | undefined;
+    compatibleRuntimes: IosRuntimeIncompatibility["compatibleRuntimes"];
+  },
+): ProvisionDeviceError {
+  const alternatives = details.compatibleRuntimes.length
+    ? details.compatibleRuntimes.map((entry) => entry.id).join(", ")
+    : "none installed";
+  return new ProvisionDeviceError(
+    "runtime_incompatible",
+    `${details.reason} Compatible installed runtimes: ${alternatives}.`,
+    undefined,
+    {
+      runtimeCompatibility: {
+        requestedRuntime: spec.runtime,
+        requestedDeviceType: spec.deviceType,
+        ...(details.bounds ? { bounds: details.bounds } : {}),
+        compatibleRuntimes: details.compatibleRuntimes,
+      },
+    },
+  );
+}
+
 export function createDefaultExactDeviceProvisioner(
   deviceManager: PlatformDeviceManager,
   deviceCreationGate: DeviceCreationGate,
@@ -665,5 +790,6 @@ export function createDefaultExactDeviceProvisioner(
     androidConfigReader: new FileAvdConfigReader(),
     androidConfigWriter,
     iosSimulator: new SimCtlClient(null),
+    iosRuntimeCatalog: new SimCtlClient(null),
   });
 }

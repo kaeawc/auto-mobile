@@ -21,6 +21,8 @@ const defaultDependencies: AppearanceOnConnectDependencies = {
 export async function applyAppearanceOnConnect(
   device: BootedDevice,
   dependencies: Partial<AppearanceOnConnectDependencies> = {},
+  /** Base UUID of the connecting session: only its own config applies (#10976). */
+  sessionKey?: string,
 ): Promise<AppearanceMode | null> {
   const { isSyncEnabled, getConfig, resolveMode, apply } = {
     ...defaultDependencies,
@@ -30,7 +32,7 @@ export async function applyAppearanceOnConnect(
     return null;
   }
   try {
-    const config = await getConfig();
+    const config = await getConfig(sessionKey);
     if (!config.applyOnConnect) {
       return null;
     }

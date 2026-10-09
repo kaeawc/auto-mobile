@@ -3,7 +3,7 @@
  *
  * The agent speaks the CtrlProxy overlay message names, so requests and `overlay_event` pushes
  * map one to one. It has no `update_overlay` (#10550): a same-id `show` replaces the overlay.
- * It has no display targeting. Per-call `timeoutMs` is not forwarded: the agent client applies
+ * It has no display targeting. `reset` is forwarded to start a same-id show fresh. Per-call `timeoutMs` is not forwarded: the agent client applies
  * its own request timeout to every request.
  */
 import { ActionableError } from "../../../models/ActionableError";
@@ -11,7 +11,10 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { OverlayAssetRequestOptions } from "../../observe/android/CtrlProxyOverlays";
 import { overlayEventSchema } from "../../observe/android/CtrlProxyOverlays";
-import { SCREENSHOT_HIDE_OVERLAY_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
+import {
+  OVERLAY_SHOW_IN_PLACE_CAPABILITY,
+  SCREENSHOT_HIDE_OVERLAY_CAPABILITY,
+} from "../../observe/android/ctrlProxyProtocol";
 import type {
   OverlayAssetResult,
   OverlayDismiss,
@@ -24,7 +27,11 @@ import {
   type OverlayAssetUpload,
 } from "../overlayAssets";
 import type { OverlaySpec } from "../overlaySpec";
-import type { OverlayDeviceStatus, OverlayTransport } from "../OverlayTransport";
+import type {
+  OverlayDeviceStatus,
+  OverlayShowOptions,
+  OverlayTransport,
+} from "../OverlayTransport";
 import type {
   OverlayAgentClient,
   OverlayAgentMessage,
@@ -50,13 +57,36 @@ export const noOverlayAgentConnections: OverlayAgentConnections = { get: () => u
  */
 export { SCREENSHOT_HIDE_OVERLAY_CAPABILITY };
 
+/**
+ * Capability the agent advertises when `get_overlay_status` also reports `lastSequence`, which
+ * `inspect` adopts. An older agent answers status without it, so inspect is refused on one.
+ */
+export const IOS_OVERLAY_INSPECT_CAPABILITY = "overlay_inspect_v1";
+
 /** The agent restores the overlay by itself after this long, even if the host never asks. */
 export const DEFAULT_CAPTURE_HIDE_DEADLINE_MS = 1500;
+
+/** The agent clamps a hold to this (`OverlayCaptureHold.maxDeadlineMs`); keep the two equal. */
+export const MAX_CAPTURE_HIDE_DEADLINE_MS = 15000;
+
+/** Slack on top of the capture's own timeout so a capture that times out still ends inside its hold. */
+export const CAPTURE_HIDE_DEADLINE_MARGIN_MS = 1000;
+
+/** The hide deadline for a capture that may take up to `captureTimeoutMs`, within the agent's cap. */
+export function captureHideDeadlineMs(captureTimeoutMs: number): number {
+  return Math.min(captureTimeoutMs + CAPTURE_HIDE_DEADLINE_MARGIN_MS, MAX_CAPTURE_HIDE_DEADLINE_MS);
+}
 
 export interface CaptureWithOverlayHidden<T> {
   value: T;
   /** False only when the agent confirmed the overlay was hidden for the whole capture. */
   screenshotIncludesOverlay: boolean;
+  /**
+   * True when the agent never confirmed a hide for the whole capture (no capability, a failed
+   * request, a hold that expired before the restore): the overlay may be in the image. Absent when the agent answered, even with `hidden: false` (nothing was
+   * visible to hide), where the image is known to exclude it.
+   */
+  hideUnconfirmed?: true;
 }
 
 export function overlayAgentNotConnectedMessage(deviceId: string): string {
@@ -101,42 +131,83 @@ export class IosOverlayTransport implements OverlayTransport {
    * Runs `capture` (the host's simulator screenshot) with the overlay hidden: `hide_for_capture`
    * is answered only once the hide is on screen, then `restore_after_capture` follows even when
    * the capture throws. The agent also restores at `deadlineMs` on its own, so a cancelled host
-   * cannot leave the overlay hidden. Without the capability, or when the hide fails, the capture
-   * still runs and reports `screenshotIncludesOverlay: true` so callers can annotate it.
+   * cannot leave the overlay hidden. Holds are token-counted agent-side, so overlapping captures
+   * keep the overlay hidden until the last one restores. Without the capability, when the hide
+   * fails, or when the restore reports the hold was no longer live (`restored !== true`), the
+   * result carries `hideUnconfirmed` so callers fail closed.
    */
   async captureWithOverlayHidden<T>(
     capture: () => Promise<T>,
     deadlineMs: number = DEFAULT_CAPTURE_HIDE_DEADLINE_MS,
   ): Promise<CaptureWithOverlayHidden<T>> {
     if (!this.supportsCapability(SCREENSHOT_HIDE_OVERLAY_CAPABILITY)) {
-      return { value: await capture(), screenshotIncludesOverlay: true };
+      return { value: await capture(), screenshotIncludesOverlay: true, hideUnconfirmed: true };
     }
     let holding = false;
     let hidden = false;
+    let token: number | undefined;
     try {
       const reply = await this.agent.request("hide_for_capture", { deadlineMs });
       holding = reply.success;
       hidden = holding && reply.hidden !== false;
+      token = typeof reply.token === "number" ? reply.token : undefined;
     } catch (error) {
       logger.warn(`[overlay-agent] hide_for_capture failed: ${errorMessage(error)}`, error);
     }
+    let value: T;
     try {
-      return { value: await capture(), screenshotIncludesOverlay: !hidden };
-    } finally {
+      value = await capture();
+    } catch (error) {
       if (holding) {
-        await this.agent.request("restore_after_capture").catch((error: unknown) => {
-          // The agent's own deadline restores the overlay, so a lost restore is not fatal.
-          logger.warn(
-            `[overlay-agent] restore_after_capture failed: ${errorMessage(error)}`,
-            error,
-          );
-        });
+        await this.restoreHold(token);
       }
+      throw error;
+    }
+    // `restored !== true` means this hold was no longer live when the capture finished: its
+    // deadline passed, so the overlay may have come back mid-capture. Fail closed, like Android.
+    const holdSurvived = holding && (await this.restoreHold(token)) === true;
+    return {
+      value,
+      screenshotIncludesOverlay: !hidden,
+      ...(holdSurvived ? {} : ({ hideUnconfirmed: true } as const)),
+    };
+  }
+
+  /** `restore_after_capture` for one hold; undefined when the reply was lost. */
+  private async restoreHold(token: number | undefined): Promise<boolean | undefined> {
+    try {
+      const reply = await this.agent.request(
+        "restore_after_capture",
+        token === undefined ? undefined : { token },
+      );
+      return reply.restored === true;
+    } catch (error) {
+      // The agent's own deadline restores the overlay, so a lost restore is not fatal here; the
+      // capture is still reported unconfirmed because the hold's survival is unknown.
+      logger.warn(`[overlay-agent] restore_after_capture failed: ${errorMessage(error)}`, error);
+      return undefined;
     }
   }
 
-  async show(spec: OverlaySpec): Promise<OverlayResult> {
-    return toOverlayResult(await this.agent.request("show_overlay", { spec }));
+  /**
+   * A same-id show replaces the overlay in place; `reset: true` starts it fresh (pager pages from
+   * the spec). The field is sent only when true, as on Android. An agent that predates it would
+   * silently keep the pages, so `reset` is refused unless the handshake advertises
+   * `overlay_show_in_place_v1`.
+   */
+  async show(spec: OverlaySpec, options: OverlayShowOptions = {}): Promise<OverlayResult> {
+    if (options.reset === true && !this.supportsCapability(OVERLAY_SHOW_IN_PLACE_CAPABILITY)) {
+      throw new ActionableError(
+        `Overlay agent ${this.agent.handshake.agentVersion} does not support reset; relaunch ` +
+          "the app with launchApp overlay: true to load the agent built for this AutoMobile version.",
+      );
+    }
+    return toOverlayResult(
+      await this.agent.request("show_overlay", {
+        spec,
+        ...(options.reset === true ? { reset: true } : {}),
+      }),
+    );
   }
 
   async dismiss(target: OverlayDismiss): Promise<OverlayResult> {

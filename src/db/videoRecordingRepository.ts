@@ -15,7 +15,18 @@ import type {
 } from "./types";
 import { logger } from "../utils/logger";
 
-type VideoRecordingStatus = "recording" | "completed" | "interrupted";
+/**
+ * `incomplete`: a release-time stop exceeded its finalize cap (#10957), so the capture was
+ * force-stopped and whatever reached the host is kept.
+ */
+export type VideoRecordingStatus = "recording" | "completed" | "interrupted" | "incomplete";
+
+/** Statuses of a recording that is no longer capturing and has an artifact row to read. */
+export const FINISHED_VIDEO_RECORDING_STATUSES: VideoRecordingStatus[] = [
+  "completed",
+  "interrupted",
+  "incomplete",
+];
 
 export interface VideoRecordingRecord extends VideoRecordingMetadata {
   deviceId: string;
@@ -374,7 +385,7 @@ export class VideoRecordingRepository {
 
   async getLatestRecording(): Promise<VideoRecordingRecord | null> {
     const rows = await this.listRecordings({
-      status: ["completed", "interrupted"],
+      status: FINISHED_VIDEO_RECORDING_STATUSES,
       orderByStartedAt: "desc",
       limit: 1,
     });

@@ -34,6 +34,9 @@ final class PassthroughWindow: UIWindow {
         if model?.windowOrigin != origin {
             model?.windowOrigin = origin
         }
+        if model?.windowSize != bounds.size {
+            model?.windowSize = bounds.size
+        }
     }
 
     /// Where this window's own (0, 0) is on screen, in points: anchors are screen coordinates.
@@ -50,6 +53,7 @@ final class OverlayAgent {
     private var server: OverlayServer?
     private var layers: OverlayLayersViewController?
     private var sceneObserver: NSObjectProtocol?
+    private var keyboardObservers: [NSObjectProtocol] = []
     private var sessionObserver: AnyCancellable?
     /// App windows' own `accessibilityElementsHidden` while the overlay covers them.
     private var hiddenBeforeCovering: [ObjectIdentifier: Bool] = [:]
@@ -57,6 +61,8 @@ final class OverlayAgent {
     private var appliedAccessibility = OverlayHostAccessibility.hidden
 
     private var testHooksEnabled = false
+    /// Authenticated host connections, as last reported by the server on the main queue.
+    private var connectedClients = 0
     /// Hide-for-screenshot hold (#9305); the overlay window stays hidden while it is active.
     private var captureHold = OverlayCaptureHold(now: { ProcessInfo.processInfo.systemUptime })
 
@@ -85,6 +91,7 @@ final class OverlayAgent {
             self?.handle(message, reply: reply)
         }
         model.onEvent = { [weak server] event in server?.broadcast(event) }
+        server.onClientCountChanged = { [weak self] count in self?.clientCountChanged(count) }
         model.onVisibilityChange = { [weak self] visible in self?.setVisible(visible) }
         model.onEndEditing = { [weak self] in _ = self?.window?.endEditing(true) }
         // `$session` publishes the new value before `model.session` holds it, so the flags are
@@ -92,8 +99,34 @@ final class OverlayAgent {
         sessionObserver = model.$session.sink { [weak self] session in
             self?.updateAccessibility(session: session)
         }
+        observeKeyboard()
         server.start()
         self.server = server
+    }
+
+    // MARK: Keyboard
+
+    /// Tracks the app's software keyboard so a bottom sheet can sit above it. The agent runs in the
+    /// app's process, so these are the notifications of the keyboard the app shows.
+    private func observeKeyboard() {
+        let center = NotificationCenter.default
+        keyboardObservers = [
+            center.addObserver(
+                forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main
+            ) { [weak self] note in
+                let info = note.userInfo
+                let frame = (info?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+                let duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue
+                MainActor.assumeIsolated { self?.model.setKeyboard(frame: frame, duration: duration) }
+            },
+            center.addObserver(
+                forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
+            ) { [weak self] note in
+                let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?
+                    .doubleValue
+                MainActor.assumeIsolated { self?.model.setKeyboard(frame: nil, duration: duration) }
+            },
+        ]
     }
 
     // MARK: Window
@@ -221,7 +254,10 @@ final class OverlayAgent {
                 }
                 model.show(spec, reset: message["reset"] as? Bool == true)
                 warnAboutFontAssets(for: spec)
-                result(true, extra: missingAssetsExtra())
+                let missing = missingAssetsExtra()
+                // The host can leave before this queued show runs; nothing would remove it later.
+                if connectedClients == 0 { model.hostDisconnected() }
+                result(true, extra: missing)
             // No update_overlay (#10550): a same-id show_overlay replaces the shown overlay.
             case "dismiss_overlay":
                 // Like Android's OverlayController: an id that is not the shown overlay fails, and
@@ -245,13 +281,18 @@ final class OverlayAgent {
                 if let id = message["id"] as? String { model.removeAsset(id) }
                 result(true)
             case "get_overlay_status":
-                result(true, extra: ["status": model.status()])
+                var status = model.status()
+                status["visible"] = window?.isHidden == false
+                result(true, extra: ["status": status])
             case OverlayAgentProtocol.hideForCaptureRequest:
-                hideForCapture(deadlineMs: OverlayCaptureHold.clampedDeadlineMs(message["deadlineMs"])) { hidden in
-                    result(true, extra: ["hidden": hidden])
+                hideForCapture(
+                    deadlineMs: OverlayCaptureHold
+                        .clampedDeadlineMs(message["deadlineMs"])
+                ) { hidden, token in
+                    result(true, extra: ["hidden": hidden, "token": token])
                 }
             case OverlayAgentProtocol.restoreAfterCaptureRequest:
-                result(true, extra: ["restored": restoreAfterCapture()])
+                result(true, extra: ["restored": restoreAfterCapture(token: (message["token"] as? NSNumber)?.intValue)])
             default:
                 result(false, "Unknown request type \(type)")
             }
@@ -260,27 +301,41 @@ final class OverlayAgent {
         }
     }
 
+    // MARK: Host connection
+
+    /// The overlay belongs to the host session: when the last authenticated connection closes it
+    /// is dismissed (`reason: disconnect`) and its assets dropped, as on Android.
+    private func clientCountChanged(_ count: Int) {
+        connectedClients = count
+        if count < 1 { model.hostDisconnected() }
+    }
+
     // MARK: Hide for capture
 
     /// Hides the overlay window and replies once the hide has been committed to the render
     /// server, so the host's screenshot cannot still contain it. The hold restores itself at the
     /// deadline, which is what makes a cancelled host safe.
-    private func hideForCapture(deadlineMs: Int, committed: @escaping (Bool) -> Void) {
+    /// `committed` gets `hidden` (the overlay is off screen because of this hold: it was visible
+    /// and is now hidden, or another live hold already hid it) and this hold's token. `hidden:
+    /// false` means nothing was visible, so the capture holds no overlay either.
+    private func hideForCapture(deadlineMs: Int, committed: @escaping (Bool, Int) -> Void) {
+        let heldByOthers = captureHold.isHiding
         let ticket = captureHold.hide(deadlineMs: deadlineMs)
-        let wasVisible = window?.isHidden == false
+        let wasVisible = window?.isHidden == false || heldByOthers
         window?.isHidden = true
         CATransaction.flush()
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(deadlineMs)) { [weak self] in
             guard let self, self.captureHold.expire(ticket) else { return }
             self.showAfterCapture()
         }
-        FrameWaiter.nextFrame { committed(wasVisible) }
+        FrameWaiter.nextFrame { committed(wasVisible, ticket.token) }
     }
 
-    private func restoreAfterCapture() -> Bool {
-        guard captureHold.restore() else { return false }
-        showAfterCapture()
-        return true
+    /// `true` when a live hold was released. The overlay comes back only with the last hold.
+    private func restoreAfterCapture(token: Int?) -> Bool {
+        let release = captureHold.restore(token: token)
+        if release.shouldShow { showAfterCapture() }
+        return release.released
     }
 
     private func showAfterCapture() {
@@ -342,6 +397,11 @@ final class OverlayLayersViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .clear
         for host in [page, top] {
+            // Only `OverlayKeyboardLift` moves anything for the keyboard (#11042), and the window's
+            // insets reach the spec through the model, so neither host applies a safe area of its
+            // own. This is UIKit's switch: with only the root's `ignoresSafeArea`, a 300 pt sheet
+            // still moved 527 pt for a 334 pt lift on an iOS 26.5 simulator.
+            host.safeAreaRegions = SafeAreaRegions(OverlayKeyboardLift.hostSafeAreaRegions)
             addChild(host)
             host.view.backgroundColor = .clear
             host.view.frame = view.bounds
@@ -456,9 +516,11 @@ struct OverlayRootView: View {
         .environment(\.overlayTypography, OverlayTypography(theme: model.spec?.theme?.typography))
         .environment(\.overlayShapes, OverlayShapes(theme: model.spec?.theme?.shapes))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Bars and cutouts are the spec's job (safeAreaPadding); the keyboard still pushes a
-        // sheet or bottom-floating overlay up so its text field stays visible.
-        .ignoresSafeArea(.container)
+        // Bars and cutouts are the spec's job (safeAreaPadding). A bottom sheet is raised by the
+        // keyboard frame itself (`keyboardLift`) and nothing else moves for the keyboard, as on
+        // Android: the hosts keep no safe area (`OverlayKeyboardLift.hostSafeAreaRegions`), and
+        // this ignores every region too, so no second lift can stack on the sheet's (#11042).
+        .ignoresSafeArea()
     }
 
     /// The spec's anchored nodes, above its tree and below its modals, as Android's anchor layer.
@@ -471,7 +533,22 @@ struct OverlayRootView: View {
             ),
             model: model,
             sheet: placement.type == "sheet"
-                ? OverlayAnchorLayer.Sheet(edge: placement.edge, height: placement.height) : nil
+                ? OverlayAnchorLayer.Sheet(edge: placement.edge, height: placement.height, lift: keyboardLift)
+                : nil
+        )
+        .animation(keyboardLiftDuration.map { .easeInOut(duration: $0) }, value: keyboardLift)
+    }
+
+    /// How far the bottom sheet is raised and how long the move takes: the keyboard's own duration,
+    /// or instant under spec `motion: "none"` or Reduce Motion.
+    private var keyboardLift: Double {
+        model.keyboardLift
+    }
+
+    private var keyboardLiftDuration: Double? {
+        OverlayKeyboardLift.animationDuration(
+            keyboardDuration: model.keyboardDuration,
+            motion: OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
         )
     }
 
@@ -494,6 +571,9 @@ struct OverlayRootView: View {
                 .frame(height: placement.height ?? OverlaySheetFrame.defaultHeight)
                 .reportFrame(key: "content", model: model)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: edge)
+                // The sheet's frame is reported from inside, so its touch rect follows the lift.
+                .padding(.bottom, keyboardLift)
+                .animation(keyboardLiftDuration.map { .easeInOut(duration: $0) }, value: keyboardLift)
         case "floating":
             root
                 .offset(x: placement.offset?.x ?? 0, y: placement.offset?.y ?? 0)
@@ -599,5 +679,14 @@ private final class FrameWaiter: NSObject {
         let done = completion
         completion = nil
         done?()
+    }
+}
+
+extension SafeAreaRegions {
+    /// The UIKit regions for the agent's device-free `OverlayHostSafeAreaRegions`.
+    init(_ regions: OverlayHostSafeAreaRegions) {
+        self = []
+        if regions.contains(.container) { insert(.container) }
+        if regions.contains(.keyboard) { insert(.keyboard) }
     }
 }

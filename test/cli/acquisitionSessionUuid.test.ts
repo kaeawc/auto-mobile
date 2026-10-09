@@ -6,6 +6,7 @@ import {
   type CliOutput,
 } from "../../src/cli";
 import { DEVICE_SESSION_ACQUISITION_TOOLS } from "../../src/server/deviceSessionResult";
+import { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/constants";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 /**
@@ -86,5 +87,7 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
     expect(help).toContain("which mint");
     expect(help).toContain("undeclared");
     expect(help).toContain("removed before strict validation");
+    expect(help).toContain(`(${DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS / 60_000} minutes by default`);
+    expect(help).toContain("AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS");
   });
 });

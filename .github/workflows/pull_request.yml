@@ -47,6 +47,7 @@ jobs:
       ios_should_run: ${{ steps.ios_should_run.outputs.should_run }}
       ios_sim_tests_should_run: ${{ steps.ios_sim_tests_should_run.outputs.should_run }}
       webrtc_should_run: ${{ steps.webrtc_should_run.outputs.should_run }}
+      prototype_simulator_should_run: ${{ steps.prototype_simulator_should_run.outputs.should_run }}
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -264,6 +265,7 @@ jobs:
               # PR that regenerates them must run that Kotlin replay (#10838).
               - 'test/fixtures/desktop-wire/**'
               - 'test/daemon/desktopWireContract.test.ts'
+              - 'test/daemon/helpers/desktopWireHarness.ts'
 
       - name: "Check for IDE Plugin changes"
         id: filter-ide-plugin
@@ -493,13 +495,40 @@ jobs:
           fi
 
       # The advisory XCTestRunner simulator lane is label opt-in on PRs (#10895);
-      # it runs every night from nightly.yml regardless.
+      # it runs every night on CircleCI (nightly-macos) regardless.
       - name: "Decide if XCTestRunner simulator tests should run"
         id: ios_sim_tests_should_run
         env:
           OPT_IN: ${{ contains(github.event.pull_request.labels.*.name, 'run-ios-sim') }}
         run: |
           if [[ "$OPT_IN" == "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" && "${{ steps.check-auto-chore.outputs.auto_chore }}" != "true" ]]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Prototype Simulator (overlay agent per-runtime smoke, #10569) runs only when
+      # its own inputs change: the overlay agent, its smoke script and driver, and
+      # the TypeScript the driver imports. Moved here from CircleCI (#11011).
+      - name: "Check for overlay agent smoke inputs"
+        id: filter-prototype-simulator
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            prototype_simulator:
+              - 'ios/overlay-agent/**'
+              - 'scripts/ios/overlay-agent-*'
+              - 'scripts/ios/run_with_timeout.sh'
+              - 'src/features/overlay/overlaySpec.ts'
+              - 'src/features/overlay/overlayValidation.ts'
+              - 'src/features/overlay/ios/**'
+              - 'src/utils/SystemTimer.ts'
+              - 'test/bats/overlay-agent-smoke.bats'
+
+      - name: "Decide if Prototype Simulator should run"
+        id: prototype_simulator_should_run
+        run: |
+          if [[ "${{ steps.filter-prototype-simulator.outputs.prototype_simulator }}" == "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" && "${{ steps.check-auto-chore.outputs.auto_chore }}" != "true" ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
@@ -1051,8 +1080,8 @@ jobs:
         # BATS pass used to run inline inside the required Fast Validation job and
         # dominated its wall-clock. It now runs as a parallel matrix leg, matching
         # merge.yml, and is gated by the required "Shell Tests" roll-up.
-        # Keep the portable PR lane on Linux. The equivalent macOS lane runs in
-        # nightly.yml so slow hosted macOS capacity is off the merge path.
+        # Keep the portable PR lane on Linux. The equivalent macOS lane runs
+        # nightly on CircleCI (nightly-macos) so macOS capacity is off the merge path.
         os: [ubuntu-latest]
     steps:
       - name: "Git Checkout"
@@ -2317,9 +2346,10 @@ jobs:
 
   ios-swift-packages:
     name: "Swift Packages (${{ matrix.config.name }})"
-    # Pull-request YAML is untrusted, including for repository members, so the
-    # package matrix always uses the GitHub-hosted runner from its configuration.
-    runs-on: ${{ matrix.config.runner }}
+    # Small self-hosted Mac pool for owner-authored same-repository PRs once the
+    # pools are registered (vars.AUTOMOBILE_MAC_POOLS_ENABLED, #11011); forks and
+    # the pre-rollout state use the hosted runner from the matrix.
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac"]') || matrix.config.runner }}
     # Keep costly hosted macOS work behind the inexpensive Fast Validation gate.
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
@@ -2328,28 +2358,51 @@ jobs:
     # "iOS Build" gate). Generous backstop, not a tight bound.
     timeout-minutes: 45
     env:
-      IOS_SIGNING_ENABLED: ${{ secrets.IOS_CERTIFICATE_BASE64 != '' }}
-      MACOS_SIGNING_ENABLED: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 != '' }}
+      # Never import signing certificates into the self-hosted Mac's keychains:
+      # the self-hosted leg always builds unsigned.
+      IOS_SIGNING_ENABLED: ${{ secrets.IOS_CERTIFICATE_BASE64 != '' && !(github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') }}
+      MACOS_SIGNING_ENABLED: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 != '' && !(github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') }}
     strategy:
       fail-fast: false
       matrix:
         # PR runs only the primary Xcode toolchain. The full version sweep
-        # (26.5 / 26.6) runs on nightly.yml — Xcode-toolchain drift is
+        # (26.5 / 26.6) runs nightly on CircleCI — Xcode-toolchain drift is
         # slow-moving and does not need per-PR macOS minutes.
         config:
           - { name: "Xcode 26.5", runner: "macos-26", xcode: "26.5" }
     steps:
+      - name: "Isolate self-hosted Swift Packages home"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          isolated_home="$RUNNER_TEMP/swift-packages-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          {
+            echo "HOME=$isolated_home"
+            echo "TMPDIR=$isolated_home/tmp"
+            echo "XDG_CONFIG_HOME=$isolated_home/config"
+            echo "XDG_DATA_HOME=$isolated_home/data"
+            echo "CFFIXED_USER_HOME=$isolated_home"
+          } >> "$GITHUB_ENV"
+
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          clean: true
 
       # Pin every package build to the matrix toolchain. This is the supported
       # compiler floor, not an ambient-runner compatibility check.
       - name: "Select Xcode ${{ matrix.config.xcode }}"
+        if: runner.environment == 'github-hosted'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ matrix.config.xcode }}
+
+      - name: "Select self-hosted Xcode ${{ matrix.config.xcode }}"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
 
       - name: "Cache Swift package dependencies"
         uses: actions/cache@v5
@@ -2358,9 +2411,9 @@ jobs:
           path: |
             ~/Library/Caches/org.swift.swiftpm
             ~/.swiftpm/cache
-          key: ${{ runner.os }}-spm-swift-packages-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          key: ${{ runner.os }}-${{ runner.environment }}-spm-swift-packages-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
-            ${{ runner.os }}-spm-swift-packages-${{ matrix.config.xcode }}-
+            ${{ runner.os }}-${{ runner.environment }}-spm-swift-packages-${{ matrix.config.xcode }}-
 
       - name: "Install macOS Developer ID certificate"
         if: ${{ env.MACOS_SIGNING_ENABLED == 'true' }}
@@ -2412,44 +2465,74 @@ jobs:
       - name: "Test Swift Packages"
         run: ./scripts/ios/swift-test.sh
 
+      - name: "Remove isolated Swift Packages home"
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/swift-packages-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
   ios-xcode-build:
     name: "Build Xcode Projects (${{ matrix.config.name }}, ${{ matrix.project }})"
-    runs-on: ${{ matrix.config.runner }}
+    # Heavy self-hosted lane (one runner process, so xcodebuild/simulator jobs
+    # never overlap on the Mac) for owner-authored same-repository PRs once the
+    # pools are registered (#11011); forks and pre-rollout use hosted macos-26.
+    # The XcodeGen drift check below is the PR-time drift gate (#10939).
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac-heavy"]') || matrix.config.runner }}
     # Keep costly hosted macOS work behind the inexpensive Fast Validation gate.
     needs: [detect-changes, fast-validation]
     # Fast Validation runs through always(), so bypass the implicit success()
     # check on ancestors and require its result explicitly.
     if: always() && !cancelled() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
-    # Fail fast on a hung/evicted macOS runner instead of sitting until GHA
-    # infra-cancels the job (a cancelled terminal run blocks the required
-    # "iOS Build" gate). Generous backstop, not a tight bound.
-    timeout-minutes: 45
+    # Tight bound: a hung simulator or xcodebuild must not hold the single heavy
+    # lane (and the required "iOS Build" gate) for long. Hosted runs take 2-4 min.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        # PR runs only the primary Xcode toolchain; full sweep runs on nightly.yml.
+        # PR runs only the primary Xcode toolchain; full sweep runs nightly on CircleCI.
         config:
           - { name: "Xcode 26.5", runner: "macos-26", xcode: "26.5" }
         # Shard the two Xcode projects across two runners so they build in
-        # parallel, halving this required leg's wall time. The "iOS Build" gate
-        # reads needs.ios-xcode-build.result, which aggregates the whole matrix
-        # (green only if every shard is green), so the gate needs no change. Costs
-        # one extra concurrent macOS slot per PR — offset by moving the Playground
-        # tests to CircleCI (see .circleci/continue_config.yml). Names must match
-        # the generated <name>.xcodeproj basenames passed to xcode-build.sh.
+        # parallel on hosted runners (on the single heavy self-hosted lane they
+        # run one after the other). The "iOS Build" gate reads
+        # needs.ios-xcode-build.result, which aggregates the whole matrix (green
+        # only if every shard is green), so the gate needs no change. Names must
+        # match the generated <name>.xcodeproj basenames passed to xcode-build.sh.
         project:
           - Playground
           - CtrlProxy
     steps:
+      - name: "Isolate self-hosted Xcode build home"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          isolated_home="$RUNNER_TEMP/xcode-build-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          {
+            echo "HOME=$isolated_home"
+            echo "TMPDIR=$isolated_home/tmp"
+            echo "XDG_CONFIG_HOME=$isolated_home/config"
+            echo "XDG_DATA_HOME=$isolated_home/data"
+            echo "CFFIXED_USER_HOME=$isolated_home"
+            echo "XCODEGEN_PREFIX=$isolated_home/.local"
+          } >> "$GITHUB_ENV"
+          echo "$isolated_home/.local/bin" >> "$GITHUB_PATH"
+
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          clean: true
 
       - name: "Select Xcode ${{ matrix.config.xcode }}"
+        if: runner.environment == 'github-hosted'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ matrix.config.xcode }}
+
+      - name: "Select self-hosted Xcode ${{ matrix.config.xcode }}"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
 
       - name: "Cache Xcode Swift package dependencies"
         uses: actions/cache@v5
@@ -2458,9 +2541,9 @@ jobs:
           path: |
             ~/Library/Caches/org.swift.swiftpm
             ~/.swiftpm/cache
-          key: ${{ runner.os }}-spm-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          key: ${{ runner.os }}-${{ runner.environment }}-spm-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
-            ${{ runner.os }}-spm-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-
+            ${{ runner.os }}-${{ runner.environment }}-spm-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-
 
       - name: "Cache Xcode DerivedData"
         uses: actions/cache@v5
@@ -2469,9 +2552,9 @@ jobs:
           path: |
             ${{ runner.temp }}/automobile-derived-data-${{ matrix.project }}/Build
             ${{ runner.temp }}/automobile-derived-data-${{ matrix.project }}/ModuleCache.noindex
-          key: ${{ runner.os }}-derived-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-${{ hashFiles('ios/**/*.swift', 'ios/**/*.m', 'ios/**/*.mm', 'ios/**/*.h', 'ios/**/*.c', 'ios/**/*.cpp', 'ios/**/*.xcconfig', 'ios/**/*.plist', 'ios/**/*.entitlements', 'ios/**/*.storyboard', 'ios/**/*.xib', 'ios/**/*.xcassets/**', 'ios/**/*.strings', 'ios/**/*.ttf', 'ios/**/*.otf', 'ios/**/*.xcprivacy', 'ios/**/*.pbxproj', 'ios/**/*.xcscheme', 'ios/**/project.yml', 'ios/**/Package.swift', 'ios/**/Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.environment }}-derived-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-${{ hashFiles('ios/**/*.swift', 'ios/**/*.m', 'ios/**/*.mm', 'ios/**/*.h', 'ios/**/*.c', 'ios/**/*.cpp', 'ios/**/*.xcconfig', 'ios/**/*.plist', 'ios/**/*.entitlements', 'ios/**/*.storyboard', 'ios/**/*.xib', 'ios/**/*.xcassets/**', 'ios/**/*.strings', 'ios/**/*.ttf', 'ios/**/*.otf', 'ios/**/*.xcprivacy', 'ios/**/*.pbxproj', 'ios/**/*.xcscheme', 'ios/**/project.yml', 'ios/**/Package.swift', 'ios/**/Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-derived-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-
+            ${{ runner.os }}-${{ runner.environment }}-derived-xcode-build-${{ matrix.project }}-${{ matrix.config.xcode }}-
 
       - name: "Install XcodeGen"
         run: ./scripts/ios/install-xcodegen.sh
@@ -2499,6 +2582,11 @@ jobs:
           ./scripts/ios/xcode-build.sh ${{ matrix.project }}
           echo "build took ${SECONDS}s"
 
+      - name: "Remove isolated Xcode build home"
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/xcode-build-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
   # The Playground design-system tests (colour/contrast/typography/shape, #5102)
   # normally run on CircleCI (.circleci/continue_config.yml → ios-playground-tests),
   # which frees a concurrent GitHub macOS slot for the sharded build lanes above.
@@ -2510,25 +2598,47 @@ jobs:
   # so there is no double-run. Advisory, like the other simulator tests.
   ios-playground-tests:
     name: "iOS Playground Tests (${{ matrix.config.name }})"
-    runs-on: ${{ matrix.config.runner }}
+    # Simulator job: heavy self-hosted lane for same-repository PRs (#11011).
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac-heavy"]') || matrix.config.runner }}
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.detect-changes.outputs.ios_changed != 'true' && needs.fast-validation.result == 'success'
-    timeout-minutes: 45
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         config:
           - { name: "Xcode 26.5", runner: "macos-26", xcode: "26.5" }
     steps:
+      - name: "Isolate self-hosted Playground home"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          isolated_home="$RUNNER_TEMP/playground-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          {
+            echo "HOME=$isolated_home"
+            echo "TMPDIR=$isolated_home/tmp"
+            echo "XDG_CONFIG_HOME=$isolated_home/config"
+            echo "XDG_DATA_HOME=$isolated_home/data"
+            echo "CFFIXED_USER_HOME=$isolated_home"
+          } >> "$GITHUB_ENV"
+
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          clean: true
 
       - name: "Select Xcode ${{ matrix.config.xcode }}"
+        if: runner.environment == 'github-hosted'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ matrix.config.xcode }}
+
+      - name: "Select self-hosted Xcode ${{ matrix.config.xcode }}"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
 
       - name: "Cache Playground Swift package dependencies"
         uses: actions/cache@v5
@@ -2537,9 +2647,9 @@ jobs:
           path: |
             ~/Library/Caches/org.swift.swiftpm
             ~/.swiftpm/cache
-          key: ${{ runner.os }}-spm-playground-tests-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          key: ${{ runner.os }}-${{ runner.environment }}-spm-playground-tests-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
-            ${{ runner.os }}-spm-playground-tests-${{ matrix.config.xcode }}-
+            ${{ runner.os }}-${{ runner.environment }}-spm-playground-tests-${{ matrix.config.xcode }}-
 
       - name: "Cache Playground DerivedData"
         uses: actions/cache@v5
@@ -2548,9 +2658,9 @@ jobs:
           path: |
             ${{ runner.temp }}/automobile-derived-data-Playground/Build
             ${{ runner.temp }}/automobile-derived-data-Playground/ModuleCache.noindex
-          key: ${{ runner.os }}-derived-playground-tests-${{ matrix.config.xcode }}-${{ hashFiles('ios/Playground/**/*.swift', 'ios/Playground/**/*.m', 'ios/Playground/**/*.mm', 'ios/Playground/**/*.h', 'ios/Playground/**/*.c', 'ios/Playground/**/*.cpp', 'ios/Playground/**/*.xcconfig', 'ios/Playground/**/*.plist', 'ios/Playground/**/*.entitlements', 'ios/Playground/**/*.storyboard', 'ios/Playground/**/*.xib', 'ios/Playground/**/*.xcassets/**', 'ios/Playground/**/*.strings', 'ios/Playground/**/*.ttf', 'ios/Playground/**/*.otf', 'ios/Playground/**/*.xcprivacy', 'ios/Playground/**/*.pbxproj', 'ios/Playground/**/*.xcscheme', 'ios/Playground/**/project.yml', 'ios/Playground/**/Package.swift', 'ios/Playground/**/Package.resolved', 'ios/highlight-core/**/*.swift', 'ios/highlight-core/**/*.m', 'ios/highlight-core/**/*.mm', 'ios/highlight-core/**/*.h', 'ios/highlight-core/**/*.c', 'ios/highlight-core/**/*.cpp', 'ios/highlight-core/**/*.xcconfig', 'ios/highlight-core/**/*.plist', 'ios/highlight-core/**/*.entitlements', 'ios/highlight-core/**/*.storyboard', 'ios/highlight-core/**/*.xib', 'ios/highlight-core/**/*.xcassets/**', 'ios/highlight-core/**/*.strings', 'ios/highlight-core/**/*.ttf', 'ios/highlight-core/**/*.otf', 'ios/highlight-core/**/*.xcprivacy', 'ios/highlight-core/**/*.pbxproj', 'ios/highlight-core/**/*.xcscheme', 'ios/highlight-core/**/project.yml', 'ios/highlight-core/**/Package.swift', 'ios/highlight-core/**/Package.resolved', 'ios/auto-mobile-sdk/**/*.swift', 'ios/auto-mobile-sdk/**/*.m', 'ios/auto-mobile-sdk/**/*.mm', 'ios/auto-mobile-sdk/**/*.h', 'ios/auto-mobile-sdk/**/*.c', 'ios/auto-mobile-sdk/**/*.cpp', 'ios/auto-mobile-sdk/**/*.xcconfig', 'ios/auto-mobile-sdk/**/*.plist', 'ios/auto-mobile-sdk/**/*.entitlements', 'ios/auto-mobile-sdk/**/*.storyboard', 'ios/auto-mobile-sdk/**/*.xib', 'ios/auto-mobile-sdk/**/*.xcassets/**', 'ios/auto-mobile-sdk/**/*.strings', 'ios/auto-mobile-sdk/**/*.ttf', 'ios/auto-mobile-sdk/**/*.otf', 'ios/auto-mobile-sdk/**/*.xcprivacy', 'ios/auto-mobile-sdk/**/*.pbxproj', 'ios/auto-mobile-sdk/**/*.xcscheme', 'ios/auto-mobile-sdk/**/project.yml', 'ios/auto-mobile-sdk/**/Package.swift', 'ios/auto-mobile-sdk/**/Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.environment }}-derived-playground-tests-${{ matrix.config.xcode }}-${{ hashFiles('ios/Playground/**/*.swift', 'ios/Playground/**/*.m', 'ios/Playground/**/*.mm', 'ios/Playground/**/*.h', 'ios/Playground/**/*.c', 'ios/Playground/**/*.cpp', 'ios/Playground/**/*.xcconfig', 'ios/Playground/**/*.plist', 'ios/Playground/**/*.entitlements', 'ios/Playground/**/*.storyboard', 'ios/Playground/**/*.xib', 'ios/Playground/**/*.xcassets/**', 'ios/Playground/**/*.strings', 'ios/Playground/**/*.ttf', 'ios/Playground/**/*.otf', 'ios/Playground/**/*.xcprivacy', 'ios/Playground/**/*.pbxproj', 'ios/Playground/**/*.xcscheme', 'ios/Playground/**/project.yml', 'ios/Playground/**/Package.swift', 'ios/Playground/**/Package.resolved', 'ios/highlight-core/**/*.swift', 'ios/highlight-core/**/*.m', 'ios/highlight-core/**/*.mm', 'ios/highlight-core/**/*.h', 'ios/highlight-core/**/*.c', 'ios/highlight-core/**/*.cpp', 'ios/highlight-core/**/*.xcconfig', 'ios/highlight-core/**/*.plist', 'ios/highlight-core/**/*.entitlements', 'ios/highlight-core/**/*.storyboard', 'ios/highlight-core/**/*.xib', 'ios/highlight-core/**/*.xcassets/**', 'ios/highlight-core/**/*.strings', 'ios/highlight-core/**/*.ttf', 'ios/highlight-core/**/*.otf', 'ios/highlight-core/**/*.xcprivacy', 'ios/highlight-core/**/*.pbxproj', 'ios/highlight-core/**/*.xcscheme', 'ios/highlight-core/**/project.yml', 'ios/highlight-core/**/Package.swift', 'ios/highlight-core/**/Package.resolved', 'ios/auto-mobile-sdk/**/*.swift', 'ios/auto-mobile-sdk/**/*.m', 'ios/auto-mobile-sdk/**/*.mm', 'ios/auto-mobile-sdk/**/*.h', 'ios/auto-mobile-sdk/**/*.c', 'ios/auto-mobile-sdk/**/*.cpp', 'ios/auto-mobile-sdk/**/*.xcconfig', 'ios/auto-mobile-sdk/**/*.plist', 'ios/auto-mobile-sdk/**/*.entitlements', 'ios/auto-mobile-sdk/**/*.storyboard', 'ios/auto-mobile-sdk/**/*.xib', 'ios/auto-mobile-sdk/**/*.xcassets/**', 'ios/auto-mobile-sdk/**/*.strings', 'ios/auto-mobile-sdk/**/*.ttf', 'ios/auto-mobile-sdk/**/*.otf', 'ios/auto-mobile-sdk/**/*.xcprivacy', 'ios/auto-mobile-sdk/**/*.pbxproj', 'ios/auto-mobile-sdk/**/*.xcscheme', 'ios/auto-mobile-sdk/**/project.yml', 'ios/auto-mobile-sdk/**/Package.swift', 'ios/auto-mobile-sdk/**/Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-derived-playground-tests-${{ matrix.config.xcode }}-
+            ${{ runner.os }}-${{ runner.environment }}-derived-playground-tests-${{ matrix.config.xcode }}-
 
       - name: "Ensure iOS Simulator runtime"
         uses: ./.github/actions/ensure-ios-simulator-runtime
@@ -2571,10 +2681,16 @@ jobs:
           ./scripts/ios/xcode-test.sh Playground
           echo "build took ${SECONDS}s"
 
+      - name: "Remove isolated Playground home"
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/playground-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
   # Advisory iOS simulator integration lane, off the default PR path (#10895):
-  # it runs nightly (nightly.yml) and on a PR only when the `run-ios-sim` label
-  # is applied (the `labeled` trigger above starts a fresh run). The job body
-  # lives in xctestrunner-simulator-tests.yml so PR and nightly share one copy.
+  # it runs nightly on CircleCI (nightly-macos, #11010) and on a PR only when the
+  # `run-ios-sim` label is applied (the `labeled` trigger above starts a fresh
+  # run). The PR job body lives in xctestrunner-simulator-tests.yml; a policy test
+  # keeps the CircleCI nightly copy's selected tests and daemon budget identical.
   ios-xctest-runner-simulator-tests:
     name: "XCTestRunner Simulator Tests"
     # The advisory simulator lane should not consume a scarce macOS runner for
@@ -2586,16 +2702,32 @@ jobs:
   ios-spm-root-package-build:
     timeout-minutes: 20
     name: "Build Root SPM Package"
-    # Pull-request YAML must remain off self-hosted runners. The root manifest
+    # Small self-hosted Mac pool for owner-authored same-repository PRs once the
+    # pools are registered (#11011); forks use hosted macos-26. The root manifest
     # needs the Swift 6.3 toolchain from Xcode 26.5.
-    runs-on: macos-26
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac"]') || 'macos-26' }}
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     steps:
+      - name: "Isolate self-hosted root SPM home"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          isolated_home="$RUNNER_TEMP/root-spm-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          {
+            echo "HOME=$isolated_home"
+            echo "TMPDIR=$isolated_home/tmp"
+            echo "XDG_CONFIG_HOME=$isolated_home/config"
+            echo "XDG_DATA_HOME=$isolated_home/data"
+            echo "CFFIXED_USER_HOME=$isolated_home"
+          } >> "$GITHUB_ENV"
+
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          clean: true
 
       # The root manifest declares swift-tools-version 6.3 (XCTestRunner's
       # strict-concurrency floor), which requires the Swift 6.3 toolchain that
@@ -2604,9 +2736,15 @@ jobs:
       # published SDK's toolchain floor and every other Swift-package job here.
       # Select it explicitly so this job verifies the published compiler floor.
       - name: "Select Xcode 26.5"
+        if: runner.environment == 'github-hosted'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: "26.5"
+
+      - name: "Select self-hosted Xcode 26.5"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: bash scripts/ci/select-self-hosted-xcode.sh "26.5"
 
       - name: "Cache root Swift package dependencies"
         uses: actions/cache@v5
@@ -2615,9 +2753,9 @@ jobs:
           path: |
             ~/Library/Caches/org.swift.swiftpm
             ~/.swiftpm/cache
-          key: ${{ runner.os }}-spm-root-package-26.5-${{ hashFiles('Package.swift') }}
+          key: ${{ runner.os }}-${{ runner.environment }}-spm-root-package-26.5-${{ hashFiles('Package.swift') }}
           restore-keys: |
-            ${{ runner.os }}-spm-root-package-26.5-
+            ${{ runner.os }}-${{ runner.environment }}-spm-root-package-26.5-
 
       - name: "Resolve root Swift package dependencies"
         run: swift package resolve
@@ -2628,6 +2766,98 @@ jobs:
           SECONDS=0
           swift build -c release 2>&1
           echo "build took ${SECONDS}s"
+
+      - name: "Remove isolated root SPM home"
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/root-spm-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
+  # "Prototype Simulator": per-runtime smoke test for the iOS overlay agent (#10569),
+  # moved from CircleCI to the heavy self-hosted lane (#11011). Injection depends
+  # on simulator dyld behaviour and each runtime's Swift runtime, so a new Xcode or
+  # runtime can break it silently. Each leg creates ONE fresh simulator, uses it
+  # serially and deletes it. Advisory: simulator tests must not gate merges, so
+  # this check stays OFF the required list.
+  # Run locally on a Mac: bash scripts/ios/overlay-agent-smoke.sh 26
+  prototype-simulator:
+    name: "Prototype Simulator iOS ${{ matrix.ios }}"
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac-heavy"]') || 'macos-26' }}
+    needs: [detect-changes, fast-validation]
+    if: needs.detect-changes.outputs.prototype_simulator_should_run == 'true' && needs.fast-validation.result == 'success'
+    # Tight bound for the single heavy lane; the smoke boots one simulator.
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # One leg per iOS runtime. Add a version (e.g. "27") once the runners
+        # ship that runtime.
+        ios: ["26"]
+    steps:
+      - name: "Isolate self-hosted Prototype Simulator home"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          isolated_home="$RUNNER_TEMP/prototype-simulator-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          {
+            echo "HOME=$isolated_home"
+            echo "TMPDIR=$isolated_home/tmp"
+            echo "XDG_CONFIG_HOME=$isolated_home/config"
+            echo "XDG_DATA_HOME=$isolated_home/data"
+            echo "CFFIXED_USER_HOME=$isolated_home"
+          } >> "$GITHUB_ENV"
+
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          clean: true
+
+      - name: "Select Xcode 26.5"
+        if: runner.environment == 'github-hosted'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.5"
+
+      - name: "Select self-hosted Xcode 26.5"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: bash scripts/ci/select-self-hosted-xcode.sh "26.5"
+
+      - name: "Report toolchain"
+        run: xcodebuild -version && xcrun simctl list runtimes iOS
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - name: "Ensure iOS Simulator runtime"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
+
+      # Exit 3 (runtime missing) fails the leg: the runner is expected to ship the
+      # runtime, so a vanished runtime is an image change worth seeing.
+      - name: "Run overlay agent smoke test (iOS ${{ matrix.ios }})"
+        timeout-minutes: 20
+        run: bash scripts/ios/overlay-agent-smoke.sh "${{ matrix.ios }}"
+
+      - name: "Upload overlay agent smoke artifacts"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: overlay-agent-smoke-ios-${{ matrix.ios }}
+          path: scratch/overlay-agent-smoke/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: "Remove isolated Prototype Simulator home"
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/prototype-simulator-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   # =============================================================================
   # Android Build and Test Jobs (Android-related changes only)
@@ -3118,13 +3348,36 @@ jobs:
     name: "iOS Device Capture to WHEP"
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'
-    runs-on: macos-26
-    timeout-minutes: 35
+    # Same-repository owner PRs run on the Namespace macOS profile once
+    # vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' (opt-in until the profile
+    # exists; until then hosted macos-26) (#11012; one
+    # macOS job at a time on the trial, and WHEP fires only on WebRTC changes).
+    # Fallbacks, in order: vars.IOS_WEBRTC_HEAVY_LANE == 'true' or the
+    # NAMESPACE_RUNNERS_DISABLED kill switch move it to the heavy self-hosted lane
+    # when the Mac pools are enabled (#11011); otherwise, and for forks, hosted
+    # macos-26. No CircleCI copy runs.
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac-heavy"]') || 'macos-26' }}
+    timeout-minutes: 30
     steps:
+      - name: "Isolate self-hosted WHEP capture home"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          isolated_home="$RUNNER_TEMP/webrtc-capture-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          {
+            echo "HOME=$isolated_home"
+            echo "TMPDIR=$isolated_home/tmp"
+            echo "XDG_CONFIG_HOME=$isolated_home/config"
+            echo "XDG_DATA_HOME=$isolated_home/data"
+            echo "CFFIXED_USER_HOME=$isolated_home"
+          } >> "$GITHUB_ENV"
+
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          clean: true
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -3279,6 +3532,11 @@ jobs:
           path: scratch/webrtc-device-integration/
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: "Remove isolated WHEP capture home"
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/webrtc-capture-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   # =============================================================================
   # Gate Jobs for Branch Protection

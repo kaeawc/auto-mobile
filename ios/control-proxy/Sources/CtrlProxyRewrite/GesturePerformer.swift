@@ -999,14 +999,17 @@ public final class GesturePerformer: GesturePerforming {
             }, fallback: "reason=\"\(reason)\" [diagnostic collection failed]")
         }
 
-        public func setApplication(_ app: XCUIApplication) {
+        /// Injects the application under test. A known `bundleId` pins it, so gestures on it keep
+        /// the pinned `XCUIApplication`; without one the pin is cleared (#10995).
+        public func setApplication(_ app: XCUIApplication, bundleId: String? = nil) {
             ownedApplication = nil
-            pinnedApplication.clear()
+            pinnedApplication.inject(bundleId: bundleId)
             application = app
         }
 
-        /// Bundle id `application` was built for by `updateApplication` (launch); empty when it
-        /// was injected without one. Gesture rebinding never changes it.
+        /// Bundle id `application` was pinned for: by `updateApplication` (launch) or by
+        /// `setApplication(_:bundleId:)`; none when it was injected without one. Gesture rebinding
+        /// never changes it.
         private var pinnedApplication = GesturePinnedApplication()
 
         /// The application a coordinate gesture targets: the pinned app unless the locator's
@@ -1107,7 +1110,8 @@ public final class GesturePerformer: GesturePerforming {
             }
             let screens = (ObjCExceptionCatcher_displayInventory() ?? []).compactMap { entry in
                 entry["displayId"].flatMap { id in
-                    entry["isMain"].map { TapDiagnostics.DisplayScreen(displayId: id.uint64Value, isMain: $0.boolValue) }
+                    entry["isMain"]
+                        .map { TapDiagnostics.DisplayScreen(displayId: id.uint64Value, isMain: $0.boolValue) }
                 }
             }
             guard let displayId = UnpinnedGestureSynthesis.mainDisplayId(screens: screens) else {

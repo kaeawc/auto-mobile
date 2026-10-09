@@ -78,11 +78,11 @@ object KeyboardProfiles {
           backspaceStrategy = BackspaceStrategy.DELETE_SURROUNDING,
           recomposeOnCursorMove = false,
           recomposeOnBackspaceIntoWord = false,
-          batchEdits = true,
+          batchEdits = false,
         ),
       evidenceStatus = "focused_trace",
       evidenceNote =
-        "Typing and caret-move call sequences match traces captured from real Gboard on API 36 (commitText per character, finishComposingText only on caret move); autocorrect and full vendor equivalence are not claimed.",
+        "Typing and caret-move call sequences match traces captured from real Gboard on API 36 (bare commitText per character with no batch wrapper, finishComposingText only on caret move); autocorrect and full vendor equivalence are not claimed.",
     )
 
   /**

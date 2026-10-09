@@ -568,6 +568,12 @@ export interface SessionReleaseOptions {
   expiryOrigin?: "lazy-expiry" | "cleanup-expired";
   /** Set by the expiry handler when it owns the ordered device return after release. */
   deviceReleaseManaged?: boolean;
+  /**
+   * A terminal reason upgrading a release that already finalized and was already notified
+   * (#10825). Its device may belong to another session by now, so device-keyed cleanup must
+   * ignore it; only observers of the release reason (the broadcaster) act on it.
+   */
+  upgradeOnly?: boolean;
 }
 
 export type SessionReleaseCallback = (
@@ -3804,7 +3810,9 @@ export class SessionManager {
         await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
       }
       reason.terminalPersisted = true;
-      this.notifySessionRelease(upgradedSnapshot);
+      // The release's cleanup already ran on the first notification; the device may now belong to
+      // the next owner, so announce only the reason change (#10825).
+      this.notifySessionRelease(upgradedSnapshot, { upgradeOnly: true });
       return upgradedSnapshot.deviceId;
     })();
     reason.lateTerminalRelease = release;

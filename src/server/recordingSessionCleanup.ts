@@ -127,12 +127,23 @@ async function stopOwnedRecordings(
   deviceId: string,
   stopping: Set<string>,
 ): Promise<void> {
+  // `stopping` starts as every recording the owner has; a stage that finished drops the ids that
+  // are no longer active, so only what is still stopping is force-stopped at the cap (#11041).
+  const pruneFinalized = (): void => {
+    const stillActive = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
+    for (const recordingId of stopping) {
+      if (!stillActive.has(recordingId)) {
+        stopping.delete(recordingId);
+      }
+    }
+  };
   // Segmented sessions first: stopping one of their segments directly would leave the rotation
   // timer running to start the next.
   await attempt(
     `finalize segmented recordings of released session ${sessionId ?? "(owner-less)"}`,
     () => deps.stopSegmentedRecordings(sessionId, deviceId),
   );
+  pruneFinalized();
   await attempt(
     `stop video recordings of released session ${sessionId ?? "(owner-less)"} on ${deviceId}`,
     async () => {
@@ -162,6 +173,7 @@ async function stopOwnedRecordings(
       `stop test recording of released session ${sessionId ?? "(owner-less)"} on ${deviceId}`,
       async () => {
         await deps.stopTestRecording();
+        pruneFinalized();
         // The plan is retained by recording id for the owning session (#10958).
         logger.info(
           `[recording] Test recording on ${deviceId} stopped: owning session ${sessionId ?? "(owner-less)"} was released; its plan stays fetchable by the owner`,
@@ -180,7 +192,9 @@ async function stopOwnedRecordingsWithinCap(
   sessionId: string | undefined,
   deviceId: string,
 ): Promise<void> {
-  const stopping = new Set<string>();
+  // Every recording the owner has, up front: single-file, segmented and the test recording, so
+  // the cap force-stops all of them rather than only the one mid-stop (#11041).
+  const stopping = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
   const capMs = deps.finalizeCapMs(deviceId);
   try {
     await raceWithDeadline(stopOwnedRecordings(deps, sessionId, deviceId, stopping), {
@@ -215,17 +229,20 @@ async function stopOwnedRecordingsWithinCap(
  * A session acquiring a device stops and finalizes the owner-less (sessionless) recordings on it
  * (#10961), so they cannot keep capturing the new owner's session or block its own recording
  * start. Returns the callback to run where acquisition cancels sessionless executions
- * (#10829); the stop is pending device cleanup, capped as in {@link RECORDING_FINALIZE_CAP_MS}.
+ * (#10829); the stop is capped as in {@link RECORDING_FINALIZE_CAP_MS}. It is tracked as
+ * acquisition cleanup, not pending device cleanup (#11041): the acquiring holder's own
+ * setActiveDevice/startDevice must not be refused, but if the holder releases before the stop
+ * settles, the device stays quarantined for the next acquirer.
  */
 export function createOwnerlessRecordingAcquisitionCleanup(
-  manager: Pick<SessionManager, "registerPendingDeviceCleanup">,
+  manager: Pick<SessionManager, "registerAcquisitionDeviceCleanup">,
   deps: RecordingSessionCleanupDeps = defaultRecordingSessionCleanupDeps,
 ): (deviceId: string) => void {
   return (deviceId) => {
     if (!deps.hasRecordingsToStop(undefined, deviceId)) {
       return;
     }
-    manager.registerPendingDeviceCleanup(
+    manager.registerAcquisitionDeviceCleanup(
       deviceId,
       stopOwnedRecordingsWithinCap(deps, undefined, deviceId),
     );

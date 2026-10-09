@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+// Must stay first: captures the launcher pid before anything else runs (#11041).
+import "./daemon/processEntry";
 import "./runtime/reflectMetadata";
 import { errorMessage } from "./utils/describeUnknownError";
 import { bootstrapEnvironment } from "./utils/envBootstrap";

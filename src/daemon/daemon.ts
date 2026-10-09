@@ -79,8 +79,10 @@ import { daemonDeviceLeaseActivitySources } from "./deviceLeaseActivitySources";
 import {
   PrivateDaemonOrphanWatchdog,
   isHarnessPrivateDaemon,
+  resolveLauncherPid,
   resolvePrivateDaemonOrphanIdleMs,
 } from "./privateDaemonOrphanWatchdog";
+import { PROCESS_ENTRY_PARENT_PID } from "./processEntry";
 import {
   resolveCtrlProxyForwardLeaseIdleMs,
   setCtrlProxyForwardLeaseOwnerSocketPath,
@@ -2676,7 +2678,8 @@ export class Daemon {
     if (process.platform === "win32" || !isHarnessPrivateDaemon(SOCKET_PATH, DEFAULT_SOCKET_PATH)) {
       return;
     }
-    const launcherPid = process.ppid;
+    // Captured at process entry, not here: the launcher may have exited by now (#11041).
+    const launcherPid = resolveLauncherPid(PROCESS_ENTRY_PARENT_PID);
     this.orphanWatchdog = new PrivateDaemonOrphanWatchdog(
       {
         parentPid: () => process.ppid,

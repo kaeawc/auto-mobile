@@ -24,7 +24,7 @@ commit_file() {
   mkdir -p "$(dirname "$1")"
   printf '%s\n' "$2" >> "$1"
   git add "$1" .circleci/main-macos-paths.txt
-  git commit --quiet -m "$1"
+  git commit --quiet -m "${3:-$1}"
   git push --quiet origin HEAD:main
   git rev-parse HEAD
 }
@@ -44,6 +44,35 @@ commit_file() {
   run bash "${script}" run-main-ios
   [ "$status" -eq 0 ]
   [[ "$output" == *"also changes ios/b.swift"* ]]
+}
+
+@test "ignores a newer [skip ci] commit that touches the group (#11041)" {
+  CIRCLE_SHA1="$(commit_file ios/a.swift one)"
+  export CIRCLE_SHA1
+  commit_file ios/b.swift two "chore: update badges [skip ci]" > /dev/null
+  run bash "${script}" run-main-ios
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ignoring"*"[skip ci]"* ]]
+  [[ "$output" == *"no commit after"* ]]
+}
+
+@test "still skips when a real commit follows a [skip ci] commit (#11041)" {
+  CIRCLE_SHA1="$(commit_file ios/a.swift one)"
+  export CIRCLE_SHA1
+  commit_file ios/b.swift two "chore: badges [skip ci]" > /dev/null
+  commit_file ios/c.swift three > /dev/null
+  run bash "${script}" run-main-ios
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"also changes ios/c.swift"* ]]
+}
+
+@test "checks each commit, so a group change followed by an unrelated tip still skips" {
+  CIRCLE_SHA1="$(commit_file ios/a.swift one)"
+  export CIRCLE_SHA1
+  commit_file ios/b.swift two > /dev/null
+  commit_file docs/x.md three > /dev/null
+  run bash "${script}" run-main-ios
+  [ "$status" -eq 0 ]
 }
 
 @test "runs when newer main commits touch only other path groups" {

@@ -7,7 +7,8 @@
 #
 # Usage: scripts/ci/circleci-main-superseded.sh <pipeline-parameter>
 #
-# Exit 0  superseded: some commit in <this SHA>..<origin/main tip> changes a path
+# Exit 0  superseded: some commit in <this SHA>..<origin/main tip> (ignoring
+#         "[skip ci]" commits, which get no pipeline) changes a path
 #         mapped to <pipeline-parameter> in the mapping file, so that commit's own
 #         pipeline also schedules this job and validates a tree containing ours.
 #         By induction the last such commit in a burst is never superseded, so
@@ -64,16 +65,30 @@ fi
 if ! git merge-base --is-ancestor "${sha}" "${tip}"; then
   run_job "${sha} is not an ancestor of ${branch} tip ${tip}"
 fi
-if ! changed="$(git -c core.quotepath=false diff --name-only "${sha}" "${tip}")"; then
-  run_job "could not diff ${sha}..${tip}"
+if ! commits="$(git rev-list --reverse "${sha}..${tip}")"; then
+  run_job "could not list ${sha}..${tip}"
 fi
 
-for pattern in ${patterns[@]+"${patterns[@]}"}; do
-  # ERE, not PCRE: the macOS executor ships BSD grep. The mapping regexes use only
-  # the subset both dialects share (., .*, [^/]*, \.).
-  if match="$(grep -E -m 1 -- "${pattern}" <<< "${changed}")"; then
-    echo "circleci-main-superseded: ${branch} tip ${tip} also changes ${match} (${parameter}); skipping ${sha}." >&2
-    exit 0
+# Each newer commit is judged on its own diff, and one whose message contains "[skip ci]"
+# is ignored: CircleCI starts no pipeline for it, so it validates nothing (#11041).
+# Known limitation: a push of several commits starts one pipeline for its tip, so a
+# non-tip commit that touches the group is trusted to be covered by that pipeline's
+# own path filtering; main is squash-merge only, which keeps pushes single-commit.
+for commit in ${commits}; do
+  if git log -1 --format=%B "${commit}" | grep -qiF -- "[skip ci]"; then
+    echo "circleci-main-superseded: ignoring ${commit} ([skip ci])." >&2
+    continue
   fi
+  if ! changed="$(git -c core.quotepath=false diff --name-only "${commit}^" "${commit}")"; then
+    run_job "could not diff ${commit}"
+  fi
+  for pattern in ${patterns[@]+"${patterns[@]}"}; do
+    # ERE, not PCRE: the macOS executor ships BSD grep. The mapping regexes use only
+    # the subset both dialects share (., .*, [^/]*, \.).
+    if match="$(grep -E -m 1 -- "${pattern}" <<< "${changed}")"; then
+      echo "circleci-main-superseded: ${commit} (before ${branch} tip ${tip}) also changes ${match} (${parameter}); skipping ${sha}." >&2
+      exit 0
+    fi
+  done
 done
 run_job "no commit after ${sha} changes ${parameter} paths"

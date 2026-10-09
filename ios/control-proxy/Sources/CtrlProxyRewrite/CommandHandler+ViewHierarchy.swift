@@ -143,7 +143,11 @@ extension CommandHandler {
         switch SdkHierarchyProbeDecision.decide(
             foregroundBundleId: foregroundBundleId,
             cachedBundleId: cachedBundleId,
-            appState: appState
+            appState: appState,
+            cacheIsFresh: SdkHierarchyProbeDecision.isFresh(
+                cachedTimestamp: cached?.timestamp,
+                captureTimestamp: hierarchy.updatedAt
+            )
         ) {
         case .clear:
             sdkHierarchyCache?.clear()

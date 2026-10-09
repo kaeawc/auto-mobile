@@ -8,7 +8,7 @@ import { loadJobSteps, stepNamed } from "../helpers/workflowSteps";
 const EXCLUDED_WITH_REASON: Readonly<Record<string, string>> = {
   "node-format": "PR fast-validation Check formatting step: bun run format:check",
   "markdown-bash":
-    "PR bats-integration-tests: validate-markdown-bash.bats scans commands and skills",
+    "PR bats-tests (integration step): validate-markdown-bash.bats scans commands and skills",
   lychee:
     "merge.yml validate-documentation-links: online links; PR fast-validation runs lychee-offline",
   "debug-tags": "PR bats-tests serial pass: validate-no-debug-log-tags.bats scans src/",

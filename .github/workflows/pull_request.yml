@@ -1038,7 +1038,7 @@ jobs:
     # the budget; the rest is `bats test/bats/` itself, which keeps growing as
     # tests are added. Give the suite comfortable headroom instead of relying on
     # reruns against a boundary it now straddles.
-    timeout-minutes: 10
+    timeout-minutes: 15
     name: "BATS Shell Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || matrix.os }}
     needs: detect-changes
@@ -1116,51 +1116,10 @@ jobs:
           AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "420"
         run: scripts/ci/run-bats.sh unit
 
-  bats-integration-tests:
-    timeout-minutes: 10
-    name: "BATS Integration Tests (${{ matrix.os }})"
-    runs-on: ${{ matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || matrix.os }}
-    needs: detect-changes
-    if: needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Install BATS"
-        shell: bash
-        run: |
-          if command -v bats &>/dev/null; then
-            echo "bats already installed: $(bats --version)"
-          elif command -v brew &>/dev/null; then
-            brew install bats-core
-          else
-            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
-            sudo /tmp/bats-core/install.sh /usr/local
-          fi
-          if command -v shellcheck &>/dev/null; then
-            echo "shellcheck already installed"
-          elif command -v brew &>/dev/null; then
-            brew install shellcheck
-          else
-            echo "shellcheck missing and no package manager to install it" >&2
-            exit 1
-          fi
-
-      - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
-
-      - name: "Install Bun dependencies"
-        shell: bash
-        run: scripts/ci/install-bun-deps.sh
-
+      # Folded in from the former bats-integration-tests job (~40s of work that
+      # paid a whole runner slot plus ~1 min of setup per PR). It must stay
+      # sequential after the unit lane: two bats sweeps never share a machine
+      # concurrently.
       - name: "Run BATS Integration Tests"
         shell: bash
         run: scripts/ci/run-bats.sh integration
@@ -2574,7 +2533,7 @@ jobs:
   # they spend their 15-minute budget booting a device. Detekt intentionally is
   # not part of this gate: its full-tree result remains non-blocking by policy.
   android-emulator-compile-smoke:
-    timeout-minutes: 10
+    timeout-minutes: 25
     name: "Android Emulator Compile Smoke"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -2596,6 +2555,24 @@ jobs:
           release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
+      # Folded in from the former sdk-debug-inspector-consumer job (separate
+      # runner slot, same checkout + Gradle setup). Publish both SDK variants to
+      # the local Maven repo. The storage-inspection ContentProviders ship in the
+      # debug variant only (#5714); this proves a Maven consumer -- not an
+      # in-repo project() dependency -- can obtain them. Check the public API
+      # here because publishing already compiles SDK release classes.
+      # Update the baseline with: cd android && ./gradlew :auto-mobile-sdk:apiDump
+      - uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":auto-mobile-sdk:publishToMavenLocal :auto-mobile-sdk:apiCheck"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Verify published debug inspection providers"
+        run: bash scripts/android/validate-sdk-debug-inspector-consumer.sh --skip-publish
 
   junit-runner-unit-tests:
     timeout-minutes: 20
@@ -2960,34 +2937,6 @@ jobs:
         with:
           name: playground-app-apk
           path: android/playground/app/build/outputs/apk/debug/playground-app-debug.apk
-
-  sdk-debug-inspector-consumer:
-    timeout-minutes: 20
-    name: "SDK Debug Inspector Consumer"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.android_should_run == 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      # Publish both SDK variants to the local Maven repo. The storage-inspection
-      # ContentProviders ship in the debug variant only (#5714); this proves a
-      # Maven consumer -- not an in-repo project() dependency -- can obtain them.
-      # Check the public API here because publishing already compiles SDK release classes.
-      # Update the baseline with: cd android && ./gradlew :auto-mobile-sdk:apiDump
-      - uses: ./.github/actions/gradle-task-run
-        with:
-          gradle-tasks: ":auto-mobile-sdk:publishToMavenLocal :auto-mobile-sdk:apiCheck"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
-          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Verify published debug inspection providers"
-        run: bash scripts/android/validate-sdk-debug-inspector-consumer.sh --skip-publish
 
   # =============================================================================
   # MCP Benchmarks
@@ -3863,7 +3812,6 @@ jobs:
     needs:
       - detect-changes
       - bats-tests
-      - bats-integration-tests
     # Roll-up only reads needs.*.result — it needs no token scopes.
     permissions: {}
     runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
@@ -3873,7 +3821,6 @@ jobs:
           declare -A results=(
             [detect-changes]="${{ needs.detect-changes.result }}"
             [bats-tests]="${{ needs.bats-tests.result }}"
-            [bats-integration-tests]="${{ needs.bats-integration-tests.result }}"
           )
           fail=
           for name in "${!results[@]}"; do

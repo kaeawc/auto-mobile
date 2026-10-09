@@ -2355,7 +2355,9 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     "Suggest likely interactions",
     identifyInteractionsSchema,
     identifyInteractionsHandler,
-    { defaultEnabled: true, debugOnly: true, deviceReadOnly: true },
+    // Not `deviceReadOnly` (#10828): like hitTest it has no sessionless read path, so it readies
+    // its target through ensureDeviceReady, which a non-holder may not do on a held device.
+    { defaultEnabled: true, debugOnly: true },
   );
 }
 

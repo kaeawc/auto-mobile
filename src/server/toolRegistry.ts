@@ -954,7 +954,23 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         );
         logger.info(`[ToolRegistry] ${name}: Using session-resolved device ${device.deviceId}`);
       } else {
-        // Legacy single-agent path or no session: use DeviceSessionManager (may set global state)
+        // Legacy single-agent path or no session: use DeviceSessionManager (may set global state).
+        // Readiness acts on the device it selects (CtrlProxy setup, the current-device pin,
+        // settings), so a call without a deviceId is checked against the device it would land
+        // on first: a refused call leaves the holder's device untouched (#10828).
+        if (
+          !providedDeviceId &&
+          !options.deviceReadOnly &&
+          DaemonState.getInstance().isInitialized()
+        ) {
+          assertToolCallerHoldsDevice(
+            name,
+            options,
+            await predictReadinessTarget(platform, deviceSessionManager, getConnectedPlatforms),
+            sessionUuid,
+            autolockEnabled,
+          );
+        }
         logger.info(
           `[ToolRegistry] ${name}: Resolving device for platform=${platform}, providedDeviceId=${providedDeviceId}`,
         );
@@ -1934,6 +1950,38 @@ function assertToolCallerHoldsDevice(
     sessionManager,
     remedy: TOOL_CALL_REMEDY,
   });
+}
+
+/**
+ * The device `ensureDeviceReady` would select for a call without a deviceId, read from the scan
+ * the call already shares and the session manager's selections, without touching a device
+ * (#10828). It mirrors readiness selection: the explicit `setActiveDevice` pin, then the current
+ * device, then the only candidate on the platform. Undefined when readiness would not settle on a
+ * connected device; the post-resolution ownership check still covers that call.
+ */
+async function predictReadinessTarget(
+  platform: SomePlatform,
+  deviceSessionManager: DeviceSessionManager,
+  getConnectedPlatforms: () => Promise<ConnectedPlatformScan>,
+): Promise<string | undefined> {
+  const { devices } = await getConnectedPlatforms();
+  const pin = deviceSessionManager.getExplicitDevicePin();
+  const current = deviceSessionManager.getCurrentDevice();
+  const platforms = new Set(devices.map((device) => device.platform));
+  const targetPlatform =
+    platform !== "either"
+      ? platform
+      : platforms.size > 1
+        ? (pin?.platform ?? deviceSessionManager.getCurrentPlatform())
+        : devices[0]?.platform;
+  const candidates = devices.filter((device) => device.platform === targetPlatform);
+  const connected = (deviceId: string | undefined) =>
+    candidates.find((device) => device.deviceId === deviceId)?.deviceId;
+  return (
+    connected(pin?.deviceId) ??
+    connected(current?.deviceId) ??
+    (candidates.length === 1 ? candidates[0]!.deviceId : undefined)
+  );
 }
 
 function assertDeviceReadRouting(

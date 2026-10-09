@@ -3736,7 +3736,10 @@ export function registerInteractionTools() {
     "Preview hierarchy-bounds candidates at a platform-native screen point; no input is dispatched and the actual event recipient is unknown.",
     hitTestSchema,
     hitTestHandler,
-    { defaultEnabled: false, deviceReadOnly: true },
+    // Not `deviceReadOnly`: with no sessionless read path, a call readies its target through
+    // ensureDeviceReady (CtrlProxy, current-device pin, settings), which is device work a
+    // non-holder may not do on a held device (#10828). `observe` is the read-only watch.
+    { defaultEnabled: false },
   );
 
   ToolRegistry.registerDeviceAware(

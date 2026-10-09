@@ -42,6 +42,7 @@ jobs:
       ios_changed: ${{ steps.filter-ios.outputs.ios }}
       ts_changed: ${{ steps.filter-ts.outputs.ts }}
       format_changed: ${{ steps.filter-format.outputs.format }}
+      shell_changed: ${{ steps.filter-shell.outputs.shell }}
       android_should_run: ${{ steps.android_should_run.outputs.should_run }}
       ios_should_run: ${{ steps.ios_should_run.outputs.should_run }}
       ios_sim_tests_should_run: ${{ steps.ios_sim_tests_should_run.outputs.should_run }}
@@ -404,6 +405,69 @@ jobs:
               - '**/*.toml'
               - '.oxfmtrc.json'
               - '.gitignore'
+
+      # BATS Shell Tests run only when an input the suite exercises changes
+      # (#10889). The BATS files mostly drive scripts/** against temp fixtures;
+      # the entries outside scripts/ are the real repository files a .bats file
+      # reads or asserts on (audited with a path-token scan of test/bats/). The
+      # source-tree scans some .bats files exercise (check-*-boundary.sh,
+      # check-stdlib-first, the datetime/debug-log validators) are also run
+      # directly on every PR by lint and Fast Validation, so src/** itself is
+      # deliberately absent. merge.yml still runs the full suite on every push.
+      - name: "Check for shell-test-relevant changes"
+        id: filter-shell
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            shell:
+              - 'scripts/**'
+              - 'test/bats/**'
+              - '.github/**'
+              - '.githooks/**'
+              - '.agents/**'
+              - '.claude-plugin/**'
+              - 'commands/**'
+              - 'skills/**'
+              - 'oxlint-plugins/**'
+              - 'schemas/**'
+              - 'ios/**'
+              - 'package.json'
+              - 'bun.lock'
+              - 'bunfig.toml'
+              - 'turbo.json'
+              - 'tsconfig.json'
+              - 'build.ts'
+              - '.oxlintrc.json'
+              - '.oxfmtrc.json'
+              - '.npmignore'
+              - '.gitattributes'
+              - '.lycherc.toml'
+              - '.swiftformat'
+              - '.swiftlint.yml'
+              - 'mkdocs.yml'
+              - 'Dockerfile'
+              - 'server.json'
+              - 'firebender.json'
+              - '*.md'
+              - 'docs/index.md'
+              - 'docs/using/ui-tests.md'
+              - 'docs/webrtc-streaming.md'
+              - 'docs/assets/mdm/**'
+              - 'docs/decisions/**'
+              - 'src/constants/release.ts'
+              - 'src/devices/deviceBootService.ts'
+              - 'test/setup/**'
+              - 'test/shared-process-allowlist.txt'
+              - 'test/fixtures/observe/**'
+              - 'test/fixtures/desktop-wire/**'
+              - 'android/build-logic/**'
+              - 'android/**/*.gradle.kts'
+              - 'android/gradle.properties'
+              - 'android/gradlew'
+              - 'android/gradle/**'
+              - 'android/config/detekt/**'
+              - 'android/auto-mobile-sdk/api/**'
+              - 'android/desktop-core/src/test/resources/screenshots/**'
 
       - name: "Decide if Android jobs should run"
         id: android_should_run
@@ -876,7 +940,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,lfs-pointers,schema-copy-drift,tool-definitions,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,test-as-any-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock \
+            --only yaml,lfs-pointers,schema-copy-drift,tool-definitions,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,test-as-any-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock,debug-tags,datetime-now-literal,markdown-bash \
             --max-parallel 4
 
       - name: "Run offline lychee link check"
@@ -976,7 +1040,9 @@ jobs:
     name: "BATS Shell Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || matrix.os }}
     needs: detect-changes
-    if: needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
+    # Path-filtered (#10889): a skipped run still lets the required "Shell
+    # Tests" roll-up pass, and merge.yml runs the full sweep on every push.
+    if: needs.detect-changes.outputs.shell_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     strategy:
       fail-fast: false
       matrix:

@@ -106,6 +106,33 @@ wiring_requires_yq() {
   [[ "$block" != *"bats-integration-tests"* ]]
 }
 
+@test "BATS runs only on shell-relevant changes while Shell Tests always reports (#10889)" {
+  wiring_requires_yq
+  local condition
+  condition="$(yq -r '.jobs."bats-tests".if' "$WF")"
+  [[ "$condition" == *"needs.detect-changes.outputs.shell_changed == 'true'"* ]]
+  # The required roll-up must not inherit the path filter: it always posts, and a
+  # skipped bats-tests is not a failure.
+  condition="$(yq -r '.jobs."shell-tests-gate".if' "$WF")"
+  [[ "$condition" == "always()"* ]]
+  [[ "$condition" != *"shell_changed"* ]]
+  [[ "$(job_block shell-tests-gate)" == *'"$r" == "failure" || "$r" == "cancelled"'* ]]
+
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-shell")
+    | (.with.filters | from_yaml | .shell[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  local path
+  for path in "scripts/**" "test/bats/**" ".github/**" "package.json" "bun.lock" "skills/**" ".agents/**" "oxlint-plugins/**"; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
+  done
+  # A TypeScript-only change must not trigger the suite.
+  [[ $'\n'"$output"$'\n' != *$'\n'"src/**"$'\n'* ]]
+  [[ "$(yq -r '.jobs."detect-changes".outputs.shell_changed' "$WF")" == *"steps.filter-shell.outputs.shell"* ]]
+}
+
 @test "Android emulator compile smoke includes test-source compilation" {
   block="$(job_block android-emulator-compile-smoke)"
   [[ -n "$block" ]]

@@ -169,6 +169,14 @@ const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
       "no hold time a non-stalled session would not have had. #10835: a cli-idle session's " +
       "idleStallForgivenAt moves by the same bounded lost interval.",
   },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdTokenOwnedSession": {
+    writes: 1,
+    reason:
+      "#10990: any connection, including one a keeper heartbeat re-establishes, resumes the " +
+      "sessions the proxy's stable owner token holds. The held session's lastUsedAt is copied " +
+      "from the daemon's own last-tool-use clock, never the current time, so resuming grants no " +
+      "idle time.",
+  },
 };
 
 /**
@@ -234,6 +242,16 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "Tool usage: a newer binding demotes the previous one to a held session whose lastUsedAt " +
       "carries that binding's replay lease (boundSessionUuidAt, itself only stamped by tool " +
       "calls), so held-session idle eviction keys off tool use, never heartbeat acks (#10677).",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdTokenOwnedSession": {
+    writes: 1,
+    reason:
+      "Resume (#10990): a session the stable owner token holds is held with the daemon's own " +
+      "lastUsedAt, listed in KNOWN_LIVENESS_WRITES.",
+  },
+  "src/daemon/daemonMcpProxy.ts <module>": {
+    writes: 1,
+    reason: "The tokenOwnedSessions answer schema (zod) declares lastUsedAt, not a clock value.",
   },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.updateBoundSessionUuid": {
     writes: 1,

@@ -14,6 +14,7 @@ import {
 } from "./client";
 import { DaemonManager, type DaemonManagerLike, type DaemonRestartResult } from "./manager";
 import { logger } from "../utils/logger";
+import { z } from "zod";
 import {
   SOCKET_PATH,
   DAEMON_STARTUP_TIMEOUT_MS,
@@ -32,6 +33,7 @@ import {
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   DAEMON_HEARTBEAT_METHOD,
+  DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
@@ -378,6 +380,37 @@ function heartbeatRequestTimeoutMs(leaseMs: number, intervalMs: number): number 
 function resolveLivenessOwnerToken(config: DaemonMcpProxyConfig): string {
   const suppliedToken = config.livenessOwnerToken?.trim();
   return suppliedToken ? suppliedToken : (config.idGenerator ?? defaultIdGenerator).next();
+}
+
+/** The harness-supplied stable owner token, or undefined when this proxy minted its own. */
+function stableLivenessOwnerToken(config: DaemonMcpProxyConfig): string | undefined {
+  const suppliedToken = config.livenessOwnerToken?.trim();
+  return suppliedToken ? suppliedToken : undefined;
+}
+
+/** A live session the daemon reports this proxy's stable token owns (#10990). */
+const tokenOwnedSessionSchema = z.object({
+  sessionId: z.string().min(1),
+  deviceId: z.string().optional().catch(undefined),
+  platform: z.enum(["android", "ios"]).optional().catch(undefined),
+  /**
+   * The daemon's record of the session's last tool use. Unknown means no use this proxy can vouch
+   * for: the held session then stays only while the daemon reports it in use.
+   */
+  lastUsedAt: z.number().catch(Number.NEGATIVE_INFINITY),
+});
+type TokenOwnedSession = z.infer<typeof tokenOwnedSessionSchema>;
+
+/** The daemon's `daemon/tokenOwnedSessions` answer; malformed entries are skipped. */
+function parseTokenOwnedSessions(result: unknown): TokenOwnedSession[] {
+  const parsed = z.object({ sessions: z.array(z.unknown()) }).safeParse(result);
+  if (!parsed.success) {
+    return [];
+  }
+  return parsed.data.sessions.flatMap((entry) => {
+    const session = tokenOwnedSessionSchema.safeParse(entry);
+    return session.success ? [session.data] : [];
+  });
 }
 
 /** The heartbeat lease the proxy believes the daemon enforces on the sessions it holds. */
@@ -1328,7 +1361,10 @@ export class DaemonMcpProxy {
    */
   async claimInitialSession(): Promise<void> {
     const sessionUuid = this.boundSessionUuid;
-    if (!this.initialSessionBindingConfigured || !sessionUuid || this.closing) {
+    const claimsInitialSession = this.initialSessionBindingConfigured && sessionUuid !== undefined;
+    // A stable owner token also connects at startup: connecting resumes every session the token
+    // owned before a restart, inside the daemon's owner-disconnect grace (#10990).
+    if ((!claimsInitialSession && !stableLivenessOwnerToken(this.config)) || this.closing) {
       return;
     }
     try {
@@ -1336,7 +1372,9 @@ export class DaemonMcpProxy {
     } catch (error) {
       // Best-effort: the first tool call retries the connection and its claim.
       logger.warn(
-        `[DaemonMcpProxy] Startup claim of initial session ${sessionUuid} failed: ${errorMessage(error)}`,
+        claimsInitialSession
+          ? `[DaemonMcpProxy] Startup claim of initial session ${sessionUuid} failed: ${errorMessage(error)}`
+          : `[DaemonMcpProxy] Startup resume of this owner token's sessions failed: ${errorMessage(error)}`,
         error,
       );
     }
@@ -1661,7 +1699,14 @@ export class DaemonMcpProxy {
     // not this flag, so the first heartbeat still fires while it is still false. On a
     // RECONNECT there is no ownership to wait for, so establishBoundSessionHeartbeat
     // flips `connected` itself before dispatching the keeper heartbeat (see there).
-    const establishOwnership = () => this.establishBoundSessionHeartbeat();
+    // A stable owner token also resumes the sessions it holds (#10990); without one the
+    // establishment step is unchanged.
+    const establishOwnership = stableLivenessOwnerToken(this.config)
+      ? async () => {
+          await this.establishBoundSessionHeartbeat();
+          await this.resumeTokenOwnedSessions(client);
+        }
+      : () => this.establishBoundSessionHeartbeat();
 
     return isFirstPresentationProfileApplication
       ? [applyPresentationProfile, establishOwnership]
@@ -3686,7 +3731,12 @@ export class DaemonMcpProxy {
     if (!this.boundSessionUuid || explicitSessionUuid === this.boundSessionUuid) {
       return normalizedArgs;
     }
-    if (explicitSessionUuid && this.initialSessionBindingConfigured) {
+    if (
+      explicitSessionUuid &&
+      this.initialSessionBindingConfigured &&
+      // A session this proxy holds under its own token (#10990) is routable beside the startup binding.
+      !this.otherHeldSessions.has(explicitSessionUuid)
+    ) {
       throw new Error(
         `MCP connection is bound to device session ${this.boundSessionUuid}; ` +
           `cannot route this call to ${explicitSessionUuid} until the binding is released.`,
@@ -4198,6 +4248,103 @@ export class DaemonMcpProxy {
     this.tickLateness.note(this.timer.now());
     this.heartbeatKeeper.start();
     this.heartbeatKeeperStarted = true;
+  }
+
+  /**
+   * Resume every live session this proxy's stable owner token owns (#10990). A proxy restarted
+   * with the same `--liveness-owner-token` asks the daemon which sessions the token owns, holds
+   * each one it does not already track, and re-claims them on this connection before the
+   * owner-disconnect grace releases them; the keeper heartbeats them from then on. Only the
+   * owning token learns its sessions, so another token's sessions stay isolated (#10664).
+   * Runs on every connection: after a transport reconnect it finds nothing new.
+   */
+  private async resumeTokenOwnedSessions(client: DaemonClientLike): Promise<void> {
+    if (!stableLivenessOwnerToken(this.config) || this.closing || this.client !== client) {
+      return;
+    }
+    let owned: TokenOwnedSession[];
+    try {
+      owned = parseTokenOwnedSessions(
+        await client.callDaemonMethod(DAEMON_TOKEN_OWNED_SESSIONS_METHOD, {
+          livenessOwnerToken: this.livenessOwnerToken,
+        }),
+      );
+    } catch (error) {
+      // Best-effort: an older daemon does not know the method. Sessions named in tool calls still
+      // route, and the connection must not fail over a resume it cannot perform.
+      logger.warn(
+        `[DaemonMcpProxy] Could not list the sessions this owner token holds: ${errorMessage(error)}`,
+        error,
+      );
+      return;
+    }
+    const resumed = owned.filter((session) => this.holdTokenOwnedSession(session));
+    if (resumed.length === 0) {
+      return;
+    }
+    logger.info(
+      `[DaemonMcpProxy] Resuming ${resumed.length} session(s) this owner token holds: ${resumed
+        .map((session) => session.sessionId)
+        .join(", ")}`,
+    );
+    await Promise.all(resumed.map((session) => this.sendResumeClaim(client, session.sessionId)));
+    if (
+      !this.heartbeatKeeperStarted &&
+      this.otherHeldSessions.size > 0 &&
+      this.transportLive &&
+      !this.closing
+    ) {
+      this.tickLateness.note(this.timer.now());
+      this.heartbeatKeeper.start();
+      this.heartbeatKeeperStarted = true;
+    }
+  }
+
+  /** Hold a token-owned session this proxy does not track yet; false when there is nothing to do. */
+  private holdTokenOwnedSession(session: TokenOwnedSession): boolean {
+    const { sessionId } = session;
+    if (
+      sessionId === this.boundSessionUuid ||
+      sessionId === this.terminalBoundSession?.sessionUuid ||
+      this.otherHeldSessions.has(sessionId)
+    ) {
+      return false;
+    }
+    this.claimableSessions.add(sessionId);
+    this.ownedDeviceSessions.add(sessionId);
+    this.rememberSessionDevice(sessionId, session.deviceId);
+    if (session.platform) {
+      this.sessionPlatforms.set(sessionId, session.platform);
+    }
+    // Resuming is not use: the held session's idle clock is the daemon's last tool use (#10656).
+    this.otherHeldSessions.set(sessionId, { claimSent: false, lastUsedAt: session.lastUsedAt });
+    return true;
+  }
+
+  /**
+   * Re-claim one resumed session directly on the connection being established, like the
+   * establishment heartbeat: routing it through the reconnect machinery would re-enter the
+   * connection attempt still in flight. A failure leaves the claim unsent for the keeper to retry.
+   */
+  private async sendResumeClaim(client: DaemonClientLike, sessionUuid: string): Promise<void> {
+    try {
+      try {
+        this.noteDaemonIdleEvidence(
+          sessionUuid,
+          await client.callDaemonMethod(
+            DAEMON_HEARTBEAT_METHOD,
+            this.boundSessionHeartbeatParams(sessionUuid, true, true),
+          ),
+        );
+      } catch (error) {
+        throw this.isDaemonSessionNotFoundError(error)
+          ? new HeldSessionNotFoundError(sessionUuid, releaseReasonFromError(error))
+          : error;
+      }
+      this.recordHeldSessionHeartbeatSuccess(sessionUuid, true);
+    } catch (error) {
+      this.handleHeldSessionHeartbeatError(sessionUuid, true, error);
+    }
   }
 
   /**
@@ -5503,9 +5650,25 @@ export class DaemonMcpProxy {
         this.terminalBoundSession = undefined;
       }
       this.rememberSessionDevice(rememberedSessionUuid, forwardedArgs.deviceId);
+      if (this.keepsStartupBindingFor(rememberedSessionUuid)) {
+        return;
+      }
       this.updateBoundSessionUuid(rememberedSessionUuid);
       this.startBoundSessionHeartbeat();
     }
+  }
+
+  /**
+   * A call on another session this proxy holds under its token does not move a startup binding:
+   * that binding stays authoritative for sessionless calls, and the held session keeps being
+   * heartbeated with its idle clock restarted when the call ended (#10990).
+   */
+  private keepsStartupBindingFor(sessionUuid: string): boolean {
+    return (
+      this.initialSessionBindingConfigured &&
+      sessionUuid !== this.boundSessionUuid &&
+      this.otherHeldSessions.has(sessionUuid)
+    );
   }
 
   private toolAcceptsSessionUuid(name: string): boolean {

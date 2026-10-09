@@ -43,6 +43,7 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
+  DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_LIST_DEVICE_SESSIONS_METHOD,
@@ -271,40 +272,45 @@ export async function handleDaemonRequest(
   return handleInitializedDaemonRequest(request, state, executions);
 }
 
+type InitializedDaemonMethodHandler = (
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+  executions?: SessionExecutionCanceller,
+) => DaemonMethodResult | Promise<DaemonMethodResult>;
+
+/** Socket daemon methods served once the daemon is initialized, by method name. */
+const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonMethodHandler> =
+  new Map<string, InitializedDaemonMethodHandler>([
+    [DAEMON_REGISTER_SESSION_METHOD, handleRegisterSession],
+    [DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD, handleReleaseLivenessOwnership],
+    [DAEMON_HEARTBEAT_METHOD, handleHeartbeat],
+    [DAEMON_TOKEN_OWNED_SESSIONS_METHOD, handleTokenOwnedSessions],
+    ["daemon/refreshDevices", handleRefreshDevices],
+    ["daemon/availableDevices", handleAvailableDevices],
+    ["daemon/sessionInfo", (request, state) => handleSessionInfo(request, state)],
+    ["daemon/activeSessions", (request, state) => handleActiveSessions(request, state)],
+    [
+      "daemon/releaseSession",
+      (request, state, executions) => handleReleaseSession(request, state, executions),
+    ],
+    [DAEMON_LIST_DEVICE_SESSIONS_METHOD, handleListDeviceSessions],
+    [DAEMON_DEVICE_LEASE_STATUS_METHOD, handleDeviceLeaseStatus],
+    [DAEMON_RELINQUISH_DEVICE_LEASE_METHOD, handleRelinquishDeviceLease],
+  ]);
+
 async function handleInitializedDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
   executions?: SessionExecutionCanceller,
 ): Promise<DaemonMethodResult> {
-  switch (request.method) {
-    case DAEMON_REGISTER_SESSION_METHOD:
-      return handleRegisterSession(request, state);
-    case DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD:
-      return handleReleaseLivenessOwnership(request, state);
-    case DAEMON_HEARTBEAT_METHOD:
-      return handleHeartbeat(request, state);
-    case "daemon/refreshDevices":
-      return handleRefreshDevices(request, state);
-    case "daemon/availableDevices":
-      return handleAvailableDevices(request, state);
-    case "daemon/sessionInfo":
-      return handleSessionInfo(request, state);
-    case "daemon/activeSessions":
-      return handleActiveSessions(request, state);
-    case "daemon/releaseSession":
-      return handleReleaseSession(request, state, executions);
-    case DAEMON_LIST_DEVICE_SESSIONS_METHOD:
-      return handleListDeviceSessions(request, state);
-    case DAEMON_DEVICE_LEASE_STATUS_METHOD:
-      return handleDeviceLeaseStatus(request, state);
-    case DAEMON_RELINQUISH_DEVICE_LEASE_METHOD:
-      return handleRelinquishDeviceLease(request, state);
-    default:
-      return {
-        success: false,
-        error: `Unsupported daemon method: ${request.method}`,
-      };
+  const handler = INITIALIZED_DAEMON_METHOD_HANDLERS.get(request.method);
+  if (!handler) {
+    return {
+      success: false,
+      error: `Unsupported daemon method: ${request.method}`,
+    };
   }
+  return await handler(request, state, executions);
 }
 
 async function handleReleaseLivenessOwnership(
@@ -344,6 +350,42 @@ async function handleReleaseLivenessOwnership(
   return {
     success: true,
     result: { sessionId, alreadyUnowned: outcome === "already-unowned" },
+  };
+}
+
+/**
+ * The live sessions the given liveness owner token owns (#10990), so a proxy restarted with its
+ * stable token can resume all of them. A releasing session is no longer resumable and is left out.
+ */
+export function handleTokenOwnedSessions(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): DaemonMethodResult {
+  const parsed = z
+    .object({ livenessOwnerToken: z.string().refine((token) => token.trim().length > 0) })
+    .safeParse(request.params);
+  if (!parsed.success) {
+    return { success: false, error: "livenessOwnerToken parameter required" };
+  }
+  const { livenessOwnerToken } = parsed.data;
+  const manager = state.getSessionManager();
+  const sessions = (manager.getAllSessions?.() ?? []).filter(
+    (session) =>
+      session.livenessOwnerToken === livenessOwnerToken &&
+      !isSessionReleasing(manager, session.sessionId, session),
+  );
+  return {
+    success: true,
+    result: {
+      sessions: sessions.map((session) => ({
+        sessionId: session.sessionId,
+        deviceId: session.assignedDevice,
+        platform: session.platform,
+        // The daemon's own idle clock, so the resuming proxy judges idleness from the last tool
+        // call rather than from the resume (#10656).
+        lastUsedAt: session.lastUsedAt,
+      })),
+    },
   };
 }
 

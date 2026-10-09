@@ -501,6 +501,14 @@ export const DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD = "daemon/releaseLivenessO
 export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
 
 /**
+ * Lists the live device sessions whose liveness owner is the given token (#10990). A proxy
+ * restarted with its harness-supplied stable `--liveness-owner-token` asks this on connect, then
+ * re-claims and heartbeats every session it owned before the owner-disconnect grace ends. Only the
+ * owning token learns its sessions; any other token gets an empty list.
+ */
+export const DAEMON_TOKEN_OWNED_SESSIONS_METHOD = "daemon/tokenOwnedSessions";
+
+/**
  * Client-to-daemon cancellation frame (issue #6384). Sent by `DaemonClient`
  * when it abandons a request (its own timeout or an abort) with
  * `params.requestId` naming the abandoned request on the same socket. Like

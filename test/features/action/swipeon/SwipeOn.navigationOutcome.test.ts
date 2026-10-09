@@ -5,6 +5,9 @@ import { screenshotPathProtection } from "../../../../src/features/observe/Scree
 import type { ObserveResult } from "../../../../src/models";
 import type { AdbClient } from "../../../../src/utils/android-cmdline-tools/AdbClient";
 import { defaultTimer } from "../../../../src/utils/SystemTimer";
+import type { SdkRouteSource } from "../../../../src/features/action/swipeon/sdkRouteSettle";
+import { deriveSdkNavigationScreenIdentity } from "../../../../src/features/observe/sdkScreenIdentity";
+import playgroundTapScreen from "../../../fixtures/android-overlay-window/app-layer-overlay-over-playground.raw.json";
 import { formatSwipeOnMessage } from "../../../../src/server/interactionTools";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
@@ -43,7 +46,12 @@ function installHostWorkGuards() {
 beforeEach(installHostWorkGuards);
 afterEach(() => restoreHostWorkGuards());
 
-function harness(platform: "ios" | "android", before: ObserveResult, after: ObserveResult) {
+function harness(
+  platform: "ios" | "android",
+  before: ObserveResult,
+  after: ObserveResult,
+  sdkRouteSource?: SdkRouteSource,
+) {
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveResult(before);
   const timer = new FakeTimer();
@@ -63,6 +71,7 @@ function harness(platform: "ios" | "android", before: ObserveResult, after: Obse
       timer,
       voiceOverExecutor: new FakeTalkBackSwipeExecutor(),
       accessibilityDetector: new FakeAccessibilityDetector(),
+      sdkRouteSource,
     },
   );
   action.observedInteraction = async (run) => ({ ...(await run(before)), observation: after });
@@ -112,5 +121,70 @@ describe("swipeOn navigation outcome", () => {
     expect(result.effect).toEqual({ screenChanged: true, basis: "activeWindow changed" });
     expect(result.warning).toContain("NexusLauncherActivity");
     expect(result.warning ?? "").not.toContain("Swipe did not change the screen");
+  });
+
+  describe("Android SDK route lag", () => {
+    const PLAYGROUND = "dev.jasonpearson.automobile.playground";
+    const withRoute = (source: unknown, destination: string): ObserveResult => ({
+      ...(structuredClone(source) as ObserveResult),
+      screenIdentity: deriveSdkNavigationScreenIdentity("android", PLAYGROUND, { destination }),
+    });
+    const home = () => withRoute(playgroundTapScreen, "HomeDestination");
+    // The swipe ends at FakeTimer time 0 or later; these straddle it.
+    const BEFORE_SWIPE_END = -1;
+    const AFTER_SWIPE_END = Number.MAX_SAFE_INTEGER;
+
+    function source(receivedAtMs: number, arriving?: ObserveResult["screenIdentity"]) {
+      const waits: Array<{ sinceMs: number; timeoutMs: number }> = [];
+      const routes: SdkRouteSource = {
+        receivedAtMs: () => receivedAtMs,
+        awaitRouteAfter: async (_package, sinceMs, timeoutMs) => {
+          waits.push({ sinceMs, timeoutMs });
+          return arriving;
+        },
+      };
+      return { routes, waits };
+    }
+
+    test("waits a bounded time for the route event and reports the navigation it carries", async () => {
+      const arriving = withRoute(playgroundMain, "DemoContrastDestination").screenIdentity;
+      const { routes, waits } = source(BEFORE_SWIPE_END, arriving);
+      const result = await harness(
+        "android",
+        home(),
+        withRoute(playgroundMain, "HomeDestination"),
+        routes,
+      ).execute({ direction: "up", autoTarget: false });
+      expect(waits).toHaveLength(1);
+      expect(waits[0]!.timeoutMs).toBeLessThanOrEqual(300);
+      expect(result.navigated).toBe(true);
+      expect(result.warning).toContain('from "HomeDestination" to "DemoContrastDestination"');
+      expect(result.observation?.screenIdentity).toEqual(arriving);
+    });
+
+    test("reports nothing when no newer route arrives before the bound", async () => {
+      const { routes, waits } = source(BEFORE_SWIPE_END, undefined);
+      const result = await harness(
+        "android",
+        home(),
+        withRoute(playgroundMain, "HomeDestination"),
+        routes,
+      ).execute({ direction: "up", autoTarget: false });
+      expect(waits).toHaveLength(1);
+      expect(result.success).toBe(true);
+      expect(result.navigated).toBeUndefined();
+    });
+
+    test("trusts a route received after the swipe ended without waiting", async () => {
+      const { routes, waits } = source(AFTER_SWIPE_END, undefined);
+      const result = await harness(
+        "android",
+        home(),
+        withRoute(playgroundMain, "HomeDestination"),
+        routes,
+      ).execute({ direction: "up", autoTarget: false });
+      expect(waits).toHaveLength(0);
+      expect(result.navigated).toBe(false);
+    });
   });
 });

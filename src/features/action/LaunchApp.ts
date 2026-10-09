@@ -1171,6 +1171,12 @@ export class LaunchApp extends BaseVisualChange {
       }
     }
 
+    // A launch from not-running, or after a terminate/clear, starts a new process: the SDK route
+    // the last one reported no longer names its screen.
+    if (!isRunning || didTerminateOrClear) {
+      this.cacheInvalidator.retireAppProcess(this.device, packageName);
+    }
+
     if (alreadyForeground) {
       // "Make this app foreground" is a goal, not a transition: the goal already
       // holds, so this is a success flagged with `alreadyForeground` — not an

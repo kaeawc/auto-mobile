@@ -142,4 +142,6 @@ export interface SwipeOnDependencies extends DisplayFenceDependencies {
   visionConfig?: import("../../../vision/VisionTypes").VisionFallbackConfig;
   screenshotCapturer?: import("../../navigation/SelectionStateTracker").ScreenshotCapturer;
   visionAnalyzer?: import("../../../vision/VisionTypes").VisionAnalyzer;
+  /** Android SDK route store; defaults to the device's existing CtrlProxy client. */
+  sdkRouteSource?: import("./sdkRouteSettle").SdkRouteSource;
 }

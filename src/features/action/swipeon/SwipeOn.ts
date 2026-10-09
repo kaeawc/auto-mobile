@@ -108,6 +108,7 @@ import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 import { unsupportedDisplayOptionMessage } from "../../observe/SessionDisplayContext";
 import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
 import { assessSwipeNavigation } from "./swipeNavigation";
+import { settleSdkRouteAssessment, type SdkRouteSource } from "./sdkRouteSettle";
 
 const DISPLAY_SWIPE_OPTIONS = [
   "lookFor",
@@ -239,6 +240,7 @@ export class SwipeOn extends BaseVisualChange {
   private visionConfig: VisionFallbackConfig;
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;
+  private readonly sdkRouteSourceOverride: SdkRouteSource | undefined;
 
   constructor(
     device: BootedDevice,
@@ -258,6 +260,7 @@ export class SwipeOn extends BaseVisualChange {
     this.screenshotCapturer =
       dependencies.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
     this.visionAnalyzer = dependencies.visionAnalyzer;
+    this.sdkRouteSourceOverride = dependencies.sdkRouteSource;
     if (dependencies.observeScreen) {
       this.observeScreen = dependencies.observeScreen;
     }
@@ -1504,15 +1507,19 @@ export class SwipeOn extends BaseVisualChange {
     diagnostics: { boomerang?: BoomerangConfig },
   ): Promise<SwipeOnResult> {
     let previous: ObserveResult | null = null;
+    let swipeEndedAtMs: number | undefined;
+    const sdkRoutes = this.sdkRouteSource();
     const result: SwipeOnResult = await this.observedInteraction(
       async (observation, fence) => {
         previous = observation;
-        return block(observation, fence);
+        const swipe = await block(observation, fence);
+        swipeEndedAtMs = sdkRoutes ? this.timer.now() : undefined;
+        return swipe;
       },
       // A boomerang whose return leg failed has moved the content: observe it on iOS too.
       { ...options, observePartialApplication: true },
     );
-    this.annotateSwipeNavigation(result, previous);
+    await this.annotateSwipeNavigation(result, previous, swipeEndedAtMs, sdkRoutes);
     if (this.device.platform !== "android") {
       return result;
     }
@@ -1534,16 +1541,45 @@ export class SwipeOn extends BaseVisualChange {
     return result;
   }
 
+  /** The Android SDK route store for this device; iOS has no equivalent here. */
+  private sdkRouteSource(): SdkRouteSource | undefined {
+    if (this.device.platform !== "android") {
+      return undefined;
+    }
+    return (
+      this.sdkRouteSourceOverride ?? {
+        receivedAtMs: (packageName) =>
+          this.accessibilityService.getSdkScreenIdentityReceivedAtMs(packageName),
+        awaitRouteAfter: (packageName, sinceMs, timeoutMs) =>
+          this.accessibilityService.awaitSdkScreenIdentityAfter(packageName, sinceMs, timeoutMs),
+      }
+    );
+  }
+
   /** A swipe that opened a different screen (e.g. acted as a tap on a row) must not read as a scroll. */
-  private annotateSwipeNavigation(result: SwipeOnResult, previous: ObserveResult | null): void {
+  private async annotateSwipeNavigation(
+    result: SwipeOnResult,
+    previous: ObserveResult | null,
+    swipeEndedAtMs: number | undefined,
+    sdkRoutes: SdkRouteSource | undefined,
+  ): Promise<void> {
     if (!result.success) {
       return;
     }
-    const assessment = assessSwipeNavigation(
+    const assess = () =>
+      assessSwipeNavigation(
+        previous,
+        result.observation,
+        { x: result.x1, y: result.y1 },
+        this.device.platform,
+      );
+    const assessment = await settleSdkRouteAssessment(
+      assess(),
       previous,
       result.observation,
-      { x: result.x1, y: result.y1 },
-      this.device.platform,
+      swipeEndedAtMs,
+      sdkRoutes,
+      assess,
     );
     if (!assessment) {
       return;

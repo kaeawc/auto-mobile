@@ -84,7 +84,7 @@ describe("DefaultAppCleanupService", () => {
           new ClearAppData(
             targetDevice,
             new FakeAdbClientFactory(adb),
-            { cacheInvalidator: { invalidate: () => {} } },
+            { cacheInvalidator: { invalidate: () => {}, retireAppProcess: () => {} } },
             () => new NoOpPerformanceTracker(),
           ),
         logger: log,

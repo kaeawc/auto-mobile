@@ -215,6 +215,7 @@ export class TerminateApp extends BaseVisualChange {
           // cached window/hierarchy record for it is stale, so invalidate here too,
           // not only on the force-stop path below.
           this.cacheInvalidator.invalidate(this.device);
+          this.cacheInvalidator.retireAppProcess(this.device, packageName);
           return {
             success: true,
             packageName,
@@ -234,6 +235,7 @@ export class TerminateApp extends BaseVisualChange {
         // stale. Invalidate it so a client re-observing to recover gets a fresh
         // sync instead of the same phantom window (issue #5867).
         this.cacheInvalidator.invalidate(this.device);
+        this.cacheInvalidator.retireAppProcess(this.device, packageName);
 
         if (!options?.skipObservation) {
           await perf.track("awaitTerminated", () =>

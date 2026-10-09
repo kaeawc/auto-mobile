@@ -149,6 +149,8 @@ export class ClearAppData {
         }
 
         logger.info(`Clearing app data was successful for user ${targetUserId}`);
+        // pm clear also stopped the process; its SDK route is gone with it.
+        this.cacheInvalidator.retireAppProcess(this.device, packageName);
         return {
           success: true,
           packageName,

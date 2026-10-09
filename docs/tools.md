@@ -322,8 +322,7 @@ observation, call `observe({ screenshot: "settled" })` and read its
 `screenshotPath`.
 
 Every returned full-screen fresh (settled or device-read), cached fallback, per-display,
-and crop (`crop-*` and `snapshot-of-*`) path is kept for **at least 10 minutes after
-return** unless capacity pressure evicts it early (below). A flat `<x>Path` has a sibling
+and crop (`crop-*` and `snapshot-of-*`) path is kept for **at least 10 minutes after return** unless capacity pressure evicts it early (below). A flat `<x>Path` has a sibling
 `<x>ExpiresAt`: top-level and per-display `screenshotExpiresAt`; objects owning a path have
 `expiresAt` (`crop.expiresAt` and snapshotOf's `expiresAt`). These optional numbers are
 host-clock epoch milliseconds and are not a promise that the file survives that long.

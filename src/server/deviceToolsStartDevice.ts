@@ -1,5 +1,6 @@
 import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
+import { DeviceShuttingDownError } from "../daemon/deviceAcquisitionRefusals";
 import { ActionableError, BootedDevice, DeviceInfo } from "../models";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
@@ -579,7 +580,7 @@ async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<vo
         preparationOptions,
       ))
     ) {
-      throw new ActionableError(`Device '${request.device.deviceId}' is shutting down.`);
+      throw new DeviceShuttingDownError(request.device.deviceId);
     }
     if (request.device.platform === "ios") {
       IOSCtrlProxyClient.resumeAfterDeviceStart(request.device.deviceId);

@@ -45,6 +45,7 @@ describe("ProvisionDeviceError retryability", () => {
       device_owned_by_other_daemon: true,
       device_cleanup_in_progress: true,
       session_creation_timeout: true,
+      device_shutting_down: true,
       device_offline: true,
       discovery_incomplete: true,
       identity_conflict: false,

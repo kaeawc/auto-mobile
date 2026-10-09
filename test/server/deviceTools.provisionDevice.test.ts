@@ -4,6 +4,8 @@ import {
   DEVICE_OWNED_BY_OTHER_DAEMON_RETRY_AFTER_MS,
   DeviceCleanupInProgressError,
   DeviceOwnedByOtherDaemonError,
+  DeviceShuttingDownError,
+  DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS,
   SessionCreationTimeoutError,
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import { deviceAlreadyAssignedToAnotherSessionError } from "../../src/daemon/inputDeviceOwnership";
@@ -4183,6 +4185,11 @@ describe("provisionDevice handler", () => {
       new SessionCreationTimeoutError("s-1", "emulator-5554", 5000),
       "session_creation_timeout",
       { retryAfterMs: DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS },
+    ],
+    [
+      new DeviceShuttingDownError("emulator-5554"),
+      "device_shutting_down",
+      { retryAfterMs: DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS },
     ],
   ] as const)(
     "a typed acquisition refusal %# is a retryable %s failure with its hints",

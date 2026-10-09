@@ -13,6 +13,7 @@ import { up as addLivenessContract } from "../../src/db/migrations/2026_09_16_00
 import { up as addLivenessWriterFence } from "../../src/db/migrations/2026_09_17_000_device_session_liveness_writer_fence";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
+import { DeviceShuttingDownError } from "../../src/daemon/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../../test/fakes/FakeTimer";
@@ -490,6 +491,28 @@ test.each([false, true])(
     });
   },
 );
+
+test("autolocking a device under a kill reservation is a typed retryable device_shutting_down refusal (#11088)", async () => {
+  await withAutolock(async () => {
+    const h = await harness();
+    try {
+      const reservation = await h.pool.reserveDeviceForShutdown("emulator-5554");
+      expect(reservation).toBeDefined();
+      const refusal = await h.pool
+        .autolockDevice("emulator-5554", "android", "agent-B")
+        .catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(DeviceShuttingDownError);
+      expect(refusal).toMatchObject({
+        code: "device_shutting_down",
+        deviceId: "emulator-5554",
+        retryable: true,
+      });
+      await reservation!.release();
+    } finally {
+      await h.close();
+    }
+  });
+});
 
 test("cancelling a shutdown reservation releases only its recovery route lease", async () => {
   await withAutolock(async () => {

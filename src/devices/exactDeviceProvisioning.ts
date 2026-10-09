@@ -97,6 +97,7 @@ export type ProvisionDeviceFailureCode =
   | "device_owned_by_other_daemon"
   | "device_cleanup_in_progress"
   | "session_creation_timeout"
+  | "device_shutting_down"
   | "device_offline"
   | "discovery_incomplete"
   | "identity_conflict"
@@ -120,6 +121,8 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   device_cleanup_in_progress: true,
   // The bind was rolled back; retrying is safe.
   session_creation_timeout: true,
+  // Transient: the kill reservation clears once the shutdown finishes.
+  device_shutting_down: true,
   device_offline: true,
   discovery_incomplete: true,
   identity_conflict: false,

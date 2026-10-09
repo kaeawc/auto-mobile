@@ -2,6 +2,7 @@ import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+  DEVICE_SHUTTING_DOWN_CODE,
   DeviceOwnedByOtherDaemonError,
   SESSION_CREATION_TIMEOUT_CODE,
   RetryableDeviceAcquisitionError,
@@ -179,10 +180,40 @@ function retryableAcquisitionProvisionCode(code: string): ProvisionDeviceFailure
     case DEVICE_OWNED_BY_OTHER_DAEMON_CODE:
     case DEVICE_CLEANUP_IN_PROGRESS_CODE:
     case SESSION_CREATION_TIMEOUT_CODE:
+    case DEVICE_SHUTTING_DOWN_CODE:
       return code;
     default:
       return undefined;
   }
+}
+
+/**
+ * Typed retryable refusals from the shared bind path keep their wire code and wait hint so a
+ * controller retries them the way startDevice/getAndroid clients do.
+ */
+function retryableAcquisitionProvisionError(
+  args: ProvisionDeviceArgs,
+  error: unknown,
+): ProvisionDeviceError | undefined {
+  if (!(error instanceof RetryableDeviceAcquisitionError)) {
+    return undefined;
+  }
+  const code = retryableAcquisitionProvisionCode(error.code);
+  if (!code) {
+    return undefined;
+  }
+  return new ProvisionDeviceError(
+    code,
+    `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
+    true,
+    {
+      deviceId: error.deviceId,
+      retryAfterMs: error.retryAfterMs,
+      ...(error instanceof DeviceOwnedByOtherDaemonError && error.ownerPid !== undefined
+        ? { ownerPid: error.ownerPid }
+        : {}),
+    },
+  );
 }
 
 export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
@@ -427,25 +458,9 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         { deviceId: error.deviceId },
       );
     }
-    const acquisitionCode =
-      error instanceof RetryableDeviceAcquisitionError
-        ? retryableAcquisitionProvisionCode(error.code)
-        : undefined;
-    if (error instanceof RetryableDeviceAcquisitionError && acquisitionCode) {
-      // Typed retryable refusals from the shared bind path keep their wire code and wait hint
-      // so a controller retries them the way startDevice/getAndroid clients do.
-      return new ProvisionDeviceError(
-        acquisitionCode,
-        `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
-        true,
-        {
-          deviceId: error.deviceId,
-          retryAfterMs: error.retryAfterMs,
-          ...(error instanceof DeviceOwnedByOtherDaemonError && error.ownerPid !== undefined
-            ? { ownerPid: error.ownerPid }
-            : {}),
-        },
-      );
+    const acquisitionFailure = retryableAcquisitionProvisionError(args, error);
+    if (acquisitionFailure) {
+      return acquisitionFailure;
     }
     if (error instanceof RunnerReadinessError) {
       const cause = error.diagnosticCause;

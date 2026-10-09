@@ -73,6 +73,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export class IosOverlayTransport implements OverlayTransport {
   constructor(private readonly agent: OverlayAgentClient) {}
 
+  /**
+   * Whether the agent's handshake advertised `capability`: a request type, or a spec feature it
+   * renders such as `overlay_anchor_v1`. An older agent draws what it does not know unpositioned.
+   */
+  supportsCapability(capability: string): boolean {
+    return this.agent.handshake.capabilities.includes(capability);
+  }
+
   async show(spec: OverlaySpec): Promise<OverlayResult> {
     return toOverlayResult(await this.agent.request("show_overlay", { spec }));
   }

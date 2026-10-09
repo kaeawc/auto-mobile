@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import {
   hasElementAnchors,
   hasOverlayAnchors,
@@ -7,6 +7,10 @@ import {
 } from "../../../src/features/overlay/overlayAnchors";
 import type { OverlayAnchor, OverlaySpec } from "../../../src/features/overlay/overlaySpec";
 import { validateOverlaySpec } from "../../../src/features/overlay/overlayValidation";
+import { CtrlProxyHierarchy } from "../../../src/features/observe/ios/CtrlProxyHierarchy";
+import type { HierarchyDelegateContext } from "../../../src/features/observe/ios/types";
+import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
+import { iosFloatingOverlayOverSettings } from "../../fixtures/observe/iosOverlayWindow";
 import { capturedFloatingCoverHierarchy } from "../../helpers/overlayWindowCapture";
 
 // Captured on API 36 at 420 dpi (2.625): a CtrlProxy floating overlay window (a box tagged
@@ -206,5 +210,69 @@ describe("resolveOverlayAnchors", () => {
     const before = structuredClone(spec);
     resolve(spec);
     expect(spec).toEqual(before);
+  });
+});
+
+// Captured on an iPhone 17 simulator (iOS 26.5, 402x874 pt): Settings with the injected overlay
+// agent's floating window (floating-card, like-button, close-button and the host dismiss control)
+// above it. Settings' General row is at [16,380,386,432] in points, the unit iOS specs use.
+describe("resolveOverlayAnchors on an iOS capture", () => {
+  let converted: ViewHierarchyResult;
+  // Converting the 200 KB capture is setup, not part of any one test's budget.
+  beforeAll(() => {
+    converted = new CtrlProxyHierarchy({} as HierarchyDelegateContext).convertToViewHierarchyResult(
+      iosFloatingOverlayOverSettings(),
+    );
+  });
+  const iosCapture = () => converted;
+  const GENERAL = { left: 16, top: 380, right: 386, bottom: 432 };
+
+  function resolveIos(selector: Record<string, unknown>) {
+    return resolveOverlayAnchors(
+      anchoredSpec({ type: "element", selector, alignment: "cover" } as OverlayAnchor),
+      { hierarchy: iosCapture(), updatedAt: 1791385231063, boundsUnit: "points" },
+    );
+  }
+
+  test("keeps the element's point bounds: the capture has no density and needs none", () => {
+    expect(iosCapture().density).toBeUndefined();
+    const resolution = resolveIos({ elementId: "com.apple.settings.general" });
+    expect(resolution.anchors).toEqual([
+      {
+        path: "root",
+        alignment: "cover",
+        boundsPx: GENERAL,
+        bounds: { x: 16, y: 380, width: 370, height: 52 },
+      },
+    ]);
+    expect(resolution.spec.root.anchor).toEqual({
+      type: "bounds",
+      bounds: { x: 16, y: 380, width: 370, height: 52 },
+      alignment: "cover",
+    });
+    expect(validateOverlaySpec(resolution.spec).success).toBe(true);
+  });
+
+  test("a text selector resolves to the row that owns it, as tapOn does", () => {
+    expect(resolveIos({ text: "General" }).anchors[0].boundsPx).toEqual(GENERAL);
+  });
+
+  test("the agent's own window is excluded: its buttons and dismiss control are not targets", () => {
+    for (const elementId of ["like-button", "close-button", "automobile-overlay-dismiss"]) {
+      expect(() => resolveIos({ elementId })).toThrow("Only the app is searched");
+    }
+  });
+
+  test("without the points unit an iOS capture is refused for its missing density", () => {
+    expect(() =>
+      resolveOverlayAnchors(
+        anchoredSpec({
+          type: "element",
+          selector: { elementId: "com.apple.settings.general" },
+          alignment: "cover",
+        }),
+        { hierarchy: iosCapture() },
+      ),
+    ).toThrow("display density");
   });
 });

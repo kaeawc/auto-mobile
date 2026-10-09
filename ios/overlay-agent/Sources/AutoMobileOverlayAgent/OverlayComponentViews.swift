@@ -655,6 +655,15 @@ struct OverlayModalLayer: View {
                         .padding(.bottom, model.safeInsets.bottom)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 }
+                // Anchored nodes in the modal's body draw above that modal, as on Android.
+                OverlayAnchorLayer(
+                    entries: OverlayNode.layeredAnchors(
+                        in: node.childEntries(path: "modal\(index)"),
+                        state: model.state,
+                        pages: model.pages
+                    ),
+                    model: model
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -376,6 +376,76 @@ describe("videoRecording tool segmentation branch", () => {
     });
   });
 
+  describe("stop by id requires the active recording's owner (#11130)", () => {
+    test("a foreign session cannot stop another session's active single recording", async () => {
+      const active = await startVideoRecording({
+        device: androidDevice,
+        ownerSessionUuid: "session-a",
+      });
+      const stopsBefore = fakeBackend.stopCalls.length;
+
+      const refusal = handler()(androidDevice, {
+        action: "stop",
+        recordingId: active.recordingId,
+        sessionUuid: "session-b",
+      });
+
+      await expect(refusal).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+      expect(fakeBackend.stopCalls.length).toBe(stopsBefore);
+      await fsPromises.writeFile(active.outputPath, "video-bytes");
+      const response = parse(
+        await handler()(androidDevice, {
+          action: "stop",
+          recordingId: active.recordingId,
+          sessionUuid: "session-a",
+        }),
+      );
+      expect((response.recordings as Array<{ recordingId: string }>)[0].recordingId).toBe(
+        active.recordingId,
+      );
+    });
+
+    test("an ownerless active recording stays stoppable by any session", async () => {
+      const active = await startVideoRecording({ device: androidDevice });
+      await fsPromises.writeFile(active.outputPath, "video-bytes");
+
+      const response = parse(
+        await handler()(androidDevice, {
+          action: "stop",
+          recordingId: active.recordingId,
+          sessionUuid: "session-b",
+        }),
+      );
+
+      expect(response.count).toBe(1);
+    });
+
+    test("a foreign session cannot stop another session's active segmented recording", async () => {
+      const start = parse(
+        await handler()(androidDevice, {
+          action: "start",
+          platform: "android",
+          maxDuration: 181,
+          sessionUuid: "session-a",
+        }),
+      );
+      const handle = (start.recordings as Array<{ recordingId: string }>)[0].recordingId;
+
+      await expect(
+        handler()(androidDevice, { action: "stop", recordingId: handle, sessionUuid: "session-b" }),
+      ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+
+      const response = parse(
+        await handler()(androidDevice, {
+          action: "stop",
+          recordingId: handle,
+          sessionUuid: "session-a",
+        }),
+      );
+      expect(response.segmented).toBe(true);
+    });
+  });
+
   test("stop response never returns a recording it evicted", async () => {
     const active = await startVideoRecording({ device: iosDevice });
     await fsPromises.writeFile(active.outputPath, "video-bytes");

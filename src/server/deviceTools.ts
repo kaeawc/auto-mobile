@@ -63,9 +63,9 @@ import {
   type BootedDeviceDiscovery,
   type BootedDeviceDiscoveryOptions,
   type DeviceImageDiscovery,
-  MultiPlatformDeviceManager,
   PlatformDeviceManager,
 } from "../devices/deviceUtils";
+import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
 import type { DeviceMatchCriteria, FormFactor } from "../models/DeviceMatchCriteria";
@@ -3566,7 +3566,9 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
           timer: deps.timer,
         });
       },
-      deviceManagerFactory: () => new MultiPlatformDeviceManager(),
+      // The shared manager keeps devicectl caching/coalescing/last-good retention
+      // and the Android model/arch caches across calls (#11063).
+      deviceManagerFactory: () => PlatformDeviceManagerFactory.getInstance(),
       avdManagerFactory: () => new AvdManagerService(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
       displayInventory: defaultDisplayInventoryProvider,

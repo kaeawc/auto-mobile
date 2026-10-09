@@ -216,4 +216,89 @@ final class OverlayAnchorTests: XCTestCase {
             ["modal0.child"]
         )
     }
+
+    // MARK: Anchor fade and sheet clip (#10912)
+
+    private func fadingSpec(transition: String?) throws -> OverlayNode {
+        let transitionField = transition.map { #", "transition": "\#($0)""# } ?? ""
+        return try node("""
+        {"type": "column", "children": [
+          {"type": "card", "visibleWhen": {"key": "show", "equals": true}\(transitionField), "children": [
+            {"type": "text", "text": "badge", "id": "badge",
+             "anchor": {"type": "bounds", "bounds": {"x": 0, "y": 0, "width": 1, "height": 1}}}
+          ]}
+        ]}
+        """)
+    }
+
+    func testAnchorsStayListedWhileAnAnimatedAncestorExits() throws {
+        let root = try fadingSpec(transition: nil)
+        let exiting = root.layeredAnchors(state: [:], pages: [:], retainExiting: true)
+        XCTAssertEqual(exiting.map { $0.node.id }, ["badge"])
+        XCTAssertEqual(exiting.map(\.ancestorsShown), [false])
+        let shown = root.layeredAnchors(state: ["show": .bool(true)], pages: [:], retainExiting: true)
+        XCTAssertEqual(shown.map(\.ancestorsShown), [true])
+    }
+
+    func testAnchorsAreDroppedAtOnceWithoutMotionOrForANoneTransition() throws {
+        XCTAssertTrue(try fadingSpec(transition: nil).layeredAnchors(state: [:], pages: [:]).isEmpty)
+        XCTAssertTrue(try fadingSpec(transition: "none")
+            .layeredAnchors(state: [:], pages: [:], retainExiting: true).isEmpty)
+        for transition in ["fade", "expand", "slide"] {
+            XCTAssertEqual(
+                try fadingSpec(transition: transition).layeredAnchors(state: [:], pages: [:], retainExiting: true).count,
+                1,
+                transition
+            )
+        }
+    }
+
+    func testTheOutermostHiddenAncestorDecidesWhetherToRetain() throws {
+        let root = try node("""
+        {"type": "column", "children": [
+          {"type": "box", "visibleWhen": {"key": "a", "equals": true}, "children": [
+            {"type": "box", "visibleWhen": {"key": "b", "equals": true}, "transition": "none", "children": [
+              {"type": "text", "text": "t", "id": "t",
+               "anchor": {"type": "bounds", "bounds": {"x": 0, "y": 0, "width": 1, "height": 1}}}
+            ]}
+          ]}
+        ]}
+        """)
+        XCTAssertEqual(root.layeredAnchors(state: [:], pages: [:], retainExiting: true).count, 1)
+        XCTAssertTrue(root.layeredAnchors(state: ["a": .bool(true)], pages: [:], retainExiting: true).isEmpty)
+        XCTAssertEqual(
+            root.layeredAnchors(state: ["a": .bool(true), "b": .bool(true)], pages: [:], retainExiting: true)
+                .map(\.ancestorsShown),
+            [true]
+        )
+    }
+
+    func testTheWindowLayerPassesRetentionThrough() throws {
+        let root = try fadingSpec(transition: "fade")
+        XCTAssertEqual(root.windowAnchorLayer(state: [:], pages: [:], retainExiting: true).count, 1)
+        XCTAssertTrue(root.windowAnchorLayer(state: [:], pages: [:]).isEmpty)
+    }
+
+    func testSheetFrameSitsOnItsEdgeAndNeverExceedsTheWindow() {
+        XCTAssertEqual(
+            OverlaySheetFrame.rect(containerWidth: 400, containerHeight: 800, edge: nil, height: nil),
+            OverlayRect(x: 0, y: 600, width: 400, height: 200)
+        )
+        XCTAssertEqual(
+            OverlaySheetFrame.rect(containerWidth: 400, containerHeight: 800, edge: "top", height: 120),
+            OverlayRect(x: 0, y: 0, width: 400, height: 120)
+        )
+        XCTAssertEqual(
+            OverlaySheetFrame.rect(containerWidth: 400, containerHeight: 150, edge: "bottom", height: 500),
+            OverlayRect(x: 0, y: 0, width: 400, height: 150)
+        )
+    }
+
+    func testHitRectsClipToTheSheet() {
+        let sheet = OverlaySheetFrame.rect(containerWidth: 400, containerHeight: 800, edge: nil, height: 200)
+        let straddling = OverlayRect(x: 300, y: 550, width: 200, height: 100)
+        XCTAssertEqual(straddling.intersection(sheet), OverlayRect(x: 300, y: 600, width: 100, height: 50))
+        XCTAssertNil(OverlayRect(x: 10, y: 100, width: 50, height: 50).intersection(sheet))
+        XCTAssertNil(OverlayRect(x: 0, y: 500, width: 50, height: 100).intersection(sheet), "touching edges do not overlap")
+    }
 }

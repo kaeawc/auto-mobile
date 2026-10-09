@@ -259,6 +259,7 @@ final class OverlayAgent {
 struct OverlayRootView: View {
     @ObservedObject var model: OverlayModel
     @Environment(\.colorScheme) private var systemScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let palette = OverlayPalette.make(theme: model.spec?.theme, systemDark: systemScheme == .dark)
@@ -320,7 +321,16 @@ struct OverlayRootView: View {
 
     /// The spec's anchored nodes, above its tree and below its modals, as Android's anchor layer.
     private func anchorLayer(_ spec: OverlaySpec) -> some View {
-        OverlayAnchorLayer(entries: spec.root.windowAnchorLayer(state: model.state, pages: model.pages), model: model)
+        let placement = spec.window.placement
+        let motion = OverlayMotion(specMotion: spec.motion, reduceMotion: reduceMotion)
+        return OverlayAnchorLayer(
+            entries: spec.root.windowAnchorLayer(
+                state: model.state, pages: model.pages, retainExiting: motion.enabled
+            ),
+            model: model,
+            sheet: placement.type == "sheet"
+                ? OverlayAnchorLayer.Sheet(edge: placement.edge, height: placement.height) : nil
+        )
     }
 
     @ViewBuilder
@@ -337,7 +347,7 @@ struct OverlayRootView: View {
             let edge: Alignment = placement.edge == "top" ? .top : .bottom
             root
                 .frame(maxWidth: .infinity)
-                .frame(height: placement.height ?? 200)
+                .frame(height: placement.height ?? OverlaySheetFrame.defaultHeight)
                 .reportFrame(key: "content", model: model)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: edge)
         case "floating":
@@ -398,9 +408,15 @@ struct OverlayRootView: View {
 
 extension View {
     /// Keeps `model.hitRects[key]` at this view's window frame while it is on screen.
-    func reportFrame(key: String, model: OverlayModel) -> some View {
+    /// With `clip`, only the part of the frame inside it takes touches; `enabled: false` withdraws
+    /// the rect while the view stays on screen (an anchored node fading out with its ancestor).
+    func reportFrame(key: String, model: OverlayModel, clip: CGRect? = nil, enabled: Bool = true) -> some View {
         onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
-            model.hitRects[key] = frame
+            let touchable = clip.map { frame.intersection($0) } ?? frame
+            model.hitRects[key] = enabled && !touchable.isNull && !touchable.isEmpty ? touchable : nil
+        }
+        .onChange(of: enabled) { _, now in
+            if !now { model.hitRects[key] = nil }
         }
         .onDisappear { model.hitRects[key] = nil }
     }

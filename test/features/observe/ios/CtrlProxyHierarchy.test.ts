@@ -209,6 +209,38 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     expect(tf.$["value"]).toBe("value-only");
   });
 
+  test("keeps an explicit empty `value` on an editable so empty is distinct from unreadable (#9078)", () => {
+    const root: CtrlProxyNode = {
+      className: "XCUIApplication",
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      node: [
+        {
+          className: "UITextField",
+          value: "",
+          hintText: "qty",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+          clickable: "true",
+        },
+        {
+          className: "UITextField",
+          hintText: "unreadable",
+          bounds: { left: 0, top: 50, right: 100, bottom: 90 },
+          clickable: "true",
+        },
+      ],
+    };
+
+    const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
+    const empty = findFirstNodeWith(result.hierarchy.node, (a) => a["hint-text"] === "qty");
+    const unreadable = findFirstNodeWith(
+      result.hierarchy.node,
+      (a) => a["hint-text"] === "unreadable",
+    );
+
+    expect(empty.$["value"]).toBe("");
+    expect(unreadable.$["value"]).toBeUndefined();
+  });
+
   test("omits `value` attribute when absent on input", () => {
     const root: CtrlProxyNode = {
       className: "XCUIApplication",

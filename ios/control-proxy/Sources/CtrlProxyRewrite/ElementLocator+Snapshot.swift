@@ -366,10 +366,11 @@ extension ElementLocator {
             // accessibility label (which is typically the placeholder for
             // UISearchBar / UITextField). Mask password content to avoid
             // leaking secrets through the hierarchy.
-            var enteredValue: String?
-            if isTextInput, let raw = snapshot.value as? String, !raw.isEmpty {
-                enteredValue = isPassword ? String(repeating: "•", count: raw.count) : raw
-            }
+            let enteredValue = Self.enteredTextValue(
+                rawValue: snapshot.value as? String,
+                isTextInput: isTextInput,
+                isPassword: isPassword
+            )
 
             return UIElementInfo(
                 text: label,
@@ -406,4 +407,23 @@ extension ElementLocator {
             )
         }
     #endif
+
+    /// Value to surface for an element, or nil to omit it (#9078).
+    ///
+    /// Non-secure text inputs report an explicit "" when empty so the host can tell
+    /// "empty" from "unreadable" (a nil `rawValue`). Secure fields never expose their
+    /// content: only a bullet mask of non-empty text is emitted, and an empty secure
+    /// field is omitted. Non-editable elements keep omitting empty values so
+    /// hierarchies stay small.
+    nonisolated static func enteredTextValue(
+        rawValue: String?,
+        isTextInput: Bool,
+        isPassword: Bool
+    ) -> String? {
+        guard isTextInput, let raw = rawValue else { return nil }
+        if isPassword {
+            return raw.isEmpty ? nil : String(repeating: "•", count: raw.count)
+        }
+        return raw
+    }
 }

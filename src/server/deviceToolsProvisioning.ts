@@ -110,6 +110,7 @@ import {
 import type { DeviceToolsDependencies, ProvisionDeviceArgs, StartDeviceArgs } from "./deviceTools";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import type { RunnerReadinessRequest } from "../ctrlProxy/RunnerReadinessService";
+import type { CreatedDeviceRollback } from "./deviceToolsStartDevice";
 
 type ProvisioningHooks = {
   bindBootedDeviceSession: (
@@ -142,6 +143,8 @@ type ProvisionCleanupOptions = {
   rollbackDeadlineMs?: number;
   recordLifecycle?: RecordProvisionDeviceLifecycle;
   lifecycleDevice?: NonNullable<ProvisionDeviceLifecycleOutcome["device"]>;
+  /** Receives a cleanup deferred until a pending mutation settles; it owns the lease until then. */
+  collectDeferredCleanup?: (cleanup: Promise<void>) => void;
 };
 
 /** Where a failed provision's rollback should aim; `unresolved` never means absent. */
@@ -216,7 +219,7 @@ function retryableAcquisitionProvisionError(
   );
 }
 
-export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
+export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
   const { bindBootedDeviceSession, ensureCtrlProxyReady, executeDeleteDevice } = hooks;
   const provisionDeviceHandler = async (
     input: ProvisionDeviceArgs,
@@ -646,7 +649,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
   }
 
   function continueProvisionCleanupAfterMutationSettles(
-    args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     createdDevice: DeviceInfo,
     provisionFailure: ProvisionDeviceError,
@@ -655,26 +657,22 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       settlement,
       recordLifecycle,
       lifecycleDevice,
+      collectDeferredCleanup,
     }: {
       lifecycleLease: VirtualDeviceLifecycleLease;
       settlement: Promise<unknown>;
       recordLifecycle?: RecordProvisionDeviceLifecycle;
       lifecycleDevice?: NonNullable<ProvisionDeviceLifecycleOutcome["device"]>;
+      collectDeferredCleanup?: (cleanup: Promise<void>) => void;
     },
   ): void {
     const finishCleanup = async (): Promise<void> => {
-      const final = await cleanupFailedProvisionDevice(
-        args,
-        deps,
-        createdDevice,
-        provisionFailure,
-        {
-          lifecycleLease: lifecycleLease,
-          pendingMutationSettlement: undefined,
-          recordLifecycle: recordLifecycle,
-          lifecycleDevice: lifecycleDevice,
-        },
-      );
+      const final = await cleanupFailedProvisionDevice(deps, createdDevice, provisionFailure, {
+        lifecycleLease: lifecycleLease,
+        pendingMutationSettlement: undefined,
+        recordLifecycle: recordLifecycle,
+        lifecycleDevice: lifecycleDevice,
+      });
       if (final.cleanup.status === "failed") {
         logger.warn(
           `[DeviceTools] Deferred provision cleanup for '${createdDevice.name}' failed: ` +
@@ -682,13 +680,16 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         );
       }
     };
-    void settlement.then(finishCleanup, finishCleanup).catch((error: unknown) => {
-      logger.warn(
-        `[DeviceTools] Deferred provision cleanup for '${createdDevice.name}' rejected: ${errorMessage(error)}`,
-        error,
-      );
-      lifecycleLease.release();
-    });
+    const deferredCleanup = settlement
+      .then(finishCleanup, finishCleanup)
+      .catch((error: unknown) => {
+        logger.warn(
+          `[DeviceTools] Deferred provision cleanup for '${createdDevice.name}' rejected: ${errorMessage(error)}`,
+          error,
+        );
+        lifecycleLease.release();
+      });
+    collectDeferredCleanup?.(deferredCleanup);
   }
 
   function provisionCleanupPreconditionFailure(
@@ -705,7 +706,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
   }
 
   function unresolvedProvisionCleanup(
-    args: ProvisionDeviceArgs,
     createdDevice: DeviceInfo,
     provisionFailure: ProvisionDeviceError,
   ): ProvisionDeviceRollbackError {
@@ -714,7 +714,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       target: {
         platform: createdDevice.platform,
         isVirtual: true,
-        stableId: args.device.name,
+        stableId: createdDevice.name,
         stableName: createdDevice.name,
       },
       failure: {
@@ -743,7 +743,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
   }
 
   async function cleanupFailedProvisionDevice(
-    args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
     createdDevice: DeviceInfo,
     provisionFailure: ProvisionDeviceError,
@@ -753,12 +752,13 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       recordLifecycle,
       lifecycleDevice,
       rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
+      collectDeferredCleanup,
     }: ProvisionCleanupOptions,
   ): Promise<ProvisionDeviceRollbackError> {
     const stableId =
       createdDevice.platform === "android" ? createdDevice.name : createdDevice.deviceId;
     if (!stableId) {
-      return unresolvedProvisionCleanup(args, createdDevice, provisionFailure);
+      return unresolvedProvisionCleanup(createdDevice, provisionFailure);
     }
     const cleanupArgs: TeardownDeviceArgs = {
       target: {
@@ -826,11 +826,12 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
               "cleanup was not attempted and lifecycle ownership remains until it settles.",
           ),
         );
-        continueProvisionCleanupAfterMutationSettles(args, deps, createdDevice, provisionFailure, {
+        continueProvisionCleanupAfterMutationSettles(deps, createdDevice, provisionFailure, {
           lifecycleLease: lifecycleLease,
           settlement: pendingMutationSettlement,
           recordLifecycle: recordLifecycle,
           lifecycleDevice: lifecycleDevice,
+          collectDeferredCleanup: collectDeferredCleanup,
         });
         return pendingCleanup;
       }
@@ -1168,7 +1169,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       reason: provisionDeviceLifecycleReason(provisionFailure),
       cleanup: { status: "in_progress", reason: "readiness_timeout" },
     });
-    throw await cleanupFailedProvisionDevice(args, deps, createdDevice, provisionFailure, {
+    throw await cleanupFailedProvisionDevice(deps, createdDevice, provisionFailure, {
       lifecycleLease: takeLifecycleLease(),
       pendingMutationSettlement: pendingMutationSettlement,
       recordLifecycle: recordLifecycle,
@@ -2129,8 +2130,38 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     return merged;
   }
 
-  return (input: ProvisionDeviceArgs, progress?: ProgressCallback, signal?: AbortSignal) =>
-    runWithAutolockPolicy(getDeviceToolsDependencies().env, () =>
-      provisionDeviceHandler(input, progress, signal),
+  /**
+   * Roll back a device a startDevice `createIfMissing` acquisition created but
+   * could not bind or boot, through the same teardown provisionDevice's own
+   * rollback uses, so retries do not accumulate orphans (#11100).
+   */
+  const rollbackCreatedDevice: CreatedDeviceRollback = async (
+    createdDevice,
+    failure,
+    { lifecycleLease, pendingMutationSettlement, collectDeferredCleanup },
+  ) => {
+    const provisionFailure =
+      failure instanceof ProvisionDeviceError
+        ? failure
+        : new ProvisionDeviceError("platform_command_failed", errorMessage(failure));
+    const rollback = await cleanupFailedProvisionDevice(
+      getDeviceToolsDependencies(),
+      createdDevice,
+      provisionFailure,
+      { lifecycleLease, pendingMutationSettlement, collectDeferredCleanup },
     );
+    return rollback.cleanup;
+  };
+
+  return {
+    provisionDeviceHandler: (
+      input: ProvisionDeviceArgs,
+      progress?: ProgressCallback,
+      signal?: AbortSignal,
+    ) =>
+      runWithAutolockPolicy(getDeviceToolsDependencies().env, () =>
+        provisionDeviceHandler(input, progress, signal),
+      ),
+    rollbackCreatedDevice,
+  };
 }

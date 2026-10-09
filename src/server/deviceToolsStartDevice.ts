@@ -66,8 +66,24 @@ import {
 import type {
   DevicePreparationBudgets,
   DeviceToolsDependencies,
+  ProvisionDeviceCleanup,
   StartDeviceArgs,
 } from "./deviceTools";
+
+/**
+ * Removes a device a createIfMissing acquisition created and then failed to
+ * bind or boot, reusing provisionDevice's rollback (#11100). The lease is
+ * transferred to the teardown; a deferred cleanup keeps it until it finishes.
+ */
+export type CreatedDeviceRollback = (
+  createdDevice: DeviceInfo,
+  failure: unknown,
+  options: {
+    lifecycleLease: VirtualDeviceLifecycleLease;
+    pendingMutationSettlement?: Promise<unknown>;
+    collectDeferredCleanup?: (cleanup: Promise<void>) => void;
+  },
+) => Promise<ProvisionDeviceCleanup>;
 
 type StartDeviceHooks = {
   prepareDevice: (
@@ -77,6 +93,7 @@ type StartDeviceHooks = {
     signal?: AbortSignal,
   ) => Promise<StructuredToolResponse>;
   stripInternalAcquisitionParams: (rawArgs: object) => Record<string, unknown>;
+  rollbackCreatedDevice?: CreatedDeviceRollback;
 };
 
 /** Bound a request's wait; shared removal cleanup must retain its own lifetime. */
@@ -119,6 +136,7 @@ type BootPreparationOptions = {
   perf: ReturnType<typeof createPerformanceTracker>;
   releaseReadinessReservations: DeviceReadinessReservation[];
   lifecycleLease: VirtualDeviceLifecycleLease;
+  rollbackCreatedDevice?: CreatedDeviceRollback;
   state: {
     boot: DeviceBootResult | undefined;
     ownershipTransferred: boolean;
@@ -128,6 +146,41 @@ type BootPreparationOptions = {
     bindingSettlements: Promise<unknown>[];
   };
 };
+
+function createdDeviceRollbackFor(
+  options: BootPreparationOptions,
+): ((device: DeviceInfo, failure: unknown) => Promise<void>) | undefined {
+  const { rollbackCreatedDevice, lifecycleLease, state } = options;
+  if (!rollbackCreatedDevice) {
+    return undefined;
+  }
+  return async (device, failure) => {
+    // A failed cold boot's emulator may still be terminating; the AVD must not
+    // be deleted underneath it, so the rollback waits (bounded) for it first.
+    const pendingTerminations = [...state.coldBootSettlements];
+    try {
+      const cleanup = await rollbackCreatedDevice(device, failure, {
+        lifecycleLease,
+        pendingMutationSettlement:
+          pendingTerminations.length > 0 ? Promise.allSettled(pendingTerminations) : undefined,
+        // Keeps the lease held by prepareDevice until the deferred rollback ends.
+        collectDeferredCleanup: (cleanup) => state.coldBootSettlements.push(cleanup),
+      });
+      if (cleanup.status === "failed") {
+        logger.warn(
+          `[DeviceTools] Rollback of created ${device.platform} device '${device.name}' failed: ` +
+            `${cleanup.failure?.message ?? "unknown cleanup failure"}`,
+        );
+      }
+    } catch (error) {
+      // The boot failure is what the caller must see; the rollback failure is logged.
+      logger.warn(
+        `[DeviceTools] Rollback of created ${device.platform} device '${device.name}' threw: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  };
+}
 
 const bootAndPrepareDevice = async (
   args: StartDeviceArgs,
@@ -165,6 +218,7 @@ const bootAndPrepareDevice = async (
     retainLeaseUntil: (settlement) => state.coldBootSettlements.push(settlement),
     // The daemon outlives the request, so a cancelled boot's cleanup finishes in the background (#9920).
     cleanupMayOutliveRequest: true,
+    rollbackCreatedDevice: createdDeviceRollbackFor(options),
     onAndroidColdBootTrackingChanged: () => {
       void deps.notifyDeviceInventoryResourcesChanged(false).catch((error) => {
         logger.warn(
@@ -784,7 +838,7 @@ async function resolveCameraPosterQr<T extends StartDeviceArgs>(args: T): Promis
 }
 
 export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
-  const { prepareDevice, stripInternalAcquisitionParams } = hooks;
+  const { prepareDevice, stripInternalAcquisitionParams, rollbackCreatedDevice } = hooks;
 
   const startDeviceHandler = async (
     rawArgs: StartDeviceArgs,
@@ -848,7 +902,14 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
   };
 
   return {
-    bootAndPrepareDevice,
+    bootAndPrepareDevice: (
+      args: StartDeviceArgs,
+      budgets: DevicePreparationBudgets,
+      deps: DeviceToolsDependencies,
+      deviceUtils: PlatformDeviceManager,
+      options: BootPreparationOptions,
+    ) =>
+      bootAndPrepareDevice(args, budgets, deps, deviceUtils, { ...options, rollbackCreatedDevice }),
     startDeviceHandler,
     bindBootedDeviceSession,
     ensureCtrlProxyReady,

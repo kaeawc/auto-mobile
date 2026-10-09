@@ -39,7 +39,7 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { enableToolsSchemaField } from "./toolSelectionTools";
 import { deviceResourceConfigurationSchema } from "./deviceResourceSchemas";
 import { registerDeviceResourceTools } from "./deviceResourceTools";
-import { createProvisionDeviceHandler } from "./deviceToolsProvisioning";
+import { createProvisionDeviceHandlers } from "./deviceToolsProvisioning";
 import { createAcquisitionHandlers } from "./deviceToolsAcquisition";
 import { createStartDeviceHandlers } from "./deviceToolsStartDevice";
 import { createLifecycleHandlers } from "./deviceToolsLifecycle";
@@ -4558,20 +4558,25 @@ export function registerDeviceTools() {
   const acquisitionHandlers = createAcquisitionHandlers({
     getBootAndPrepareDevice: () => startDeviceHandlers!.bootAndPrepareDevice,
   });
+  let provisionHandlers: ReturnType<typeof createProvisionDeviceHandlers> | undefined = undefined;
   startDeviceHandlers = createStartDeviceHandlers({
     prepareDevice: acquisitionHandlers.prepareDevice,
     stripInternalAcquisitionParams: acquisitionHandlers.stripInternalAcquisitionParams,
+    // createIfMissing rolls back through provisionDevice's cleanup (#11100).
+    rollbackCreatedDevice: (device, failure, options) =>
+      provisionHandlers!.rollbackCreatedDevice(device, failure, options),
   });
   const { startDeviceHandler, bindBootedDeviceSession, ensureCtrlProxyReady } = startDeviceHandlers;
   const { getAndroidHandler, getAppleHandler } = acquisitionHandlers;
 
   const { killDeviceHandler, executeDeleteDevice, deleteDeviceHandler } = createLifecycleHandlers();
 
-  const provisionDeviceHandler = createProvisionDeviceHandler({
+  provisionHandlers = createProvisionDeviceHandlers({
     bindBootedDeviceSession,
     ensureCtrlProxyReady,
     executeDeleteDevice,
   });
+  const { provisionDeviceHandler } = provisionHandlers;
 
   // Register with the tool registry
   registerDeviceResourceTools(getDeviceToolsDependencies);

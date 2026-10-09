@@ -1,10 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -125,8 +121,11 @@ fun OverlaySpecContent(
  * style would otherwise reset to the window's defaults.
  */
 internal class OverlayAnchorLocals {
-  val byIdentity = mutableStateMapOf<String, CompositionLocalContext>()
+  val byIdentity = mutableStateMapOf<String, CapturedAnchor>()
 }
+
+/** What an anchored node takes from where it was authored: its locals and its ancestors' fade. */
+internal class CapturedAnchor(val locals: CompositionLocalContext, val fade: () -> Float)
 
 private val LocalOverlayAnchorLocals = compositionLocalOf<OverlayAnchorLocals?> { null }
 
@@ -138,14 +137,15 @@ private fun CaptureAnchorLocals(identity: String) {
   val registry = LocalOverlayAnchorLocals.current ?: return
   // Written while composing, not in an effect: the layer composes after this in the same pass and
   // must not draw the node a frame with the wrong locals first.
-  registry.byIdentity[identity] = currentCompositionLocalContext
+  registry.byIdentity[identity] =
+    CapturedAnchor(currentCompositionLocalContext, LocalOverlayAnchorFade.current)
   DisposableEffect(registry, identity) { onDispose { registry.byIdentity.remove(identity) } }
 }
 
 @Composable
 private fun WithAnchorLocals(identity: String, content: @Composable () -> Unit) {
   val captured = LocalOverlayAnchorLocals.current?.byIdentity?.get(identity)
-  if (captured != null) CompositionLocalProvider(captured, content = content) else content()
+  if (captured != null) CompositionLocalProvider(captured.locals, content = content) else content()
 }
 
 /**
@@ -177,10 +177,11 @@ private fun OverlayAnchorLayer(
 
 /**
  * One anchored node of the layer, composed with the locals of its authored position. While an
- * ancestor with a `visibleWhen` hides, the node stays composed and fades out with it, and fades in
- * with it again; without motion, or with no animated ancestor, it follows them instantly. Only a
- * fade: a shrink would clip the node to the layer's zero-size slot, not to the ancestor it was
- * authored in.
+ * ancestor with a `visibleWhen` hides, the node stays composed until that ancestor's exit has
+ * finished and fades with it (its alpha is the ancestors' exit progress, #10869); it fades in with
+ * them again. Without motion, or with no animated ancestor, it follows them instantly. Only a fade:
+ * a shrink would clip the node to the layer's zero-size slot, not to the ancestor it was authored
+ * in.
  */
 @Composable
 private fun LayeredAnchorEntry(
@@ -191,16 +192,11 @@ private fun LayeredAnchorEntry(
   val content: @Composable () -> Unit = {
     WithAnchorLocals(node.identity) { RenderOverlayNode(node, interact, anchorLayer = true) }
   }
-  val ancestor = anchor.animatedAncestor
-  if (LocalOverlayMotion.current && ancestor != null) {
-    val none = ancestor.source?.transition == "none"
-    AnimatedVisibility(
-      visible = anchor.ancestorsShown,
-      enter = if (none) EnterTransition.None else fadeIn(),
-      exit = if (none) ExitTransition.None else fadeOut(),
-    ) {
-      content()
-    }
+  if (LocalOverlayMotion.current && anchor.animatedAncestor != null) {
+    // Composed exactly while the authored ancestors are: their exit keeps them (and so this) up
+    // until it finishes, and their fade, not a transition of our own, drives the alpha (#10869).
+    val captured = LocalOverlayAnchorLocals.current?.byIdentity?.get(node.identity)
+    if (captured != null) Box(Modifier.anchorFade(captured.fade)) { content() }
   } else if (anchor.ancestorsShown) content()
 }
 
@@ -247,7 +243,9 @@ private fun RenderOverlayNode(
       enter = overlayEnterTransition(node.source.transition),
       exit = overlayExitTransition(node.source.transition),
     ) {
-      RenderOverlayNodeContent(node, interact, weightAxis = weightAxis, windowRoot = windowRoot)
+      ProvideAnchorFade(none = node.source.transition == "none") {
+        RenderOverlayNodeContent(node, interact, weightAxis = weightAxis, windowRoot = windowRoot)
+      }
     }
   } else if (node.visible) {
     RenderOverlayNodeContent(node, interact, parentModifier, weightAxis, windowRoot)

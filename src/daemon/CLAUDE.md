@@ -147,12 +147,22 @@ takes input only from a frame whose `sessionUuid` names its holder (typed code
 Device-aware `tools/call` follows the same rule (`assertToolCallerHoldsDevice` in
 `src/server/toolRegistry.ts`): on a held device, a call from another session or
 with no session is refused with the same code before admission or device work,
-unless the tool is registered `deviceReadOnly` (watching: `observe`). A call
+unless the tool is registered `deviceReadOnly` (watching). A call
 without a deviceId is checked against the device readiness would select (the
 `setActiveDevice` pin, the current device, or the only candidate) before
 `ensureDeviceReady` runs, so a refused call never readies, pins or configures the
-holder's device (#10828). `identifyInteractions` and `hitTest` have no sessionless
-read path, so they are not `deviceReadOnly`. An autolocked device keeps autolock's
+holder's device (#10828). A sessionless `deviceReadOnly` call whose target (its
+deviceId, or that predicted device) is held runs on the read-only device path
+instead (#10830): the device is resolved from the booted list
+(`sessionlessDeviceReadFor`), with no readiness, current-device pin, settings,
+navigation recording or audit, and handlers see `isSessionlessDeviceRead()`
+(observe and snapshotOf then use the observer capture, connect-only on a held
+device). Read-only tools: `observe`, `snapshotOf`, `listApps`, `getDeviceState`,
+`getNetworkGraph`, `getPreference`, `listDataStores`, `getDataStore`, and
+`sqlQuery` when `isReadOnlySqlQuery` accepts the statement (a write, or anything
+the classifier cannot prove read-only, needs the holder). `identifyInteractions`
+and `hitTest` read through the session observe pipeline and its shared caches,
+so they are not `deviceReadOnly`. An autolocked device keeps autolock's
 own refusal. Plain lifecycle tools that stop a running device (`killDevice`, and
 `deleteDevice` on a booted target) never reach that resolver, so they apply the
 same code through `assertLifecycleCallerHoldsDevice`

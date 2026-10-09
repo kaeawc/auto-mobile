@@ -619,6 +619,11 @@ export function registerNetworkTools(): void {
         ...(truncated ? { truncated: true, maxEvents: NETWORK_GRAPH_MAX_EVENTS } : {}),
       });
     },
-    { defaultEnabled: false, embeddedSdkOnly: true },
+    {
+      defaultEnabled: false,
+      embeddedSdkOnly: true,
+      // Reads only the host's captured events; open to any watcher (#10830).
+      deviceReadOnly: true,
+    },
   );
 }

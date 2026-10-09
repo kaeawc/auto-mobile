@@ -1062,7 +1062,12 @@ export function registerUtilityTools(
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     getDeviceStateSchema,
     createGetDeviceStateHandler(options.networkFilterBridge),
-    { defaultEnabled: false, outputSchema: getDeviceStateResultSchema },
+    {
+      defaultEnabled: false,
+      outputSchema: getDeviceStateResultSchema,
+      // Reads only; a non-holder watches a held device through the read-only path (#10830).
+      deviceReadOnly: true,
+    },
   );
 
   ToolRegistry.registerDeviceAware(

@@ -7,7 +7,11 @@ import type { SessionToolSelectionService } from "./SessionToolSelectionService"
 import type { ProgressCallback } from "../../server/toolRegistry";
 
 export type ToolSelectionContext = {
-  /** Set only at MCP ingress when observe's raw arguments explicitly name a device. */
+  /**
+   * The call runs on the read-only device path: set at MCP ingress when observe's raw arguments
+   * explicitly name a device, and by ToolRegistry for a sessionless read-only call on a device
+   * another session holds (#10830). Read it through `isSessionlessDeviceRead`.
+   */
   explicitObserveDeviceRead?: boolean;
   /** Trusted enclosing plan metadata, reattached after each step's schema parse. */
   planRequest?: {
@@ -79,3 +83,8 @@ export const runWithToolSelectionContext = async <T>(
 
 export const getToolSelectionContext = (): ToolSelectionContext | undefined =>
   toolSelectionContext.getStore();
+
+/** Whether the current device-aware call runs on the read-only device path (#10830). */
+export function isSessionlessDeviceRead(): boolean {
+  return getToolSelectionContext()?.explicitObserveDeviceRead === true;
+}

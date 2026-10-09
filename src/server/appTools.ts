@@ -1519,6 +1519,8 @@ export function registerAppTools() {
       // automation — so it should not pay for (or trigger) automation-readiness
       // setup on the target device (#6216 review).
       deviceReadiness: "booted",
+      // Reads only; a non-holder watches a held device through the read-only path (#10830).
+      deviceReadOnly: true,
     },
   );
 }

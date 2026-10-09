@@ -495,6 +495,9 @@ async function handleHeartbeat(
   if (keeperRefusal) {
     return keeperRefusal;
   }
+  if (isCliKeeperOnCliIdleSession(heartbeatParams?.livenessOwnerKind, session)) {
+    return cliKeeperNoopAck(sessionId);
+  }
   const livenessOwnerToken =
     typeof heartbeatParams?.livenessOwnerToken === "string" &&
     heartbeatParams.livenessOwnerToken.length > 0
@@ -524,7 +527,14 @@ async function handleHeartbeat(
       outcome,
     );
     if (rejection) {
-      return rejection;
+      // A concurrent `--cli` call can move the session onto the cli-idle policy (claiming it
+      // with its own token) while the keeper's claim was resolving; the keeper still no-ops.
+      const current = manager.getSession(sessionId);
+      return rejection.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE &&
+        current &&
+        isCliKeeperOnCliIdleSession(heartbeatParams?.livenessOwnerKind, current)
+        ? cliKeeperNoopAck(sessionId)
+        : rejection;
     }
     if (!claimsLivenessOwnership) {
       // A verified keeper proves only that its current owner is still
@@ -650,6 +660,30 @@ export function refuseCliKeeperOnProxySession(
     success: false,
     code: DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
     error: `Session ${session.sessionId} is owned by an MCP proxy, which is the only liveness owner for its sessions, so this heartbeat was rejected and nothing changed. The external heartbeat keeper is for one-shot CLI sessions only. Let the harness's proxy keep the session alive and check its state with \`--daemon session-info ${session.sessionId}\`.`,
+  };
+}
+
+/**
+ * Owner decision 2026-10-09 (#11096): an external `--daemon heartbeat` keeper adds nothing to a
+ * `cli-idle` session — its idle window runs from tool calls, not heartbeats, and it never holds a
+ * live owner lease — while every one-shot `--cli` call re-claims its liveness, so a keeper that
+ * claimed it was displaced by the next call and failed its next tick. A keeper heartbeat on such
+ * a session is therefore a successful no-op: it neither claims liveness ownership nor touches the
+ * session. Sessions on the strict heartbeat contract keep the keeper's existing behaviour.
+ */
+function isCliKeeperOnCliIdleSession(
+  livenessOwnerKind: string | undefined,
+  session: Session,
+): boolean {
+  return (
+    livenessOwnerKind === CLI_KEEPER_LIVENESS_OWNER_KIND && session.livenessPolicy === "cli-idle"
+  );
+}
+
+function cliKeeperNoopAck(sessionId: string): DaemonMethodResult {
+  return {
+    success: true,
+    result: { sessionId, livenessPolicy: "cli-idle", livenessUnchanged: true },
   };
 }
 

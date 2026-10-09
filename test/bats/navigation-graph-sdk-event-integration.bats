@@ -224,7 +224,7 @@ exit 1
   grep -q -- "--session-uuid legacy-ios-session" "$INVOCATION_FILE"
 }
 
-@test "renews the graph session while retrying post-bind CtrlProxy health" {
+@test "retries post-bind CtrlProxy health without a heartbeat keeper" {
   make_mock xcrun 'exit 0'
   make_mock curl '
 url="${!#}"
@@ -306,7 +306,9 @@ fi
   [ "$status" -eq 0 ]
   [ "$(cat "$GRAPH_ATTEMPTS_FILE")" = "2" ]
   [ "$(cat "$HEALTH_ATTEMPTS_FILE")" = "2" ]
-  [ -f "$HEARTBEAT_FILE" ]
+  # #11096: a one-shot CLI session needs no keeper, so the script never heartbeats.
+  [ ! -f "$HEARTBEAT_FILE" ]
+  [ "$(grep -c -- "--daemon heartbeat" "$INVOCATION_FILE")" = "0" ]
   [ -f "$TARGET_APP_LAUNCHED_FILE" ]
   [[ "$output" == *"getNavigationGraph attempt 1 failed"* ]]
   [ "$(grep -c -- "--cli getApple --deviceId simulator-udid" "$INVOCATION_FILE")" = "1" ]

@@ -34,14 +34,6 @@ require_command xcrun
 
 xcrun simctl getenv "${device_id}" HOME > /dev/null
 
-renew_session_ownership() {
-  local session_uuid="$1"
-  if ! AUTOMOBILE_DAEMON_TIMEOUT_MS=2000 auto-mobile --daemon heartbeat "${session_uuid}" > /dev/null; then
-    echo "error: could not renew navigation graph session ownership" >&2
-    return 1
-  fi
-}
-
 ctrl_proxy_port_from_acquisition() {
   jq -er '
     def acquisition:
@@ -61,22 +53,12 @@ ctrl_proxy_port_from_acquisition() {
 
 wait_for_ctrl_proxy_health() {
   local ctrl_proxy_port="$1"
-  local session_uuid="${2:-}"
-  local attempt renew_status
+  local attempt
+  # No heartbeat keeper: the graph session is a one-shot CLI session whose idle
+  # window runs from tool calls, so a heartbeat would change nothing (#11096).
   for attempt in 1 2 3 4 5; do
     if curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" > /dev/null; then
       return 0
-    fi
-    # One-shot CLI clients stop their proxy heartbeat after each public call.
-    # Renew the graph session while this bounded runner-health retry is in progress.
-    if [[ -n "${session_uuid}" ]]; then
-      set +e
-      renew_session_ownership "${session_uuid}"
-      renew_status=$?
-      set -e
-      if [[ "${renew_status}" -ne 0 ]]; then
-        return 1
-      fi
     fi
     if [[ "${attempt}" -lt 5 ]]; then
       echo "CtrlProxy health check attempt ${attempt} failed; retrying in 2s..." >&2
@@ -148,7 +130,7 @@ if ! auto-mobile --debug --embedded-sdk --cli --session-uuid "${session_uuid}" o
   exit 1
 fi
 
-wait_for_ctrl_proxy_health "${ctrl_proxy_port}" "${session_uuid}"
+wait_for_ctrl_proxy_health "${ctrl_proxy_port}"
 
 event_payload() {
   local destination="$1"

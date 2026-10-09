@@ -21,6 +21,39 @@ enum GestureApplicationTarget: Equatable {
         }
         return tracked == pinnedBundleId ? .keepPinned : .rebind(bundleId: tracked)
     }
+
+    /// Short log label: `keepPinned` or `rebind`.
+    var logLabel: String {
+        switch self {
+        case .keepPinned: "keepPinned"
+        case .rebind: "rebind"
+        }
+    }
+}
+
+/// The app the runner pinned through `request_launch_app`, and only that app.
+///
+/// A gesture on a different tracked app must not pin it. Before this type, the `XCUICoordinate`
+/// fallback for a rebound app stored that app as the pinned one, so after a single fallback every
+/// later gesture on an app launched with `simctl launch` resolved to `.keepPinned` and never
+/// reached the synthesized route again (#10858: `launchApp` Playground, `simctl launch`
+/// Settings, then a swipe on Settings logged `trackedApp=com.apple.Preferences` and still waited
+/// about 24 s in `xcuitestGesture`). Only `pin(_:)` (launch) and `clear()` (an injected app with
+/// no bundle id) change it; resolving a target never does.
+struct GesturePinnedApplication: Equatable {
+    private(set) var bundleId: String?
+
+    mutating func pin(_ bundleId: String) {
+        self.bundleId = bundleId
+    }
+
+    mutating func clear() {
+        bundleId = nil
+    }
+
+    func target(trackedBundleId: String?) -> GestureApplicationTarget {
+        GestureApplicationTarget.resolve(pinnedBundleId: bundleId, trackedBundleId: trackedBundleId)
+    }
 }
 
 /// How a tap or swipe reaches the screen.
@@ -40,6 +73,22 @@ enum GestureDeliveryRoute: Equatable {
     /// `UIInterfaceOrientation` raw value.
     case synthesizedEventRecord(interfaceOrientation: Int)
 
+    /// Why a gesture kept the `XCUICoordinate` path; logged so a simulator run can tell a stale
+    /// tracker (`pinnedApp`) from a missing or unusable observation of the foreground app.
+    enum Fallback: String, Equatable {
+        case pinnedApp
+        case forcedStrategy
+        case noObservation
+        case invalidSize
+        case multiPanel
+        case unknownRotation
+    }
+
+    struct Decision: Equatable {
+        let route: GestureDeliveryRoute
+        let fallback: Fallback?
+    }
+
     /// Synthesizes only when every condition proves an observed point is a screen point:
     /// the foreground app was not pinned by the runner, no strategy was forced, and the cached
     /// observation of that app is a full-screen, single-panel frame with a known rotation.
@@ -51,16 +100,36 @@ enum GestureDeliveryRoute: Equatable {
     )
         -> Self
     {
-        guard case .rebind = target,
-              forced == nil,
-              let geometry,
-              geometry.app.isValid,
-              geometry.screen.isValid,
-              !hasMultiPanelMismatch(app: geometry.app, screen: geometry.screen),
-              let orientation = DeviceRotation.gestureInterfaceOrientationRawValue(rotation: geometry.rotation)
-        else {
-            return .xcuiCoordinate
+        decide(target: target, forced: forced, geometry: geometry).route
+    }
+
+    static func decide(
+        target: GestureApplicationTarget,
+        forced: TapCoordinateStrategy?,
+        geometry: GestureCoordinateGeometry?
+    )
+        -> Decision
+    {
+        let fallback: Fallback
+        if case .keepPinned = target {
+            fallback = .pinnedApp
+        } else if forced != nil {
+            fallback = .forcedStrategy
+        } else if let geometry {
+            if !geometry.app.isValid || !geometry.screen.isValid {
+                fallback = .invalidSize
+            } else if hasMultiPanelMismatch(app: geometry.app, screen: geometry.screen) {
+                fallback = .multiPanel
+            } else if let orientation = DeviceRotation
+                .gestureInterfaceOrientationRawValue(rotation: geometry.rotation)
+            {
+                return Decision(route: .synthesizedEventRecord(interfaceOrientation: orientation), fallback: nil)
+            } else {
+                fallback = .unknownRotation
+            }
+        } else {
+            fallback = .noObservation
         }
-        return .synthesizedEventRecord(interfaceOrientation: orientation)
+        return Decision(route: .xcuiCoordinate, fallback: fallback)
     }
 }

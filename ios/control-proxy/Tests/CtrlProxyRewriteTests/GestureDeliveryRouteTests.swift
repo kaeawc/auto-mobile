@@ -70,4 +70,64 @@ final class GestureDeliveryRouteTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - launchApp, then an external launch (#10858 original order)
+
+    private let playground = "dev.jasonpearson.automobile.Playground"
+    private let settings = "com.apple.Preferences"
+
+    /// `launchApp` pins Playground; `simctl launch` brings Settings forward and observe moves the
+    /// tracker. Every later gesture on Settings, not just the first, takes the synthesized route.
+    func testExternallyLaunchedAppStaysUnpinnedAcrossGestures() {
+        var pinned = GesturePinnedApplication()
+        var tracker = ForegroundTracker()
+        pinned.pin(playground)
+        _ = tracker.switchForeground(app: nil, bundleId: playground, observe: true, now: 1)
+        XCTAssertEqual(pinned.target(trackedBundleId: tracker.bundleId), .keepPinned)
+
+        _ = tracker.switchForeground(app: nil, bundleId: settings, observe: true, now: 2)
+        for gesture in ["tapOn General", "swipeOn up", "tapOn About"] {
+            let target = pinned.target(trackedBundleId: tracker.bundleId)
+            XCTAssertEqual(target, .rebind(bundleId: settings), gesture)
+            XCTAssertEqual(
+                GestureDeliveryRoute.decide(target: target, forced: nil, geometry: geometry()),
+                .init(route: .synthesizedEventRecord(interfaceOrientation: 1), fallback: nil), gesture
+            )
+        }
+        XCTAssertEqual(pinned.bundleId, playground, "resolving a gesture target must not re-pin")
+    }
+
+    /// Back on the pinned app the `XCUICoordinate` path returns; a new `launchApp` re-pins.
+    func testPinnedAppKeepsXCUICoordinateAndRelaunchRepins() {
+        var pinned = GesturePinnedApplication()
+        pinned.pin(playground)
+        XCTAssertEqual(
+            GestureDeliveryRoute.decide(
+                target: pinned.target(trackedBundleId: playground), forced: nil, geometry: geometry()
+            ),
+            .init(route: .xcuiCoordinate, fallback: .pinnedApp)
+        )
+        pinned.pin(settings)
+        XCTAssertEqual(pinned.target(trackedBundleId: settings), .keepPinned)
+        pinned.clear()
+        XCTAssertEqual(pinned.target(trackedBundleId: settings), .rebind(bundleId: settings))
+        XCTAssertEqual(pinned.target(trackedBundleId: nil), .keepPinned)
+    }
+
+    func testFallbackNamesWhyTheSynthesizedRouteWasSkipped() {
+        let cases: [(GestureCoordinateGeometry?, TapCoordinateStrategy?, GestureDeliveryRoute.Fallback)] = [
+            (nil, nil, .noObservation),
+            (geometry(), .legacy, .forcedStrategy),
+            (geometry(app: GestureSize(width: 0, height: 0)), nil, .invalidSize),
+            (geometry(app: GestureSize(width: 600, height: 700), screen: GestureSize(width: 1024, height: 1366)),
+             nil, .multiPanel),
+            (geometry(rotation: nil), nil, .unknownRotation),
+        ]
+        for (candidate, forced, fallback) in cases {
+            XCTAssertEqual(
+                GestureDeliveryRoute.decide(target: unpinned, forced: forced, geometry: candidate),
+                .init(route: .xcuiCoordinate, fallback: fallback), "\(fallback)"
+            )
+        }
+    }
 }

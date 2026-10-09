@@ -421,6 +421,8 @@ export interface RegisteredTool {
   transportRecovery?: ToolTransportRecovery;
   requiresDevice?: boolean;
   deviceAwareHandler?: DeviceAwareToolHandler;
+  /** The tool's `deviceReadOnly` classification for one argument set (#10969 read lane). */
+  isDeviceReadOnlyCall?: (args: unknown) => boolean;
   debugOnly?: boolean;
   hidden?: boolean;
   embeddedSdkOnly?: boolean;
@@ -2553,6 +2555,7 @@ export class ToolRegistryClass {
       transportRecovery,
       requiresDevice: true,
       deviceAwareHandler: handler,
+      isDeviceReadOnlyCall: (args) => isDeviceReadOnlyCall(options, args),
       debugOnly: options.debugOnly ?? false,
       embeddedSdkOnly: options.embeddedSdkOnly ?? false,
       planExecutable: options.planExecutable ?? false,

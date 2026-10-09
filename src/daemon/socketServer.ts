@@ -647,7 +647,28 @@ interface SocketDaemonStateAccess extends DaemonStateAccess {
   getSessionManager(): ReturnType<DaemonStateAccess["getSessionManager"]> & {
     isReleasedSessionInRestartRecoveryWindow?(sessionId: string): Promise<boolean>;
   };
+  getDevicePool(): ReturnType<DaemonStateAccess["getDevicePool"]> & {
+    getDevice?(deviceId: string): { autolockSessionId?: string | null } | null | undefined;
+    resolveOwnedDeviceSessionForMcpSession?(
+      mcpSessionId: string | undefined,
+      deviceId: string,
+    ): string | undefined;
+  };
 }
+
+/** Classifies one tools/call argument set as a device read (`deviceReadOnly`). */
+export type DeviceReadToolCallClassifier = (toolName: string, args: unknown) => boolean;
+
+const registeredDeviceReadClassifier: DeviceReadToolCallClassifier = (toolName, args) =>
+  ToolRegistry.getRegisteredTool(toolName)?.isDeviceReadOnlyCall?.(args) === true;
+
+/**
+ * Suffix of a device's read lane (#10969). A watcher's read of a device another session holds
+ * runs on the read path, which has no device side effects there, so it never queues behind the
+ * holder's control calls on `device:<id>`. Reads still serialize among themselves.
+ */
+const MCP_FORWARD_READ_LANE_SUFFIX = ":read";
+const MCP_FORWARD_DEVICE_KEY_PREFIX = "device:";
 
 interface McpForwardRoute {
   /** Serializes work that targets the same physical device or session. */
@@ -934,6 +955,9 @@ export class UnixSocketServer {
    * Defaults to the real {@link createMcpClient}; tests assign a fake here to
    * exercise forwarding without a live HTTP endpoint.
    */
+  /** Test seam: the per-args `deviceReadOnly` classification behind the read lane (#10969). */
+  deviceReadToolCallClassifier: DeviceReadToolCallClassifier = registeredDeviceReadClassifier;
+
   mcpClientFactory: McpClientFactory = (
     sessionUuid,
     toolSelectionProfileUuid,
@@ -2509,11 +2533,14 @@ export class UnixSocketServer {
     socketSessionId: string,
   ): McpForwardRoute | Promise<McpForwardRoute> {
     if (request.method === "tools/call") {
-      return this.getToolsCallForwardRoute(
+      const route = this.getToolsCallForwardRoute(
         request.params?.arguments,
         socketSessionId,
         request.params?.name,
       );
+      const toLane = (resolved: McpForwardRoute) =>
+        this.withDeviceReadLane(resolved, request, socketSessionId);
+      return route instanceof Promise ? route.then(toLane) : toLane(route);
     }
 
     return this.withAdmittedBoundSession(
@@ -2521,6 +2548,86 @@ export class UnixSocketServer {
       (recoverableSessionUuid) =>
         this.getAdmittedMcpForwardRoute(request, socketSessionId, recoverableSessionUuid),
     );
+  }
+
+  /**
+   * Move a watcher's read of a held device onto the device's read lane (#10969). Control calls,
+   * the holder's own calls (by session, device label, autolock or the acquiring connection) and
+   * reads of a free device, which may run readiness, stay on the control lane. Re-resolved before
+   * the forward runs, so an acquisition or release while queued moves the call between lanes.
+   */
+  private withDeviceReadLane(
+    route: McpForwardRoute,
+    request: DaemonRequest,
+    socketSessionId: string,
+  ): McpForwardRoute {
+    const toolName = request.params?.name;
+    const args = request.params?.arguments;
+    if (
+      !route.executionKey.startsWith(MCP_FORWARD_DEVICE_KEY_PREFIX) ||
+      typeof toolName !== "string" ||
+      !this.isDeviceReadToolCall(toolName, args)
+    ) {
+      return route;
+    }
+    const deviceId = route.executionKey.slice(MCP_FORWARD_DEVICE_KEY_PREFIX.length);
+    const holder = this.getDeviceHolderSession(deviceId);
+    if (!holder) {
+      return route;
+    }
+    const sessionManager = this.daemonState.getSessionManager();
+    const base = (sessionUuid: string | undefined) =>
+      sessionUuid ? resolveToolSelectionBaseSessionUuid(sessionUuid, sessionManager) : undefined;
+    const holderBase = base(holder);
+    const callerSessions = [
+      route.sessionUuid,
+      this.getSessionUuid(args),
+      this.getDeviceLabelSession(args),
+      this.resolveImplicitAutolockSession(socketSessionId, args),
+      this.daemonState
+        .getDevicePool()
+        .resolveOwnedDeviceSessionForMcpSession?.(socketSessionId, deviceId),
+    ];
+    if (callerSessions.some((sessionUuid) => base(sessionUuid) === holderBase)) {
+      return route;
+    }
+    return { ...route, executionKey: `${route.executionKey}${MCP_FORWARD_READ_LANE_SUFFIX}` };
+  }
+
+  private getDeviceLabelSession(args: unknown): string | undefined {
+    const baseSessionUuid = this.getSessionUuid(args);
+    const record = args as Record<string, unknown> | undefined;
+    return baseSessionUuid && typeof record?.device === "string" && record.device.length > 0
+      ? this.resolveDeviceLabelSession(baseSessionUuid, record.device)
+      : undefined;
+  }
+
+  private isDeviceReadToolCall(toolName: string, args: unknown): boolean {
+    try {
+      return this.deviceReadToolCallClassifier(toolName, args);
+    } catch (error) {
+      // An argument set the classifier cannot read is not proven a read: keep the control lane.
+      logger.debug(`[McpForward] read classification failed for ${toolName}: ${error}`);
+      return false;
+    }
+  }
+
+  /** The session holding a device: its live owner, or its autolock holder. */
+  private getDeviceHolderSession(deviceId: string): string | undefined {
+    if (!this.daemonState.isInitialized()) {
+      return undefined;
+    }
+    try {
+      return (
+        this.getSessionForDevice(deviceId) ??
+        this.daemonState.getDevicePool().getDevice?.(deviceId)?.autolockSessionId ??
+        undefined
+      );
+    } catch (error) {
+      // Without a proven holder the call keeps the control lane, as before #10969.
+      logger.debug(`[McpForward] holder lookup failed for ${deviceId}: ${error}`);
+      return undefined;
+    }
   }
 
   private getAdmittedMcpForwardRoute(

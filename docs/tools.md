@@ -1856,8 +1856,10 @@ and an independent `observed` full-platform resource snapshot after configuratio
 including unrequested groups. No read path yields `unsupported` with a reason;
 failed reads yield `unknown`. Explicit opposite enabled/disabled states set
 `success: false` and name the resources in `observationContradictions`, using the
-existing MCP error response (provisioning retains the device/session). Unknown or
-unsupported observations do not add failures. Existing mutation fields retain
+existing MCP error response (Android provisioning retains the device/session). Unknown or
+unsupported observations do not add `success: false` to the result; for `provisionDevice` on an iOS
+Simulator they still fail provisioning with `resource_profile_unproven` and `resourceDrift` (no
+session is bound). Existing mutation fields retain
 their shape and meaning. Observation uses at most half the remaining resource deadline and shares the abort
 signal; exhausted reads report `unknown`, and provisioning replay refreshes it.
 Identical package and launchctl reads are reused only within one observation.

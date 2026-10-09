@@ -255,13 +255,29 @@ Retrying reconciles partial changes. Overrides may survive a
 reboot depending on the runtime, but these tools verify only the current boot.
 
 For `setDeviceResources`, an incomplete result is an MCP tool error with the
-evidence intact. Provisioning returns that same result under `resources` and
-also marks the response as an error if configuration is incomplete; it retains
-the provisioned device identity and session so the caller can inspect or retry.
-Device boot/readiness and resource-configuration success are separate facts.
-Booted provisioning responses expose the session as a top-level `sessionId`
-field, with no `sessionUuid` alias, including resource failures and replayed
-operations. With `boot: false`, no top-level session field is present.
+evidence intact.
+
+`provisionDevice.resources` is all-or-nothing on an iOS Simulator (owner decision
+2026-10-09, #6695). After the write and the independent re-read, every requested
+entry must be proven; an entry that is contradicted (`missingRequested`),
+`unsupported`, or has unknown or missing evidence (`commandFailure`) fails
+provisioning with the typed error code `resource_profile_unproven`. The error is
+non-retryable and its `resourceDrift` lists the unproven entries in the same shape
+as `reconcileDeviceResources` drift; the message names them too, so a replayed
+operation keeps them. Failure happens before CtrlProxy readiness and session
+binding, so no session is bound, a replayed session is released, the lifecycle
+lease is released, and a simulator created by this operation is rolled back by the
+normal failed-provision cleanup. On an adopted simulator the overrides that were
+already written are deliberately not reverted: they stay in effect and remain
+recorded as AutoMobile-owned, because a compensating write could itself fail and
+would hide which state the device is really in. Use `reconcileDeviceResources`
+(`repair`, optionally `releaseOwnedExtras`) or `setDeviceResources` to converge or
+undo them. Android and physical iOS targets keep the earlier behavior: the result
+is returned under `resources`, the response is marked as an error, and the
+provisioned device identity and session are retained. Booted provisioning
+responses expose the session as a top-level `sessionId` field, with no
+`sessionUuid` alias, including replayed operations. With `boot: false`, no
+top-level session field is present.
 
 ## Reconciling workload profiles
 
@@ -296,7 +312,8 @@ are not booted are rejected before any command runs.
 
 `provisionDevice.resources` already applies resources after boot and before
 automation readiness under the provisioning lifecycle lease; its writes are recorded
-the same way, so a later reconciliation recognizes them.
+the same way, so a later reconciliation recognizes them. On an iOS Simulator it
+fails closed when the profile cannot be proven (see above).
 
 ## Automation capabilities
 

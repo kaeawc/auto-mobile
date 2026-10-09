@@ -1,5 +1,7 @@
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { observeConfiguredDeviceResources } from "./deviceResourceTools";
+import { computeDeviceResourceDrift } from "../utils/deviceResourceDrift";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ProgressCallback } from "./toolRegistry";
@@ -2502,11 +2504,52 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       deadlineMs: resourceDeadlineMs,
       signal,
     });
-    return observeConfiguredDeviceResources(deps, configured, {
+    const verified = await observeConfiguredDeviceResources(deps, configured, {
       device,
       deadlineMs: resourceDeadlineMs,
       signal,
     });
+    assertSimulatorProfileProven(args, device, verified);
+    return verified;
+  }
+
+  /**
+   * iOS Simulator workload profiles are all-or-nothing (#6695): when any requested
+   * entry cannot be proven applied after the write and independent re-read, fail
+   * provisioning before readiness and session binding. The thrown error flows through
+   * the normal failed-provision lifecycle, which rolls back a device this operation
+   * created, releases the lifecycle lease and never binds a session. Overrides already
+   * written to an adopted simulator are left in place (recorded as AutoMobile-owned).
+   */
+  function assertSimulatorProfileProven(
+    args: ProvisionDeviceArgs,
+    device: BootedDevice,
+    result: DeviceResourceConfigurationResult,
+  ): void {
+    if (device.platform !== "ios" || resolveIosDeviceKind(device) !== "simulator") {
+      return;
+    }
+    // The independent re-read is authoritative when it completed; otherwise fall back
+    // to the controller's own verified statuses.
+    const states = { ...result.resources, ...result.observed?.resources };
+    const drift = computeDeviceResourceDrift(result.requested, states);
+    if (drift.length === 0 && result.success) {
+      return;
+    }
+    const detail = drift.length
+      ? drift
+          .map(
+            (entry) =>
+              `${entry.resource} (${entry.kind}: expected ${entry.expected}, observed ${entry.observed.state})`,
+          )
+          .join(", ")
+      : "resource configuration did not report success";
+    throw new ProvisionDeviceError(
+      "resource_profile_unproven",
+      `Requested resource profile could not be proven applied on iOS simulator '${args.device.name}'; no session was bound. Unproven: ${detail}. Overrides already written to an adopted simulator remain; run reconcileDeviceResources with repair, or setDeviceResources, to change them.`,
+      false,
+      { resourceDrift: drift, deviceId: device.deviceId },
+    );
   }
 
   async function reserveProvisionDeviceReadiness(
@@ -2696,6 +2739,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       ...(diagnostics.attempt !== undefined ? { attempt: diagnostics.attempt } : {}),
       ...(diagnostics.incidentId ? { incidentId: diagnostics.incidentId } : {}),
       ...(diagnostics.deviceId ? { deviceId: diagnostics.deviceId } : {}),
+      ...(diagnostics.resourceDrift ? { resourceDrift: diagnostics.resourceDrift } : {}),
       daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
     };
   }

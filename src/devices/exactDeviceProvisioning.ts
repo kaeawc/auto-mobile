@@ -1,3 +1,4 @@
+import type { DeviceResourceDrift } from "../models/DeviceResourceReconciliation";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -88,7 +89,8 @@ export type ProvisionDeviceFailureCode =
   | "identity_conflict"
   | "timeout"
   | "unsupported"
-  | "platform_command_failed";
+  | "platform_command_failed"
+  | "resource_profile_unproven";
 
 export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   Record<ProvisionDeviceFailureCode, boolean>
@@ -102,6 +104,7 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   timeout: true,
   unsupported: false,
   platform_command_failed: false,
+  resource_profile_unproven: false,
 };
 
 interface ProvisionDeviceErrorDiagnostics {
@@ -110,6 +113,8 @@ interface ProvisionDeviceErrorDiagnostics {
   attempt?: number;
   incidentId?: string;
   deviceId?: string;
+  /** Requested resources that could not be proven applied (iOS Simulator profiles). */
+  resourceDrift?: DeviceResourceDrift[];
 }
 
 export class ProvisionDeviceError extends ActionableError {

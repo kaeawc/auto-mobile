@@ -71,6 +71,8 @@ describe("ToolRegistry autolock session enforcement", () => {
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       env,
       displayInventory: new FakeDisplayInventoryProvider(),
+      // A watcher reads a held device through the read-only device path (#10830).
+      deviceReadAccess: { listBooted: async () => [androidA], isAuthorized: () => true },
     });
   });
 
@@ -125,6 +127,7 @@ describe("ToolRegistry autolock session enforcement", () => {
       await lockedPool();
       const tool = registerTool("watchHeld", { deviceReadOnly: true });
       await expect(tool.handler({ deviceId: androidA.deviceId })).resolves.toBeDefined();
+      expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
     });
   });
 

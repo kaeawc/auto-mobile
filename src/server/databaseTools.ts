@@ -275,7 +275,14 @@ export function registerDatabaseTools() {
     "Execute SQL on app SQLite database.",
     sqlQuerySchema,
     sqlQueryHandler,
-    { defaultEnabled: false, embeddedSdkOnly: true },
+    {
+      defaultEnabled: false,
+      embeddedSdkOnly: true,
+      // Only a single read-only statement watches (#10830); anything the classifier cannot prove
+      // read-only needs the device's holder and is refused with device_owned_by_other_session.
+      deviceReadOnly: (args: SqlQueryArgs) =>
+        typeof args.query === "string" && isReadOnlySqlQuery(args.query),
+    },
   );
 }
 

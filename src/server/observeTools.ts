@@ -24,11 +24,7 @@ import { stripInternalToolParams } from "./internalToolParams";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
 import { assertAllDisplayObserveSupported } from "../features/observe/DisplaySelection";
-import {
-  assertObservationReadAccess,
-  resolveDeviceForObservationRead,
-  type DeviceObservationAccess,
-} from "./deviceObservationAccess";
+import { sessionlessDeviceReadFor, type DeviceObservationAccess } from "./deviceObservationAccess";
 import { ResourceRegistry } from "./resourceRegistry";
 import { RESOURCE_URIS } from "./observationResources";
 import { OBSERVE_APP_RESOURCE_URI } from "./observeAppResource";
@@ -2349,12 +2345,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       transportRecovery: "replay",
       outputSchema: observeToolResultSchema,
       appUiResourceUri: OBSERVE_APP_RESOURCE_URI,
-      sessionlessDeviceRead: {
-        resolve: (deviceId, signal) =>
-          resolveDeviceForObservationRead(deviceId, signal, dependencies.deviceReadAccess),
-        assertAuthorized: (device) =>
-          assertObservationReadAccess(device, dependencies.deviceReadAccess),
-      },
+      sessionlessDeviceRead: sessionlessDeviceReadFor(dependencies.deviceReadAccess),
     },
   );
 
@@ -2363,8 +2354,8 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     "Suggest likely interactions",
     identifyInteractionsSchema,
     identifyInteractionsHandler,
-    // Not `deviceReadOnly` (#10828): like hitTest it has no sessionless read path, so it readies
-    // its target through ensureDeviceReady, which a non-holder may not do on a held device.
+    // Not `deviceReadOnly` (#10828, #10830): like hitTest it reads through the session observe
+    // pipeline and cache, not the observer capture the read-only device path needs.
     { defaultEnabled: true, debugOnly: true },
   );
 }

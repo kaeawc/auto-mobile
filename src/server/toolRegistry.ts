@@ -44,6 +44,11 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { PLAN_AUTO_RELEASE_REASON } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
 import { assertInputRequesterHoldsDevice, TOOL_CALL_REMEDY } from "../daemon/inputDeviceOwnership";
+import {
+  defaultDeviceObservationAccess,
+  sessionlessDeviceReadFor,
+  type DeviceObservationAccess,
+} from "./deviceObservationAccess";
 import { createToolExecutionContext } from "./ToolExecutionContext";
 import { resolveTransportDeadlineMs } from "./formTools";
 import {
@@ -361,19 +366,28 @@ interface ToolRegistrationOptions {
   appUiResourceUri?: string;
 }
 
+/** Resolves a device for a read without acquiring, readying or changing a device session. */
+interface SessionlessDeviceRead {
+  resolve(deviceId: string, signal?: AbortSignal): Promise<BootedDevice>;
+  assertAuthorized(device: BootedDevice): void;
+}
+
 interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions {
   shouldEnsureDevice?: (args: T) => boolean;
   /**
    * The tool only watches the device (#10730: watching is allowed on any device and is not use),
    * so a caller that does not hold a device another session holds may still run it. Every other
-   * device-aware tool is refused on such a device (`device_owned_by_other_session`).
+   * device-aware tool is refused on such a device (`device_owned_by_other_session`). A function
+   * decides per call (sqlQuery: only a read-only statement watches).
+   *
+   * A sessionless call that would land on a device another session holds runs through the
+   * read-only device path (`sessionlessDeviceRead`, or the registry's default): the target is
+   * resolved from the booted-device list, with no readiness (no CtrlProxy setup, no current-device
+   * pin, no settings writes), no navigation recording and no audit (#10830).
    */
-  deviceReadOnly?: boolean;
+  deviceReadOnly?: boolean | ((args: T) => boolean);
   /** Read an explicit device id without acquiring or changing a device session. */
-  sessionlessDeviceRead?: {
-    resolve(deviceId: string, signal?: AbortSignal): Promise<BootedDevice>;
-    assertAuthorized(device: BootedDevice): void;
-  };
+  sessionlessDeviceRead?: SessionlessDeviceRead;
   deviceReadiness?: DeviceReadinessLevel | ((args: T) => DeviceReadinessLevel);
   nonDeviceHandler?: ToolHandler<T>;
   embeddedSdkOnly?: boolean;
@@ -444,6 +458,8 @@ interface ExecutionTargetContext {
   internalCall: boolean;
   sessionUuid: string | undefined;
   shouldResolveDevice: boolean;
+  /** Resolved through the read-only device path: the handler runs without recording or audit. */
+  deviceRead?: SessionlessDeviceRead;
 }
 
 interface ExecutionTargetResolver {
@@ -652,6 +668,8 @@ interface ToolRegistryPipelineOverrides {
   env?: Environment;
   executionTargetResolver?: ExecutionTargetResolver;
   displayInventory?: DisplayInventoryProvider;
+  /** Booted-device listing for the read-only device path (#10830). */
+  deviceReadAccess?: DeviceObservationAccess;
   auditRunner?: AuditRunner;
   afterToolCall?: AfterToolCallHandler;
   planLifecycleManager?: PlanLifecycleManager;
@@ -659,7 +677,7 @@ interface ToolRegistryPipelineOverrides {
 
 async function resolveSessionlessDeviceRead(
   input: ExecutionTargetInput,
-  read: NonNullable<DeviceAwareToolOptions["sessionlessDeviceRead"]>,
+  read: SessionlessDeviceRead,
   deviceId: string,
 ): Promise<ExecutionTargetContext> {
   const { args, signal } = input;
@@ -677,14 +695,35 @@ async function resolveSessionlessDeviceRead(
     internalCall: args[INTERNAL_NO_DIFF_PARAM] === true,
     sessionUuid: undefined,
     shouldResolveDevice: true,
+    deviceRead: read,
   };
 }
 
+function isDeviceReadOnlyCall(options: DeviceAwareToolOptions, args: unknown): boolean {
+  return typeof options.deviceReadOnly === "function"
+    ? options.deviceReadOnly(args)
+    : options.deviceReadOnly === true;
+}
+
+/** A device another session holds: a live owner, or an autolock holder. */
+function isDeviceHeld(deviceId: string): boolean {
+  const daemonState = DaemonState.getInstance();
+  return Boolean(
+    daemonState.getSessionManager().getSessionForDevice(deviceId) ??
+    daemonState.getDevicePool().getDevice(deviceId)?.autolockSessionId,
+  );
+}
+
 class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
+  private readonly defaultDeviceRead: SessionlessDeviceRead;
+
   constructor(
     private readonly logger: Logger = logger,
     private readonly displayInventory: DisplayInventoryProvider = defaultDisplayInventoryProvider,
-  ) {}
+    deviceReadAccess: DeviceObservationAccess = defaultDeviceObservationAccess,
+  ) {
+    this.defaultDeviceRead = sessionlessDeviceReadFor(deviceReadAccess);
+  }
   async resolveExecutionTarget(input: ExecutionTargetInput): Promise<ExecutionTargetContext> {
     if (
       input.options.sessionlessDeviceRead &&
@@ -822,9 +861,29 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       });
     }
 
+    const readOnly = isDeviceReadOnlyCall(options, args);
+    // A sessionless read-only call that would land on a held device watches it through the
+    // read-only path: no readiness, pin or settings work on the holder's device (#10830).
+    const watchedDeviceId = await this.heldDeviceToWatch({
+      readOnly,
+      shouldResolveDevice,
+      sessionUuid,
+      providedDeviceId,
+      platform,
+      deviceSessionManager,
+      getConnectedPlatforms,
+    });
+    if (watchedDeviceId) {
+      return resolveSessionlessDeviceRead(
+        input,
+        options.sessionlessDeviceRead ?? this.defaultDeviceRead,
+        watchedDeviceId,
+      );
+    }
+
     // An explicit target held by another session is refused before admission or any device work,
     // so a non-holder (including an observer-only or sessionless caller) gets the typed code.
-    assertToolCallerHoldsDevice(name, options, providedDeviceId, sessionUuid, autolockEnabled);
+    assertToolCallerHoldsDevice(name, readOnly, providedDeviceId, sessionUuid, autolockEnabled);
 
     logger.info(
       `[ToolRegistry] Tool ${name} called, sessionUuid=${sessionUuid}, daemonInitialized=${DaemonState.getInstance().isInitialized()}`,
@@ -960,14 +1019,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // Readiness acts on the device it selects (CtrlProxy setup, the current-device pin,
         // settings), so a call without a deviceId is checked against the device it would land
         // on first: a refused call leaves the holder's device untouched (#10828).
-        if (
-          !providedDeviceId &&
-          !options.deviceReadOnly &&
-          DaemonState.getInstance().isInitialized()
-        ) {
+        if (!providedDeviceId && !readOnly && DaemonState.getInstance().isInitialized()) {
           assertToolCallerHoldsDevice(
             name,
-            options,
+            readOnly,
             await predictReadinessTarget(platform, deviceSessionManager, getConnectedPlatforms),
             sessionUuid,
             autolockEnabled,
@@ -996,8 +1051,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
 
     // The resolved target too: a call without a deviceId can land on a held device.
-    assertToolCallerHoldsDevice(name, options, device?.deviceId, sessionUuid, autolockEnabled);
-    if (device && execution && !sessionUuid && !options.deviceReadOnly) {
+    assertToolCallerHoldsDevice(name, readOnly, device?.deviceId, sessionUuid, autolockEnabled);
+    if (device && execution && !sessionUuid && !readOnly) {
       // Admitted on a device no session holds: a session acquiring it from here on cancels this
       // call, which may not keep driving the new holder's device (#10829).
       executionTracker.markSessionlessDeviceUse(execution.executionId, device.deviceId);
@@ -1026,6 +1081,38 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       sessionUuid,
       shouldResolveDevice,
     };
+  }
+
+  /**
+   * The held device a sessionless read-only call would land on: its explicit deviceId, or the
+   * device readiness would select. Undefined when the call has a session, is not read-only, or its
+   * target is not held; that call takes the normal path.
+   */
+  private async heldDeviceToWatch(input: {
+    readOnly: boolean;
+    shouldResolveDevice: boolean;
+    sessionUuid: string | undefined;
+    providedDeviceId: string | undefined;
+    platform: SomePlatform;
+    deviceSessionManager: DeviceSessionManager;
+    getConnectedPlatforms: () => Promise<ConnectedPlatformScan>;
+  }): Promise<string | undefined> {
+    if (
+      !input.readOnly ||
+      !input.shouldResolveDevice ||
+      input.sessionUuid ||
+      !DaemonState.getInstance().isInitialized()
+    ) {
+      return undefined;
+    }
+    const target =
+      input.providedDeviceId ??
+      (await predictReadinessTarget(
+        input.platform,
+        input.deviceSessionManager,
+        input.getConnectedPlatforms,
+      ));
+    return target && isDeviceHeld(target) ? target : undefined;
   }
 
   private async enforceSessionUuidForMultipleDevices(
@@ -1948,7 +2035,7 @@ function assertSessionDeviceRouting(
  */
 function assertToolCallerHoldsDevice(
   toolName: string,
-  options: DeviceAwareToolOptions,
+  readOnly: boolean,
   deviceId: string | undefined,
   sessionUuid: string | undefined,
   autolockEnabled: boolean,
@@ -1956,7 +2043,7 @@ function assertToolCallerHoldsDevice(
   if (!deviceId || !DaemonState.getInstance().isInitialized()) {
     return;
   }
-  if (options.deviceReadOnly) {
+  if (readOnly) {
     return;
   }
   // An autolocked device is governed by autolock's own check and remedies. Like the general check,
@@ -2027,24 +2114,6 @@ function assertDeviceReadRouting(
   }
 }
 
-function assertSessionlessReadAuthorization(
-  options: DeviceAwareToolOptions,
-  args: Record<string, unknown>,
-  device: BootedDevice | undefined,
-  signal?: AbortSignal,
-): void {
-  if (
-    options.sessionlessDeviceRead &&
-    getToolSelectionContext()?.explicitObserveDeviceRead &&
-    args.deviceId &&
-    !args.sessionUuid &&
-    device
-  ) {
-    signal?.throwIfAborted();
-    options.sessionlessDeviceRead.assertAuthorized(device);
-  }
-}
-
 // Reuse the display capability across registrations and internal dispatch without
 // retaining schemas after their tools are removed.
 const sessionDisplaySchemaCapabilities = new WeakMap<ZodType, boolean>();
@@ -2091,8 +2160,6 @@ function runReportingDispatch<T>(
 }
 
 async function invokeResolvedDeviceHandler(input: {
-  options: DeviceAwareToolOptions;
-  selectionContext: ReturnType<typeof getToolSelectionContext>;
   target: ExecutionTargetContext & { device: BootedDevice };
   name: string;
   args: Record<string, unknown>;
@@ -2102,12 +2169,10 @@ async function invokeResolvedDeviceHandler(input: {
   auditRunner: AuditRunner;
   navigationRecorder: NavigationToolCallRecorder;
 }): Promise<any> {
-  const { options, selectionContext, target, name, args, handler, progress, signal } = input;
-  if (
-    options.sessionlessDeviceRead &&
-    selectionContext?.explicitObserveDeviceRead &&
-    !args.sessionUuid
-  ) {
+  const { target, name, args, handler, progress, signal } = input;
+  if (target.deviceRead) {
+    // A read-only device read is not this caller's use of the device: no navigation recording
+    // and no audit run on a device the caller may not hold (#10830).
     return handler(target.device, args, progress, signal);
   }
   const withdraw = input.navigationRecorder.record(name, args, target.device, target.sessionUuid);
@@ -2347,8 +2412,10 @@ export class ToolRegistryClass {
           {
             routingSessionUuid: resolvedTarget.sessionUuid,
             toolSelectionProfileUuid: selectionContext?.toolSelectionProfileUuid,
+            // Handlers read this to stay on their read-only path (observe, snapshotOf).
             explicitObserveDeviceRead:
-              selectionContext?.explicitObserveDeviceRead === true && !handlerArgs.sessionUuid,
+              (selectionContext?.explicitObserveDeviceRead === true && !handlerArgs.sessionUuid) ||
+              resolvedTarget.deviceRead !== undefined,
           },
           captures(async () => {
             let succeeded = false;
@@ -2361,8 +2428,6 @@ export class ToolRegistryClass {
                 response = await options.nonDeviceHandler(handlerArgs, progress, signal);
               } else if (resolvedTarget.device !== undefined) {
                 response = await invokeResolvedDeviceHandler({
-                  options,
-                  selectionContext,
                   target: { ...resolvedTarget, device: resolvedTarget.device },
                   name,
                   args: handlerArgs,
@@ -2372,12 +2437,10 @@ export class ToolRegistryClass {
                   auditRunner: this.auditRunner,
                   navigationRecorder: this.navigationToolCallRecorder,
                 });
-                assertSessionlessReadAuthorization(
-                  options,
-                  handlerArgs,
-                  resolvedTarget.device,
-                  signal,
-                );
+                if (resolvedTarget.deviceRead) {
+                  signal?.throwIfAborted();
+                  resolvedTarget.deviceRead.assertAuthorized(resolvedTarget.device);
+                }
               }
 
               // A late device-loss abort cannot replace a completed success.
@@ -2967,10 +3030,11 @@ export class ToolRegistryClass {
     this.env = overrides.env ?? this.env;
     if (overrides.executionTargetResolver) {
       this.executionTargetResolver = overrides.executionTargetResolver;
-    } else if (overrides.displayInventory) {
+    } else if (overrides.displayInventory || overrides.deviceReadAccess) {
       this.executionTargetResolver = new DefaultExecutionTargetResolver(
         this.logger,
         overrides.displayInventory,
+        overrides.deviceReadAccess,
       );
     }
     if (overrides.auditRunner) {

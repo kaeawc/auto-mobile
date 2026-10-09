@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { registerObserveTools } from "../../src/server/observeTools";
+import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,
@@ -117,7 +118,21 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     sessionManager.setDeviceReadiness(agent, "automationReady");
 
     registerInteractionTools();
-    registerObserveTools();
+    registerObserveTools({
+      deviceReadAccess: { listBooted: async () => [held, free], isAuthorized: () => true },
+      // Watching a held device runs observe's own read-only capture, not the audit runner.
+      createScreen: (device) => ({
+        executeDeviceRead: async () => {
+          ran.push({ name: "observe", deviceId: device.deviceId });
+          return loadAndroidHomeObserve().observe;
+        },
+        execute: async () => {
+          throw new Error("A watcher's observe must not run the session capture");
+        },
+        appendRawViewHierarchy: async () => {},
+        getMostRecentCachedObserveResult: async () => loadAndroidHomeObserve().observe,
+      }),
+    });
   });
 
   afterEach(() => {
@@ -182,6 +197,9 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   test("observe on a device another session holds is allowed (watching is not use)", async () => {
     await call("observe", { platform: "android", deviceId: held.deviceId });
     expect(ran).toEqual([{ name: "observe", deviceId: held.deviceId }]);
+    // #10830: watching never readies the holder's device.
+    expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
+    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
   });
 
   // #10828: a call without a deviceId used to run ensureDeviceReady (CtrlProxy setup, the

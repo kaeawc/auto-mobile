@@ -1050,6 +1050,13 @@ export const DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF: BackoffPolicy = exponential
 });
 const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 export const SESSION_REHYDRATION_DEADLINE_MS = 15_000;
+/** Persisted rows recovered at once during startup rehydration (#11114). */
+export const SESSION_REHYDRATION_CONCURRENCY = 4;
+
+type RehydrationRowOutcome =
+  | { kind: "rehydrated" }
+  | { kind: "terminalized"; reason: string }
+  | { kind: "skipped"; reason: string };
 const EXPIRY_RELEASE_REASONS = new Set([
   "lazy-expiry",
   "cleanup-expired",
@@ -1184,6 +1191,8 @@ export class SessionManager {
   private sessionDeviceMap: Map<string, string> = new Map(); // sessionId -> deviceId
   private deviceSessionMap: Map<string, string> = new Map(); // deviceId -> sessionId (reverse lookup)
   private cleanupTimer: NodeJS.Timeout | null = null;
+  /** Pending follow-up sweep of rows the startup rehydration deadline skipped (#11114). */
+  private rehydrationFollowUpTimer: NodeJS.Timeout | null = null;
   private timer: Timer;
   /** The clock every session timestamp is stamped and judged with (#11080); see {@link sessionNow}. */
   private readonly sessionClock: SteadyWallClock;
@@ -3152,9 +3161,10 @@ export class SessionManager {
 
   async rehydratePersistedSessions(
     devicePool: SessionDeviceAssigner,
-    options: { deadlineMs?: number } = {},
+    options: { deadlineMs?: number; concurrency?: number } = {},
   ): Promise<RehydrationSummary> {
     const deadlineMs = options.deadlineMs ?? SESSION_REHYDRATION_DEADLINE_MS;
+    const concurrency = Math.max(1, options.concurrency ?? SESSION_REHYDRATION_CONCURRENCY);
     const deadlineAt = this.sessionNow() + deadlineMs;
     const summary: RehydrationSummary = {
       rehydrated: [],
@@ -3167,86 +3177,162 @@ export class SessionManager {
     const persistedSessions = (
       await this.listRecoverableSessionsBeforeDeadline(deadlineAt, summary)
     ).map((persisted) => this.withRecoveredTerminalRelease(persisted));
-    const markDeadline = (startIndex: number): void => {
-      for (const remaining of persistedSessions.slice(startIndex)) {
-        const sessionId = remaining.session_uuid;
-        if (!this.isRecoverablePersistedSession(remaining)) {
-          summary.skipped.push({ sessionUuid: sessionId, reason: "not-recoverable" });
-        } else if (this.sessions.has(sessionId)) {
-          summary.skipped.push({ sessionUuid: sessionId, reason: "already-live" });
+    // Rows recover concurrently, so one slow row (an unresolved emulator waiting out its restart
+    // grace) no longer holds every later row past the deadline (#11114).
+    const outcomes: Array<RehydrationRowOutcome | undefined> = [];
+    let nextIndex = 0;
+    let deadlineReached = false;
+    const worker = async (): Promise<void> => {
+      while (!deadlineReached && nextIndex < persistedSessions.length) {
+        const index = nextIndex++;
+        const outcome = await this.rehydratePersistedRow(persistedSessions[index], devicePool);
+        if (deadlineReached) {
+          this.logLateRehydrationOutcome(persistedSessions[index].session_uuid, outcome);
         } else {
-          summary.skipped.push({ sessionUuid: sessionId, reason: "startup-deadline" });
+          outcomes[index] = outcome;
         }
-      }
-      if (!summary.timedOut) {
-        summary.timedOut = true;
-        const skippedCount = summary.skipped.filter(
-          ({ reason }) => reason === "startup-deadline",
-        ).length;
-        logger.warn(
-          `[SessionManager] Startup rehydration deadline reached; skipped ${skippedCount} rows due to startup-deadline`,
-        );
       }
     };
-    const recoveryDeadlineWon = Symbol("startup-deadline");
-    for (const [index, persisted] of persistedSessions.entries()) {
-      const sessionId = persisted.session_uuid;
-      if (!this.isRecoverablePersistedSession(persisted)) {
-        summary.skipped.push({ sessionUuid: sessionId, reason: "not-recoverable" });
-        continue;
-      }
-      const skipReason = this.rehydrationSkipReason(sessionId);
-      if (skipReason) {
-        summary.skipped.push({ sessionUuid: sessionId, reason: skipReason });
-        continue;
-      }
-      if (this.sessionNow() >= deadlineAt) {
-        markDeadline(index);
-        break;
-      }
-      try {
-        const recoveryPromise = this.registerRehydrationRecovery(sessionId, devicePool, persisted);
-        const remaining = Math.max(0, deadlineAt - this.sessionNow());
-        const recoveryResult = await raceWithDeadline(recoveryPromise, {
-          timer: this.timer,
-          timeoutMs: remaining,
-          label: "Session rehydration",
-          timeoutError: () => recoveryDeadlineWon,
-        }).catch((error: unknown) => {
-          if (error !== recoveryDeadlineWon) {
-            throw error;
-          }
-          return recoveryDeadlineWon;
-        });
-        if (recoveryResult === recoveryDeadlineWon) {
-          void recoveryPromise.catch((error) =>
-            logger.warn(
-              `[SessionManager] Rehydration continued after startup deadline for ${sessionId}: ${errorMessage(error)}`,
-            ),
-          );
-          markDeadline(index);
-          break;
+    if (this.sessionNow() < deadlineAt && persistedSessions.length > 0) {
+      const deadlineWon = Symbol("startup-deadline");
+      const workers = Promise.all(
+        Array.from({ length: Math.min(concurrency, persistedSessions.length) }, worker),
+      );
+      const result = await raceWithDeadline(workers, {
+        timer: this.timer,
+        timeoutMs: Math.max(0, deadlineAt - this.sessionNow()),
+        label: "Session rehydration",
+        timeoutError: () => deadlineWon,
+      }).catch((error: unknown) => {
+        if (error !== deadlineWon) {
+          throw error;
         }
-        summary.rehydrated.push(sessionId);
-      } catch (error) {
-        const terminalRelease = this.getTerminalReleaseSnapshot(sessionId);
-        if (terminalRelease) {
-          summary.terminalized.push({
-            sessionUuid: sessionId,
-            reason: terminalRelease.releaseReason,
-          });
-        } else {
-          const reason = errorMessage(error);
-          logger.warn(`[SessionManager] Failed to rehydrate session ${sessionId}: ${reason}`);
-          summary.skipped.push({ sessionUuid: sessionId, reason });
-        }
-      }
+        return deadlineWon;
+      });
+      deadlineReached = result === deadlineWon;
+    } else {
+      deadlineReached = persistedSessions.length > 0;
     }
+    // Rows the deadline kept from starting are recovered by a follow-up sweep, not abandoned.
+    const unstarted = persistedSessions.slice(nextIndex);
+    nextIndex = persistedSessions.length;
+    for (const [index, persisted] of persistedSessions.entries()) {
+      this.recordRehydrationOutcome(summary, persisted, outcomes[index]);
+    }
+    if (deadlineReached && !summary.timedOut) {
+      summary.timedOut = true;
+      const skippedCount = summary.skipped.filter(
+        ({ reason }) => reason === "startup-deadline",
+      ).length;
+      logger.warn(
+        `[SessionManager] Startup rehydration deadline reached; skipped ${skippedCount} rows due to startup-deadline`,
+      );
+    }
+    this.scheduleRehydrationFollowUp(unstarted, devicePool, concurrency);
     logger.info(
       `[SessionManager] Rehydration: ${summary.rehydrated.length} rehydrated, ` +
         `${summary.terminalized.length} terminalized, ${summary.skipped.length} skipped`,
     );
     return summary;
+  }
+
+  private recordRehydrationOutcome(
+    summary: RehydrationSummary,
+    persisted: DeviceSession,
+    outcome: RehydrationRowOutcome | undefined,
+  ): void {
+    const sessionUuid = persisted.session_uuid;
+    if (outcome?.kind === "rehydrated") {
+      summary.rehydrated.push(sessionUuid);
+    } else if (outcome?.kind === "terminalized") {
+      summary.terminalized.push({ sessionUuid, reason: outcome.reason });
+    } else if (outcome) {
+      summary.skipped.push({ sessionUuid, reason: outcome.reason });
+    } else if (!this.isRecoverablePersistedSession(persisted)) {
+      summary.skipped.push({ sessionUuid, reason: "not-recoverable" });
+    } else if (this.sessions.has(sessionUuid)) {
+      summary.skipped.push({ sessionUuid, reason: "already-live" });
+    } else {
+      // Still recovering, or left to the follow-up sweep.
+      summary.skipped.push({ sessionUuid, reason: "startup-deadline" });
+    }
+  }
+
+  private async rehydratePersistedRow(
+    persisted: DeviceSession,
+    devicePool: SessionDeviceAssigner,
+  ): Promise<RehydrationRowOutcome> {
+    const sessionId = persisted.session_uuid;
+    if (!this.isRecoverablePersistedSession(persisted)) {
+      return { kind: "skipped", reason: "not-recoverable" };
+    }
+    const skipReason = this.rehydrationSkipReason(sessionId);
+    if (skipReason) {
+      return { kind: "skipped", reason: skipReason };
+    }
+    try {
+      await this.registerRehydrationRecovery(sessionId, devicePool, persisted);
+      return { kind: "rehydrated" };
+    } catch (error) {
+      const terminalRelease = this.getTerminalReleaseSnapshot(sessionId);
+      if (terminalRelease) {
+        return { kind: "terminalized", reason: terminalRelease.releaseReason };
+      }
+      const reason = errorMessage(error);
+      logger.warn(`[SessionManager] Failed to rehydrate session ${sessionId}: ${reason}`);
+      return { kind: "skipped", reason };
+    }
+  }
+
+  private logLateRehydrationOutcome(sessionId: string, outcome: RehydrationRowOutcome): void {
+    logger.info(
+      `[SessionManager] Rehydration of ${sessionId} finished after the startup deadline: ` +
+        `${outcome.kind}${outcome.kind === "rehydrated" ? "" : ` (${outcome.reason})`}`,
+    );
+  }
+
+  /**
+   * Recover the rows the startup deadline kept from starting (#11114). A row its owner already
+   * recovered on reconnect is skipped as already live or pending.
+   */
+  private scheduleRehydrationFollowUp(
+    rows: DeviceSession[],
+    devicePool: SessionDeviceAssigner,
+    concurrency: number,
+  ): void {
+    const pending = rows.filter(
+      (persisted) =>
+        this.isRecoverablePersistedSession(persisted) && !this.sessions.has(persisted.session_uuid),
+    );
+    if (pending.length === 0) {
+      return;
+    }
+    if (this.rehydrationFollowUpTimer) {
+      this.timer.clearTimeout(this.rehydrationFollowUpTimer);
+    }
+    this.rehydrationFollowUpTimer = this.timer.setTimeout(() => {
+      this.rehydrationFollowUpTimer = null;
+      void this.runRehydrationFollowUp(pending, devicePool, concurrency);
+    }, 0);
+  }
+
+  private async runRehydrationFollowUp(
+    rows: DeviceSession[],
+    devicePool: SessionDeviceAssigner,
+    concurrency: number,
+  ): Promise<void> {
+    logger.info(`[SessionManager] Follow-up rehydration of ${rows.length} deadline-skipped rows`);
+    let nextIndex = 0;
+    const worker = async (): Promise<void> => {
+      while (nextIndex < rows.length) {
+        const persisted = rows[nextIndex++];
+        this.logLateRehydrationOutcome(
+          persisted.session_uuid,
+          await this.rehydratePersistedRow(persisted, devicePool),
+        );
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, rows.length) }, worker));
   }
 
   private recoverySessionFields(
@@ -7829,6 +7915,10 @@ export class SessionManager {
     if (this.cleanupTimer) {
       this.timer.clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
+    }
+    if (this.rehydrationFollowUpTimer) {
+      this.timer.clearTimeout(this.rehydrationFollowUpTimer);
+      this.rehydrationFollowUpTimer = null;
     }
     for (const entry of this.pendingTerminalReleaseRetries.values()) {
       if (entry.handle !== undefined) {

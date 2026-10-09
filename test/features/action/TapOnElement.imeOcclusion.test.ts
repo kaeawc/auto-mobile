@@ -702,6 +702,11 @@ describe("captured iOS keyboard selected through a registered observe capture", 
   const keyQ = { elementId: "s2-f4f27f88982be7ea", point: { x: 23, y: 624 } };
   const appQ = "synthetic-app-q";
   const overlayDismiss = "automobile-overlay-dismiss";
+  const layerCases = [
+    { name: "default layer", layer: undefined, overlay: false },
+    { name: "default layer, overlay showing", layer: undefined, overlay: true },
+    { name: 'layer "app", overlay showing', layer: "app", overlay: true },
+  ] as const;
 
   test("default layer taps the keyboard key", async () => {
     const { result, points } = await executeAt("q", {
@@ -741,30 +746,19 @@ describe("captured iOS keyboard selected through a registered observe capture", 
   });
 
   // iOS keys carry no input-method package, so a text selector still resolves the key.
-  test.each([
-    { layer: undefined, overlay: false },
-    { layer: undefined, overlay: true },
-    { layer: "app", overlay: true },
-  ] as const)(
-    'text "q" taps the keyboard key (layer $layer, overlay $overlay)',
-    async ({ layer, overlay }) => {
-      const { result, points } = await executeAt("q", {
-        ...registeredIos(registeredKeyboardCapture({ overlay })),
-        layer,
-      });
-      expect(result.error).toBeUndefined();
-      expect(result.success).toBe(true);
-      expect(result.element["view-id"]).toBe(keyQ.elementId);
-      expect(points).toEqual([keyQ.point]);
-    },
-  );
+  test.each(layerCases)('text "q" taps the keyboard key ($name)', async ({ layer, overlay }) => {
+    const { result, points } = await executeAt("q", {
+      ...registeredIos(registeredKeyboardCapture({ overlay })),
+      layer,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.element["view-id"]).toBe(keyQ.elementId);
+    expect(points).toEqual([keyQ.point]);
+  });
 
-  test.each([
-    { layer: undefined, overlay: false },
-    { layer: undefined, overlay: true },
-    { layer: "app", overlay: true },
-  ] as const)(
-    "an app q sharing the key's bounds stays refused (layer $layer, overlay $overlay)",
+  test.each(layerCases)(
+    "an app q sharing the key's bounds stays refused ($name)",
     async ({ layer, overlay }) => {
       const { result, points, actionError } = await executeAt("q", {
         ...registeredIos(registeredKeyboardCapture({ overlay, appQ: true })),

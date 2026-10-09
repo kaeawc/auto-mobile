@@ -3694,6 +3694,20 @@
           "description": "App artifact path (.apk, .app, or .ipa)",
           "type": "string"
         },
+        "expectedSigningSha256": {
+          "description": "Android: complete signer set (SHA-256 of every signing certificate) an already installed copy must have before it is replaced; any other signer set, or signers that cannot be read, refuses the install. See inspectPackageSigning.",
+          "minItems": 1,
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:[0-9a-fA-F]{2}:?){31}[0-9a-fA-F]{2}$"
+          }
+        },
+        "allowDestructiveRecovery": {
+          "description": "Android: false refuses the uninstall-and-reinstall recovery after INSTALL_FAILED_VERSION_DOWNGRADE (default true)",
+          "type": "boolean"
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -38350,6 +38364,16 @@
         "keepData": {
           "description": "Keep app data after uninstall (Android only, default false)",
           "type": "boolean"
+        },
+        "expectedSigningSha256": {
+          "description": "Android: complete signer set (SHA-256 of every signing certificate) the installed package must have; a different signer set, absence, or signers that cannot be read refuses the uninstall, and removal is confirmed by a fresh presence read.",
+          "minItems": 1,
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:[0-9a-fA-F]{2}:?){31}[0-9a-fA-F]{2}$"
+          }
         },
         "platform": {
           "type": "string",

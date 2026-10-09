@@ -1358,6 +1358,26 @@ erases every app's Keychain, regardless of `appId`.
 `uninstallApp.keepData` retains app data after uninstall on Android (default
 false; Android only).
 
+Opt-in signing guards (Android only; iOS rejects them). `installApp` and `uninstallApp` accept
+`expectedSigningSha256`, the complete signer set (SHA-256 of every signing certificate,
+64 hex characters, colons optional, see `inspectPackageSigning`). Before anything destructive
+the tool reads the installed package fresh for the user it will mutate and refuses with a
+`SigningGuardError` carrying `reason` (`mismatch`, `absent`, `presence-unknown`,
+`signing-unavailable`) when the signer set differs, the lookup is inconclusive, or the signers
+cannot be read; the device is unchanged in every case. Matching is exact set equality on the
+current signers: one signer of a multi-signer package never satisfies a larger expected set, and
+a rotated package matches its current signer, not its history. For `installApp` the guard applies
+to a copy being replaced (checked on the target user, or on another user holding the shared
+package); a package that is not installed passes with `signingGuard.status`
+`no-existing-package`. For `uninstallApp` an absent package refuses (`absent`). A guarded
+`uninstallApp` confirms removal with a fresh presence read: `removalVerification` is `absent` on
+success, and `installed` or `unknown` (lookup failed) make `success` false. `installApp`
+`allowDestructiveRecovery: false` fails an `INSTALL_FAILED_VERSION_DOWNGRADE` instead of
+uninstalling and reinstalling (default true). AutoMobile serializes its own Android installs and
+uninstalls per device, so a guarded check-then-mutate cannot interleave with another AutoMobile
+mutation; package changes made outside AutoMobile (adb in a terminal, another tool) are not
+visible to that lock, so hold the device exclusively when that matters.
+
 `inspectPackageSigning` (Android) takes `appId` and an optional `userId`; when omitted the
 user is resolved the way `uninstallApp` does and reported as `userId` and `userSource`. Each
 call reads the device (`dumpsys package`, `pm path`, and the installed base APK's signing

@@ -16,6 +16,13 @@ export interface UninstallAppResult extends BaseActionResult {
   wasInstalled?: boolean;
   /** Android user ID where the app was uninstalled from (0 for primary user, 10+ for work profiles) */
   userId?: number;
+  /** Present when the caller requested a signing guard and the installed signers matched. */
+  signingGuard?: { matchedSha256: string[] };
+  /**
+   * Present only for a guarded uninstall: the result of a fresh presence read after removal.
+   * `success` is true only when this is `absent`.
+   */
+  removalVerification?: "absent" | "installed" | "unknown";
   /** Command-span timing tree, present only when `--debug-perf` is enabled and this call was not nested inside an outer ambient perf scope. */
   perfTiming?: TimingData;
 }

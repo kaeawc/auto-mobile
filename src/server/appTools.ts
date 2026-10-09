@@ -20,8 +20,9 @@ import {
   isLaunchPermissionDialogObservation,
 } from "../features/action/launchObservationPackages";
 import { TerminateApp } from "../features/action/TerminateApp";
-import { InstallApp } from "../features/action/InstallApp";
-import { UninstallApp } from "../features/action/UninstallApp";
+import { InstallApp, type InstallGuardOptions } from "../features/action/InstallApp";
+import { UninstallApp, type UninstallGuardOptions } from "../features/action/UninstallApp";
+import { SIGNING_SHA256_PATTERN } from "../utils/signingIdentity";
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
 import type { PackageSigningInspection } from "../models/PackageSigningInspection";
 import type { UninstallAppResult } from "../models/UninstallAppResult";
@@ -298,7 +299,12 @@ export function resetAppLifecycleToolDependencies(): void {
 }
 
 export interface InstallAppExecutor {
-  execute(artifactPath: string, userId?: number, signal?: AbortSignal): Promise<InstallAppResult>;
+  execute(
+    artifactPath: string,
+    userId?: number,
+    signal?: AbortSignal,
+    guard?: InstallGuardOptions,
+  ): Promise<InstallAppResult>;
 }
 
 export interface InstallAppToolDependencies {
@@ -311,6 +317,7 @@ export interface UninstallAppExecutor {
     keepData?: boolean,
     userId?: number,
     signal?: AbortSignal,
+    guard?: UninstallGuardOptions,
   ): Promise<UninstallAppResult>;
 }
 
@@ -678,10 +685,36 @@ export const launchAppSchema = withAppIdAliases(
   ),
 );
 
+const expectedSigningSha256Schema = z
+  .array(
+    z
+      .string()
+      .regex(
+        SIGNING_SHA256_PATTERN,
+        "Expected a SHA-256 digest: 64 hex characters, optionally colon-separated",
+      ),
+  )
+  .min(1)
+  .max(16);
+
 export const installAppSchema = addDeviceTargetingToSchema(
   z
     .object({
       artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
+      expectedSigningSha256: expectedSigningSha256Schema
+        .optional()
+        .describe(
+          "Android: complete signer set (SHA-256 of every signing certificate) an already " +
+            "installed copy must have before it is replaced; any other signer set, or signers " +
+            "that cannot be read, refuses the install. See inspectPackageSigning.",
+        ),
+      allowDestructiveRecovery: z
+        .boolean()
+        .optional()
+        .describe(
+          "Android: false refuses the uninstall-and-reinstall recovery after " +
+            "INSTALL_FAILED_VERSION_DOWNGRADE (default true)",
+        ),
     })
     .strict(),
 );
@@ -695,6 +728,13 @@ export const uninstallAppSchema = withAppIdAliases(
           .boolean()
           .optional()
           .describe("Keep app data after uninstall (Android only, default false)"),
+        expectedSigningSha256: expectedSigningSha256Schema
+          .optional()
+          .describe(
+            "Android: complete signer set (SHA-256 of every signing certificate) the installed " +
+              "package must have; a different signer set, absence, or signers that cannot be " +
+              "read refuses the uninstall, and removal is confirmed by a fresh presence read.",
+          ),
       })
       .strict(),
   ),
@@ -936,11 +976,14 @@ function redactLaunchError(error: unknown, token: string | undefined): unknown {
 
 export interface InstallAppArgs {
   artifactPath: string;
+  expectedSigningSha256?: string[];
+  allowDestructiveRecovery?: boolean;
 }
 
 export interface UninstallAppArgs {
   appId: string;
   keepData?: boolean;
+  expectedSigningSha256?: string[];
 }
 
 export type SetAppPermissionsArgs = z.infer<typeof setAppPermissionsSchema>;
@@ -1346,6 +1389,16 @@ const appLifecycleHandler = async (
   }
 };
 
+function installGuardFromArgs(args: InstallAppArgs): InstallGuardOptions | undefined {
+  if (args.expectedSigningSha256 === undefined && args.allowDestructiveRecovery === undefined) {
+    return undefined;
+  }
+  return {
+    expectedSigningSha256: args.expectedSigningSha256,
+    allowDestructiveRecovery: args.allowDestructiveRecovery,
+  };
+}
+
 // Install app handler
 const installAppHandler = async (
   device: BootedDevice,
@@ -1358,7 +1411,10 @@ const installAppHandler = async (
     signal?.throwIfAborted();
     const installApp = getInstallAppToolDependencies().createInstallApp(device);
     mutationMayHaveHappened = true;
-    const result = await installApp.execute(args.artifactPath, undefined, signal);
+    const guard = installGuardFromArgs(args);
+    const result = guard
+      ? await installApp.execute(args.artifactPath, undefined, signal, guard)
+      : await installApp.execute(args.artifactPath, undefined, signal);
     if (!result.success) {
       throw new ActionableError(result.error || `Failed to install app from ${args.artifactPath}`);
     }
@@ -1382,6 +1438,21 @@ const installAppHandler = async (
   }
 };
 
+/** Passes the guard only when requested so an unguarded call keeps its historical shape. */
+function executeUninstall(
+  uninstallApp: UninstallAppExecutor,
+  args: UninstallAppArgs,
+  signal: AbortSignal | undefined,
+): Promise<UninstallAppResult> {
+  const keepData = args.keepData ?? false;
+  const guard: UninstallGuardOptions | undefined = args.expectedSigningSha256
+    ? { expectedSigningSha256: args.expectedSigningSha256 }
+    : undefined;
+  return guard
+    ? uninstallApp.execute(args.appId, keepData, undefined, signal, guard)
+    : uninstallApp.execute(args.appId, keepData, undefined, signal);
+}
+
 // Uninstall app handler
 const uninstallAppHandler = async (
   device: BootedDevice,
@@ -1394,12 +1465,7 @@ const uninstallAppHandler = async (
     signal?.throwIfAborted();
     const uninstallApp = getUninstallAppToolDependencies().createUninstallApp(device);
     mutationMayHaveHappened = true;
-    const result = await uninstallApp.execute(
-      args.appId,
-      args.keepData ?? false,
-      undefined,
-      signal,
-    );
+    const result = await executeUninstall(uninstallApp, args, signal);
 
     if (!result.success) {
       throw new ActionableError(result.error || `Failed to uninstall app ${args.appId}`);

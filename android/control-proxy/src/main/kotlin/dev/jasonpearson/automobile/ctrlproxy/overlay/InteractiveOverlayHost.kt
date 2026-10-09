@@ -206,6 +206,7 @@ class DefaultInteractiveOverlayHost(
   private val onWindowAttached: () -> Unit = {},
   private val onWindowLost: () -> Unit = {},
   private val isBlocked: () -> Boolean = { false },
+  private val imeInset: OverlayImeInset = NoOverlayImeInset,
   private val displayWindows: OverlayDisplayWindows = OverlayDisplayWindows { _, _ -> null },
   private val backScope: CoroutineScope =
     CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
@@ -289,6 +290,7 @@ class DefaultInteractiveOverlayHost(
         target.density(),
         sdkInt,
         request.layer,
+        imeLift(request),
       )
     if (touchThroughToken != null) {
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -298,6 +300,18 @@ class DefaultInteractiveOverlayHost(
     return if (inPlace != null) updateInPlace(inPlace, request, params)
     else addWindow(target, request, params, replacing = current)
   }
+
+  /** The keyboard's reach for a bottom sheet; other placements never read it. */
+  private fun imeLift(request: InteractiveOverlayRequest): Int =
+    if (overlayImeShiftPx(request.placement, 1) == 0) 0
+    else
+      try {
+        imeInset.liftPx(request.displayId)
+      } catch (error: Exception) {
+        // Best-effort: an unreadable keyboard leaves the sheet at the screen edge, as before.
+        Log.w(TAG, "Keyboard bounds unavailable; sheet stays at the screen edge", error)
+        0
+      }
 
   private fun updateInPlace(
     current: Window,
@@ -433,6 +447,7 @@ class DefaultInteractiveOverlayHost(
         current.target.density(),
         sdkInt,
         current.request.layer,
+        imeLift(current.request),
       )
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     if (touchThroughToken != null)

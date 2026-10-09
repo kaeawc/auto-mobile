@@ -71,8 +71,11 @@ import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayForegroundTracker
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayForegroundWindow
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayHiddenCapture
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImageCache
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImeInset
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImeWindow
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
+import dev.jasonpearson.automobile.ctrlproxy.overlay.imeLiftPx
 import dev.jasonpearson.automobile.ctrlproxy.overlay.isInteractiveOverlayWindow
 import dev.jasonpearson.automobile.ctrlproxy.overlay.overlayForegroundFromWindows
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
@@ -1797,6 +1800,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               onWindowAttached = { overlayManager.setInteractiveOverlayAttached(true) },
               onWindowLost = ::refreshOverlayWindow,
               isBlocked = ::isOverlayBlocked,
+              imeInset = OverlayImeInset { displayId -> overlayImeLiftPx(displayId) },
               backScope = serviceScope,
             ),
             overlayResultSink,
@@ -3515,6 +3519,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     if (!::overlayController.isInitialized) return
     if (!overlayController.isShowing && !overlayController.isSuspendedByForeground) return
     overlayForeground.onWindowEvent(eventPackage, ownEventWindowType(event))
+  }
+
+  /** The keyboard's reach up from [displayId]'s bottom edge, from its accessibility window. */
+  private fun overlayImeLiftPx(displayId: Int): Int {
+    val screen = getScreenDimensions(displayId) ?: return 0
+    val windows =
+      viewHierarchyExtractor.windowsForDisplay(this, displayId).map {
+        val bounds = Rect()
+        it.getBoundsInScreen(bounds)
+        OverlayImeWindow(it.type, bounds.top, bounds.bottom)
+      }
+    return imeLiftPx(windows, screen.height)
   }
 
   private suspend fun refreshOverlayWindowNow() {

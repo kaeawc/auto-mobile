@@ -1,0 +1,157 @@
+{
+  "description": "Shared daemon state-path vectors (#10906). Generated from src/daemon/constants.ts resolveDaemonStatePath; the TypeScript, JUnit runner, desktop and XCTestRunner resolvers are all tested against it. uid is the user id the paths are computed for; posixOnly vectors resolve relative paths and hold on POSIX hosts only.",
+  "uid": "501",
+  "cases": [
+    {
+      "name": "no aux dir keeps the resident paths",
+      "posixOnly": false,
+      "env": {},
+      "suffix": "",
+      "socketPath": "/tmp/auto-mobile-daemon-501.sock",
+      "pidFilePath": "/tmp/auto-mobile-daemon-501.pid",
+      "lockFilePath": "/tmp/auto-mobile-daemon-501.lock"
+    },
+    {
+      "name": "blank aux dir keeps the resident paths",
+      "posixOnly": false,
+      "env": {
+        "AUTOMOBILE_AUX_SOCKET_DIR": "   "
+      },
+      "suffix": "",
+      "socketPath": "/tmp/auto-mobile-daemon-501.sock",
+      "pidFilePath": "/tmp/auto-mobile-daemon-501.pid",
+      "lockFilePath": "/tmp/auto-mobile-daemon-501.lock"
+    },
+    {
+      "name": "absolute aux dir",
+      "posixOnly": false,
+      "env": {
+        "AUTOMOBILE_AUX_SOCKET_DIR": "/tmp/lane/aux"
+      },
+      "suffix": "-edf7a04020",
+      "socketPath": "/tmp/auto-mobile-daemon-501-edf7a04020.sock",
+      "pidFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.pid",
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock"
+    },
+    {
+      "name": "absolute aux dir is trimmed",
+      "posixOnly": false,
+      "env": {
+        "AUTOMOBILE_AUX_SOCKET_DIR": "  /tmp/lane/aux\t"
+      },
+      "suffix": "-edf7a04020",
+      "socketPath": "/tmp/auto-mobile-daemon-501-edf7a04020.sock",
+      "pidFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.pid",
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock"
+    },
+    {
+      "name": "absolute aux dir is hashed verbatim (trailing slash kept)",
+      "posixOnly": false,
+      "env": {
+        "AUTOMOBILE_AUX_SOCKET_DIR": "/tmp/lane/aux/"
+      },
+      "suffix": "-88e10361a8",
+      "socketPath": "/tmp/auto-mobile-daemon-501-88e10361a8.sock",
+      "pidFilePath": "/tmp/auto-mobile-daemon-501-88e10361a8.pid",
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-88e10361a8.lock"
+    },
+    {
+      "name": "non-ASCII aux dir hashes its UTF-8 bytes",
+      "posixOnly": false,
+      "env": {
+        "AUTOMOBILE_AUX_SOCKET_DIR": "/Users/ñandú/am aux"
+      },
+      "suffix": "-8bbe0de50f",
+      "socketPath": "/tmp/auto-mobile-daemon-501-8bbe0de50f.sock",
+      "pidFilePath": "/tmp/auto-mobile-daemon-501-8bbe0de50f.pid",
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-8bbe0de50f.lock"
+    },
+    {
+      "name": "relative aux dir resolves against the launch cwd",
+      "posixOnly": true,
+      "env": {
+        "AUTOMOBILE_AUX_SOCKET_DIR": "aux",
+        "AUTOMOBILE_DAEMON_LAUNCH_CWD": "/work/lane"
+      },
+      "suffix": "-94b54a3ac2",
+      "socketPath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.sock",
+      "pidFilePath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.pid",
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.lock"
+    },
+    {
+      "name": "relative aux dir is normalized",
+      "posixOnly": true,
+      "env": {
+        "AUTOMOBILE_AUX_SOCKET_DIR": "./x/../aux/",
+        "AUTOMOBILE_DAEMON_LAUNCH_CWD": "/work/lane"
+      },
+      "suffix": "-94b54a3ac2",
+      "socketPath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.sock",
+      "pidFilePath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.pid",
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-94b54a3ac2.lock"
+    },
+    {
+      "name": "explicit socket and pid paths win over the aux dir",
+      "posixOnly": false,
+      "env": {
+        "AUTOMOBILE_AUX_SOCKET_DIR": "/tmp/lane/aux",
+        "AUTOMOBILE_DAEMON_SOCKET_PATH": "/tmp/lane/d.sock",
+        "AUTOMOBILE_DAEMON_PID_FILE_PATH": "/tmp/lane/d.pid"
+      },
+      "suffix": "-edf7a04020",
+      "socketPath": "/tmp/lane/d.sock",
+      "pidFilePath": "/tmp/lane/d.pid",
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock"
+    },
+    {
+      "name": "legacy override aliases are honoured",
+      "posixOnly": false,
+      "env": {
+        "AUTOMOBILE_AUX_SOCKET_DIR": "/tmp/lane/aux",
+        "AUTO_MOBILE_DAEMON_SOCKET_PATH": "/tmp/legacy/d.sock",
+        "AUTO_MOBILE_DAEMON_PID_FILE_PATH": "/tmp/legacy/d.pid"
+      },
+      "suffix": "-edf7a04020",
+      "socketPath": "/tmp/legacy/d.sock",
+      "pidFilePath": "/tmp/legacy/d.pid",
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock"
+    },
+    {
+      "name": "AUTOMOBILE_ override wins over the legacy alias",
+      "posixOnly": false,
+      "env": {
+        "AUTOMOBILE_DAEMON_SOCKET_PATH": "/tmp/new/d.sock",
+        "AUTO_MOBILE_DAEMON_SOCKET_PATH": "/tmp/legacy/d.sock"
+      },
+      "suffix": "",
+      "socketPath": "/tmp/new/d.sock",
+      "pidFilePath": "/tmp/auto-mobile-daemon-501.pid",
+      "lockFilePath": "/tmp/auto-mobile-daemon-501.lock"
+    },
+    {
+      "name": "relative override resolves against the launch cwd",
+      "posixOnly": true,
+      "env": {
+        "AUTOMOBILE_DAEMON_SOCKET_PATH": "d.sock",
+        "AUTOMOBILE_DAEMON_PID_FILE_PATH": "state/../d.pid",
+        "AUTOMOBILE_DAEMON_LAUNCH_CWD": "/work/lane"
+      },
+      "suffix": "",
+      "socketPath": "/work/lane/d.sock",
+      "pidFilePath": "/work/lane/d.pid",
+      "lockFilePath": "/tmp/auto-mobile-daemon-501.lock"
+    },
+    {
+      "name": "an override for one file leaves the others isolated",
+      "posixOnly": false,
+      "env": {
+        "AUTOMOBILE_AUX_SOCKET_DIR": "/tmp/lane/aux",
+        "AUTOMOBILE_DAEMON_SOCKET_PATH": "/tmp/lane/d.sock"
+      },
+      "suffix": "-edf7a04020",
+      "socketPath": "/tmp/lane/d.sock",
+      "pidFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.pid",
+      "lockFilePath": "/tmp/auto-mobile-daemon-501-edf7a04020.lock"
+    }
+  ]
+}

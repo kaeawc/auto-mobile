@@ -150,6 +150,12 @@ tasks.withType<Test>().configureEach {
     .dir(rootDir.resolve("../test/fixtures/desktop-wire"))
     .withPropertyName("desktopWireFixtures")
     .withPathSensitivity(PathSensitivity.RELATIVE)
+  // DaemonIsolationPathVectorsTest reads the daemon state-path vectors shared with the TypeScript
+  // daemon, the JUnit runner and XCTestRunner (#10906).
+  inputs
+    .file(rootDir.resolve("../test/fixtures/daemon-isolation-paths.json"))
+    .withPropertyName("daemonIsolationPathVectors")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
 
   // Run this module's tests in a single worker JVM (#5422). desktop-core's Compose UI tests
   // (`runComposeUiTest`) drive real dispatchers, a frame/animation clock, and gesture timing;

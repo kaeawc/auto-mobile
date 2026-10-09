@@ -11,7 +11,6 @@ import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
-import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -1234,42 +1233,15 @@ object DaemonSocketPaths {
 
   internal fun socketPath(
     userId: CachedDaemonUserId,
-    override: String? =
-      System.getenv("AUTOMOBILE_DAEMON_SOCKET_PATH")
-        ?: System.getenv("AUTO_MOBILE_DAEMON_SOCKET_PATH"),
-  ): String = resolveDaemonPath(override, { "/tmp/auto-mobile-daemon-${userId.value}.sock" })
+    envProvider: (String) -> String? = System::getenv,
+  ): String =
+    AutoMobileSocketPaths.daemonStatePath(DaemonStateFile.SOCKET, { userId.value }, envProvider)
 
   internal fun pidFilePath(
     userId: CachedDaemonUserId,
-    override: String? =
-      System.getenv("AUTOMOBILE_DAEMON_PID_FILE_PATH")
-        ?: System.getenv("AUTO_MOBILE_DAEMON_PID_FILE_PATH"),
+    envProvider: (String) -> String? = System::getenv,
   ): String =
-    resolveDaemonPath(
-      override,
-      { "/tmp/auto-mobile-daemon-${userId.value}.pid" },
-      System.getenv("AUTOMOBILE_DAEMON_LAUNCH_CWD") ?: System.getProperty("user.dir", "."),
-    )
-
-  internal fun resolveDaemonPath(
-    override: String?,
-    defaultPath: String,
-    daemonLaunchCwd: String =
-      System.getenv("AUTOMOBILE_DAEMON_LAUNCH_CWD") ?: System.getProperty("user.dir", "."),
-  ): String = resolveDaemonPath(override, { defaultPath }, daemonLaunchCwd)
-
-  /** [defaultPath] is lazy so an explicit [override] never pays for the default's uid lookup. */
-  internal fun resolveDaemonPath(
-    override: String?,
-    defaultPath: () -> String,
-    daemonLaunchCwd: String =
-      System.getenv("AUTOMOBILE_DAEMON_LAUNCH_CWD") ?: System.getProperty("user.dir", "."),
-  ): String {
-    val configuredPath = override?.trim().takeUnless { it.isNullOrEmpty() } ?: return defaultPath()
-    val path = Path.of(configuredPath)
-    return if (path.isAbsolute) configuredPath
-    else Path.of(daemonLaunchCwd, configuredPath).toString()
-  }
+    AutoMobileSocketPaths.daemonStatePath(DaemonStateFile.PID, { userId.value }, envProvider)
 
   /** Version this desktop client declares to the daemon's version handshake gate. */
   fun resolveClientVersion(): String? =

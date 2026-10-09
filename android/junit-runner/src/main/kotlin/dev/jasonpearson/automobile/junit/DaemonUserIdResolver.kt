@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.junit
 import java.util.concurrent.TimeUnit
 
 internal class DaemonUserIdResolver(
+  private val envProvider: (String) -> String? = System::getenv,
   private val osName: () -> String = { System.getProperty("os.name").orEmpty() },
   private val userName: () -> String = {
     System.getProperty("user.name", "default").ifBlank { "default" }
@@ -44,5 +45,6 @@ internal class DaemonUserIdResolver(
         }
       }
 
-  fun pidPath(): String = "/tmp/auto-mobile-daemon-$userId.pid"
+  /** Same resolution as `DaemonSocketPaths.pidFilePath()` (overrides, aux-dir suffix). */
+  fun pidPath(): String = DaemonStatePaths.resolve(DaemonStateFile.PID, { userId }, envProvider)
 }

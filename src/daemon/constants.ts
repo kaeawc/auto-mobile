@@ -52,6 +52,31 @@ export function resolveIsolatedDaemonStatePath(
   return `/tmp/auto-mobile-daemon-${userId}${resolveDaemonIsolationSuffix(env)}.${extension}`;
 }
 
+const DAEMON_STATE_PATH_OVERRIDE_ENV = {
+  sock: ["AUTOMOBILE_DAEMON_SOCKET_PATH", "AUTO_MOBILE_DAEMON_SOCKET_PATH"],
+  pid: ["AUTOMOBILE_DAEMON_PID_FILE_PATH", "AUTO_MOBILE_DAEMON_PID_FILE_PATH"],
+  lock: ["AUTOMOBILE_DAEMON_LOCK_FILE_PATH", "AUTO_MOBILE_DAEMON_LOCK_FILE_PATH"],
+} as const;
+
+/**
+ * Effective daemon state-file path: an explicit `AUTOMOBILE_DAEMON_*_PATH` override
+ * (resolved against the daemon launch directory) first, then the
+ * `AUTOMOBILE_AUX_SOCKET_DIR`-isolated `/tmp` default. The JUnit runner, desktop
+ * app and XCTestRunner port this rule; `test/fixtures/daemon-isolation-paths.json`
+ * holds the shared vectors all of them are tested against (#10906).
+ */
+export function resolveDaemonStatePath(
+  extension: "sock" | "pid" | "lock",
+  env: NodeJS.ProcessEnv = process.env,
+  userId: string = uid,
+): string {
+  const [primary, legacy] = DAEMON_STATE_PATH_OVERRIDE_ENV[extension];
+  const override = env[primary] ?? env[legacy];
+  return override
+    ? resolvePathFromDaemonLaunchWorkingDirectory(override, env)
+    : resolveIsolatedDaemonStatePath(extension, env, userId);
+}
+
 /**
  * Default port for the daemon's internal HTTP server
  */
@@ -161,11 +186,7 @@ export const DAEMON_PORT_RANGE_END = 3010;
  */
 export const DEFAULT_SOCKET_PATH = `/tmp/auto-mobile-daemon-${uid}.sock`;
 
-const socketPathOverride =
-  process.env.AUTOMOBILE_DAEMON_SOCKET_PATH ?? process.env.AUTO_MOBILE_DAEMON_SOCKET_PATH;
-export const SOCKET_PATH = socketPathOverride
-  ? resolvePathFromDaemonLaunchWorkingDirectory(socketPathOverride)
-  : resolveIsolatedDaemonStatePath("sock");
+export const SOCKET_PATH = resolveDaemonStatePath("sock");
 
 /**
  * PID lock file path
@@ -177,22 +198,14 @@ export const SOCKET_PATH = socketPathOverride
  */
 export const DEFAULT_PID_FILE_PATH = `/tmp/auto-mobile-daemon-${uid}.pid`;
 
-const pidFilePathOverride =
-  process.env.AUTOMOBILE_DAEMON_PID_FILE_PATH ?? process.env.AUTO_MOBILE_DAEMON_PID_FILE_PATH;
-export const PID_FILE_PATH = pidFilePathOverride
-  ? resolvePathFromDaemonLaunchWorkingDirectory(pidFilePathOverride)
-  : resolveIsolatedDaemonStatePath("pid");
+export const PID_FILE_PATH = resolveDaemonStatePath("pid");
 
 /**
  * Lock file path for coordinating concurrent daemon start operations.
  * Prevents thundering herd when multiple proxy processes try to start
  * the daemon simultaneously.
  */
-const lockFilePathOverride =
-  process.env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH ?? process.env.AUTO_MOBILE_DAEMON_LOCK_FILE_PATH;
-export const LOCK_FILE_PATH = lockFilePathOverride
-  ? resolvePathFromDaemonLaunchWorkingDirectory(lockFilePathOverride)
-  : resolveIsolatedDaemonStatePath("lock");
+export const LOCK_FILE_PATH = resolveDaemonStatePath("lock");
 
 /**
  * Absolute path of the launch-capture log inherited from DaemonManager. The

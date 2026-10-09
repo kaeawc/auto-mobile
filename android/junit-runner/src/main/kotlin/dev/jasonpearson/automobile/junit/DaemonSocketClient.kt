@@ -250,10 +250,8 @@ internal object DaemonSocketPaths {
   private const val DAEMON_PACKAGE_VERSION_PROPERTY = "automobile.daemon.package.version"
   private val ignoredPackageVersions = setOf("latest", "unknown")
 
-  fun socketPath(): String {
-    val userId = getUserId()
-    return "/tmp/auto-mobile-daemon-$userId.sock"
-  }
+  /** Control socket, honouring overrides and `AUTOMOBILE_AUX_SOCKET_DIR` like the daemon. */
+  fun socketPath(): String = DaemonStatePaths.resolve(DaemonStateFile.SOCKET, ::getUserId)
 
   fun daemonStartTimeoutMs(): Long {
     // Check system property first, then environment variable
@@ -491,11 +489,8 @@ internal object DaemonSocketPaths {
     }
   }
 
-  /** PID file the daemon writes its identity to. Mirrors [socketPath] (per-uid, /tmp). */
-  fun pidFilePath(): String {
-    val userId = getUserId()
-    return "/tmp/auto-mobile-daemon-$userId.pid"
-  }
+  /** PID file the daemon writes its identity to. Resolved like [socketPath]. */
+  fun pidFilePath(): String = DaemonStatePaths.resolve(DaemonStateFile.PID, ::getUserId)
 
   /**
    * The release portion of a version string — everything before the semver `+g<sha>` dev stamp.

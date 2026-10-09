@@ -619,18 +619,16 @@ class DesktopDaemonLifecycleTest {
 
   @Test
   fun `resolves PID-file overrides using the daemon launch directory`() {
-    assertEquals(
-      "/tmp/automobile/daemon.pid",
-      DaemonSocketPaths.resolveDaemonPath("daemon.pid", "/tmp/default.pid", "/tmp/automobile"),
-    )
-    assertEquals(
-      "/var/run/automobile.pid",
-      DaemonSocketPaths.resolveDaemonPath(
-        "/var/run/automobile.pid",
-        "/tmp/default.pid",
-        "/tmp/automobile",
-      ),
-    )
+    fun pidPath(override: String) =
+      DaemonSocketPaths.pidFilePath(
+        CachedDaemonUserId { "501" },
+        mapOf(
+          "AUTOMOBILE_DAEMON_PID_FILE_PATH" to override,
+          "AUTOMOBILE_DAEMON_LAUNCH_CWD" to "/tmp/automobile",
+        )::get,
+      )
+    assertEquals("/tmp/automobile/daemon.pid", pidPath("daemon.pid"))
+    assertEquals("/var/run/automobile.pid", pidPath("/var/run/automobile.pid"))
   }
 
   @Test

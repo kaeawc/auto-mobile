@@ -57,6 +57,9 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
     // An observer gets the same no-heartbeat budget as a session owner: the lease plus the
     // suspect grace, so one late heartbeat at the 2 s client cadence never expires it.
     private readonly heartbeatTimeoutMs = getDefaultSessionHeartbeatTimeoutMs() + SUSPECT_GRACE_MS,
+    // Called when an observer is gone for good (explicit release or heartbeat expiry). Not called
+    // for "promotion": the same UUID lives on as a device session and keeps its state.
+    private readonly onObserverGone?: (sessionId: string) => void,
   ) {}
 
   register(sessionId: string, clientName: string): ObserverRegistrationResult {
@@ -126,6 +129,9 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
     const removed = this.sessions.delete(sessionId);
     if (removed) {
       logger.debug(`Removed observer session ${sessionId}: ${reason}`);
+      if (reason !== "promotion") {
+        this.onObserverGone?.(sessionId);
+      }
     }
     return removed;
   }

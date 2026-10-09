@@ -666,7 +666,16 @@ export class Daemon {
     });
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
-    this.observerSessionRegistry = new ObserverSessionRegistry(this.timer);
+    this.observerSessionRegistry = new ObserverSessionRegistry(
+      this.timer,
+      undefined,
+      (sessionId) => {
+        // An observer's per-session appearance config (#10976) dies with the observer.
+        clearSessionAppearanceConfig(sessionId).catch((error: unknown) => {
+          logger.warn(`[Appearance] Failed to drop config of observer ${sessionId}`, error);
+        });
+      },
+    );
     this.configureSessionLifecycleCallbacks();
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     const recoveryConfiguration = parseDeviceRecoveryPolicy(recoveryPolicyEnvironment);

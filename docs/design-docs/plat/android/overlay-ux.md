@@ -631,7 +631,11 @@ list is a `column` with `repeat` whose single child is the row template).
   `dialog.text`, `dialog.confirm`/`dismiss` (`label` and `onTap`), `snackbar.text` and
   `snackbar.action` (`label` and `onTap`); in condition operands (`equals` and
   `notEquals` strings in `visibleWhen`, `styleWhen[].when` and nested `all`/`any`/
-  `not`), in `setState.value` and in `emit.name`. Anything else, including a
+  `not`), in `setState.value` and in `emit.name`; and in every state key (#11051):
+  `stateKey`, `timePicker` `hourKey`/`minuteKey`, a `listItem` trailing `stateKey`,
+  `openWhen.key`, condition `key`s and the `key` of `setState`, `toggle`, `increment`
+  and `decrement`, so `"key": "liked_{item.id}"` gives every row its own state.
+  Anything else, including a
   `{key}` state placeholder, other braces, and the container's own fields, is not a
   repeat placeholder and is untouched. Inside a template `{index}` shadows a state
   key named `index`. A string that is exactly one placeholder keeps the item's own
@@ -646,6 +650,13 @@ list is a `column` with `repeat` whose single child is the row template).
   contain another `repeat` (`root.children[0].repeat`) or a `pager`
   (`root.children[0]`); `repeat` on a leaf node is an unknown property; an `emit.name`
   that binds to an empty string for any item fails at the name (`root.children[0].onTap[0].name`).
+  A bound state key must be a literal key (`^[A-Za-z_][A-Za-z0-9_]{0,63}$`) for every
+  item; one that is not fails at that item (`root.repeat.items[1]`, message
+  `Bound state key "liked_b-c" is invalid`). A state-key
+  placeholder outside every template fails at the key (`State key placeholder outside a
+  repeat template`). A bound key missing from `state` behaves exactly like a literal
+  missing key: the type checks run once per item and fail at the key, naming the item
+  (`Toggle requires a boolean state key (repeat item 1)`).
 - Limits count the expanded tree. `MAX_OVERLAY_NODES` and `MAX_OVERLAY_IMAGES` are
   checked against every instance, and an overflow fails at the container's
   `repeat` (for example `root.children[2].repeat`, `Expanded node limit exceeded`).
@@ -656,6 +667,70 @@ list is a `column` with `repeat` whose single child is the row template).
 - Rendering expands the template before layout. Each instance node renders under
   the path `container.repeat[item].children[template]`, which is also its Compose
   key, so a row keeps its identity for as long as it keeps its index.
+
+### Reusable components: components and use
+
+A spec may declare a top-level `components` map of named node templates and place
+them with `use` nodes (#11053), so a card, row or header used in several places is
+written once.
+
+```json
+{
+  "components": {
+    "postCard": {
+      "root": {
+        "type": "card",
+        "children": [
+          { "type": "text", "text": "{props.name}" },
+          {
+            "type": "button",
+            "label": "Like",
+            "onTap": [{ "type": "toggle", "key": "{props.likeKey}" }]
+          }
+        ]
+      }
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "use",
+        "component": "postCard",
+        "props": { "name": "Alexey", "likeKey": "liked_a" }
+      },
+      { "type": "use", "component": "postCard", "props": { "name": "Bea", "likeKey": "liked_b" } }
+    ]
+  }
+}
+```
+
+- Components are expanded on the host (`src/features/overlay/overlayComponents.ts`)
+  before validation and transport: each `use` is replaced by a copy of the
+  component's `root` and `components` is dropped. Devices never see either, so the
+  Kotlin and Swift renderers and the device validator are unchanged.
+- Component names and prop names are state-key-shaped. A `use` node has only
+  `type`, `component` and optional `props`; props are scalars (string, finite
+  number, boolean).
+- `{props.<field>}` binds in exactly the fields a `repeat` placeholder binds (see
+  List templates above), state keys included, plus the `props` of a nested `use`.
+  A string that is exactly one placeholder keeps the prop's type. `{index}` and
+  other aliases are left for a `repeat` to bind, so a `use` inside a repeat template
+  can pass `"likeKey": "liked_{item.id}"`, and a component may contain `repeat`
+  and further `use` nodes.
+- Rejected, with the path of the `use`: an unknown component
+  (`root.children[0].component`), a missing prop (`.props`), an unused or
+  non-scalar prop (`.props.<name>`), a cycle including self-reference
+  (`.component`, message `Component cycle: a → b → a`), and `use` nesting deeper
+  than 8. Unused components are allowed.
+- Limits apply to the expanded tree: nodes, depth and images as usual (expansion
+  itself stops at `MAX_OVERLAY_NODES`), and the byte limit applies to both the
+  authored and the expanded spec (`Expanded spec byte limit exceeded`), because the
+  device re-validates bytes.
+- An error inside an expansion names each `use` it went through, for example
+  `root.children[2] (use postCard) → components.postCard.root.children[1].label`.
+  Nodes outside every component keep their authored paths, because a `use` expands
+  to exactly one node.
 
 ### Re-showing an overlay
 

@@ -4,6 +4,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.doubleOrNull
 
 /** One piece of a string with `{as.field}` / `{index}` placeholders resolved into segments. */
 sealed interface OverlayRepeatSegment {
@@ -53,24 +54,224 @@ object OverlayRepeatTemplate {
     else null
   }
 
-  private fun isFieldName(name: String): Boolean =
+  /**
+   * A state-key field: a literal key, or key characters mixed with at least one `{index}` or
+   * `{alias.field}` placeholder that must bind to a literal key per instance (#11051). Scanned
+   * rather than matched with a regex, like [segments].
+   */
+  fun isBoundKey(text: String): Boolean {
+    if (isFieldName(text)) return true
+    var placeholders = 0
+    var index = 0
+    while (index < text.length) {
+      val character = text[index]
+      if (character == '{') {
+        val close = text.indexOf('}', index + 1)
+        if (close < 0 || !isPlaceholder(text.substring(index + 1, close))) return false
+        placeholders++
+        index = close + 1
+      } else if (isKeyCharacter(character)) {
+        index++
+      } else {
+        return false
+      }
+    }
+    return placeholders > 0
+  }
+
+  /** [text] with `{index}` and `{alias.field}` bound to one item; unknown fields stay literal. */
+  fun bind(text: String, alias: String, item: Map<String, JsonElement>, index: Int): String =
+    segments(text, alias).joinToString("") { segment ->
+      when (segment) {
+        is OverlayRepeatSegment.Literal -> segment.text
+        is OverlayRepeatSegment.Index -> index.toString()
+        is OverlayRepeatSegment.Field ->
+          (item[segment.name] as? JsonPrimitive)?.let(::rendered) ?: "{$alias.${segment.name}}"
+      }
+    }
+
+  /** Integral numbers render without a decimal point or exponent at any magnitude. */
+  fun rendered(value: JsonPrimitive): String {
+    if (value.isString) return value.content
+    val number = value.doubleOrNull
+    return if (number != null && number.isFinite() && number == Math.floor(number))
+      java.math.BigDecimal(number).toPlainString()
+    else value.content
+  }
+
+  private fun isPlaceholder(inner: String): Boolean {
+    if (inner == "index") return true
+    val dot = inner.indexOf('.')
+    return dot > 0 && isFieldName(inner.substring(0, dot)) && isFieldName(inner.substring(dot + 1))
+  }
+
+  private fun isKeyCharacter(character: Char): Boolean =
+    character in 'A'..'Z' || character in 'a'..'z' || character in '0'..'9' || character == '_'
+
+  fun isFieldName(name: String): Boolean =
     name.length in 1..64 &&
       (name[0] in 'A'..'Z' || name[0] in 'a'..'z' || name[0] == '_') &&
       name.all { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '_' }
 }
 
+/** How a bindable field binds; mirrors `FieldKind` in the TypeScript `overlayTemplate.ts`. */
+internal enum class OverlayBindableKind {
+  TEXT,
+  OPERAND,
+  EMIT_NAME,
+  KEY,
+}
+
+/**
+ * Visits a node's own bindable fields (not its children) in the same order as the TypeScript
+ * `mapBindableFields`: `text`, component fields, `visibleWhen`, `styleWhen`, `onTap`, then the
+ * state-key fields. Stops at the first non-null result of [visit].
+ */
+internal object OverlayBindableFields {
+  fun <T : Any> first(
+    node: JsonObject,
+    path: String,
+    visit: (JsonElement?, String, OverlayBindableKind) -> T?,
+  ): T? {
+    val visitor = Visitor(visit)
+    return visitor.node(node, path)
+  }
+
+  private class Visitor<T : Any>(
+    val visit: (JsonElement?, String, OverlayBindableKind) -> T?,
+  ) {
+    fun field(data: JsonObject, key: String, path: String, kind: OverlayBindableKind): T? =
+      data[key]?.let { visit(it, "$path.$key", kind) }
+
+    fun objects(data: JsonObject, key: String, path: String): List<Pair<JsonObject, String>> =
+      (data[key] as? JsonArray).orEmpty().mapIndexedNotNull { index, entry ->
+        (entry as? JsonObject)?.let { it to "$path.$key[$index]" }
+      }
+
+    fun condition(value: JsonElement?, path: String): T? {
+      val condition = value as? JsonObject ?: return null
+      field(condition, "key", path, OverlayBindableKind.KEY)?.let {
+        return it
+      }
+      field(condition, "equals", path, OverlayBindableKind.OPERAND)?.let {
+        return it
+      }
+      field(condition, "notEquals", path, OverlayBindableKind.OPERAND)?.let {
+        return it
+      }
+      condition(condition["not"], "$path.not")?.let {
+        return it
+      }
+      for (form in listOf("all", "any")) {
+        for ((member, memberPath) in objects(condition, form, path)) {
+          condition(member, memberPath)?.let {
+            return it
+          }
+        }
+      }
+      return null
+    }
+
+    fun action(action: JsonObject, path: String): T? =
+      when ((action["type"] as? JsonPrimitive)?.content) {
+        "setState" ->
+          field(action, "key", path, OverlayBindableKind.KEY)
+            ?: field(action, "value", path, OverlayBindableKind.OPERAND)
+        "emit" -> field(action, "name", path, OverlayBindableKind.EMIT_NAME)
+        "toggle",
+        "increment",
+        "decrement" -> field(action, "key", path, OverlayBindableKind.KEY)
+        else -> null
+      }
+
+    fun actions(data: JsonObject, path: String): T? {
+      for ((action, actionPath) in objects(data, "onTap", path)) {
+        action(action, actionPath)?.let {
+          return it
+        }
+      }
+      return null
+    }
+
+    /** A `{label, onTap?}` part (dialog or snackbar button, app bar action). */
+    fun part(value: JsonElement?, path: String): T? {
+      val part = value as? JsonObject ?: return null
+      return field(part, "label", path, OverlayBindableKind.TEXT) ?: actions(part, path)
+    }
+
+    fun component(node: JsonObject, path: String): T? =
+      when ((node["type"] as? JsonPrimitive)?.content) {
+        "button",
+        "fab" -> field(node, "label", path, OverlayBindableKind.TEXT)
+        "segmentedButton" ->
+          objects(node, "options", path).firstNotNullOfOrNull { (option, optionPath) ->
+            field(option, "label", optionPath, OverlayBindableKind.TEXT)
+          }
+        "topAppBar" ->
+          field(node, "title", path, OverlayBindableKind.TEXT)
+            ?: part(node["navigationIcon"], "$path.navigationIcon")
+            ?: objects(node, "actions", path).firstNotNullOfOrNull { (entry, entryPath) ->
+              part(entry, entryPath)
+            }
+        "dialog" ->
+          field(node, "title", path, OverlayBindableKind.TEXT)
+            ?: field(node, "text", path, OverlayBindableKind.TEXT)
+            ?: part(node["confirm"], "$path.confirm")
+            ?: part(node["dismiss"], "$path.dismiss")
+        "snackbar" ->
+          field(node, "text", path, OverlayBindableKind.TEXT)
+            ?: part(node["action"], "$path.action")
+        else -> null
+      }
+
+    fun keys(node: JsonObject, path: String): T? {
+      for (key in listOf("stateKey", "hourKey", "minuteKey")) {
+        field(node, key, path, OverlayBindableKind.KEY)?.let {
+          return it
+        }
+      }
+      (node["trailing"] as? JsonObject)?.let { trailing ->
+        field(trailing, "stateKey", "$path.trailing", OverlayBindableKind.KEY)?.let {
+          return it
+        }
+      }
+      return (node["openWhen"] as? JsonObject)?.let { openWhen ->
+        field(openWhen, "key", "$path.openWhen", OverlayBindableKind.KEY)
+      }
+    }
+
+    fun node(node: JsonObject, path: String): T? {
+      if ((node["type"] as? JsonPrimitive)?.content == "text") {
+        field(node, "text", path, OverlayBindableKind.TEXT)?.let {
+          return it
+        }
+      }
+      return component(node, path)
+        ?: condition(node["visibleWhen"], "$path.visibleWhen")
+        ?: objects(node, "styleWhen", path).firstNotNullOfOrNull { (entry, entryPath) ->
+          condition(entry["when"], "$entryPath.when")
+        }
+        ?: actions(node, path)
+        ?: keys(node, path)
+    }
+  }
+}
+
 /**
  * Static checks for `repeat` on an already structurally valid spec, mirroring the TypeScript
- * validator: placeholders name a field every item has, a template holds no nested `repeat` or
- * pager, and the expanded tree still fits the node and image limits. Depth is unchanged because
- * instances are siblings.
+ * validator: placeholders name a field every item has, state keys bind to a literal key for every
+ * item, a template holds no nested `repeat` or pager, and the expanded tree still fits the node and
+ * image limits. Depth is unchanged because instances are siblings.
  */
 internal object OverlayRepeatValidator {
-  private data class Scope(val alias: String, val items: List<JsonObject>)
+  /** A repeat container's path, its alias and its items. */
+  data class Scope(val path: String, val alias: String, val items: List<JsonObject>)
 
   private data class Child(val node: JsonObject, val path: String)
 
   private class Budget(var nodes: Int = 0, var images: Int = 0)
+
+  private val stateKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 
   fun validate(spec: JsonElement): OverlaySpecError? {
     val root = (spec as? JsonObject)?.get("root") as? JsonObject ?: return null
@@ -82,8 +283,13 @@ internal object OverlayRepeatValidator {
   private fun JsonObject.text(key: String): String? =
     (get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content
 
-  private fun checkString(value: JsonElement?, path: String, scope: Scope): OverlaySpecError? {
-    val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+  private fun JsonElement?.string(): String? =
+    (this as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+  private fun hasPlaceholder(text: String, alias: String): Boolean =
+    OverlayRepeatTemplate.segments(text, alias).any { it !is OverlayRepeatSegment.Literal }
+
+  private fun unknownField(text: String, path: String, scope: Scope): OverlaySpecError? {
     for (name in OverlayRepeatTemplate.fieldReferences(text, scope.alias)) {
       if (!scope.items.all { it.containsKey(name) }) {
         return fail(path, "Unknown repeat field ${JsonPrimitive(name)}")
@@ -93,78 +299,61 @@ internal object OverlayRepeatValidator {
   }
 
   /** An emit name must stay non-empty for every item once its placeholders are bound. */
-  private fun checkEmitName(value: JsonElement?, path: String, scope: Scope): OverlaySpecError? {
-    val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
-    val segments = OverlayRepeatTemplate.segments(text, scope.alias)
+  private fun emptyEmitName(text: String, path: String, scope: Scope): OverlaySpecError? {
     val empty =
-      scope.items.indexOfFirst { item ->
-        segments.all { segment ->
-          when (segment) {
-            is OverlayRepeatSegment.Literal -> segment.text.isEmpty()
-            is OverlayRepeatSegment.Index -> false
-            is OverlayRepeatSegment.Field ->
-              (item[segment.name] as? JsonPrimitive)?.content.orEmpty().isEmpty()
-          }
-        }
+      scope.items.withIndex().indexOfFirst { (index, item) ->
+        OverlayRepeatTemplate.bind(text, scope.alias, item, index).isEmpty()
       }
     return if (empty < 0) null else fail(path, "Expanded emit name is empty for item $empty")
   }
 
-  private fun checkCondition(value: JsonElement?, path: String, scope: Scope): OverlaySpecError? {
-    val condition = value as? JsonObject ?: return null
-    checkString(condition["equals"], "$path.equals", scope)?.let {
-      return it
+  /** A state key must bind to a literal key for every item; the failing item is reported. */
+  private fun invalidBoundKey(key: String, path: String, scope: Scope): OverlaySpecError? {
+    if (!hasPlaceholder(key, scope.alias)) {
+      return if (stateKeyPattern.matches(key)) null else fail(path, "Invalid key value")
     }
-    checkString(condition["notEquals"], "$path.notEquals", scope)?.let {
-      return it
-    }
-    checkCondition(condition["not"], "$path.not", scope)?.let {
-      return it
-    }
-    for (form in listOf("all", "any")) {
-      val members = condition[form] as? JsonArray ?: continue
-      for ((index, member) in members.withIndex()) {
-        checkCondition(member, "$path.$form[$index]", scope)?.let {
-          return it
-        }
+    for ((index, item) in scope.items.withIndex()) {
+      val bound = OverlayRepeatTemplate.bind(key, scope.alias, item, index)
+      if (!stateKeyPattern.matches(bound)) {
+        return fail(
+          "${scope.path}.repeat.items[$index]",
+          "Bound state key ${JsonPrimitive(bound)} is invalid",
+        )
       }
     }
     return null
   }
 
-  private fun checkAction(value: JsonElement, path: String, scope: Scope): OverlaySpecError? {
-    val action = value as? JsonObject ?: return null
-    return when (action.text("type")) {
-      "setState" -> checkString(action["value"], "$path.value", scope)
-      "emit" ->
-        checkString(action["name"], "$path.name", scope)
-          ?: checkEmitName(action["name"], "$path.name", scope)
+  private fun fieldError(
+    value: JsonElement?,
+    path: String,
+    kind: OverlayBindableKind,
+    scope: Scope,
+  ): OverlaySpecError? {
+    val text = value.string() ?: return null
+    unknownField(text, path, scope)?.let {
+      return it
+    }
+    return when (kind) {
+      OverlayBindableKind.EMIT_NAME -> emptyEmitName(text, path, scope)
+      OverlayBindableKind.KEY -> invalidBoundKey(text, path, scope)
       else -> null
     }
   }
 
-  private fun checkOwnFields(node: JsonObject, path: String, scope: Scope): OverlaySpecError? {
-    if (node.text("type") == "text") {
-      checkString(node["text"], "$path.text", scope)?.let {
-        return it
-      }
+  private fun checkOwnFields(node: JsonObject, path: String, scope: Scope): OverlaySpecError? =
+    OverlayBindableFields.first(node, path) { value, fieldPath, kind ->
+      fieldError(value, fieldPath, kind, scope)
     }
-    checkCondition(node["visibleWhen"], "$path.visibleWhen", scope)?.let {
-      return it
+
+  /** Outside every template a state key is literal, so a placeholder there is an invalid key. */
+  private fun checkLiteralKeys(node: JsonObject, path: String): OverlaySpecError? =
+    OverlayBindableFields.first(node, path) { value, fieldPath, kind ->
+      val text = value.string()
+      if (kind == OverlayBindableKind.KEY && text != null && !stateKeyPattern.matches(text))
+        fail(fieldPath, "State key placeholder outside a repeat template")
+      else null
     }
-    for ((index, entry) in (node["styleWhen"] as? JsonArray).orEmpty().withIndex()) {
-      val condition = (entry as? JsonObject)?.get("when")
-      checkCondition(condition, "$path.styleWhen[$index].when", scope)?.let {
-        return it
-      }
-    }
-    for ((index, action) in (node["onTap"] as? JsonArray).orEmpty().withIndex()) {
-      checkAction(action, "$path.onTap[$index]", scope)?.let {
-        return it
-      }
-    }
-    return null
-  }
 
   private fun childrenOf(node: JsonObject, path: String): List<Child> {
     (node["child"] as? JsonObject)?.let {
@@ -175,11 +364,11 @@ internal object OverlayRepeatValidator {
     }
   }
 
-  private fun scopeOf(node: JsonObject): Scope? {
+  private fun scopeOf(node: JsonObject, path: String): Scope? {
     val repeat = node["repeat"] as? JsonObject ?: return null
     val alias = repeat.text("as") ?: return null
     val items = (repeat["items"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
-    return Scope(alias, items)
+    return Scope(path, alias, items)
   }
 
   private fun templateErrors(node: JsonObject, path: String, scope: Scope?): OverlaySpecError? {
@@ -187,11 +376,10 @@ internal object OverlayRepeatValidator {
       if (node.containsKey("repeat")) return fail("$path.repeat", "Nested repeat is not supported")
       if (node.text("type") == "pager")
         return fail(path, "Pager cannot appear inside a repeat template")
-      checkOwnFields(node, path, scope)?.let {
-        return it
-      }
     }
-    val childScope = scopeOf(node) ?: scope
+    val own = if (scope != null) checkOwnFields(node, path, scope) else checkLiteralKeys(node, path)
+    if (own != null) return own
+    val childScope = scopeOf(node, path) ?: scope
     for (child in childrenOf(node, path)) {
       templateErrors(child.node, child.path, childScope)?.let {
         return it
@@ -218,7 +406,7 @@ internal object OverlayRepeatValidator {
     budget.images += imageUses(node)
     if (budget.images > OverlaySpecValidator.MAX_OVERLAY_IMAGES)
       return fail(at, "Expanded image limit exceeded")
-    val scope = scopeOf(node)
+    val scope = scopeOf(node, path)
     val nestedPath = if (scope != null) "$path.repeat" else repeatPath
     repeat(scope?.items?.size ?: 1) {
       for (child in childrenOf(node, path)) {
@@ -228,5 +416,62 @@ internal object OverlayRepeatValidator {
       }
     }
     return null
+  }
+
+  /** Every repeat container in the spec, outermost first. */
+  fun scopes(spec: JsonElement): List<Scope> {
+    val root = (spec as? JsonObject)?.get("root") as? JsonObject ?: return emptyList()
+    val scopes = mutableListOf<Scope>()
+    fun collect(node: JsonObject, path: String) {
+      scopeOf(node, path)?.let(scopes::add)
+      for (child in childrenOf(node, path)) collect(child.node, child.path)
+    }
+    collect(root, "root")
+    return scopes
+  }
+
+  private val checkedKeyFields = listOf("key", "stateKey", "hourKey", "minuteKey")
+
+  /** The state-key values the validator type-checks: node keys and an action's `key`. */
+  private fun checkedKeys(value: JsonObject): List<String> =
+    checkedKeyFields.mapNotNull { value.text(it) } +
+      listOfNotNull(
+        (value["trailing"] as? JsonObject)?.text("stateKey"),
+        (value["openWhen"] as? JsonObject)?.text("key"),
+      )
+
+  private fun bindKeys(value: JsonObject, scope: Scope, item: JsonObject, index: Int): JsonObject {
+    fun JsonObject.bound(field: String): JsonObject {
+      val text = text(field) ?: return this
+      return JsonObject(
+        this + (field to JsonPrimitive(OverlayRepeatTemplate.bind(text, scope.alias, item, index))),
+      )
+    }
+    var bound = value
+    for (field in checkedKeyFields) bound = bound.bound(field)
+    (bound["trailing"] as? JsonObject)?.let {
+      bound = JsonObject(bound + ("trailing" to it.bound("stateKey")))
+    }
+    (bound["openWhen"] as? JsonObject)?.let {
+      bound = JsonObject(bound + ("openWhen" to it.bound("key")))
+    }
+    return bound
+  }
+
+  /**
+   * The per-item views the state-type checks run over: a node or action inside a template whose
+   * state keys hold placeholders appears once per item with those keys bound; everything else
+   * appears once, unchanged. Call only after [validate] passed.
+   */
+  fun keyInstances(
+    scopes: List<Scope>,
+    value: JsonObject,
+    path: String,
+  ): List<Pair<JsonObject, Int?>> {
+    val scope = scopes.firstOrNull { path.startsWith("${it.path}.children[") }
+    if (scope == null || checkedKeys(value).none { hasPlaceholder(it, scope.alias) }) {
+      return listOf(value to null)
+    }
+    return scope.items.mapIndexed { index, item -> bindKeys(value, scope, item, index) to index }
   }
 }

@@ -1,0 +1,37 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "components": {
+      "a": {
+        "root": {
+          "type": "column",
+          "children": [
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "use",
+              "component": "a"
+            }
+          ]
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "use",
+          "component": "a"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0] (use a) → components.a.root.children[1].component",
+  "expectedMessage": "Component cycle: a → a"
+}

@@ -24,6 +24,7 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 | Element and bounds anchors                                               | Supported, in points (`overlay_anchor_v1`); see [Anchors](#anchors)                                     |
 | `pressScale`, motion, `visibleWhen`, state and actions, assets and fonts | Supported                                                                                               |
 | Material component nodes, dialog, snackbar, pickers                      | Supported; see [Material components](#material-components)                                              |
+| Reusable `components` / `use` nodes (#11053)                             | Supported: the host expands them before sending, so the agent only sees plain nodes                     |
 | Overlay hidden from `layer: "app"` observe screenshots (`target`)        | Supported (#10943, #10988); the host restores it after capture                                          |
 | `display` selector                                                       | Refused: a simulator has one screen                                                                     |
 | `window.layer: "app"`                                                    | Accepted and ignored, silently: the window level is fixed at alert + 1 (decision 3)                     |

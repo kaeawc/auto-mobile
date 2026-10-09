@@ -136,10 +136,7 @@ object OverlaySpecValidator {
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
         ?: OverlayRepeatValidator.validate(value)
         ?: pagerErrors(context)
-        ?: bindingErrors(context, value as? JsonObject ?: JsonObject(emptyMap()))
-        ?: listItemBindingErrors(context, value as? JsonObject ?: JsonObject(emptyMap()))
-        ?: sheetBindingErrors(context, value as? JsonObject ?: JsonObject(emptyMap()))
-        ?: stateActionErrors(context, value as? JsonObject ?: JsonObject(emptyMap()))
+        ?: stateTypeErrors(value, context)
     if (error != null) return OverlaySpecValidation.Failure(error)
     return try {
       OverlaySpecValidation.Success(
@@ -184,7 +181,33 @@ object OverlaySpecValidator {
       else -> value
     }
 
-  private data class Located(val value: JsonObject, val path: String)
+  /** A node or action; [item] is the repeat item its state keys were bound to, if any. */
+  private data class Located(val value: JsonObject, val path: String, val item: Int? = null)
+
+  private fun OverlaySpecError.forItem(item: Int?): OverlaySpecError =
+    if (item == null) this else copy(message = "$message (repeat item $item)")
+
+  /**
+   * State-type checks over every repeat instance: a node or action whose state keys hold
+   * placeholders is checked once per item with those keys bound (#11051).
+   */
+  private fun stateTypeErrors(value: JsonElement, context: Context): OverlaySpecError? {
+    val data = value as? JsonObject ?: JsonObject(emptyMap())
+    val scopes = OverlayRepeatValidator.scopes(value)
+    fun List<Located>.instances() = flatMap { located ->
+      OverlayRepeatValidator.keyInstances(scopes, located.value, located.path).map { (bound, item)
+        ->
+        Located(bound, located.path, item)
+      }
+    }
+    val checked = Context()
+    checked.nodes.addAll(context.nodes.instances())
+    checked.actions.addAll(context.actions.instances())
+    return bindingErrors(checked, data)
+      ?: listItemBindingErrors(checked, data)
+      ?: sheetBindingErrors(checked, data)
+      ?: stateActionErrors(checked, data)
+  }
 
   private class Context {
     val nodes = mutableListOf<Located>()
@@ -225,7 +248,9 @@ object OverlaySpecValidator {
       "map" -> visitMap(value, rule, path, context, depth)
       "choice" -> visitChoice(value, rule, path, context, depth)
       else ->
-        if (primitiveValid(value, rule)) null else fail(path, "Invalid ${rule.text("kind")} value")
+        if (primitiveValid(value, rule)) null
+        else
+          fail(path, "Invalid ${rule.text("kind").takeUnless { it == "boundKey" } ?: "key"} value")
     }
 
   private fun visitReference(
@@ -455,6 +480,7 @@ object OverlaySpecValidator {
           (rule.flag("empty") || text.isNotEmpty()) &&
           (!rule.flag("nonblank") || !blankTextPattern.matches(text))
       "key" -> text != null && stateKeyPattern.matches(text)
+      "boundKey" -> text != null && OverlayRepeatTemplate.isBoundKey(text)
       "color" -> text != null && colorPattern.matches(text)
       "number" -> numberValid(value, rule)
       "boolean" -> primitive != null && !primitive.isString && primitive.booleanOrNull != null
@@ -527,12 +553,13 @@ object OverlaySpecValidator {
   /** A list item's trailing switch or checkbox binds a boolean, like the standalone controls. */
   private fun listItemBindingErrors(context: Context, data: JsonObject): OverlaySpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
-    for ((value, path) in context.nodes) {
+    for ((value, path, item) in context.nodes) {
       if (value.text("type") != "listItem") continue
       val key = (value["trailing"] as? JsonObject)?.text("stateKey") ?: continue
       val stored = state[key] as? JsonPrimitive
       if (stored == null || stored.isString || stored.booleanOrNull == null)
         return fail("$path.trailing.stateKey", "Toggle control requires a boolean state key")
+          .forItem(item)
     }
     return null
   }
@@ -642,28 +669,29 @@ object OverlaySpecValidator {
 
   private fun bindingErrors(context: Context, data: JsonObject): OverlaySpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
-    for ((value, path) in context.nodes) {
+    for ((value, path, item) in context.nodes) {
       componentBindingErrors(value, path, state)?.let {
-        return it
+        return it.forItem(item)
       }
       val key = value.text("stateKey") ?: continue
       val stored = state[key] as? JsonPrimitive
       if (value.text("type") == "textField" && stored?.isString != true)
-        return fail("$path.stateKey", "Text field requires a string state key")
+        return fail("$path.stateKey", "Text field requires a string state key").forItem(item)
       if (
         value.text("type") in setOf("switch", "checkbox") &&
           (stored == null || stored.isString || stored.booleanOrNull == null)
       )
-        return fail("$path.stateKey", "Toggle control requires a boolean state key")
+        return fail("$path.stateKey", "Toggle control requires a boolean state key").forItem(item)
       if (value.text("type") in setOf("radioGroup", "segmentedButton")) {
         radioGroupErrors(value, path, stored)?.let {
-          return it
+          return it.forItem(item)
         }
       }
       if (value.text("type") !in setOf("tabBar", "bottomNav")) continue
       val number = stored?.takeIf { !it.isString }?.doubleOrNull
       if (number == null || !number.isFinite() || number < 0 || number % 1.0 != 0.0) {
         return fail("$path.stateKey", "Selection requires a nonnegative integer state key")
+          .forItem(item)
       }
     }
     return null
@@ -675,7 +703,7 @@ object OverlaySpecValidator {
 
   private fun sheetBindingErrors(context: Context, data: JsonObject): OverlaySpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
-    for ((value, path) in context.nodes) {
+    for ((value, path, item) in context.nodes) {
       val name = modalNames[value.text("type")] ?: continue
       val condition = value["openWhen"] as? JsonObject ?: continue
       val key = condition.text("key") ?: continue
@@ -684,7 +712,7 @@ object OverlaySpecValidator {
         state.containsKey(key) &&
           (stored == null || stored.isString || stored.booleanOrNull == null)
       ) {
-        return fail("$path.openWhen.key", "$name requires a boolean state key")
+        return fail("$path.openWhen.key", "$name requires a boolean state key").forItem(item)
       }
     }
     return null
@@ -692,7 +720,7 @@ object OverlaySpecValidator {
 
   private fun stateActionErrors(context: Context, data: JsonObject): OverlaySpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
-    for ((value, path) in context.actions) {
+    for ((value, path, item) in context.actions) {
       val stored = state[value.text("key") ?: continue] as? JsonPrimitive
       val message =
         when (value.text("type")) {
@@ -713,7 +741,7 @@ object OverlaySpecValidator {
               }
           else -> null
         }
-      if (message != null) return fail("$path.key", message)
+      if (message != null) return fail("$path.key", message).forItem(item)
     }
     return null
   }

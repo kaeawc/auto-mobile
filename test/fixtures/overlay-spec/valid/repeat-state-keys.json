@@ -1,0 +1,131 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "liked_a": false,
+    "liked_b": true,
+    "notify_a": true,
+    "notify_b": false,
+    "saved_a": false,
+    "saved_b": true,
+    "count_a": 0,
+    "count_b": 0,
+    "open_a": false,
+    "open_b": false
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "items": [
+        {
+          "id": "a",
+          "name": "Alexey"
+        },
+        {
+          "id": "b",
+          "name": "Bea"
+        }
+      ],
+      "as": "item"
+    },
+    "children": [
+      {
+        "type": "row",
+        "children": [
+          {
+            "type": "text",
+            "text": "{item.name}"
+          },
+          {
+            "type": "text",
+            "text": "Like",
+            "testTag": "like",
+            "onTap": [
+              {
+                "type": "toggle",
+                "key": "liked_{item.id}"
+              }
+            ],
+            "styleWhen": [
+              {
+                "when": {
+                  "key": "liked_{item.id}",
+                  "equals": true
+                },
+                "style": {
+                  "color": "#CC2255"
+                }
+              }
+            ]
+          },
+          {
+            "type": "text",
+            "text": "Liked",
+            "visibleWhen": {
+              "any": [
+                {
+                  "key": "liked_{item.id}",
+                  "equals": true
+                },
+                {
+                  "not": {
+                    "key": "count_{item.id}",
+                    "lt": 1
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "switch",
+            "stateKey": "notify_{item.id}"
+          },
+          {
+            "type": "button",
+            "label": "+1",
+            "onTap": [
+              {
+                "type": "increment",
+                "key": "count_{item.id}"
+              },
+              {
+                "type": "setState",
+                "key": "last_{index}",
+                "value": "{item.id}"
+              }
+            ]
+          },
+          {
+            "type": "listItem",
+            "headline": "Save {item.name}",
+            "trailing": {
+              "type": "checkbox",
+              "stateKey": "saved_{item.id}"
+            }
+          },
+          {
+            "type": "dialog",
+            "openWhen": {
+              "key": "open_{item.id}",
+              "equals": true
+            },
+            "title": "{item.name}",
+            "confirm": {
+              "label": "Close",
+              "onTap": [
+                {
+                  "type": "toggle",
+                  "key": "open_{item.id}"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

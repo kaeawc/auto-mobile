@@ -1,7 +1,9 @@
 import { z } from "zod";
 import contract from "../../../schemas/overlay-spec-contract.json";
 import { logger } from "../../utils/logger";
-import { repeatErrors } from "./overlayRepeat";
+import { expandOverlayComponents } from "./overlayComponents";
+import { repeatErrors, repeatKeyInstances, type KeyInstance } from "./overlayRepeat";
+import { BOUND_STATE_KEY_PATTERN } from "./overlayTemplate";
 import { overlaySpecSchema, type OverlaySpec, MAX_OVERLAY_SPEC_BYTES } from "./overlaySpec";
 
 interface Rule {
@@ -321,6 +323,7 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     (rule.empty === true || value.length > 0) &&
     (!rule.nonblank || value.trim().length > 0),
   key: (value) => typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(value),
+  boundKey: (value) => typeof value === "string" && BOUND_STATE_KEY_PATTERN.test(value),
   color: (value) => typeof value === "string" && /^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(value),
   number: numberValid,
   boolean: (value) => typeof value === "boolean",
@@ -413,7 +416,7 @@ function walk(
   }
   return primitiveChecks[rule.kind]?.(value, rule)
     ? undefined
-    : fail(path, `Invalid ${rule.kind} value`);
+    : fail(path, `Invalid ${rule.kind === "boundKey" ? "key" : rule.kind} value`);
 }
 function pagerErrors(context: Context): OverlayValidationError | undefined {
   const pagers = new Set<string>();
@@ -518,18 +521,21 @@ function isOverlayDate(value: unknown): boolean {
 }
 /** A list item's trailing switch or checkbox binds a boolean, like the standalone controls. */
 function listItemBindingErrors(
-  context: Context,
+  checked: Checked,
   data: Record<string, unknown>,
 ): OverlayValidationError | undefined {
   const state = object(data.state) ?? {};
-  for (const { value, path } of context.nodes) {
+  for (const { value, path, item } of checked.nodes) {
     const trailing = value.type === "listItem" ? object(value.trailing) : undefined;
     if (
       trailing &&
       typeof trailing.stateKey === "string" &&
       typeof state[trailing.stateKey] !== "boolean"
     ) {
-      return fail(`${path}.trailing.stateKey`, "Toggle control requires a boolean state key");
+      return forItem(
+        fail(`${path}.trailing.stateKey`, "Toggle control requires a boolean state key"),
+        item,
+      );
     }
   }
   return undefined;
@@ -618,14 +624,14 @@ function componentFormErrors(
   }
 }
 function bindingErrors(
-  context: Context,
+  checked: Checked,
   data: Record<string, unknown>,
 ): OverlayValidationError | undefined {
   const state = object(data.state) ?? {};
-  for (const { value, path } of context.nodes) {
+  for (const { value, path, item } of checked.nodes) {
     const component = componentBindingErrors(value, path, state);
     if (component) {
-      return component;
+      return forItem(component, item);
     }
     if (typeof value.stateKey !== "string") {
       continue;
@@ -635,7 +641,10 @@ function bindingErrors(
       continue;
     }
     if (!numberValid(stored, { kind: "number", integer: true, min: 0 })) {
-      return fail(`${path}.stateKey`, "Selection requires a nonnegative integer state key");
+      return forItem(
+        fail(`${path}.stateKey`, "Selection requires a nonnegative integer state key"),
+        item,
+      );
     }
   }
   return undefined;
@@ -647,11 +656,11 @@ const MODAL_NAMES: Record<string, string | undefined> = {
   snackbar: "Snackbar",
 };
 function sheetBindingErrors(
-  context: Context,
+  checked: Checked,
   data: Record<string, unknown>,
 ): OverlayValidationError | undefined {
   const state = object(data.state) ?? {};
-  for (const { value, path } of context.nodes) {
+  for (const { value, path, item } of checked.nodes) {
     const type = String(value.type);
     const name = Object.hasOwn(MODAL_NAMES, type) ? MODAL_NAMES[type] : undefined;
     if (name === undefined) {
@@ -660,7 +669,7 @@ function sheetBindingErrors(
     const condition = object(value.openWhen);
     const key = condition?.key;
     if (typeof key === "string" && Object.hasOwn(state, key) && typeof state[key] !== "boolean") {
-      return fail(`${path}.openWhen.key`, `${name} requires a boolean state key`);
+      return forItem(fail(`${path}.openWhen.key`, `${name} requires a boolean state key`), item);
     }
   }
   return undefined;
@@ -680,20 +689,57 @@ const stateActionTypes: Record<string, { check: (stored: unknown) => boolean; me
   },
 };
 function stateActionErrors(
-  context: Context,
+  checked: Checked,
   data: Record<string, unknown>,
 ): OverlayValidationError | undefined {
   const state = object(data.state) ?? {};
-  for (const { value, path } of context.actions) {
+  for (const { value, path, item } of checked.actions) {
     const rule =
       typeof value.type === "string" && Object.hasOwn(stateActionTypes, value.type)
         ? stateActionTypes[value.type]
         : undefined;
     if (rule && typeof value.key === "string" && !rule.check(state[value.key])) {
-      return fail(`${path}.key`, rule.message);
+      return forItem(fail(`${path}.key`, rule.message), item);
     }
   }
   return undefined;
+}
+/** A node or action as the state-type checks see it: keys bound for one repeat item, if any. */
+interface Bound {
+  value: Record<string, unknown>;
+  path: string;
+  item?: number;
+}
+interface Checked {
+  nodes: Bound[];
+  actions: Bound[];
+}
+function forItem(error: OverlayValidationError, item: number | undefined): OverlayValidationError {
+  return item === undefined
+    ? error
+    : { ...error, message: `${error.message} (repeat item ${item})` };
+}
+const bound = ({ located, value, item }: KeyInstance<Located>): Bound => ({
+  value,
+  path: located.path,
+  item,
+});
+/** State-type checks over every repeat instance: a templated key is checked once per item. */
+function stateTypeErrors(
+  value: unknown,
+  context: Context,
+  data: Record<string, unknown>,
+): OverlayValidationError | undefined {
+  const checked: Checked = {
+    nodes: repeatKeyInstances(value, context.nodes).map(bound),
+    actions: repeatKeyInstances(value, context.actions).map(bound),
+  };
+  return (
+    bindingErrors(checked, data) ??
+    listItemBindingErrors(checked, data) ??
+    sheetBindingErrors(checked, data) ??
+    stateActionErrors(checked, data)
+  );
 }
 function validateValue(value: unknown): OverlayValidationResult {
   const context: Context = {
@@ -708,10 +754,7 @@ function validateValue(value: unknown): OverlayValidationResult {
     walk(value, definitions.spec, "", context, 0) ??
     repeatErrors(value) ??
     pagerErrors(context) ??
-    bindingErrors(context, data) ??
-    listItemBindingErrors(context, data) ??
-    sheetBindingErrors(context, data) ??
-    stateActionErrors(context, data);
+    stateTypeErrors(value, context, data);
   if (error) {
     return { success: false, error };
   }
@@ -720,6 +763,27 @@ function validateValue(value: unknown): OverlayValidationResult {
     return { success: false, error: fail("$", "Internal schema/contract mismatch") };
   }
   return { success: true, data: parsed.data };
+}
+/**
+ * Expands reusable components (#11053) before validating, so every limit applies to the tree the
+ * device receives. The expanded spec must also fit the byte limit, because the device re-validates
+ * bytes, and an error inside an expansion is reported at its authored location.
+ */
+function validateExpanded(value: unknown): OverlayValidationResult {
+  const expansion = expandOverlayComponents(value);
+  if (!expansion.success) {
+    return { success: false, error: expansion.error };
+  }
+  if (expansion.expanded && bytes(expansion.spec) > MAX_OVERLAY_SPEC_BYTES) {
+    return { success: false, error: fail("$", "Expanded spec byte limit exceeded") };
+  }
+  const result = validateValue(expansion.spec);
+  return result.success
+    ? result
+    : {
+        success: false,
+        error: { path: expansion.locate(result.error.path), message: result.error.message },
+      };
 }
 /** Raw JSON strings measure transmitted UTF-8 bytes; object input measures compact JSON bytes. */
 export function validateOverlaySpec(json: unknown): OverlayValidationResult {
@@ -731,7 +795,7 @@ export function validateOverlaySpec(json: unknown): OverlayValidationResult {
     if (Buffer.byteLength(input, "utf8") > MAX_OVERLAY_SPEC_BYTES) {
       return { success: false, error: fail("$", "Spec byte limit exceeded") };
     }
-    return validateValue(typeof json === "string" ? JSON.parse(input) : json);
+    return validateExpanded(typeof json === "string" ? JSON.parse(input) : json);
   } catch (error) {
     logger.warn("Overlay JSON could not be decoded", error);
     return { success: false, error: fail("$", "Invalid JSON") };

@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import dev.jasonpearson.automobile.protocol.*
+import java.io.File
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -253,5 +255,50 @@ class OverlayRepeatTest {
     assertTrue(
       OverlaySpecValidator.validate(json("row-{item.id}")) is OverlaySpecValidation.Success,
     )
+  }
+
+  private fun fixture(name: String): OverlaySpec {
+    val file =
+      generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
+        .map { File(it, "test/fixtures/overlay-spec/valid/$name.json") }
+        .first { it.isFile }
+    val validated = OverlaySpecValidator.validate(file.readText())
+    return (validated as? OverlaySpecValidation.Success)?.spec ?: error(validated.toString())
+  }
+
+  @Test
+  fun `bound state keys toggle and style each row independently`() = runTest {
+    val runtime = OverlayRuntime(fixture("repeat-state-keys"), nextSequence = { 0L })
+    fun rows() = mapOverlaySpec(runtime.current.spec).root.children.map { it.children }
+    fun liked() = rows().map { row -> row[2].visible }
+    val likeKeys =
+      rows().map { row ->
+        ((row[1].source as OverlayTextNode).onTap!!.single() as OverlayToggleAction).key
+      }
+    assertEquals(listOf("liked_a", "liked_b"), likeKeys)
+    assertEquals(listOf(false, true), liked())
+    val switches = rows().map { row -> (row[3].source as OverlaySwitchNode).stateKey }
+    assertEquals(listOf("notify_a", "notify_b"), switches)
+    val trailing = rows().map { row -> (row[5].source as OverlayListItemNode).trailing }
+    assertEquals(
+      listOf(OverlayListItemCheckbox("saved_a"), OverlayListItemCheckbox("saved_b")),
+      trailing,
+    )
+    val dialogs = rows().map { row -> (row[6].source as OverlayDialogNode).openWhen.key }
+    assertEquals(listOf("open_a", "open_b"), dialogs)
+
+    fun likeColors() = rows().map { row -> row[1].style.color }
+    val likedColor = likeColors()[1]
+    assertNotEquals(likedColor, likeColors()[0])
+
+    runtime.handle(OverlayInteraction.Tap((rows()[0][1].source as OverlayTextNode).onTap!!))
+    assertEquals(listOf(true, true), liked())
+    assertEquals(listOf(likedColor, likedColor), likeColors())
+    runtime.handle(OverlayInteraction.Tap((rows()[1][1].source as OverlayTextNode).onTap!!))
+    assertEquals(listOf(true, false), liked())
+    assertEquals(OverlayScalar.BooleanValue(true), runtime.current.state["liked_a"])
+    assertEquals(OverlayScalar.BooleanValue(false), runtime.current.state["liked_b"])
+    assertEquals(likedColor, likeColors()[0])
+    assertNotEquals(likedColor, likeColors()[1])
   }
 }

@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "components": {
+      "divider": {
+        "root": {
+          "type": "divider"
+        }
+      },
+      "spare": {
+        "root": {
+          "type": "text",
+          "text": "never used"
+        }
+      }
+    },
+    "root": {
+      "type": "use",
+      "component": "divider"
+    }
+  },
+  "expanded": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "divider"
+    }
+  }
+}

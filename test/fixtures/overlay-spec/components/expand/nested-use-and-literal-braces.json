@@ -1,0 +1,88 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "count": 2
+    },
+    "components": {
+      "header": {
+        "root": {
+          "type": "row",
+          "children": [
+            {
+              "type": "use",
+              "component": "badge",
+              "props": {
+                "text": "{props.title}: {count} new"
+              }
+            },
+            {
+              "type": "text",
+              "text": "{index} {item.x} {props}"
+            }
+          ]
+        }
+      },
+      "badge": {
+        "root": {
+          "type": "text",
+          "text": "{props.text}"
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "use",
+          "component": "header",
+          "props": {
+            "title": "Inbox"
+          }
+        },
+        {
+          "type": "text",
+          "text": "{props.title} stays literal outside a component"
+        }
+      ]
+    }
+  },
+  "expanded": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "count": 2
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "row",
+          "children": [
+            {
+              "type": "text",
+              "text": "Inbox: {count} new"
+            },
+            {
+              "type": "text",
+              "text": "{index} {item.x} {props}"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "{props.title} stays literal outside a component"
+        }
+      ]
+    }
+  }
+}

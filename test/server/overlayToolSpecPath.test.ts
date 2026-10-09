@@ -59,6 +59,23 @@ describe("prototype show specPath", () => {
     expect(reader.reads).toEqual(["/work/spec.json"]);
   });
 
+  test("a spec file with components is sent expanded (#11053)", async () => {
+    reader.addFile(
+      "/work/components.json",
+      file({
+        ...spec,
+        components: { hello: { root: { type: "text", text: "Hello {props.name}" } } },
+        root: { type: "use", component: "hello", props: { name: "file" } },
+      }),
+    );
+    const { response } = await call({ action: "show", specPath: "/work/components.json" });
+    expect(response.isError).not.toBe(true);
+    expect(client.getOverlayHistory()).toMatchObject([
+      { method: "show", spec: { ...spec, root: { type: "text", text: "Hello file" } } },
+    ]);
+    expect(JSON.stringify(client.getOverlayHistory())).not.toContain("components");
+  });
+
   test("other show options still apply", async () => {
     await call({ action: "show", specPath: "/work/spec.json" });
     const { response } = await call({ action: "show", specPath: "/work/spec.json", reset: true });

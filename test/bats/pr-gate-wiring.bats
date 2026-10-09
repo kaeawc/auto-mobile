@@ -148,11 +148,13 @@ wiring_requires_yq() {
     [ "$status" -eq 0 ]
     [ "$output" = "ubuntu-latest" ]
   done
-  for job in node-unit-tests node-host-integration-tests; do
-    run yq -r ".jobs.\"${job}\".strategy.matrix.os[]" "$WF"
-    [ "$status" -eq 0 ]
-    [ "$output" = $'ubuntu-latest\nwindows-latest' ]
-  done
+  run yq -r '.jobs."node-host-integration-tests".strategy.matrix.os[]' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'ubuntu-latest\nwindows-latest' ]
+  # The Linux unit run lives in the required ts-build-and-test job (#10893).
+  run yq -r '.jobs."node-unit-tests".strategy.matrix.os[]' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "windows-latest" ]
 }
 
 @test "unit, integration, and stress jobs invoke their canonical lanes" {
@@ -179,14 +181,33 @@ wiring_requires_yq() {
   [ "$dependencies" = $'detect-changes\nfast-validation' ]
 }
 
-@test "PR and merge TypeScript coverage have setup headroom beyond the 12 minute wall budget" {
+@test "merge TypeScript coverage has setup headroom beyond the 12 minute wall budget" {
   wiring_requires_yq
-  local workflow
-  for workflow in "$WF" .github/workflows/merge.yml; do
-    run yq -r '.jobs."ts-code-coverage"."timeout-minutes" >= 20' "$workflow"
-    [ "$status" -eq 0 ]
-    [ "$output" = "true" ]
-  done
+  run yq -r '.jobs."ts-code-coverage"."timeout-minutes" >= 20' .github/workflows/merge.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
+@test "PRs run the Node unit suite once on Linux; coverage stays on merge (#10893)" {
+  wiring_requires_yq
+  # The required check name survives on the lint/typecheck/build job.
+  run yq -r '.jobs."ts-build-and-test".name' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "Node TypeScript Build and Test (ubuntu-latest)" ]
+  [[ -z "$(job_block ts-code-coverage)" ]]
+  # No PR job runs the suite under coverage.
+  [[ "$(cat "$WF")" != *"run-ts-coverage.sh"* ]]
+  [[ "$(cat "$WF")" != *"test-ts.sh coverage"* ]]
+  # The required Ubuntu job is the one Linux unit run, with the 100ms budget;
+  # the Node Unit Tests matrix no longer has an Ubuntu leg. merge.yml keeps
+  # producing coverage for the README badge.
+  local ubuntu
+  ubuntu="$(job_block ts-build-and-test)"
+  [[ "$ubuntu" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$ubuntu" == *"scripts/validate-bun-test-timings.sh"* ]]
+  [[ "$(yq -r '.jobs."node-unit-tests".strategy.matrix.os[]' "$WF")" != *"ubuntu"* ]]
+  [[ "$(job_block node-unit-tests)" != *"validate-bun-test-timings.sh"* ]]
+  [[ "$(job_block ts-code-coverage .github/workflows/merge.yml)" == *"run-ts-coverage.sh"* ]]
 }
 
 @test "merge TypeScript coverage uploads diagnostics after failures with bounded retention" {

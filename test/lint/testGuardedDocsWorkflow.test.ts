@@ -240,8 +240,8 @@ describe("contract-bearing docs keep their Node test guard in CI", () => {
   });
 
   test("Node unit test skip still depends on the guarded docs-only output", () => {
-    expect(workflow.jobs["node-unit-tests"].if).toContain(
-      "needs.detect-changes.outputs.docs_only != 'true'",
-    );
+    for (const job of ["node-unit-tests", "ts-build-and-test"]) {
+      expect(workflow.jobs[job].if).toContain("needs.detect-changes.outputs.docs_only != 'true'");
+    }
   });
 });

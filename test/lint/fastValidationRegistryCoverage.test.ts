@@ -9,15 +9,15 @@ const EXCLUDED_WITH_REASON: Readonly<Record<string, string>> = {
   "node-format": "PR fast-validation Check formatting step: bun run format:check",
   lychee:
     "merge.yml validate-documentation-links: online links; PR fast-validation runs lychee-offline",
-  "host-shell-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh (diff ratchet)",
-  "git-metadata-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh",
-  "ffmpeg-execution-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh",
+  "host-shell-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh (diff ratchet)",
+  "git-metadata-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh",
+  "ffmpeg-execution-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh",
   "sdkmanager-execution-boundary":
     "PR node-host-integration-tests: sdkManagerExecutionBoundary.integration.test.ts scans src/",
   "archive-extraction-boundary": "PR node-unit-tests: archiveExtractionBoundary.test.ts scans src/",
-  "xcodebuild-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh (diff ratchet)",
-  "daemon-launcher-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh",
-  "process-safety": "PR ts-code-coverage: lint -> check-boundaries.sh",
+  "xcodebuild-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh (diff ratchet)",
+  "daemon-launcher-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh",
+  "process-safety": "PR ts-build-and-test: lint -> check-boundaries.sh",
 };
 
 function selectedChecks(run: string): string[] {

@@ -253,6 +253,22 @@ JSON
   [[ "$output" == *"Node Unit Tests (ubuntu-latest) → Enforce 100ms budget for changed unit tests → none → RERUN-DONT-FIX"* ]]
 }
 
+@test "classifies a timing-budget flap on the required Ubuntu build-and-test job (#10893)" {
+  fixture="$BATS_TEST_TMPDIR/required-timing-budget-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/required-timing-budget",
+  "jobs": [
+    {"databaseId": 1, "name": "Node TypeScript Build and Test (ubuntu-latest)", "conclusion": "failure", "steps": [{"name": "Enforce 100ms budget for changed unit tests", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 127
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Node TypeScript Build and Test (ubuntu-latest) → Enforce 100ms budget for changed unit tests → none → RERUN-DONT-FIX"* ]]
+}
+
 @test "investigates a timing-budget breach retained by isolated median rechecks" {
   fixture="$BATS_TEST_TMPDIR/timing-budget-median-run.json"
   cat > "$fixture" <<'JSON'

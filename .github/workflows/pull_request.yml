@@ -1273,18 +1273,17 @@ jobs:
   # =============================================================================
 
   node-unit-tests:
-    # 1560s unit lane cap (720s shard budget, one infra retry: see
-    # scripts/test-ts.sh) + 360s timing rechecks + setup, cold-import probe
-    # and upload < 2220s.
+    # The Linux unit run lives in ts-build-and-test (#10893); this leg is the
+    # Windows run. 1560s unit lane cap + setup and upload < 2220s.
     timeout-minutes: 37
     name: "Node Unit Tests (${{ matrix.os }})"
-    runs-on: ${{ matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || matrix.os }}
+    runs-on: ${{ matrix.os }}
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [windows-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1315,42 +1314,6 @@ jobs:
             unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
           fi
           bash scripts/test-ts.sh unit
-
-      # The 100 ms budget used to run in a separate "Node Unit Timing Budget"
-      # job that downloaded these JUnit reports onto a fresh hosted runner: a
-      # runner slot, a queue wait, a checkout and a bun install per PR. It now
-      # runs on the leg that produced the reports, as merge.yml already does.
-      # Same validator, same isolated median recheck, same base ref.
-      - name: "Enforce 100ms budget for changed unit tests"
-        if: runner.os == 'Linux'
-        shell: bash
-        env:
-          BUN_TEST_TIMING_BASE_REF: ${{ github.event.pull_request.base.sha }}
-          BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
-          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "360"
-        run: bash scripts/validate-bun-test-timings.sh
-
-      - name: "Upload Node Unit Timing Budget Summary"
-        if: always() && !cancelled() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v6
-        with:
-          name: node-unit-timing-budget-summary
-          path: scratch/timing-unit-reports/unit-timing-budget-summary.md
-          if-no-files-found: ignore
-          retention-days: 7
-
-      - name: "Measure cold module imports (advisory, #10429)"
-        if: runner.os == 'Linux'
-        continue-on-error: true
-        timeout-minutes: 2
-        shell: bash
-        run: |
-          mkdir -p scratch
-          bash scripts/measure-cold-imports.sh | tee scratch/cold-imports.md
-          {
-            echo "### Cold module import (Linux)"
-            cat scratch/cold-imports.md
-          } >> "$GITHUB_STEP_SUMMARY"
 
   node-host-integration-tests:
     timeout-minutes: 20
@@ -1418,7 +1381,7 @@ jobs:
     needs: detect-changes
     # macOS coverage runs after merge, where a scarce hosted macOS runner cannot
     # block PRs. Keep this required PR lane on Windows alongside the separate
-    # Ubuntu coverage job below.
+    # Ubuntu build-and-test job below.
     timeout-minutes: 25
     env:
       RUN_MCP_BUILD_TEST: ${{ needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true' }}
@@ -1564,15 +1527,25 @@ jobs:
           path: "*.heapsnapshot"
 
   # =============================================================================
-  # Formatting and TypeScript Code Coverage
+  # Node TypeScript Lint, Typecheck, Build and Unit Tests (Ubuntu)
   # =============================================================================
 
-  ts-code-coverage:
+  # Reports the required "Node TypeScript Build and Test (ubuntu-latest)" check.
+  # It is the one Linux unit-suite execution per PR (#10893): it used to run the
+  # suite under coverage while a separate Node Unit Tests (ubuntu-latest) leg ran
+  # it again for the 100ms timing budget. The plain unit lane and the timing
+  # budget now run here, so a unit failure still blocks merge through this
+  # required check; coverage and the README badge come from merge.yml's
+  # ts-code-coverage job on every push to main.
+  ts-build-and-test:
     name: "Node TypeScript Build and Test (ubuntu-latest)"
     runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
-    timeout-minutes: 20
+    # 1560s unit lane cap (720s shard budget, one infra retry: see
+    # scripts/test-ts.sh) + 360s timing rechecks + lint, typecheck, build,
+    # smokes, cold-import probe and uploads < 2700s.
+    timeout-minutes: 45
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1653,11 +1626,47 @@ jobs:
       - name: "Run Bun image runtime smoke"
         run: bun run test:image:bun
 
-      - name: "Run Tests with Coverage"
-        run: bash scripts/ci/run-ts-coverage.sh
+      - name: "Run complete unit lane"
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+          # 2 x (720s budget + 60s attempt overhead): a shard that times out or
+          # is killed by a signal is retried once (#10583).
+          AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560"
+          AUTOMOBILE_UNIT_JUNIT_DIR: scratch/timing-unit-reports
+        run: bash scripts/test-ts.sh unit
 
-      - name: "Verify Coverage Output"
-        run: bash scripts/ci/verify-ts-coverage-output.sh
+      # Runs on the leg that produced these JUnit reports (same validator, same
+      # isolated median recheck, same base ref as merge.yml).
+      - name: "Enforce 100ms budget for changed unit tests"
+        shell: bash
+        env:
+          BUN_TEST_TIMING_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
+          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "360"
+        run: bash scripts/validate-bun-test-timings.sh
+
+      - name: "Upload Node Unit Timing Budget Summary"
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@v6
+        with:
+          name: node-unit-timing-budget-summary
+          path: scratch/timing-unit-reports/unit-timing-budget-summary.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: "Measure cold module imports (advisory, #10429)"
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          mkdir -p scratch
+          bash scripts/measure-cold-imports.sh | tee scratch/cold-imports.md
+          {
+            echo "### Cold module import (Linux)"
+            cat scratch/cold-imports.md
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: "Upload Build/Test Logs"
         if: failure() || cancelled()
@@ -1666,14 +1675,6 @@ jobs:
         with:
           name: mcp-build-test-logs-ubuntu-latest
           path: ci-logs/*.log
-          retention-days: 7
-
-      - name: "Upload Coverage"
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: ts-code-coverage
-          path: coverage/
           retention-days: 7
 
   # =============================================================================

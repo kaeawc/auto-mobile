@@ -4,6 +4,16 @@ import { loadJobSteps, stepNamed } from "../helpers/workflowSteps";
 const WORKFLOWS = [".github/workflows/pull_request.yml", ".github/workflows/merge.yml"] as const;
 
 describe("Node test workflow isolation", () => {
+  test("the required Ubuntu PR job prevents unit tests from starting a real adb daemon", () => {
+    const runTests = stepNamed(
+      loadJobSteps(".github/workflows/pull_request.yml", "ts-build-and-test"),
+      "Run complete unit lane",
+    );
+
+    expect(runTests).toBeDefined();
+    expect(runTests?.env?.AUTOMOBILE_TEST_MODE).toBe("true");
+  });
+
   for (const workflow of WORKFLOWS) {
     test(`${workflow} prevents unit tests from starting a real adb daemon`, () => {
       const runTests = stepNamed(

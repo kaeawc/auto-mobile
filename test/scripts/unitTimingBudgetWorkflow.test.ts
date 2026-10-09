@@ -21,7 +21,7 @@ const callers = readdirSync(workflowDir)
 describe("unit timing validator workflow budgets", () => {
   test("discovers both existing timing gates", () => {
     expect(callers.map(({ file, id }) => `${file}:${id}`)).toContain(
-      "pull_request.yml:node-unit-tests",
+      "pull_request.yml:ts-build-and-test",
     );
     expect(callers.map(({ file, id }) => `${file}:${id}`)).toContain("merge.yml:node-unit-tests");
   });
@@ -61,12 +61,18 @@ describe("unit timing validator workflow budgets", () => {
 });
 
 const prJobs = loadJobs(".github/workflows/pull_request.yml");
-const budgetSteps = prJobs["node-unit-tests"].steps ?? [];
+// The required Ubuntu job is the one Linux unit run per PR (#10893).
+const budgetSteps = prJobs["ts-build-and-test"].steps ?? [];
 
 test("timing budget runs on the leg that produced the reports, not a separate job", () => {
   // A separate job cost a runner slot, queue wait, checkout and bun install
   // per PR just to download these JUnit reports.
   expect(prJobs["node-unit-timing-budget"]).toBeUndefined();
+  expect(
+    (prJobs["node-unit-tests"].steps ?? []).some((step) =>
+      step.run?.includes("scripts/validate-bun-test-timings.sh"),
+    ),
+  ).toBe(false);
   const laneIndex = budgetSteps.findIndex((step) =>
     step.run?.includes("bash scripts/test-ts.sh unit"),
   );
@@ -76,7 +82,7 @@ test("timing budget runs on the leg that produced the reports, not a separate jo
   const enforce = budgetSteps[enforceIndex];
   expect(laneIndex).toBeGreaterThanOrEqual(0);
   expect(enforceIndex).toBeGreaterThan(laneIndex);
-  expect(enforce?.if).toBe("runner.os == 'Linux'");
+  expect(enforce?.if).toBeUndefined();
   expect(enforce?.env?.BUN_TEST_TIMING_REPORT_DIR).toBe(
     budgetSteps[laneIndex].env?.AUTOMOBILE_UNIT_JUNIT_DIR,
   );
@@ -94,7 +100,7 @@ test("timing budget uploads its summary after enforcement even on failure", () =
   expect(uploadIndex).toBeGreaterThan(enforceIndex);
   const upload = budgetSteps[uploadIndex];
   expect(upload.uses).toBe("actions/upload-artifact@v6");
-  expect(upload.if).toBe("always() && !cancelled() && runner.os == 'Linux'");
+  expect(upload.if).toBe("always() && !cancelled()");
   expect(upload.with).toEqual({
     name: "node-unit-timing-budget-summary",
     path: "scratch/timing-unit-reports/unit-timing-budget-summary.md",

@@ -326,6 +326,14 @@ export const DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS = 5_000;
 export const DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS = 3;
 export const DAEMON_START_PROCESS_TABLE_SCAN_RETRY_DELAYS_MS = [200, 500] as const;
 
+/**
+ * How long a daemon RPC socket whose peer closed its side may keep flushing replies already queued
+ * to it before it is destroyed (#11058). Under Bun a reply queued to a peer that has gone away
+ * neither flushes nor errors, so the automatic end never completes and the socket never closes:
+ * the connection's sessions were never handed to the owner-disconnect policy.
+ */
+export const DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS = 1_000;
+
 /** Bound on the explicit-restart canonical-port availability probe. */
 export const DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS = 1_000;
 

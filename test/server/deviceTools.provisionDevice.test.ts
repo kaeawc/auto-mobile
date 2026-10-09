@@ -1388,26 +1388,57 @@ describe("provisionDevice handler", () => {
     expect(await deviceManager.listDeviceImages("ios")).toEqual([]);
   });
 
-  test("iOS simulator profile (#6695): an unknown re-read is a command failure, never a guessed success", async () => {
+  test("iOS simulator profile (#6695): unreadable evidence everywhere is a retryable command failure, replayed with its drift", async () => {
     const resources = new FakeDeviceResourceController();
+    resources.result.resources = { wallpaperRendering: { state: "unknown" } };
     resourceObserver.result.resources.wallpaperRendering = {
       state: "unknown",
       reason: "launchctl timed out",
     };
     const harness = setupSimulator(false, resources);
-
-    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+    const args = {
       ...provisionTestArgs("ios", "profile-unknown"),
-      resources: { wallpaperRendering: "disabled" },
-    });
+      resources: { wallpaperRendering: "disabled" as const },
+    };
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler(args);
 
     const payload = JSON.parse(response.content[0].text);
+    expect(payload.error.retryable).toBe(true);
     expect(payload.error.resourceDrift).toMatchObject([
       { resource: "wallpaperRendering", kind: "commandFailure" },
     ]);
     expect(payload.sessionId).toBeUndefined();
     await expectDeviceFree(harness.coordinator);
+
+    const replay = JSON.parse(
+      (await ToolRegistry.getTool("provisionDevice")!.handler(args)).content[0].text,
+    );
+    expect(replay.error.resourceDrift).toMatchObject([
+      { resource: "wallpaperRendering", kind: "commandFailure" },
+    ]);
   });
+
+  test.each([
+    ["unknown", { state: "unknown", reason: "launchctl timed out" }],
+    ["unsupported", { state: "unsupported" }],
+  ] as const)(
+    "iOS simulator profile (#11028): an observed %s never overrides a state the controller proved",
+    async (_name, observed) => {
+      const resources = new FakeDeviceResourceController();
+      resourceObserver.result.resources.wallpaperRendering = observed;
+      const harness = setupSimulator(false, resources);
+
+      const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+        ...provisionTestArgs("ios", "profile-transient-read"),
+        resources: { wallpaperRendering: "disabled" },
+      });
+
+      expect(response.isError).not.toBe(true);
+      expect(JSON.parse(response.content[0].text).sessionId).toEqual(expect.any(String));
+      expect(harness.readinessCalls()).toBe(1);
+    },
+  );
 
   test("iOS simulator profile (#6695): a proven profile binds the session", async () => {
     const resources = new FakeDeviceResourceController();

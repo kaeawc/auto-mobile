@@ -133,6 +133,7 @@ export class RealToolCallPath {
       createSetActiveDeviceHandler({
         displayInventory: new FakeDisplayInventoryProvider(),
         resumeCtrlProxy: async () => undefined,
+        legacyDeviceSelection: () => this.deviceSessionManager,
       }),
       { defaultEnabled: true },
     );

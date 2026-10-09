@@ -148,6 +148,73 @@ for (const [platform, deviceId] of [
       expect(store.claims.get(deviceId)).toBe(DAEMON_A_PID);
     });
 
+    // #11071: with autolock on, explicit acquisition (startDevice/getAndroid/getApple) went through
+    // autolock, which neither checked nor published the claim, so two daemons owned one device.
+    const autolock = (pool: DevicePool, mcpSessionId: string) =>
+      pool.autolockDevice(
+        deviceId,
+        platform,
+        mcpSessionId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "automationReady",
+        undefined,
+        { autolockEnabled: true },
+      );
+
+    test("an autolock acquisition is refused while another daemon claims the device, and claims it after release", async () => {
+      const a = await daemon(DAEMON_A_PID);
+      const b = await daemon(DAEMON_B_PID);
+
+      const aSession = await autolock(a.pool, "mcp-a");
+      expect(aSession).toBeDefined();
+      expect(store.claims.get(deviceId)).toBe(DAEMON_A_PID);
+
+      const refusal = await autolock(b.pool, "mcp-b").then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(refusal).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+      expect(refusal).toMatchObject({
+        code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+        ownerPid: DAEMON_A_PID,
+      });
+      expect(b.pool.getDevice(deviceId)?.sessionId ?? null).toBeNull();
+      expect(b.pool.getDevice(deviceId)?.autolockSessionId).toBeUndefined();
+
+      await releaseSessionAndDevice(a.sessions, a.pool, deviceId, aSession!, "explicit-release");
+      const bSession = await autolock(b.pool, "mcp-b");
+      expect(b.pool.getDevice(deviceId)?.sessionId).toBe(bSession!);
+      expect(store.claims.get(deviceId)).toBe(DAEMON_B_PID);
+    });
+
+    test("a claim taken between the check and the autolock rolls the autolock back", async () => {
+      const own = store.forDaemon(DAEMON_B_PID);
+      const racing: ForeignDeviceOwnership = {
+        refresh: (ids) => own.refresh(ids),
+        foreignOwnerPid: (id) => own.foreignOwnerPid(id),
+        claim: async (id) => {
+          store.claims.set(id, DAEMON_A_PID);
+          return await own.claim(id);
+        },
+        release: (id) => own.release(id),
+      };
+      const b = await daemon(DAEMON_B_PID, racing);
+
+      const refusal = await autolock(b.pool, "mcp-b").then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(refusal).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+      expect(b.pool.getDevice(deviceId)?.sessionId ?? null).toBeNull();
+      expect(b.pool.getDevice(deviceId)?.autolockSessionId).toBeUndefined();
+      expect(b.pool.resolveAutolockSessionForMcpSession("mcp-b")).toBeUndefined();
+      expect(store.claims.get(deviceId)).toBe(DAEMON_A_PID);
+    });
+
     test("platform allocation skips a device another daemon claimed", async () => {
       const a = await daemon(DAEMON_A_PID);
       const b = await daemon(DAEMON_B_PID);

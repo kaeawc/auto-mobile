@@ -64,6 +64,8 @@ export class FakeTimer implements Timer {
   private currentTime: number = 0;
   /** Wall-clock time the simulated host spent asleep; the monotonic clock skips it (#10699). */
   private hostSleptMs: number = 0;
+  /** The monotonic clock also runs while the host sleeps (Windows/Linux semantics). */
+  private sleepCountingMonotonic = false;
   private pendingTimeouts: PendingTimeout[] = [];
   private pendingIntervals: PendingInterval[] = [];
   private nextTimeoutId: number = 1;
@@ -251,10 +253,24 @@ export class FakeTimer implements Timer {
 
   /**
    * The monotonic clock: it moves with every advance and `setCurrentTime`, but not across
-   * {@link simulateHostSleep}, like `performance.now()` across a macOS or Linux suspend.
+   * {@link simulateHostSleep}, like `performance.now()` across a macOS suspend. With
+   * {@link simulateSleepCountingMonotonicClock} it runs through sleep too, as on Windows and Linux.
    */
   monotonicNow(): number {
-    return this.currentTime - this.hostSleptMs;
+    return this.monotonicIncludesHostSleep ? this.currentTime : this.currentTime - this.hostSleptMs;
+  }
+
+  /** See `Timer.monotonicIncludesHostSleep`; false (a macOS-like clock) unless switched. */
+  get monotonicIncludesHostSleep(): boolean {
+    return this.sleepCountingMonotonic;
+  }
+
+  /**
+   * Make the monotonic clock run through {@link simulateHostSleep}, like `QueryPerformanceCounter`
+   * on Windows or `CLOCK_BOOTTIME` on Linux, so sleep is indistinguishable from a stall.
+   */
+  simulateSleepCountingMonotonicClock(): void {
+    this.sleepCountingMonotonic = true;
   }
 
   /**
@@ -362,6 +378,7 @@ export class FakeTimer implements Timer {
     this.sleepHistory = [];
     this.currentTime = 0;
     this.hostSleptMs = 0;
+    this.sleepCountingMonotonic = false;
     this.pendingTimeouts = [];
     this.pendingIntervals = [];
     this.nextEventSeq = 1;

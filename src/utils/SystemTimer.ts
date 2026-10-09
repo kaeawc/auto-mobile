@@ -59,19 +59,51 @@ export interface Timer {
   now(): number;
 
   /**
-   * A monotonic clock reading in milliseconds, for measuring how long the process itself was
-   * running. Unlike {@link now} it does not advance while the host is suspended (macOS and Linux
-   * suspend; `performance.now()` is uptime-based there), so the gap between the two over an
-   * interval is time the host spent asleep (#10699). Only differences between readings are
-   * meaningful. Optional: a timer without it is treated as never sleeping.
+   * A monotonic clock reading in milliseconds. Only differences between readings are meaningful.
+   * Where it pauses while the host is suspended (see {@link monotonicIncludesHostSleep}), the gap
+   * between it and {@link now} over an interval is time the host spent asleep (#10699). Optional:
+   * a timer without it is treated as never sleeping.
    */
   monotonicNow?(): number;
+
+  /**
+   * True when {@link monotonicNow} keeps running while the host is suspended, so the two clocks
+   * cannot tell host sleep from a stall of this process. Absent or false: it pauses during
+   * suspend and the difference is a reliable sleep measurement.
+   */
+  readonly monotonicIncludesHostSleep?: boolean;
+}
+
+/**
+ * Whether `performance.now()` keeps running across a host suspend on `platform` (#10699 follow-up).
+ *
+ * Bun 1.3.x (the pinned runtime) reads every monotonic clock (`performance.now()`,
+ * `process.hrtime`, `Bun.nanoseconds()`) from one Zig `std.time.Timer`, whose `Instant` uses:
+ *
+ * - darwin: `CLOCK_UPTIME_RAW`, which does not advance while the Mac sleeps;
+ * - win32: `QueryPerformanceCounter`, which Microsoft documents as including standby, hibernate
+ *   and connected standby;
+ * - linux: `CLOCK_BOOTTIME`, which includes suspend (unlike `CLOCK_MONOTONIC`).
+ *
+ * No runtime API exposes a suspend-excluding clock on Windows or Linux without native code
+ * (`QueryUnbiasedInterruptTime` / `CLOCK_MONOTONIC`): `os.uptime()` and `process.uptime()` include
+ * sleep too. So only darwin is trusted to measure sleep; everywhere else the heartbeat monitor
+ * falls back to a length ceiling (see `SessionHeartbeatMonitorConfig.maxCredibleStallMs`).
+ */
+export function monotonicClockIncludesHostSleep(platform: NodeJS.Platform): boolean {
+  return platform !== "darwin";
 }
 
 /**
  * System timer implementation delegating to global timer functions
  */
 export class SystemTimer implements Timer {
+  readonly monotonicIncludesHostSleep: boolean;
+
+  constructor(platform: NodeJS.Platform = process.platform) {
+    this.monotonicIncludesHostSleep = monotonicClockIncludesHostSleep(platform);
+  }
+
   async sleep(ms: number): Promise<void> {
     return sleep(ms);
   }

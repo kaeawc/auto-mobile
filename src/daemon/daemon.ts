@@ -344,7 +344,10 @@ function toBootedDevice(pooledDevice: PooledDevice): BootedDevice {
  * own clock (host fallback inside the adb client, as the action paths do); iOS keeps the host
  * floor (issue #9895).
  */
-function createDaemonObservationExecutor(requestStart: number) {
+function createDaemonObservationExecutor(
+  requestStart: number,
+  isViewerRead: (pooledDevice: PooledDevice) => boolean,
+) {
   return createPooledObservationExecutor({
     hostRequestStartMs: requestStart,
     readAndroidDeviceClockMs: async (pooledDevice: PooledDevice, signal: AbortSignal) =>
@@ -359,6 +362,15 @@ function createDaemonObservationExecutor(requestStart: number) {
         minTimestamp,
         signal,
       }),
+    // A watcher of a held device gets the `observe` tool's deviceId read (#10967): connect-only,
+    // never the session pipeline's service rebind or CtrlProxy setup on the holder's device.
+    viewerRead: {
+      applies: isViewerRead,
+      observe: (pooledDevice: PooledDevice, signal: AbortSignal) =>
+        new RealObserveScreen(toBootedDevice(pooledDevice), undefined, {
+          deviceReadOnly: true,
+        }).executeDeviceRead(signal, "none"),
+    },
   });
 }
 
@@ -2236,7 +2248,9 @@ export class Daemon {
       const requestStart = this.timer.now();
       return runObservationRequestBatch(
         pooledDevices,
-        createDaemonObservationExecutor(requestStart),
+        createDaemonObservationExecutor(requestStart, (pooledDevice) =>
+          this.isHeldByAnotherSession(pooledDevice.id, sessionUuid),
+        ),
         {
           timer: this.timer,
           signal,
@@ -2253,6 +2267,22 @@ export class Daemon {
 
     // Wire up navigation graph updates to stream to IDE plugins
     this.setupNavigationGraphStreamListener(server);
+  }
+
+  /**
+   * Whether a device is held by a session other than the requester's (a derived
+   * `${base}:${label}` session counts as its base). Such a requester only watches it (#10967).
+   */
+  private isHeldByAnotherSession(deviceId: string, requesterSessionUuid?: string): boolean {
+    const holder =
+      this.sessionManager.getSessionForDevice(deviceId) ??
+      this.devicePool.getDevice(deviceId)?.sessionId;
+    if (!holder) {
+      return false;
+    }
+    const base = (sessionUuid: string | undefined) =>
+      resolveToolSelectionBaseSessionUuid(sessionUuid, this.sessionManager);
+    return base(holder) !== base(requesterSessionUuid?.trim() || undefined);
   }
 
   /**

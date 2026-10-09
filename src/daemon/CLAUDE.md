@@ -157,7 +157,9 @@ instead (#10830): the device is resolved from the booted list
 (`sessionlessDeviceReadFor`), with no readiness, current-device pin, settings,
 navigation recording or audit, and handlers see `isSessionlessDeviceRead()`
 (observe and snapshotOf then use the observer capture, connect-only on a held
-device). Read-only tools: `observe`, `snapshotOf`, `listApps`, `getDeviceState`,
+device). The observation socket's `request_observation` follows the same rule: a requester
+whose session does not hold a held device gets that connect-only observer read, never the
+session observe pipeline's service rebind or CtrlProxy setup (#10967). Read-only tools: `observe`, `snapshotOf`, `listApps`, `getDeviceState`,
 `getNetworkGraph`, `getPreference`, `listDataStores`, `getDataStore`, and
 `sqlQuery` when `isReadOnlySqlQuery` accepts the statement (a write, or anything
 the classifier cannot prove read-only, needs the holder). `identifyInteractions`

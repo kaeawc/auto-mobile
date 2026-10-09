@@ -7,6 +7,7 @@ import {
   renderPrototypeGuide,
   searchIcons,
 } from "../features/overlay/prototypeGuide";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 /** Registers the `prototype` authoring guide and its icon lookup (#11052). */
 export function registerPrototypeResources(): void {
@@ -31,7 +32,7 @@ export function registerPrototypeResources(): void {
       const query = params.query ?? "";
       const { total, names } = searchIcons(query);
       return {
-        uri: `${PROTOTYPE_ICONS_URI}?query=${encodeURIComponent(query)}`,
+        uri: `${PROTOTYPE_ICONS_URI}?query=${encodeUriSegment(query)}`,
         mimeType: "application/json",
         text: JSON.stringify({ query, total, truncated: total > names.length, names }),
       };

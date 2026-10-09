@@ -143,6 +143,13 @@ printf '%s\n' "$$" > "${state}/proxy_pid"
 reply() {
   jq -cn --argjson id "$1" --argjson result "$2" '{jsonrpc: "2.0", id: $id, result: $result}'
 }
+# Bun on macOS never delivers stdin EOF for a named FIFO (#11073): model it by detecting one.
+stdin_is_fifo=0
+if lsof -a -p "$$" -d 0 -Fn 2> /dev/null | grep -q '^n/'; then
+  stdin_is_fifo=1
+fi
+printf '%s\n' "${stdin_is_fifo}" > "${FAKE}/stdin_is_fifo"
+trap 'exit 0' TERM
 while IFS= read -r line; do
   id="$(jq -r '.id // empty' <<< "${line}")"
   [[ -n "${id}" ]] || continue
@@ -152,6 +159,15 @@ while IFS= read -r line; do
     continue
   fi
   tool="$(jq -r '.params.name' <<< "${line}")"
+  # The owner of a lazily expired session is refused on its next call (#10964/#10979).
+  if [[ "${tool}" == observe ]]; then
+    observed="$(jq -r '.params.arguments.deviceId // empty' <<< "${line}")"
+    if [[ "${FAKE_REFUSE_WHILE_HELD:-0}" == 1 ||
+      (-n "${observed}" && ! -d "${state}/${observed}" && -f "${FAKE}/releases") ]]; then
+      jq -cn --argjson id "${id}" '{jsonrpc: "2.0", id: $id, result: {isError: true, content: [{type: "text", text: "{\"code\":\"no_active_device_session\",\"reason\":\"lazy-expiry\"}"}]}}'
+      continue
+    fi
+  fi
   printf '%s %s\n' "${tool}" "$(jq -c '.params.arguments' <<< "${line}")" >> "${FAKE}/tool.calls"
   target=""
   session_arg="$(jq -r '.params.arguments.sessionUuid // empty' <<< "${line}")"
@@ -178,6 +194,9 @@ while IFS= read -r line; do
   fi
   reply "${id}" '{"content":[{"type":"text","text":"ok"}]}'
 done
+if [[ "${stdin_is_fifo}" == 1 ]]; then
+  while true; do command sleep 0.05; done
+fi
 EOF
 
   cat > "${FAKE}/nc" <<'EOF'
@@ -352,6 +371,13 @@ run_check() {
   [ "${output}" = "owner-disconnected" ]
 }
 
+@test "stdin-eof: the proxy sees EOF on an anonymous pipe, not a FIFO, so stop does not wait" {
+  run_check --scenario stdin-eof
+  [ "${status}" -eq 0 ]
+  [ "$(cat "${FAKE}/stdin_is_fifo")" = 0 ]
+  [[ "${output}" != *"did not exit after stdin closed"* ]]
+}
+
 @test "selector: deviceId-only calls hold the device past the idle window" {
   run_check --scenario selector
   [ "${status}" -eq 0 ]
@@ -372,6 +398,20 @@ run_check() {
   grep -qx 'observe {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
   run cut -d' ' -f2 "${FAKE}/releases"
   [ "${output}" = "cleanup-expired" ]
+}
+
+@test "observe-only: the owner's refusal after the release is the release signal" {
+  run_check --scenario observe-only
+  [ "${status}" -eq 0 ]
+  # The loop observed once more after the release and was refused, rather than dying.
+  [ "$(grep -c '^observe ' "${FAKE}/tool.calls")" -ge 2 ]
+  [[ "${output}" == *"PASS observe-only"* ]]
+}
+
+@test "observe-only: a refusal while the device is still held fails" {
+  FAKE_REFUSE_WHILE_HELD=1 run_check --scenario observe-only
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"refused with no_active_device_session while"* ]]
 }
 
 @test "observe-only: fails when a read counts as use" {

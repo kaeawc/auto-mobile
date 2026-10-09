@@ -504,4 +504,167 @@ final class DisplayTargetedGestureTests: XCTestCase {
             XCTAssertEqual(delivery.route, .xcuiCoordinate)
         }
     }
+
+    // MARK: - Pinch (#8379 follow-up)
+
+    private func assertPath(
+        _ path: DisplayFingerPath, start: (Double, Double), end: (Double, Double),
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCTAssertEqual(path.start.x, start.0, accuracy: 1e-9, file: file, line: line)
+        XCTAssertEqual(path.start.y, start.1, accuracy: 1e-9, file: file, line: line)
+        XCTAssertEqual(path.end.x, end.0, accuracy: 1e-9, file: file, line: line)
+        XCTAssertEqual(path.end.y, end.1, accuracy: 1e-9, file: file, line: line)
+    }
+
+    func testUnfoldedPinchTargetsInnerDisplayWithEachFingerMappedToPortrait() throws {
+        let provider = provider()
+        let factory = try DisplayGestureFactory(provider: provider)
+        var before = 0
+        let delivery = try factory.deliverPinch(
+            center: point, distanceStart: 100, distanceEnd: 300, rotationDegrees: 0, duration: 0.4
+        ) { _ in
+            XCTAssertTrue(provider.pinches.isEmpty)
+            before += 1
+        }
+        XCTAssertEqual(before, 1)
+        let pinch = try XCTUnwrap(provider.pinches.first)
+        XCTAssertEqual(provider.pinches.count, 1)
+        // Observed fingers (393,202)->(293,202) and (493,202)->(593,202) on the landscape panel
+        // map to (y, appHeight - x): the horizontal observed spread is vertical on the display.
+        assertPath(pinch.first, start: (202, 558), end: (202, 658))
+        assertPath(pinch.second, start: (202, 458), end: (202, 358))
+        XCTAssertEqual(pinch.duration, 0.4)
+        XCTAssertEqual(pinch.displayId, 2)
+        XCTAssertEqual(pinch.interfaceOrientation, 1)
+        XCTAssertEqual(delivery.route, .displayTargetedRecord)
+        XCTAssertEqual(delivery.selection.strategy, .displayTargeted)
+        XCTAssertEqual(delivery.selection.reason, "multiPanelMismatch")
+        XCTAssertEqual(delivery.synthesizedPoint, GesturePoint(x: 202, y: 508))
+        XCTAssertNil(delivery.fallbackFrom)
+        XCTAssertTrue(provider.touches.isEmpty)
+        XCTAssertTrue(provider.selections.isEmpty)
+        XCTAssertTrue(provider.actions.isEmpty)
+        XCTAssertEqual(provider.inventoryReads, 1)
+        var diagnostics = TapDiagnostics(requested: .init(x: point.x, y: point.y, durationMs: 400, mode: "pinch"))
+        factory.annotate(&diagnostics, delivery: delivery)
+        XCTAssertEqual(diagnostics.route, .displayTargetedRecord)
+        XCTAssertEqual(diagnostics.targetDisplayId, 2)
+        XCTAssertNil(diagnostics.deliveryWarning)
+        XCTAssertTrue(diagnostics.logLine(gesture: "pinch").contains("mode=pinch"))
+    }
+
+    func testPinchMappingPreservesSpreadAndRotationSense() throws {
+        let provider = provider()
+        let factory = try DisplayGestureFactory(provider: provider)
+        _ = try factory.deliverPinch(
+            center: point, distanceStart: 120, distanceEnd: 300, rotationDegrees: 90, duration: 0.3
+        )
+        let pinch = try XCTUnwrap(provider.pinches.first)
+        func spread(_ a: GesturePoint, _ b: GesturePoint) -> Double { hypot(a.x - b.x, a.y - b.y) }
+        XCTAssertEqual(spread(pinch.first.start, pinch.second.start), 120, accuracy: 1e-9)
+        XCTAssertEqual(spread(pinch.first.end, pinch.second.end), 300, accuracy: 1e-9)
+        // Observed end axis is vertical (443,52)/(443,352); the 90-degree map makes it horizontal
+        // through the mapped center, keeping the turn's direction (the map is a proper rotation).
+        assertPath(pinch.first, start: (202, 568), end: (52, 508))
+        assertPath(pinch.second, start: (202, 448), end: (352, 508))
+        let observed = observedPinchPaths(center: point, distanceStart: 120, distanceEnd: 300, rotationDegrees: 90)
+        func cross(_ path: (first: DisplayFingerPath, second: DisplayFingerPath)) -> Double {
+            let start = (path.second.start.x - path.first.start.x, path.second.start.y - path.first.start.y)
+            let end = (path.second.end.x - path.first.end.x, path.second.end.y - path.first.end.y)
+            return start.0 * end.1 - start.1 * end.0
+        }
+        XCTAssertEqual(cross(observed).sign, cross((pinch.first, pinch.second)).sign)
+    }
+
+    func testMirroredUnfoldedPinchUsesRotationThreeMapping() throws {
+        let provider = provider(geometry: GestureCoordinateGeometry(
+            app: unfolded.app, screen: unfolded.screen, observation: unfolded.observation, rotation: 3
+        ))
+        let factory = try DisplayGestureFactory(provider: provider)
+        let delivery = try factory.deliverPinch(
+            center: point, distanceStart: 100, distanceEnd: 300, rotationDegrees: 0, duration: 0.3
+        )
+        let pinch = try XCTUnwrap(provider.pinches.first)
+        // (x, y) -> (appWidth - y, x)
+        assertPath(pinch.first, start: (467, 393), end: (467, 293))
+        assertPath(pinch.second, start: (467, 493), end: (467, 593))
+        XCTAssertEqual(delivery.synthesizedPoint, GesturePoint(x: 467, y: 443))
+        XCTAssertEqual(pinch.interfaceOrientation, 1)
+    }
+
+    func testDegeneratePinchDistancesKeepTheOnePointFloor() throws {
+        let provider = provider()
+        let factory = try DisplayGestureFactory(provider: provider)
+        _ = try factory.deliverPinch(
+            center: point, distanceStart: 0, distanceEnd: -5, rotationDegrees: 0, duration: 0.3
+        )
+        let pinch = try XCTUnwrap(provider.pinches.first)
+        assertPath(pinch.first, start: (202, 508.5), end: (202, 508.5))
+        assertPath(pinch.second, start: (202, 507.5), end: (202, 507.5))
+    }
+
+    func testFoldedPinchKeepsMainScreenPathWithZeroInventoryReads() throws {
+        let provider = provider(geometry: folded)
+        let factory = try DisplayGestureFactory(provider: provider)
+        var before = 0
+        let delivery = try factory.deliverPinch(
+            center: point, distanceStart: 100, distanceEnd: 300, rotationDegrees: 0, duration: 0.3
+        ) { _ in before += 1 }
+        XCTAssertEqual(before, 0)
+        XCTAssertNil(delivery.synthesizedPoint)
+        XCTAssertNil(delivery.fallbackFrom)
+        XCTAssertEqual(delivery.route, .xcuiCoordinate)
+        XCTAssertEqual(delivery.selection.strategy, .legacy)
+        XCTAssertFalse(factory.mismatch)
+        XCTAssertEqual(provider.inventoryReads, 0)
+        XCTAssertTrue(provider.pinches.isEmpty)
+        XCTAssertTrue(provider.selections.isEmpty)
+        XCTAssertTrue(provider.actions.isEmpty)
+    }
+
+    func testPinchWithoutAResolvedDisplayKeepsMainScreenPathAndWarns() throws {
+        let provider = provider()
+        provider.inventory = GestureDisplayInventory(screens: [main], applicationDisplayId: 1, isPhoneIdiom: true)
+        let factory = try DisplayGestureFactory(provider: provider)
+        let delivery = try factory.deliverPinch(
+            center: point, distanceStart: 100, distanceEnd: 300, rotationDegrees: 0, duration: 0.3
+        )
+        XCTAssertNil(delivery.synthesizedPoint)
+        XCTAssertNil(delivery.fallbackFrom)
+        XCTAssertTrue(provider.pinches.isEmpty)
+        var diagnostics = TapDiagnostics(requested: .init(x: point.x, y: point.y, durationMs: 300, mode: "pinch"))
+        factory.annotate(&diagnostics, delivery: delivery)
+        XCTAssertEqual(diagnostics.deliveryWarning, .eventDisplayMismatch)
+        XCTAssertEqual(diagnostics.targetDisplayReason, "noNonMainScreen")
+    }
+
+    func testPinchUnavailableSymbolsFallBackToMainScreenPath() throws {
+        let provider = provider()
+        provider.symbolsAvailable = false
+        let factory = try DisplayGestureFactory(provider: provider)
+        let delivery = try factory.deliverPinch(
+            center: point, distanceStart: 100, distanceEnd: 300, rotationDegrees: 0, duration: 0.3
+        )
+        XCTAssertEqual(provider.pinches.count, 1)
+        XCTAssertNil(delivery.synthesizedPoint)
+        XCTAssertEqual(delivery.fallbackFrom, .displayTargeted)
+        XCTAssertEqual(delivery.selection.strategy, .appRelative)
+        XCTAssertTrue(provider.selections.isEmpty)
+        var diagnostics = TapDiagnostics(requested: .init(x: point.x, y: point.y, durationMs: 300, mode: "pinch"))
+        factory.annotate(&diagnostics, delivery: delivery)
+        XCTAssertEqual(diagnostics.route, .xcuiCoordinate)
+        XCTAssertEqual(diagnostics.fallbackFrom, TapCoordinateStrategy.displayTargeted.rawValue)
+        XCTAssertEqual(diagnostics.deliveryWarning, .eventDisplayMismatch)
+    }
+
+    func testPinchSynthesisErrorPropagates() throws {
+        struct Failure: Error {}
+        let provider = provider()
+        provider.synthesisError = Failure()
+        let factory = try DisplayGestureFactory(provider: provider)
+        XCTAssertThrowsError(try factory.deliverPinch(
+            center: point, distanceStart: 100, distanceEnd: 300, rotationDegrees: 0, duration: 0.3
+        )) { XCTAssertTrue($0 is Failure) }
+    }
 }

@@ -95,6 +95,33 @@ export function monotonicClockIncludesHostSleep(platform: NodeJS.Platform): bool
 }
 
 /**
+ * The Bun release line whose clock sources {@link monotonicClockIncludesHostSleep} was verified
+ * against (#10962). A different line may read its monotonic clocks from another source, silently
+ * inverting the sleep/stall judgement; `test/utils/SystemTimer.monotonicSleep.test.ts` fails when
+ * the running or pinned Bun leaves this line, so a runtime upgrade re-verifies the table.
+ */
+export const MONOTONIC_CLOCK_SEMANTICS_VERIFIED_BUN = "1.3";
+
+/**
+ * A warning when the running Bun is not the release line the clock-semantics table was verified
+ * against, else undefined. Not a Bun runtime (undefined) is not drift: there is nothing to compare.
+ */
+export function monotonicClockSemanticsDrift(bunVersion: string | undefined): string | undefined {
+  if (bunVersion === undefined) {
+    return undefined;
+  }
+  const line = bunVersion.split(".").slice(0, 2).join(".");
+  if (line === MONOTONIC_CLOCK_SEMANTICS_VERIFIED_BUN) {
+    return undefined;
+  }
+  return (
+    `Bun ${bunVersion} is not the release line (${MONOTONIC_CLOCK_SEMANTICS_VERIFIED_BUN}.x) whose ` +
+    "monotonic clock semantics were verified; whether performance.now() runs through host sleep " +
+    "may have changed, so host sleep and daemon stalls may be judged wrongly (#10962)"
+  );
+}
+
+/**
  * System timer implementation delegating to global timer functions
  */
 export class SystemTimer implements Timer {

@@ -79,6 +79,10 @@ import {
   getSessionIdleTimeoutMs,
 } from "./sessionLivenessWindows";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import {
+  DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
+  SessionCreationTimeoutError,
+} from "./deviceAcquisitionRefusals";
 import { DAEMON_SESSION_SUSPECT_CODE, isIdleReleaseReason } from "./types";
 
 /**
@@ -653,6 +657,8 @@ export type SessionDeviceUnboundCallback = (sessionId: string, deviceId: string)
 
 interface PendingSessionCreation {
   promise: Promise<Session>;
+  /** Set when the creation outlived its deadline: it must not publish if it lands later (#10963). */
+  abandoned?: boolean;
 }
 
 interface ReleaseReasonState {
@@ -669,6 +675,28 @@ interface PendingSessionRelease {
 
 interface SessionReleaseOperation extends PendingSessionRelease {
   session: Session;
+  /** When the release started; bounds the retry hint for a bind it refuses (#10960). */
+  startedAtMs?: number;
+  /** The release's current stage, named when it is reported stuck (#10963). */
+  stage?: SessionReleaseStage;
+  /** Set once a stuck release has been forced: it no longer holds the device (#10963). */
+  forced?: boolean;
+}
+
+/** Where an in-flight release is, for a stuck-release report (#10963). */
+export type SessionReleaseStage =
+  | "awaiting-rebind"
+  | "teardown"
+  | "terminal-persist"
+  | "finalize-persist";
+
+function setReleaseStage(
+  operation: SessionReleaseOperation | undefined,
+  stage: SessionReleaseStage,
+): void {
+  if (operation) {
+    operation.stage = stage;
+  }
 }
 
 interface PendingSessionRebind {
@@ -924,6 +952,27 @@ export const SESSION_RELEASE_TEARDOWN_CAP_MS = 10_000;
 export const SESSION_RELEASE_PERSIST_TIMEOUT_MS = 10_000;
 /** Logged reason when a release write outlives {@link SESSION_RELEASE_PERSIST_TIMEOUT_MS}. */
 export const RELEASE_PERSIST_TIMEOUT_REASON = "release-persist-timeout";
+/**
+ * Bound on a session creation's own waits (#10963): a release of the same UUID still in flight,
+ * and the creation's DB reads and writes. A device bind runs these under the pool's assignment
+ * mutex, and the SQLite dialect queues every query behind an open transaction, so an unbounded
+ * await held every other assignment for as long as the DB stayed wedged. Covers a release's
+ * capped teardown and its bounded writes, with margin, like the pool's create-release wait.
+ */
+export const SESSION_CREATE_WAIT_TIMEOUT_MS =
+  SESSION_RELEASE_TEARDOWN_CAP_MS + 2 * SESSION_RELEASE_PERSIST_TIMEOUT_MS + 10_000;
+/** Non-terminal release reason recorded for a creation abandoned at its deadline (#10963). */
+export const SESSION_CREATION_TIMEOUT_REASON = "session-creation-timeout";
+
+/**
+ * Retry delays for a terminal release write that timed out and then failed (#10959). The in-memory
+ * fence keeps the UUID refused for this process; the row must still become terminal before a
+ * restart, or the next daemon would admit the released UUID again. Retried until it lands.
+ */
+export const DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF: BackoffPolicy = exponentialBackoff({
+  initialDelayMs: 1_000,
+  maxDelayMs: 30_000,
+});
 const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 export const SESSION_REHYDRATION_DEADLINE_MS = 15_000;
 const EXPIRY_RELEASE_REASONS = new Set([
@@ -1072,6 +1121,12 @@ export class SessionManager {
   private readonly activeReleasePromises: Set<SessionReleaseOperation> = new Set();
   /** Release writes that outlived their deadline but may still land (#10836). */
   private readonly lateReleaseWrites: Set<Promise<void>> = new Set();
+  /** Terminal release rows a late write failed to persist, awaiting a retry (#10959). */
+  private readonly pendingTerminalReleaseRetries: Map<
+    string,
+    { snapshot: SessionReleaseSnapshot; attempt: number; handle?: NodeJS.Timeout }
+  > = new Map();
+  private terminalReleaseRetryBackoff: BackoffPolicy = DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF;
   /** Finalized release state retained only while its exact Session identity is referenced. */
   private readonly finalizedSessionReleases: WeakMap<Session, ReleaseReasonState> = new WeakMap();
   /** Serializes durable liveness claims within one exact session incarnation. */
@@ -1101,6 +1156,8 @@ export class SessionManager {
    * late setup or keep-awake restore.
    */
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
+  /** The latest cap-bounded settle time of each device's pending cleanup, when one was given. */
+  private readonly pendingDeviceCleanupSettlesBy: Map<string, number> = new Map();
   /**
    * Active per-condition network TTLs (issue #6085 item 2), keyed by session id.
    * When a session degrades the network with an `expiresInSeconds`, a timer resets
@@ -1205,6 +1262,11 @@ export class SessionManager {
   private readonly screenReaderMutationQueues = new Map<string, Promise<unknown>>();
   private observerSessions?: Pick<ObserverSessionStore, "release"> &
     Partial<Pick<ObserverSessionStore, "list">>;
+
+  /** Retry delays for terminal release writes that failed after their deadline (#10959). */
+  setTerminalReleaseRetryBackoff(backoff: BackoffPolicy): void {
+    this.terminalReleaseRetryBackoff = backoff;
+  }
 
   /** Optional daemon wiring; existing constructors and device-session lookups stay unchanged. */
   setObserverSessionRegistry(
@@ -1588,8 +1650,43 @@ export class SessionManager {
    * a concurrent session release observes the cleanup before returning the
    * device to the pool.
    */
-  registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
+  registerPendingDeviceCleanup(
+    deviceId: string,
+    cleanup: Promise<unknown>,
+    /** The cleanup's own cap, when it has one: it bounds the retry hint a refused bind gets. */
+    capMs?: number,
+  ): void {
+    if (capMs !== undefined) {
+      const settlesBy = this.timer.now() + capMs;
+      const previous = this.pendingDeviceCleanupSettlesBy.get(deviceId) ?? 0;
+      this.pendingDeviceCleanupSettlesBy.set(deviceId, Math.max(previous, settlesBy));
+    }
     this.trackPendingDeviceCleanup(deviceId, [cleanup]);
+  }
+
+  /**
+   * How long a bind refused by {@link hasDeviceCleanupInProgress} should wait before retrying
+   * (#10960): the remaining time of the cleanup's cap or of the in-flight release's bounded
+   * teardown and persist phases, or a default polling hint when nothing bounds it.
+   */
+  getDeviceCleanupRetryAfterMs(deviceId: string): number {
+    const now = this.timer.now();
+    const bounds = Array.from(this.activeReleasePromises)
+      .filter((release) => !release.forced && release.session.assignedDevice === deviceId)
+      .map(
+        (release) =>
+          (release.startedAtMs ?? now) +
+          SESSION_RELEASE_TEARDOWN_CAP_MS +
+          SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+      );
+    const cleanupBound = this.pendingDeviceCleanups.has(deviceId)
+      ? this.pendingDeviceCleanupSettlesBy.get(deviceId)
+      : undefined;
+    if (cleanupBound !== undefined) {
+      bounds.push(cleanupBound);
+    }
+    const remaining = Math.max(0, ...bounds.map((bound) => bound - now));
+    return remaining > 0 ? remaining : DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
   }
 
   /** Release owns the device until both bounded teardown and any overflow work settle. */
@@ -1597,9 +1694,94 @@ export class SessionManager {
     return (
       this.pendingDeviceCleanups.has(deviceId) ||
       Array.from(this.activeReleasePromises).some(
-        (release) => release.session.assignedDevice === deviceId,
+        (release) => !release.forced && release.session.assignedDevice === deviceId,
       )
     );
+  }
+
+  /**
+   * A release forced while it waited to start (#10963): the device may already belong to the next
+   * owner, so no teardown may touch it. Only the fence the force raised is persisted.
+   */
+  private async finishReleaseForcedBeforeStart(sessionId: string, session: Session): Promise<null> {
+    try {
+      const fence = this.terminalReleaseSnapshots.get(sessionId);
+      if (fence) {
+        await this.persistSessionRelease(fence).catch((error: unknown) => {
+          logger.warn(
+            `[SessionManager] Failed to persist forced release of ${sessionId}: ${errorMessage(error)}`,
+          );
+        });
+      }
+      return null;
+    } finally {
+      this.releasingSessions.delete(session);
+    }
+  }
+
+  /**
+   * Force a release that is stuck past the heartbeat monitor's deadline (#10963). The session is
+   * fenced terminally (so its UUID never routes again) and removed from the device maps, and its
+   * device is quarantined only until the stuck release settles or {@link SESSION_RELEASE_TEARDOWN_CAP_MS}
+   * passes, whichever is first; the caller then returns the device to the pool. Returns the device
+   * to release and the stage the release was stuck in, or undefined when no release of this
+   * session is in flight (it settled meanwhile) or it was already forced.
+   */
+  forceStuckRelease(
+    sessionId: string,
+  ): { deviceId: string; stage: SessionReleaseStage | undefined } | undefined {
+    const operation = this.releasePromises.get(sessionId);
+    if (!operation || operation.forced || !this.activeReleasePromises.has(operation)) {
+      return undefined;
+    }
+    const { session } = operation;
+    const deviceId = session.assignedDevice;
+    operation.forced = true;
+    if (!this.terminalReleaseSnapshots.has(sessionId)) {
+      const releasedAtMs = this.timer.now();
+      const releaseReason = isTerminalReleaseReason(operation.reason.value)
+        ? operation.reason.value
+        : "heartbeat-timeout";
+      this.terminalReleaseSnapshots.set(sessionId, {
+        sessionId,
+        deviceId,
+        releaseReason,
+        releasedAtMs,
+        terminal: true,
+        heartbeat: {
+          lastHeartbeatMs: session.lastHeartbeat,
+          hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+          timeoutMs: session.heartbeatTimeoutMs,
+          ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
+        },
+      });
+    }
+    if (this.removeSession(sessionId, session)) {
+      // The stuck release never reached its own notification: announce the release now so
+      // proxies and stream servers stop treating the session as live.
+      this.notifySessionRelease(this.terminalReleaseSnapshots.get(sessionId)!);
+    }
+    const settled = operation.promise.then(
+      () => undefined,
+      () => undefined,
+    );
+    const capped = raceWithDeadline(settled, {
+      timer: this.timer,
+      timeoutMs: SESSION_RELEASE_TEARDOWN_CAP_MS,
+      unref: true,
+      label: "Forced stuck release",
+    }).catch((error: unknown) => {
+      // Reaching the cap is the expected outcome for a release that stays wedged: the device is
+      // returned anyway, and the release's own stage was already reported above.
+      logger.debug(`[SessionManager] Forced release of ${sessionId}: ${errorMessage(error)}`);
+    });
+    this.trackPendingDeviceCleanup(deviceId, [capped]);
+    logger.warn(
+      `[SessionManager] Forcing the stuck release of session ${sessionId} ` +
+        `(stage=${operation.stage ?? "unknown"}): the session stays fenced and device ` +
+        `${deviceId} returns to the pool after at most ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms`,
+    );
+    return { deviceId, stage: operation.stage };
   }
 
   /**
@@ -1712,7 +1894,7 @@ export class SessionManager {
       .filter((release) => release.session.sessionId === sessionId)
       .map((release) => release.promise);
     if (activeReleases.length > 0) {
-      await Promise.all(activeReleases);
+      await this.withinCreateDeadline(sessionId, assignedDevice, Promise.all(activeReleases));
       this.assertTerminalReleaseAdmission(sessionId, this.sessions.get(sessionId));
       terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
       if (terminalRelease) {
@@ -1722,7 +1904,7 @@ export class SessionManager {
 
     const pendingCreation = this.pendingSessionCreations.get(sessionId);
     if (pendingCreation) {
-      return await pendingCreation.promise;
+      return await this.withinCreateDeadline(sessionId, assignedDevice, pendingCreation.promise);
     }
 
     const now = this.timer.now();
@@ -1752,10 +1934,18 @@ export class SessionManager {
         : {}),
     };
 
-    const creation: PendingSessionCreation = { promise: this.persistAndPublishSession(session) };
+    const creation: PendingSessionCreation = { promise: Promise.resolve(session) };
+    creation.promise = this.persistAndPublishSession(session, creation);
     this.pendingSessionCreations.set(sessionId, creation);
     try {
-      const created = await creation.promise;
+      const created = await this.withinCreateDeadline(
+        sessionId,
+        assignedDevice,
+        creation.promise,
+        () => {
+          creation.abandoned = true;
+        },
+      );
       // Natural point to retry a rotation or screen reader an earlier release could not restore.
       await this.retryAbandonedRotationRestore(created.assignedDevice);
       await this.retryAbandonedScreenReaderRestore(created.assignedDevice);
@@ -1779,14 +1969,48 @@ export class SessionManager {
     this.acceptingSessionCreations = false;
   }
 
-  private async persistAndPublishSession(session: Session): Promise<Session> {
+  /**
+   * Race one of a creation's waits against {@link SESSION_CREATE_WAIT_TIMEOUT_MS} (#10963). On
+   * timeout the caller gets a typed retryable error and `onTimeout` runs; the wait itself is not
+   * cancelled.
+   */
+  private async withinCreateDeadline<T>(
+    sessionId: string,
+    deviceId: string,
+    wait: Promise<T>,
+    onTimeout?: () => void,
+  ): Promise<T> {
+    return await raceWithDeadline(wait, {
+      timer: this.timer,
+      timeoutMs: SESSION_CREATE_WAIT_TIMEOUT_MS,
+      unref: true,
+      label: "Session creation",
+      timeoutError: () =>
+        new SessionCreationTimeoutError(sessionId, deviceId, SESSION_CREATE_WAIT_TIMEOUT_MS),
+      onTimeout: () => {
+        logger.warn(
+          `[SessionManager] Creating session ${sessionId} did not finish within ` +
+            `${SESSION_CREATE_WAIT_TIMEOUT_MS}ms (reason=${SESSION_CREATION_TIMEOUT_REASON}); ` +
+            "refusing it so the device and the assignment mutex are freed",
+        );
+        onTimeout?.();
+      },
+    });
+  }
+
+  private async persistAndPublishSession(
+    session: Session,
+    creation?: PendingSessionCreation,
+  ): Promise<Session> {
     const persistedTerminalRelease = await this.getPersistedTerminalRelease(session.sessionId);
     if (persistedTerminalRelease) {
       this.terminalReleaseSnapshots.set(session.sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);
     }
+    this.assertCreationNotAbandoned(session, creation);
     await this.rejectCreationAfterShutdownFence(session);
     await this.persistSession(session);
+    await this.retireCreationIfAbandoned(session, creation);
     await this.rejectCreationAfterShutdownFence(session);
     this.assertTerminalReleaseAdmission(session.sessionId, session);
     const terminalRelease = this.terminalReleaseSnapshots.get(session.sessionId);
@@ -1813,6 +2037,62 @@ export class SessionManager {
     this.notifySessionCreated(session);
     logger.info(`Created session ${session.sessionId} with device ${session.assignedDevice}`);
     return session;
+  }
+
+  /**
+   * A creation abandoned at its deadline whose write landed afterwards (#10963): its caller was
+   * refused and its pool claim rolled back, so it must not publish, and its active row must not
+   * let a restart rehydrate it. Unless a retry is re-creating the UUID, record a non-terminal
+   * release (the caller may retry with the same UUID), then refuse.
+   */
+  /** An abandoned creation refused before anything was written has nothing to retire. */
+  private assertCreationNotAbandoned(session: Session, creation?: PendingSessionCreation): void {
+    if (creation?.abandoned) {
+      throw new SessionCreationTimeoutError(
+        session.sessionId,
+        session.assignedDevice,
+        SESSION_CREATE_WAIT_TIMEOUT_MS,
+      );
+    }
+  }
+
+  private async retireCreationIfAbandoned(
+    session: Session,
+    creation?: PendingSessionCreation,
+  ): Promise<void> {
+    if (creation?.abandoned) {
+      await this.retireAbandonedCreation(session);
+    }
+  }
+
+  private async retireAbandonedCreation(session: Session): Promise<never> {
+    const releasedAtMs = this.timer.now();
+    await this.persistSessionRelease(
+      {
+        sessionId: session.sessionId,
+        deviceId: session.assignedDevice,
+        releaseReason: SESSION_CREATION_TIMEOUT_REASON,
+        releasedAtMs,
+        terminal: false,
+        heartbeat: {
+          lastHeartbeatMs: session.lastHeartbeat,
+          hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+          timeoutMs: session.heartbeatTimeoutMs,
+          ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
+        },
+      },
+      true,
+    ).catch((error: unknown) => {
+      logger.warn(
+        `[SessionManager] Failed to release abandoned creation of ${session.sessionId}: ` +
+          errorMessage(error),
+      );
+    });
+    throw new SessionCreationTimeoutError(
+      session.sessionId,
+      session.assignedDevice,
+      SESSION_CREATE_WAIT_TIMEOUT_MS,
+    );
   }
 
   private async rejectCreationAfterShutdownFence(session: Session): Promise<void> {
@@ -3175,14 +3455,23 @@ export class SessionManager {
     this.releasingSessions.add(session);
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     const reason = this.createReleaseReasonState(sessionId, releaseReason);
-    const promise =
-      pendingRebind?.session === session
-        ? pendingRebind.promise.then(
-            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options),
-            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options),
-          )
-        : this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options);
-    const release = { session, promise, reason };
+    const release: SessionReleaseOperation = {
+      session,
+      promise: Promise.resolve(null),
+      reason,
+      startedAtMs: this.timer.now(),
+    };
+    const run = () =>
+      release.forced
+        ? this.finishReleaseForcedBeforeStart(sessionId, session)
+        : this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options, release);
+    if (pendingRebind?.session === session) {
+      release.stage = "awaiting-rebind";
+      release.promise = pendingRebind.promise.then(run, run);
+    } else {
+      release.promise = run();
+    }
+    const promise = release.promise;
     this.releasePromises.set(sessionId, release);
     this.activeReleasePromises.add(release);
     try {
@@ -3388,7 +3677,14 @@ export class SessionManager {
     pendingSession: Promise<Session>,
   ): Promise<string | null> {
     try {
-      await pendingSession;
+      // Bounded like the creation itself (#10963): a creation that outlives this is abandoned and
+      // never publishes, so there is nothing left to release.
+      await raceWithDeadline(pendingSession, {
+        timer: this.timer,
+        timeoutMs: SESSION_CREATE_WAIT_TIMEOUT_MS,
+        unref: true,
+        label: "Release of a session still being created",
+      });
       return await this.releaseSession(sessionId, reason.value, allowExpired);
     } catch (error) {
       logger.warn(`Session ${sessionId} assignment failed before release: ${error}`);
@@ -3442,6 +3738,9 @@ export class SessionManager {
     const releases = [
       ...Array.from(this.activeReleasePromises, (release) => release.promise),
       ...this.lateReleaseWrites,
+      // Shutdown does not wait out a retry's backoff: write every unconfirmed terminal row now,
+      // before the database closes (#10959).
+      ...this.retryPendingTerminalReleasesNow(),
       ...additionalReleases,
     ];
     try {
@@ -3518,8 +3817,11 @@ export class SessionManager {
     reason: ReleaseReasonState,
     shouldCommit: ReleaseCommitFence | undefined,
     options: SessionReleaseOptions,
+    operation?: SessionReleaseOperation,
   ): Promise<string | null> {
+    const enter = (stage: SessionReleaseStage) => setReleaseStage(operation, stage);
     try {
+      enter("teardown");
       // Release restores the device to `none` itself, so a standalone TTL is now
       // redundant — cancel it first so the two restore paths cannot both fire
       // (issue #6085 item 2). Whichever runs first (this release, or the TTL that
@@ -3564,6 +3866,7 @@ export class SessionManager {
       // this operation is awaiting teardown above.
       let terminalPersisted = true;
       if (releaseSnapshot.terminal) {
+        enter("terminal-persist");
         ({ snapshot: releaseSnapshot, persisted: terminalPersisted } =
           await this.persistTerminalReleaseWithinDeadline(releaseSnapshot, reason, session));
       }
@@ -3596,6 +3899,7 @@ export class SessionManager {
       }
 
       this.notifySessionRelease(releaseSnapshot, options);
+      enter("finalize-persist");
       let persistedSnapshot: SessionReleaseSnapshot;
       try {
         persistedSnapshot = await this.completeReleasePersistence(
@@ -4085,7 +4389,7 @@ export class SessionManager {
           ),
         // The write is not cancelled; shutdown's release drain still waits on it before the
         // database closes, and if it lands later it writes the same row.
-        onTimeout: () => this.trackLateReleaseWrite(write),
+        onTimeout: () => this.trackLateReleaseWrite(write, snapshot),
       });
       if (this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot) {
         this.pendingNonTerminalReleaseSnapshots.delete(snapshot.sessionId);
@@ -4108,15 +4412,115 @@ export class SessionManager {
     }
   }
 
-  private trackLateReleaseWrite(write: Promise<void>): void {
+  private trackLateReleaseWrite(write: Promise<void>, snapshot: SessionReleaseSnapshot): void {
     const settled = write.then(
       () => undefined,
       (error: unknown) => {
         logger.warn(`[SessionManager] Late session release write failed: ${errorMessage(error)}`);
+        // The row is still active: without a retry a restart would revive the released UUID.
+        if (snapshot.terminal) {
+          this.scheduleTerminalReleaseRetry(snapshot);
+        }
       },
     );
     this.lateReleaseWrites.add(settled);
     void settled.then(() => this.lateReleaseWrites.delete(settled));
+  }
+
+  /** Queue another write of a terminal release row, after the next backoff delay (#10959). */
+  private scheduleTerminalReleaseRetry(snapshot: SessionReleaseSnapshot): void {
+    if (!this.isTerminalReleaseRetryCurrent(snapshot)) {
+      this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
+      return;
+    }
+    const pending = this.pendingTerminalReleaseRetries.get(snapshot.sessionId);
+    const attempt = (pending?.snapshot === snapshot ? pending.attempt : 0) + 1;
+    if (pending?.handle !== undefined) {
+      this.timer.clearTimeout(pending.handle);
+    }
+    const entry: { snapshot: SessionReleaseSnapshot; attempt: number; handle?: NodeJS.Timeout } = {
+      snapshot,
+      attempt,
+    };
+    entry.handle = this.timer.setTimeout(() => {
+      entry.handle = undefined;
+      void this.retryTerminalReleaseWrite(entry);
+    }, this.terminalReleaseRetryBackoff.delayForAttempt(attempt));
+    (entry.handle as { unref?: () => void }).unref?.();
+    this.pendingTerminalReleaseRetries.set(snapshot.sessionId, entry);
+    logger.warn(
+      `[SessionManager] Terminal release of session ${snapshot.sessionId} is not persisted; ` +
+        `retrying the write (attempt ${attempt})`,
+    );
+  }
+
+  /** The retry still matters: the UUID is still fenced by this snapshot and not being re-created. */
+  private isTerminalReleaseRetryCurrent(snapshot: SessionReleaseSnapshot): boolean {
+    const fence = this.terminalReleaseSnapshots.get(snapshot.sessionId);
+    return (
+      fence !== undefined &&
+      fence.releaseReason === snapshot.releaseReason &&
+      !this.isSessionBeingRecreated(snapshot.sessionId)
+    );
+  }
+
+  private async retryTerminalReleaseWrite(entry: {
+    snapshot: SessionReleaseSnapshot;
+    attempt: number;
+  }): Promise<void> {
+    const { snapshot } = entry;
+    if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) !== entry) {
+      return;
+    }
+    if (!this.isTerminalReleaseRetryCurrent(snapshot)) {
+      this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
+      return;
+    }
+    try {
+      await raceWithDeadline(
+        this.deviceSessionRepository.markReleased(
+          snapshot.sessionId,
+          EXPIRY_RELEASE_REASONS.has(snapshot.releaseReason) ? "expired" : "released",
+          snapshot.releasedAtMs,
+          snapshot.releaseReason,
+        ),
+        {
+          timer: this.timer,
+          timeoutMs: SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+          unref: true,
+          label: "Terminal session release retry",
+          timeoutError: () =>
+            new SessionReleasePersistTimeoutError(
+              snapshot.sessionId,
+              snapshot.releaseReason,
+              SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+            ),
+        },
+      );
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Retrying the terminal release write of session ${snapshot.sessionId} ` +
+          `failed: ${errorMessage(error)}`,
+      );
+      if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry) {
+        this.scheduleTerminalReleaseRetry(snapshot);
+      }
+      return;
+    }
+    if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry) {
+      this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
+    }
+  }
+
+  /** Issue every pending terminal retry now, skipping its backoff, and return the writes. */
+  private retryPendingTerminalReleasesNow(): Promise<void>[] {
+    return Array.from(this.pendingTerminalReleaseRetries.values(), (entry) => {
+      if (entry.handle !== undefined) {
+        this.timer.clearTimeout(entry.handle);
+        entry.handle = undefined;
+      }
+      return this.retryTerminalReleaseWrite(entry);
+    });
   }
 
   private isSessionBeingRecreated(sessionId: string): boolean {
@@ -5693,6 +6097,7 @@ export class SessionManager {
     void cleanup.then(() => {
       if (this.pendingDeviceCleanups.get(deviceId) === cleanup) {
         this.pendingDeviceCleanups.delete(deviceId);
+        this.pendingDeviceCleanupSettlesBy.delete(deviceId);
       }
     });
   }
@@ -6793,9 +7198,10 @@ export class SessionManager {
   /**
    * An idle-expiry release overrides in-flight work only once that work's veto has run out
    * (#10713). Abort it before the release starts so a call that never settles cannot keep driving
-   * the device after its next owner binds it (#10820). Nothing in flight, or a veto still holding
-   * (a lookup for a new execution can expire a session without consulting the veto), cancels
-   * nothing. Returns whether it cancelled.
+   * the device after its next owner binds it (#10820). Every expiry path consults the veto before
+   * releasing (#10956), so by the time this runs any execution still in flight is one the release
+   * overrides: cancel it unconditionally rather than free the device under a running call. The
+   * execution whose own lookup expired the session is spared. Returns whether it cancelled.
    */
   private cancelExecutionsOverriddenByExpiry(
     session: Session,
@@ -6804,15 +7210,7 @@ export class SessionManager {
   ): boolean {
     const query: ActiveSessionExecutionQuery =
       excludeExecutionId === undefined ? {} : { excludeExecutionId };
-    const hasActiveExecutions = this.activeSessionExecutionChecker(session.sessionId, query);
-    if (
-      !hasActiveExecutions ||
-      isReleaseVetoedByExecutions({
-        hasActiveExecutions,
-        now: this.timer.now(),
-        ...this.idleExecutionVetoBoundInput(session),
-      })
-    ) {
+    if (!this.activeSessionExecutionChecker(session.sessionId, query)) {
       return false;
     }
     this.expiryReleaseExecutionCanceller(session.sessionId, releaseReason, query);
@@ -6837,10 +7235,17 @@ export class SessionManager {
     session: Session,
     execution?: SessionExecutionMetadata,
   ): boolean {
+    // A lookup that carries no execution (routing resolution: autolock, setActiveDevice, the
+    // lifecycle ownership check) is not a call that arrived after the deadline; it only asks who
+    // holds the device. It must respect the unsettled-execution veto exactly as the idle sweep
+    // does, or it releases a session whose long call is still driving the device (#10956).
+    if (execution === undefined) {
+      return this.isSessionExpired(session);
+    }
     if (this.timer.now() <= session.expiresAt + suspectGraceMsFor(session)) {
       return false;
     }
-    return execution?.startTime === undefined || execution.startTime > session.expiresAt;
+    return execution.startTime > session.expiresAt;
   }
 
   private isLateExecutionWhileEarlierWorkIsActive(
@@ -6973,6 +7378,12 @@ export class SessionManager {
     if (this.cleanupTimer) {
       this.timer.clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
+    }
+    for (const entry of this.pendingTerminalReleaseRetries.values()) {
+      if (entry.handle !== undefined) {
+        this.timer.clearTimeout(entry.handle);
+        entry.handle = undefined;
+      }
     }
     // Cancel any armed per-condition network TTLs so a stopped manager leaves no
     // dangling timer (issue #6085 item 2).

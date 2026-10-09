@@ -4,6 +4,7 @@ import { isSessionReleasing } from "./sessionReleaseState";
 import { isTokenOwnedOrClaimPending, lookupReleasedSessionReason } from "./daemonRequestHandlers";
 import {
   cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
+  forceStuckSessionRelease,
   releaseSessionAndDevice,
 } from "./releaseSessionAndDevice";
 import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
@@ -2629,6 +2630,11 @@ export class Daemon {
         await this.cancelAndReleaseSession(sessionId, reason);
       },
       this.timer,
+      {
+        // A reap stuck past its deadline frees the device; the session stays fenced (#10963).
+        forceStuckRelease: (sessionId) =>
+          forceStuckSessionRelease(this.sessionManager, this.devicePool, sessionId),
+      },
     );
     this.heartbeatMonitor.start();
   }

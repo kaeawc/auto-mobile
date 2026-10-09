@@ -473,9 +473,10 @@ internal object AutoMobilePlanExecutor {
       }
 
       val errorMessage = response.error ?: parsed.errorMessage
-      if (parsed.code == DEVICE_OWNED_BY_OTHER_SESSION_CODE) {
-        // Another session holds the device (typically a concurrent test attempt in this runner).
-        // Wait for it to release it, within its own bounded budget, without spending maxRetries.
+      if (parsed.code in DEVICE_WAIT_CODES) {
+        // Another session holds the device (typically a concurrent test attempt in this runner),
+        // or its previous session is still finishing cleanup (#10960). Wait for it to free up,
+        // within its own bounded budget, without spending maxRetries.
         val delayMs = deviceOwnedBackoffDelayMs(deviceOwnedWaits, deviceOwnedWaitMs)
         if (delayMs == null) {
           parsed = parsed.copy(errorMessage = deviceOwnedGiveUpMessage(parsed, deviceOwnedWaitMs))
@@ -1116,6 +1117,22 @@ internal object AutoMobilePlanExecutor {
   /** Typed code for a device-mutating call refused because another session holds it (#10783). */
   internal const val DEVICE_OWNED_BY_OTHER_SESSION_CODE = "device_owned_by_other_session"
 
+  /**
+   * Typed code for a bind refused while the device's previous session finishes cleanup (#10960).
+   */
+  internal const val DEVICE_CLEANUP_IN_PROGRESS_CODE = "device_cleanup_in_progress"
+
+  /** Typed code for a bind refused because another AutoMobile daemon claims the device (#10980). */
+  internal const val DEVICE_OWNED_BY_OTHER_DAEMON_CODE = "device_owned_by_other_daemon"
+
+  /** Refusals the runner waits out with the bounded held-device wait. */
+  private val DEVICE_WAIT_CODES =
+    setOf(
+      DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+      DEVICE_CLEANUP_IN_PROGRESS_CODE,
+      DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+    )
+
   private const val DEVICE_OWNED_INITIAL_DELAY_MS = 500L
   private const val DEVICE_OWNED_MAX_DELAY_MS = 4_000L
   private const val DEVICE_OWNED_DEFAULT_BUDGET_MS = 30_000L
@@ -1141,7 +1158,13 @@ internal object AutoMobilePlanExecutor {
   private const val RELEASE_SESSION_TIMEOUT_MS = 10_000L
 
   private fun deviceOwnedGiveUpMessage(parsed: ParsedToolResult, waitedMs: Long): String =
-    "Device is held by another session ($DEVICE_OWNED_BY_OTHER_SESSION_CODE)" +
+    (when (parsed.code) {
+      DEVICE_CLEANUP_IN_PROGRESS_CODE ->
+        "Device is still finishing its previous session's cleanup ($DEVICE_CLEANUP_IN_PROGRESS_CODE)"
+      DEVICE_OWNED_BY_OTHER_DAEMON_CODE ->
+        "Device is claimed by another AutoMobile daemon ($DEVICE_OWNED_BY_OTHER_DAEMON_CODE)"
+      else -> "Device is held by another session ($DEVICE_OWNED_BY_OTHER_SESSION_CODE)"
+    }) +
       (parsed.daemonMessage?.let { ": $it" } ?: "") +
       "\nThe runner waited ${waitedMs}ms for it to be released. Another test attempt or tool " +
       "session is using this device; give each concurrent test its own device, or run them " +

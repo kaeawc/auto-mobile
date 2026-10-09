@@ -381,6 +381,34 @@ describe("autolock with a live proxy", () => {
     expectFreed();
   });
 
+  test("a long call past the 60 s window survives a concurrent routing lookup; freed one window after it settles (#10956)", async () => {
+    scenario = await LivenessScenario.start({ autolock: true });
+    const session = await scenario.acquire();
+    const call = scenario.startLongCall(session);
+
+    // Held side: past the window with the call open, another request on the same connection
+    // resolves its autolock routing (no execution metadata). It must not release the session.
+    for (let step = 0; step < 4; step++) {
+      await scenario.idle(AUTOLOCK_WINDOW_MS);
+      expect(
+        scenario.daemon.pool.resolveAutolockSessionForMcpSession(scenario.proxyConnection),
+      ).toBe(session);
+      expectHeld(session);
+    }
+    expect(scenario.releaseOf(session)).toBeUndefined();
+
+    // Released side: the window runs from the END of the call.
+    await call.settle();
+    const settledAt = scenario.timer.now();
+    const releasedAt = await scenario.idleUntilReleased(
+      session,
+      AUTOLOCK_WINDOW_MS + RELEASE_SLACK_MS,
+    );
+    expect(releasedAt).toBeGreaterThan(settledAt + AUTOLOCK_WINDOW_MS);
+    expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
+    expectFreed();
+  });
+
   test("a silent owner (proxy dead, connection never closed) is freed in about 10 s, not after the 60 s window (#10729)", async () => {
     scenario = await LivenessScenario.start({ autolock: true });
     const session = await scenario.acquire();

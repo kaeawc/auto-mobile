@@ -872,6 +872,12 @@ class McpDaemonClient(
         "daemon/heartbeat",
         buildJsonObject { put("sessionId", JsonPrimitive(sessionId)) },
       )
+    if (!response.success && response.code?.contentOrNull == SESSION_NOT_FOUND_CODE) {
+      throw DaemonSessionNotFoundException(
+        response.error ?: "Session not found",
+        response.releaseReason,
+      )
+    }
     ensureSuccess(response)
   }
 
@@ -1371,6 +1377,11 @@ data class DaemonResponse(
    * JSON-RPC number (`src/daemon/types.ts`), so it is kept as a primitive.
    */
   val code: JsonPrimitive? = null,
+  /**
+   * With a session-not-found [code]: why the daemon released a session it knows (e.g.
+   * `heartbeat-timeout`, `cleanup-expired`); absent for a UUID it never issued (#10730).
+   */
+  val releaseReason: String? = null,
 )
 
 @Serializable private data class DaemonCapabilitiesResult(val capabilities: List<String>)
@@ -1395,4 +1406,11 @@ private sealed interface DaemonCapabilitiesProbe {
 
 private val sharedDaemonCapabilities = ConcurrentHashMap<SocketIdentity, Set<String>>()
 
-class DaemonUnavailableException(message: String) : McpConnectionException(message)
+open class DaemonUnavailableException(message: String) : McpConnectionException(message)
+
+/** The daemon answered "session not found" and, for a session it released, [releaseReason] why. */
+class DaemonSessionNotFoundException(message: String, val releaseReason: String?) :
+  DaemonUnavailableException(message)
+
+/** The wire `code` of a session-not-found answer (`DAEMON_SESSION_NOT_FOUND_CODE` in types.ts). */
+private const val SESSION_NOT_FOUND_CODE = "daemon_session_not_found"

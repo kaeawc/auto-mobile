@@ -58,6 +58,12 @@ export interface DaemonResponse {
   error?: string;
   /** Structured daemon error code, or JSON-RPC parse/invalid-request code. */
   code?: string | number;
+  /**
+   * Why a session-not-found answer names a session the daemon knows it released (#10730), e.g.
+   * `heartbeat-timeout`, `cleanup-expired` or `owner-disconnected`. Absent for a UUID the daemon
+   * never issued. Additive: older clients ignore it.
+   */
+  releaseReason?: string;
   /** Rejected before any device operation was admitted. */
   handshakeFailure?: DaemonHandshakeFailure;
   /**
@@ -160,12 +166,27 @@ export interface BoundSessionLoss {
   release?: SessionReleaseSnapshot;
 }
 
+/** The daemon's `releaseReason` carried on a session-not-found error (#10730), when it sent one. */
+export function releaseReasonFromError(error: unknown): string | undefined {
+  if (error === null || typeof error !== "object" || !("releaseReason" in error)) {
+    return undefined;
+  }
+  const { releaseReason } = error;
+  return typeof releaseReason === "string" && releaseReason.length > 0 ? releaseReason : undefined;
+}
+
 /** Release reasons that mean the session ran out its idle window rather than being taken away. */
 const IDLE_EXPIRY_LOSS_REASONS: ReadonlySet<string> = new Set([
   "lazy-expiry",
   "cleanup-expired",
   "cli-idle-timeout",
 ]);
+
+const OWNER_DISCONNECTED_LOSS_REASON = "owner-disconnected";
+
+function isDaemonRestartLossReason(reason: string): boolean {
+  return reason === "daemon-shutdown" || reason.startsWith("device-restart");
+}
 
 /** The owner stopped heartbeating: its liveness lease lapsed, whatever its tool activity. */
 const HEARTBEAT_TIMEOUT_LOSS_REASON = "heartbeat-timeout";
@@ -184,6 +205,18 @@ export function boundSessionLossMessage(failure: BoundSessionLoss): string {
     return (
       `${base}The daemon stopped receiving this session's liveness heartbeats, so it released ` +
       `the device; check that the client process holding the session is still running. ${next}`
+    );
+  }
+  if (failure.reason === OWNER_DISCONNECTED_LOSS_REASON) {
+    return (
+      `${base}The client connection that owned this session closed, so the daemon released the ` +
+      `device. ${next}`
+    );
+  }
+  if (isDaemonRestartLossReason(failure.reason)) {
+    return (
+      `${base}The daemon shut down or restarted, or the device restarted, and this session was ` +
+      `not restored. ${next}`
     );
   }
   return IDLE_EXPIRY_LOSS_REASONS.has(failure.reason)

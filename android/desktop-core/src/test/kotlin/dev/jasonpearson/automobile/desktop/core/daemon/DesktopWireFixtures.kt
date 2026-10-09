@@ -80,6 +80,7 @@ internal class WireExchange(private val json: JsonObject) {
       result = response["result"]?.takeUnless { it is JsonNull },
       error = response["error"]?.jsonPrimitive?.contentOrNull,
       code = response["code"] as? JsonPrimitive,
+      releaseReason = response["releaseReason"]?.jsonPrimitive?.contentOrNull,
     )
 
   /** The `result` envelope (a tool result for `tools/call`). */

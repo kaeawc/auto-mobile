@@ -254,7 +254,10 @@ describe("HTTP heartbeat during release", () => {
         // A released session is gone: the client must learn that, like the socket route.
         expect(after.statusCode).toBe(404);
         expect(after.body).toBe(
-          JSON.stringify({ error: `Session not found: ${releasingSessionId}` }),
+          JSON.stringify({
+            error: `Session not found: ${releasingSessionId}`,
+            releaseReason: "explicit-release",
+          }),
         );
         expect(heartbeat).toHaveBeenCalledTimes(0);
         // The unknown-session refusal is a liveness no-op, including when the

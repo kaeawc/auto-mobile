@@ -6,7 +6,11 @@ import {
   type OwnerConflictLeash,
 } from "../../src/daemon/proxyLivenessRecovery";
 import { livenessOwnerHold } from "../../src/daemon/livenessOwnerLease";
-import { DAEMON_LIVENESS_OWNER_CONFLICT_CODE } from "../../src/daemon/types";
+import {
+  DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
+  DAEMON_SESSION_NOT_FOUND_CODE,
+  releaseReasonFromError,
+} from "../../src/daemon/types";
 
 // #10701: the challenger's leash follows the daemon's report of the owner's hold.
 
@@ -123,5 +127,37 @@ describe("the conflict refusal carries the owner's hold to the challenger", () =
       result: { liveness },
     });
     expect(otherCode).not.toHaveProperty("livenessOwnerHold");
+  });
+});
+
+describe("release reason on a session-not-found response (#10730)", () => {
+  test("the socket client attaches the daemon's releaseReason to the not-found error", () => {
+    const error = daemonResponseError({
+      id: "1",
+      type: "mcp_response",
+      success: false,
+      error: "Session not found: s-1",
+      code: DAEMON_SESSION_NOT_FOUND_CODE,
+      releaseReason: "heartbeat-timeout",
+    });
+
+    expect(error).toMatchObject({
+      code: DAEMON_SESSION_NOT_FOUND_CODE,
+      releaseReason: "heartbeat-timeout",
+    });
+    expect(releaseReasonFromError(error)).toBe("heartbeat-timeout");
+  });
+
+  test("an unknown UUID stays a plain not-found without a releaseReason", () => {
+    const error = daemonResponseError({
+      id: "1",
+      type: "mcp_response",
+      success: false,
+      error: "Session not found: s-1",
+      code: DAEMON_SESSION_NOT_FOUND_CODE,
+    });
+
+    expect(releaseReasonFromError(error)).toBeUndefined();
+    expect("releaseReason" in error).toBe(false);
   });
 });

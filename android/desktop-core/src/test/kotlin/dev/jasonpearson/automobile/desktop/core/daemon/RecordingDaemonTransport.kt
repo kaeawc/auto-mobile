@@ -42,6 +42,12 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
    */
   val releasedSessions: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
+  /**
+   * Overrides the `releaseReason` a [releasedSessions] heartbeat answer carries (#10730); "" omits
+   * it.
+   */
+  val releaseReasons: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
+
   fun failNext(key: String) {
     failures.add(key)
   }
@@ -68,7 +74,12 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
     val sessionId = request.params["sessionId"]?.jsonPrimitive?.content
     sessionCalls.add(request.method to sessionId)
     if (key == "daemon/heartbeat" && sessionId in releasedSessions) {
-      return WireAnswers.sessionNotFound.response(request.id)
+      val answer = WireAnswers.sessionNotFound.response(request.id)
+      return if (sessionId in releaseReasons) {
+        answer.copy(releaseReason = releaseReasons[sessionId]?.ifEmpty { null })
+      } else {
+        answer
+      }
     }
     if (failures.remove(key)) {
       return DaemonResponse(

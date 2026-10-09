@@ -1,7 +1,7 @@
 import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { isSessionReleasing } from "./sessionReleaseState";
-import { isTokenOwnedOrClaimPending } from "./daemonRequestHandlers";
+import { isTokenOwnedOrClaimPending, lookupReleasedSessionReason } from "./daemonRequestHandlers";
 import {
   cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
   releaseSessionAndDevice,
@@ -1395,8 +1395,14 @@ export class Daemon {
         res.end(JSON.stringify({ status: "ok" }));
         return;
       }
+      const releaseReason = await lookupReleasedSessionReason(this.sessionManager, sessionId);
       res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: `Session not found: ${sessionId}` }));
+      res.end(
+        JSON.stringify({
+          error: `Session not found: ${sessionId}`,
+          ...(releaseReason ? { releaseReason } : {}),
+        }),
+      );
       return;
     }
     // HTTP heartbeats carry no liveness owner token, so apply the socket route's

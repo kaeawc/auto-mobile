@@ -2836,6 +2836,23 @@ export class SessionManager {
     return this.finalizedSessionReleases.get(session)?.finalizedSnapshot?.releaseReason;
   }
 
+  /**
+   * Why this daemon released a session it issued (#10730), from the in-memory terminal snapshot or
+   * the persisted `release_reason`. Undefined for a live session or a UUID it never issued, so a
+   * caller can tell a known release from a plain unknown id.
+   */
+  async getReleasedSessionReason(sessionId: string): Promise<string | undefined> {
+    if (this.sessions.has(sessionId)) {
+      return undefined;
+    }
+    const inMemory = this.terminalReleaseSnapshots.get(sessionId)?.releaseReason;
+    if (inMemory) {
+      return inMemory;
+    }
+    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    return persisted?.release_reason ?? undefined;
+  }
+
   getTerminalReleaseSnapshot(sessionId: string): SessionReleaseSnapshot | undefined {
     const snapshot = this.terminalReleaseSnapshots.get(sessionId);
     return snapshot ? { ...snapshot, heartbeat: { ...snapshot.heartbeat } } : undefined;

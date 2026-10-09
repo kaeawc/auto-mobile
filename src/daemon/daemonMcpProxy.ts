@@ -39,6 +39,7 @@ import {
 import { getSessionIdleTimeoutMs, PROXY_HEARTBEAT_INTERVAL_MS } from "./sessionLivenessWindows";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
+  releaseReasonFromError,
   DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
   isGatedToolErrorCode,
@@ -357,7 +358,11 @@ function isLivenessOwnershipLostError(error: unknown): boolean {
  * "stale session" errors) is not triggered by a per-session answer.
  */
 class HeldSessionNotFoundError extends Error {
-  constructor(readonly sessionUuid: string) {
+  constructor(
+    readonly sessionUuid: string,
+    /** Why the daemon released the session, when it said (#10730). */
+    readonly releaseReason?: string,
+  ) {
     // Deliberately not the daemon's "Session not found" wording, which the reconnect machinery matches on.
     super(`The daemon does not know held session ${sessionUuid}`);
     this.name = "HeldSessionNotFoundError";
@@ -4168,7 +4173,10 @@ export class DaemonMcpProxy {
         // proceeding to a keeper that can only re-confirm the loss — this keeps
         // terminal fencing intact and gives the caller an ownership-lost error on
         // its next operation. Synchronous fence: no reconnect, no reentrancy.
-        this.fenceBoundSessionUuid(sessionUuid, "session-not-found");
+        this.fenceBoundSessionUuid(
+          sessionUuid,
+          releaseReasonFromError(error) ?? "session-not-found",
+        );
         return;
       }
       // Safe to swallow the rest: the establishment heartbeat is best-effort. The
@@ -4508,9 +4516,9 @@ export class DaemonMcpProxy {
   }
 
   /** The daemon answered that a session it was heartbeated for no longer exists. */
-  private dropGoneSession(sessionUuid: string): void {
+  private dropGoneSession(sessionUuid: string, releaseReason?: string): void {
     if (sessionUuid === this.boundSessionUuid && !this.terminalBoundSession) {
-      this.fenceBoundSessionUuid(sessionUuid, "session-not-found");
+      this.fenceBoundSessionUuid(sessionUuid, releaseReason ?? "session-not-found");
       return;
     }
     logger.warn(`[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating it`);
@@ -4759,7 +4767,7 @@ export class DaemonMcpProxy {
       );
     } catch (error) {
       if (this.isDaemonSessionNotFoundError(error)) {
-        throw new HeldSessionNotFoundError(sessionUuid);
+        throw new HeldSessionNotFoundError(sessionUuid, releaseReasonFromError(error));
       }
       throw error;
     }
@@ -4860,7 +4868,7 @@ export class DaemonMcpProxy {
     if (error instanceof HeldSessionNotFoundError) {
       // The daemon does not know this session. Drop it once; retrying every tick would only
       // keep asking, and resetting the socket to ask again would hurt its siblings.
-      this.dropGoneSession(sessionUuid);
+      this.dropGoneSession(sessionUuid, error.releaseReason);
       return;
     }
     if (isLivenessOwnerConflictError(error)) {
@@ -5022,7 +5030,7 @@ export class DaemonMcpProxy {
         return;
       }
       if (this.isDaemonSessionNotFoundError(error) && isCurrent()) {
-        this.stopHeartbeatingUnknownLatestBinding(sessionUuid);
+        this.stopHeartbeatingUnknownLatestBinding(sessionUuid, releaseReasonFromError(error));
         return;
       }
       if (error instanceof DaemonBoundSessionExpiredError) {
@@ -5041,13 +5049,14 @@ export class DaemonMcpProxy {
    * fenced: a replacement daemon may restore a persisted session when a tool call reaches it, and a
    * call that does so re-arms the heartbeat; otherwise that call reports the loss.
    */
-  private stopHeartbeatingUnknownLatestBinding(sessionUuid: string): void {
+  private stopHeartbeatingUnknownLatestBinding(sessionUuid: string, releaseReason?: string): void {
     if (this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
       return;
     }
     if (this.latestBindingNotFound !== sessionUuid) {
       logger.info(
-        `[DaemonMcpProxy] The daemon no longer knows session ${sessionUuid}; no longer heartbeating it`,
+        `[DaemonMcpProxy] The daemon no longer knows session ${sessionUuid}` +
+          `${releaseReason ? ` (released: ${releaseReason})` : ""}; no longer heartbeating it`,
       );
     }
     this.latestBindingNotFound = sessionUuid;

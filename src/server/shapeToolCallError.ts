@@ -12,7 +12,10 @@ import {
 import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignmentError";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
-import { RetryableDeviceAcquisitionError } from "../daemon/deviceAcquisitionRefusals";
+import {
+  DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+  RetryableDeviceAcquisitionError,
+} from "../daemon/deviceAcquisitionRefusals";
 
 export interface ToolCallErrorContext {
   toolName: string;
@@ -78,13 +81,21 @@ export function shapeToolCallError(
                           retryable: true,
                           retryAfterMs: error.retryAfterMs,
                         })
-                      : error instanceof ActionableError && error.containerFailure
+                      : isTerminalForeignOwnedRecoveryError(error)
                         ? JSON.stringify({
                             success: false,
                             error: message,
-                            containerFailure: error.containerFailure,
+                            code: error.code,
+                            deviceId: error.deviceId,
+                            retryable: false,
                           })
-                        : `Error: ${message}`,
+                        : error instanceof ActionableError && error.containerFailure
+                          ? JSON.stringify({
+                              success: false,
+                              error: message,
+                              containerFailure: error.containerFailure,
+                            })
+                          : `Error: ${message}`,
       },
     ],
     isError: true,
@@ -106,6 +117,22 @@ function isSuspectSessionError(
     typeof error.sessionUuid === "string" &&
     "remainingMs" in error &&
     typeof error.remainingMs === "number"
+  );
+}
+
+/**
+ * A restarted daemon's session whose device another live daemon now holds (#11076). The session
+ * is terminal, so unlike an acquisition refusal it is not retryable under the same UUID. Matched
+ * on its wire `code` so this module does not import the daemon's session manager.
+ */
+function isTerminalForeignOwnedRecoveryError(
+  error: unknown,
+): error is Error & { code: string; deviceId: string | undefined } {
+  return (
+    error instanceof Error &&
+    error.name === "SessionRecoveryIdentityLossError" &&
+    "code" in error &&
+    error.code === DEVICE_OWNED_BY_OTHER_DAEMON_CODE
   );
 }
 

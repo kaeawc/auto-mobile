@@ -81,6 +81,7 @@ import {
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
   DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
+  DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   SessionCreationTimeoutError,
 } from "./deviceAcquisitionRefusals";
 import { DAEMON_SESSION_SUSPECT_CODE, isIdleReleaseReason } from "./types";
@@ -807,7 +808,14 @@ export interface SessionRecoveryLiveness {
 export type SessionRecoveryFailureReason =
   | "target-absent"
   | "target-busy"
-  | "identity-continuity-lost";
+  | "identity-continuity-lost"
+  | "owned-by-other-daemon";
+
+/** Which other daemon holds a recovery target (reason `owned-by-other-daemon`, #11076). */
+export interface SessionRecoveryForeignOwner {
+  deviceId: string;
+  ownerPid: number | undefined;
+}
 
 /**
  * The persisted target cannot be recovered without assigning an unrelated
@@ -815,26 +823,49 @@ export type SessionRecoveryFailureReason =
  */
 export class SessionRecoveryIdentityLossError extends ActionableError {
   readonly terminalReleaseReason: string;
+  /** Wire code when another live daemon holds the target (`device_owned_by_other_daemon`). */
+  readonly code: string | undefined;
+  readonly deviceId: string | undefined;
+  readonly ownerPid: number | undefined;
 
   constructor(
     readonly sessionUuid: string,
     readonly target: SessionRecoveryTarget,
     readonly reason: SessionRecoveryFailureReason,
+    foreignOwner?: SessionRecoveryForeignOwner,
   ) {
-    const detail =
-      reason === "target-busy"
-        ? "is already in use"
-        : reason === "identity-continuity-lost"
-          ? "lost identity continuity"
-          : "is unavailable";
     super(
       `Cannot safely recover session ${sessionUuid}: ${target.platform} device ` +
-        `'${target.stableDeviceId}' ${detail} (recovery reason: ${reason}). ` +
+        `'${target.stableDeviceId}' ${recoveryFailureDetail(reason, foreignOwner)} ` +
+        `(recovery reason: ${reason}). ` +
         "The persisted session is terminal; " +
         "acquire a new device with getAndroid or getApple.",
     );
     this.name = "SessionRecoveryIdentityLossError";
     this.terminalReleaseReason = `identity-recovery-${reason}`;
+    this.code = reason === "owned-by-other-daemon" ? DEVICE_OWNED_BY_OTHER_DAEMON_CODE : undefined;
+    this.deviceId = foreignOwner?.deviceId;
+    this.ownerPid = foreignOwner?.ownerPid;
+  }
+}
+
+function recoveryFailureDetail(
+  reason: SessionRecoveryFailureReason,
+  foreignOwner: SessionRecoveryForeignOwner | undefined,
+): string {
+  switch (reason) {
+    case "target-busy":
+      return "is already in use";
+    case "identity-continuity-lost":
+      return "lost identity continuity";
+    case "owned-by-other-daemon":
+      return (
+        "is claimed by another AutoMobile daemon" +
+        (foreignOwner?.ownerPid === undefined ? "" : ` (PID ${foreignOwner.ownerPid})`) +
+        ` (code ${DEVICE_OWNED_BY_OTHER_DAEMON_CODE})`
+      );
+    case "target-absent":
+      return "is unavailable";
   }
 }
 
@@ -845,7 +876,10 @@ type SessionRecoveryIdentityLoss = Pick<
 
 function isSessionRecoveryFailureReason(reason: unknown): reason is SessionRecoveryFailureReason {
   return (
-    reason === "target-absent" || reason === "target-busy" || reason === "identity-continuity-lost"
+    reason === "target-absent" ||
+    reason === "target-busy" ||
+    reason === "identity-continuity-lost" ||
+    reason === "owned-by-other-daemon"
   );
 }
 

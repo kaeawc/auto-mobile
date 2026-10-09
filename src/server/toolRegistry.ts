@@ -63,7 +63,11 @@ import {
   DefaultAppCleanupService,
 } from "./AppCleanupService";
 import { ToolCallRepository } from "../db/toolCallRepository";
-import { getDeviceLabelMap, releaseDeviceLabelSessions } from "./deviceLabelMapping";
+import {
+  failedPlanSessionHoldable,
+  getDeviceLabelMap,
+  releaseDeviceLabelSessions,
+} from "./deviceLabelMapping";
 import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import type { Environment } from "../daemon/poolConfig";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
@@ -2031,7 +2035,8 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
    * session and its device, so the caller's recovery and the resumed plan run on a device no other
    * session can take in between (#10834). The caller owns the session from here: the resumed plan
    * releases it, or the caller releases it (or stops heartbeating) when it gives up. A plan with
-   * device labels is released as before: its derived label sessions have no caller-side owner.
+   * derived label sessions is released as before: they have no caller-side owner. A single-label
+   * plan's only session is the base, so it is held like an unlabeled plan (#11091).
    */
   private holdsFailedPlanSessionForRecovery(
     input: PlanLifecycleInput,
@@ -2040,10 +2045,10 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
     if (input.args?.holdSessionOnFailure !== true || input.succeeded !== false) {
       return false;
     }
-    if (Object.keys(getDeviceLabelMap(releaseSessionUuid) ?? {}).length > 0) {
+    if (!failedPlanSessionHoldable(releaseSessionUuid)) {
       logger.info(
         `[PlanLifecycle] holdSessionOnFailure ignored for ${releaseSessionUuid}: a plan with ` +
-          "device labels is always released",
+          "derived label sessions is always released (reported as sessionHeld: false)",
       );
       return false;
     }

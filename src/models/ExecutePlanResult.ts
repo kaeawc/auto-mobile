@@ -162,4 +162,10 @@ export interface ExecutePlanResult {
   videoRecordingIds?: string[];
   /** Capture gaps, truncation or failures, including when no video could be returned. */
   videoWarnings?: string[];
+  /**
+   * Present only on a failed plan that asked for `holdSessionOnFailure`: whether the daemon kept the
+   * session and its device for the caller's recovery. `false` means it released them (a plan with
+   * derived label sessions is always released), so the caller must not recover on that device (#11091).
+   */
+  sessionHeld?: boolean;
 }

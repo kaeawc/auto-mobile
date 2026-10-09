@@ -17,6 +17,8 @@ import {
   PLAN_APP_CLEANUP_CAP_MS,
   type PlanLifecycleInput,
 } from "../../src/server/toolRegistry";
+import { withReportedSessionHold } from "../../src/server/planTools";
+import type { ExecutePlanResult } from "../../src/models/ExecutePlanResult";
 import { logger } from "../../src/utils/logger";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { ClearAppData } from "../../src/features/action/ClearAppData";
@@ -207,6 +209,7 @@ describe("executePlan cleans every acquired device before release", () => {
   });
 
   describe("holdSessionOnFailure (#10834)", () => {
+    const failedResult: ExecutePlanResult = { success: false, executedSteps: 1, totalSteps: 2 };
     const hold = (overrides: Partial<PlanLifecycleInput> = {}): PlanLifecycleInput =>
       input({ args: { holdSessionOnFailure: true }, ...overrides });
 
@@ -240,14 +243,46 @@ describe("executePlan cleans every acquired device before release", () => {
       expect(events).toEqual(["session-release:base", "release:device-A"]);
     });
 
-    test("a failed plan with device labels is always released", async () => {
+    test("a failed plan with derived label sessions is always released", async () => {
       await acquire(devices.slice(0, 2));
+      // The handler reports the decision before the lifecycle acts on it.
+      expect(
+        withReportedSessionHold(failedResult, { holdSessionOnFailure: true, sessionUuid: "base" })
+          .sessionHeld,
+      ).toBe(false);
 
       await lifecycle.afterExecution(hold({ succeeded: false }));
 
       for (const id of ["base", "base:B"]) {
         expect(sessionManager.getSession(id)).toBeNull();
       }
+    });
+
+    test("a failed single-label plan keeps its base session like an unlabeled plan (#11091)", async () => {
+      await acquire([devices[0]]);
+      expect(sessionManager.getDeviceLabels("base")).toEqual({ A: "base" });
+      pool.getDevice("device-A")!.sessionId = "base";
+      const session = sessionManager.getSession("base");
+
+      await lifecycle.afterExecution(hold({ succeeded: false }));
+
+      expect(sessionManager.getSession("base")).toBe(session);
+      expect(pool.getDevice("device-A")!.sessionId).toBe("base");
+      expect(events).toEqual([]);
+      expect(
+        withReportedSessionHold(failedResult, { holdSessionOnFailure: true, sessionUuid: "base" })
+          .sessionHeld,
+      ).toBe(true);
+    });
+
+    test("sessionHeld is reported only on a failed run that asked to hold", () => {
+      const succeeded = { ...failedResult, success: true };
+      expect(
+        withReportedSessionHold(succeeded, { holdSessionOnFailure: true, sessionUuid: "base" }),
+      ).not.toHaveProperty("sessionHeld");
+      expect(withReportedSessionHold(failedResult, { sessionUuid: "base" })).not.toHaveProperty(
+        "sessionHeld",
+      );
     });
   });
 

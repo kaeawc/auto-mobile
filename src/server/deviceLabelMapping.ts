@@ -63,6 +63,25 @@ export const getDeviceLabelMap = (baseSessionUuid: string): DeviceLabelMap | nul
 };
 
 /**
+ * Whether a plan's label map gives it sessions other than its base. `buildDeviceLabelMap` maps the
+ * primary label to the base itself, so a single-label plan (`devices: [A]`) has none: its only
+ * session is the caller's own (#11091).
+ */
+export const labelMapHasDerivedSessions = (
+  map: DeviceLabelMap | null | undefined,
+  baseSessionUuid: string,
+): boolean => Object.values(map ?? {}).some((sessionUuid) => sessionUuid !== baseSessionUuid);
+
+/**
+ * Whether a failed executePlan that asked to hold its session (`holdSessionOnFailure`) keeps it for
+ * the caller's recovery (#10834). A plan whose label map has derived sessions is always released:
+ * those sessions have no caller-side owner. The executePlan result reports this decision as
+ * `sessionHeld` and the plan lifecycle acts on it, so both read this one predicate.
+ */
+export const failedPlanSessionHoldable = (baseSessionUuid: string): boolean =>
+  !labelMapHasDerivedSessions(getDeviceLabelMap(baseSessionUuid), baseSessionUuid);
+
+/**
  * No general pool/boot parallel-start limit exists in devicePool.ts. Its
  * assignmentMutex serializes assignment, preventing two labels from receiving
  * the same device, before this readiness setup runs. This bound only caps

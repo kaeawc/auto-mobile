@@ -1,4 +1,5 @@
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../daemon/inputDeviceOwnership";
+import { isDeviceSessionAcquisitionTool } from "../server/deviceSessionResult";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
@@ -48,6 +49,17 @@ export function cliDeviceOwnershipHint(payload: unknown, toolName: string): stri
   }
   if (code !== DEVICE_OWNED_BY_OTHER_SESSION_CODE) {
     return undefined;
+  }
+  if (isDeviceSessionAcquisitionTool(toolName)) {
+    // The CLI drops --session-uuid for acquisition tools (they mint their own session), so
+    // "re-run with --session-uuid" would be discarded (#11096).
+    return (
+      `Hint: another session holds the device, and ${toolName} cannot join it: acquisition ` +
+      "tools mint their own session and the CLI ignores --session-uuid for them. If that " +
+      "session is yours, skip re-acquiring and pass --session-uuid <uuid> to your follow-up " +
+      "calls; to free the device, run --daemon release-session <uuid>; otherwise wait for the " +
+      "holder to release it."
+    );
   }
   const forceHint = FORCE_OVERRIDE_TOOLS.has(toolName)
     ? ` To stop it anyway, pass --force true.`

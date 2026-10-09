@@ -39,8 +39,18 @@ if [[ "$1" == "-s" && "$3" == "get-state" ]]; then
   printf '%s\n' "${FAKE_ADB_STATE:-device}"
   exit 0
 fi
+if [[ "$1" == "-s" && "$3 $4 $5" == "emu avd name" ]]; then
+  printf '%s\r\nOK\r\n' "${FAKE_AVD_NAME:-Pixel_9_API_36}"
+  exit 0
+fi
 exit 1
 EOF
+
+  mkdir -p "${FAKE}/avd/Pixel_9_API_36.avd"
+  printf '%s\n' 'AvdId=Pixel_9_API_36' 'hw.device.name = pixel_9' \
+    'image.sysdir.1=system-images/android-36/google_apis/arm64-v8a/' \
+    > "${FAKE}/avd/Pixel_9_API_36.avd/config.ini"
+  export ANDROID_AVD_HOME="${FAKE}/avd"
 
   cat > "${FAKE}/bun" <<'EOF'
 #!/usr/bin/env bash
@@ -172,7 +182,8 @@ while IFS= read -r line; do
   target=""
   session_arg="$(jq -r '.params.arguments.sessionUuid // empty' <<< "${line}")"
   if [[ "${tool}" == getAndroid || "${tool}" == provisionDevice ]]; then
-    target="$(jq -r '.params.arguments.deviceId' <<< "${line}")"
+    # provisionDevice names the AVD, not the serial; the fake runs one emulator for it.
+    target="$(jq -r '.params.arguments.deviceId // "emulator-5560"' <<< "${line}")"
     mkdir -p "${state}/${target}"
     session_for "${target}" > "${state}/${target}/session"
     printf '%s\n' "$$" > "${state}/${target}/proxy_pid"
@@ -435,7 +446,17 @@ run_check() {
   run_check --scenario provision
   [ "${status}" -eq 0 ]
   [[ "${output}" == *"PASS provision"* ]]
-  grep -qx 'provisionDevice {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
+  # #11065: the exact-device schema, derived from the emulator's own AVD, with no operationId.
+  grep -qx 'provisionDevice {"device":{"platform":"android","name":"Pixel_9_API_36","spec":{"runtime":"system-images;android-36;google_apis;arm64-v8a","deviceType":"pixel_9"}}}' "${FAKE}/tool.calls"
+  run grep -q operationId "${FAKE}/tool.calls"
+  [ "${status}" -ne 0 ]
+}
+
+@test "provision: refuses when the emulator's AVD config cannot be found" {
+  FAKE_AVD_NAME=Missing_AVD run_check --scenario provision
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"no config.ini for AVD Missing_AVD"* ]]
+  [ ! -e "${FAKE}/tool.calls" ]
 }
 
 @test "stream: the subscription survives the idle release and frames are kept as evidence" {

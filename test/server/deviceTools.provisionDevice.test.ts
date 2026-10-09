@@ -3755,6 +3755,60 @@ describe("provisionDevice handler", () => {
     expect(provisionCalls).toBe(2);
   });
 
+  // #11111: the daemon frees its admission barrier on cancel while rollback keeps running, so the
+  // lifecycle lease alone must fence a following provision of the same device.
+  test("a provision right after a cancel waits for the cancelled attempt's rollback", async () => {
+    const timer = new FakeTimer();
+    let provisionCalls = 0;
+    const provisionEntered = deferred();
+    const firstAttemptGate = Promise.withResolvers<void>();
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          provisionCalls += 1;
+          request.onBeforeCreate?.();
+          provisionEntered.resolve();
+          if (provisionCalls > 1) {
+            return provisionedTestDevice("android", true);
+          }
+          await new Promise<void>((resolve) => {
+            request.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          await firstAttemptGate.promise;
+          throw request.signal?.reason ?? new Error("aborted");
+        },
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = { ...provisionTestArgs("android"), boot: false, readiness: "none" as const };
+
+    const caller = new AbortController();
+    const first = tool.handler(args, undefined, caller.signal);
+    await provisionEntered.promise;
+    caller.abort(new Error("client went away"));
+    await flushMicrotasks();
+    timer.advanceTime(5_000);
+    const cancelled = JSON.parse(
+      ((await first) as { content: { text: string }[] }).content[0].text,
+    );
+    expect(cancelled).toMatchObject({ error: { code: "request_cancelled" } });
+
+    const second = tool.handler(args);
+    await flushMicrotasks();
+    expect(provisionCalls).toBe(1);
+
+    firstAttemptGate.resolve();
+    const retried = JSON.parse(((await second) as { content: { text: string }[] }).content[0].text);
+    expect(retried.error).toBeUndefined();
+    expect(provisionCalls).toBe(2);
+  });
+
   test.each(["android", "ios"] as const)(
     "preserves %s boot timeout classification",
     async (platform) => {

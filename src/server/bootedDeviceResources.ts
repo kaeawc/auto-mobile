@@ -949,17 +949,24 @@ async function discoverBootedDevicesForPlatform(
         devicePool,
       ),
     );
+    const offlineHeld = await adbOfflineHeldDeviceDescriptions({
+      platform,
+      discovered: discovery.devices,
+      devicePool,
+      sessionInfoByDeviceId,
+      resolveDeviceSessionUuid,
+      deviceManager,
+      configuredImages,
+    });
+    // A held AVD re-cold-booting while adb still lists its old serial offline would otherwise
+    // appear twice under one stableId (#11132). The held row carries the session and pool status
+    // the serial-less cold-boot row lacks, so the cold-boot row is the one dropped.
+    const heldStableIds = new Set(offlineHeld.map((device) => device.identity.stableId));
     devices.push(
-      ...inFlightAndroidColdBootDescriptions(platform, discovery.devices, configuredImages),
-      ...(await adbOfflineHeldDeviceDescriptions({
-        platform,
-        discovered: discovery.devices,
-        devicePool,
-        sessionInfoByDeviceId,
-        resolveDeviceSessionUuid,
-        deviceManager,
-        configuredImages,
-      })),
+      ...inFlightAndroidColdBootDescriptions(platform, discovery.devices, configuredImages).filter(
+        (device) => !heldStableIds.has(device.identity.stableId),
+      ),
+      ...offlineHeld,
     );
     return {
       devices,

@@ -1450,6 +1450,59 @@ describe("MCP Booted Device Resources", () => {
       sessionManager.stopCleanupTimer();
     });
 
+    // #11132: the held AVD re-cold-boots while adb still lists the old serial offline; the
+    // listing must show it once, keeping the held row's session and pool status.
+    test("does not list a held offline AVD twice while it is re-cold-booting", async function () {
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      resetAdbClientCaches();
+      const adb = new AdbClient(null, async (command: string) =>
+        command.includes("adb devices")
+          ? createExecResult(
+              [
+                "List of devices attached",
+                "emulator-5554          offline transport_id:1",
+                "",
+              ].join("\n"),
+              "",
+            )
+          : createExecResult("", ""),
+      );
+      const emulator = new AndroidEmulatorClient(
+        undefined,
+        null,
+        fakeTimer,
+        new FakeAdbClientFactory(adb),
+      );
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+      (fakeDeviceUtils as PlatformDeviceManager).getAndroidListedDeviceStates = (ids) =>
+        emulator.getListedNonDeviceStatesAmong(ids);
+      const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+      const devicePool = new DevicePool(
+        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          deviceManager: fakeDeviceUtils,
+        }),
+      );
+      await devicePool.initializeWithDevices([mockAndroidDevice1]);
+      await devicePool.assignDeviceToSession("session-held");
+      fakeDeviceUtils.setBootedDevices("android", []);
+      DaemonState.getInstance().initialize(sessionManager, devicePool);
+      setInFlightAndroidColdBootReader({
+        listInFlightAndroidColdBootAvdNames: () => [mockAndroidDevice1.name],
+      });
+
+      const result = await getBootedDevicesForPlatforms(["android"], fakeTimer);
+
+      expect(result.devices).toHaveLength(1);
+      expect(result.devices[0]?.runtime.session?.sessionUuid).toBe("session-held");
+      expect(result.devices[0]?.runtime.connection).toEqual({
+        state: "offline",
+        adbState: "offline",
+      });
+      sessionManager.stopCleanupTimer();
+    });
+
     // The resource joins discovery to pool state by SERIAL. A different AVD can
     // take over a reused serial before the next pool refresh, and publishing the
     // old entry's epoch as the new runtime's `connectionId` would tell consumers

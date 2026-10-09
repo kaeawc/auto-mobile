@@ -102,15 +102,20 @@ fun OverlaySpecContent(
     val anchorLocals = remember { OverlayAnchorLocals() }
     CompositionLocalProvider(LocalOverlayAnchorLocals provides anchorLocals) {
       val fillsWindow = LocalOverlayFillsWindow.current
-      Box(
-        Modifier.semantics { testTagsAsResourceId = true }
-          .then(
-            if (fillsWindow) Modifier.fillWhenEmpty() else Modifier,
-          ),
-      ) {
-        RenderOverlayNode(root, interact, windowRoot = true)
-        OverlayAnchorLayer(layeredOverlayAnchors(root), interact)
-        modalOverlaySheets(root).forEach { node ->
+      Box(Modifier.semantics { testTagsAsResourceId = true }) {
+        val modals = modalOverlaySheets(root)
+        // An open dialog is modal: the page behind it leaves the accessibility tree, as it does
+        // on iOS and as touches already do. A snackbar or sheet does not block the page.
+        val pageBlocked = modals.any { it.role == "dialog" }
+        // The page box takes the fill: it is the root's parent and must measure the window.
+        Box(
+          Modifier.then(if (fillsWindow) Modifier.fillWhenEmpty() else Modifier)
+            .then(if (pageBlocked) Modifier.clearAndSetSemantics {} else Modifier),
+        ) {
+          RenderOverlayNode(root, interact, windowRoot = true)
+          OverlayAnchorLayer(layeredOverlayAnchors(root), interact)
+        }
+        modals.forEach { node ->
           key(node.identity) {
             RenderOverlayModal(node, interact)
             OverlayAnchorLayer(layeredOverlayAnchorsIn(node.children), interact)

@@ -16,6 +16,27 @@ public protocol HeldSessionControlling: Sendable {
 
 public protocol HeldSessionHeartbeat: Sendable {
     func stop()
+    /// Why the daemon no longer holds the session, once a heartbeat was answered with
+    /// `daemon_session_not_found` (#11102): the daemon's `releaseReason` when it named one, else a
+    /// generic description. Nil while the session is still held. A lost session is terminal: the
+    /// device may belong to another runner, so recovery must not resume the plan on it.
+    var lostReason: String? { get }
+}
+
+/// Classifies a `daemon/heartbeat` reply. Mirrors the Android junit-runner's
+/// `DaemonSessionReleasedException`: the daemon answers a released or unknown session with
+/// `code: daemon_session_not_found` (and `releaseReason` when it released the session itself).
+enum HeldSessionLoss {
+    static let sessionNotFoundCode = "daemon_session_not_found"
+
+    static func lostReason(in response: [String: Any]?, sessionId: String) -> String? {
+        guard let response, (response["success"] as? Bool) != true else { return nil }
+        let code = response["code"] as? String
+        let error = response["error"] as? String
+        guard code == sessionNotFoundCode || error?.hasPrefix("Session not found") == true else { return nil }
+        let reason = (response["releaseReason"] as? String) ?? error ?? "session not found"
+        return "the daemon released session \(sessionId) (\(reason))"
+    }
 }
 
 /// Heartbeats and releases over the daemon's Unix socket (`daemon/heartbeat`,
@@ -34,6 +55,7 @@ public struct DaemonSocketHeldSessionController: HeldSessionControlling {
 
     private let socketPath: String
     private let heartbeatIntervalSeconds: TimeInterval
+    private let sendHeartbeat: @Sendable (String) async -> [String: Any]?
 
     public init(
         socketPath: String,
@@ -41,14 +63,34 @@ public struct DaemonSocketHeldSessionController: HeldSessionControlling {
     ) {
         self.socketPath = socketPath
         self.heartbeatIntervalSeconds = heartbeatIntervalSeconds
+        sendHeartbeat = { sessionId in
+            await Self.send(method: "daemon/heartbeat", sessionId: sessionId, socketPath: socketPath)
+        }
+    }
+
+    /// Test seam: heartbeats go through `sendHeartbeat` instead of the daemon socket.
+    init(
+        socketPath: String,
+        heartbeatIntervalSeconds: TimeInterval,
+        sendHeartbeat: @escaping @Sendable (String) async -> [String: Any]?
+    ) {
+        self.socketPath = socketPath
+        self.heartbeatIntervalSeconds = heartbeatIntervalSeconds
+        self.sendHeartbeat = sendHeartbeat
     }
 
     public func startHeartbeating(sessionId: String) -> any HeldSessionHeartbeat {
-        let socketPath = socketPath
         let interval = heartbeatIntervalSeconds
+        let sendHeartbeat = sendHeartbeat
+        let loss = LossBox()
         let task = Task.detached(priority: .utility) {
             while !Task.isCancelled {
-                _ = await Self.send(method: "daemon/heartbeat", sessionId: sessionId, socketPath: socketPath)
+                let response = await sendHeartbeat(sessionId)
+                if let reason = HeldSessionLoss.lostReason(in: response, sessionId: sessionId) {
+                    // Heartbeating a terminal UUID forever helps nobody; the executor reads the loss.
+                    loss.record(reason)
+                    return
+                }
                 do {
                     try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                 } catch {
@@ -57,7 +99,7 @@ public struct DaemonSocketHeldSessionController: HeldSessionControlling {
                 }
             }
         }
-        return TaskHeartbeat(task: task)
+        return TaskHeartbeat(task: task, loss: loss)
     }
 
     public func release(sessionId: String) async {
@@ -89,8 +131,28 @@ public struct DaemonSocketHeldSessionController: HeldSessionControlling {
         let value: [String: Any]?
     }
 
+    private final class LossBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var reason: String?
+
+        func record(_ newReason: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            reason = reason ?? newReason
+        }
+
+        var value: String? {
+            lock.lock()
+            defer { lock.unlock() }
+            return reason
+        }
+    }
+
     private struct TaskHeartbeat: HeldSessionHeartbeat {
         let task: Task<Void, Never>
+        let loss: LossBox
+
+        var lostReason: String? { loss.value }
 
         func stop() {
             task.cancel()

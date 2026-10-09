@@ -182,6 +182,29 @@ final class RecoveryExecutorTests: XCTestCase {
         XCTAssertEqual(heldSessions.liveHeartbeats, [], "the heartbeat stops with recovery")
     }
 
+    func testSessionLostDuringRecoveryFailsFastWithoutResumingOrReleasing() async throws {
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: ["stepIndex": 1, "tool": "tapOn", "error": "boom"]
+        ))
+        client.queueExecutePlan(planJSON(success: true, executedSteps: 3, totalSteps: 3))
+        let heldSessions = RecordingHeldSessionController()
+        heldSessions.lossReason = "the daemon released session held-session (idle)"
+        let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
+        let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true, heldSessions: heldSessions)
+
+        do {
+            _ = try await executor.execute(testMetadata: nil, sessionUuid: "held-session")
+            XCTFail("a lost held session must not resume the plan")
+        } catch {
+            XCTAssertTrue("\(error)".contains("the daemon released session held-session (idle)"), "\(error)")
+        }
+
+        XCTAssertEqual(client.executePlanCalls.count, 1, "no resume on a session the daemon released")
+        XCTAssertEqual(heldSessions.releasedSessions, [], "nothing left to release")
+    }
+
     func testFailureRecoveryCannotHandleReleasesTheHeldSession() async throws {
         // A failure without a usable failed step never reaches recovery: the hold must not outlive it.
         let client = RecoveryMCPClient()

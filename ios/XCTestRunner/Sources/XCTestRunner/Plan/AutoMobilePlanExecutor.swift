@@ -420,6 +420,14 @@ public final class AutoMobilePlanExecutor: Sendable {
             await releaseHeld()
             throw error
         }
+        // The daemon released the held session mid-recovery (restart, idle): the device may belong to
+        // another runner, so do not resume on it and nothing is left to release (#11102).
+        if let lostReason = heartbeat?.lostReason {
+            logger.warn("Held session lost during AI recovery: \(lostReason)")
+            throw ExecutorError.executionFailed(
+                "\(failureMessage)\n  AI recovery aborted: \(lostReason); the plan was not resumed."
+            )
+        }
         if !outcome.success {
             logger.warn("AI recovery failed")
             await releaseHeld()

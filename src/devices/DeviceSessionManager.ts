@@ -36,6 +36,7 @@ import type { Window } from "../features/observe/interfaces/Window";
 import { logger } from "../utils/logger";
 import { AndroidCtrlProxyManager, CtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../ctrlProxy/IOSCtrlProxyManager";
+import { AdbUnavailableError } from "../utils/android-cmdline-tools/AdbClient";
 import { AndroidEmulatorClient } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { PlatformDeviceManager } from "../utils/interfaces/DeviceUtils";
@@ -603,14 +604,24 @@ export class DeviceSessionManager implements DeviceSessionManager {
     try {
       // Check for Android devices via ADB
       perf.startOperation("androidDeviceScan");
-      const androidDevices = await this.adb.getBootedAndroidDevices({ signal });
+      // A missing adb binary (or its cooldown) must not read as a complete,
+      // empty scan: that would let reconciliation clear a pinned Android device.
+      const androidDevices = await this.adb.getBootedAndroidDevices({
+        signal,
+        throwOnMissingAdb: true,
+      });
       perf.endOperation("androidDeviceScan");
       devices.push(...androidDevices);
       scannedSources.android = true;
     } catch (error) {
       perf.endOperation("androidDeviceScan");
       signal?.throwIfAborted();
-      logger.warn(`Failed to detect Android devices: ${error}`);
+      if (error instanceof AdbUnavailableError) {
+        // Expected on hosts without the Android SDK; the scan stays non-authoritative.
+        logger.debug(`Android scan skipped: ${error.message}`);
+      } else {
+        logger.warn(`Failed to detect Android devices: ${error}`);
+      }
     }
 
     const [simulators, physical] = await Promise.all([

@@ -218,6 +218,15 @@ export class Clipboard {
           "Paste was sent but the focused field's value did not change; nothing appears to have been pasted (outcome unconfirmed). The simulator may have minimized the software keyboard for a hardware keyboard. Try pasting again.",
       };
     }
+    if (verification === "unreadable") {
+      return {
+        success: false,
+        action: "paste",
+        method: "a11y",
+        error:
+          "Paste was sent but the focused field's value could not be read after the paste, so the paste is unconfirmed and may not have landed. Observe the field before retrying.",
+      };
+    }
     if (verification === "unverifiable" && baseline?.pasteboardUnreadable) {
       // The runner pastes through an unreadable pasteboard (Cmd+V needs no text), so with no field
       // comparison there is nothing to back a success claim.
@@ -266,12 +275,13 @@ export class Clipboard {
         () => this.hierarchyProvider.getViewHierarchy(signal, { timeoutMs }),
         { timer: this.timer, timeoutMs, signal, label: "iOS paste verification hierarchy" },
       );
+      // An empty or placeholder-only field reads as "" so it still gives a baseline (#9078).
       const field =
-        hierarchy && !hierarchy.hierarchy?.error ? getFocusedTextField(hierarchy) : undefined;
+        hierarchy && !hierarchy.hierarchy?.error
+          ? getFocusedTextField(hierarchy, undefined, { iosEmptyAsBlank: true })
+          : undefined;
       if (field?.value === undefined && !field?.secure) {
-        logger.info(
-          "[Clipboard] iOS paste verification unavailable: no readable focused field value",
-        );
+        logger.info("[Clipboard] iOS paste verification unavailable: no focused editable field");
         return undefined;
       }
       return field;
@@ -286,39 +296,38 @@ export class Clipboard {
   }
 
   /**
-   * "unverifiable" covers a secure field (its value is never read) and a field that cannot be read
-   * after the paste: neither proves a dropped paste.
+   * "unverifiable" covers a secure field, whose value is never read. "unreadable" means the field
+   * had a readable baseline but no readable value by the deadline: the paste is unconfirmed (#9078).
    */
   private async verifyIOSPaste(
     before: FocusedTextField,
     signal?: AbortSignal,
-  ): Promise<"changed" | "unchanged" | "unverifiable"> {
+  ): Promise<"changed" | "unchanged" | "unverifiable" | "unreadable"> {
     if (before.secure) {
       logger.info("[Clipboard] iOS paste verification skipped for a secure field");
       return "unverifiable";
     }
     const deadline = this.timer.now() + Clipboard.PASTE_VERIFICATION_TIMEOUT_MS;
+    let lastReadable = true;
     for (;;) {
       throwIfAborted(signal);
       const remaining = deadline - this.timer.now();
       if (remaining <= 0) {
-        return "unchanged";
+        return lastReadable ? "unchanged" : "unreadable";
       }
       const after = await this.readIOSFocusedValue(remaining, signal);
       if (after?.secure) {
         logger.info("[Clipboard] iOS paste verification skipped for a secure field");
         return "unverifiable";
       }
-      // Missing hierarchy/value makes the outcome indeterminate, not a proven dropped paste.
-      if (after === undefined) {
-        return "unverifiable";
-      }
-      if (after.value !== before.value) {
+      // A missing hierarchy or field may be transient (keyboard animation), so keep polling.
+      lastReadable = after !== undefined;
+      if (after !== undefined && after.value !== before.value) {
         return "changed";
       }
       const delay = Math.min(Clipboard.PASTE_VERIFICATION_POLL_MS, deadline - this.timer.now());
       if (delay <= 0) {
-        return "unchanged";
+        return lastReadable ? "unchanged" : "unreadable";
       }
       await awaitWhileRequestIsLive(this.timer.sleep(delay), signal);
     }

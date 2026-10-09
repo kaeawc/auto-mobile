@@ -2222,6 +2222,11 @@ export class DevicePool {
     this.deviceSessionStarts.delete(deviceId);
     this.refreshMissingDeviceMisses.delete(deviceId);
     this.dropTrackedProcessOnRemoval(deviceId, options);
+    for (const [capturedSessionId, capture] of this.releasedDeviceCaptures) {
+      if (capture.deviceId === deviceId) {
+        this.releasedDeviceCaptures.delete(capturedSessionId);
+      }
+    }
     if (this.lastReleasedDeviceId === deviceId) {
       this.lastReleasedDeviceId = null;
     }
@@ -4019,8 +4024,16 @@ export class DevicePool {
       await this.finishEmulatorLossIncident(incidentId, "not-attempted");
       return false;
     }
+    this.discardReleasedCapture(sessionId, device.id);
     device.sessionId = null;
     return true;
+  }
+
+  /** Device-loss releases never reach releaseDevice, the only capture consumer (#11123). */
+  private discardReleasedCapture(sessionId: string, deviceId: string): void {
+    if (this.releasedDeviceCaptures.get(sessionId)?.deviceId === deviceId) {
+      this.releasedDeviceCaptures.delete(sessionId);
+    }
   }
 
   private async tryPreserveSessionForMissingDevice(

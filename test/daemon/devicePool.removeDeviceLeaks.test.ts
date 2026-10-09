@@ -82,4 +82,16 @@ describe("DevicePool removeDevice / start leaks (#11123)", () => {
     await pool.removeDevice("emulator-5554");
     expect(internals(pool).startedDeviceProcesses.has("emulator-5554")).toBe(false);
   });
+
+  it("drops released-device captures for a removed device", async () => {
+    const device = pool.getDevice("emulator-5554")!;
+    device.sessionId = "s1";
+    internals(pool).captureReleasedDevice("s1", "emulator-5554");
+    expect(internals(pool).releasedDeviceCaptures.has("s1")).toBe(true);
+    device.sessionId = null;
+
+    await pool.removeDevice("emulator-5554");
+
+    expect(internals(pool).releasedDeviceCaptures.size).toBe(0);
+  });
 });

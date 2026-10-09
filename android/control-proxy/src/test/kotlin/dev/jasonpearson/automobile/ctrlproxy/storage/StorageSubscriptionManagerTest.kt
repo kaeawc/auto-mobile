@@ -18,6 +18,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import java.util.concurrent.TimeUnit.SECONDS
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -48,6 +49,11 @@ import org.robolectric.shadows.ShadowContentResolver
 
 @RunWith(RobolectricTestRunner::class)
 class StorageSubscriptionManagerTest {
+
+  private companion object {
+    const val LATCH_CEILING_SECONDS = 30L
+    const val JOIN_CEILING_MS = 30_000L
+  }
 
   private lateinit var context: Context
   private lateinit var contentResolver: ContentResolver
@@ -563,24 +569,32 @@ class StorageSubscriptionManagerTest {
       {
         if (registrationCalls.getAndIncrement() == 0) {
           firstRegistrationEntered.countDown()
-          assertTrue(releaseFirstRegistration.await(1, java.util.concurrent.TimeUnit.SECONDS))
+          // Generous ceiling only so a broken test cannot hang; a loaded CI JVM must not trip it.
+          assertTrue(releaseFirstRegistration.await(LATCH_CEILING_SECONDS, SECONDS))
           throw SecurityException("first registration denied")
         }
       }
 
-    var firstResult: Result<StorageSubscription>? = null
-    var secondResult: Result<StorageSubscription>? = null
-    val first = Thread { firstResult = manager.subscribe("com.example.app", "auth") }
+    val firstResult = java.util.concurrent.atomic.AtomicReference<Result<StorageSubscription>>()
+    val secondResult = java.util.concurrent.atomic.AtomicReference<Result<StorageSubscription>>()
+    val first = Thread { firstResult.set(manager.subscribe("com.example.app", "auth")) }
     first.start()
-    assertTrue(firstRegistrationEntered.await(1, java.util.concurrent.TimeUnit.SECONDS))
-    val second = Thread { secondResult = manager.subscribe("com.example.app", "auth") }
+    assertTrue(firstRegistrationEntered.await(LATCH_CEILING_SECONDS, SECONDS))
+    val second = Thread { secondResult.set(manager.subscribe("com.example.app", "auth")) }
     second.start()
+    // Release only once the second caller is actually contending for the first caller's
+    // per-subscription lock; otherwise the test may never exercise the concurrent path.
+    val deadlineNanos = System.nanoTime() + SECONDS.toNanos(LATCH_CEILING_SECONDS)
+    while (second.state != Thread.State.BLOCKED && System.nanoTime() < deadlineNanos) {
+      Thread.yield()
+    }
+    assertEquals(Thread.State.BLOCKED, second.state)
     releaseFirstRegistration.countDown()
-    first.join(1_000)
-    second.join(1_000)
+    first.join(JOIN_CEILING_MS)
+    second.join(JOIN_CEILING_MS)
 
-    assertTrue(firstResult?.isFailure == true)
-    assertTrue(secondResult?.isSuccess == true)
+    assertTrue(firstResult.get()?.isFailure == true)
+    assertTrue(secondResult.get()?.isSuccess == true)
     assertEquals(
       listOf("com.example.app:auth"),
       manager.getActiveSubscriptions().map { it.subscriptionId },

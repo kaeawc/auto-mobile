@@ -16,7 +16,6 @@ concurrency:
 permissions:
   actions: read
   checks: write
-  security-events: write
   pull-requests: write
   contents: read
   packages: write
@@ -415,7 +414,8 @@ jobs:
               - 'package.json'
               - 'bun.lock'
 
-      # TypeScript-only concerns (CodeQL/JS, memory-leak harness, benchmarks).
+      # TypeScript-only concerns (memory-leak harness, benchmarks). CodeQL runs
+      # from codeql.yml on push to main and weekly (#10888), not per PR.
       # scripts/** is required: the memory-leak harness and benchmark scripts live
       # there and import from src/**.
       - name: "Check for TypeScript-related changes"
@@ -1241,51 +1241,6 @@ jobs:
         if: always() && runner.environment == 'self-hosted'
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/installer-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-
-  # =============================================================================
-  # Security Analysis (Skip for docs-only changes)
-  # =============================================================================
-
-  codeql-node:
-    name: "CodeQL Analysis - Node.js/TypeScript"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'
-    timeout-minutes: 360
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        language: ["typescript"]
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Initialize CodeQL"
-        uses: github/codeql-action/init@v4
-        with:
-          languages: ${{ matrix.language }}
-          queries: security-extended,security-and-quality
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Build TypeScript"
-        env:
-          TURBO_TELEMETRY_DISABLED: "1"
-          TURBO_NO_UPDATE_NOTIFIER: "1"
-          DO_NOT_TRACK: "1"
-          NO_COLOR: "1"
-        run: turbo run build --output-logs=errors-only
-
-      - name: "Perform CodeQL Analysis"
-        uses: github/codeql-action/analyze@v4
-        with:
-          category: "/language:${{matrix.language}}"
 
   bun-audit:
     timeout-minutes: 20

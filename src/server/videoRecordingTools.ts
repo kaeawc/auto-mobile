@@ -268,6 +268,14 @@ export function hasSegmentedVideoRecordingsForOwner(
   return segmentedSessions.forOwner(sessionUuid, deviceId).length > 0;
 }
 
+/** Handles (the first segment's recordingId) of the segmented sessions an owner has on a device. */
+export function segmentedVideoRecordingHandlesForOwner(
+  sessionUuid: string | undefined,
+  deviceId: string,
+): string[] {
+  return segmentedSessions.forOwner(sessionUuid, deviceId).map(([handle]) => handle);
+}
+
 /**
  * Finalize the segmented sessions a released daemon session owns on a device, so their rotation
  * timers stop and each segment is finalized. Failures are logged and never thrown: release must

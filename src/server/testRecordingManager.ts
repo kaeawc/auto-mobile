@@ -134,6 +134,15 @@ export function isTestRecordingOwnedBy(sessionUuid: string | undefined, deviceId
   );
 }
 
+/** Id of the live test recording `isTestRecordingOwnedBy` matches; its plan stays fetchable by that id. */
+export function ownedTestRecordingId(
+  sessionUuid: string | undefined,
+  deviceId: string,
+): string | undefined {
+  const session = activeRecording ?? startingRecording?.session ?? null;
+  return session && isTestRecordingOwnedBy(sessionUuid, deviceId) ? session.recordingId : undefined;
+}
+
 const buildPlanFromSteps = (
   steps: PlanStep[],
   session: RecordingSession,

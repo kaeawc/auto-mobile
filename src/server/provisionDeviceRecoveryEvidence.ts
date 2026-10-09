@@ -9,7 +9,11 @@ import type { ProvisionDeviceLifecycleOutcome } from "../db/provisionDeviceOpera
 export type ProvisionDeviceFailureBoundary =
   | "daemon_handoff"
   | "caller_cancellation"
-  | "result_persistence";
+  | "result_persistence"
+  | "readiness_failure"
+  | "cleanup_failure";
+
+type DeviceOwnership = "created_by_operation" | "adopted";
 
 export type ProvisionDeviceRecoveryAction =
   | "retry_original_operation"
@@ -32,7 +36,7 @@ export interface ProvisionDeviceRecoveryEvidence {
   /** Lifecycle phase last durably recorded for the operation, when any. */
   phaseReached?: string;
   /** Exact identity; a display name alone never authorizes destructive recovery. */
-  device?: RecoveryDevice & { ownership: "created_by_operation" | "adopted" | "unknown" };
+  device?: RecoveryDevice & { ownership: DeviceOwnership | "unknown" };
   outcomes: {
     deviceCreation: "created" | "adopted" | "not_created" | "unknown";
     resultPersistence: "not_attempted" | "unconfirmed" | "unknown";
@@ -77,6 +81,10 @@ export interface ProvisionDeviceRecoveryInput {
     hasSession: boolean;
   };
   retryAfterMs?: number;
+  /** Whether this operation created the device or adopted an existing one, when observed. */
+  ownership?: DeviceOwnership;
+  /** Failure boundaries: the provider's own verdict on whether retrying can help. */
+  retryable?: boolean;
 }
 
 type Cleanup = ProvisionDeviceRecoveryEvidence["cleanup"];
@@ -101,6 +109,12 @@ function cleanupFromLifecycle(lifecycle: ProvisionDeviceLifecycleOutcome | undef
     default:
       return { status: "unknown" };
   }
+}
+
+function isUnretryableFailureBoundary(input: ProvisionDeviceRecoveryInput): boolean {
+  const failureBoundary =
+    input.boundary === "readiness_failure" || input.boundary === "cleanup_failure";
+  return failureBoundary && input.retryable !== true;
 }
 
 function nextAction(input: ProvisionDeviceRecoveryInput, cleanup: Cleanup) {
@@ -138,6 +152,14 @@ function nextAction(input: ProvisionDeviceRecoveryInput, cleanup: Cleanup) {
       reason:
         "The device outcome is known but the result commit is unconfirmed; replaying the original operationId re-establishes the session without duplicate creation.",
       automaticRetrySafe: true,
+    };
+  }
+  if (isUnretryableFailureBoundary(input)) {
+    return {
+      action: "obtain_further_evidence" as const,
+      reason:
+        "The failure is not marked retryable; inspect the original error and the device inventory before acting.",
+      automaticRetrySafe: false,
     };
   }
   if (!input.lifecycle) {
@@ -185,14 +207,21 @@ function evidenceFromResult(
 
 function creationFromLifecycle(
   lifecycle: ProvisionDeviceLifecycleOutcome | undefined,
+  ownership: DeviceOwnership | undefined,
 ): DeviceEvidence["outcomes"]["deviceCreation"] {
+  if (lifecycle?.state === "no_device_created") {
+    return "not_created";
+  }
+  // Observed ownership is more precise than the lifecycle state: an adopted
+  // device that failed readiness was never created by this operation.
+  if (ownership && lifecycle) {
+    return ownership === "adopted" ? "adopted" : "created";
+  }
   switch (lifecycle?.state) {
     case "created_not_ready":
     case "retained":
     case "cleanup_in_progress":
       return "created";
-    case "no_device_created":
-      return "not_created";
     default:
       return "unknown";
   }
@@ -206,10 +235,10 @@ function deviceEvidence(input: ProvisionDeviceRecoveryInput): DeviceEvidence {
   const { lifecycle } = input;
   return {
     ...(lifecycle?.device
-      ? { device: { ...lifecycle.device, ownership: "unknown" as const } }
+      ? { device: { ...lifecycle.device, ownership: input.ownership ?? ("unknown" as const) } }
       : {}),
     outcomes: {
-      deviceCreation: creationFromLifecycle(lifecycle),
+      deviceCreation: creationFromLifecycle(lifecycle, input.ownership),
       resultPersistence: "not_attempted",
       session: "unknown",
       settlement,

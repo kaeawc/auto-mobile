@@ -3,12 +3,18 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { isTestRecordingOwnedBy, stopTestRecording } from "./testRecordingManager";
+import {
+  isTestRecordingOwnedBy,
+  ownedTestRecordingId,
+  stopTestRecording,
+} from "./testRecordingManager";
 import {
   hasSegmentedVideoRecordingsForOwner,
+  segmentedVideoRecordingHandlesForOwner,
   stopSegmentedVideoRecordingsForOwner,
 } from "./videoRecordingTools";
 import {
+  listActiveVideoRecordingIdsForOwner,
   listActiveVideoRecordings,
   listOwnedActiveVideoRecordingIds,
   markVideoRecordingIncomplete,
@@ -48,6 +54,8 @@ export interface RecordingSessionCleanupDeps {
   stopVideoRecording(recordingId: string): Promise<void>;
   isTestRecordingOwnedBy(sessionId: string | undefined, deviceId: string): boolean;
   stopTestRecording(): Promise<void>;
+  /** Ids of the recordings a session owns on the device, from memory only (no DB read). */
+  activeRecordingIdsForOwner(sessionId: string | undefined, deviceId: string): string[];
   /** Deadline clock for the finalize cap; a FakeTimer in tests. */
   timer: Pick<Timer, "setTimeout" | "clearTimeout">;
   /** Finalize cap for the device's platform. */
@@ -67,6 +75,11 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
     await stopVideoRecordingUnattended(recordingId);
   },
   isTestRecordingOwnedBy,
+  activeRecordingIdsForOwner: (sessionId, deviceId) => [
+    ...listActiveVideoRecordingIdsForOwner(sessionId, deviceId),
+    ...segmentedVideoRecordingHandlesForOwner(sessionId, deviceId),
+    ...(ownedTestRecordingId(sessionId, deviceId) ?? []),
+  ],
   stopTestRecording: async () => {
     await stopTestRecording();
   },
@@ -74,6 +87,24 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
   finalizeCapMs: defaultFinalizeCapMs,
   markVideoRecordingIncomplete,
 };
+
+/**
+ * Recording ids captured at release time, per released session. Captured inside the release
+ * callback, before any stop starts, because stopping removes the in-memory ownership the ids
+ * come from.
+ */
+const idsCapturedAtRelease = new Map<string, string[]>();
+
+/**
+ * Ids of the recordings the release of `sessionId` finalizes, consumed once so the
+ * `notifications/session/released` payload can name them (`recordingIds`) and the previous
+ * owner knows what to fetch (#10958). Empty when the release had no recording work.
+ */
+export function takeRecordingIdsFinalizedByRelease(sessionId: string): string[] {
+  const ids = idsCapturedAtRelease.get(sessionId) ?? [];
+  idsCapturedAtRelease.delete(sessionId);
+  return ids;
+}
 
 /** Extra time the force-stop and `incomplete` marking get once the cap has passed. */
 const INCOMPLETE_MARK_GRACE_MS = 5_000;
@@ -228,6 +259,10 @@ export function registerRecordingSessionCleanup(
   // A terminal upgrade of a finished release would stop the device's next owner's recording (#10825).
   manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
     if (!releaseOptions?.upgradeOnly) {
+      const ids = [...new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId))];
+      if (ids.length > 0) {
+        idsCapturedAtRelease.set(sessionId, ids);
+      }
       cleanup(sessionId, deviceId);
     }
   });

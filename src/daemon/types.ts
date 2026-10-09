@@ -359,6 +359,11 @@ export interface DaemonNotification {
   /** Authoritative terminal state captured before SessionManager removed it. */
   release?: SessionReleaseSnapshot;
   /**
+   * Recording ids the release is finalizing (`notifications/session/released` only, additive).
+   * The previous owner can still fetch each one by id after the release (#10958).
+   */
+  recordingIds?: string[];
+  /**
    * The client-supplied progress token this tick belongs to, for
    * `notifications/progress` frames (issue #6205) — echoed verbatim from the
    * `tools/call` {@link DaemonRequest.progressToken} that requested it, never a

@@ -1374,7 +1374,11 @@ export interface ActiveProvisionDeviceOperation {
   controller: AbortController;
   waiters: number;
   /** Last lifecycle durably recorded by the running attempt; feeds recovery evidence. */
-  lifecycleEvidence?: { lifecycle?: ProvisionDeviceLifecycleOutcome };
+  lifecycleEvidence?: {
+    lifecycle?: ProvisionDeviceLifecycleOutcome;
+    /** Whether this operation created the device or adopted it; sticky once observed. */
+    ownership?: "created_by_operation" | "adopted";
+  };
 }
 
 export const activeProvisionDeviceOperations = new Map<string, ActiveProvisionDeviceOperation>();

@@ -1163,9 +1163,9 @@ export class UnixSocketServer {
       // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
       this.sessionReleaseUnsubscribe?.();
       this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
-        (sessionId, reason, snapshot) => {
+        (sessionId, reason, snapshot, extras) => {
           this.clearBoundMcpClientsForReleasedSession(sessionId);
-          this.broadcastSessionReleased(sessionId, reason, snapshot);
+          this.broadcastSessionReleased(sessionId, reason, snapshot, extras?.recordingIds);
         },
       );
 
@@ -1694,6 +1694,7 @@ export class UnixSocketServer {
     releasedSessionId: string,
     reason?: string,
     release?: DaemonNotification["release"],
+    recordingIds?: string[],
   ): void {
     const notification: DaemonNotification = {
       type: "daemon_notification",
@@ -1701,6 +1702,7 @@ export class UnixSocketServer {
       sessionId: releasedSessionId,
       ...(reason !== undefined ? { reason } : {}),
       ...(release !== undefined ? { release } : {}),
+      ...(recordingIds && recordingIds.length > 0 ? { recordingIds } : {}),
     };
     for (const sessionId of this.notificationSubscribers) {
       const socket = this.clientSockets.get(sessionId);

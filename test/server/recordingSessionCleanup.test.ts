@@ -5,6 +5,7 @@ import type { SessionManager } from "../../src/daemon/sessionManager";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   registerRecordingSessionCleanup,
+  takeRecordingIdsFinalizedByRelease,
   type RecordingSessionCleanupDeps,
 } from "../../src/server/recordingSessionCleanup";
 
@@ -78,6 +79,14 @@ class FakeRecordings implements RecordingSessionCleanupDeps {
     });
   }
 
+  activeRecordingIdsForOwner(sessionId: string | undefined, deviceId: string): string[] {
+    const video = [...this.active.values()]
+      .filter((record) => record.deviceId === deviceId && record.ownerSessionUuid === sessionId)
+      .map((record) => record.recordingId);
+    return this.isTestRecordingOwnedBy(sessionId, deviceId)
+      ? [...video, `test-${sessionId}`]
+      : video;
+  }
   hasRecordingsToStop(sessionId: string | undefined, deviceId: string): boolean {
     return this.active.size > 0 || this.isTestRecordingOwnedBy(sessionId, deviceId);
   }
@@ -144,6 +153,35 @@ describe("registerRecordingSessionCleanup", () => {
     expect(manager.pendingCleanups.map((entry) => entry.deviceId)).toEqual(["SIM-1"]);
     recordings.start("SIM-1", "session-b");
     expect(recordings.active.get("SIM-1")?.ownerSessionUuid).toBe("session-b");
+  });
+
+  test("release captures the recording ids it finalizes before stopping them, once", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    recordings.testRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
+
+    manager.release("session-a", "SIM-1");
+    // Capture happens synchronously, so it holds even after the stops removed the recordings.
+    await manager.settle();
+
+    expect(recordings.active.size).toBe(0);
+    expect(takeRecordingIdsFinalizedByRelease("session-a")).toEqual([
+      "rec-session-a",
+      "test-session-a",
+    ]);
+    expect(takeRecordingIdsFinalizedByRelease("session-a")).toEqual([]);
+  });
+
+  test("a foreign owner's recording and an upgrade-only release name nothing", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-b");
+
+    manager.release("session-a", "SIM-1");
+    expect(takeRecordingIdsFinalizedByRelease("session-a")).toEqual([]);
+
+    recordings.start("SIM-2", "session-c");
+    manager.release("session-c", "SIM-2", true);
+    expect(takeRecordingIdsFinalizedByRelease("session-c")).toEqual([]);
   });
 
   test("a recording owned by another session on the device is left alone", async () => {

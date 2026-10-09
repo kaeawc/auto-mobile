@@ -37,6 +37,8 @@ import type {
   HierarchyDelegateContext,
 } from "../../../src/features/observe/android/types";
 import * as skeletonProjection from "../../../src/features/observe/output/SkeletonProjection";
+import retainedKeyboard from "../../fixtures/observe/ios-ipad-keyboard.json";
+import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 
 const capturedImeHierarchy = () =>
   new CtrlProxyHierarchy({
@@ -215,7 +217,7 @@ async function executeAt(
   if (display !== undefined) {
     hierarchy.displayId = Number(display);
   }
-  const keyboard = hierarchy.windows?.[0]?.hierarchy.node;
+  const keyboard = hierarchy.windows?.[0]?.hierarchy?.node;
   if (keyboard && platform === "ios") {
     keyboard.$ = { class: "UIKeyboard" };
     const key = keyboard.node?.[0];
@@ -684,6 +686,65 @@ test("iOS elementId selection behind the docked keyboard dispatches no tap", asy
   expect(result.error).toContain("covered by the soft keyboard");
   expect(points).toEqual([]);
 });
+
+describe("retained iPad keyboard with observe capture provenance", () => {
+  test.each([
+    { label: "Q", elementId: "s2-461eddd061a03b92", point: { x: 119, y: 937 } },
+    { label: "Tab", elementId: "tab", point: { x: 46, y: 937 } },
+    { label: "Emoji", elementId: "emoji", point: { x: 40, y: 1128 } },
+    { label: "Hide keyboard", elementId: "s2-457d0bcd3ce31237", point: { x: 769, y: 1128 } },
+  ])(
+    "$label uses the selected capture's keyboard ancestry",
+    async ({ label, elementId, point }) => {
+      const hierarchy = capturedIpadKeyboard();
+      const { result, points } = await executeAt(label, {
+        platform: "ios",
+        fixture: hierarchy,
+        screenSize: { width: 820, height: 1180 },
+        elementId,
+        realSelector: true,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.success).toBe(true);
+      expect(result.element["view-id"]).toBe(elementId);
+      expect(points).toEqual([point]);
+    },
+  );
+
+  test("an app Q sibling with the key's exact bounds is still refused without dispatch", async () => {
+    const { result, points, actionError } = await executeAt("Q", {
+      platform: "ios",
+      fixture: capturedIpadKeyboard(),
+      screenSize: { width: 820, height: 1180 },
+      elementId: "app-q",
+      realSelector: true,
+    });
+    expect(actionError).toBeInstanceOf(KeyboardOcclusionError);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Target "Q" is covered by the soft keyboard');
+    expect(points).toEqual([]);
+  });
+});
+
+function capturedIpadKeyboard(): ViewHierarchyResult {
+  const hierarchy = structuredClone(retainedKeyboard) as ViewHierarchyResult;
+  // Synthetic app sibling deliberately shares Q's label, bounds and absent native ID.
+  // It follows the keyboard so a bounds-only match would wrongly exempt it.
+  hierarchy.hierarchy.node = [
+    ...retainedKeyboard.hierarchy.node.map((node) => structuredClone(node)),
+    {
+      className: "UIButton",
+      clickable: "true",
+      text: "Q",
+      "view-id": "app-q",
+      bounds: { left: 87, top: 905, right: 152, bottom: 969 },
+    },
+  ];
+  // ObserveScreen registers this projection but retains the original hierarchy.
+  // The real selector uses snapshot nodes, which have different source identities.
+  identifyObservedHierarchy("ios", hierarchy, "fresh", new FakeTimer());
+  return hierarchy;
+}
 
 // No existing captured fixture contains a dialog over a list: build this tree inline.
 function dialogOverRow(

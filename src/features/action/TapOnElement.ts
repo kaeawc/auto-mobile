@@ -757,7 +757,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (platform !== "android" && platform !== "ios") {
       return undefined;
     }
-    const elements = new DefaultObserveElementCollector().collect(hierarchy, platform);
+    // iOS selectors use the registered capture's projected nodes. Collect from
+    // that same tree so the IME guard can recover the selected node's ancestry.
+    const capturedHierarchy =
+      platform === "ios" ? (getHierarchySnapshot(hierarchy)?.hierarchy ?? hierarchy) : hierarchy;
+    const elements = new DefaultObserveElementCollector().collect(capturedHierarchy, platform);
     const ime = elements && getImeOccluderForElement(elements, element);
     return ime && platform === "ios" ? getIosImeOccluder(ime, screenSize) : ime;
   }

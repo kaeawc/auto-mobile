@@ -10,6 +10,12 @@ import {
   rememberDeviceLossAbort,
 } from "./deviceLossOutcome";
 import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+
+const SESSIONLESS_DEVICE_ACQUIRED_REMEDY =
+  "another session acquired it while this call was in flight, so the call was cancelled. " +
+  "Acquire the device (setActiveDevice) and retry with that session's sessionUuid, or wait for " +
+  "the holder to release it.";
 
 interface ActiveExecution {
   id: string;
@@ -52,6 +58,12 @@ interface ActiveExecution {
    * tracker's clock. Undefined when the call was admitted without a deadline (#10712).
    */
   readDeadlineMs?: () => number | undefined;
+  /**
+   * Devices this call was admitted to drive without a session, because no session held them
+   * (#10829). A session that acquires one of them cancels the call: it may not keep driving the
+   * new holder's device.
+   */
+  sessionlessDeviceUse?: Set<string>;
 }
 
 /** How a session-bearing execution ended: whether it was ever admitted under its session. */
@@ -344,6 +356,54 @@ export class ExecutionTracker {
     if (execution) {
       execution.sessionAdmitted = true;
     }
+  }
+
+  /**
+   * Record that a sessionless call passed the ownership check for `deviceId` while no session held
+   * it, and will now drive it (#10829). Watching calls are not recorded: they stay allowed on a held
+   * device.
+   */
+  markSessionlessDeviceUse(executionId: string, deviceId: string): void {
+    const execution = this.executions.get(executionId);
+    if (execution) {
+      execution.sessionlessDeviceUse ??= new Set();
+      execution.sessionlessDeviceUse.add(deviceId);
+    }
+  }
+
+  /**
+   * A session just acquired `deviceId`: abort every sessionless call admitted to drive it while it
+   * was free, synchronously, with the same typed ownership refusal a new sessionless call gets
+   * (#10829). `excludeExecutionId` spares the call performing the acquisition. Returns the count.
+   */
+  cancelSessionlessDeviceUse(
+    deviceId: string,
+    options: { excludeExecutionId?: string } = {},
+  ): number {
+    let cancelled = 0;
+    for (const execution of this.executions.values()) {
+      if (
+        execution.id === options.excludeExecutionId ||
+        !execution.sessionlessDeviceUse?.has(deviceId) ||
+        execution.abortController.signal.aborted
+      ) {
+        continue;
+      }
+      this.abortExecution(
+        execution,
+        new InputDeviceOwnedError(
+          execution.toolName,
+          deviceId,
+          undefined,
+          SESSIONLESS_DEVICE_ACQUIRED_REMEDY,
+        ),
+      );
+      cancelled++;
+      logger.info(
+        `[ExecutionTracker] Cancelled sessionless execution ${execution.id} on ${deviceId}: a session acquired the device (tool=${execution.toolName})`,
+      );
+    }
+    return cancelled;
   }
 
   /** Mark an execution as a read-only inventory call, whose end is not session use. */

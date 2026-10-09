@@ -626,6 +626,12 @@ export type ExpiryReleaseExecutionCanceller = (
   query: ActiveSessionExecutionQuery,
 ) => void;
 
+/**
+ * Aborts the sessionless executions driving a device a session just acquired (#10829). Must signal
+ * the aborts synchronously: the new holder may drive the device in the same turn.
+ */
+export type DeviceAcquisitionExecutionCanceller = (deviceId: string, sessionId: string) => void;
+
 export type SessionDeviceUnboundCallback = (sessionId: string, deviceId: string) => void;
 
 interface PendingSessionCreation {
@@ -1328,6 +1334,8 @@ export class SessionManager {
   private sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup = () => undefined;
   // No canceller means nothing to abort: only the daemon tracks executions (#10820).
   private expiryReleaseExecutionCanceller: ExpiryReleaseExecutionCanceller = () => undefined;
+  private deviceAcquisitionExecutionCanceller: DeviceAcquisitionExecutionCanceller = () =>
+    undefined;
 
   // Idle window (heartbeats, no tool call): 2 minutes from the end of the last
   // tool call, env-overridable (see `./sessionLivenessWindows`).
@@ -1589,6 +1597,14 @@ export class SessionManager {
   }
 
   /**
+   * How acquiring a device cancels the sessionless calls admitted on it while it was free (#10829).
+   * The daemon supplies the execution tracker.
+   */
+  setDeviceAcquisitionExecutionCanceller(canceller: DeviceAcquisitionExecutionCanceller): void {
+    this.deviceAcquisitionExecutionCanceller = canceller;
+  }
+
+  /**
    * Register cleanup for a device a session stopped using without ending that
    * session. This intentionally excludes session-wide cleanup and transport
    * unbinding, which must remain attached to a real session release.
@@ -1725,6 +1741,7 @@ export class SessionManager {
     this.sessions.set(session.sessionId, session);
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
+    this.deviceAcquisitionExecutionCanceller(session.assignedDevice, session.sessionId);
     // Generation only: publishing an owner changes entitlement, not the screen/connection.
     this.notifyDeviceOwnershipChange(session.assignedDevice);
     this.notifySessionCreated(session);
@@ -2822,6 +2839,9 @@ export class SessionManager {
       this.deviceSessionMap.delete(previousDevice);
     }
     this.deviceSessionMap.set(assignedDevice, existing.sessionId);
+    if (assignedDevice !== previousDevice) {
+      this.deviceAcquisitionExecutionCanceller(assignedDevice, existing.sessionId);
+    }
     // Full: different-serial rebinds switch runtimes; same-serial force explicitly
     // means a restarted runtime. Terminal-release recovery also forces this path.
     this.notifyDeviceOwnershipChange(previousDevice, "full");

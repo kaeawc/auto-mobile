@@ -18,6 +18,11 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { setDebugModeEnabled } from "../../src/utils/debug";
+import { executionTracker } from "../../src/server/executionTracker";
+import {
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../../src/features/toolSelection/toolSelectionContext";
 
 /**
  * A device another live session holds runs device-aware tools only for its holder, as `input/*`
@@ -40,6 +45,8 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
   let devices: FakeDeviceSessionManager;
+  let gate: Promise<void> | undefined;
+  let dispatched: (() => void) | undefined;
 
   const call = (name: string, args: Record<string, unknown>) =>
     ToolRegistry.getTool(name)!.handler(args);
@@ -60,6 +67,13 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
       displayInventory: new FakeDisplayInventoryProvider(),
       auditRunner: {
         async run(input: AuditRunnerInput) {
+          // A gated handler stands in for device work in flight; like a real device call it
+          // honors its abort signal once it resumes.
+          dispatched?.();
+          if (gate) {
+            await gate;
+          }
+          input.signal?.throwIfAborted();
           ran.push({ name: input.name, deviceId: input.device.deviceId });
           return { success: true };
         },
@@ -93,6 +107,12 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     );
     await pool.initializeWithDevices([held, free]);
     DaemonState.getInstance().initialize(sessionManager, pool);
+    // Production wiring (daemon.ts): acquiring a device cancels sessionless work on it (#10829).
+    sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
+      executionTracker.cancelSessionlessDeviceUse(deviceId, {
+        excludeExecutionId: getToolSelectionContext()?.execution?.executionId,
+      });
+    });
     await sessionManager.createSession(agent, held.deviceId, "android");
     sessionManager.setDeviceReadiness(agent, "automationReady");
 
@@ -101,6 +121,8 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   });
 
   afterEach(() => {
+    gate = undefined;
+    dispatched = undefined;
     restorePipeline();
     Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
     Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
@@ -217,5 +239,81 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
       deviceId: held.deviceId,
       retryable: false,
     });
+  });
+  /** Run a call as a tracked execution, as the MCP ingress does, with the tracker's signal. */
+  async function tracked(name: string, args: Record<string, unknown>): Promise<unknown> {
+    const execution = executionTracker.startExecution(name);
+    try {
+      return await runWithToolSelectionContext(
+        { execution: { executionId: execution.id, startTime: execution.startTime } },
+        () =>
+          ToolRegistry.getTool(name)!.handler(args, undefined, execution.abortController.signal),
+      );
+    } finally {
+      executionTracker.endExecution(execution.id);
+    }
+  }
+
+  /** Start a gated call and wait until it is in its device work. */
+  async function startGated(name: string, args: Record<string, unknown>) {
+    const release = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    gate = release.promise;
+    dispatched = () => entered.resolve();
+    const outcome = tracked(name, args).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await entered.promise;
+    return { outcome, release: () => release.resolve() };
+  }
+
+  // #10829: ownership was checked once, at target resolution. A session acquiring the device while
+  // a sessionless call was in flight did not stop it, so its work landed on the new holder's device.
+  test("a sessionless rotate in flight is cancelled when another session acquires its device", async () => {
+    const call = await startGated("rotate", {
+      orientation: "landscape",
+      platform: "android",
+      deviceId: free.deviceId,
+    });
+    await sessionManager.createSession("late-holder", free.deviceId, "android");
+    call.release();
+    const error = await call.outcome;
+
+    expect(error).toBeInstanceOf(InputDeviceOwnedError);
+    expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect((error as Error).message).toContain("acquired it while this call was in flight");
+    expect(ran).toEqual([]);
+  });
+
+  test("a sessionless rotate on a device nobody acquires runs to completion", async () => {
+    const call = await startGated("rotate", {
+      orientation: "landscape",
+      platform: "android",
+      deviceId: free.deviceId,
+    });
+    call.release();
+    expect(await call.outcome).toBeUndefined();
+    expect(ran).toEqual([{ name: "rotate", deviceId: free.deviceId }]);
+  });
+
+  test("a sessionless observe in flight keeps watching after another session acquires the device", async () => {
+    const call = await startGated("observe", { platform: "android", deviceId: free.deviceId });
+    await sessionManager.createSession("late-holder", free.deviceId, "android");
+    call.release();
+    expect(await call.outcome).toBeUndefined();
+    expect(ran).toEqual([{ name: "observe", deviceId: free.deviceId }]);
+  });
+
+  test("the holder's own call is not cancelled by another device's acquisition", async () => {
+    const call = await startGated("rotate", {
+      orientation: "landscape",
+      sessionUuid: agent,
+      deviceId: held.deviceId,
+    });
+    await sessionManager.createSession("late-holder", free.deviceId, "android");
+    call.release();
+    expect(await call.outcome).toBeUndefined();
+    expect(ran).toEqual([{ name: "rotate", deviceId: held.deviceId }]);
   });
 });

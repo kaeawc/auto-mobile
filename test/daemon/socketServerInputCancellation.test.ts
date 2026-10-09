@@ -9,6 +9,10 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { ActionableError } from "../../src/models/ActionableError";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { androidDevice, createFakeDeviceManager } from "./helpers/inputSocketHarness";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { executionTracker } from "../../src/server/executionTracker";
+import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 
 /**
  * `input/*` frames get the owner fence a forwarded MCP call has (#10006): a frame whose socket
@@ -322,4 +326,45 @@ test("auto-advancing time does not expire a tap whose key holder finishes in tim
   expect(second.responses).toEqual([expect.objectContaining({ id: "second", success: true })]);
   expect(calls).toBe(2);
   expect(maxInFlight).toBe(1);
+});
+
+// #10829: a sessionless input on a free device passed the owner check, then parked on the device
+// key. A session acquiring the device meanwhile did not stop it, so it was sent to the new holder.
+test("a parked sessionless input/tap is not sent once another session acquires the device", async () => {
+  const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  sessionManager.stopCleanupTimer();
+  // Production wiring (daemon.ts).
+  sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
+    executionTracker.cancelSessionlessDeviceUse(deviceId);
+  });
+  const server = new UnixSocketServer(
+    "unused",
+    "http://localhost:0/mcp",
+    {
+      isInitialized: () => true,
+      getSessionManager: () => sessionManager,
+      getDevicePool: () => ({}),
+    } as unknown as DaemonStateAccess,
+    timer,
+  );
+  internals = server as unknown as Internals;
+  internals.acceptingRequests = true;
+
+  await holdDeviceKey();
+  const waiter = connect();
+  waiter.send(tapFrame("waiter", 2));
+  await settle();
+  expect(taps).toHaveLength(1);
+
+  await sessionManager.createSession("late-holder", androidDevice.deviceId, "android");
+  taps[0].release({ success: true });
+  await drain();
+
+  expect(taps.map((tap) => tap.x)).toEqual([1]);
+  expect(waiter.responses.find((frame) => frame.id === "waiter")).toMatchObject({
+    success: false,
+    error: expect.stringContaining("acquired it while this call was in flight"),
+    code: DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+  });
+  sessionManager.stopCleanupTimer();
 });

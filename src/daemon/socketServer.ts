@@ -6635,7 +6635,12 @@ export class UnixSocketServer {
       async (signal) =>
         this.runKeyedMcpForward(
           executionKey,
-          () => operation(signal),
+          () => {
+            // Parked on the device key, the input may have been cancelled (a session acquired the
+            // device, #10829): it is not sent.
+            signal?.throwIfAborted();
+            return operation(signal);
+          },
           executionKey,
           gate?.chainWait,
         ),
@@ -6775,6 +6780,11 @@ export class UnixSocketServer {
       signal.throwIfAborted();
       // The holder and readiness checks above passed: this input is use of the session (#10824).
       executionTracker.markSessionAdmitted(execution.id);
+      if (!sessionUuid) {
+        // Admitted on a device no session holds: a session acquiring it while this input is parked
+        // or in flight cancels it (#10829).
+        executionTracker.markSessionlessDeviceUse(execution.id, targetDevice.deviceId);
+      }
       return await runWithToolSelectionContext(
         {
           execution: {

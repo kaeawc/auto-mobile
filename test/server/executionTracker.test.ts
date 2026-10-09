@@ -7,6 +7,39 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 
 describe("ExecutionTracker", function () {
+  test("an acquisition cancels only the sessionless device use recorded on that device (#10829)", () => {
+    const tracker = new ExecutionTracker(
+      new FakeTimer(),
+      new FakeIdGenerator(["a", "b", "c", "d"]),
+    );
+    const onDevice = tracker.startExecution("rotate");
+    const otherDevice = tracker.startExecution("rotate");
+    const watching = tracker.startExecution("observe");
+    const acquiring = tracker.startExecution("executePlan");
+    tracker.markSessionlessDeviceUse(onDevice.id, "emulator-5554");
+    tracker.markSessionlessDeviceUse(otherDevice.id, "emulator-5556");
+    tracker.bindDeviceExecution(watching.id, "emulator-5554");
+    tracker.markSessionlessDeviceUse(acquiring.id, "emulator-5554");
+
+    const cancelled = tracker.cancelSessionlessDeviceUse("emulator-5554", {
+      excludeExecutionId: acquiring.id,
+    });
+
+    expect(cancelled).toBe(1);
+    expect(onDevice.abortController.signal.reason).toMatchObject({
+      code: "device_owned_by_other_session",
+      deviceId: "emulator-5554",
+    });
+    expect((onDevice.abortController.signal.reason as Error).message).toStartWith(
+      "rotate refused: device 'emulator-5554' is held by another session.",
+    );
+    expect(otherDevice.abortController.signal.aborted).toBe(false);
+    expect(watching.abortController.signal.aborted).toBe(false);
+    expect(acquiring.abortController.signal.aborted).toBe(false);
+    expect(tracker.cancelSessionlessDeviceUse("emulator-5554")).toBe(1);
+    expect(tracker.cancelSessionlessDeviceUse("emulator-5554")).toBe(0);
+  });
+
   test("tracks per-device activity for forwarding-lease idleness (#10497)", () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(1_000);

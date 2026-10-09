@@ -241,34 +241,6 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
   }
 }
 
-const RENAME_ATTEMPTS = 4;
-const RENAME_RETRY_DELAY_MS = 25;
-
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-/** Rename, retrying transient EPERM/EACCES a few times (Windows AV/indexer holds). */
-export function renameWithRetry(
-  rename: (from: string, to: string) => void,
-  sleep: (ms: number) => void,
-  from: string,
-  to: string,
-): void {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      rename(from, to);
-      return;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if ((code !== "EPERM" && code !== "EACCES") || attempt >= RENAME_ATTEMPTS) {
-        throw error;
-      }
-      sleep(RENAME_RETRY_DELAY_MS * attempt);
-    }
-  }
-}
-
 function fsyncPath(filePath: string, flags: string): void {
   const fd = fs.openSync(filePath, flags);
   try {
@@ -312,7 +284,9 @@ export const nodeTerminalReleaseJournalFileSystem: TerminalReleaseJournalFileSys
     try {
       // libuv renames with MOVEFILE_REPLACE_EXISTING on Windows, so this replaces in place there
       // too; it fails only while another process (AV, indexer) briefly holds the target open.
-      renameWithRetry(fs.renameSync, sleepSync, temporaryPath, filePath);
+      // No retry or sleep here: this runs on the daemon's event loop, so a failure surfaces at once
+      // and `resolve` falls back to the durable appended `lifted` marker (#11102).
+      fs.renameSync(temporaryPath, filePath);
     } catch (error) {
       fs.rmSync(temporaryPath, { force: true });
       throw error;

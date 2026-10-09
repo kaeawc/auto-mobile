@@ -13,6 +13,14 @@ public final class RecordingHeldSessionController: HeldSessionControlling {
 
     private let state = OSAllocatedUnfairLock<[Event]>(initialState: [])
 
+    /// When set, every heartbeat handle reports the session as lost with this reason (#11102).
+    public var lossReason: String? {
+        get { loss.withLock { $0 } }
+        set { loss.withLock { $0 = newValue } }
+    }
+
+    private let loss = OSAllocatedUnfairLock<String?>(initialState: nil)
+
     public init() {}
 
     public var events: [Event] { state.withLock { $0 } }
@@ -38,7 +46,7 @@ public final class RecordingHeldSessionController: HeldSessionControlling {
 
     public func startHeartbeating(sessionId: String) -> any HeldSessionHeartbeat {
         state.withLock { $0.append(.heartbeatStarted(sessionId)) }
-        return Handle(sessionId: sessionId, state: state)
+        return Handle(sessionId: sessionId, state: state, lostReason: lossReason)
     }
 
     public func release(sessionId: String) async {
@@ -48,6 +56,7 @@ public final class RecordingHeldSessionController: HeldSessionControlling {
     private struct Handle: HeldSessionHeartbeat {
         let sessionId: String
         let state: OSAllocatedUnfairLock<[Event]>
+        let lostReason: String?
 
         func stop() {
             state.withLock { $0.append(.heartbeatStopped(sessionId)) }

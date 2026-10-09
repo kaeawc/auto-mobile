@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   FileTerminalReleaseJournal,
-  renameWithRetry,
+  nodeTerminalReleaseJournalFileSystem,
   createDaemonTerminalReleaseJournal,
   TERMINAL_RELEASE_JOURNAL_FILE_NAME,
 } from "../../src/daemon/terminalReleaseJournal";
@@ -65,27 +65,36 @@ describe("FileTerminalReleaseJournal (#10959)", () => {
     ]);
   });
 
-  test("renameWithRetry retries transient EPERM/EACCES and rethrows other errors (#11077)", () => {
-    const sleeps: number[] = [];
-    let calls = 0;
-    const flaky = () => {
-      calls++;
-      if (calls < 3) {
-        throw Object.assign(new Error("busy"), { code: calls === 1 ? "EPERM" : "EACCES" });
-      }
-    };
-    renameWithRetry(flaky, (ms) => sleeps.push(ms), "a", "b");
-    expect(calls).toBe(3);
-    expect(sleeps.length).toBe(2);
+  test("a failed compaction rename is not retried or slept on; the lifted marker is appended at once (#11102)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trj-"));
+    const file = path.join(dir, TERMINAL_RELEASE_JOURNAL_FILE_NAME);
+    const rename = spyOn(fs, "renameSync").mockImplementation(() => {
+      throw Object.assign(new Error("held by AV"), { code: "EPERM" });
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const wait = spyOn(Atomics, "wait");
+    try {
+      const journal = new FileTerminalReleaseJournal(file, nodeTerminalReleaseJournalFileSystem);
+      journal.record({ sessionId: "live", reason: "heartbeat-timeout", at: 1 });
+      journal.record({ sessionId: "other", reason: "explicit-release", at: 2 });
 
-    const missing = () => {
-      throw Object.assign(new Error("gone"), { code: "ENOENT" });
-    };
-    expect(() => renameWithRetry(missing, () => {}, "a", "b")).toThrow("gone");
-    const stuck = () => {
-      throw Object.assign(new Error("stuck"), { code: "EPERM" });
-    };
-    expect(() => renameWithRetry(stuck, () => {}, "a", "b")).toThrow("stuck");
+      journal.resolve("live");
+
+      expect(rename).toHaveBeenCalledTimes(1);
+      expect(wait).not.toHaveBeenCalled();
+      expect(fs.readdirSync(dir)).toEqual([TERMINAL_RELEASE_JOURNAL_FILE_NAME]);
+      rename.mockRestore();
+      expect(
+        new FileTerminalReleaseJournal(file, nodeTerminalReleaseJournalFileSystem)
+          .loadUnconfirmed()
+          .map(({ sessionId }) => sessionId),
+      ).toEqual(["other"]);
+    } finally {
+      wait.mockRestore();
+      warn.mockRestore();
+      rename.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("a confirmation for another reason keeps a later upgraded intent", () => {

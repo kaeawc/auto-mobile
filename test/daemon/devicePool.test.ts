@@ -5524,6 +5524,31 @@ describe("DevicePool", () => {
       );
     });
 
+    // #11138: an acquisition that resolved a source image fell into the freshly-started guard.
+    test("reuses an anonymous session for a one-shot CLI bind that resolved a source image", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
+      await bindAs("session-1", "cli-connection-1", false, true);
+
+      const sessionId = await devicePool.bindOrReuseDeviceSession(
+        "session-2",
+        "sim-1",
+        "ios",
+        { name: "iPhone 15", platform: "ios", deviceId: "sim-1", isRunning: true, source: "local" },
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        "cli-connection-2",
+        true,
+      );
+
+      expect(sessionId).toBe("session-1");
+      expect(sessionManager.getSession("session-2")).toBeNull();
+    });
+
     test("refuses a one-shot CLI bind of a device an MCP connection acquired, typed", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
       fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];

@@ -7664,8 +7664,8 @@ export class DevicePool {
   /**
    * Assert the caller may act on `session` and return whether same-owner reuse was proven. An
    * identified MCP connection must have acquired it; a one-shot `--cli` caller may act only on a
-   * session another anonymous acquisition created (#11096); a caller with no identity is left to
-   * the anonymous reuse check.
+   * session another anonymous acquisition created, and is then its owner (#11096, #11138); a
+   * caller with no identity is left to the anonymous reuse check.
    */
   private assertCallerOwnsDeviceSession(
     caller: AutolockClient | undefined,
@@ -7676,7 +7676,10 @@ export class DevicePool {
       if (!isAnonymousAcquisitionSession(session)) {
         throw deviceAlreadyAssignedToAnotherSessionError(device.id);
       }
-      return false;
+      // Anonymous acquisitions share one owner, so a one-shot CLI caller reusing one is its
+      // confirmed owner. Returning false sent an acquisition that resolved a source image (an AVD
+      // name, or a booted AVD's serial) into the freshly-started-device guard (#11138).
+      return true;
     }
     const mcpSessionId = caller?.mcpSessionId;
     if (mcpSessionId === undefined) {

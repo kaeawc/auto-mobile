@@ -432,8 +432,11 @@ proxy_alive() {
 start_proxy() {
   rm -f "${work_dir}/mcp.in" "${work_dir}/mcp.out"
   mkfifo "${work_dir}/mcp.in" "${work_dir}/mcp.out"
-  "${BUN}" "${server}" --port "${port}" --strict-port \
-    < "${work_dir}/mcp.in" > "${work_dir}/mcp.out" 2>> "${work_dir}/proxy.stderr" &
+  # stdin reaches the proxy through an anonymous pipe (`cat` reads the FIFO): Bun on macOS never
+  # delivers `end` for a named FIFO, so the proxy would not see this script close its stdin and
+  # stop_proxy would wait out its full timeout (#11073). $! is the proxy, the last command.
+  cat "${work_dir}/mcp.in" | "${BUN}" "${server}" --port "${port}" --strict-port \
+    > "${work_dir}/mcp.out" 2>> "${work_dir}/proxy.stderr" &
   proxy_pid=$!
   # Open the writer first: the proxy opens its stdin before its stdout.
   exec 7> "${work_dir}/mcp.in"
@@ -472,9 +475,10 @@ stop_proxy() {
   proxy_pid=""
 }
 
-# Send one JSON-RPC request and wait for its response; any error fails the scenario.
+# Send one JSON-RPC request and wait for its response; any error fails the scenario, except a
+# tool error naming the optional 4th argument (e.g. no_active_device_session), which returns 3.
 mcp_request() {
-  local method="$1" params="$2" timeout_s="$3"
+  local method="$1" params="$2" timeout_s="$3" tolerate="${4:-}"
   request_id=$((request_id + 1))
   jq -cn --argjson id "${request_id}" --arg method "${method}" --argjson params "${params}" \
     '{jsonrpc: "2.0", id: $id, method: $method, params: $params}' >&7 ||
@@ -489,6 +493,9 @@ mcp_request() {
         die "${method} failed: $(jq -c '.error' <<< "${line}")"
       fi
       if jq -e '.result.isError == true' <<< "${line}" > /dev/null; then
+        if [[ -n "${tolerate}" && "${line}" == *"${tolerate}"* ]]; then
+          return 3
+        fi
         die "${method} returned an error: $(jq -c '.result.content' <<< "${line}")"
       fi
       return 0
@@ -498,9 +505,9 @@ mcp_request() {
 }
 
 call_tool() {
-  local name="$1" arguments="$2" timeout_s="$3"
+  local name="$1" arguments="$2" timeout_s="$3" tolerate="${4:-}"
   mcp_request tools/call "$(jq -cn --arg name "${name}" --argjson arguments "${arguments}" \
-    '{name: $name, arguments: $arguments}')" "${timeout_s}"
+    '{name: $name, arguments: $arguments}')" "${timeout_s}" "${tolerate}"
 }
 
 # Through the running proxy, acquire `device` with `tool` (getAndroid or provisionDevice) and
@@ -686,7 +693,7 @@ scenario_selector() {
 scenario_observe_only() {
   current_scenario="observe-only"
   acquire_device
-  local acquired first now
+  local acquired first now call_status
   acquired="$(now_ms)"
   query_device_entry
   first="${entry}"
@@ -694,10 +701,16 @@ scenario_observe_only() {
   local deadline=$((acquired + idle_timeout_ms + SUSPECT_GRACE_MS + MONITOR_SCAN_MS + slack_ms))
   released_at=""
   while [[ -z "${released_at}" ]]; do
-    call_tool observe "$(jq -cn --arg device "${serial}" '{deviceId: $device}')" 120
+    # After the release the owner's next call is refused (lazy expiry): that refusal is the
+    # release signal, not a failure (#11073). The entry query below confirms it.
+    call_status=0
+    call_tool observe "$(jq -cn --arg device "${serial}" '{deviceId: $device}')" 120 no_active_device_session ||
+      call_status=$?
     now="$(now_ms)"
     query_device_entry
-    if [[ -z "${entry}" ]]; then
+    if ((call_status == 3)) && [[ -n "${entry}" ]]; then
+      die "observe was refused with no_active_device_session while ${serial} is still held"
+    elif [[ -z "${entry}" ]]; then
       released_at="${now}"
     elif [[ "$(entry_field "${entry}" lastToolActivityAt)" != "$(entry_field "${first}" lastToolActivityAt)" ]]; then
       die "an observe moved lastToolActivityAt; a read must not count as use"

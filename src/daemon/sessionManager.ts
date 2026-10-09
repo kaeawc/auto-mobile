@@ -3382,7 +3382,8 @@ export class SessionManager {
   ): Promise<DeviceSession[]> {
     const deadlineWon = Symbol("startup-deadline");
     const recoverableSessions =
-      this.deviceSessionRepository.listRecoverableSessions?.() ?? Promise.resolve([]);
+      this.deviceSessionRepository.listRecoverableSessions?.(this.sessionNow()) ??
+      Promise.resolve([]);
     let result: typeof deadlineWon | DeviceSession[];
     try {
       result = await raceWithDeadline(recoverableSessions, {
@@ -7982,27 +7983,31 @@ export class SessionManager {
   // awaited write is already sequenced by its caller and must not be wrapped in
   // `track()`. Do not "fix" this by adding a barrier — that would be a non-bug fix.
   private async persistSession(session: Session, incarnation: Session): Promise<void> {
-    const rowGeneration = await this.deviceSessionRepository.upsertActiveSession({
-      sessionUuid: session.sessionId,
-      deviceId: session.assignedDevice,
-      stableDeviceId: session.stableDeviceId,
-      platform: session.platform,
-      source: session.persistenceMetadata?.source ?? "session-manager",
-      autolockEnabled: session.persistenceMetadata?.autolockEnabled,
-      mcpSessionId: session.persistenceMetadata?.mcpSessionId,
-      daemonSessionId: this.daemonSessionId ?? session.persistenceMetadata?.daemonSessionId,
-      createdAtMs: session.createdAt,
-      lastUsedAtMs: session.lastUsedAt,
-      expiresAtMs: session.expiresAt,
-      sessionTimeoutMs: session.sessionTimeoutMs,
-      heartbeatTimeoutMs: session.heartbeatTimeoutMs,
-      heartbeatTimeoutSource: session.heartbeatTimeoutSource,
-      hasReceivedHeartbeat: session.hasReceivedHeartbeat,
-      livenessPolicy: session.livenessPolicy,
-      preCliHeartbeatTimeoutMs: session.preCliLiveness?.heartbeatTimeoutMs,
-      preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
-      preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
-    });
+    const rowGeneration = await this.deviceSessionRepository.upsertActiveSession(
+      {
+        sessionUuid: session.sessionId,
+        deviceId: session.assignedDevice,
+        stableDeviceId: session.stableDeviceId,
+        platform: session.platform,
+        source: session.persistenceMetadata?.source ?? "session-manager",
+        autolockEnabled: session.persistenceMetadata?.autolockEnabled,
+        mcpSessionId: session.persistenceMetadata?.mcpSessionId,
+        daemonSessionId: this.daemonSessionId ?? session.persistenceMetadata?.daemonSessionId,
+        createdAtMs: session.createdAt,
+        lastUsedAtMs: session.lastUsedAt,
+        expiresAtMs: session.expiresAt,
+        sessionTimeoutMs: session.sessionTimeoutMs,
+        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+        heartbeatTimeoutSource: session.heartbeatTimeoutSource,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        livenessPolicy: session.livenessPolicy,
+        preCliHeartbeatTimeoutMs: session.preCliLiveness?.heartbeatTimeoutMs,
+        preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
+        preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
+      },
+      // The retention prune compares session-clock release stamps (#11129).
+      this.sessionNow(),
+    );
     // Recorded before the ownership write, which can fail after the row already advanced.
     this.recordPersistedRowGeneration(incarnation, rowGeneration);
     await this.deviceSessionRepository.replaceLivenessOwnership?.(

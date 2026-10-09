@@ -974,6 +974,60 @@ describe("DeviceSessionRepository", () => {
     }
   });
 
+  test("recoverable-session listing judges expiry on the session clock it is given (#11129)", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "recoverable",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: true,
+    });
+    await repo.markReleased("recoverable", "expired", 1000, "daemon-restart");
+    // The wall timer reads past the expiry; the session-clock instant the caller passes does not.
+    timer.setCurrentTime(121_000);
+
+    const listed = await repo.listRecoverableSessions(2000);
+    expect(listed.map((row) => row.session_uuid)).toEqual(["recoverable"]);
+    expect((await repo.getSession("recoverable"))!.release_reason).toBe("daemon-restart");
+  });
+
+  test("SessionManager hands the repository its session clock, not the wall timer (#11129)", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(10_000);
+    const seen: { upsert?: number; list?: number } = {};
+    class ClockRecordingRepository extends DeviceSessionRepository {
+      override async upsertActiveSession(record: DeviceSessionRecord, nowMs?: number) {
+        seen.upsert = nowMs;
+        return await super.upsertActiveSession(record, nowMs);
+      }
+      override async listRecoverableSessions(nowMs?: number) {
+        seen.list = nowMs;
+        return await super.listRecoverableSessions(nowMs);
+      }
+    }
+    const sessionManager = new SessionManager(timer, new ClockRecordingRepository(db, timer));
+    try {
+      const sessionClock = sessionManager.sessionNow();
+      // A backward wall step: the session clock holds, the wall timer falls an hour behind.
+      timer.stepWallClock(-3_600_000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      await sessionManager.rehydratePersistedSessions({
+        assignSessionToDevice: async () => {
+          throw new Error("no rows to assign");
+        },
+      } as unknown as Parameters<SessionManager["rehydratePersistedSessions"]>[0]);
+      expect(seen.upsert).toBe(sessionClock);
+      expect(seen.list).toBe(sessionClock);
+      expect(timer.now()).toBe(sessionClock - 3_600_000);
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
   test("SessionManager persists create, activity, and release", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, repo);

@@ -105,11 +105,13 @@ export interface DeviceSessionPersistence {
   /**
    * Resolves with the row's `stable_identity_generation` after the write when the implementation
    * reports it; that is the value a later release of this incarnation passes as
-   * {@link MarkReleasedOptions.expectedRowGeneration}.
+   * {@link MarkReleasedOptions.expectedRowGeneration}. `nowMs` is the session clock the row's
+   * stamps are written with (#11129), used for the retention prune; it defaults to the timer.
    */
-  upsertActiveSession(record: DeviceSessionRecord): Promise<number | void>;
+  upsertActiveSession(record: DeviceSessionRecord, nowMs?: number): Promise<number | void>;
   getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
-  listRecoverableSessions?(): Promise<DeviceSession[]>;
+  /** `nowMs` is the session clock the persisted stamps were written with (#11129). */
+  listRecoverableSessions?(nowMs?: number): Promise<DeviceSession[]>;
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
   /**
    * Extend a device-restart-released row's expiry to `activityAtMs + session_timeout_ms` when that
@@ -257,13 +259,16 @@ export class DeviceSessionRepository {
     return new Date(this.timer.now()).toISOString();
   }
 
-  async upsertActiveSession(record: DeviceSessionRecord): Promise<number> {
+  async upsertActiveSession(
+    record: DeviceSessionRecord,
+    nowMs: number = this.timer.now(),
+  ): Promise<number> {
     // A cheap, unconditional, indexed range
     // delete run before the write rather than gated behind amortization —
     // session starts are far less frequent than the amortized-per-insert
     // tables (#6464). Self-contained: a prune failure must never block a new
     // session from being persisted, so it swallows its own errors.
-    await this.pruneExpiredSessions(this.timer.now());
+    await this.pruneExpiredSessions(nowMs);
     try {
       const db = await this.getDb();
       const now = this.nowIso();
@@ -546,10 +551,13 @@ export class DeviceSessionRepository {
       .executeTakeFirst();
   }
 
-  /** Terminalizes expired recoverable rows before reading and returning sessions. */
-  async listRecoverableSessions(): Promise<DeviceSession[]> {
+  /**
+   * Terminalizes expired recoverable rows before reading and returning sessions. `nowMs` must be
+   * on the clock the stamps were written with (the session clock, #11129); the timer is only a
+   * fallback for callers without one.
+   */
+  async listRecoverableSessions(nowMs: number = this.timer.now()): Promise<DeviceSession[]> {
     const db = await this.getDb();
-    const nowMs = this.timer.now();
     await this.pruneExpiredSessions(nowMs);
     const reasons = Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS);
     const expired = await db

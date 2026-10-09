@@ -45,7 +45,7 @@ for (const workflow of ["pull_request", "merge"]) {
       const sdkStep = androidSteps.find(isSdkStep);
       const sdkName = sanitize(String(sdkStep?.with?.["gradle-tasks"]));
       expect(sdkName).toContain("auto-mobile-sdk-apiCheck");
-      for (const [jobId, job] of Object.entries(jobs)) {
+      for (const job of Object.values(jobs)) {
         for (const step of job.steps ?? []) {
           if (step.uses === "./.github/actions/gradle-task-run" && !isSdkStep(step)) {
             expect(sanitize(String(step.with?.["gradle-tasks"]))).not.toBe(sdkName);

@@ -21,7 +21,7 @@ export interface SubscriptionResponse {
   error?: string;
   timestamp?: number;
   subscriptionId?: string;
-  code?: "BACKFILL_QUEUE_OVERFLOW" | "DEVICE_SESSION_SUPERSEDED_BY_RESTORE";
+  code?: "BACKFILL_QUEUE_OVERFLOW" | "DEVICE_SESSION_SUPERSEDED_BY_RESTORE" | "SESSION_ENDED";
 }
 
 const MAX_BACKFILL_QUEUE = 1_000;

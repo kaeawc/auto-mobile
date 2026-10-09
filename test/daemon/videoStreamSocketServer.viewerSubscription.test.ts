@@ -127,6 +127,7 @@ async function harness(
   const emissions: Array<(data: Buffer) => void> = [];
   let lifecycleListeners = 0;
   const releaseListeners = new Set<(sessionId: string) => void>();
+  const observerListeners = new Set<(sessionId: string) => void>();
   let resolveCalls = 0;
   const server = new TestServer(
     {
@@ -152,6 +153,14 @@ async function harness(
           releaseListeners.add(cb);
           return () => {
             releaseListeners.delete(cb);
+          };
+        },
+      },
+      observerReleases: {
+        subscribe: (cb) => {
+          observerListeners.add(cb);
+          return () => {
+            observerListeners.delete(cb);
           };
         },
       },
@@ -239,6 +248,12 @@ async function harness(
         cb(id);
       }
     },
+    observerGone: (id: string) => {
+      for (const cb of observerListeners) {
+        cb(id);
+      }
+    },
+    observerListenerCount: () => observerListeners.size,
     lifecycleListenerCount: () => lifecycleListeners,
     emit: () =>
       emissions[0](
@@ -256,6 +271,28 @@ function terminal(socket: FakeSocket, reason: string): void {
   expect(messages(socket).at(-1)?.error).toStartWith("Video stream ended:");
   expect(socket.destroyed).toBe(true);
 }
+
+describe("observer registrations that end (#11076)", () => {
+  test("a released or expired observer's viewer stream ends with session_ended", async () => {
+    const h = await harness({ owner: "b" });
+    const socket = await h.subscribe("a");
+    expect(messages(socket).at(-1)).toMatchObject({ success: true, subscriptionKind: "viewer" });
+
+    // The observer registry no longer admits "a"; no device owner changed.
+    h.state.live.delete("a");
+    h.observerGone("a");
+
+    terminal(socket, "session_ended");
+    expect(h.server.subscriberCount(device.deviceId)).toBe(0);
+  });
+
+  test("close unsubscribes from observer releases", async () => {
+    const h = await harness();
+    expect(h.observerListenerCount()).toBe(1);
+    await h.server.close();
+    expect(h.observerListenerCount()).toBe(0);
+  });
+});
 
 describe("viewer subscriptions (moved from real-socket ownership tests)", () => {
   test("shutdown bounds a non-reading connection without finish or peer FIN", async () => {

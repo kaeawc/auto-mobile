@@ -5266,6 +5266,10 @@ export class DevicePool {
         () => this.hasPendingAndroidRecovery(platform),
       );
     }
+    const ownership = this.foreignOwnershipFor(recoveryTarget.platform);
+    if (ownership) {
+      await this.assertRecoveryTargetNotForeignOwned(sessionId, recoveryTarget, ownership);
+    }
     const result = await this.tryAssignFrom(
       sessionId,
       () => this.getDevicesMatchingRecoveryTarget(recoveryTarget),
@@ -5274,11 +5278,65 @@ export class DevicePool {
       recoveryTarget,
       settledRecoveryLoss,
     );
-    if (result.success && result.deviceId !== undefined && this.foreignDeviceOwnership) {
-      // Recovery rebinds the session's own device; publish the claim without giving it back.
-      await this.publishDeviceClaimBestEffort(sessionId, result.deviceId);
+    if (ownership && result.success && result.deviceId !== undefined && result.session) {
+      await this.claimRecoveredDevice(
+        sessionId,
+        recoveryTarget,
+        ownership,
+        result.deviceId,
+        result.session,
+      );
     }
     return result;
+  }
+
+  /**
+   * A restarted daemon must not rehydrate a session onto a device another live daemon took over
+   * while it was down (#11076): both would drive it. The persisted session is terminal then.
+   */
+  private async assertRecoveryTargetNotForeignOwned(
+    sessionId: string,
+    target: SessionRecoveryTarget,
+    ownership: ForeignDeviceOwnership,
+  ): Promise<void> {
+    const idle = this.getDevicesMatchingRecoveryTarget(target).filter(
+      (device) => device.sessionId === null,
+    );
+    if (idle.length === 0) {
+      return;
+    }
+    await ownership.refresh(idle.map((device) => device.id));
+    const foreign = idle.find((device) => this.isDrivenByForeignDaemon(device));
+    if (foreign) {
+      throw new SessionRecoveryIdentityLossError(sessionId, target, "owned-by-other-daemon", {
+        deviceId: foreign.id,
+        ownerPid: ownership.foreignOwnerPid(foreign.id),
+      });
+    }
+  }
+
+  /**
+   * Publish this daemon's claim on the device recovery just rebound. When another live daemon's
+   * claim won the race, give the device back and terminalize the session (#11076).
+   */
+  private async claimRecoveredDevice(
+    sessionId: string,
+    target: SessionRecoveryTarget,
+    ownership: ForeignDeviceOwnership,
+    deviceId: string,
+    session: Session,
+  ): Promise<void> {
+    if (await this.publishDeviceClaim(sessionId, deviceId)) {
+      return;
+    }
+    logger.warn(
+      `[DevicePool] Another AutoMobile process claims ${deviceId}; rolling back recovery of session ${sessionId}`,
+    );
+    await this.rollbackAssignments(new Map([[sessionId, { deviceId, session }]]));
+    throw new SessionRecoveryIdentityLossError(sessionId, target, "owned-by-other-daemon", {
+      deviceId,
+      ownerPid: ownership.foreignOwnerPid(deviceId),
+    });
   }
 
   /**
@@ -5368,15 +5426,6 @@ export class DevicePool {
       this.releaseDeviceClaim(deviceId);
     }
     return true;
-  }
-
-  /** Publish a claim for a device the caller keeps either way (explicit bind, recovery). */
-  private async publishDeviceClaimBestEffort(sessionId: string, deviceId: string): Promise<void> {
-    if (!(await this.publishDeviceClaim(sessionId, deviceId))) {
-      logger.warn(
-        `[DevicePool] Another AutoMobile process still claims ${deviceId}; session ${sessionId} keeps it as requested`,
-      );
-    }
   }
 
   /** Withdraw this daemon's claim once no session of this daemon holds the device. */

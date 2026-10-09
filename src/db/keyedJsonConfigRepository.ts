@@ -49,7 +49,12 @@ export interface ConfigRepository<TConfig> {
   clearConfig(key?: string): Promise<void>;
 }
 
-export class KeyedJsonConfigRepository<TConfig> implements ConfigRepository<TConfig> {
+/** A config store whose rows can be enumerated by key prefix (per-session appearance rows). */
+export interface KeyedConfigRepository<TConfig> extends ConfigRepository<TConfig> {
+  listKeys(prefix: string): Promise<string[]>;
+}
+
+export class KeyedJsonConfigRepository<TConfig> implements KeyedConfigRepository<TConfig> {
   private readonly tableName: KeyedJsonConfigTableName;
   private readonly loggerTag: string;
   private readonly db: Kysely<Database> | null;
@@ -118,12 +123,18 @@ export class KeyedJsonConfigRepository<TConfig> implements ConfigRepository<TCon
     const db = await this.getDb();
     await db.deleteFrom(this.tableName).where("key", "=", key).execute();
   }
+
+  async listKeys(prefix: string): Promise<string[]> {
+    const db = await this.getDb();
+    const rows = await db.selectFrom(this.tableName).select(["key"]).execute();
+    return rows.map((row) => row.key).filter((key) => key.startsWith(prefix));
+  }
 }
 
 function createConfigRepository<TConfig>(
   key: keyof typeof KEYED_JSON_CONFIG_TABLES,
   db?: Kysely<Database>,
-): ConfigRepository<TConfig> {
+): KeyedConfigRepository<TConfig> {
   return new KeyedJsonConfigRepository<TConfig>({
     ...KEYED_JSON_CONFIG_TABLES[key],
     db,
@@ -132,7 +143,7 @@ function createConfigRepository<TConfig>(
 
 export function createAppearanceConfigRepository(
   db?: Kysely<Database>,
-): ConfigRepository<AppearanceConfig> {
+): KeyedConfigRepository<AppearanceConfig> {
   return createConfigRepository<AppearanceConfig>("appearance", db);
 }
 

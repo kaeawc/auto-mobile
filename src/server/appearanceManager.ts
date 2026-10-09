@@ -1,5 +1,8 @@
 import type { AppearanceConfig, AppearanceConfigInput, AppearanceMode } from "../models";
-import { createAppearanceConfigRepository } from "../db/keyedJsonConfigRepository";
+import {
+  createAppearanceConfigRepository,
+  type KeyedConfigRepository,
+} from "../db/keyedJsonConfigRepository";
 import { parseAppearanceConfig } from "../features/appearance";
 import { serverConfig } from "../utils/ServerConfig";
 import { detectHostAppearance } from "../utils/hostAppearance";
@@ -11,8 +14,10 @@ const configRepository = createAppearanceConfigRepository();
  * its own row under its base session UUID. Without a session (direct mode, auth off) the single
  * global row is used, and it is also the fallback for a session that has stored nothing yet.
  */
+const SESSION_ROW_PREFIX = "session:";
+
 function rowKey(sessionKey?: string): string | undefined {
-  return sessionKey ? `session:${sessionKey}` : undefined;
+  return sessionKey ? `${SESSION_ROW_PREFIX}${sessionKey}` : undefined;
 }
 
 function mergeConfigInput(
@@ -64,6 +69,27 @@ export async function updateAppearanceConfig(
 /** Drops a session's stored config, e.g. when the session is released for good. */
 export async function clearSessionAppearanceConfig(sessionKey: string): Promise<void> {
   await configRepository.clearConfig(rowKey(sessionKey));
+}
+
+/**
+ * Startup sweep (#11076): drop every per-session row whose session is not live. Rows are cleared
+ * only by a live release or observer expiry, so a crash, a journal-terminalized UUID or a pruned
+ * session row leaves them behind. Returns the session keys whose rows were dropped.
+ */
+export async function pruneSessionAppearanceConfigs(
+  isLiveSession: (sessionKey: string) => boolean,
+  repository: KeyedConfigRepository<AppearanceConfig> = configRepository,
+): Promise<string[]> {
+  const dropped: string[] = [];
+  for (const key of await repository.listKeys(SESSION_ROW_PREFIX)) {
+    const sessionKey = key.slice(SESSION_ROW_PREFIX.length);
+    // Decide per row, just before its delete, so a session admitted meanwhile keeps its row.
+    if (!isLiveSession(sessionKey)) {
+      await repository.clearConfig(key);
+      dropped.push(sessionKey);
+    }
+  }
+  return dropped;
 }
 
 export async function resolveAppearanceMode(config?: AppearanceConfig): Promise<AppearanceMode> {

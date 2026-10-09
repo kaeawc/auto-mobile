@@ -70,9 +70,12 @@ import {
   defaultIosCaptureOverlayHider,
   type IosCaptureOverlayHiderResolver,
 } from "../overlay/ios/iosCaptureOverlayHider";
+import { captureHideDeadlineMs } from "../overlay/ios/iosOverlayTransport";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 const SCREENSHOT_CLEANUP_TIMEOUT_MS = 1500;
+/** How long the host waits for the CtrlProxy iOS screenshot; the overlay hide deadline derives from it. */
+const IOS_SCREENSHOT_TIMEOUT_MS = 10000;
 
 export function replaceScreenshotExtension(filePath: string, extension: string): string {
   const oldExtension = path.extname(filePath);
@@ -711,7 +714,10 @@ export class TakeScreenshot implements ScreenshotService {
 
       // Request screenshot from CtrlProxy iOS
       const request = (): Promise<CtrlProxyScreenshotResult> =>
-        awaitWhileRequestIsLive(client.requestScreenshot(10000, undefined, signal), signal);
+        awaitWhileRequestIsLive(
+          client.requestScreenshot(IOS_SCREENSHOT_TIMEOUT_MS, undefined, signal),
+          signal,
+        );
       const result = await this.requestiOSScreenshot(request, options);
       const written = await this.writeiOSScreenshot(finalPath, result, startTime, options, signal);
       return options.hideOverlays === true && written.success
@@ -752,7 +758,10 @@ export class TakeScreenshot implements ScreenshotService {
           "The iOS overlay agent is no longer connected, so the overlay cannot be hidden for the capture; retry the observe",
       };
     }
-    const { value, hideUnconfirmed } = await hider.captureWithOverlayHidden(request);
+    const { value, hideUnconfirmed } = await hider.captureWithOverlayHidden(
+      request,
+      captureHideDeadlineMs(IOS_SCREENSHOT_TIMEOUT_MS),
+    );
     if (hideUnconfirmed === true && value.success) {
       return {
         success: false,

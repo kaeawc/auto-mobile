@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { idleReleaseAt } from "../../src/daemon/sessionHoldDiagnostics";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { logger } from "../../src/utils/logger";
 import {
@@ -310,6 +311,29 @@ describe("handleDaemonRequest", () => {
       result: { sessionId },
     });
     expect(sessionManager.getSession(sessionId)?.lastHeartbeat).toBeGreaterThan(initialHeartbeat);
+  });
+
+  test("#10823: a heartbeat that asks reports the daemon's idle release instant without extending it", async () => {
+    const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+    const state = new FakeDaemonState(sessionManager, devicePool);
+    const sessionId = "idle-report-session";
+    const session = await sessionManager.createSession(sessionId, "emulator-5554", "android");
+    const expiresAt = session.expiresAt;
+    fakeTimer.advanceTime(30_000);
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/heartbeat", { sessionId, reportIdleRelease: true }),
+      state,
+    );
+
+    const live = sessionManager.getSession(sessionId)!;
+    // The heartbeat extended nothing; it reports the instant the idle sweep releases on.
+    expect(live.expiresAt).toBe(expiresAt);
+    expect(response).toEqual({
+      success: true,
+      result: { sessionId, idleReleaseAt: idleReleaseAt(live) },
+    });
+    expect(idleReleaseAt(live)).toBeGreaterThanOrEqual(expiresAt);
   });
 
   test.each([

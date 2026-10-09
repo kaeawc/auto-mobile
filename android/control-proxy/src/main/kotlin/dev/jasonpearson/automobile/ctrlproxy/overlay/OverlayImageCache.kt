@@ -188,4 +188,12 @@ internal fun overlayImageSampleSize(
   return sample
 }
 
+/** Whether decoding at [sampleSize] stays within [maxPixels]; false for absurd header sizes. */
+internal fun overlayImageFitsBudget(
+  sourceWidth: Int,
+  sourceHeight: Int,
+  sampleSize: Int,
+  maxPixels: Long,
+): Boolean = (sourceWidth / sampleSize).toLong() * (sourceHeight / sampleSize) <= maxPixels
+
 private const val MAX_SAMPLE_SIZE = 1 shl 6

@@ -13,6 +13,7 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.AnnotatedString
 import dev.jasonpearson.automobile.protocol.*
+import java.time.Duration
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -22,10 +23,16 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowChoreographer
 
 /** What observe and tapOn see for the last Material component slice (#10439). */
 @RunWith(RobolectricTestRunner::class)
 class OverlayMaterialSemanticsTest {
+  private companion object {
+    const val FRAME_INTERVAL_MS = 16L
+    const val INFINITE_ANIMATION_SETTLE_MS = 200L
+  }
+
   private val interactions = mutableListOf<OverlayInteraction>()
   private val save = listOf<OverlayAction>(OverlayEmitAction("save"))
   private val editing = OverlaySheetCondition("editing", true)
@@ -34,11 +41,20 @@ class OverlayMaterialSemanticsTest {
   private fun render(
     root: OverlayNode,
     state: Map<String, OverlayScalar> = emptyMap(),
+    hasInfiniteAnimation: Boolean = false,
   ): SemanticsNode {
     val spec = OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), state, root)
     val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
     activity.setContent { OverlaySpecContent(mapOverlaySpec(spec).root) { interactions += it } }
-    shadowOf(Looper.getMainLooper()).idle()
+    // An indeterminate progress indicator reschedules a frame forever. Robolectric's Choreographer
+    // posts each frame at the current virtual time, so idle() (and idleFor) never gets past it and
+    // every frame appends to the ShadowTrace queue until the heap is gone (9 minutes, ~1 GB dump).
+    // Give frames a real frame interval so a bounded idleFor ends.
+    val looper = shadowOf(Looper.getMainLooper())
+    if (hasInfiniteAnimation) {
+      ShadowChoreographer.setPostFrameCallbackDelay(FRAME_INTERVAL_MS.toInt())
+      looper.idleFor(Duration.ofMillis(INFINITE_ANIMATION_SETTLE_MS))
+    } else looper.idle()
     val view = checkNotNull(composeView(activity.window.decorView))
     return (view as RootForTest).semanticsOwner.rootSemanticsNode
   }
@@ -169,6 +185,7 @@ class OverlayMaterialSemanticsTest {
             ),
         ),
         mapOf("upload" to OverlayScalar.Numeric(40.0)),
+        hasInfiniteAnimation = true,
       )
     val upload = root.tagged("upload").config[SemanticsProperties.ProgressBarRangeInfo]
     assertEquals(0.4f, upload.current, 1e-6f)

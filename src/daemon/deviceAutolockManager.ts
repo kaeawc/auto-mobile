@@ -789,18 +789,32 @@ export class DeviceAutolockManager {
   }
 
   /** Whether any connected MCP client still acquired or routes to the autolock session. */
-  hasMcpSessionOwner(sessionId: string): boolean {
-    for (const acquired of this.mcpSessionAcquiredAutolocks.values()) {
-      if (acquired.has(sessionId)) {
+  hasMcpSessionOwner(sessionId: string, exceptMcpSessionId?: string): boolean {
+    for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredAutolocks) {
+      if (mcpSessionId !== exceptMcpSessionId && acquired.has(sessionId)) {
         return true;
       }
     }
-    for (const mappedSessionId of this.mcpSessionAutolockMap.values()) {
-      if (mappedSessionId === sessionId) {
+    for (const [mcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
+      if (mcpSessionId !== exceptMcpSessionId && mappedSessionId === sessionId) {
         return true;
       }
     }
     return false;
+  }
+
+  /** Drop every other MCP client's hold on `sessionId`: ownership moves to `mcpSessionId` (#11107). */
+  releaseMcpSessionOwnershipExcept(sessionId: string, mcpSessionId: string): void {
+    for (const [otherMcpSessionId, acquired] of this.mcpSessionAcquiredAutolocks) {
+      if (otherMcpSessionId !== mcpSessionId && acquired.delete(sessionId) && acquired.size === 0) {
+        this.mcpSessionAcquiredAutolocks.delete(otherMcpSessionId);
+      }
+    }
+    for (const [otherMcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
+      if (otherMcpSessionId !== mcpSessionId && mappedSessionId === sessionId) {
+        this.mcpSessionAutolockMap.delete(otherMcpSessionId);
+      }
+    }
   }
 
   releaseMcpSessionBindings(mcpSessionId: string): void {

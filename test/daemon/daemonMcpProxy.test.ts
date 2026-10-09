@@ -34,6 +34,7 @@ import {
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
@@ -296,6 +297,7 @@ describe("DaemonMcpProxy", () => {
         toolName: "getApple",
         params: {
           [DAEMON_OWNED_SESSIONS_PARAM]: ["session-a"],
+          [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: expect.any(String),
         },
       });
       expect(fakeClient.callToolCalls.at(-1)).toEqual({
@@ -303,6 +305,7 @@ describe("DaemonMcpProxy", () => {
         params: {
           deviceId: "free-device-c",
           [DAEMON_OWNED_SESSIONS_PARAM]: ["session-b", "session-a"],
+          [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: expect.any(String),
         },
       });
     } finally {

@@ -114,6 +114,43 @@ describe("DevicePool owner-disconnect release (#10503)", () => {
     await expect(bind("new-session", NEW_CONNECTION)).rejects.toThrow(REFUSAL);
   });
 
+  test("another connection cannot restore a live session its owner's connection still holds (#11107)", async () => {
+    await expect(
+      devicePool.restoreOwnedDeviceSessionsForMcpSession([OWNER_SESSION], NEW_CONNECTION),
+    ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+    await expect(
+      devicePool.restoreOwnedDeviceSessionsForMcpSession(
+        [OWNER_SESSION],
+        NEW_CONNECTION,
+        "someone-elses-token",
+      ),
+    ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+
+    // The real owner's disconnect is not suppressed by a claimed duplicate owner.
+    devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
+    fakeTimer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    await awaitOwnerRelease();
+    expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
+  });
+
+  test("a restore proving the owner token moves ownership rather than duplicating it (#11107)", async () => {
+    expect(await sessionManager.claimLivenessOwnership(OWNER_SESSION, "owner-token")).toBe(
+      "claimed",
+    );
+    await devicePool.restoreOwnedDeviceSessionsForMcpSession(
+      [OWNER_SESSION],
+      "reconnected-owner",
+      "owner-token",
+    );
+
+    // The new connection is the sole owner: its close starts the release even though the stale
+    // connection has not closed yet, which no longer holds a duplicate claim to suppress it.
+    devicePool.releaseMcpSessionBindings("reconnected-owner");
+    fakeTimer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    await awaitOwnerRelease();
+    expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
+  });
+
   test("an owner that heartbeats after its connection closed keeps its session", async () => {
     devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
     fakeTimer.advanceTime(1_000);

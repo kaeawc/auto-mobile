@@ -26,6 +26,7 @@ import {
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
@@ -3643,6 +3644,7 @@ export class DaemonMcpProxy {
     const callerArgs = { ...args };
     delete callerArgs[DAEMON_BOUND_SESSION_PARAM];
     delete callerArgs[DAEMON_OWNED_SESSIONS_PARAM];
+    delete callerArgs[DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM];
     delete callerArgs[DAEMON_RELEASED_SESSION_PARAM];
     delete callerArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
     delete callerArgs[DAEMON_ONE_SHOT_CLI_PARAM];
@@ -3911,7 +3913,15 @@ export class DaemonMcpProxy {
       // default, so the current binding must precede older owned sessions.
       retained.unshift(this.boundSessionUuid);
     }
-    return retained.length ? { ...args, [DAEMON_OWNED_SESSIONS_PARAM]: retained } : args;
+    // The owner token lets the daemon move ownership to this connection even while a stale
+    // connection of this proxy still holds it; a bare UUID only restores an unowned session (#11107).
+    return retained.length
+      ? {
+          ...args,
+          [DAEMON_OWNED_SESSIONS_PARAM]: retained,
+          [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: this.livenessOwnerToken,
+        }
+      : args;
   }
 
   private rememberActiveDeviceSession(name: string, result: unknown, releaseEpoch: number): void {

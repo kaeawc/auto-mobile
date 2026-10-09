@@ -59,6 +59,7 @@ import {
   DAEMON_ONE_SHOT_CLI_PARAM,
   INTERNAL_ONE_SHOT_CLI_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
   DAEMON_VERSION,
@@ -2888,12 +2889,22 @@ export class UnixSocketServer {
     // Restoration attaches only live sessions. It restores both explicit
     // acquisition ownership and autolock routing without reallocating a
     // released UUID.
-    await pool.restoreOwnedDeviceSessionsForMcpSession?.(ids, socketSessionId);
+    await pool.restoreOwnedDeviceSessionsForMcpSession?.(
+      ids,
+      socketSessionId,
+      this.ownedSessionsOwnerToken(args),
+    );
     if (this.releaseBindingsIfSocketDisconnected(socketSessionId, ownerSocket, pool)) {
       return;
     }
     await pool.restoreAutolockSessionsForMcpSession?.(ids, socketSessionId);
     this.releaseBindingsIfSocketDisconnected(socketSessionId, ownerSocket, pool);
+  }
+
+  /** The restoring proxy's liveness owner token, when it sent one with its owned sessions. */
+  private ownedSessionsOwnerToken(args: unknown): string | undefined {
+    const token = (args as Record<string, unknown>)[DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM];
+    return typeof token === "string" && token.trim() !== "" ? token : undefined;
   }
 
   private selectorSessionIds(args: unknown): string[] | undefined {
@@ -7329,6 +7340,7 @@ export class UnixSocketServer {
     const forwardedArgs = { ...args } as Record<string, unknown>;
     delete forwardedArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
     delete forwardedArgs[DAEMON_OWNED_SESSIONS_PARAM];
+    delete forwardedArgs[DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM];
     this.recordOneShotCliConnection(socketSessionId, forwardedArgs);
     // Only the daemon asserts the loopback marker, from the connection's own declaration.
     delete forwardedArgs[INTERNAL_ONE_SHOT_CLI_PARAM];

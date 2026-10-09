@@ -549,6 +549,8 @@ describe("platform device preparation tools", () => {
       });
 
       expect(sameOwner.runtime.session.sessionUuid).toBe(owner.runtime.session.sessionUuid);
+      // The owner's first connection closes; only then may a bare restore claim the session (#11107).
+      pool.releaseMcpSessionBindings("owner-connection");
       await pool.restoreOwnedDeviceSessionsForMcpSession(
         [owner.runtime.session.sessionUuid as string],
         "reconnected-owner-connection",

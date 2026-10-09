@@ -7697,6 +7697,18 @@ export class DevicePool {
       return;
     }
     this.ownerDisconnectRelease.cancel(sessionId);
+    // One owning connection per session (#11107): recording ownership moves it off any other
+    // connection, so the previous owner's disconnect can no longer be suppressed by a duplicate.
+    for (const [otherMcpSessionId, otherAcquired] of this.mcpSessionAcquiredDeviceSessions) {
+      if (
+        otherMcpSessionId !== mcpSessionId &&
+        otherAcquired.delete(sessionId) &&
+        otherAcquired.size === 0
+      ) {
+        this.mcpSessionAcquiredDeviceSessions.delete(otherMcpSessionId);
+      }
+    }
+    this.autolockManager.releaseMcpSessionOwnershipExcept(sessionId, mcpSessionId);
     const acquired = this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId) ?? new Set<string>();
     acquired.add(sessionId);
     this.mcpSessionAcquiredDeviceSessions.set(mcpSessionId, acquired);
@@ -7907,6 +7919,7 @@ export class DevicePool {
   async restoreOwnedDeviceSessionsForMcpSession(
     sessionIds: readonly string[],
     mcpSessionId: string,
+    livenessOwnerToken?: string,
   ): Promise<void> {
     await this.assignmentMutex.runExclusive(() => {
       for (const sessionId of sessionIds) {
@@ -7918,10 +7931,29 @@ export class DevicePool {
           this.isSessionAssignmentCurrent(device, session) &&
           this.sessionManager.isAdmittedForAutomation(session)
         ) {
+          if (!this.mayRestoreMcpSessionOwnership(session, mcpSessionId, livenessOwnerToken)) {
+            throw deviceAlreadyAssignedToAnotherSessionError(device.id);
+          }
           this.recordMcpSessionOwnership(mcpSessionId, sessionId);
         }
       }
     });
+  }
+
+  /**
+   * Whether a reconnecting client may restore ownership of a live session (#11107): it proves the
+   * session's liveness owner token, or no other connected MCP client owns the session. Naming a
+   * session UUID is not proof of ownership.
+   */
+  private mayRestoreMcpSessionOwnership(
+    session: Session,
+    mcpSessionId: string,
+    livenessOwnerToken: string | undefined,
+  ): boolean {
+    if (livenessOwnerToken !== undefined && session.livenessOwnerToken === livenessOwnerToken) {
+      return true;
+    }
+    return !this.hasConnectedMcpSessionOwner(session.sessionId, mcpSessionId);
   }
 
   /**
@@ -7945,14 +7977,17 @@ export class DevicePool {
     }
   }
 
-  /** Whether a still-connected MCP client owns the session or routes to it by autolock. */
-  private hasConnectedMcpSessionOwner(sessionId: string): boolean {
-    for (const acquired of this.mcpSessionAcquiredDeviceSessions.values()) {
-      if (acquired.has(sessionId)) {
+  /**
+   * Whether a still-connected MCP client (other than `exceptMcpSessionId`) owns the session or
+   * routes to it by autolock.
+   */
+  private hasConnectedMcpSessionOwner(sessionId: string, exceptMcpSessionId?: string): boolean {
+    for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredDeviceSessions) {
+      if (mcpSessionId !== exceptMcpSessionId && acquired.has(sessionId)) {
         return true;
       }
     }
-    return this.autolockManager.hasMcpSessionOwner(sessionId);
+    return this.autolockManager.hasMcpSessionOwner(sessionId, exceptMcpSessionId);
   }
 
   /**

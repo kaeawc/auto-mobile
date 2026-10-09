@@ -148,6 +148,25 @@ export function ownerLeaseHeartbeat(
 }
 
 /**
+ * Whether an owned session's owner lease was still running at `at` (#11080): `at` is within one
+ * lease of the owner's last heartbeat. The daemon's stall forgiveness asks this of a gap's start,
+ * so it excuses only owners that were live when the daemon stopped hearing them. Read from the
+ * raw `lastHeartbeat`, not the forgiven lease start, so successive late scans cannot chain one
+ * forgiveness onto the last for an owner that is gone. A session not owned (awaiting its
+ * rehydrated owner) has no owner lease to have lapsed, and an absent `at` asks nothing: both are
+ * treated as live.
+ */
+export function ownerLeaseLiveAt(
+  session: Pick<LeaseSession, "lastHeartbeat" | "heartbeatTimeoutMs" | "ownership">,
+  at: number | undefined,
+): boolean {
+  if (at === undefined || session.ownership !== "owned") {
+    return true;
+  }
+  return at - session.lastHeartbeat <= session.heartbeatTimeoutMs;
+}
+
+/**
  * The suspect window a session is entitled to. Only a session whose owner has
  * actually delivered a heartbeat holds a lease worth a grace period; a session
  * that never heartbeated, an awaiting-owner rehydration and a `cli-idle` session

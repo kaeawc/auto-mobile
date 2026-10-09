@@ -80,6 +80,12 @@ export interface SessionHeartbeatMonitorConfig {
   maxCredibleStallMs?: number;
   /** The running Bun version the clock-semantics self-check compares (#10962); tests inject it. */
   bunVersion?: string;
+  /**
+   * Called once when a reap has been unsettled for {@link STUCK_REAP_WARN_MS} (#10963): force the
+   * device back to the pool while the session stays fenced. Without it the stuck reap is only
+   * reported and its device stays held for as long as the teardown stays wedged.
+   */
+  forceStuckRelease?: (sessionId: string) => Promise<void>;
 }
 
 /**
@@ -140,6 +146,7 @@ export class SessionHeartbeatMonitor {
   private readonly stallThresholdMs: number;
   private readonly maxCredibleStallMs: number;
   private readonly bunVersionOverride: string | undefined;
+  private readonly forceStuckRelease: ((sessionId: string) => Promise<void>) | undefined;
   /** The measured clock disagreed with `monotonicIncludesHostSleep`; warned once (#10962). */
   private clockSemanticsDisagreementReported = false;
   /** Bounds how long active executions keep a stale session (#10663, shared policy #10712). */
@@ -192,6 +199,7 @@ export class SessionHeartbeatMonitor {
       ) ??
       getDefaultSessionHeartbeatTimeoutMs();
     this.stallThresholdMs = config.stallThresholdMs ?? DEFAULT_STALL_MARGIN_MS;
+    this.forceStuckRelease = config.forceStuckRelease;
     this.maxCredibleStallMs = config.maxCredibleStallMs ?? MAX_CREDIBLE_DAEMON_STALL_MS;
     this.bunVersionOverride = config.bunVersion;
     this.executionVeto = new UnsettledExecutionVeto(executions, timer);
@@ -466,10 +474,23 @@ export class SessionHeartbeatMonitor {
       return;
     }
     started.reported = true;
+    if (!this.forceStuckRelease) {
+      logger.warn(
+        `Session ${sessionId} release has not settled after ${elapsedMs}ms; its device stays ` +
+          "held until the teardown finishes. Other sessions are still judged on schedule.",
+      );
+      return;
+    }
     logger.warn(
-      `Session ${sessionId} release has not settled after ${elapsedMs}ms; its device stays held ` +
-        "until the teardown finishes. Other sessions are still judged on schedule.",
+      `Session ${sessionId} release has not settled after ${elapsedMs}ms; forcing its device ` +
+        "back to the pool while the session stays fenced (#10963).",
     );
+    void this.forceStuckRelease(sessionId).catch((error: unknown) => {
+      logger.warn(
+        `Forcing the stuck release of session ${sessionId} failed: ${errorMessage(error)}`,
+        error,
+      );
+    });
   }
 
   /**

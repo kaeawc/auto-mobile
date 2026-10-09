@@ -68,3 +68,18 @@ export async function releaseSessionAndDevice(
     await pool.releaseDevice(releasedDeviceId, sessionId);
   }
 }
+
+/**
+ * Free the device of a session whose release is stuck (#10963): the session manager fences the
+ * session and quarantines the device for at most the teardown cap, then the pool takes it back.
+ */
+export async function forceStuckSessionRelease(
+  manager: { forceStuckRelease(sessionId: string): { deviceId: string } | undefined },
+  pool: SessionReleasePool,
+  sessionId: string,
+): Promise<void> {
+  const forced = manager.forceStuckRelease(sessionId);
+  if (forced) {
+    await pool.releaseDevice(forced.deviceId, sessionId);
+  }
+}

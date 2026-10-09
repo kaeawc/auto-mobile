@@ -6,9 +6,17 @@ import { ActionableError } from "../models/ActionableError";
  */
 export const DEVICE_CLEANUP_IN_PROGRESS_CODE = "device_cleanup_in_progress";
 
+/**
+ * A session's creation did not finish within its deadline (a wedged DB write or a release of the
+ * same UUID that never settled), so the bind was rolled back rather than hold the device and the
+ * pool's assignment mutex (#10963). Retrying is safe.
+ */
+export const SESSION_CREATION_TIMEOUT_CODE = "session_creation_timeout";
+
 /** Wire codes of acquisition refusals a client should wait out rather than fail on. */
 export const RETRYABLE_DEVICE_ACQUISITION_CODES: ReadonlySet<string> = new Set([
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
+  SESSION_CREATION_TIMEOUT_CODE,
 ]);
 
 /** Retry hint when nothing bounds the remaining wait more precisely. */
@@ -44,5 +52,23 @@ export class DeviceCleanupInProgressError extends RetryableDeviceAcquisitionErro
         "after the cleanup finishes.",
     );
     this.name = "DeviceCleanupInProgressError";
+  }
+}
+
+export class SessionCreationTimeoutError extends RetryableDeviceAcquisitionError {
+  constructor(
+    readonly sessionUuid: string,
+    deviceId: string,
+    timeoutMs: number,
+  ) {
+    super(
+      SESSION_CREATION_TIMEOUT_CODE,
+      deviceId,
+      DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
+      `Creating session ${sessionUuid} on device '${deviceId}' did not finish within ` +
+        `${timeoutMs}ms (code ${SESSION_CREATION_TIMEOUT_CODE}); the device was not bound. ` +
+        "Retry the request.",
+    );
+    this.name = "SessionCreationTimeoutError";
   }
 }

@@ -31,14 +31,17 @@ const MAX_CACHED_STATEMENTS = 200;
  */
 const DEFAULT_MAX_RETRY_ATTEMPTS = 3;
 /**
- * Total wait allowed for one statement across all its BUSY/LOCKED attempts. Each
- * attempt can itself block the event loop for the connection's `busy_timeout` (5 s,
- * `SQLITE_BUSY_TIMEOUT_MS` in database.ts) — bun:sqlite waits synchronously — so
- * unbounded attempts would stretch the worst case to attempts x busy_timeout (15 s
- * while a peer daemon holds the write lock). A retry starts only while this budget
- * remains: a statement that fails fast is retried, one that already waited a full
- * `busy_timeout` is not. First bounded for a transaction's `BEGIN IMMEDIATE`
- * (#10134); autocommit statements share it (#11079).
+ * Budget for one statement's BUSY/LOCKED retries. Each attempt can itself block the
+ * event loop for the connection's `busy_timeout` (5 s, `SQLITE_BUSY_TIMEOUT_MS` in
+ * database.ts) — bun:sqlite waits synchronously and the pragma is per connection, so an
+ * attempt in flight cannot be shortened to the remaining budget. The budget is therefore
+ * checked only BEFORE a retry starts: a statement that fails fast is retried, one that
+ * already waited a full `busy_timeout` is not. It is not a hard cap: a first attempt that
+ * waited just under the budget (say 4.9 s) still starts a second attempt that may block a
+ * fresh `busy_timeout`, so the worst case is below budget + `busy_timeout` (~2x), not
+ * attempts x busy_timeout (15 s while a peer daemon holds the write lock). First bounded
+ * for a transaction's `BEGIN IMMEDIATE` (#10134); autocommit statements share it (#11079,
+ * #11102).
  */
 export const DEFAULT_RETRY_TOTAL_WAIT_MS = 5_000;
 const DEFAULT_RETRY_BACKOFF: BackoffPolicy = exponentialBackoff({

@@ -6,7 +6,9 @@
 export const GUIDE_INTRO = `# Prototype authoring guide
 
 Use the \`prototype\` tool with \`action: "show"\` and a full \`spec\`. A show with the id of the
-overlay already on screen replaces it; there is no partial update. The spec is
+overlay already on screen replaces it; there is no partial update. A large or script-generated spec can be written to a local JSON file and
+shown with \`specPath\` (an absolute path the daemon reads) in place of \`spec\`; give exactly one of
+the two. The spec is
 \`{id, window, theme?, state?, motion?, root}\`. State values are flat scalars (string, finite
 number, boolean). State keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`.
 

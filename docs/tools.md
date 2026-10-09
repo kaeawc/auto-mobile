@@ -594,7 +594,12 @@ The `prototype` tool, on Android and iOS simulators (formerly `overlay`, which r
 deprecated alias for one release) is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is
 `show`, `dismiss`, `status`, `inspect`, or `awaitEvent`. `show` requires a full `spec` (id,
-window, optional state, root) and always renders the whole spec. `dismiss`
+window, optional state, root) and always renders the whole spec. Instead of an inline
+`spec`, `show` accepts `specPath`, the absolute path of a local JSON file with the same spec
+(exactly one of the two): the daemon reads it, refuses a file over the spec byte limit (1 MiB)
+before reading it, validates it like an inline spec, and names the file in every error.
+The path is never sent to the device. A spec holds up to 2000 nodes, and a `repeat` up to
+128 items. `dismiss`
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
 percentage from 0 to 100, default 100; show the spec again to change it.
 

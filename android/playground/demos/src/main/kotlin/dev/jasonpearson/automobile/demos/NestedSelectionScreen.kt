@@ -43,7 +43,9 @@ private val ItemIds = (40..47).map { "item_$it" }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NestedSelectionDemoScreen(onNavigateBack: () -> Unit) {
-  val rows = remember { CartNames.associateWith { mutableStateListOf<String>().apply { addAll(ItemIds) } } }
+  val rows = remember {
+    CartNames.associateWith { mutableStateListOf<String>().apply { addAll(ItemIds) } }
+  }
   val quantities = remember { mutableStateMapOf<String, String>() }
   var status by remember { mutableStateOf("status: idle") }
 
@@ -57,14 +59,13 @@ fun NestedSelectionDemoScreen(onNavigateBack: () -> Unit) {
           }
         },
       )
-    }
+    },
   ) { paddingValues ->
     Column(
       modifier =
-        Modifier.fillMaxSize()
-          .padding(paddingValues)
-          .padding(horizontal = 12.dp)
-          .semantics { testTagsAsResourceId = true },
+        Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 12.dp).semantics {
+          testTagsAsResourceId = true
+        },
       verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       Text(
@@ -95,10 +96,9 @@ fun NestedSelectionDemoScreen(onNavigateBack: () -> Unit) {
         Text(text = cart)
         Column(
           modifier =
-            Modifier.fillMaxWidth()
-              .height(210.dp)
-              .verticalScroll(rememberScrollState())
-              .semantics { testTag = cart },
+            Modifier.fillMaxWidth().height(210.dp).verticalScroll(rememberScrollState()).semantics {
+              testTag = cart
+            },
         ) {
           rows.getValue(cart).toList().forEach { item ->
             Row(
@@ -109,8 +109,7 @@ fun NestedSelectionDemoScreen(onNavigateBack: () -> Unit) {
                 value = quantities["$cart/$item"] ?: "",
                 onValueChange = { quantities["$cart/$item"] = it },
                 label = { Text("$item qty") },
-                modifier =
-                  Modifier.height(64.dp).weight(1f).semantics { testTag = "quantity" },
+                modifier = Modifier.height(64.dp).weight(1f).semantics { testTag = "quantity" },
               )
               Button(
                 onClick = {

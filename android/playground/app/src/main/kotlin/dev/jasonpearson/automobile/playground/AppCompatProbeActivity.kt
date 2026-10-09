@@ -8,7 +8,8 @@ import androidx.appcompat.app.AppCompatActivity
 /**
  * Minimal [AppCompatActivity] screen. AppCompat installs its own window callback, so this screen
  * lets device checks confirm AutoMobile's click tracker still sees exactly one tap per touch on an
- * AppCompat host. Launch with `am start -n dev.jasonpearson.automobile.playground/.AppCompatProbeActivity`.
+ * AppCompat host. Launch with `am start -n
+ * dev.jasonpearson.automobile.playground/.AppCompatProbeActivity`.
  */
 class AppCompatProbeActivity : AppCompatActivity() {
   private var taps = 0

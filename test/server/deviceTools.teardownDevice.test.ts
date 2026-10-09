@@ -1051,7 +1051,7 @@ describe("deleteDevice handler", () => {
     const device: BootedDevice = { platform: "ios", name: "iPhone 16", deviceId: "IOS-HELD-1" };
     let sessionManager: SessionManager;
 
-    const holdDevice = async () => {
+    const holdDevice = async (assign = true) => {
       const timer = new FakeTimer();
       sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
       const pool = new DevicePool(
@@ -1066,7 +1066,10 @@ describe("deleteDevice handler", () => {
       manager.setBootedDevices("ios", [device]);
       manager.setDeviceImages("ios", [{ ...device, isRunning: true }]);
       await pool.addDevice(device, { ...device, isRunning: true });
-      await pool.assignMultipleDevices(["holder-session"], 1_000, "ios");
+      if (assign) {
+        await pool.assignMultipleDevices(["holder-session"], 1_000, "ios");
+      }
+      return pool;
     };
 
     test("is refused to another session before teardown is accepted", async () => {
@@ -1087,6 +1090,28 @@ describe("deleteDevice handler", () => {
           "Session other-session does not hold it; call it with the holding session's " +
           "sessionUuid, wait for the holder to release the device, or pass force: true to stop " +
           "it anyway.",
+      });
+      expect(manager.killedDevices).toEqual([]);
+      expect(manager.destroyRequests).toEqual([]);
+      expect(sessionManager.getSessionForDevice(device.deviceId)).toBe("holder-session");
+    });
+
+    test("is refused when another session binds it between the entry check and the shutdown reservation", async () => {
+      const pool = await holdDevice(false);
+      const reserve = pool.reserveDeviceForShutdown.bind(pool);
+      pool.reserveDeviceForShutdown = async (...args) => {
+        await pool.assignMultipleDevices(["holder-session"], 1_000, "ios");
+        return await reserve(...args);
+      };
+
+      const response = await teardownTool().handler({
+        ...request("ios", device.deviceId, device.name),
+        sessionUuid: "other-session",
+      });
+
+      expect(responseBody(response).state).toBe("failed");
+      expect(responseBody(response).failure).toMatchObject({
+        code: "device_owned_by_other_session",
       });
       expect(manager.killedDevices).toEqual([]);
       expect(manager.destroyRequests).toEqual([]);

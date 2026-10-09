@@ -40,10 +40,31 @@ export class FakeDeviceManager implements PlatformDeviceManager {
   // `succeededSources`, so a consumer that mistakes presence for a fresh
   // observation is caught.
   retainedSources: Set<DiscoverySource> = new Set();
+  /** Non-`device` adb rows (serial → state) reported by getAndroidListedDeviceStates. */
+  androidListedDeviceStates: Map<string, string> = new Map();
   deviceImageDiscoveryCalls: Array<{
     platform: SomePlatform;
     options: DeviceImageDiscoveryOptions;
   }> = [];
+
+  /**
+   * Configured {@link androidListedDeviceStates} among the candidates, plus an
+   * `offline` row for each serial a subclass's `getAndroidOfflineDeviceIds`
+   * reports, so fakes that model only offline-ness keep driving the monitor.
+   */
+  async getAndroidListedDeviceStates(candidateIds: Iterable<string>): Promise<Map<string, string>> {
+    const candidates = [...candidateIds];
+    const offlineProbe = (this as Pick<PlatformDeviceManager, "getAndroidOfflineDeviceIds">)
+      .getAndroidOfflineDeviceIds;
+    const offline = (await offlineProbe?.call(this, candidates)) ?? new Set<string>();
+    return new Map([
+      ...candidates.flatMap((id) => {
+        const state = this.androidListedDeviceStates.get(id);
+        return state === undefined ? [] : [[id, state] as const];
+      }),
+      ...[...offline].map((id) => [id, "offline"] as const),
+    ]);
+  }
 
   constructor(images: DeviceInfo[] = [], booted: BootedDevice[] = []) {
     this.deviceImages = images;

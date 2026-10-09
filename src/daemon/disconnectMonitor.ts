@@ -34,9 +34,28 @@ export function recordingCandidateIncarnations(
   );
 }
 
+/**
+ * How long a candidate may stay ADB `offline` before the monitor treats it as
+ * lost (#11090). A loaded host can hold a running emulator `offline` well past
+ * the 3-sweep absent debounce (~10 s); releasing its session then drops a
+ * working device. Truly absent serials keep the 3-miss rule, and an emulator
+ * AutoMobile launched is evicted on process exit by its own watcher, so this
+ * budget only bounds external emulators and devices whose transport never
+ * returns.
+ */
+export const OFFLINE_DEVICE_DISCONNECT_BUDGET_MS = 60_000;
+
+/** Start of a candidate's current ADB `offline` episode, keyed to its incarnation. */
+export interface OfflineEpisode {
+  sinceMs: number;
+  incarnation: DisconnectCandidateIncarnation | undefined;
+}
+
 export interface DisconnectMonitorEvaluation {
   disconnected: string[];
   missed: Array<{ deviceId: string; misses: number }>;
+  /** Candidates held as ADB `offline` this sweep instead of counting a miss. */
+  offline: Array<{ deviceId: string; offlineForMs: number }>;
   skippedAllDiscoveryFailed: boolean;
 }
 
@@ -62,28 +81,42 @@ export interface DisconnectMonitorEvaluationInput {
    * Build it with {@link selectImmediateDisconnectCandidates}.
    */
   immediateDisconnectDeviceIds?: ReadonlySet<string>;
+  /**
+   * Candidates `adb devices` lists as `offline` this sweep (#11090). With
+   * {@link offlineEpisodes} and {@link nowMs}, these sweeps neither count nor
+   * reset an absent miss; the candidate is disconnected once its offline
+   * episode exceeds {@link offlineBudgetMs}. Undefined (probe failed or
+   * skipped) falls back to ordinary miss counting.
+   */
+  offlineDeviceIds?: ReadonlySet<string>;
+  offlineEpisodes?: Map<string, OfflineEpisode>;
+  nowMs?: number;
+  offlineBudgetMs?: number;
 }
 
 /**
- * Physical USB Android candidates absent from this sweep's booted list and not
- * merely ADB `offline` (#10493). Unplugging a phone or dropping its transport
- * removes it from `adb devices`, which a physical device does not do
+ * Physical USB Android candidates absent from this sweep's `adb devices`
+ * listing in every state (#10493, #11090). Unplugging a phone or dropping its
+ * transport removes it from `adb devices`, which a physical device does not do
  * transiently the way an emulator restart or wireless transport can, so its
- * sessions are released on the first miss. Emulators and TCP/mDNS transports
- * keep the debounce, as does a serial whose adbd AutoMobile is restarting
- * (`adb root`/`unroot`, plus a short grace). An unknown offline state (probe
- * failed or skipped) selects nothing, and the evaluator still requires the
- * Android source to have succeeded, so a failed or partial listing never
- * fast-paths a release.
+ * sessions are released on the first miss. A serial still listed in any
+ * non-`device` state (offline, authorizing after an adbd restart or USB
+ * re-enumeration, connecting, unauthorized, recovery, bootloader, sideload,
+ * no permissions) is attached and keeps the normal debounce. Emulators and
+ * TCP/mDNS transports keep the debounce, as does a serial whose adbd
+ * AutoMobile is restarting (`adb root`/`unroot`, plus a short grace). An
+ * unknown listing (probe failed or skipped) selects nothing, and the evaluator
+ * still requires the Android source to have succeeded, so a failed or partial
+ * listing never fast-paths a release.
  */
 export function selectImmediateDisconnectCandidates(
   candidateDeviceIds: ReadonlySet<string>,
   candidatePlatforms: ReadonlyMap<string, Platform>,
   bootedDeviceIds: ReadonlySet<string>,
-  offlineDeviceIds: ReadonlySet<string> | undefined,
+  listedNonDeviceIds: ReadonlySet<string> | undefined,
   transportRestarts?: AdbTransportRestartLookup,
 ): Set<string> {
-  if (offlineDeviceIds === undefined) {
+  if (listedNonDeviceIds === undefined) {
     return new Set();
   }
   return new Set(
@@ -92,7 +125,7 @@ export function selectImmediateDisconnectCandidates(
         candidatePlatforms.get(deviceId) === "android" &&
         isPhysicalAndroidUsbSerial(deviceId) &&
         !bootedDeviceIds.has(deviceId) &&
-        !offlineDeviceIds.has(deviceId) &&
+        !listedNonDeviceIds.has(deviceId) &&
         transportRestarts?.isRestarting(deviceId) !== true,
     ),
   );
@@ -156,11 +189,34 @@ export function selectOfflineRecoveryCandidates(
   );
 }
 
+/**
+ * End offline episodes for candidates that left the candidate set, came back
+ * as `device`, or now name a different incarnation. Absent sweeps do not end
+ * an episode, so offline/absent flapping stays bounded by the budget.
+ */
+function pruneOfflineEpisodes(
+  offlineEpisodes: Map<string, OfflineEpisode> | undefined,
+  input: Pick<DisconnectMonitorEvaluationInput, "candidateDeviceIds" | "bootedDeviceIds">,
+  candidateIncarnations: ReadonlyMap<string, DisconnectCandidateIncarnation>,
+): void {
+  for (const [deviceId, episode] of offlineEpisodes ?? []) {
+    if (
+      !input.candidateDeviceIds.has(deviceId) ||
+      input.bootedDeviceIds.has(deviceId) ||
+      episode.incarnation !== candidateIncarnations.get(deviceId)
+    ) {
+      offlineEpisodes?.delete(deviceId);
+    }
+  }
+}
+
 export function evaluateDeviceDisconnects(
   input: DisconnectMonitorEvaluationInput,
 ): DisconnectMonitorEvaluation {
   const disconnected: string[] = [];
   const missed: Array<{ deviceId: string; misses: number }> = [];
+  const offline: Array<{ deviceId: string; offlineForMs: number }> = [];
+  const offlineEpisodes = input.offlineEpisodes;
   const forceDisconnectedDeviceIds = input.forceDisconnectedDeviceIds ?? new Set<string>();
   const candidateIncarnations = input.candidateIncarnations ?? new Map<string, number>();
   const deviceDisconnectMissIncarnations =
@@ -222,6 +278,28 @@ export function evaluateDeviceDisconnects(
     }
   };
 
+  /**
+   * Hold an ADB-offline candidate: the transport is listed, so the device is
+   * not gone, and its absent miss streak is neither advanced nor reset. The
+   * episode survives interleaved absent sweeps, so offline/absent flapping is
+   * still bounded by the budget or the absent debounce.
+   */
+  const holdOffline = (deviceId: string, nowMs: number, episodes: Map<string, OfflineEpisode>) => {
+    const episode = episodes.get(deviceId) ?? {
+      sinceMs: nowMs,
+      incarnation: candidateIncarnations.get(deviceId),
+    };
+    episodes.set(deviceId, episode);
+    const offlineForMs = nowMs - episode.sinceMs;
+    if (offlineForMs < (input.offlineBudgetMs ?? OFFLINE_DEVICE_DISCONNECT_BUDGET_MS)) {
+      offline.push({ deviceId, offlineForMs });
+      return;
+    }
+    input.deviceDisconnectMisses.set(deviceId, MISSING_DEVICE_MISS_THRESHOLD);
+    missed.push({ deviceId, misses: MISSING_DEVICE_MISS_THRESHOLD });
+    disconnected.push(deviceId);
+  };
+
   const evaluateCandidate = (deviceId: string): void => {
     if (input.bootedDeviceIds.has(deviceId)) {
       clearMiss(deviceId);
@@ -253,10 +331,20 @@ export function evaluateDeviceDisconnects(
       return;
     }
 
+    if (
+      input.offlineDeviceIds?.has(deviceId) === true &&
+      offlineEpisodes !== undefined &&
+      input.nowMs !== undefined
+    ) {
+      holdOffline(deviceId, input.nowMs, offlineEpisodes);
+      return;
+    }
+
     recordMiss(deviceId);
   };
 
   clearStaleCandidates();
+  pruneOfflineEpisodes(offlineEpisodes, input, candidateIncarnations);
   if (
     input.bootedDeviceIds.size === 0 &&
     input.candidateDeviceIds.size > 0 &&
@@ -266,12 +354,12 @@ export function evaluateDeviceDisconnects(
     for (const deviceId of input.candidateDeviceIds) {
       clearMiss(deviceId);
     }
-    return { disconnected, missed, skippedAllDiscoveryFailed: true };
+    return { disconnected, missed, offline, skippedAllDiscoveryFailed: true };
   }
 
   for (const deviceId of input.candidateDeviceIds) {
     evaluateCandidate(deviceId);
   }
 
-  return { disconnected, missed, skippedAllDiscoveryFailed: false };
+  return { disconnected, missed, offline, skippedAllDiscoveryFailed: false };
 }

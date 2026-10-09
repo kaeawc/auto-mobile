@@ -288,6 +288,16 @@ export interface PlatformDeviceManager {
   ): Promise<Set<string>>;
 
   /**
+   * Among the given Android serials, every one `adb devices` lists in a
+   * non-`device` state (offline, authorizing, unauthorized, ...), keyed to
+   * that state (#11090). Optional: managers without an ADB transport omit it.
+   */
+  getAndroidListedDeviceStates?(
+    candidateIds: Iterable<string>,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<Map<string, string>>;
+
+  /**
    * Delete an already-resolved platform device representation.
    *
    * Android destruction is keyed by the exact AVD name resolved from a booted
@@ -769,6 +779,18 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<Set<string>> {
     return this.emulator.getOfflineDeviceIdsAmong(candidateIds, options);
+  }
+
+  /**
+   * Among the given Android candidate serials, every one ADB lists in a
+   * non-`device` state, keyed to that state (#11090). See
+   * {@link AndroidEmulatorClient.getListedNonDeviceStatesAmong}.
+   */
+  async getAndroidListedDeviceStates(
+    candidateIds: Iterable<string>,
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<Map<string, string>> {
+    return this.emulator.getListedNonDeviceStatesAmong(candidateIds, options);
   }
 
   /**

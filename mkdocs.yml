@@ -121,6 +121,7 @@ nav:
       - "Live device acceptance": using/live-device-acceptance.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "Environment variables": using/environment-variables.md
+      - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md
       - "Device ownership": using/device-ownership.md
       - "Managed Macs and CI runners": using/managed-macs.md

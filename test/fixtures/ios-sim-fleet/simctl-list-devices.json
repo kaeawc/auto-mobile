@@ -1,0 +1,46 @@
+{
+  "devices": {
+    "com.apple.CoreSimulator.SimRuntime.iOS-18-6": [
+      {
+        "dataPath": "/Users/dev/Library/Developer/CoreSimulator/Devices/BCC31307-1A19-4D67-A7F0-44FC98F78921/data",
+        "dataPathSize": 1495502848,
+        "logPath": "/Users/dev/Library/Logs/CoreSimulator/BCC31307-1A19-4D67-A7F0-44FC98F78921",
+        "udid": "BCC31307-1A19-4D67-A7F0-44FC98F78921",
+        "lastUsedAt": "2026-09-30T18:11:20Z",
+        "isAvailable": true,
+        "logPathSize": 385024,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+        "state": "Shutdown",
+        "name": "MT iPhone 16 iOS18.6"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-1": [
+      {
+        "dataPath": "/Users/dev/Library/Developer/CoreSimulator/Devices/490BEBFF-5F82-43CF-B7BC-59AE24229520/data",
+        "dataPathSize": 3770527744,
+        "logPath": "/Users/dev/Library/Logs/CoreSimulator/490BEBFF-5F82-43CF-B7BC-59AE24229520",
+        "udid": "490BEBFF-5F82-43CF-B7BC-59AE24229520",
+        "lastUsedAt": "2026-09-30T18:17:39Z",
+        "isAvailable": true,
+        "logPathSize": 475136,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+        "state": "Shutdown",
+        "name": "iPhone Duo"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-0": [
+      {
+        "dataPath": "/Users/dev/Library/Developer/CoreSimulator/Devices/2300914A-231E-4874-8F8A-40C3D2F1E24B/data",
+        "dataPathSize": 7380619264,
+        "logPath": "/Users/dev/Library/Logs/CoreSimulator/2300914A-231E-4874-8F8A-40C3D2F1E24B",
+        "udid": "2300914A-231E-4874-8F8A-40C3D2F1E24B",
+        "lastUsedAt": "2026-10-04T15:26:48Z",
+        "isAvailable": true,
+        "logPathSize": 638976,
+        "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro",
+        "state": "Shutdown",
+        "name": "iPhone 18 Pro"
+      }
+    ]
+  }
+}

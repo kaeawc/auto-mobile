@@ -96,11 +96,28 @@ export function getDeviceSessionIdFromResult(result: unknown): string | undefine
 }
 
 /**
+ * The device description a device-start tool result carries. getAndroid/getApple/startDevice
+ * answer with the description itself; provisionDevice nests it under `device` beside its
+ * top-level `sessionId` (#10821).
+ */
+function readDeviceDescription(result: unknown): Record<string, unknown> | undefined {
+  const payload = readToolEnvelopePayload(result)?.payload;
+  if (!payload || "platform" in payload || "runtime" in payload) {
+    return payload;
+  }
+  const nested = payload.device;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    return nested as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+/**
  * The device id a device-start tool result describes, from `runtime.deviceId` beside the session
  * UUID. A proxy records it so a liveness handover can name the device (#10053).
  */
 export function getDeviceIdFromResult(result: unknown): string | undefined {
-  const runtime = readToolEnvelopePayload(result)?.payload?.runtime;
+  const runtime = readDeviceDescription(result)?.runtime;
   if (!runtime || typeof runtime !== "object" || !("deviceId" in runtime)) {
     return undefined;
   }
@@ -114,7 +131,7 @@ export function getDeviceIdFromResult(result: unknown): string | undefined {
  * sessions it reached (#10692).
  */
 export function getDevicePlatformFromResult(result: unknown): "android" | "ios" | undefined {
-  const platform = readToolEnvelopePayload(result)?.payload?.platform;
+  const platform = readDeviceDescription(result)?.platform;
   return platform === "android" || platform === "ios" ? platform : undefined;
 }
 

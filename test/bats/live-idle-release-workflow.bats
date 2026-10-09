@@ -1,21 +1,34 @@
 #!/usr/bin/env bats
 #
-# Wiring guard for the opt-in live idle-release job (#10840). The job drives a real emulator,
-# so it must be dispatch-only: any other trigger would put it on pull requests or merges.
+# Wiring guard for the live idle-release job (#10840, #10983). The job drives a real emulator, so
+# it runs on dispatch and nightly only: any other trigger would put it on pull requests or merges.
+# It stays advisory (continue-on-error) until it has been green twice.
 
 WORKFLOW=".github/workflows/live-idle-release.yml"
 RUNNER="scripts/ci/run-live-idle-release.sh"
 
-@test "the live idle-release workflow triggers on workflow_dispatch only" {
+@test "the live idle-release workflow triggers on schedule and workflow_dispatch only" {
   run awk '/^on:/{on=1; next} on && /^[^ #]/{exit} on && /^  [a-z_]+:/{print $1}' "${WORKFLOW}"
   [ "${status}" -eq 0 ]
-  [ "${output}" = "workflow_dispatch:" ]
+  [ "${output}" = $'schedule:\nworkflow_dispatch:' ]
 }
 
-@test "every job in the workflow is guarded to workflow_dispatch" {
+@test "the nightly schedule is a single cron entry" {
+  run grep -c '^    - cron: ' "${WORKFLOW}"
+  [ "${output}" = "1" ]
+}
+
+@test "every job in the workflow is guarded to dispatch or the upstream repository's schedule" {
   jobs="$(awk '/^jobs:/{j=1; next} j && /^  [a-z-]+:/{n++} END{print n}' "${WORKFLOW}")"
-  guards="$(grep -c "if: github.event_name == 'workflow_dispatch'" "${WORKFLOW}")"
+  guards="$(grep -c "if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.repository == 'kaeawc/auto-mobile')" "${WORKFLOW}")"
   [ "${jobs}" -eq "${guards}" ]
+}
+
+@test "the check job is advisory and scheduled runs fall back to the dispatch defaults" {
+  run awk '/^  live-idle-release:/{j=1; next} j && /^  [a-z-]+:/{exit} j && /continue-on-error: true/{print "advisory"}' "${WORKFLOW}"
+  [ "${output}" = "advisory" ]
+  grep -qF "inputs.scenario || 'all'" "${WORKFLOW}"
+  grep -qF "inputs.idle-timeout-ms || '20000'" "${WORKFLOW}"
 }
 
 @test "the job boots the emulator through the shared action and runs the runner script" {

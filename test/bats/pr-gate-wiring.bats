@@ -400,7 +400,8 @@ wiring_requires_yq() {
   for path in \
     "android/desktop-core/**" \
     "test/fixtures/desktop-wire/**" \
-    "test/daemon/desktopWireContract.test.ts"; do
+    "test/daemon/desktopWireContract.test.ts" \
+    "test/daemon/helpers/desktopWireHarness.ts"; do
     [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
   done
 }
@@ -506,4 +507,18 @@ wiring_requires_yq() {
   [[ "$block" == *"needs.build-ide-plugin.result"* ]]
   [[ "$block" == *"- ide-plugin-unit-tests"* ]]
   [[ "$block" == *"needs.ide-plugin-unit-tests.result"* ]]
+}
+
+@test "merge.yml runs the desktop wire-contract replay on every merge (#10983)" {
+  wiring_requires_yq
+  local merge=".github/workflows/merge.yml"
+  # The job is enabled (the old `if: ${{ false }}` is gone) ...
+  run yq -r '.jobs."desktop-core-unit-tests".if // "enabled"' "$merge"
+  [ "$status" -eq 0 ]
+  [ "$output" = "enabled" ]
+  # ... and runs the wire replay, not an unrelated slice of desktop-core.
+  run yq -r '.jobs."desktop-core-unit-tests".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks" + " " + .with."gradle-flags"' "$merge"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *":desktop-core:test"* ]]
+  [[ "$output" == *"*DesktopWireFixtureCompositionTest"* ]]
 }

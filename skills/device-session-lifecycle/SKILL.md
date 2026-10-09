@@ -565,16 +565,16 @@ comments. **A refactor that drops a comment silently drops an invariant.**
 - **Known blind spot**: harness-reimplemented production wiring. A harness that
   hand-calls `recordToolCallEnded`, the ownership assert or a tracker
   subscription stays green when the production copy regresses (#10839). Call
-  the production function; if it is private, export it first. The harness still
-  copies some wiring that lives in `Daemon` (the heartbeat monitor's reap
-  callback, the `onSessionRelease` ->
-  `SessionReleaseBroadcaster.emit` forward, selector routing in
-  `resolveSelectorRoute`); each is marked as a copy in
-  `livenessScenarioHarness.ts`. Treat a green matrix as proof of the policy and
-  the producers, not of that glue: when you change the glue, run
-  `scripts/live-idle-release-check.sh` (or the dispatch-only `Live Idle Release`
-  workflow) and, if the glue is worth guarding, export it from `src/` and call it
-  from the harness instead of copying it.
+  the production function; if it is private, export it first. The harness now builds a real
+  `Daemon` (#10975), so the lifecycle callbacks its constructor wires (expiry canceller,
+  recording cleanup, release broadcast, in-flight vetoes) are production code, and it runs the
+  daemon's own `subscribeToolCallEndActivity` / `startHeartbeatMonitor`. What it still does not
+  drive is `Daemon.start()` itself (pinned by `test/daemon/daemonStartWiring.test.ts`), the IDE's
+  Kotlin provider construction, and the read-only (watcher) observe path. Heartbeat acks reach the
+  proxy as the real client delivers them (`result`, or `daemonResponseError`). Mutation-test any
+  wiring change: apply the regression to `src/` and confirm a matrix, wire-contract or wiring test
+  fails. When you change glue outside that, run
+  `scripts/live-idle-release-check.sh` (or the `Live Idle Release` workflow).
 - **Known blind spot**: unit fakes can't represent live adb reconnect timing —
   #5369 shipped green through unit tests. Anything touching pool runtime
   identity (incarnation boundaries, name matching on real reconnects, the

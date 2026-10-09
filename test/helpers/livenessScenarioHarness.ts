@@ -1,5 +1,5 @@
 import { spyOn } from "bun:test";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient, daemonResponseError } from "../../src/daemon/client";
 import {
   CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
@@ -7,6 +7,10 @@ import {
   DAEMON_VERSION,
   getCliSessionIdleTimeoutMs,
 } from "../../src/daemon/constants";
+import { Daemon } from "../../src/daemon/daemon";
+import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
+import { createTestDatabase } from "../db/testDbHelper";
+import { defaultRecordingSessionCleanupDeps } from "../../src/server/recordingSessionCleanup";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import {
   handleDaemonRequest,
@@ -14,8 +18,6 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import {
@@ -28,21 +30,14 @@ import {
   SessionManager,
   getDefaultSessionHeartbeatTimeoutMs,
 } from "../../src/daemon/sessionManager";
-import {
-  hasActiveSessionExecution,
-  subscribeToolCallEndActivity,
-} from "../../src/daemon/toolCallActivity";
-import { executionTracker } from "../../src/server/executionTracker";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
-import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
-import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "./devicePoolDependencies";
 import { drainMicrotasks } from "./fakeTimerStepping";
 import { RealToolCallPath, type DeviceToolRun } from "./realToolCallPath";
 
@@ -52,14 +47,18 @@ import { RealToolCallPath, type DeviceToolRun } from "./realToolCallPath";
 // scenario, driven by the real producers rather than by hand-called SessionManager probes.
 //
 // Real: DaemonMcpProxy built like src/index.ts (its own keeper heartbeats at the production
-// cadence and owner token), handleDaemonRequest, SessionManager and its cleanup sweep,
-// SessionHeartbeatMonitor wired as in daemon.ts, DevicePool (including OwnerDisconnectRelease),
-// releaseSessionAndDevice, and rehydration across a simulated daemon restart. A device tool
-// call runs the real registration through the real ToolRegistry, session admission and execution
-// tracker, and its end reaches the session through the daemon's own
-// `subscribeToolCallEndActivity` (#10839; see RealToolCallPath).
-// Faked: the socket transport (each frame is handed to the real handler), the tool body's device
-// work, device discovery and readiness, persistence, and the clock (FakeTimer).
+// cadence and owner token), handleDaemonRequest, and a real `Daemon` (#10975): its constructor
+// wires the session lifecycle (expiry canceller, recording cleanup, release broadcast, in-flight
+// vetoes), and the harness runs its own `subscribeToolCallEndActivity` and `startHeartbeatMonitor`
+// (with the real reap path) by their production names. That covers SessionManager and its cleanup
+// sweep, DevicePool (including OwnerDisconnectRelease), releaseSessionAndDevice, and rehydration
+// across a simulated daemon restart over one in-memory database. A device tool call runs the
+// real registration through the real ToolRegistry, session admission and execution tracker (#10839;
+// see RealToolCallPath).
+// Faked: the socket transport (each frame is handed to the real handler, and its result or
+// `daemonResponseError` goes back to the proxy like the real client's), the tool body's device
+// work, device discovery and readiness, the recording operations, and the clock (FakeTimer).
+// Not covered here: `Daemon.start()` itself (its subscription is pinned by daemonStartWiring.test.ts).
 //
 // A scenario covers minutes of virtual time in a few milliseconds by advancing in coarse steps;
 // the keeper still ticks every production interval inside each step.
@@ -103,12 +102,19 @@ export interface LivenessScenarioOptions {
   autolock?: boolean;
 }
 
+/** The daemon's private startup steps the harness runs by their production names (#10975). */
+interface DaemonStartInternals {
+  subscribeToolCallEndActivity(): void;
+  startHeartbeatMonitor(): void;
+  stopSessionTimers(): void;
+  heartbeatMonitor: SessionHeartbeatMonitor | null;
+}
+
 interface DaemonSide {
+  daemon: Daemon;
   manager: SessionManager;
   pool: DevicePool;
-  monitor: SessionHeartbeatMonitor;
   state: DaemonStateAccess;
-  unsubscribeToolCallEnd: () => void;
 }
 
 interface LongCall {
@@ -154,7 +160,8 @@ const AUTOLOCK_ENV_KEYS = [
 
 export class LivenessScenario {
   readonly timer = new FakeTimer();
-  readonly persistence = new FakeDeviceSessionPersistence();
+  /** The daemon's session persistence: a real repository over an in-memory database. */
+  repository!: DeviceSessionRepository;
   readonly releases: ReleaseRecord[] = [];
   readonly reaped: Array<{ sessionId: string; reason: string }> = [];
   readonly deviceIds: string[];
@@ -167,6 +174,23 @@ export class LivenessScenario {
    * the video and WebRTC servers re-authorize their subscribers on), in emission order.
    */
   readonly releaseBroadcasts: Array<{ at: number; sessionId: string; reason: string }> = [];
+  /** Sessions whose in-flight tool call the daemon aborted, in order. */
+  readonly abortedCalls: Array<string | undefined> = [];
+  /**
+   * Recording cleanups the daemon ran on session release (`registerRecordingSessionCleanup`):
+   * the recording operations are stubbed at the device boundary and report here.
+   */
+  readonly recordingStops: Array<{ sessionId: string | undefined; deviceId: string }> = [];
+
+  /**
+   * Stops a session's release ran for a recording that session owns. The acquisition canceller's
+   * owner-less sweep (#11035) also reports here, with no session id; it is not a release stop.
+   */
+  get sessionRecordingStops(): Array<{ sessionId: string; deviceId: string }> {
+    return this.recordingStops.flatMap(({ sessionId, deviceId }) =>
+      sessionId === undefined ? [] : [{ sessionId, deviceId }],
+    );
+  }
   /** While true, the transport silently loses every heartbeat frame (the proxy sees an ack). */
   dropHeartbeats = false;
   daemon!: DaemonSide;
@@ -178,6 +202,7 @@ export class LivenessScenario {
   private readonly savedEnv = new Map<string, string | undefined>();
   private readonly gates = new Map<string, Promise<void>>();
   private unsubscribeReleaseBroadcast: (() => void) | undefined;
+  private restoreRecordingDeps: (() => void) | undefined;
   private minted: string | undefined;
   private mintCount = 0;
 
@@ -214,10 +239,25 @@ export class LivenessScenario {
       PLATFORM,
       this.deviceIds.map((id) => this.device(id)),
     );
+    // The real Daemon builds its pool with the process-wide device manager: serve the fake.
+    PlatformDeviceManagerFactory.setInstance(this.discovery);
+    this.stubRecordingDevice();
     this.tools = new RealToolCallPath(this.deviceIds.map((id) => this.device(id))).install();
     // A long call stays in flight at the device boundary until the scenario settles it.
     this.tools.setBody(async (input) => {
-      await this.gates.get(input.args?.sessionUuid);
+      const sessionUuid = input.args?.sessionUuid;
+      // A call the daemon aborts (the idle-expiry canceller, #10820) leaves its body at once.
+      const aborted = new Promise<void>((resolve) => {
+        input.signal?.addEventListener(
+          "abort",
+          () => {
+            this.abortedCalls.push(sessionUuid);
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      await Promise.race([this.gates.get(sessionUuid), aborted]);
       return { content: [{ type: "text", text: JSON.stringify({ success: true }) }] };
     });
     this.unsubscribeReleaseBroadcast = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
@@ -227,63 +267,58 @@ export class LivenessScenario {
     this.proxy = this.createProxy();
   }
 
+  /**
+   * Every session "owns a recording" at the device boundary, so a release the daemon wires to
+   * recording cleanup stops it and a release it does not leaves `recordingStops` empty.
+   */
+  private stubRecordingDevice(): void {
+    const deps = defaultRecordingSessionCleanupDeps;
+    const original = { ...deps };
+    deps.hasRecordingsToStop = () => true;
+    deps.stopSegmentedRecordings = async (sessionId, deviceId) => {
+      this.recordingStops.push({ sessionId, deviceId });
+    };
+    deps.listActiveVideoRecordings = async () => [];
+    deps.isTestRecordingOwnedBy = () => false;
+    this.restoreRecordingDeps = () => Object.assign(deps, original);
+  }
+
   /** A second stdio proxy on the same daemon, e.g. a challenger naming another proxy's session. */
   addProxy(config: { token: string; initialSessionUuid?: string }): DaemonMcpProxy {
     return this.createProxy(config.token, config.initialSessionUuid);
   }
 
-  /** One daemon process: its session manager, pool and heartbeat monitor over shared persistence. */
+  /**
+   * One daemon process: a real `Daemon`, so its constructor wires session lifecycle (the expiry
+   * canceller, recording cleanup, the release-broadcast forward, in-flight vetoes) and the
+   * harness never hand-wires those (#10975). The daemon's own tool-call-end subscription and
+   * heartbeat monitor are started through its production methods; `start()`'s call to the
+   * former is pinned by `daemonStartWiring.test.ts`.
+   */
   private async createDaemonSide(): Promise<DaemonSide> {
-    const manager = new SessionManager(
-      this.timer,
-      this.persistence,
-      () => new FakeDbWriteBarrier(),
-    );
-    const pool = new DevicePool(
-      createDevicePoolDependencies(manager, "scenario-daemon", {
-        timer: this.timer,
-        deviceManager: this.discovery,
-        env: { ...process.env },
-      }),
-    );
+    // One database across daemon "processes", so a restart rehydrates what the last one persisted.
+    this.repository ??= new DeviceSessionRepository(await createTestDatabase(), this.timer);
+    const repository = this.repository;
+    const daemon = new Daemon({}, undefined, this.timer, repository, new FakeIdGenerator());
+    const manager = daemon.getSessionManager();
+    const pool = daemon.getDevicePool();
+    // The Daemon builds its pool over the real multi-platform device manager and takes no
+    // injection; swap the fake in before anything discovers a device.
+    (pool as unknown as { deviceManager: unknown }).deviceManager = this.discovery;
     await pool.initializeWithDevices(this.deviceIds.map((id) => this.device(id)));
-    const registry = new DeviceSessionRegistry(this.timer);
     const state: DaemonStateAccess = {
       isInitialized: () => true,
       getSessionManager: () => manager,
       getDevicePool: () => pool,
-      getDeviceSessionRegistry: () => registry,
+      getDeviceSessionRegistry: () => DaemonState.getInstance().getDeviceSessionRegistry(),
     };
-    // ToolRegistry resolves sessions through the process singleton, as in the daemon.
-    if (DaemonState.getInstance().isInitialized()) {
-      DaemonState.getInstance().reset();
-    }
-    DaemonState.getInstance().initialize(manager, pool, registry);
-    // The daemon's own wiring: in-flight calls veto releases, and a call's END is activity.
-    const inFlight = (sessionId: string) =>
-      hasActiveSessionExecution(executionTracker, manager, pool, sessionId);
-    manager.setActiveSessionExecutionChecker((sessionId, query) =>
-      hasActiveSessionExecution(executionTracker, manager, pool, sessionId, query),
-    );
-    const unsubscribeToolCallEnd = subscribeToolCallEndActivity(executionTracker, manager, pool);
+    const internals = daemon as unknown as DaemonStartInternals;
+    internals.subscribeToolCallEndActivity();
+    internals.startHeartbeatMonitor();
     manager.onSessionRelease((sessionId, deviceId, reason) => {
       this.releases.push({ at: this.timer.now(), sessionId, deviceId, reason: reason ?? "" });
-      // Mirrors the one-line forward in Daemon (onSessionRelease -> SessionReleaseBroadcaster.emit).
-      // This is a copy of production wiring: a regression in that forward is NOT caught here.
-      SessionReleaseBroadcaster.emit(sessionId, reason);
     });
-    const monitor = new SessionHeartbeatMonitor(
-      manager,
-      inFlight,
-      async (sessionId, reason) => {
-        this.reaped.push({ sessionId, reason });
-        const deviceId = manager.getSession(sessionId)?.assignedDevice ?? null;
-        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, reason);
-      },
-      this.timer,
-    );
-    monitor.start();
-    return { manager, pool, monitor, state, unsubscribeToolCallEnd };
+    return { daemon, manager, pool, state };
   }
 
   /** The stdio proxy exactly as src/index.ts builds it: default lease, owner token, own keeper. */
@@ -321,9 +356,17 @@ export class LivenessScenario {
             (this.heartbeatsBySession.get(params.sessionId) ?? 0) + 1,
           );
         }
+        // The real client resolves with the daemon's `result` (so acks carry `idleReleaseAt` and
+        // `daemonInstance` to the proxy) and rejects with `daemonResponseError` (#10975).
         if (!response.success) {
-          throw Object.assign(new Error(response.error), { code: response.code });
+          throw daemonResponseError({
+            id: method,
+            type: "daemon_response",
+            success: false,
+            ...response,
+          });
         }
+        return response.result;
       },
     });
     return new DaemonMcpProxy({
@@ -561,6 +604,14 @@ export class LivenessScenario {
     return this.minted!;
   }
 
+  /**
+   * Times a tool call readied a device (`ensureDeviceReady`, the call that touches the device).
+   * A refused call must not add to it: "refuse before readiness" (#10828).
+   */
+  get readinessTouches(): number {
+    return this.tools.deviceSessionManager.getEnsureDeviceReadyCalls();
+  }
+
   /** Tool bodies that reached the device boundary (what actually drove a device). */
   get driven(): readonly DeviceToolRun[] {
     return this.tools.runs;
@@ -580,27 +631,31 @@ export class LivenessScenario {
   async daemonRestart(): Promise<void> {
     const old = this.daemon;
     for (const session of old.manager.getAllSessions()) {
-      await this.persistence.markReleased(
+      await this.repository.markReleased(
         session.sessionId,
         "expired",
         this.timer.now(),
         "daemon-restart",
       );
     }
-    await old.monitor.stop();
-    old.manager.stopCleanupTimer();
-    old.unsubscribeToolCallEnd();
+    await this.stopDaemonSide(old);
     this.daemon = await this.createDaemonSide();
     await this.daemon.manager.rehydratePersistedSessions(this.daemon.pool);
     this.daemon.manager.startRehydratedOwnerWindows();
   }
 
+  private async stopDaemonSide(side: DaemonSide): Promise<void> {
+    const internals = side.daemon as unknown as DaemonStartInternals;
+    await internals.heartbeatMonitor?.stop();
+    internals.stopSessionTimers();
+  }
+
   async stop(): Promise<void> {
     await this.proxy.close();
-    await this.daemon.monitor.stop();
-    this.daemon.manager.stopCleanupTimer();
-    this.daemon.unsubscribeToolCallEnd();
+    await this.stopDaemonSide(this.daemon);
     this.tools.uninstall();
+    PlatformDeviceManagerFactory.reset();
+    this.restoreRecordingDeps?.();
     this.unsubscribeReleaseBroadcast?.();
     DaemonState.getInstance().reset();
     for (const spy of this.spies.splice(0)) {

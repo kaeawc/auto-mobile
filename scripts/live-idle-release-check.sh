@@ -763,7 +763,10 @@ start_stream_subscriber() {
   subscriber_pid=$!
   exec 9> "${work_dir}/stream.in"
   subscriber_fd_open=true
-  jq -cn --arg device "${serial}" '{id: "1", command: "subscribe", deviceId: $device}' >&9 ||
+  # The stream socket rejects an unauthenticated subscribe (STREAM_SOCKET_AUTH_ENV), so name the
+  # holder's session, as a real viewer connected through the daemon would.
+  jq -cn --arg device "${serial}" --arg session "${session_id}" \
+    '{id: "1", command: "subscribe", deviceId: $device, sessionUuid: $session}' >&9 ||
     die "could not subscribe to the observation stream"
 }
 

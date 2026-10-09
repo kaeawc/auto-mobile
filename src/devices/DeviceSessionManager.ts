@@ -67,6 +67,7 @@ import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../utils/runnerReadinessCon
 import { trackProcess, waitForExit } from "../utils/ChildProcessTracker";
 import {
   getVirtualDeviceLifecycleCoordinator,
+  selectorLifecycleIdentity,
   type StableVirtualDeviceIdentity,
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleIdentity,
@@ -119,7 +120,7 @@ function lifecycleIdentityForDevice(
 
   return isAndroidEmulatorSerial(device.deviceId) && !isUnresolvedAndroidEmulatorName(device)
     ? { platform: "android", stableId: device.name }
-    : { kind: "selector", platform: "android", selector: device.deviceId };
+    : selectorLifecycleIdentity("android", { deviceId: device.deviceId });
 }
 
 /**

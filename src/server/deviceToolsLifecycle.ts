@@ -8,7 +8,10 @@ import {
   type DeviceTeardownService,
   type DeviceTeardownWorkflow,
 } from "../devices/deviceTeardownService";
-import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
+import {
+  selectorLifecycleIdentity,
+  type VirtualDeviceLifecycleLease,
+} from "../devices/virtualDeviceLifecycleCoordinator";
 import { logger } from "../utils/logger";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import type { ProgressCallback } from "./toolRegistry";
@@ -315,7 +318,7 @@ export function createLifecycleHandlers() {
           coordinator: deps.lifecycleCoordinator,
         })
       : await deps.lifecycleCoordinator.reserve(
-          { kind: "selector", platform: args.device.platform, selector: args.device.deviceId },
+          selectorLifecycleIdentity(args.device.platform, { deviceId: args.device.deviceId }),
           { operation: "shutdown", deadlineMs, signal: requestAbortSignal },
         );
     const signals = [requestAbortSignal, lifecycleLease.signal].filter(

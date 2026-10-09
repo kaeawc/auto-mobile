@@ -55,7 +55,10 @@ import type {
   BootedDeviceDiscoveryOptions,
   DeviceShutdownOptions,
 } from "../../src/devices/deviceUtils";
-import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
+import {
+  InMemoryVirtualDeviceLifecycleCoordinator,
+  selectorLifecycleIdentity,
+} from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import { createRegistryWiredDevicePool } from "../helpers/createRegistryWiredDevicePool";
 
@@ -1217,6 +1220,39 @@ describe("killDevice handler", () => {
 
       await expect(killTool().handler({ device: handset })).resolves.toBeDefined();
       expect(runtimeAvdNameProbes).toEqual([]);
+    });
+
+    // Acquisition keys an unnamed/physical serial by selector; killDevice must key
+    // the same serial identically or the two never serialize (#11108).
+    test("waits behind an in-flight acquisition lease on the same physical serial", async () => {
+      manager = new SuccessfulKillDeviceManager();
+      const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        lifecycleCoordinator: coordinator,
+      });
+      const handset: BootedDevice = {
+        platform: "android",
+        name: "Unknown (R5CT10ABCDE)",
+        deviceId: "R5CT10ABCDE",
+      };
+      await poolWithUnknownRuntime(handset, "Pixel 8");
+      // What getAndroid({deviceId, minOsVersion}) reserves while it boots.
+      const acquisition = await coordinator.reserve(
+        selectorLifecycleIdentity("android", { deviceId: handset.deviceId, minOsVersion: 30 }),
+        { operation: "start", deadlineMs: Number.MAX_SAFE_INTEGER },
+      );
+
+      const kill = killTool().handler({ device: handset });
+      // Macrotask turns drain every microtask-only step kill takes before it can kill.
+      for (let i = 0; i < 5; i++) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      expect(manager.killedDeviceIds).toEqual([]);
+
+      acquisition.release();
+      await kill;
+      expect(manager.killedDeviceIds).toEqual([handset.deviceId]);
     });
 
     // The verifier is the LAST gate before anything destructive, but it used to

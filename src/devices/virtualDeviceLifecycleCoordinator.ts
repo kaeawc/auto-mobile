@@ -1,6 +1,7 @@
 import { ActionableError, type Platform } from "../models";
 import { toActionableError } from "../models/ActionableError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { stableStringify } from "../utils/stableStringify";
 
 export type VirtualDeviceLifecycleOperation =
   | "start"
@@ -95,6 +96,40 @@ const REFUSED_BEHIND_UNKILLABLE_HOLD: ReadonlySet<VirtualDeviceLifecycleOperatio
   "provision",
   "configure",
 ]);
+
+export interface DeviceSelectorCriteria {
+  deviceId?: string;
+  name?: string;
+  minOsVersion?: number | string;
+  maxOsVersion?: number | string;
+  formFactor?: string;
+  requires?: unknown;
+  screenSize?: unknown;
+}
+
+/**
+ * The one place a selector lifecycle identity is built. A concrete serial is the
+ * identity regardless of the other criteria, so acquisition (start, boot) and
+ * teardown (killDevice, session release) of the same unnamed or physical device
+ * contend on one key; criteria-only requests key on the normalized criteria.
+ */
+export function selectorLifecycleIdentity(
+  platform: Platform,
+  criteria: DeviceSelectorCriteria,
+): VirtualDeviceLifecycleIdentity {
+  const selector = criteria.deviceId
+    ? criteria.deviceId
+    : stableStringify({
+        deviceId: criteria.deviceId,
+        name: criteria.name,
+        minOsVersion: criteria.minOsVersion,
+        maxOsVersion: criteria.maxOsVersion,
+        formFactor: criteria.formFactor,
+        requires: criteria.requires,
+        screenSize: criteria.screenSize,
+      });
+  return { kind: "selector", platform, selector };
+}
 
 function lifecycleIdentityKey(identity: VirtualDeviceLifecycleIdentity): string {
   return identity.kind === "stable"

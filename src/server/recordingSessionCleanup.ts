@@ -215,17 +215,20 @@ async function stopOwnedRecordingsWithinCap(
  * A session acquiring a device stops and finalizes the owner-less (sessionless) recordings on it
  * (#10961), so they cannot keep capturing the new owner's session or block its own recording
  * start. Returns the callback to run where acquisition cancels sessionless executions
- * (#10829); the stop is pending device cleanup, capped as in {@link RECORDING_FINALIZE_CAP_MS}.
+ * (#10829); the stop is capped as in {@link RECORDING_FINALIZE_CAP_MS}. It is tracked as
+ * acquisition cleanup, not pending device cleanup (#11041): the acquiring holder's own
+ * setActiveDevice/startDevice must not be refused, but if the holder releases before the stop
+ * settles, the device stays quarantined for the next acquirer.
  */
 export function createOwnerlessRecordingAcquisitionCleanup(
-  manager: Pick<SessionManager, "registerPendingDeviceCleanup">,
+  manager: Pick<SessionManager, "registerAcquisitionDeviceCleanup">,
   deps: RecordingSessionCleanupDeps = defaultRecordingSessionCleanupDeps,
 ): (deviceId: string) => void {
   return (deviceId) => {
     if (!deps.hasRecordingsToStop(undefined, deviceId)) {
       return;
     }
-    manager.registerPendingDeviceCleanup(
+    manager.registerAcquisitionDeviceCleanup(
       deviceId,
       stopOwnedRecordingsWithinCap(deps, undefined, deviceId),
     );

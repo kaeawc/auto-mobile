@@ -2590,6 +2590,45 @@ describe("SessionManager", () => {
     });
   });
 
+  describe("acquisition device cleanup (#11041)", () => {
+    test("does not count as cleanup for the live holder, but quarantines the device once it is released", async () => {
+      const timer = new FakeTimer();
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const stop = Promise.withResolvers<void>();
+      try {
+        await manager.createSession("session-1", "emulator-5554", "android");
+        manager.registerAcquisitionDeviceCleanup("emulator-5554", stop.promise);
+        expect(manager.hasDeviceCleanupInProgress("emulator-5554")).toBe(false);
+
+        await manager.releaseSession("session-1");
+        expect(manager.hasDeviceCleanupInProgress("emulator-5554")).toBe(true);
+
+        stop.resolve();
+        await manager.drainPendingDeviceCleanups(50);
+        await Promise.resolve();
+        expect(manager.hasDeviceCleanupInProgress("emulator-5554")).toBe(false);
+      } finally {
+        stop.resolve();
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("is waited on by the shutdown drain", async () => {
+      const timer = new FakeTimer();
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const stop = Promise.withResolvers<void>();
+      try {
+        manager.registerAcquisitionDeviceCleanup("emulator-5554", stop.promise);
+        const drain = manager.drainPendingDeviceCleanups(50);
+        timer.advanceTime(50);
+        await expect(drain).resolves.toBe(false);
+      } finally {
+        stop.resolve();
+        manager.stopCleanupTimer();
+      }
+    });
+  });
+
   test("drains pending device cleanups with a bounded wait", async () => {
     const timer = new FakeTimer();
     const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());

@@ -1159,6 +1159,11 @@ export class SessionManager {
   /** The latest cap-bounded settle time of each device's pending cleanup, when one was given. */
   private readonly pendingDeviceCleanupSettlesBy: Map<string, number> = new Map();
   /**
+   * Work started by the device's current acquisition (owner-less recording stop, #11041). It never
+   * blocks the live holder, but counts as cleanup once the device has no owner again.
+   */
+  private readonly acquisitionDeviceCleanups: Map<string, Promise<void>> = new Map();
+  /**
    * Active per-condition network TTLs (issue #6085 item 2), keyed by session id.
    * When a session degrades the network with an `expiresInSeconds`, a timer resets
    * the profile to `none` when it elapses — independent of session lifetime. The
@@ -1621,7 +1626,10 @@ export class SessionManager {
 
   /** Wait for the device work that outlived release, without blocking shutdown indefinitely. */
   async drainPendingDeviceCleanups(timeoutMs: number): Promise<boolean> {
-    const cleanups = Array.from(this.pendingDeviceCleanups.values());
+    const cleanups = [
+      ...this.pendingDeviceCleanups.values(),
+      ...this.acquisitionDeviceCleanups.values(),
+    ];
     if (cleanups.length === 0) {
       return true;
     }
@@ -1689,10 +1697,32 @@ export class SessionManager {
     return remaining > 0 ? remaining : DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
   }
 
+  /**
+   * Like {@link registerPendingDeviceCleanup}, for work the current acquirer triggered on its own
+   * device. While that session holds the device the work does not make
+   * {@link hasDeviceCleanupInProgress} true (the holder's own reuse must not be refused); if the
+   * holder releases first, the still-running work quarantines the device for the next acquirer.
+   */
+  registerAcquisitionDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
+    const tracked = Promise.allSettled([cleanup]).then(() => undefined);
+    const previous = this.acquisitionDeviceCleanups.get(deviceId);
+    const combined = previous
+      ? Promise.allSettled([previous, tracked]).then(() => undefined)
+      : tracked;
+    this.acquisitionDeviceCleanups.set(deviceId, combined);
+    void combined.then(() => {
+      if (this.acquisitionDeviceCleanups.get(deviceId) === combined) {
+        this.acquisitionDeviceCleanups.delete(deviceId);
+      }
+    });
+  }
+
   /** Release owns the device until both bounded teardown and any overflow work settle. */
   hasDeviceCleanupInProgress(deviceId: string): boolean {
     return (
       this.pendingDeviceCleanups.has(deviceId) ||
+      (this.acquisitionDeviceCleanups.has(deviceId) &&
+        this.getSessionForDevice(deviceId) === null) ||
       Array.from(this.activeReleasePromises).some(
         (release) => !release.forced && release.session.assignedDevice === deviceId,
       )

@@ -9,7 +9,8 @@ import {
   type RecordingSessionCleanupDeps,
 } from "../../src/server/recordingSessionCleanup";
 
-type CleanupManager = Parameters<typeof registerRecordingSessionCleanup>[0];
+type CleanupManager = Parameters<typeof registerRecordingSessionCleanup>[0] &
+  Parameters<typeof createOwnerlessRecordingAcquisitionCleanup>[0];
 type ReleaseCallback = Parameters<SessionManager["onSessionRelease"]>[0];
 type UnboundCallback = Parameters<SessionManager["onSessionDeviceUnbound"]>[0];
 
@@ -17,6 +18,7 @@ class FakeSessionManager implements CleanupManager {
   releaseCallbacks: ReleaseCallback[] = [];
   unboundCallbacks: UnboundCallback[] = [];
   pendingCleanups: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
+  acquisitionCleanups: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
 
   onSessionRelease(callback: ReleaseCallback): void {
     this.releaseCallbacks.push(callback);
@@ -26,6 +28,10 @@ class FakeSessionManager implements CleanupManager {
   }
   registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
     this.pendingCleanups.push({ deviceId, cleanup });
+  }
+
+  registerAcquisitionDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
+    this.acquisitionCleanups.push({ deviceId, cleanup });
   }
 
   release(sessionId: string, deviceId: string, upgradeOnly = false): void {
@@ -48,7 +54,9 @@ class FakeSessionManager implements CleanupManager {
   }
 
   async settle(): Promise<void> {
-    await Promise.all(this.pendingCleanups.map((entry) => entry.cleanup));
+    await Promise.all(
+      [...this.pendingCleanups, ...this.acquisitionCleanups].map((entry) => entry.cleanup),
+    );
   }
 }
 
@@ -311,7 +319,9 @@ describe("registerRecordingSessionCleanup", () => {
       await manager.settle();
 
       expect(recordings.active.size).toBe(0);
-      expect(manager.pendingCleanups.map((entry) => entry.deviceId)).toEqual(["SIM-1"]);
+      // Tracked as acquisition cleanup so the holder's own reuse is not refused (#11041).
+      expect(manager.pendingCleanups).toHaveLength(0);
+      expect(manager.acquisitionCleanups.map((entry) => entry.deviceId)).toEqual(["SIM-1"]);
       recordings.start("SIM-1", "session-b");
     });
 
@@ -357,7 +367,7 @@ describe("registerRecordingSessionCleanup", () => {
     test("no recordings means no pending cleanup", () => {
       const { manager, recordings } = setup();
       createOwnerlessRecordingAcquisitionCleanup(manager, recordings)("SIM-1");
-      expect(manager.pendingCleanups).toHaveLength(0);
+      expect(manager.acquisitionCleanups).toHaveLength(0);
     });
   });
 });

@@ -182,6 +182,10 @@ EOF
 printf '%s\n' "$*" >> "${FAKE}/nc.calls"
 IFS= read -r request || exit 0
 printf '%s\n' "${request}" >> "${FAKE}/nc.requests"
+if [[ "${request}" != *'"sessionUuid":"'* ]]; then
+  printf '%s\n' '{"id":"1","type":"error","success":false,"error":"observationStream requires an authenticated daemon session."}'
+  exit 0
+fi
 printf '%s\n' '{"id":"1","type":"subscription_response","success":true,"subscriptionId":"devicedatastream-1"}'
 if [[ "${FAKE_STREAM_ENDED:-0}" == 1 ]]; then
   printf '%s\n' '{"type":"device_session_ended","deviceId":"emulator-5560"}'
@@ -377,6 +381,7 @@ run_check() {
   [ "${status}" -eq 0 ]
   [[ "${output}" == *"PASS stream"* ]]
   grep -q '"command":"subscribe"' "${FAKE}/nc.requests"
+  grep -q "\"sessionUuid\":\"${SESSION_UUID}\"" "${FAKE}/nc.requests"
   grep -q subscription_response "${EVIDENCE}/stream.stream.frames"
 }
 

@@ -157,8 +157,13 @@ open class AutoMobileAgent(
       val redactionValues = SecretRedactor.secretValues(secretValues)
       // Every recovery call — the agent's tools, WaitForTool and the liveness observe — targets
       // the device the failed step ran on, not whichever device the daemon defaults to (#10089).
-      val deviceClient =
+      val pinnedClient =
         DevicePinningMCPClient.pinTo(mcpClient, context.deviceId, context.sessionUuid)
+      // Recovery that holds the failed attempt's session waits, bounded, for its device if the
+      // idle window released it during a long think (#10979).
+      val deviceClient =
+        if (context.sessionUuid.isNullOrBlank()) pinnedClient
+        else HeldDeviceWaitingMCPClient(pinnedClient)
       val agentMcpClient =
         if (redactionValues.isEmpty()) deviceClient
         else RedactingMCPClient(deviceClient, redactionValues)

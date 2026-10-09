@@ -1108,9 +1108,8 @@ describe("DeviceSessionRepository", () => {
       await repo.upsertActiveSession(makeRecord({ sessionUuid: "recent-released" }));
       await repo.markReleased("recent-released", "released", 9 * oneDayMs, "explicit-release");
 
-      // A new session starting at day 10 triggers the prune — mirrors
-      // `DeviceTeardownOperationRepository.begin()`'s unconditional
-      // delete-before-write pattern. Cutoff = day 10 - 7 days = day 3, so the
+      // A new session starting at day 10 triggers the prune — runs an unconditional
+      // delete-before-write prune. Cutoff = day 10 - 7 days = day 3, so the
       // day-1 release is pruned and the day-9 release survives.
       timer.advanceTime(10 * oneDayMs);
       await repo.upsertActiveSession(

@@ -3,7 +3,7 @@
  */
 export interface GrantAndroidPermissionItemResult {
   /** Stable step id, e.g. pm_grant:android.permission.CAMERA, cmd.notification.allow_dnd */
-  operationId: string;
+  stepId: string;
   /** Present when this row mutates one runtime permission with `pm grant` or `pm revoke`. */
   permission?: string;
   success: boolean;

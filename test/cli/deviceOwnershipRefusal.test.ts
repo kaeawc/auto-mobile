@@ -183,7 +183,6 @@ describe("--cli surfaces a held-device refusal", () => {
     respondWith(
       createTeardownFailureResponse(
         {
-          operationId: "00000000-0000-0000-0000-000000000000",
           mode: "destroy",
           target: { platform: "android", isVirtual: true, stableId: "x" },
         } as never,

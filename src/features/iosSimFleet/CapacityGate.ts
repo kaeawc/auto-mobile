@@ -1,6 +1,7 @@
 import { ActionableError } from "../../models/ActionableError";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
-import type { FleetCostSource } from "./FleetCostCollector";
+import { BOOTED_STATE, type FleetCostSource } from "./FleetCostCollector";
 import {
   estimatePerSimulatorBytes,
   findWarmCompatibleDevices,
@@ -34,12 +35,20 @@ export interface CapacityWaitResult {
   decision: CapacityDecision;
   waitedMs: number;
   timedOut: boolean;
+  /**
+   * Present when the wait admitted a boot: it counts toward the limit until
+   * released, so concurrent waiters cannot all be admitted against one free
+   * slot before the first boot shows up as Booted. Call once the boot ends.
+   */
+  releaseAdmission?: () => void;
 }
 
 export interface CapacityWaitOptions {
   signal?: AbortSignal;
   /** Absolute deadline on the gate's timer clock. */
   deadlineMs: number;
+  /** UDID the admitted boot is for; counted as in flight until it reports Booted. */
+  bootUdid?: string;
 }
 
 /**
@@ -68,6 +77,8 @@ export class IosSimCapacityGate implements SimulatorCapacityGate {
   private readonly sustainedSamples: number;
   private pressuredStreak = 0;
   private latestReport: FleetCostReport | undefined;
+  /** Boots admitted by `waitForCapacity` and not yet released, keyed by admission token. */
+  private readonly admittedBoots = new Map<symbol, string | undefined>();
 
   constructor(
     private readonly fleet: FleetCostSource,
@@ -91,13 +102,17 @@ export class IosSimCapacityGate implements SimulatorCapacityGate {
   }
 
   async evaluateBoot(request: WarmDeviceRequest = {}): Promise<CapacityDecision> {
-    const report = await this.refresh();
+    return this.decide(await this.refresh(), request);
+  }
+
+  /** Synchronous so a waiter can decide and record its admission without an interleaving. */
+  private decide(report: FleetCostReport, request: WarmDeviceRequest = {}): CapacityDecision {
     const warm = findWarmCompatibleDevices(report, request)[0];
     if (warm) {
       return { outcome: "reuse-warm", udid: warm.udid };
     }
     const limits = this.limitsFor(report);
-    const bootedCount = report.totals.bootedCount;
+    const bootedCount = report.totals.bootedCount + this.inFlightBootCount(report);
     const queued = this.queueReason(report.host, bootedCount, limits);
     if (queued) {
       return {
@@ -119,16 +134,60 @@ export class IosSimCapacityGate implements SimulatorCapacityGate {
     const startedAt = this.timer.now();
     for (;;) {
       options.signal?.throwIfAborted();
-      const decision = await this.evaluateBoot(request);
+      const report = await this.refreshWithin(options, startedAt);
+      options.signal?.throwIfAborted();
+      const decision = this.decide(report, request);
       const waitedMs = this.timer.now() - startedAt;
       if (decision.outcome !== "queue") {
-        return { decision, waitedMs, timedOut: false };
+        return { decision, waitedMs, timedOut: false, releaseAdmission: this.admit(options) };
       }
       if (this.timer.now() + decision.retryAfterMs > options.deadlineMs) {
         return { decision, waitedMs, timedOut: true };
       }
-      await this.timer.sleep(decision.retryAfterMs);
+      await raceWithDeadline(this.timer.sleep(decision.retryAfterMs), {
+        timer: this.timer,
+        signal: options.signal,
+        label: "Waiting for iOS simulator capacity",
+      });
     }
+  }
+
+  /** A fleet sample bounded by the wait's deadline and cancellation. */
+  private async refreshWithin(
+    options: CapacityWaitOptions,
+    startedAt: number,
+  ): Promise<FleetCostReport> {
+    const remainingMs = Math.floor(options.deadlineMs - this.timer.now());
+    const timedOut = () =>
+      new ActionableError(
+        `Timed out after ${this.timer.now() - startedAt}ms collecting iOS simulator capacity.`,
+      );
+    if (remainingMs <= 0) {
+      throw timedOut();
+    }
+    return await raceWithDeadline(() => this.refresh(), {
+      timer: this.timer,
+      timeoutMs: remainingMs,
+      signal: options.signal,
+      label: "Collecting iOS simulator capacity",
+      timeoutError: timedOut,
+    });
+  }
+
+  private admit(options: CapacityWaitOptions): () => void {
+    const token = Symbol("ios-boot-admission");
+    this.admittedBoots.set(token, options.bootUdid);
+    return () => {
+      this.admittedBoots.delete(token);
+    };
+  }
+
+  /** Admitted boots that the latest sample does not already show as Booted. */
+  private inFlightBootCount(report: FleetCostReport): number {
+    const booted = new Set(
+      report.simulators.filter((sim) => sim.state === BOOTED_STATE).map((sim) => sim.udid),
+    );
+    return [...this.admittedBoots.values()].filter((udid) => !udid || !booted.has(udid)).length;
   }
 
   private limitsFor(report: FleetCostReport): CapacityLimits {

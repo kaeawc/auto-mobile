@@ -693,6 +693,40 @@ describe("MultiPlatformDeviceManager", () => {
     expect(started).toEqual([{ udid: "UDID-1", timeoutMs: 1234 }]);
   });
 
+  // #11064: an opt-in capacity wait must see the boot request's cancellation.
+  test("startDevice hands the ambient abort signal to the iOS boot instrumentation", async () => {
+    const fakeSimctl = {
+      isAvailable: async () => true,
+      getBootedSimulators: async () => [],
+      getBootedSimulatorsChecked: async () => [],
+      isSimulatorRunning: async () => false,
+      startSimulator: async () => ({}) as never,
+    } as unknown as SimCtlClient;
+    const signals: Array<AbortSignal | undefined> = [];
+    const instrumentation: IosBootInstrumentation = {
+      run: async (request, boot) => {
+        signals.push(request.signal);
+        return boot(1234);
+      },
+    };
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      fakeSimctl,
+      null,
+    ).withIosBootInstrumentation(instrumentation);
+    const controller = new AbortController();
+
+    await runWithAbortSignal(controller.signal, () =>
+      manager.startDevice(
+        { name: "iPhone", platform: "ios", isRunning: false, deviceId: "UDID-1", runtimeId: "rt" },
+        60_000,
+      ),
+    );
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toBe(controller.signal);
+  });
+
   test("startDevice validates a missing UDID before probing simctl running-state, even when a same-named simulator is already booted (#6414)", async () => {
     let runningStateProbed = false;
     const fakeSimctl = {

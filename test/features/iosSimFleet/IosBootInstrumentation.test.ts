@@ -89,6 +89,33 @@ describe("FleetBootInstrumentation", () => {
     expect(booted).toBe(false);
   });
 
+  // #11064: the boot path's signal reaches the capacity wait, and an admitted
+  // boot holds its slot only until the boot ends, success or failure.
+  test("threads the boot signal into the capacity wait and releases the admission after boot", async () => {
+    const { gate, instrumentation } = setup({ outcome: "allow", limits, bootedCount: 0 });
+    const controller = new AbortController();
+    let admittedDuringBoot = 0;
+    await instrumentation.run(
+      { udid: UDID, timeoutMs: 1_000, signal: controller.signal },
+      async () => {
+        admittedDuringBoot = gate!.admitted;
+      },
+    );
+    expect(gate!.waitOptions[0]).toMatchObject({ signal: controller.signal, bootUdid: UDID });
+    expect(admittedDuringBoot).toBe(1);
+    expect(gate!.admitted).toBe(0);
+  });
+
+  test("a failed boot still releases its capacity admission", async () => {
+    const { gate, instrumentation } = setup({ outcome: "allow", limits, bootedCount: 0 });
+    await expect(
+      instrumentation.run({ udid: UDID, timeoutMs: 1_000 }, async () => {
+        throw new Error("boot failed");
+      }),
+    ).rejects.toThrow("boot failed");
+    expect(gate!.admitted).toBe(0);
+  });
+
   test("a compatible warm simulator does not block the requested boot", async () => {
     const { instrumentation } = setup({ outcome: "reuse-warm", udid: "OTHER" });
     let booted = false;

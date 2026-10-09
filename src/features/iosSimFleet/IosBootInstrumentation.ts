@@ -21,6 +21,8 @@ export interface IosBootRequest {
   profile?: SimulatorWorkloadProfile;
   /** Total budget for waiting on capacity plus the boot itself. */
   timeoutMs: number;
+  /** Cancels a capacity wait (the boot path's ambient request signal). */
+  signal?: AbortSignal;
 }
 
 /** Seam the iOS boot path calls; swappable for a fake so boot tests stay hermetic. */
@@ -48,13 +50,19 @@ export class FleetBootInstrumentation implements IosBootInstrumentation {
     const { history, timer, gate } = this.options;
     const profileId = bootProfileId(request.profile);
     const startedAtMs = timer.now();
-    if (gate) {
-      await this.awaitCapacity(gate, request, profileId, startedAtMs);
-    }
+    const releaseAdmission = gate
+      ? await this.awaitCapacity(gate, request, profileId, startedAtMs)
+      : undefined;
     const bootStartedAtMs = timer.now();
     // Only time spent queued for capacity is deducted; the unqueued path keeps the caller's budget.
     const waitedMs = gate ? bootStartedAtMs - startedAtMs : 0;
-    const result = await boot(Math.max(1, request.timeoutMs - waitedMs));
+    let result: T;
+    try {
+      result = await boot(Math.max(1, request.timeoutMs - waitedMs));
+    } finally {
+      // The admitted boot counted toward the limit until now; the fleet sample takes over.
+      releaseAdmission?.();
+    }
     const finishedAtMs = timer.now();
     history.record({
       udid: request.udid,
@@ -70,10 +78,14 @@ export class FleetBootInstrumentation implements IosBootInstrumentation {
     request: IosBootRequest,
     profileId: string,
     startedAtMs: number,
-  ): Promise<void> {
+  ): Promise<(() => void) | undefined> {
     const result = await gate.waitForCapacity(
       { runtime: request.runtime, profileId, excludeUdids: [request.udid] },
-      { deadlineMs: startedAtMs + request.timeoutMs },
+      {
+        deadlineMs: startedAtMs + request.timeoutMs,
+        signal: request.signal,
+        bootUdid: request.udid,
+      },
     );
     assertCapacityGranted(result);
     if (result.decision.outcome === "reuse-warm") {
@@ -82,5 +94,6 @@ export class FleetBootInstrumentation implements IosBootInstrumentation {
         `compatible warm simulator ${result.decision.udid} is booted; booting ${request.udid} as requested`,
       );
     }
+    return result.releaseAdmission;
   }
 }

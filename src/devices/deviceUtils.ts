@@ -1102,7 +1102,13 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     options: DeviceStartOptions,
   ): Promise<ChildProcess> {
     return this.iosBootInstrumentation.run(
-      { udid, runtime: device.runtimeId, profile: options.resourceProfile, timeoutMs },
+      {
+        udid,
+        runtime: device.runtimeId,
+        profile: options.resourceProfile,
+        timeoutMs,
+        signal: getAbortSignal(),
+      },
       (remainingMs) => this.simctl.startSimulator(udid, remainingMs),
     );
   }

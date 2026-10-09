@@ -2,6 +2,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import type { Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database } from "./types";
+import type { DeviceResourceDrift } from "../models/DeviceResourceReconciliation";
 import { logger } from "../utils/logger";
 
 export type ProvisionDeviceLifecycleState =
@@ -30,6 +31,7 @@ export interface ProvisionDeviceLifecycleOutcome {
     attempt?: number;
     incidentId?: string;
     deviceId?: string;
+    resourceDrift?: DeviceResourceDrift[];
     daemonBuild?: string;
   };
   cleanup?: {

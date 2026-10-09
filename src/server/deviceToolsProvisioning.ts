@@ -2529,9 +2529,10 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     if (device.platform !== "ios" || resolveIosDeviceKind(device) !== "simulator") {
       return;
     }
-    // The independent re-read is authoritative when it completed; otherwise fall back
-    // to the controller's own verified statuses.
-    const states = { ...result.resources, ...result.observed?.resources };
+    // The independent re-read wins only by direct contradiction: an observed
+    // unknown/unsupported (a failed or timed-out read) never overrides a state the
+    // controller proved, so a transient read error cannot fail provisioning.
+    const states = mergeProvenResourceStates(result.resources, result.observed?.resources);
     const drift = computeDeviceResourceDrift(result.requested, states);
     if (drift.length === 0 && result.success) {
       return;
@@ -2547,7 +2548,8 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     throw new ProvisionDeviceError(
       "resource_profile_unproven",
       `Requested resource profile could not be proven applied on iOS simulator '${args.device.name}'; no session was bound. Unproven: ${detail}. Overrides already written to an adopted simulator remain; run reconcileDeviceResources with repair, or setDeviceResources, to change them.`,
-      false,
+      // Only unreadable evidence (every entry a command failure) is worth retrying.
+      drift.length > 0 && drift.every((entry) => entry.kind === "commandFailure"),
       { resourceDrift: drift, deviceId: device.deviceId },
     );
   }
@@ -2744,6 +2746,24 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     };
   }
 
+  function mergeProvenResourceStates(
+    controller: DeviceResourceConfigurationResult["resources"],
+    observed: DeviceResourceConfigurationResult["resources"] | undefined,
+  ): DeviceResourceConfigurationResult["resources"] {
+    const merged = { ...controller };
+    for (const [resource, status] of Object.entries(observed ?? {}) as [
+      keyof typeof merged,
+      NonNullable<(typeof merged)[keyof typeof merged]>,
+    ][]) {
+      const proven = merged[resource];
+      const unreadable = status.state === "unknown" || status.state === "unsupported";
+      if (!(unreadable && proven && proven.state !== "unknown" && proven.state !== "unsupported")) {
+        merged[resource] = status;
+      }
+    }
+    return merged;
+  }
+
   function provisionDeviceLifecycleDiagnosticFields(
     reason: ProvisionDeviceLifecycleOutcome["reason"],
   ) {
@@ -2756,6 +2776,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       ...(reason.attempt !== undefined ? { attempt: reason.attempt } : {}),
       ...(reason.incidentId ? { incidentId: reason.incidentId } : {}),
       ...(reason.deviceId ? { deviceId: reason.deviceId } : {}),
+      ...(reason.resourceDrift ? { resourceDrift: reason.resourceDrift } : {}),
       ...(reason.daemonBuild ? { daemonBuild: reason.daemonBuild } : {}),
     };
   }

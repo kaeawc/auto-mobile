@@ -22,6 +22,8 @@ import {
   LIVENESS_RECOVERY_ATTEMPTS,
   LivenessRecovery,
   runWithoutDaemonLifecycle,
+  livenessHandoverMessage,
+  livenessHandoverPayload,
   livenessRecoveryCallWaitMs,
   recoveryAttemptSlotMs,
   type LivenessHandover,
@@ -868,6 +870,35 @@ describe("proxy liveness stalls (#10053)", () => {
         proxy.callTool("observe", { sessionUuid: "android-session" }),
       ).resolves.toBeDefined();
       expect(handoverCount(proxy)).toBe(0);
+    });
+
+    test("a daemon stall that ends in a lost session pushes the loss notification with daemon-stall wording (#11028)", async () => {
+      const proxy = createProxy(2_000, true);
+      await acquire(proxy, "getAndroid");
+      await acquire(proxy, "getApple");
+      await stallAndroid(proxy);
+      expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
+
+      timer.stall(2_000);
+      await sessionManager.claimLivenessOwnership("android-session", "other-owner");
+      await expect(
+        proxy.callTool("observe", { sessionUuid: "android-session" }),
+      ).rejects.toMatchObject({ reason: "proxy_stalled" });
+
+      // The harness is told now, not only on its next call, and once per lost session.
+      expect(handovers.map((handover) => handover.code)).toEqual([
+        "daemon_stalled",
+        "proxy_stalled",
+      ]);
+      const loss = handovers[1];
+      expect(loss.sessions).toEqual([
+        expect.objectContaining({ sessionUuid: "android-session", deviceId: "emulator-5554" }),
+      ]);
+      expect(livenessHandoverPayload(loss).error).toMatchObject({
+        code: "proxy_stalled",
+        recovery: { action: "reacquire_lost_sessions" },
+      });
+      expect(livenessHandoverMessage(loss)).toContain("The AutoMobile daemon stalled");
     });
 
     test.each(["not-found", "notification", "foreign-token", "foreign-conflict"])(

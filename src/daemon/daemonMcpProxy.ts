@@ -4440,8 +4440,14 @@ export class DaemonMcpProxy {
    */
   private holdTokenOwnedSession(session: TokenOwnedSession): boolean {
     const { sessionId } = session;
+    if (sessionId === this.boundSessionUuid) {
+      // The startup-bound session (--initial-session-uuid) is bound without a device, and calls
+      // naming it carry none: the daemon's answer is the only place the proxy learns it, and
+      // loss reports need it (#11028).
+      this.rememberSessionDevice(sessionId, session.deviceId);
+      return false;
+    }
     if (
-      sessionId === this.boundSessionUuid ||
       sessionId === this.terminalBoundSession?.sessionUuid ||
       this.otherHeldSessions.has(sessionId) ||
       this.stallHandovers.has(sessionId)
@@ -4896,6 +4902,13 @@ export class DaemonMcpProxy {
         this.endLostSessionHandover(sessionUuid);
       }
     }
+    this.notifyLivenessHandoverListeners(handover);
+    if (this.hasProbeableStall() && !this.closing) {
+      this.stallResumeProbe.start();
+    }
+  }
+
+  private notifyLivenessHandoverListeners(handover: LivenessHandover): void {
     for (const listener of this.livenessHandoverListeners) {
       try {
         listener(handover);
@@ -4903,9 +4916,6 @@ export class DaemonMcpProxy {
         // Best-effort: a dead client transport must not stop the other listeners or the proxy.
         logger.warn(`[DaemonMcpProxy] liveness handover listener failed: ${error}`);
       }
-    }
-    if (this.hasProbeableStall() && !this.closing) {
-      this.stallResumeProbe.start();
     }
   }
 
@@ -5177,7 +5187,7 @@ export class DaemonMcpProxy {
     }
     // A delivered proxy_stalled already reported this definitive loss. daemon_stalled did not.
     if (record.handover.code !== PROXY_STALLED_CODE || !record.delivered) {
-      this.pendingSessionLosses.set(sessionUuid, {
+      const loss: LivenessHandover = {
         ...record.handover,
         code: PROXY_STALLED_CODE,
         ...(record.handover.code === DAEMON_STALLED_CODE ? { stalledBy: "daemon" as const } : {}),
@@ -5186,7 +5196,14 @@ export class DaemonMcpProxy {
           record.handover.sessions.find((session) => session.sessionUuid === sessionUuid)
             ?.lastAcknowledgedHeartbeatAt ?? record.handover.lastAcknowledgedHeartbeatAt,
         action: "reacquire_lost_sessions",
-      });
+      };
+      this.pendingSessionLosses.set(sessionUuid, loss);
+      if (record.handover.code === DAEMON_STALLED_CODE) {
+        // A daemon stall that ends in a lost session pushes the same liveness notification a
+        // proxy stall does, worded as the daemon stall it was (#11028). A proxy_stalled handover
+        // was already pushed when it was delivered.
+        this.notifyLivenessHandoverListeners(loss);
+      }
     }
     this.forgetSessionLivenessState(sessionUuid);
     this.ownedDeviceSessions.delete(sessionUuid);
@@ -5284,6 +5301,8 @@ export class DaemonMcpProxy {
     const claimLivenessOwnership = !held.claimSent;
     try {
       await this.heartbeatWithStallDetection(sessionUuid, async (isCurrent) => {
+        // A skipped send proved nothing, so it must not be recorded as a success.
+        let sent = false;
         // Fencing the latest binding must not silence its siblings, hence
         // allowReleasedSession. Not-found is not proof of loss here, as on the
         // latest binding's tick: the release notification is authoritative.
@@ -5295,6 +5314,7 @@ export class DaemonMcpProxy {
             async () => {
               if (this.otherHeldSessions.get(sessionUuid) === held) {
                 await this.sendHeldSessionHeartbeat(sessionUuid, claimLivenessOwnership);
+                sent = true;
               }
             },
             sessionUuid,
@@ -5302,7 +5322,7 @@ export class DaemonMcpProxy {
             false,
           ),
         );
-        if (isCurrent()) {
+        if (sent && isCurrent()) {
           this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
         }
       });

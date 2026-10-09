@@ -172,6 +172,20 @@ describe("proxy restarted with a stable owner token", () => {
     expect(heartbeatsFor(clients, SECOND).length).toBeGreaterThanOrEqual(2);
   });
 
+  test("the startup-bound session keeps the daemon-reported deviceId for its loss reports (#11028)", async () => {
+    const clients: FakeDaemonClient[] = [];
+    const proxy = restartedProxy(clients, { livenessOwnerToken: TOKEN, initialSessionUuid: FIRST });
+
+    await proxy.claimInitialSession();
+
+    // Handover and stall payloads name a session's device from this map; calls naming the
+    // startup-bound session carry no deviceId, so the token resume is its only source.
+    const devices = (proxy as unknown as { sessionDeviceIds: Map<string, string> })
+      .sessionDeviceIds;
+    expect(devices.get(FIRST)).toBe("emulator-5554");
+    expect(devices.get(SECOND)).toBe("emulator-5556");
+  });
+
   test("a different token cannot resume them", async () => {
     const clients: FakeDaemonClient[] = [];
     const proxy = restartedProxy(clients, { livenessOwnerToken: "another-harness-token" });

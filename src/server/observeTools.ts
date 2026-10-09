@@ -828,6 +828,7 @@ export const identifyInteractionsSchema = addDeviceTargetingToSchema(
         })
         .optional()
         .describe("Context options"),
+      layer: hierarchyLayerSchema.optional(),
     })
     .strict(),
 );
@@ -2313,8 +2314,15 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
           ? await navigationGraph.getEdgesFrom(currentScreen)
           : [];
 
+      // Issue #9305: identify interactions on the app or on the overlay only. The cached
+      // observation keeps every window; only the copy the analyzer reads is scoped.
+      if (args.layer === "overlay" && cachedResult.viewHierarchy) {
+        scopeHierarchyForSelector(cachedResult.viewHierarchy, args.layer);
+      }
+      const scoped = scopeObserveResultToLayer(cachedResult, args.layer, device.platform);
+
       const analyzer = new IdentifyInteractions();
-      const result = analyzer.analyze(cachedResult, args, currentScreen, navigationEdges);
+      const result = analyzer.analyze(scoped, args, currentScreen, navigationEdges);
 
       return createJSONToolResponse(result);
     } catch (error) {

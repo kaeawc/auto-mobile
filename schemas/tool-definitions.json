@@ -3617,6 +3617,11 @@
           },
           "additionalProperties": false
         },
+        "layer": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"

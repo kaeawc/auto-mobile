@@ -98,12 +98,12 @@ wiring_requires_yq() {
   done
 }
 
-@test "shell-tests-gate rolls up unit and integration BATS jobs" {
+@test "shell-tests-gate rolls up the BATS job (unit + integration lanes)" {
   block="$(job_block shell-tests-gate)"
   [[ "$block" == *"- bats-tests"* ]]
   [[ "$block" == *"needs.bats-tests.result"* ]]
-  [[ "$block" == *"- bats-integration-tests"* ]]
-  [[ "$block" == *"needs.bats-integration-tests.result"* ]]
+  # The integration lane is a step of bats-tests (folded to save a runner slot).
+  [[ "$block" != *"bats-integration-tests"* ]]
 }
 
 @test "Android emulator compile smoke includes test-source compilation" {
@@ -116,7 +116,7 @@ wiring_requires_yq() {
 @test "portable PR matrices leave macOS coverage to nightly" {
   wiring_requires_yq
   local job expected
-  for job in bats-tests bats-integration-tests; do
+  for job in bats-tests; do
     run yq -r ".jobs.\"${job}\".strategy.matrix.os[]" "$WF"
     [ "$status" -eq 0 ]
     [ "$output" = "ubuntu-latest" ]
@@ -129,17 +129,16 @@ wiring_requires_yq() {
 }
 
 @test "unit, integration, and stress jobs invoke their canonical lanes" {
-  local unit host bats_unit bats_integration
+  local unit host bats_unit
   unit="$(job_block node-unit-tests)"
   host="$(job_block node-host-integration-tests)"
   bats_unit="$(job_block bats-tests)"
-  bats_integration="$(job_block bats-integration-tests)"
 
   [[ "$unit" == *"bash scripts/test-ts.sh unit"* ]]
   [[ "$host" == *"bash scripts/test-ts.sh integration"* ]]
   [[ "$host" == *"bash scripts/test-ts.sh stress"* ]]
   [[ "$bats_unit" == *"scripts/ci/run-bats.sh unit"* ]]
-  [[ "$bats_integration" == *"scripts/ci/run-bats.sh integration"* ]]
+  [[ "$bats_unit" == *"scripts/ci/run-bats.sh integration"* ]]
   [[ "$bats_unit" != *"AUTOMOBILE_BATS_SERIAL_ONLY"* ]]
 }
 

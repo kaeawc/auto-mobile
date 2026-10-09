@@ -308,7 +308,7 @@ test("relay replay parses parameter sets without liveness evidence", async () =>
   }
 });
 for (const first of ["relay", "webrtc"] as const) {
-  test(`iOS ${first} first respects binding WebRTC rate and flexible relay default`, async () => {
+  test(`iOS ${first} first shares one capture at the highest requested rate (#10711)`, async () => {
     const h = harness("ios");
     let streamId = "";
     const start = async () => {
@@ -323,20 +323,23 @@ for (const first of ["relay", "webrtc"] as const) {
       if (first === "relay") {
         await h.relay.request(new FakeSocket(), "subscribe");
         await start();
+        // The relay's capture is restarted in place at WebRTC's binding rate; no second capture.
+        expect(h.counts()).toEqual([0, 2]);
+        expect(h.options.map((value) => value.fps)).toEqual([5, 15]);
+        expect(h.events).toEqual(["create1", "start1", "stop1", "create2", "start2"]);
       } else {
         await start();
         await h.relay.request(new FakeSocket(), "subscribe");
-      }
-      expect(h.counts()).toEqual(first === "relay" ? [1, 1] : [1, 0]);
-      expect(h.options.map((value) => value.fps)).toEqual(first === "relay" ? [5, 15] : [15]);
-      if (first === "webrtc") {
+        expect(h.counts()).toEqual([1, 0]);
+        expect(h.options.map((value) => value.fps)).toEqual([15]);
+        // A slower binding relay hint is satisfied by the faster shared capture.
         await h.relay.request(new FakeSocket(), "subscribe", { fps: 5 });
         h.timer.advanceTime(200);
         for (let i = 0; i < 24; i++) {
           await Promise.resolve();
         }
-        expect(h.counts()).toEqual([1, 1]);
-        expect(h.options[1].fps).toBe(5);
+        expect(h.counts()).toEqual([1, 0]);
+        expect(h.events).toEqual(["create1", "start1"]);
       }
     } finally {
       await h.relay.close();
@@ -344,6 +347,7 @@ for (const first of ["relay", "webrtc"] as const) {
         await stopWebRtcStream(streamId);
       }
     }
+    expect(h.sources.every((source) => source.stops === 1)).toBe(true);
   });
 }
 

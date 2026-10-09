@@ -70,7 +70,7 @@ export const NO_HEARTBEAT_BUDGET_MS = NO_HEARTBEAT_RELEASE_BUDGET_MS;
 /** The latest an idle release lands after its deadline: suspect grace, one scan, one keeper tick. */
 export const RELEASE_SLACK_MS = SUSPECT_GRACE_MS + SCAN_MS + KEEPER_INTERVAL_MS;
 /** The autolock window the scenarios configure (AUTOMOBILE_DEVICE_POOL_TIMEOUT, in seconds). */
-/** A JUnit runner heartbeats its session every second (android/junit-runner DaemonHeartbeat.kt). */
+/** A JUnit runner heartbeats its session every second (the JUnit runner's DaemonHeartbeat). */
 export const JUNIT_HEARTBEAT_MS = 1_000;
 export const AUTOLOCK_WINDOW_MS = 60_000;
 

@@ -383,6 +383,11 @@ export type DeviceRecoveryEligibility =
  *
  * Represents a device in the pool with assignment info
  */
+export interface RemoveDeviceOptions {
+  /** Keep the tracked emulator child (liveness-miss removal, not retirement). */
+  keepTrackedProcess?: boolean;
+}
+
 export interface PooledDevice {
   id: string; // Device ID (e.g., "emulator-5554")
   name: string; // Device name (e.g., "Pixel 7")
@@ -1347,8 +1352,8 @@ export class DevicePool {
         this.intentionalShutdowns.delete(deviceId);
       },
       isReservedForShutdown: (device) => this.isReservedForShutdown(device),
-      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
-        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice),
+      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice, options) =>
+        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice, options),
       finishEmulatorLossIncident: (incidentId, outcome) =>
         this.finishEmulatorLossIncident(incidentId, outcome),
       recordEmulatorLossIncident: (deviceId, path, processExit, lastAdbState) =>
@@ -1485,8 +1490,8 @@ export class DevicePool {
       completeEmulatorLossRecovery: (incidentId, outcome) =>
         this.completeEmulatorLossRecovery(incidentId, outcome),
       settleEmulatorLossIncident: (incidentId) => this.settleEmulatorLossIncident(incidentId),
-      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
-        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice),
+      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice, options) =>
+        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice, options),
       isReservedForShutdown: (device) => this.isReservedForShutdown(device),
       recordEmulatorLossIncident: (deviceId, path, exit, state) =>
         this.recordEmulatorLossIncident(deviceId, path, exit, state),
@@ -2158,12 +2163,30 @@ export class DevicePool {
   }
 
   /**
+   * Retirement forgets the tracked emulator process. A liveness-miss removal
+   * (adb dropped the serial but the child may be alive) keeps it so its exit is
+   * still watched and killDevice can stop it (#11123).
+   */
+  private dropTrackedProcessOnRemoval(deviceId: string, options?: RemoveDeviceOptions): void {
+    const tracked = this.startedDeviceProcesses.get(deviceId);
+    if (options?.keepTrackedProcess && tracked) {
+      return;
+    }
+    if (tracked && !this.emulatorProcessLifecycle.getCompletedProcessExit(tracked)) {
+      logger.warn(`[DevicePool] Dropping tracking of live emulator process for ${deviceId}`);
+    }
+    this.startedDeviceProcesses.delete(deviceId);
+    this.startedDeviceProcessOutput.delete(deviceId);
+  }
+
+  /**
    * Remove device from pool
    */
   async removeDevice(
     deviceId: string,
     awaitCacheCleanup: boolean = true,
     expectedDevice?: PooledDevice,
+    options?: RemoveDeviceOptions,
   ): Promise<void> {
     const device = this.devices.get(deviceId);
     if (!device) {
@@ -2198,8 +2221,12 @@ export class DevicePool {
     this.notifyDeviceRemoved(deviceId, device.platform);
     this.deviceSessionStarts.delete(deviceId);
     this.refreshMissingDeviceMisses.delete(deviceId);
-    this.startedDeviceProcesses.delete(deviceId);
-    this.startedDeviceProcessOutput.delete(deviceId);
+    this.dropTrackedProcessOnRemoval(deviceId, options);
+    for (const [capturedSessionId, capture] of this.releasedDeviceCaptures) {
+      if (capture.deviceId === deviceId) {
+        this.releasedDeviceCaptures.delete(capturedSessionId);
+      }
+    }
     if (this.lastReleasedDeviceId === deviceId) {
       this.lastReleasedDeviceId = null;
     }
@@ -3479,11 +3506,13 @@ export class DevicePool {
             platform: device.platform,
             stableId: device.platform === "android" ? device.name : device.deviceId!,
           };
-    const lifecycleLease = await this.lifecycleCoordinator.reserve(identity, {
-      operation,
-      deadlineMs,
-      signal: controller.signal,
-    });
+    const lifecycleLease = await this.lifecycleCoordinator
+      .reserve(identity, { operation, deadlineMs, signal: controller.signal })
+      .catch((error: unknown) => {
+        // The finally below only owns the timer once the lease is held (#11123).
+        this.timer.clearTimeout(timeoutHandle);
+        throw error;
+      });
     const signal = AbortSignal.any([controller.signal, lifecycleLease.signal]);
     let retainedLeaseSettlement: Promise<unknown> | undefined;
     const retainLeaseUntil = (settlement: Promise<unknown>): void => {
@@ -3997,8 +4026,16 @@ export class DevicePool {
       await this.finishEmulatorLossIncident(incidentId, "not-attempted");
       return false;
     }
+    this.discardReleasedCapture(sessionId, device.id);
     device.sessionId = null;
     return true;
+  }
+
+  /** Device-loss releases never reach releaseDevice, the only capture consumer (#11123). */
+  private discardReleasedCapture(sessionId: string, deviceId: string): void {
+    if (this.releasedDeviceCaptures.get(sessionId)?.deviceId === deviceId) {
+      this.releasedDeviceCaptures.delete(sessionId);
+    }
   }
 
   private async tryPreserveSessionForMissingDevice(

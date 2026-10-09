@@ -5,6 +5,7 @@ import { ExecutionTracker, type ActiveExecution } from "../../src/server/executi
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 
 // #11105 item 2: request deadlines are stamped on the wall clock, the idle veto judges them on
 // the session clock. A wall step before a call starts must not end its veto early.
@@ -74,5 +75,29 @@ describe("idle-release veto under a wall-clock step (#11105)", () => {
     manager.cleanupExpiredSessions();
 
     expect(call.abortController.signal.aborted).toBe(true);
+  });
+
+  it("a forward step before a progress extension does not stretch the veto past the abort (#11123)", () => {
+    // Where the monotonic clock includes sleep (Linux, Windows) the session clock ignores a forward step.
+    timer.simulateSleepCountingMonotonicClock();
+    call = tracker.startExecution("provision", undefined, SESSION);
+    const deadline = new ProgressExtendableDeadline(timer.now(), 600_000, 10 * HOUR_MS);
+    tracker.setExecutionDeadline(
+      call.id,
+      () => deadline.value,
+      (onExtended) => deadline.onExtended(onExtended),
+    );
+    timer.advanceTime(300_000);
+    manager.sessionNow(); // the daemon samples the session clock continuously
+    timer.stepWallClock(HOUR_MS);
+    // Progress restamps the deadline with the stepped wall clock; the real abort fires 600s of
+    // monotonic time later, on the session clock at sessionNow() + 600s.
+    deadline.extendOnProgress(timer.now(), 600_000);
+
+    const sessionDeadline = tracker.getLatestSessionExecutionDeadlineMs(SESSION, {
+      onSessionClock: true,
+    });
+
+    expect(sessionDeadline).toBe(manager.sessionNow() + 600_000);
   });
 });

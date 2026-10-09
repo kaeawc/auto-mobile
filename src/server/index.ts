@@ -1,4 +1,8 @@
-import { getLiveDeadlineMs, getLiveTextRequestState } from "../daemon/liveDeadlineRegistry";
+import {
+  getLiveDeadlineMs,
+  getLiveTextRequestState,
+  subscribeLiveDeadline,
+} from "../daemon/liveDeadlineRegistry";
 import {
   TextRequestState,
   runWithTextRequestContext,
@@ -1311,7 +1315,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       (requestLiveDeadlineKey ? getLiveDeadlineMs(requestLiveDeadlineKey) : undefined) ??
       requestDeadlineMs;
     // A release vetoed by this call is bounded by the call's own deadline (#10712).
-    executionTracker.setExecutionDeadline(execution.id, getRequestDeadlineMs);
+    executionTracker.setExecutionDeadline(
+      execution.id,
+      getRequestDeadlineMs,
+      requestLiveDeadlineKey
+        ? (onExtended) => subscribeLiveDeadline(requestLiveDeadlineKey, onExtended)
+        : undefined,
+    );
     // The daemon echoes the session it routed an admitted, non-read call to, so a proxy credits
     // exactly that session instead of guessing it from a selector (#10974). Read before the
     // execution ends.

@@ -8,7 +8,9 @@ import type { BootedDevice } from "../../src/models";
 import { executionTracker } from "../../src/server/executionTracker";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { registerObserveTools } from "../../src/server/observeTools";
+import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
+import { setActiveDeviceSchema } from "../../src/server/utilityTools";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
@@ -89,6 +91,17 @@ export class RealToolCallPath {
     this.restorers.push(() => ctrlProxy.mockRestore());
     registerInteractionTools();
     registerObserveTools();
+    // The real handler and registration; only the CtrlProxy resume at the device boundary is fake.
+    ToolRegistry.register(
+      "setActiveDevice",
+      "Set active device",
+      setActiveDeviceSchema,
+      createSetActiveDeviceHandler({
+        displayInventory: new FakeDisplayInventoryProvider(),
+        resumeCtrlProxy: async () => undefined,
+      }),
+      { defaultEnabled: true },
+    );
     return this;
   }
 

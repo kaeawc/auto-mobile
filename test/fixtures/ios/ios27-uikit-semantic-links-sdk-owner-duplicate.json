@@ -1,0 +1,1027 @@
+{
+  "hierarchy": {
+    "bounds": [0, 0, 402, 874],
+    "className": "XCUIApplication",
+    "extras": {
+      "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled)",
+      "sdk.hasTapTarget": "true"
+    },
+    "node": [
+      {
+        "bounds": [0, 62, 402, 116],
+        "className": "UINavigationBar",
+        "extras": {
+          "sdk.gestureRecognizers": "_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionPressGestureRecognizer(enabled),UIPanGestureRecognizer(disabled),UIPanGestureRecognizer(disabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+          "sdk.hasTapTarget": "true"
+        },
+        "node": [
+          {
+            "bounds": [16, 62, 60, 106],
+            "className": "UIButton",
+            "clickable": "true",
+            "resource-id": "BackButton",
+            "role": "button",
+            "text": "Demos"
+          },
+          {
+            "bounds": [112, 73, 289, 94],
+            "className": "UILabel",
+            "extras": {
+              "sdk.accessibilityTraits": "header",
+              "sdk.isAccessibilityElement": "true",
+              "sdk.isUserInteractionEnabled": "false"
+            },
+            "role": "heading",
+            "text": "Semantic Links (UIKit)",
+            "view-id": "s2-1f94e56d3b856e52"
+          },
+          {
+            "bounds": [0, 0, 402, 116],
+            "className": "_UIBarBackground",
+            "extras": {
+              "sdk.accessibilityElementsHidden": "true",
+              "sdk.isUserInteractionEnabled": "false",
+              "sdk.source": "sdkWalker"
+            }
+          }
+        ],
+        "resource-id": "Semantic Links (UIKit)"
+      },
+      {
+        "bounds": [1, 0, 400, 874],
+        "className": "UIScrollView",
+        "node": [
+          {
+            "bounds": [17, 132, 384, 188],
+            "className": "UILabel",
+            "role": "text",
+            "semantic-links": [
+              {
+                "occurrence": 0,
+                "text": "Privacy Policy"
+              }
+            ],
+            "text": "Activate either Terms of Service occurrence, Support, or the standalone Privacy Policy link. Each activation changes the result below without navigating.",
+            "view-id": "s2-aa59d70c474d210a"
+          },
+          {
+            "bounds": [17, 223, 373, 265],
+            "className": "UILink",
+            "clickable": "true",
+            "extras": {
+              "sdk.accessibilityTraits": "link",
+              "sdk.isAccessibilityElement": "true",
+              "sdk.isUserInteractionEnabled": "false"
+            },
+            "node": [
+              {
+                "actions": ["set_text", "clear_text"],
+                "bounds": [17, 223, 372, 244],
+                "className": "UITextView",
+                "clickable": "true",
+                "extras": {
+                  "sdk.accessibilityTraits": "link",
+                  "sdk.isAccessibilityElement": "true",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "node": [
+                  {
+                    "bounds": [91, 223, 214, 244],
+                    "className": "UILink",
+                    "clickable": "true",
+                    "extras": {
+                      "sdk.accessibilityTraits": "link",
+                      "sdk.isAccessibilityElement": "true",
+                      "sdk.isUserInteractionEnabled": "false"
+                    },
+                    "role": "link",
+                    "semantic-links": [
+                      {
+                        "occurrence": 0,
+                        "text": "Terms of Service"
+                      },
+                      {
+                        "occurrence": 0,
+                        "text": "Support"
+                      },
+                      {
+                        "occurrence": 1,
+                        "text": "Terms of Service"
+                      }
+                    ],
+                    "text": "Terms of Service",
+                    "view-id": "s2-706bf1752c2f98b3"
+                  },
+                  {
+                    "bounds": [284, 223, 341, 244],
+                    "className": "UILink",
+                    "clickable": "true",
+                    "extras": {
+                      "sdk.accessibilityTraits": "link",
+                      "sdk.isAccessibilityElement": "true",
+                      "sdk.isUserInteractionEnabled": "false"
+                    },
+                    "role": "link",
+                    "semantic-links": [
+                      {
+                        "occurrence": 0,
+                        "text": "Terms of Service"
+                      },
+                      {
+                        "occurrence": 0,
+                        "text": "Support"
+                      },
+                      {
+                        "occurrence": 1,
+                        "text": "Terms of Service"
+                      }
+                    ],
+                    "text": "Support",
+                    "view-id": "s2-580030ffad490192"
+                  }
+                ],
+                "role": "textfield",
+                "scrollable": "true",
+                "semantic-links": [
+                  {
+                    "occurrence": 0,
+                    "text": "Terms of Service"
+                  },
+                  {
+                    "occurrence": 0,
+                    "text": "Support"
+                  },
+                  {
+                    "occurrence": 1,
+                    "text": "Terms of Service"
+                  }
+                ],
+                "text": "Read the Terms of Service, contact Support, or review the Terms of Service again.",
+                "view-id": "s2-63a8b77360ebe83c"
+              },
+              {
+                "bounds": [340, 223, 370, 265],
+                "className": "UIView",
+                "extras": {
+                  "sdk.accessibilityTraits": "link",
+                  "sdk.isAccessibilityElement": "true",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "semantic-links": [
+                  {
+                    "occurrence": 0,
+                    "text": "Terms of Service"
+                  },
+                  {
+                    "occurrence": 0,
+                    "text": "Support"
+                  },
+                  {
+                    "occurrence": 1,
+                    "text": "Terms of Service"
+                  }
+                ],
+                "text": "Vertical scroll bar, 1 page",
+                "view-id": "s2-edd1e9ee444fedac-1"
+              },
+              {
+                "bounds": [17, 241, 373, 262],
+                "className": "UIView",
+                "extras": {
+                  "sdk.accessibilityTraits": "link",
+                  "sdk.isAccessibilityElement": "true",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "semantic-links": [
+                  {
+                    "occurrence": 0,
+                    "text": "Terms of Service"
+                  },
+                  {
+                    "occurrence": 0,
+                    "text": "Support"
+                  },
+                  {
+                    "occurrence": 1,
+                    "text": "Terms of Service"
+                  }
+                ],
+                "text": "Horizontal scroll bar, 1 page",
+                "view-id": "s2-a79830a9c63cf5c5-1"
+              }
+            ],
+            "resource-id": "uikit_semantic_links_inline",
+            "role": "link",
+            "semantic-links": [
+              {
+                "occurrence": 0,
+                "text": "Terms of Service"
+              },
+              {
+                "occurrence": 0,
+                "text": "Support"
+              },
+              {
+                "occurrence": 1,
+                "text": "Terms of Service"
+              }
+            ]
+          },
+          {
+            "bounds": [17, 303, 119, 325],
+            "className": "UILink",
+            "clickable": "true",
+            "extras": {
+              "sdk.accessibilityTraits": "link",
+              "sdk.isAccessibilityElement": "true",
+              "sdk.isUserInteractionEnabled": "false"
+            },
+            "node": [
+              {
+                "bounds": [17, 302, 119, 325],
+                "className": "UILink",
+                "clickable": "true",
+                "node": {
+                  "bounds": [18, 303, 120, 325],
+                  "className": "UITextView",
+                  "extras": {
+                    "sdk.accessibilityTraits": "link",
+                    "sdk.gestureRecognizers": "UITapAndAHalfRecognizer(enabled),UITextTapRecognizer(enabled),UITextTapRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),UIScrollViewDelayedTouchesBeganGestureRecognizer(disabled),UIScrollViewPanGestureRecognizer(disabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIHoverGestureRecognizer(enabled),_UIDragAutoScrollGestureRecognizer(enabled),_UIPressGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.isAccessibilityElement": "true",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "resource-id": "uikit_semantic_links_standalone",
+                  "text": "Privacy Policy"
+                },
+                "role": "link",
+                "semantic-links": [
+                  {
+                    "occurrence": 0,
+                    "text": "Privacy Policy"
+                  }
+                ],
+                "text": "Privacy Policy",
+                "view-id": "s2-93ae04edbccae7be"
+              },
+              {
+                "bounds": [86, 303, 116, 325],
+                "className": "UIView",
+                "text": "Vertical scroll bar, 1 page",
+                "view-id": "s2-edd1e9ee444fedac-2"
+              },
+              {
+                "bounds": [17, 311, 119, 322],
+                "className": "UIView",
+                "text": "Horizontal scroll bar, 1 page",
+                "view-id": "s2-a79830a9c63cf5c5-2"
+              }
+            ],
+            "resource-id": "uikit_semantic_links_standalone",
+            "role": "link",
+            "semantic-links": [
+              {
+                "occurrence": 0,
+                "text": "Privacy Policy"
+              }
+            ],
+            "text": "Privacy Policy"
+          },
+          {
+            "bounds": [17, 348, 183, 370],
+            "className": "UILabel",
+            "resource-id": "semantic_links_result",
+            "role": "text",
+            "semantic-links": [
+              {
+                "occurrence": 0,
+                "text": "Privacy Policy"
+              }
+            ],
+            "text": "Last activated: None"
+          },
+          {
+            "bounds": [367, 116, 397, 791],
+            "className": "UIView",
+            "text": "Vertical scroll bar, 1 page",
+            "view-id": "s2-edd1e9ee444fedac-3"
+          },
+          {
+            "bounds": [2, 0, 401, 874],
+            "className": "HostingScrollView",
+            "extras": {
+              "sdk.gestureRecognizers": "UIScrollViewDelayedTouchesBeganGestureRecognizer(enabled),UIScrollViewPanGestureRecognizer(enabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIHoverGestureRecognizer(enabled),_UIDragAutoScrollGestureRecognizer(enabled),_UIPressGestureRecognizer(enabled)",
+              "sdk.source": "sdkWalker"
+            },
+            "node": {
+              "bounds": [2, 116, 401, 386],
+              "className": "PlatformGroupContainer",
+              "extras": {
+                "sdk.source": "sdkWalker"
+              },
+              "node": [
+                {
+                  "bounds": [18, 223, 373, 266],
+                  "className": "UIKitPlatformViewHost<PlatformViewRepresentableAdaptor<UIKitSemanticLinkTextView>>",
+                  "extras": {
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": {
+                    "bounds": [18, 223, 373, 266],
+                    "className": "UITextView",
+                    "extras": {
+                      "sdk.accessibilityCustomActions": "Terms of Service,Support,Terms of Service",
+                      "sdk.accessibilityTraits": "link",
+                      "sdk.gestureRecognizers": "UITapAndAHalfRecognizer(enabled),UITextTapRecognizer(enabled),UITextTapRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),UIScrollViewDelayedTouchesBeganGestureRecognizer(disabled),UIScrollViewPanGestureRecognizer(disabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIHoverGestureRecognizer(enabled),_UIDragAutoScrollGestureRecognizer(enabled),_UIPressGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "resource-id": "uikit_semantic_links_inline"
+                  }
+                },
+                {
+                  "bounds": [17, 223, 373, 265],
+                  "className": "UITextView",
+                  "extras": {
+                    "sdk.accessibilityTraits": "link",
+                    "sdk.isAccessibilityElement": "true",
+                    "sdk.isUserInteractionEnabled": "false",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "resource-id": "uikit_semantic_links_inline"
+                },
+                {
+                  "bounds": [17, 303, 119, 325],
+                  "className": "UITextView",
+                  "extras": {
+                    "sdk.accessibilityTraits": "link",
+                    "sdk.isAccessibilityElement": "true",
+                    "sdk.isUserInteractionEnabled": "false",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "resource-id": "uikit_semantic_links_standalone",
+                  "text": "Privacy Policy"
+                }
+              ]
+            }
+          }
+        ],
+        "scrollable": "true",
+        "view-id": "s2-602cff28a06fca32"
+      },
+      {
+        "bounds": [0, 0, 402, 874],
+        "className": "UIToolbar",
+        "extras": {
+          "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled)",
+          "sdk.hasTapTarget": "true"
+        },
+        "node": {
+          "bounds": [0, 0, 402, 874],
+          "className": "UITransitionView",
+          "extras": {
+            "sdk.source": "sdkWalker"
+          },
+          "node": {
+            "bounds": [0, 0, 402, 874],
+            "className": "UIDropShadowView",
+            "extras": {
+              "sdk.source": "sdkWalker"
+            },
+            "node": {
+              "bounds": [0, 0, 402, 874],
+              "className": "_UIHostingView<ModifiedContent<LazyView<ModifiedContent<ContentView, AutoMobileThemeModifier>>, RootModifier>>",
+              "extras": {
+                "sdk.backgroundColor": "#FFFFFFFF",
+                "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                "sdk.source": "sdkWalker"
+              },
+              "node": {
+                "bounds": [0, 0, 402, 874],
+                "className": "UIKitPlatformViewHost<PlatformViewControllerRepresentableAdaptor<UIKitAdaptableTabView>>",
+                "extras": {
+                  "sdk.source": "sdkWalker"
+                },
+                "node": {
+                  "bounds": [0, 0, 402, 874],
+                  "className": "UILayoutContainerView",
+                  "extras": {
+                    "sdk.backgroundColor": "#FFFFFFFF",
+                    "sdk.gestureRecognizers": "UITapGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": [
+                    {
+                      "bounds": [0, 0, 402, 874],
+                      "className": "UITransitionView",
+                      "extras": {
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": {
+                        "bounds": [0, 0, 402, 874],
+                        "className": "UIViewControllerWrapperView",
+                        "extras": {
+                          "sdk.source": "sdkWalker"
+                        },
+                        "node": {
+                          "bounds": [0, 0, 402, 874],
+                          "className": "_UIHostingView<RootView>",
+                          "extras": {
+                            "sdk.backgroundColor": "#FFFFFFFF",
+                            "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "node": {
+                            "bounds": [0, 0, 402, 874],
+                            "className": "UIKitPlatformViewHost<PlatformViewControllerRepresentableAdaptor<NavigationStackRepresentable>>",
+                            "extras": {
+                              "sdk.source": "sdkWalker"
+                            },
+                            "node": {
+                              "bounds": [0, 0, 402, 874],
+                              "className": "UILayoutContainerView",
+                              "extras": {
+                                "sdk.gestureRecognizers": "_UIParallaxTransitionPanGestureRecognizer(enabled),_UIParallaxTransitionPanGestureRecognizer(enabled)",
+                                "sdk.source": "sdkWalker"
+                              },
+                              "node": [
+                                {
+                                  "bounds": [0, 0, 402, 874],
+                                  "className": "UINavigationTransitionView",
+                                  "extras": {
+                                    "sdk.source": "sdkWalker"
+                                  },
+                                  "node": {
+                                    "bounds": [0, 0, 402, 874],
+                                    "className": "UIViewControllerWrapperView",
+                                    "extras": {
+                                      "sdk.source": "sdkWalker"
+                                    },
+                                    "node": {
+                                      "bounds": [0, 0, 402, 874],
+                                      "className": "HostingView",
+                                      "extras": {
+                                        "sdk.backgroundColor": "#FFFFFFFF",
+                                        "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                                        "sdk.source": "sdkWalker"
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "bounds": [0, 62, 402, 116],
+                                  "className": "UIKitNavigationBar",
+                                  "extras": {
+                                    "sdk.gestureRecognizers": "_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionPressGestureRecognizer(enabled),UIPanGestureRecognizer(disabled),UIPanGestureRecognizer(disabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                                    "sdk.hasTapTarget": "true",
+                                    "sdk.source": "sdkWalker"
+                                  },
+                                  "resource-id": "Semantic Links (UIKit)"
+                                },
+                                {
+                                  "bounds": [0, 0, 402, 874],
+                                  "className": "_UIFloatingBarContainerView",
+                                  "extras": {
+                                    "sdk.source": "sdkWalker"
+                                  },
+                                  "resource-id": "Toolbar",
+                                  "text": "Toolbar"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "bounds": [0, 791, 402, 874],
+                      "className": "_UIMultiLayer",
+                      "extras": {
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": [
+                        {
+                          "bounds": [0, 791, 402, 874],
+                          "className": "CALayer",
+                          "extras": {
+                            "sdk.isLayerNode": "true",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "node": {
+                            "bounds": [0, 0, 402, 874],
+                            "className": "CALayer",
+                            "extras": {
+                              "sdk.isLayerNode": "true",
+                              "sdk.isUserInteractionEnabled": "false",
+                              "sdk.source": "sdkWalker"
+                            },
+                            "node": {
+                              "bounds": [0, 791, 402, 874],
+                              "className": "CALayer",
+                              "extras": {
+                                "sdk.isLayerNode": "true",
+                                "sdk.isUserInteractionEnabled": "false",
+                                "sdk.source": "sdkWalker"
+                              },
+                              "node": {
+                                "bounds": [21, 791, 381, 853],
+                                "className": "CALayer",
+                                "extras": {
+                                  "sdk.isLayerNode": "true",
+                                  "sdk.isUserInteractionEnabled": "false",
+                                  "sdk.source": "sdkWalker"
+                                },
+                                "node": {
+                                  "bounds": [21, 791, 116, 845],
+                                  "className": "CALayer",
+                                  "extras": {
+                                    "sdk.backgroundColor": "#000000FF",
+                                    "sdk.cornerRadius": "27.0",
+                                    "sdk.isLayerNode": "true",
+                                    "sdk.isUserInteractionEnabled": "false",
+                                    "sdk.source": "sdkWalker"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "bounds": [0, 791, 402, 874],
+                          "className": "CALayer",
+                          "extras": {
+                            "sdk.isLayerNode": "true",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "node": {
+                            "bounds": [0, 791, 402, 874],
+                            "className": "CALayer",
+                            "extras": {
+                              "sdk.isLayerNode": "true",
+                              "sdk.isUserInteractionEnabled": "false",
+                              "sdk.source": "sdkWalker"
+                            },
+                            "node": {
+                              "bounds": [0, 791, 402, 874],
+                              "className": "CALayer",
+                              "extras": {
+                                "sdk.isLayerNode": "true",
+                                "sdk.isUserInteractionEnabled": "false",
+                                "sdk.source": "sdkWalker"
+                              },
+                              "node": [
+                                {
+                                  "bounds": [0, 791, 402, 874],
+                                  "className": "CABackdropLayer",
+                                  "extras": {
+                                    "sdk.isLayerNode": "true",
+                                    "sdk.isUserInteractionEnabled": "false",
+                                    "sdk.source": "sdkWalker"
+                                  },
+                                  "node": {
+                                    "bounds": [0, 791, 402, 874],
+                                    "className": "CASDFLayer",
+                                    "extras": {
+                                      "sdk.isLayerNode": "true",
+                                      "sdk.isUserInteractionEnabled": "false",
+                                      "sdk.source": "sdkWalker"
+                                    },
+                                    "resource-id": "@0"
+                                  }
+                                },
+                                {
+                                  "bounds": [0, 791, 402, 874],
+                                  "className": "CASDFLayer",
+                                  "extras": {
+                                    "sdk.isLayerNode": "true",
+                                    "sdk.isUserInteractionEnabled": "false",
+                                    "sdk.source": "sdkWalker"
+                                  },
+                                  "resource-id": "SDF"
+                                }
+                              ],
+                              "resource-id": "MaterialProvider"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "resource-id": "Toolbar",
+        "text": "Toolbar"
+      },
+      {
+        "bounds": [0, 791, 402, 874],
+        "className": "UITabBar",
+        "clickable": "true",
+        "extras": {
+          "sdk.gestureRecognizers": "_UIContinuousSelectionGestureRecognizer(enabled),_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionPressGestureRecognizer(enabled)"
+        },
+        "node": [
+          {
+            "bounds": [25, 795, 120, 849],
+            "className": "UIButton",
+            "clickable": "true",
+            "extras": {
+              "sdk.accessibilityTraits": "button",
+              "sdk.isAccessibilityElement": "true"
+            },
+            "node": {
+              "bounds": [58, 801, 86, 828],
+              "className": "UIImageView",
+              "clickable": "true",
+              "extras": {
+                "sdk.accessibilityTraits": "button",
+                "sdk.isAccessibilityElement": "true"
+              },
+              "resource-id": "magnifyingglass",
+              "role": "image",
+              "text": "Search"
+            },
+            "resource-id": "magnifyingglass",
+            "role": "button",
+            "text": "Discover"
+          },
+          {
+            "bounds": [110, 795, 205, 849],
+            "className": "UIButton",
+            "clickable": "true",
+            "extras": {
+              "sdk.accessibilityTraits": "button,selected",
+              "sdk.isAccessibilityElement": "true"
+            },
+            "node": [
+              {
+                "bounds": [148, 803, 168, 826],
+                "className": "UIImageView",
+                "clickable": "true",
+                "extras": {
+                  "sdk.accessibilityTraits": "image",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "resource-id": "play.fill",
+                "role": "image",
+                "text": "play"
+              },
+              {
+                "bounds": [111, 795, 206, 849],
+                "className": "TitleWrapperView",
+                "extras": {
+                  "sdk.isUserInteractionEnabled": "false",
+                  "sdk.source": "sdkWalker"
+                },
+                "node": {
+                  "bounds": [141, 830, 176, 842],
+                  "className": "Label",
+                  "extras": {
+                    "sdk.accessibilityTraits": "staticText",
+                    "sdk.isAccessibilityElement": "true",
+                    "sdk.isUserInteractionEnabled": "false",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "text": "Demos"
+                }
+              }
+            ],
+            "resource-id": "play.fill",
+            "role": "button",
+            "selected": "true",
+            "text": "Demos"
+          },
+          {
+            "bounds": [196, 795, 291, 849],
+            "className": "UIButton",
+            "clickable": "true",
+            "extras": {
+              "sdk.accessibilityTraits": "button",
+              "sdk.isAccessibilityElement": "true"
+            },
+            "node": [
+              {
+                "bounds": [228, 802, 260, 827],
+                "className": "UIImageView",
+                "clickable": "true",
+                "extras": {
+                  "sdk.accessibilityTraits": "image",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "resource-id": "folder.fill",
+                "role": "image",
+                "text": "move"
+              },
+              {
+                "bounds": [196, 795, 291, 849],
+                "className": "TitleWrapperView",
+                "extras": {
+                  "sdk.isUserInteractionEnabled": "false",
+                  "sdk.source": "sdkWalker"
+                },
+                "node": {
+                  "bounds": [232, 830, 256, 842],
+                  "className": "Label",
+                  "extras": {
+                    "sdk.accessibilityTraits": "staticText",
+                    "sdk.isAccessibilityElement": "true",
+                    "sdk.isUserInteractionEnabled": "false",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "text": "Files"
+                }
+              }
+            ],
+            "resource-id": "folder",
+            "role": "button",
+            "text": "Files"
+          },
+          {
+            "bounds": [282, 795, 377, 849],
+            "className": "UIButton",
+            "clickable": "true",
+            "extras": {
+              "sdk.accessibilityTraits": "button",
+              "sdk.isAccessibilityElement": "true"
+            },
+            "node": [
+              {
+                "bounds": [315, 801, 343, 829],
+                "className": "UIImageView",
+                "clickable": "true",
+                "extras": {
+                  "sdk.accessibilityTraits": "image",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "resource-id": "gearshape.fill",
+                "role": "image",
+                "text": "Gear shape, filled"
+              },
+              {
+                "bounds": [282, 795, 377, 849],
+                "className": "TitleWrapperView",
+                "extras": {
+                  "sdk.isUserInteractionEnabled": "false",
+                  "sdk.source": "sdkWalker"
+                },
+                "node": {
+                  "bounds": [308, 830, 350, 842],
+                  "className": "Label",
+                  "extras": {
+                    "sdk.accessibilityTraits": "staticText",
+                    "sdk.isAccessibilityElement": "true",
+                    "sdk.isUserInteractionEnabled": "false",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "text": "Settings"
+                }
+              }
+            ],
+            "resource-id": "gearshape.fill",
+            "role": "button",
+            "text": "Settings"
+          },
+          {
+            "bounds": [21, 791, 381, 853],
+            "className": "_UITabBarItemPlatterView",
+            "extras": {
+              "sdk.source": "sdkWalker"
+            },
+            "node": [
+              {
+                "bounds": [21, 791, 381, 853],
+                "className": "SelectedContentView",
+                "extras": {
+                  "sdk.accessibilityElementsHidden": "true",
+                  "sdk.source": "sdkWalker"
+                },
+                "node": [
+                  {
+                    "bounds": [25, 795, 120, 849],
+                    "className": "_UITabButton",
+                    "extras": {
+                      "sdk.accessibilityTraits": "button",
+                      "sdk.isAccessibilityElement": "true",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "text": "Discover"
+                  },
+                  {
+                    "bounds": [111, 795, 206, 849],
+                    "className": "_UITabButton",
+                    "extras": {
+                      "sdk.accessibilityTraits": "button,selected",
+                      "sdk.isAccessibilityElement": "true",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "text": "Demos"
+                  },
+                  {
+                    "bounds": [196, 795, 291, 849],
+                    "className": "_UITabButton",
+                    "extras": {
+                      "sdk.accessibilityTraits": "button",
+                      "sdk.isAccessibilityElement": "true",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "text": "Files"
+                  },
+                  {
+                    "bounds": [282, 795, 377, 849],
+                    "className": "_UITabButton",
+                    "extras": {
+                      "sdk.accessibilityTraits": "button",
+                      "sdk.isAccessibilityElement": "true",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "text": "Settings"
+                  }
+                ]
+              },
+              {
+                "bounds": [21, 791, 381, 853],
+                "className": "ContentView",
+                "extras": {
+                  "sdk.source": "sdkWalker"
+                },
+                "node": [
+                  {
+                    "bounds": [25, 795, 120, 849],
+                    "className": "_UITabButton",
+                    "extras": {
+                      "sdk.accessibilityTraits": "button",
+                      "sdk.isAccessibilityElement": "true",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "resource-id": "magnifyingglass",
+                    "text": "Discover"
+                  },
+                  {
+                    "bounds": [111, 795, 206, 849],
+                    "className": "_UITabButton",
+                    "extras": {
+                      "sdk.accessibilityTraits": "button,selected",
+                      "sdk.isAccessibilityElement": "true",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [111, 795, 206, 849],
+                      "className": "TitleWrapperView",
+                      "extras": {
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": {
+                        "bounds": [141, 830, 175, 842],
+                        "className": "Label",
+                        "extras": {
+                          "sdk.accessibilityTraits": "staticText",
+                          "sdk.isAccessibilityElement": "true",
+                          "sdk.isUserInteractionEnabled": "false",
+                          "sdk.source": "sdkWalker"
+                        },
+                        "text": "Demos"
+                      }
+                    },
+                    "resource-id": "play.fill",
+                    "text": "Demos"
+                  },
+                  {
+                    "bounds": [196, 795, 291, 849],
+                    "className": "_UITabButton",
+                    "extras": {
+                      "sdk.accessibilityTraits": "button",
+                      "sdk.isAccessibilityElement": "true",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [196, 795, 291, 849],
+                      "className": "TitleWrapperView",
+                      "extras": {
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": {
+                        "bounds": [232, 830, 255, 842],
+                        "className": "Label",
+                        "extras": {
+                          "sdk.accessibilityTraits": "staticText",
+                          "sdk.isAccessibilityElement": "true",
+                          "sdk.isUserInteractionEnabled": "false",
+                          "sdk.source": "sdkWalker"
+                        },
+                        "text": "Files"
+                      }
+                    },
+                    "resource-id": "folder",
+                    "text": "Files"
+                  },
+                  {
+                    "bounds": [282, 795, 377, 849],
+                    "className": "_UITabButton",
+                    "extras": {
+                      "sdk.accessibilityTraits": "button",
+                      "sdk.isAccessibilityElement": "true",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [282, 795, 377, 849],
+                      "className": "TitleWrapperView",
+                      "extras": {
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": {
+                        "bounds": [309, 830, 350, 842],
+                        "className": "Label",
+                        "extras": {
+                          "sdk.accessibilityTraits": "staticText",
+                          "sdk.isAccessibilityElement": "true",
+                          "sdk.isUserInteractionEnabled": "false",
+                          "sdk.source": "sdkWalker"
+                        },
+                        "text": "Settings"
+                      }
+                    },
+                    "resource-id": "gearshape.fill",
+                    "text": "Settings"
+                  }
+                ]
+              },
+              {
+                "bounds": [21, 791, 116, 845],
+                "className": "DestOutView",
+                "extras": {
+                  "sdk.backgroundColor": "#000000FF",
+                  "sdk.cornerRadius": "27.0",
+                  "sdk.isUserInteractionEnabled": "false",
+                  "sdk.source": "sdkWalker"
+                }
+              }
+            ]
+          }
+        ],
+        "text": "Tab Bar",
+        "view-id": "s2-73cac3b5235bb505"
+      }
+    ],
+    "text": "Playground",
+    "view-id": "s2-6e0a0f15d6586edd"
+  },
+  "insets": {
+    "available": true,
+    "displayCutoutInfo": {
+      "classification": "unknown"
+    },
+    "safeArea": {
+      "bottom": 34,
+      "left": 0,
+      "right": 0,
+      "top": 62
+    },
+    "source": "ios-sdk-safe-area",
+    "systemChrome": {
+      "homeIndicatorAutoHideRequested": false,
+      "source": "ios-status-bar-manager",
+      "statusBar": "visible",
+      "visibility": "visible"
+    },
+    "units": "points"
+  },
+  "nativeScale": 3,
+  "packageName": "dev.jasonpearson.automobile.Playground",
+  "pixelHeight": 2622,
+  "pixelWidth": 1206,
+  "screenHeight": 874,
+  "screenScale": 3,
+  "screenWidth": 402,
+  "systemInsets": {
+    "bottom": 34,
+    "left": 0,
+    "right": 0,
+    "top": 62
+  },
+  "updatedAt": 1791504133623,
+  "windowInfo": {
+    "bounds": [0, 0, 402, 874],
+    "id": 0,
+    "isActive": true,
+    "isFocused": true,
+    "type": 1
+  },
+  "windows": [
+    {
+      "bounds": [0, 0, 402, 874],
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    }
+  ],
+  "frameContext": "09342D72-5B34-4C0D-8C2B-4DFC12381407:55:ad9f0c57ba84d4a0",
+  "fresh": true
+}

@@ -194,6 +194,7 @@ import {
   tapPointOutsideIme,
 } from "../observe/output/SkeletonProjection";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
+import { isSdkInjectedNode } from "../observe/android/StableNodeIdentity";
 import { compareSelectionRank } from "../utility/selectionRank";
 import { clipIosChromeBounds, isIosTapPointCoveredByChrome } from "./swipeon/iosChromeInsets";
 
@@ -913,7 +914,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return (
         typeof ownerResourceId === "string" &&
         ownerResourceId.length > 0 &&
-        elements.filter((element) => element["resource-id"] === ownerResourceId).length === 1
+        preferCapturedOwners(
+          elements.filter((element) => element["resource-id"] === ownerResourceId),
+        ).length === 1
       );
     }
     const selector = stableNodeSelectorForElement(owner);
@@ -5890,4 +5893,21 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   ): LongPressMetadata {
     return this.longPressMetadataDetector.detect(previousObservation, currentObservation);
   }
+}
+
+/**
+ * An iOS capture merges the in-app SDK snapshot into the XCUITest tree, and SDK views
+ * no XCUITest node matched are injected beside it (`sdk.source=sdkWalker`). After an
+ * interaction that snapshot can carry the owner's view again (the UITextView behind a
+ * UILink owner), so the resource-id shows up on SDK copies too (#10843). The runner
+ * resolves the owner among XCUITest elements, so when XCUITest captured the identifier,
+ * the SDK copies are duplicates of it and must not make the owner ambiguous. With no
+ * captured node, keep every candidate so an SDK-only identifier is still counted.
+ */
+function preferCapturedOwners(candidates: Element[]): Element[] {
+  const captured = candidates.filter((element) => {
+    const source = getHierarchyNodeSource(element);
+    return !source || !isSdkInjectedNode(source);
+  });
+  return captured.length > 0 ? captured : candidates;
 }

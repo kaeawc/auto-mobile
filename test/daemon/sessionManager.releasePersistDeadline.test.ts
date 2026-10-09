@@ -5,7 +5,9 @@ import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevic
 import {
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SessionManager,
+  TerminalSessionError,
 } from "../../src/daemon/sessionManager";
+import { fixedBackoff } from "../../src/utils/Backoff";
 import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import type { DeviceSessionStatus } from "../../src/db/types";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -29,6 +31,8 @@ const flush = async () => {
 class ParkableReleasePersistence extends FakeDeviceSessionPersistence {
   /** While set, `markReleased` waits on this before writing. */
   park: Promise<void> | undefined;
+  /** While set, the next `markReleased` rejects with this after its park (SQLITE_BUSY). */
+  failNextReleaseWrite: Error | undefined;
   /** While set, `upsertActiveSession` waits on this before writing. */
   parkCreate: Promise<void> | undefined;
   readonly releaseWrites: string[] = [];
@@ -40,6 +44,11 @@ class ParkableReleasePersistence extends FakeDeviceSessionPersistence {
     reason: string,
   ): Promise<void> {
     await this.park;
+    const failure = this.failNextReleaseWrite;
+    if (failure) {
+      this.failNextReleaseWrite = undefined;
+      throw failure;
+    }
     this.releaseWrites.push(`${sessionUuid}:${reason}`);
     await super.markReleased(sessionUuid, status, releasedAtMs, reason);
   }
@@ -177,6 +186,89 @@ describe("a release whose DB write never settles is bounded by a deadline (#1083
         "old:heartbeat-timeout",
         "old:heartbeat-timeout",
       ]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("a terminal release write that times out and then fails is retried (#10959)", () => {
+  const RETRY_DELAY_MS = 1_000;
+
+  /** Park the reap's write past its deadline, then let the parked write reject. */
+  async function timeOutThenFail(h: Harness): Promise<void> {
+    h.manager.setTerminalReleaseRetryBackoff(fixedBackoff(RETRY_DELAY_MS));
+    const gate = Promise.withResolvers<void>();
+    h.persistence.park = gate.promise;
+    h.persistence.failNextReleaseWrite = new Error("SQLITE_BUSY: database is locked");
+    const pending = reap(h);
+    await flush();
+    await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+    await pending.done;
+    h.persistence.park = undefined;
+    gate.resolve();
+    await flush();
+    expect((await h.persistence.getSession!("old"))?.status).toBe("active");
+  }
+
+  /** A new daemon on the same database refuses the released UUID. */
+  async function expectRefusedAfterRestart(h: Harness): Promise<void> {
+    const restarted = new SessionManager(h.timer, h.persistence, () => new FakeDbWriteBarrier());
+    managers.push(restarted);
+    await expect(restarted.admitIssuedSessionForAutomation("old")).rejects.toBeInstanceOf(
+      TerminalSessionError,
+    );
+    await expect(
+      restarted.getOrCreateSession("old", h.pool, "android", undefined, true),
+    ).rejects.toBeInstanceOf(TerminalSessionError);
+  }
+
+  test("the failed late write is re-queued with the injected backoff and lands before a restart", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      await timeOutThenFail(h);
+
+      await h.timer.advanceTimeAsync(RETRY_DELAY_MS);
+      await flush();
+
+      expect(h.persistence.releaseWrites).toEqual(["old:heartbeat-timeout"]);
+      expect((await h.persistence.getSession!("old"))?.status).not.toBe("active");
+      await expectRefusedAfterRestart(h);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a retry that fails again is re-queued until it lands", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      await timeOutThenFail(h);
+
+      h.persistence.failNextReleaseWrite = new Error("SQLITE_BUSY: database is locked");
+      await h.timer.advanceTimeAsync(RETRY_DELAY_MS);
+      await flush();
+      expect((await h.persistence.getSession!("old"))?.status).toBe("active");
+
+      await h.timer.advanceTimeAsync(RETRY_DELAY_MS);
+      await flush();
+      expect(h.persistence.releaseWrites).toEqual(["old:heartbeat-timeout"]);
+      await expectRefusedAfterRestart(h);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("the shutdown drain writes a pending terminal row without waiting out the backoff", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      await timeOutThenFail(h);
+
+      expect(await h.manager.drainReleasePromises(5_000)).toBe(true);
+      expect(h.persistence.releaseWrites).toEqual(["old:heartbeat-timeout"]);
+      await expectRefusedAfterRestart(h);
     } finally {
       warn.mockRestore();
     }

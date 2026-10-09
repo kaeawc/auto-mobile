@@ -924,6 +924,15 @@ export const SESSION_RELEASE_TEARDOWN_CAP_MS = 10_000;
 export const SESSION_RELEASE_PERSIST_TIMEOUT_MS = 10_000;
 /** Logged reason when a release write outlives {@link SESSION_RELEASE_PERSIST_TIMEOUT_MS}. */
 export const RELEASE_PERSIST_TIMEOUT_REASON = "release-persist-timeout";
+/**
+ * Retry delays for a terminal release write that timed out and then failed (#10959). The in-memory
+ * fence keeps the UUID refused for this process; the row must still become terminal before a
+ * restart, or the next daemon would admit the released UUID again. Retried until it lands.
+ */
+export const DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF: BackoffPolicy = exponentialBackoff({
+  initialDelayMs: 1_000,
+  maxDelayMs: 30_000,
+});
 const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 export const SESSION_REHYDRATION_DEADLINE_MS = 15_000;
 const EXPIRY_RELEASE_REASONS = new Set([
@@ -1072,6 +1081,12 @@ export class SessionManager {
   private readonly activeReleasePromises: Set<SessionReleaseOperation> = new Set();
   /** Release writes that outlived their deadline but may still land (#10836). */
   private readonly lateReleaseWrites: Set<Promise<void>> = new Set();
+  /** Terminal release rows a late write failed to persist, awaiting a retry (#10959). */
+  private readonly pendingTerminalReleaseRetries: Map<
+    string,
+    { snapshot: SessionReleaseSnapshot; attempt: number; handle?: NodeJS.Timeout }
+  > = new Map();
+  private terminalReleaseRetryBackoff: BackoffPolicy = DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF;
   /** Finalized release state retained only while its exact Session identity is referenced. */
   private readonly finalizedSessionReleases: WeakMap<Session, ReleaseReasonState> = new WeakMap();
   /** Serializes durable liveness claims within one exact session incarnation. */
@@ -1205,6 +1220,11 @@ export class SessionManager {
   private readonly screenReaderMutationQueues = new Map<string, Promise<unknown>>();
   private observerSessions?: Pick<ObserverSessionStore, "release"> &
     Partial<Pick<ObserverSessionStore, "list">>;
+
+  /** Retry delays for terminal release writes that failed after their deadline (#10959). */
+  setTerminalReleaseRetryBackoff(backoff: BackoffPolicy): void {
+    this.terminalReleaseRetryBackoff = backoff;
+  }
 
   /** Optional daemon wiring; existing constructors and device-session lookups stay unchanged. */
   setObserverSessionRegistry(
@@ -3442,6 +3462,9 @@ export class SessionManager {
     const releases = [
       ...Array.from(this.activeReleasePromises, (release) => release.promise),
       ...this.lateReleaseWrites,
+      // Shutdown does not wait out a retry's backoff: write every unconfirmed terminal row now,
+      // before the database closes (#10959).
+      ...this.retryPendingTerminalReleasesNow(),
       ...additionalReleases,
     ];
     try {
@@ -4085,7 +4108,7 @@ export class SessionManager {
           ),
         // The write is not cancelled; shutdown's release drain still waits on it before the
         // database closes, and if it lands later it writes the same row.
-        onTimeout: () => this.trackLateReleaseWrite(write),
+        onTimeout: () => this.trackLateReleaseWrite(write, snapshot),
       });
       if (this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot) {
         this.pendingNonTerminalReleaseSnapshots.delete(snapshot.sessionId);
@@ -4108,15 +4131,115 @@ export class SessionManager {
     }
   }
 
-  private trackLateReleaseWrite(write: Promise<void>): void {
+  private trackLateReleaseWrite(write: Promise<void>, snapshot: SessionReleaseSnapshot): void {
     const settled = write.then(
       () => undefined,
       (error: unknown) => {
         logger.warn(`[SessionManager] Late session release write failed: ${errorMessage(error)}`);
+        // The row is still active: without a retry a restart would revive the released UUID.
+        if (snapshot.terminal) {
+          this.scheduleTerminalReleaseRetry(snapshot);
+        }
       },
     );
     this.lateReleaseWrites.add(settled);
     void settled.then(() => this.lateReleaseWrites.delete(settled));
+  }
+
+  /** Queue another write of a terminal release row, after the next backoff delay (#10959). */
+  private scheduleTerminalReleaseRetry(snapshot: SessionReleaseSnapshot): void {
+    if (!this.isTerminalReleaseRetryCurrent(snapshot)) {
+      this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
+      return;
+    }
+    const pending = this.pendingTerminalReleaseRetries.get(snapshot.sessionId);
+    const attempt = (pending?.snapshot === snapshot ? pending.attempt : 0) + 1;
+    if (pending?.handle !== undefined) {
+      this.timer.clearTimeout(pending.handle);
+    }
+    const entry: { snapshot: SessionReleaseSnapshot; attempt: number; handle?: NodeJS.Timeout } = {
+      snapshot,
+      attempt,
+    };
+    entry.handle = this.timer.setTimeout(() => {
+      entry.handle = undefined;
+      void this.retryTerminalReleaseWrite(entry);
+    }, this.terminalReleaseRetryBackoff.delayForAttempt(attempt));
+    (entry.handle as { unref?: () => void }).unref?.();
+    this.pendingTerminalReleaseRetries.set(snapshot.sessionId, entry);
+    logger.warn(
+      `[SessionManager] Terminal release of session ${snapshot.sessionId} is not persisted; ` +
+        `retrying the write (attempt ${attempt})`,
+    );
+  }
+
+  /** The retry still matters: the UUID is still fenced by this snapshot and not being re-created. */
+  private isTerminalReleaseRetryCurrent(snapshot: SessionReleaseSnapshot): boolean {
+    const fence = this.terminalReleaseSnapshots.get(snapshot.sessionId);
+    return (
+      fence !== undefined &&
+      fence.releaseReason === snapshot.releaseReason &&
+      !this.isSessionBeingRecreated(snapshot.sessionId)
+    );
+  }
+
+  private async retryTerminalReleaseWrite(entry: {
+    snapshot: SessionReleaseSnapshot;
+    attempt: number;
+  }): Promise<void> {
+    const { snapshot } = entry;
+    if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) !== entry) {
+      return;
+    }
+    if (!this.isTerminalReleaseRetryCurrent(snapshot)) {
+      this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
+      return;
+    }
+    try {
+      await raceWithDeadline(
+        this.deviceSessionRepository.markReleased(
+          snapshot.sessionId,
+          EXPIRY_RELEASE_REASONS.has(snapshot.releaseReason) ? "expired" : "released",
+          snapshot.releasedAtMs,
+          snapshot.releaseReason,
+        ),
+        {
+          timer: this.timer,
+          timeoutMs: SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+          unref: true,
+          label: "Terminal session release retry",
+          timeoutError: () =>
+            new SessionReleasePersistTimeoutError(
+              snapshot.sessionId,
+              snapshot.releaseReason,
+              SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+            ),
+        },
+      );
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Retrying the terminal release write of session ${snapshot.sessionId} ` +
+          `failed: ${errorMessage(error)}`,
+      );
+      if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry) {
+        this.scheduleTerminalReleaseRetry(snapshot);
+      }
+      return;
+    }
+    if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry) {
+      this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
+    }
+  }
+
+  /** Issue every pending terminal retry now, skipping its backoff, and return the writes. */
+  private retryPendingTerminalReleasesNow(): Promise<void>[] {
+    return Array.from(this.pendingTerminalReleaseRetries.values(), (entry) => {
+      if (entry.handle !== undefined) {
+        this.timer.clearTimeout(entry.handle);
+        entry.handle = undefined;
+      }
+      return this.retryTerminalReleaseWrite(entry);
+    });
   }
 
   private isSessionBeingRecreated(sessionId: string): boolean {
@@ -6973,6 +7096,12 @@ export class SessionManager {
     if (this.cleanupTimer) {
       this.timer.clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
+    }
+    for (const entry of this.pendingTerminalReleaseRetries.values()) {
+      if (entry.handle !== undefined) {
+        this.timer.clearTimeout(entry.handle);
+        entry.handle = undefined;
+      }
     }
     // Cancel any armed per-condition network TTLs so a stopped manager leaves no
     // dangling timer (issue #6085 item 2).

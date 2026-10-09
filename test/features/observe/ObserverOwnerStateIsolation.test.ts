@@ -13,6 +13,7 @@ import { snapshotReferences } from "../../../src/features/observe/SnapshotRefere
 import { FileSystemObserveCacheStore } from "../../../src/features/observe/cache/FileSystemObserveCacheStore";
 import {
   getObserveCacheStore,
+  resetObserveCacheStore,
   setObserveCacheStore,
 } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import {
@@ -54,7 +55,6 @@ const device: BootedDevice = {
 const displayCommand = "shell cmd display get-displays";
 const ownerCommand = "shell input touchscreen tap 10 20";
 const png = readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64");
-const originalCache = getObserveCacheStore();
 const originalScreenshotState = getScreenshotStateStore();
 const originalReferences = new Map(
   Reflect.get(snapshotReferences, "entries") as Map<string, unknown>,
@@ -147,7 +147,9 @@ afterEach(() => {
   PortManager.setPortAvailabilityCheckerForTesting(null);
   displayTransitions.reset(device.deviceId);
   ObservedAndroidDisplayCache.release(device.deviceId);
-  setObserveCacheStore(originalCache);
+  // Reset to the default store: a module-load snapshot would capture whatever fake a
+  // sibling file had installed at load time and reinstall it after every test.
+  resetObserveCacheStore();
   setScreenshotStateStore(originalScreenshotState);
   const entries = Reflect.get(snapshotReferences, "entries") as Map<string, unknown>;
   entries.clear();

@@ -20,6 +20,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import type { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
@@ -45,6 +46,8 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
+import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import type { WireFixture } from "../daemon/helpers/desktopWireHarness";
 import { drainMicrotasks } from "./fakeTimerStepping";
 import { RealToolCallPath, type DeviceToolRun } from "./realToolCallPath";
@@ -108,7 +111,26 @@ export interface PoolTimelineEntry {
   autolockSessionId: string | undefined;
 }
 
+/** The PID the scenario's daemon claims devices under, and the one a peer daemon claims under. */
+export const SCENARIO_DAEMON_PID = 1111;
+export const PEER_DAEMON_PID = 2222;
+
+/** Where the scenario's terminal-release journal lives in its in-memory file system. */
+export const TERMINAL_RELEASE_JOURNAL_PATH = "/scenario-data/terminal-release-intents.jsonl";
+
 export interface LivenessScenarioOptions {
+  /**
+   * Attach the terminal-release journal to each daemon, as `Daemon.start()` does right after
+   * database initialization (#10959), over {@link LivenessScenario.journalFiles}: the "disk" a
+   * restarted daemon reads back.
+   */
+  terminalReleaseJournal?: boolean;
+  /**
+   * Give the daemon's pool a claim store shared with a peer daemon (device id -> owning PID, see
+   * {@link LivenessScenario.deviceClaims}) instead of the process-wide claim files, so a scenario
+   * can have a peer take a device while the daemon is down.
+   */
+  sharedDeviceClaims?: boolean;
   /** Device ids in the pool; the first is the default acquisition target. */
   devices?: string[];
   /** Autolock acquisition with the 60 s window (AUTOMOBILE_DEVICE_POOL_AUTOLOCK). */
@@ -178,6 +200,15 @@ export class LivenessScenario {
   readonly releases: ReleaseRecord[] = [];
   readonly reaped: Array<{ sessionId: string; reason: string }> = [];
   readonly deviceIds: string[];
+  /** The data directory a restarted daemon finds the terminal-release journal in. */
+  readonly journalFiles = new FakeTerminalReleaseJournalFileSystem();
+  /** Device claims by owning daemon PID when `sharedDeviceClaims` is set. */
+  readonly deviceClaims = new Map<string, number>();
+  /**
+   * Runs as the daemon publishes its claim on a device, before the store decides: a peer that
+   * claims here wins the race the daemon's earlier foreign-owner check could not see.
+   */
+  beforeDeviceClaim: ((deviceId: string) => void) | undefined;
   /** Heartbeat frames the proxy keepers delivered, by session. */
   readonly heartbeatsBySession = new Map<string, number>();
   /** Heartbeat frames delivered, by owner token. */
@@ -209,6 +240,8 @@ export class LivenessScenario {
   daemon!: DaemonSide;
   proxy!: DaemonMcpProxy;
   private readonly autolock: boolean;
+  private readonly sharedDeviceClaims: boolean;
+  private readonly terminalReleaseJournal: boolean;
   private readonly discovery = new FakeDeviceUtils();
   private tools!: RealToolCallPath;
   private readonly spies: Array<ReturnType<typeof spyOn>> = [];
@@ -222,6 +255,8 @@ export class LivenessScenario {
   private constructor(options: LivenessScenarioOptions) {
     this.deviceIds = options.devices ?? ["emulator-5554"];
     this.autolock = options.autolock ?? false;
+    this.sharedDeviceClaims = options.sharedDeviceClaims ?? false;
+    this.terminalReleaseJournal = options.terminalReleaseJournal ?? false;
   }
 
   static async start(options: LivenessScenarioOptions = {}): Promise<LivenessScenario> {
@@ -318,7 +353,16 @@ export class LivenessScenario {
     // The Daemon builds its pool over the real multi-platform device manager and takes no
     // injection; swap the fake in before anything discovers a device.
     (pool as unknown as { deviceManager: unknown }).deviceManager = this.discovery;
+    if (this.sharedDeviceClaims) {
+      (pool as unknown as { foreignDeviceOwnership: unknown }).foreignDeviceOwnership =
+        this.peerAwareOwnership();
+    }
     await pool.initializeWithDevices(this.deviceIds.map((id) => this.device(id)));
+    if (this.terminalReleaseJournal) {
+      manager.attachTerminalReleaseJournal(
+        new FileTerminalReleaseJournal(TERMINAL_RELEASE_JOURNAL_PATH, this.journalFiles),
+      );
+    }
     const state: DaemonStateAccess = {
       isInitialized: () => true,
       getSessionManager: () => manager,
@@ -336,6 +380,33 @@ export class LivenessScenario {
       this.releases.push({ at: this.timer.now(), sessionId, deviceId, reason: reason ?? "" });
     });
     return { daemon, manager, pool, state };
+  }
+
+  /** This daemon's view of the shared claim store: a claim by any other PID is foreign. */
+  private peerAwareOwnership(): ForeignDeviceOwnership {
+    const claims = this.deviceClaims;
+    const beforeClaim = (deviceId: string) => this.beforeDeviceClaim?.(deviceId);
+    return {
+      async refresh(): Promise<void> {},
+      foreignOwnerPid(deviceId: string): number | undefined {
+        const owner = claims.get(deviceId);
+        return owner === undefined || owner === SCENARIO_DAEMON_PID ? undefined : owner;
+      },
+      async claim(deviceId: string): Promise<boolean> {
+        beforeClaim(deviceId);
+        const owner = claims.get(deviceId);
+        if (owner !== undefined && owner !== SCENARIO_DAEMON_PID) {
+          return false;
+        }
+        claims.set(deviceId, SCENARIO_DAEMON_PID);
+        return true;
+      },
+      release(deviceId: string): void {
+        if (claims.get(deviceId) === SCENARIO_DAEMON_PID) {
+          claims.delete(deviceId);
+        }
+      },
+    };
   }
 
   /** The stdio proxy exactly as src/index.ts builds it: default lease, owner token, own keeper. */

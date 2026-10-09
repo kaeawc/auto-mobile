@@ -41,6 +41,7 @@ describe("ProvisionDeviceError retryability", () => {
       cleanup_failed: false,
       creation_not_allowed: false,
       device_lost: true,
+      device_owned_by_other_session: true,
       device_offline: true,
       discovery_incomplete: true,
       identity_conflict: false,

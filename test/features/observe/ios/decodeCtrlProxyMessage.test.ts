@@ -969,7 +969,7 @@ describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#1008
 
   /** Fields the decoders must keep, with the response types the runner sets them on. */
   const CARRIED: Record<string, { value: unknown; types: string[] }> = {
-    errorCode: { value: "deadline_completed_late", types: ["swipe_result"] },
+    errorCode: { value: "deadline_completed_late", types: ["swipe_result", "press_key_result"] },
     warning: { value: "runner note", types: ["action_result", "press_key_result"] },
     verified: { value: true, types: ["press_key_result"] },
     text: { value: "clipboard text", types: ["clipboard_result"] },
@@ -1306,5 +1306,22 @@ describe("decodeCtrlProxyMessage errorCode (#10161)", () => {
       msg({ type: "swipe_result", success: false, error: "boom" }),
     );
     expect(decoded?.result).not.toHaveProperty("errorCode");
+  });
+
+  test("a press-key failure keeps the runner's focus-query code (#10924)", () => {
+    const error =
+      "arrow key was not sent: XCUITest failed while finding the focused text input during element resolution (XCTestException: stale); the UI likely changed mid-query, so observe again and retry";
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "press_key_result", success: false, error, errorCode: "focus_query_failed" }),
+    );
+    expect(decoded?.result).toMatchObject({
+      success: false,
+      error,
+      errorCode: "focus_query_failed",
+    });
+    expect(
+      decodeCtrlProxyMessage(msg({ type: "press_key_result", success: false, error: "boom" }))
+        ?.result,
+    ).not.toHaveProperty("errorCode");
   });
 });

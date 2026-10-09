@@ -1337,6 +1337,40 @@ describe("SendKeys", () => {
     });
   });
 
+  test("surfaces an iOS focus-query failure with its typed code (#10924)", async () => {
+    const observer = createObserver();
+    const error =
+      "arrow key was not sent: XCUITest failed while finding the focused text input during element resolution (XCTestException: stale); the UI likely changed mid-query, so observe again and retry";
+    const executor = new DefaultSendKeysCommandExecutor(
+      iosDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      observer,
+      {
+        inputKey: {
+          press: async () => ({
+            success: false,
+            key: "arrow_right",
+            keyCode: "arrow_right",
+            error,
+            errorCode: "focus_query_failed",
+          }),
+        },
+      },
+    );
+    const sendKeys = new SendKeys(iosDevice, undefined, {
+      executor,
+      observer,
+      timestampProvider: { now: async () => 0 },
+    });
+
+    expect(await sendKeys.execute([{ action: "key", key: "arrow_right" }])).toMatchObject({
+      success: false,
+      failedIndex: 0,
+      error,
+      commands: [{ success: false, error, errorCode: "focus_query_failed" }],
+    });
+  });
+
   test("surfaces successful iOS key warnings on commands and joins them on the result", async () => {
     const observer = createObserver();
     const warning = "Key 'backspace' value did not change; delivery could not be confirmed";

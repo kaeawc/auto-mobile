@@ -177,6 +177,7 @@ function decodePressKeyResult(message: WebSocketMessage): unknown {
     verified: message.verified,
     warning: message.warning,
     perfTiming: message.perfTiming,
+    ...(message.errorCode === undefined ? {} : { errorCode: message.errorCode }),
   };
 }
 

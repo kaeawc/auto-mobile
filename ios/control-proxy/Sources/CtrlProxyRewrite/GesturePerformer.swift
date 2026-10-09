@@ -106,11 +106,29 @@ public final class GesturePerformer: GesturePerforming {
         case gestureFailed(String)
         case arrowNoEffect
         case arrowBudgetExhausted(step: String, elapsedMs: Int)
+        /// XCUITest raised while resolving the focused input before an arrow key was sent
+        /// (e.g. a stale element mid-scan). The key was not sent; the request fails cleanly.
+        case focusQueryFailed(phase: String, detail: String)
         case notSupported(String)
         case missingParameter(String)
         case clipboardEmpty
         case clipboardReadUnavailable
         case unsupportedAction(String)
+
+        /// Machine-readable code for the wire's additive `errorCode` field (see
+        /// `CommandError.wireCode`); `nil` for errors the host tells apart by wording alone.
+        /// Pinned against `src/features/observe/ios/runnerErrorCodes.ts` by
+        /// `runnerErrorCodes.contract.test.ts`.
+        public var wireCode: String? {
+            switch self {
+            case .focusQueryFailed:
+                // The key was never sent: a definite non-delivery, safe to retry after re-observing.
+                return "focus_query_failed"
+            case .noApplication, .elementNotFound, .gestureFailed, .arrowNoEffect, .arrowBudgetExhausted,
+                 .notSupported, .missingParameter, .clipboardEmpty, .clipboardReadUnavailable, .unsupportedAction:
+                return nil
+            }
+        }
 
         public var errorDescription: String? {
             switch self {
@@ -124,6 +142,8 @@ public final class GesturePerformer: GesturePerforming {
                 return "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead"
             case let .arrowBudgetExhausted(step, elapsedMs):
                 return "arrow key was not sent: runner time budget exhausted at \(step) after \(elapsedMs)ms; retry"
+            case let .focusQueryFailed(phase, detail):
+                return "arrow key was not sent: XCUITest failed while finding the focused text input during \(phase) (\(detail)); the UI likely changed mid-query, so observe again and retry"
             case let .notSupported(feature):
                 return "Feature not supported: \(feature)"
             case let .missingParameter(param):
@@ -405,8 +425,25 @@ public final class GesturePerformer: GesturePerforming {
         return nil
     }
 
+    /// Converts an XCUITest `NSException` (already bridged to `ObjCExceptionError` by
+    /// `catchingObjCException`) raised before an arrow key is sent into the typed
+    /// `GestureError.focusQueryFailed`, so the host gets a stable `errorCode` and a message
+    /// saying the key was not sent instead of a raw `NSException(...)` string. Every other
+    /// error, including `arrowBudgetExhausted`, passes through unchanged.
+    nonisolated static func mappingFocusQueryException<T>(phase: String, _ body: () throws -> T) throws -> T {
+        do {
+            return try body()
+        } catch let exception as ObjCExceptionError {
+            throw GestureError.focusQueryFailed(
+                phase: phase, detail: "\(exception.name): \(exception.reason ?? "no reason")"
+            )
+        }
+    }
+
     /// Query sequencing shared with the XCUI adapter, so host tests cover budget forwarding
     /// through both native fields and custom wrappers without contacting an application.
+    /// The adapter wraps each XCUITest closure in `catchingObjCException`; an exception from
+    /// any of them fails the lookup as `GestureError.focusQueryFailed`.
     nonisolated static func resolveFocusedTextElement<Element, OtherElements: Sequence>(
         checkBudget: () throws -> Void,
         predicateMatch: () throws -> Element?,
@@ -417,20 +454,22 @@ public final class GesturePerformer: GesturePerforming {
     )
         throws -> Element? where OtherElements.Element == Element
     {
-        try checkBudget()
-        if let match = try predicateMatch() { return match }
-        for query in nativeQueries {
+        try mappingFocusQueryException(phase: "element resolution") {
             try checkBudget()
-            if let focused = try firstFocusedCandidate(
-                in: query(), checkBudget: checkBudget, hasFocus: nativeHasFocus
-            ) {
-                return focused
+            if let match = try predicateMatch() { return match }
+            for query in nativeQueries {
+                try checkBudget()
+                if let focused = try firstFocusedCandidate(
+                    in: query(), checkBudget: checkBudget, hasFocus: nativeHasFocus
+                ) {
+                    return focused
+                }
             }
+            try checkBudget()
+            return try firstFocusedCandidate(
+                in: otherQuery(), checkBudget: checkBudget, hasFocus: otherHasFocus
+            )
         }
-        try checkBudget()
-        return try firstFocusedCandidate(
-            in: otherQuery(), checkBudget: checkBudget, hasFocus: otherHasFocus
-        )
     }
 
     /// The runner supplies XCUITest operations; host tests supply fast clock-driven fakes.
@@ -1753,42 +1792,56 @@ public final class GesturePerformer: GesturePerforming {
             }
         }
 
-        /// Resolve the focused text-input element so we can check its type.
-        /// Returns nil if no element can be identified (caller falls back to
-        /// Cmd+A+Delete which works for native inputs).
+        /// Best-effort lookup of the focused text-input element so callers can check its type.
+        /// Returns nil when no element is focused or the lookup fails for any reason, including
+        /// an XCUITest exception (callers fall back to Cmd+A+Delete, which works for native inputs).
         private func resolveFocusedTextElement(app: XCUIApplication) -> XCUIElement? {
             try? resolveFocusedTextElement(app: app, checkBudget: {})
         }
 
+        /// Strict lookup for the arrow-key path. Returns nil only when no focused input is found;
+        /// throws the budget's `arrowBudgetExhausted` unchanged, and an XCUITest exception during
+        /// the scan as `GestureError.focusQueryFailed`, before any key is sent.
         private func resolveFocusedTextElement(
             app: XCUIApplication, checkBudget: () throws -> Void
         )
             throws -> XCUIElement?
         {
-            try catchingObjCException {
-                try Self.resolveFocusedTextElement(
-                    checkBudget: checkBudget,
-                    predicateMatch: {
-                        let match = app.descendants(matching: .any)
-                            .matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
-                        return match.exists ? match : nil
-                    },
-                    nativeQueries: [
-                        { app.textFields.allElementsBoundByIndex },
-                        { app.secureTextFields.allElementsBoundByIndex },
-                        { app.textViews.allElementsBoundByIndex },
-                        { app.searchFields.allElementsBoundByIndex },
-                    ],
-                    otherQuery: {
-                        let query = app.otherElements
-                        return (0 ..< query.count).lazy.map { query.element(boundBy: $0) }
-                    },
-                    nativeHasFocus: { (try? $0.snapshot())?.hasFocus == true },
-                    otherHasFocus: { candidate in
-                        guard let snap = try? candidate.snapshot() else { return false }
-                        return snap.hasFocus && GesturePerformer.snapshotLooksLikeTextInput(snap)
-                    }
-                )
+            // Each XCUITest call is bridged on its own so the shared resolver maps the exception;
+            // the outer bridge stays as the guard that an NSException can never escape the runner.
+            try GesturePerformer.mappingFocusQueryException(phase: "element resolution") {
+                try catchingObjCException {
+                    try Self.resolveFocusedTextElement(
+                        checkBudget: checkBudget,
+                        predicateMatch: {
+                            try catchingObjCException {
+                                let match = app.descendants(matching: .any)
+                                    .matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
+                                return match.exists ? match : nil
+                            }
+                        },
+                        nativeQueries: [
+                            { try catchingObjCException { app.textFields.allElementsBoundByIndex } },
+                            { try catchingObjCException { app.secureTextFields.allElementsBoundByIndex } },
+                            { try catchingObjCException { app.textViews.allElementsBoundByIndex } },
+                            { try catchingObjCException { app.searchFields.allElementsBoundByIndex } },
+                        ],
+                        otherQuery: {
+                            let query = app.otherElements
+                            let count = try catchingObjCException { query.count }
+                            return (0 ..< count).lazy.map { query.element(boundBy: $0) }
+                        },
+                        nativeHasFocus: { candidate in
+                            try catchingObjCException { (try? candidate.snapshot())?.hasFocus == true }
+                        },
+                        otherHasFocus: { candidate in
+                            try catchingObjCException {
+                                guard let snap = try? candidate.snapshot() else { return false }
+                                return snap.hasFocus && GesturePerformer.snapshotLooksLikeTextInput(snap)
+                            }
+                        }
+                    )
+                }
             }
         }
 
@@ -2102,8 +2155,10 @@ public final class GesturePerformer: GesturePerforming {
                         let element = try self.resolveFocusedTextElement(app: app, checkBudget: checkBudget)
                         try checkBudget()
                         GesturePhaseDiagnostics.current?.begin("valueRead")
-                        let original = try element.map { element in
-                            try catchingObjCException { self.fieldText(element) }
+                        let original = try GesturePerformer.mappingFocusQueryException(phase: "value read") {
+                            try element.map { element in
+                                try catchingObjCException { self.fieldText(element) }
+                            }
                         }
                         return (element, original)
                     },

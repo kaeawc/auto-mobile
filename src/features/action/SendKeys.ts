@@ -357,6 +357,8 @@ export interface SendKeysCommandResult extends BaseActionResult {
   /** Device upper bound; this is not the verified committedGraphemes count. */
   committedUnits?: number;
   error?: string;
+  /** iOS runner's typed failure code for a key command (`runnerErrorCodes.ts`). */
+  errorCode?: string;
   retryable?: boolean;
   verified?: boolean;
   warning?: string;
@@ -926,6 +928,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       ...(result.verified === undefined ? {} : { verified: result.verified }),
       ...(result.warning === undefined ? {} : { warning: result.warning }),
       ...(result.error ? { error: result.error } : {}),
+      ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
     };
   }
 

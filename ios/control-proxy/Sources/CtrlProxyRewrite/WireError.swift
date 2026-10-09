@@ -11,6 +11,19 @@ import Foundation
 /// - `typeMismatch` / `valueNotFound` / `dataCorrupted` are rewritten to actionable
 ///   text (#2965 / #2986).
 enum WireError {
+    /// The additive machine-readable `errorCode` for a caught error, or `nil` when the host tells
+    /// it apart by wording alone. Command-level and gesture-level errors each own their codes.
+    static func code(for error: Error) -> String? {
+        switch error {
+        case let error as CommandError:
+            return error.wireCode
+        case let error as GesturePerformer.GestureError:
+            return error.wireCode
+        default:
+            return nil
+        }
+    }
+
     /// Maps a caught error into the message surfaced on the wire.
     static func message(for error: Error) -> String {
         switch error {

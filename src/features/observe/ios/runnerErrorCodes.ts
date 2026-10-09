@@ -67,6 +67,23 @@ export function isRunnerGestureOutcomeUnknown(failure: {
 }
 
 /**
+ * XCUITest raised while the runner looked up the focused text input before an arrow key, so the
+ * key was NOT sent (a definite non-delivery, safe to retry after re-observing). The Swift side is
+ * `GesturePerformer.GestureError.focusQueryFailed`; newer runners only, so there is no wording
+ * fallback: older runners treated the same exception as "no focused input" and sent the key.
+ */
+export const RUNNER_FOCUS_QUERY_FAILED_CODE = "focus_query_failed";
+
+/** Host message when a focus-query failure arrives without the runner's description. */
+export const RUNNER_FOCUS_QUERY_FAILED_FALLBACK_MESSAGE =
+  "arrow key was not sent: the iOS runner could not identify the focused text input; observe again and retry";
+
+/** True when a runner failure says the key was not sent because the focused-input lookup failed. */
+export function isRunnerFocusQueryFailed(failure: { errorCode?: string }): boolean {
+  return failure.errorCode === RUNNER_FOCUS_QUERY_FAILED_CODE;
+}
+
+/**
  * The runner refused a command with `runner_busy` before queuing it: the command never ran, so
  * the refusal is a definite non-execution and safe to retry, unlike a lost or late reply.
  */

@@ -4,6 +4,7 @@ import { ActionableError, type BootedDevice } from "../../../src/models";
 import { DeviceLostError } from "../../../src/models/DeviceLostError";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { RUNNER_FOCUS_QUERY_FAILED_FALLBACK_MESSAGE } from "../../../src/features/observe/ios/runnerErrorCodes";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const androidDevice: BootedDevice = {
@@ -190,6 +191,45 @@ describe("InputKey", () => {
     });
     response = { success: true, error: undefined, verified: false };
     expect(await inputKey.press("arrow_left")).toMatchObject({ success: true, verified: false });
+  });
+
+  test("reports an iOS focus-query failure as a typed, not-sent key failure (#10924)", async () => {
+    const runnerError =
+      "arrow key was not sent: XCUITest failed while finding the focused text input during element resolution (XCTestException: stale); the UI likely changed mid-query, so observe again and retry";
+    const requestPressKey = mock(async () => ({
+      success: false,
+      error: runnerError as string | undefined,
+      errorCode: "focus_query_failed",
+      dispatched: true,
+      acknowledged: true,
+    }));
+    const inputKey = new InputKey(
+      iosDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      undefined,
+      new FakeTimer(),
+      () => ({ requestPressKey }),
+    );
+
+    expect(await inputKey.press("arrow_right")).toEqual({
+      success: false,
+      key: "arrow_right",
+      keyCode: "arrow_right",
+      error: runnerError,
+      errorCode: "focus_query_failed",
+    });
+    requestPressKey.mockImplementation(async () => ({
+      success: false,
+      error: undefined,
+      errorCode: "focus_query_failed",
+      dispatched: true,
+      acknowledged: true,
+    }));
+    expect(await inputKey.press("arrow_right")).toMatchObject({
+      success: false,
+      errorCode: "focus_query_failed",
+      error: RUNNER_FOCUS_QUERY_FAILED_FALLBACK_MESSAGE,
+    });
   });
 
   test("carries an iOS delete warning and preserves a reliable-field failure", async () => {

@@ -131,3 +131,6 @@ test/fixtures/accessibility-contrast/*.json text eol=lf
 
 # Real Windows netstat captures keep their CRLF bytes so the parser is tested on them.
 test/fixtures/windows-netstat/*.txt -text
+# Golden iOS CtrlProxy captures replayed by unit tests (#5837).
+test/fixtures/ios/ctrlproxy-golden/**/*.json text eol=lf
+test/fixtures/ios/merger-pairs/*.json text eol=lf

@@ -1,0 +1,794 @@
+{
+  "push": {
+    "data": {
+      "hierarchy": {
+        "bounds": {
+          "bottom": 874,
+          "left": 0,
+          "right": 402,
+          "top": 0
+        },
+        "className": "XCUIApplication",
+        "node": [
+          {
+            "bounds": {
+              "bottom": 168,
+              "left": 0,
+              "right": 402,
+              "top": 62
+            },
+            "className": "UINavigationBar",
+            "node": [
+              {
+                "bounds": {
+                  "bottom": 160,
+                  "left": 16,
+                  "right": 149,
+                  "top": 119
+                },
+                "className": "UILabel",
+                "role": "text",
+                "text": "Settings",
+                "view-id": "59e312f9-c465-9793-e7d8-9d0d36f085df"
+              }
+            ],
+            "resource-id": "Settings",
+            "view-id": "Settings"
+          },
+          {
+            "bounds": {
+              "bottom": 874,
+              "left": 0,
+              "right": 402,
+              "top": 0
+            },
+            "className": "UICollectionView",
+            "node": [
+              {
+                "bounds": {
+                  "bottom": 1010,
+                  "left": -120,
+                  "right": 522,
+                  "top": 738
+                },
+                "className": "UIImageView",
+                "clickable": "true",
+                "resource-id": "AdditionalDimmingOverlay",
+                "role": "image",
+                "view-id": "AdditionalDimmingOverlay"
+              },
+              {
+                "bounds": {
+                  "bottom": 258,
+                  "left": 16,
+                  "right": 386,
+                  "top": 168
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 258,
+                      "left": 16,
+                      "right": 386,
+                      "top": 168
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 243,
+                          "left": 32,
+                          "right": 92,
+                          "top": 183
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "resource-id": "apple.id",
+                        "role": "image",
+                        "text": "apple.id",
+                        "view-id": "apple.id"
+                      },
+                      {
+                        "bounds": {
+                          "bottom": 207,
+                          "left": 100,
+                          "right": 234,
+                          "top": 183
+                        },
+                        "className": "UILabel",
+                        "role": "text",
+                        "text": "Apple Account",
+                        "view-id": "dec9d2c2-f572-df78-13f8-bd9fc3ad35f2"
+                      },
+                      {
+                        "bounds": {
+                          "bottom": 243,
+                          "left": 100,
+                          "right": 336,
+                          "top": 209
+                        },
+                        "className": "UILabel",
+                        "role": "text",
+                        "text": "Sign in to access your iCloud data, the App Store, Apple services, and more.",
+                        "view-id": "394a47b6-341d-ba8c-94b1-eeecbfb94317"
+                      },
+                      {
+                        "bounds": {
+                          "bottom": 219,
+                          "left": 360,
+                          "right": 367,
+                          "top": 207
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "resource-id": "chevron.forward",
+                        "role": "image",
+                        "view-id": "chevron.forward"
+                      }
+                    ],
+                    "resource-id": "com.apple.settings.primaryAppleAccount",
+                    "role": "button",
+                    "text": "Apple Account, Sign in to access your iCloud data, the App Store, Apple services, and more.",
+                    "view-id": "com.apple.settings.primaryAppleAccount"
+                  }
+                ],
+                "role": "listitem",
+                "view-id": "34967487-5639-c301-3f4b-4bd2a98269d3"
+              },
+              {
+                "bounds": {
+                  "bottom": 345,
+                  "left": 16,
+                  "right": 386,
+                  "top": 293
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 345,
+                      "left": 16,
+                      "right": 386,
+                      "top": 293
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 325,
+                          "left": 360,
+                          "right": 367,
+                          "top": 313
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "resource-id": "chevron.forward",
+                        "role": "image",
+                        "view-id": "chevron.forward"
+                      }
+                    ],
+                    "resource-id": "com.apple.settings.followUpItem.com.apple.icloud.gm",
+                    "role": "button",
+                    "text": "Ready for Apple Intelligence",
+                    "view-id": "com.apple.settings.followUpItem.com.apple.icloud.gm"
+                  }
+                ],
+                "role": "listitem",
+                "view-id": "9d83b1c5-64a2-3156-5205-282e8e3e85e7"
+              },
+              {
+                "bounds": {
+                  "bottom": 432,
+                  "left": 16,
+                  "right": 386,
+                  "top": 380
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 432,
+                      "left": 16,
+                      "right": 386,
+                      "top": 380
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 421,
+                          "left": 29,
+                          "right": 58,
+                          "top": 392
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "40c47229-39e6-ba9c-17f5-c3d3aa7d2177"
+                      },
+                      {
+                        "bounds": {
+                          "bottom": 412,
+                          "left": 360,
+                          "right": 367,
+                          "top": 400
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "resource-id": "chevron.forward",
+                        "role": "image",
+                        "view-id": "chevron.forward"
+                      }
+                    ],
+                    "resource-id": "com.apple.settings.general",
+                    "role": "button",
+                    "text": "General",
+                    "view-id": "com.apple.settings.general"
+                  }
+                ],
+                "role": "listitem",
+                "view-id": "4961ac07-660b-d674-a4e1-0721e1ecd02d"
+              },
+              {
+                "bounds": {
+                  "bottom": 484,
+                  "left": 16,
+                  "right": 386,
+                  "top": 432
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 484,
+                      "left": 16,
+                      "right": 386,
+                      "top": 432
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 473,
+                          "left": 29,
+                          "right": 58,
+                          "top": 444
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "b162f069-1553-6185-1a93-67c0e23db7f1"
+                      },
+                      {
+                        "bounds": {
+                          "bottom": 464,
+                          "left": 360,
+                          "right": 367,
+                          "top": 452
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "resource-id": "chevron.forward",
+                        "role": "image",
+                        "view-id": "chevron.forward"
+                      }
+                    ],
+                    "resource-id": "com.apple.settings.accessibility",
+                    "role": "button",
+                    "text": "Accessibility",
+                    "view-id": "com.apple.settings.accessibility"
+                  }
+                ],
+                "role": "listitem",
+                "view-id": "1350436d-2866-4f87-bfa4-5fe059521e08"
+              },
+              {
+                "bounds": {
+                  "bottom": 536,
+                  "left": 16,
+                  "right": 386,
+                  "top": 484
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 536,
+                      "left": 16,
+                      "right": 386,
+                      "top": 484
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 525,
+                          "left": 29,
+                          "right": 58,
+                          "top": 496
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "21fa6929-7375-e015-0a7d-40b4365c73cd"
+                      },
+                      {
+                        "bounds": {
+                          "bottom": 516,
+                          "left": 360,
+                          "right": 367,
+                          "top": 504
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "resource-id": "chevron.forward",
+                        "role": "image",
+                        "view-id": "chevron.forward"
+                      }
+                    ],
+                    "resource-id": "com.apple.settings.actionButton",
+                    "role": "button",
+                    "text": "Action Button",
+                    "view-id": "com.apple.settings.actionButton"
+                  }
+                ],
+                "role": "listitem",
+                "view-id": "bce5d3ed-5bb3-5439-3148-71ed73f86cdb"
+              },
+              {
+                "bounds": {
+                  "bottom": 588,
+                  "left": 16,
+                  "right": 386,
+                  "top": 536
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 588,
+                      "left": 16,
+                      "right": 386,
+                      "top": 536
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 576,
+                          "left": 29,
+                          "right": 58,
+                          "top": 547
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "a61bc9c8-89ef-91d3-87df-7fdc60bf48e2"
+                      },
+                      {
+                        "bounds": {
+                          "bottom": 568,
+                          "left": 360,
+                          "right": 367,
+                          "top": 556
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "resource-id": "chevron.forward",
+                        "role": "image",
+                        "view-id": "chevron.forward"
+                      }
+                    ],
+                    "resource-id": "com.apple.settings.siri",
+                    "role": "button",
+                    "text": "Apple Intelligence & Siri",
+                    "view-id": "com.apple.settings.siri"
+                  }
+                ],
+                "role": "listitem",
+                "view-id": "a9a4e10b-83f9-ba58-20b2-59ef81001c1f"
+              },
+              {
+                "bounds": {
+                  "bottom": 640,
+                  "left": 16,
+                  "right": 386,
+                  "top": 588
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 640,
+                      "left": 16,
+                      "right": 386,
+                      "top": 588
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 628,
+                          "left": 29,
+                          "right": 58,
+                          "top": 599
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "3992ce8c-c7df-c7e5-0cf7-2048d8ea6a19"
+                      },
+                      {
+                        "bounds": {
+                          "bottom": 620,
+                          "left": 360,
+                          "right": 367,
+                          "top": 608
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "resource-id": "chevron.forward",
+                        "role": "image",
+                        "view-id": "chevron.forward"
+                      }
+                    ],
+                    "resource-id": "com.apple.settings.camera",
+                    "role": "button",
+                    "text": "Camera",
+                    "view-id": "com.apple.settings.camera"
+                  }
+                ],
+                "role": "listitem",
+                "view-id": "31fbe824-1d6a-9f49-56dd-5b610c31aa9c"
+              },
+              {
+                "bounds": {
+                  "bottom": 692,
+                  "left": 16,
+                  "right": 386,
+                  "top": 640
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 692,
+                      "left": 16,
+                      "right": 386,
+                      "top": 640
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 680,
+                          "left": 29,
+                          "right": 58,
+                          "top": 651
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "575d947e-750b-af82-19a3-c8e87dc720f5"
+                      },
+                      {
+                        "bounds": {
+                          "bottom": 672,
+                          "left": 360,
+                          "right": 367,
+                          "top": 660
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "resource-id": "chevron.forward",
+                        "role": "image",
+                        "view-id": "chevron.forward"
+                      }
+                    ],
+                    "resource-id": "com.apple.settings.homeScreen",
+                    "role": "button",
+                    "text": "Home Screen & App Library",
+                    "view-id": "com.apple.settings.homeScreen"
+                  }
+                ],
+                "role": "listitem",
+                "view-id": "92650b4c-ecf9-6617-144f-1b6d3af17764"
+              },
+              {
+                "bounds": {
+                  "bottom": 744,
+                  "left": 16,
+                  "right": 386,
+                  "top": 692
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 744,
+                      "left": 16,
+                      "right": 386,
+                      "top": 692
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 733,
+                          "left": 29,
+                          "right": 58,
+                          "top": 704
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "17fa046f-3fab-9441-a811-a8691a04c32c"
+                      },
+                      {
+                        "bounds": {
+                          "bottom": 724,
+                          "left": 360,
+                          "right": 367,
+                          "top": 712
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "resource-id": "chevron.forward",
+                        "role": "image",
+                        "view-id": "chevron.forward"
+                      }
+                    ],
+                    "resource-id": "com.apple.settings.search",
+                    "role": "button",
+                    "text": "Search",
+                    "view-id": "com.apple.settings.search"
+                  }
+                ],
+                "role": "listitem",
+                "view-id": "4f83a9b2-b279-6168-548c-575da515c6c6"
+              },
+              {
+                "bounds": {
+                  "bottom": 796,
+                  "left": 16,
+                  "right": 386,
+                  "top": 744
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 796,
+                      "left": 16,
+                      "right": 386,
+                      "top": 744
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 785,
+                          "left": 29,
+                          "right": 58,
+                          "top": 756
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "9b99e5c4-5819-2546-f723-cb777c9392d4"
+                      },
+                      {
+                        "bounds": {
+                          "bottom": 776,
+                          "left": 360,
+                          "right": 367,
+                          "top": 764
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "resource-id": "chevron.forward",
+                        "role": "image",
+                        "view-id": "chevron.forward"
+                      }
+                    ],
+                    "resource-id": "com.apple.settings.standBy",
+                    "role": "button",
+                    "text": "StandBy",
+                    "view-id": "com.apple.settings.standBy"
+                  }
+                ],
+                "role": "listitem",
+                "view-id": "47876ea4-248a-0d55-7092-b4bc5a745a59"
+              },
+              {
+                "bounds": {
+                  "bottom": 883,
+                  "left": 16,
+                  "right": 386,
+                  "top": 831
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 883,
+                      "left": 16,
+                      "right": 386,
+                      "top": 831
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 872,
+                          "left": 29,
+                          "right": 58,
+                          "top": 843
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "7e1b8ae5-aef6-de7d-4042-a65632d54d4f"
+                      },
+                      {
+                        "bounds": {
+                          "bottom": 863,
+                          "left": 360,
+                          "right": 367,
+                          "top": 851
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "resource-id": "chevron.forward",
+                        "role": "image",
+                        "view-id": "chevron.forward"
+                      }
+                    ],
+                    "resource-id": "com.apple.settings.screenTime",
+                    "role": "button",
+                    "text": "Screen Time",
+                    "view-id": "com.apple.settings.screenTime"
+                  }
+                ],
+                "role": "listitem",
+                "view-id": "0b22c892-df45-a6f6-c864-09a166ed939c"
+              },
+              {
+                "bounds": {
+                  "bottom": 788,
+                  "left": 369,
+                  "right": 399,
+                  "top": 116
+                },
+                "className": "UIView",
+                "text": "Vertical scroll bar, 2 pages",
+                "view-id": "f6b2ee8e-6ae7-3b67-08b7-5ea1be717125"
+              }
+            ],
+            "role": "list",
+            "scrollable": "true",
+            "view-id": "67b4489c-e73b-6075-584f-4f36538af41b"
+          },
+          {
+            "actions": [
+              "set_text",
+              "clear_text"
+            ],
+            "bounds": {
+              "bottom": 841,
+              "left": 32,
+              "right": 368,
+              "top": 803
+            },
+            "className": "UISearchBar",
+            "clickable": "true",
+            "hint-text": "Search",
+            "node": [
+              {
+                "bounds": {
+                  "bottom": 833,
+                  "left": 335,
+                  "right": 353,
+                  "top": 811
+                },
+                "className": "UIButton",
+                "clickable": "true",
+                "resource-id": "Dictate",
+                "role": "button",
+                "text": "Dictate",
+                "view-id": "Dictate"
+              },
+              {
+                "bounds": {
+                  "bottom": 831,
+                  "left": 45,
+                  "right": 66,
+                  "top": 812
+                },
+                "className": "UIImageView",
+                "clickable": "true",
+                "resource-id": "magnifyingglass",
+                "role": "image",
+                "text": "Search",
+                "view-id": "magnifyingglass"
+              }
+            ],
+            "role": "textfield",
+            "text": "Search",
+            "view-id": "cf2bed3f-a47a-1a2e-8f46-d2598e2a979c"
+          }
+        ],
+        "text": "Settings",
+        "view-id": "5feceb66-ffc8-6f38-d952-786c6d696c79"
+      },
+      "insets": {
+        "available": false,
+        "displayCutoutInfo": {
+          "classification": "unknown"
+        },
+        "source": "unavailable",
+        "units": "unknown"
+      },
+      "nativeScale": 3,
+      "packageName": "com.apple.Preferences",
+      "pixelHeight": 2622,
+      "pixelWidth": 1206,
+      "screenHeight": 874,
+      "screenScale": 3,
+      "screenWidth": 402,
+      "updatedAt": 1791506443590,
+      "windowInfo": {
+        "bounds": {
+          "bottom": 874,
+          "left": 0,
+          "right": 402,
+          "top": 0
+        },
+        "id": 0,
+        "isActive": true,
+        "isFocused": true,
+        "type": 1
+      },
+      "windows": [
+        {
+          "bounds": {
+            "bottom": 874,
+            "left": 0,
+            "right": 402,
+            "top": 0
+          },
+          "id": 0,
+          "isActive": true,
+          "isFocused": true,
+          "type": 1
+        }
+      ]
+    },
+    "frameContext": "946BF959-8722-4080-BE15-4E9A2148C58C:75:b3ace3af9b894ed3",
+    "timestamp": 1791506443591,
+    "type": "hierarchy_update"
+  }
+}

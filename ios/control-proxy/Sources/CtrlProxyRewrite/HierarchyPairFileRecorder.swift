@@ -6,7 +6,7 @@ import os
 /// Simulator runners share the host filesystem, so the daemon forwards
 /// `CTRL_PROXY_IOS_HIERARCHY_PAIR_DIR` through the xctestrun environment and the files
 /// land directly in the developer's capture directory. Each file is
-/// `{"sdk": SdkViewHierarchy, "xcuitest": ViewHierarchy}` named `pair-NNNN-<bundle>.json`.
+/// compact sorted-key `{"sdk": SdkViewHierarchy, "xcuitest": ViewHierarchy}` named `pair-NNNN-<bundle>.json`.
 ///
 /// Nothing is redacted: XCUITest already masks secure-text-field values, and the SDK
 /// tree carries accessibility labels and geometry, not field contents.
@@ -23,7 +23,9 @@ public final class HierarchyPairFileRecorder: HierarchyPairRecording, Sendable {
     /// A recorder for the directory named by the environment, or nil when unset or blank.
     public static func fromEnvironment(
         _ environment: [String: String] = ProcessInfo.processInfo.environment
-    ) -> HierarchyPairFileRecorder? {
+    )
+        -> HierarchyPairFileRecorder?
+    {
         guard let path = environment[environmentKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
               !path.isEmpty
         else { return nil }
@@ -40,7 +42,8 @@ public final class HierarchyPairFileRecorder: HierarchyPairRecording, Sendable {
         let name = String(format: "pair-%04d-", index) + String(bundle) + ".json"
         do {
             let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            // Compact: pairs are ~100 KB each and are committed as replay fixtures.
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             let data = try encoder.encode(HierarchyPair(xcuitest: xcuitest, sdk: sdk))
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try (data + Data("\n".utf8)).write(to: directory.appendingPathComponent(name), options: .atomic)

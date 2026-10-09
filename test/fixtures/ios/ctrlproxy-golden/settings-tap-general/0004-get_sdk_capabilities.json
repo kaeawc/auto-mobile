@@ -1,0 +1,15 @@
+{
+  "request": {
+    "type": "get_sdk_capabilities",
+    "requestId": "sdkCapabilities_a8175789-12cc-4035-b40e-53f0c6c54e31"
+  },
+  "response": {
+    "available": false,
+    "capabilities": [],
+    "requestId": "sdkCapabilities_a8175789-12cc-4035-b40e-53f0c6c54e31",
+    "success": true,
+    "timestamp": 1791506442530,
+    "totalTimeMs": 2,
+    "type": "sdk_capabilities_result"
+  }
+}

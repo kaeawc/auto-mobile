@@ -1,0 +1,100 @@
+{
+  "request": {
+    "type": "request_launch_app",
+    "requestId": "launchApp_555a8d8a-8245-4a38-b981-ceb18afdc8b4",
+    "timeoutMs": 10000,
+    "bundleId": "com.apple.Preferences",
+    "coldBoot": false
+  },
+  "response": {
+    "perfTiming": {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "durationMs": 0,
+                  "name": "checkState"
+                },
+                {
+                  "children": [
+                    {
+                      "durationMs": 43,
+                      "name": "springboardSnapshot"
+                    },
+                    {
+                      "durationMs": 0,
+                      "name": "checkCandidates"
+                    }
+                  ],
+                  "durationMs": 44,
+                  "name": "detectForeground"
+                }
+              ],
+              "durationMs": 45,
+              "name": "ensureForegroundApp"
+            },
+            {
+              "durationMs": 435,
+              "name": "snapshot"
+            },
+            {
+              "durationMs": 4,
+              "name": "buildHierarchy"
+            },
+            {
+              "durationMs": 1,
+              "name": "mergeTypedTextInputs"
+            },
+            {
+              "durationMs": 1,
+              "name": "optimize"
+            },
+            {
+              "durationMs": 42,
+              "name": "systemAlerts"
+            }
+          ],
+          "durationMs": 530,
+          "name": "getViewHierarchy"
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "durationMs": 0,
+                  "name": "checkAppState"
+                },
+                {
+                  "durationMs": 86,
+                  "name": "activateApp"
+                },
+                {
+                  "durationMs": 1,
+                  "name": "switchForegroundApp"
+                },
+                {
+                  "durationMs": 0,
+                  "name": "updateApplication"
+                }
+              ],
+              "durationMs": 87,
+              "name": "handleLaunchApp"
+            }
+          ],
+          "durationMs": 617,
+          "name": "handleRequest:request_launch_app"
+        }
+      ],
+      "durationMs": 1147,
+      "name": "total"
+    },
+    "requestId": "launchApp_555a8d8a-8245-4a38-b981-ceb18afdc8b4",
+    "success": true,
+    "timestamp": 1791506442527,
+    "totalTimeMs": 617,
+    "type": "launch_app_result"
+  }
+}

@@ -1,0 +1,638 @@
+{
+  "push": {
+    "data": {
+      "hierarchy": {
+        "bounds": {
+          "bottom": 874,
+          "left": 0,
+          "right": 402,
+          "top": 0
+        },
+        "className": "XCUIApplication",
+        "node": [
+          {
+            "bounds": {
+              "bottom": 116,
+              "left": 0,
+              "right": 402,
+              "top": 62
+            },
+            "className": "UINavigationBar",
+            "node": [
+              {
+                "bounds": {
+                  "bottom": 106,
+                  "left": 16,
+                  "right": 60,
+                  "top": 62
+                },
+                "className": "UIButton",
+                "clickable": "true",
+                "resource-id": "BackButton",
+                "role": "button",
+                "text": "Settings",
+                "view-id": "BackButton"
+              },
+              {
+                "bounds": {
+                  "bottom": 94,
+                  "left": 170,
+                  "right": 232,
+                  "top": 73
+                },
+                "className": "UILabel",
+                "role": "text",
+                "text": "General",
+                "view-id": "7fc2c5e7-8af8-c8f1-99ff-c1b34121a59d"
+              }
+            ],
+            "resource-id": "General",
+            "view-id": "General"
+          },
+          {
+            "bounds": {
+              "bottom": 874,
+              "left": 0,
+              "right": 402,
+              "top": 0
+            },
+            "className": "UITableView",
+            "node": [
+              {
+                "bounds": {
+                  "bottom": 356,
+                  "left": 20,
+                  "right": 382,
+                  "top": 133
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 209,
+                      "left": 36,
+                      "right": 96,
+                      "top": 149
+                    },
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "role": "image",
+                    "view-id": "c416c82a-7d17-734f-08e9-34098cfdc7af"
+                  },
+                  {
+                    "bounds": {
+                      "bottom": 250,
+                      "left": 36,
+                      "right": 116,
+                      "top": 224
+                    },
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "General",
+                    "view-id": "8c9083c9-1232-a60c-cefa-f7b7acfe35ec"
+                  },
+                  {
+                    "bounds": {
+                      "bottom": 340,
+                      "left": 36,
+                      "right": 366,
+                      "top": 254
+                    },
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Manage your overall setup and preferences for iPhone, such as software updates, device language, CarPlay, AirDrop, and more.",
+                    "view-id": "15580b02-2f94-aff7-6a24-340cd57a2307"
+                  }
+                ],
+                "resource-id": "PLACARD",
+                "role": "listitem",
+                "view-id": "PLACARD"
+              },
+              {
+                "bounds": {
+                  "bottom": 444,
+                  "left": 20,
+                  "right": 382,
+                  "top": 391
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 432,
+                      "left": 34,
+                      "right": 122,
+                      "top": 404
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 431,
+                          "left": 34,
+                          "right": 62,
+                          "top": 403
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "e1e06519-47a3-d8bd-f71a-8638bea743ae"
+                      }
+                    ],
+                    "resource-id": "About",
+                    "role": "button",
+                    "text": "About",
+                    "view-id": "About"
+                  },
+                  {
+                    "bounds": {
+                      "bottom": 424,
+                      "left": 351,
+                      "right": 362,
+                      "top": 410
+                    },
+                    "className": "UIButton",
+                    "role": "button",
+                    "text": "chevron",
+                    "view-id": "d64abde8-9365-27b8-59a1-fea2298a19ad"
+                  }
+                ],
+                "resource-id": "About",
+                "role": "listitem",
+                "text": "About",
+                "view-id": "About"
+              },
+              {
+                "bounds": {
+                  "bottom": 497,
+                  "left": 20,
+                  "right": 382,
+                  "top": 444
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 485,
+                      "left": 34,
+                      "right": 194,
+                      "top": 457
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 484,
+                          "left": 34,
+                          "right": 62,
+                          "top": 456
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "d5516057-c5e4-4930-8eb8-7c57f8677dc0"
+                      }
+                    ],
+                    "resource-id": "SCREEN_CAPTURE",
+                    "role": "button",
+                    "text": "Screen Capture",
+                    "view-id": "SCREEN_CAPTURE"
+                  },
+                  {
+                    "bounds": {
+                      "bottom": 477,
+                      "left": 351,
+                      "right": 362,
+                      "top": 463
+                    },
+                    "className": "UIButton",
+                    "role": "button",
+                    "text": "chevron",
+                    "view-id": "7dd01226-8654-3a24-d177-384a6a8f5260"
+                  }
+                ],
+                "resource-id": "SCREEN_CAPTURE",
+                "role": "listitem",
+                "text": "Screen Capture",
+                "view-id": "SCREEN_CAPTURE"
+              },
+              {
+                "bounds": {
+                  "bottom": 585,
+                  "left": 20,
+                  "right": 382,
+                  "top": 532
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 573,
+                      "left": 34,
+                      "right": 234,
+                      "top": 545
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 572,
+                          "left": 34,
+                          "right": 62,
+                          "top": 544
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "a17d1411-64da-f794-4036-b41168eb5601"
+                      }
+                    ],
+                    "resource-id": "AUTOFILL",
+                    "role": "button",
+                    "text": "AutoFill & Passwords",
+                    "view-id": "AUTOFILL"
+                  },
+                  {
+                    "bounds": {
+                      "bottom": 565,
+                      "left": 351,
+                      "right": 362,
+                      "top": 551
+                    },
+                    "className": "UIButton",
+                    "role": "button",
+                    "text": "chevron",
+                    "view-id": "7d2ad59e-5024-5118-29d9-a89293a3e94c"
+                  }
+                ],
+                "resource-id": "AUTOFILL",
+                "role": "listitem",
+                "text": "AutoFill & Passwords",
+                "view-id": "AUTOFILL"
+              },
+              {
+                "bounds": {
+                  "bottom": 638,
+                  "left": 20,
+                  "right": 382,
+                  "top": 585
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 626,
+                      "left": 34,
+                      "right": 153,
+                      "top": 598
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 625,
+                          "left": 34,
+                          "right": 62,
+                          "top": 597
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "2ef80a6d-5fa3-c94d-dcb4-90bcd29618ac"
+                      }
+                    ],
+                    "resource-id": "DICTIONARY",
+                    "role": "button",
+                    "text": "Dictionary",
+                    "view-id": "DICTIONARY"
+                  },
+                  {
+                    "bounds": {
+                      "bottom": 618,
+                      "left": 351,
+                      "right": 362,
+                      "top": 604
+                    },
+                    "className": "UIButton",
+                    "role": "button",
+                    "text": "chevron",
+                    "view-id": "be76e3b4-ba8c-3c71-9ffd-434199ae4558"
+                  }
+                ],
+                "resource-id": "DICTIONARY",
+                "role": "listitem",
+                "text": "Dictionary",
+                "view-id": "DICTIONARY"
+              },
+              {
+                "bounds": {
+                  "bottom": 691,
+                  "left": 20,
+                  "right": 382,
+                  "top": 638
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 679,
+                      "left": 34,
+                      "right": 118,
+                      "top": 651
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 678,
+                          "left": 34,
+                          "right": 62,
+                          "top": 650
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "6cb545af-4ca8-d130-b981-7862fba2c039"
+                      }
+                    ],
+                    "resource-id": "FONT_SETTING",
+                    "role": "button",
+                    "text": "Fonts",
+                    "view-id": "FONT_SETTING"
+                  },
+                  {
+                    "bounds": {
+                      "bottom": 671,
+                      "left": 351,
+                      "right": 362,
+                      "top": 657
+                    },
+                    "className": "UIButton",
+                    "role": "button",
+                    "text": "chevron",
+                    "view-id": "4e1fa408-234d-7c91-04e5-727671e3989e"
+                  }
+                ],
+                "resource-id": "FONT_SETTING",
+                "role": "listitem",
+                "text": "Fonts",
+                "view-id": "FONT_SETTING"
+              },
+              {
+                "bounds": {
+                  "bottom": 744,
+                  "left": 20,
+                  "right": 382,
+                  "top": 691
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 732,
+                      "left": 34,
+                      "right": 148,
+                      "top": 704
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 731,
+                          "left": 34,
+                          "right": 62,
+                          "top": 703
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "4b971318-3d37-fd14-1703-30b8b8fb67e1"
+                      }
+                    ],
+                    "resource-id": "Keyboard",
+                    "role": "button",
+                    "text": "Keyboard",
+                    "view-id": "Keyboard"
+                  },
+                  {
+                    "bounds": {
+                      "bottom": 724,
+                      "left": 351,
+                      "right": 362,
+                      "top": 710
+                    },
+                    "className": "UIButton",
+                    "role": "button",
+                    "text": "chevron",
+                    "view-id": "5b5736a2-0a72-64ce-6542-42fe6cb593c6"
+                  }
+                ],
+                "resource-id": "Keyboard",
+                "role": "listitem",
+                "text": "Keyboard",
+                "view-id": "Keyboard"
+              },
+              {
+                "bounds": {
+                  "bottom": 797,
+                  "left": 20,
+                  "right": 382,
+                  "top": 744
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 785,
+                      "left": 34,
+                      "right": 224,
+                      "top": 757
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 784,
+                          "left": 34,
+                          "right": 62,
+                          "top": 756
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "52500502-7260-e8c5-e56b-6573a9503086"
+                      }
+                    ],
+                    "resource-id": "INTERNATIONAL",
+                    "role": "button",
+                    "text": "Language & Region",
+                    "view-id": "INTERNATIONAL"
+                  },
+                  {
+                    "bounds": {
+                      "bottom": 777,
+                      "left": 351,
+                      "right": 362,
+                      "top": 763
+                    },
+                    "className": "UIButton",
+                    "role": "button",
+                    "text": "chevron",
+                    "view-id": "8243396f-aff9-14af-1b77-ef0b07998e02"
+                  }
+                ],
+                "resource-id": "INTERNATIONAL",
+                "role": "listitem",
+                "text": "Language & Region",
+                "view-id": "INTERNATIONAL"
+              },
+              {
+                "bounds": {
+                  "bottom": 885,
+                  "left": 20,
+                  "right": 382,
+                  "top": 832
+                },
+                "className": "UITableViewCell",
+                "clickable": "true",
+                "node": [
+                  {
+                    "bounds": {
+                      "bottom": 873,
+                      "left": 34,
+                      "right": 286,
+                      "top": 845
+                    },
+                    "className": "UIButton",
+                    "clickable": "true",
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 872,
+                          "left": 34,
+                          "right": 62,
+                          "top": 844
+                        },
+                        "className": "UIImageView",
+                        "clickable": "true",
+                        "role": "image",
+                        "view-id": "d7db036d-38ce-bebe-76f5-0614546ebc0b"
+                      }
+                    ],
+                    "resource-id": "ManagedConfigurationList",
+                    "role": "button",
+                    "text": "VPN & Device Management",
+                    "view-id": "ManagedConfigurationList"
+                  },
+                  {
+                    "bounds": {
+                      "bottom": 865,
+                      "left": 351,
+                      "right": 362,
+                      "top": 851
+                    },
+                    "className": "UIButton",
+                    "role": "button",
+                    "text": "chevron",
+                    "view-id": "9c93f4e2-6c3a-a318-c819-25ab494a0135"
+                  }
+                ],
+                "resource-id": "ManagedConfigurationList",
+                "role": "listitem",
+                "text": "VPN & Device Management",
+                "view-id": "ManagedConfigurationList"
+              },
+              {
+                "bounds": {
+                  "bottom": 812,
+                  "left": 369,
+                  "right": 399,
+                  "top": 116
+                },
+                "className": "UIView",
+                "text": "Vertical scroll bar, 2 pages",
+                "view-id": "30ca0fb9-f8a4-802d-1810-7543b68862f1"
+              },
+              {
+                "bounds": {
+                  "bottom": 871,
+                  "left": 62,
+                  "right": 340,
+                  "top": 841
+                },
+                "className": "UIView",
+                "text": "Horizontal scroll bar, 1 page",
+                "view-id": "47483e36-523b-1562-fb6d-84f98b4fab89"
+              }
+            ],
+            "role": "list",
+            "scrollable": "true",
+            "view-id": "6e9c5683-2453-a3f4-3bc3-4f71013135f4"
+          }
+        ],
+        "text": "Settings",
+        "view-id": "5feceb66-ffc8-6f38-d952-786c6d696c79"
+      },
+      "insets": {
+        "available": false,
+        "displayCutoutInfo": {
+          "classification": "unknown"
+        },
+        "source": "unavailable",
+        "units": "unknown"
+      },
+      "nativeScale": 3,
+      "packageName": "com.apple.Preferences",
+      "pixelHeight": 2622,
+      "pixelWidth": 1206,
+      "screenHeight": 874,
+      "screenScale": 3,
+      "screenWidth": 402,
+      "updatedAt": 1791506445794,
+      "windowInfo": {
+        "bounds": {
+          "bottom": 874,
+          "left": 0,
+          "right": 402,
+          "top": 0
+        },
+        "id": 0,
+        "isActive": true,
+        "isFocused": true,
+        "type": 1
+      },
+      "windows": [
+        {
+          "bounds": {
+            "bottom": 874,
+            "left": 0,
+            "right": 402,
+            "top": 0
+          },
+          "id": 0,
+          "isActive": true,
+          "isFocused": true,
+          "type": 1
+        }
+      ]
+    },
+    "frameContext": "946BF959-8722-4080-BE15-4E9A2148C58C:76:69e6347437274684",
+    "timestamp": 1791506445795,
+    "type": "hierarchy_update"
+  }
+}

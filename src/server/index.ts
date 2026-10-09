@@ -360,6 +360,7 @@ import { registerAppFileResources } from "./appFileResources";
 import { registerSessionLogResources } from "./sessionLogResources";
 import { registerSharedStorageResources } from "./sharedStorageResources";
 import { registerFeatureFlagResources } from "./featureFlagResources";
+import { registerPrototypeResources } from "./prototypeResources";
 import { createIosDoctorDependencies, type IosDoctorDependencies } from "../doctor/checks/ios";
 import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { registerHostToolchainResources } from "./hostToolchainResources";
@@ -709,6 +710,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerSessionLogResources();
   registerSharedStorageResources();
   registerFeatureFlagResources();
+  registerPrototypeResources();
   registerHostToolchainResources({ iosDependencies });
   registerToolCatalogResources();
   registerNetworkResources();

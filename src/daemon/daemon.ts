@@ -221,6 +221,7 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
+import { createDaemonTerminalReleaseJournal } from "./terminalReleaseJournal";
 import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
 import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
@@ -1089,6 +1090,10 @@ export class Daemon {
           initializeDatabase: () => this.initializeDatabase(),
         }),
       );
+
+      // Adopt terminal releases a crashed predecessor never persisted (#10959) before any
+      // listener can admit a session; startup rehydration writes their rows.
+      this.sessionManager.attachTerminalReleaseJournal(createDaemonTerminalReleaseJournal());
 
       this.warmAndroidAvdProvenanceCache();
       // iOS device-type profiles are memoized per SimCtlClient and populated inline

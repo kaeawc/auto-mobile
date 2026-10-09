@@ -2742,6 +2742,9 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       ...(diagnostics.incidentId ? { incidentId: diagnostics.incidentId } : {}),
       ...(diagnostics.deviceId ? { deviceId: diagnostics.deviceId } : {}),
       ...(diagnostics.resourceDrift ? { resourceDrift: diagnostics.resourceDrift } : {}),
+      ...(diagnostics.runtimeCompatibility
+        ? { runtimeCompatibility: diagnostics.runtimeCompatibility }
+        : {}),
       daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
     };
   }
@@ -2777,6 +2780,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       ...(reason.incidentId ? { incidentId: reason.incidentId } : {}),
       ...(reason.deviceId ? { deviceId: reason.deviceId } : {}),
       ...(reason.resourceDrift ? { resourceDrift: reason.resourceDrift } : {}),
+      ...(reason.runtimeCompatibility ? { runtimeCompatibility: reason.runtimeCompatibility } : {}),
       ...(reason.daemonBuild ? { daemonBuild: reason.daemonBuild } : {}),
     };
   }

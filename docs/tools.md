@@ -1875,6 +1875,18 @@ every requested resource is observed in its requested state and no owned extra r
 `releaseOwnedExtras: true` (with `repair`) re-enables services AutoMobile disabled
 earlier that the profile omits; services AutoMobile never changed are never touched.
 
+The iOS catalog (`automobile:devices/images/ios`, `provisioningCatalog.deviceTypes[]`) adds
+`runtimeCompatibility` per model: `knowledge: "known"` with inclusive normalized
+`minRuntimeVersion`/`maxRuntimeVersion` (`null` is an unbounded maximum) and
+`compatibleRuntimeIds` (installed, available runtimes inside the bounds; empty is an authoritative
+"none"), or `knowledge: "unknown"` with a `reason` when CoreSimulator evidence is missing or
+malformed (it says nothing about which runtimes work). Exact iOS `provisionDevice` checks the
+requested pair against the same evidence before any creation side effect and fails a proven
+mismatch (or an unavailable runtime) with non-retryable `runtime_incompatible`; its
+`runtimeCompatibility` diagnostic carries the requested pair, known `bounds`, and installed
+`compatibleRuntimes`. Unknown evidence or failed discovery does not block creation. The requested
+runtime or model is never substituted.
+
 `provisionDevice.operationId` is a caller-generated idempotency key.
 `deleteDevice.operationId` is a caller-generated idempotency and diagnostic
 correlation ID. `verifyAbsence` requires a complete inventory observation proving

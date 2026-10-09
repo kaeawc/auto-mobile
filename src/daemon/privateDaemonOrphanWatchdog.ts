@@ -32,6 +32,23 @@ export function resolvePrivateDaemonOrphanIdleMs(env: NodeJS.ProcessEnv = proces
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS;
 }
 
+/** A launcher that knows its own pid can pass it explicitly, which wins over the parent pid. */
+export const DAEMON_LAUNCHER_PID_ENV = "AUTOMOBILE_DAEMON_LAUNCHER_PID";
+
+/**
+ * The launcher pid the orphan watchdog compares the parent against: the launcher-provided
+ * `AUTOMOBILE_DAEMON_LAUNCHER_PID` when it is a valid pid, else the parent pid captured at
+ * process entry (#11041).
+ */
+export function resolveLauncherPid(
+  entryParentPid: number,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env[DAEMON_LAUNCHER_PID_ENV]?.trim() ?? "";
+  const parsed = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed > 1 ? parsed : entryParentPid;
+}
+
 /** Explicit harness marker: `1` arms the orphan watchdog, `0` opts a daemon out of it. */
 export const HARNESS_PRIVATE_DAEMON_ENV = "AUTOMOBILE_HARNESS_PRIVATE_DAEMON";
 

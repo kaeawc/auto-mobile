@@ -60,9 +60,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
-import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession
 import dev.jasonpearson.automobile.desktop.core.control.DeviceKeyboardEventTranslator
 import dev.jasonpearson.automobile.desktop.core.control.GestureStreamingConfig
+import dev.jasonpearson.automobile.desktop.core.control.rememberDeviceControlSession
 import dev.jasonpearson.automobile.desktop.core.daemon.ActiveRecordingTracker
 import dev.jasonpearson.automobile.desktop.core.daemon.AllocatingAppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
@@ -90,7 +90,6 @@ import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingSocketClien
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.allocatingClientProvider
-import dev.jasonpearson.automobile.desktop.core.daemon.inputAllocatingClient
 import dev.jasonpearson.automobile.desktop.core.daemon.isStreamSessionRejection
 import dev.jasonpearson.automobile.desktop.core.daemon.rememberDesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.daemon.screenshotObserveArguments
@@ -1005,24 +1004,16 @@ fun AutoMobileContent(
   // screenshotScope: taps queued behind a blocked request would drain through the superseded
   // client once it unblocked, and that session's independent error claim could publish a banner
   // into the new context.
-  val controlClientProvider by rememberUpdatedState(clientProvider)
   val deviceControlSession =
-    remember(screenshotScope) {
-      DeviceControlSession(
-        scope = screenshotScope,
-        clientProvider = { inputAllocatingClient(controlClientProvider) { inputAllocation } },
-        platform = { controlPlatform.value },
-        nowMs = MONOTONIC_NOW_MS,
-        publishError = { message -> deviceControlTapError = message },
-        streamingEnabled = GestureStreamingConfig.enabled,
-      )
-    }
-
-  // The provider swaps behind the session via rememberUpdatedState; this drops everything captured
-  // against the PREVIOUS provider — the queued backlog (closing each pending client, so a
-  // superseded dispatcher can never hold unclosed AutoMobileClient instances), the error claim, and
-  // any pending post-input refresh wait.
-  LaunchedEffect(clientProvider) { deviceControlSession.reset() }
+    rememberDeviceControlSession(
+      scope = screenshotScope,
+      clientProvider = clientProvider,
+      inputAllocation = { inputAllocation },
+      platform = { controlPlatform.value },
+      nowMs = MONOTONIC_NOW_MS,
+      publishError = { message -> deviceControlTapError = message },
+      streamingEnabled = GestureStreamingConfig.enabled,
+    )
 
   // One coherent reset of the control context (issues #3347, #3348), run at every point that
   // invalidates the rendered frame identity (device change, transport/mode change, stream

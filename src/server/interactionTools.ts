@@ -1624,7 +1624,10 @@ export function formatRecentAppsMessage(result: { success?: boolean; error?: str
 }
 
 export function formatSwipeOnMessage(
-  result: Pick<SwipeOnToolPayload, "success" | "error" | "found" | "scrollIterations">,
+  result: Pick<
+    SwipeOnToolPayload,
+    "success" | "error" | "found" | "scrollIterations" | "navigated"
+  >,
   direction: string,
 ): string {
   if (!result.success) {
@@ -1632,8 +1635,12 @@ export function formatSwipeOnMessage(
     // non-empty fallback, otherwise the tool returns a blank message (#4183 P4).
     return result.error || `Swipe ${direction} failed`;
   }
-  return result.found
-    ? `Swiped ${direction} and found element after ${result.scrollIterations ?? 1} swipe(s)`
+  if (result.found) {
+    return `Swiped ${direction} and found element after ${result.scrollIterations ?? 1} swipe(s)`;
+  }
+  // A swipe that opened another screen did not scroll; say so instead of "Swiped up".
+  return result.navigated
+    ? `Swiped ${direction}, but the screen changed instead of scrolling (see warning)`
     : `Swiped ${direction}`;
 }
 

@@ -58,7 +58,8 @@ private actor RejectingSdkDatabaseClient: SdkDatabaseFetching {
         databasePath _: String,
         query _: String,
         sessionId _: String?,
-        mutationToken _: String?
+        mutationToken _: String?,
+        readOnly _: Bool?
     )
         async throws -> SdkExecuteSqlResult
     {

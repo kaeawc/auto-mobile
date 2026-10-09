@@ -65,6 +65,13 @@ interface TableStructureResponseResult extends DatabaseResultBase {
   diagnostic?: SQLResult["diagnostic"];
 }
 
+/** Optional wire fields of `execute_sql`. `readOnly` is the host's read verdict, enforced by the SDK. */
+interface ExecuteSqlOptions {
+  sessionId?: string;
+  mutationToken?: string;
+  readOnly?: boolean;
+}
+
 export class CtrlProxyDatabase {
   constructor(private readonly context: DelegateContext) {}
 
@@ -73,8 +80,7 @@ export class CtrlProxyDatabase {
     databasePath: string,
     query: string,
     timeoutMs: number = 5000,
-    sessionId?: string,
-    mutationToken?: string,
+    { sessionId, mutationToken, readOnly }: ExecuteSqlOptions = {},
   ): Promise<SQLResult> {
     const result = await this.request<ExecuteSqlResult>(
       "execute_sql",
@@ -85,6 +91,7 @@ export class CtrlProxyDatabase {
         query,
         ...(sessionId ? { sessionId } : {}),
         ...(mutationToken ? { mutationToken } : {}),
+        ...(readOnly ? { readOnly: true } : {}),
       },
       timeoutMs,
       "Execute SQL",

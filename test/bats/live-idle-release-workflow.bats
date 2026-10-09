@@ -36,3 +36,26 @@ RUNNER="scripts/ci/run-live-idle-release.sh"
   [ "${status}" -eq 2 ]
   [[ "${output}" == *"must be an integer"* ]]
 }
+
+@test "the runner hands the private daemon an absolute CtrlProxy APK path" {
+  repo="$(pwd)"
+  stub="${BATS_TEST_TMPDIR}/check.sh"
+  printf '#!/usr/bin/env bash\necho "APK=${AUTOMOBILE_CTRL_PROXY_APK_PATH}"\n' > "${stub}"
+  rel="control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"
+  mkdir -p "${repo}/android/$(dirname "${rel}")"
+  created=false
+  if [[ ! -e "${repo}/android/${rel}" ]]; then
+    : > "${repo}/android/${rel}"
+    created=true
+  fi
+  AUTOMOBILE_CTRL_PROXY_APK_PATH="${rel}" IDLE_CHECK_SCRIPT="${stub}" run bash "${RUNNER}"
+  [[ "${created}" == true ]] && rm -f "${repo}/android/${rel}"
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "APK=${repo}/android/${rel}" ]
+}
+
+@test "the runner fails fast when the CtrlProxy APK is missing" {
+  AUTOMOBILE_CTRL_PROXY_APK_PATH="${BATS_TEST_TMPDIR}/nope.apk" run bash "${RUNNER}"
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"APK not found"* ]]
+}

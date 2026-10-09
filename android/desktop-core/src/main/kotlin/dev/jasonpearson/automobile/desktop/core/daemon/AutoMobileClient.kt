@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
@@ -16,6 +17,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 
@@ -72,13 +74,6 @@ interface AutoMobileClient {
   ): StartDeviceResult
 
   fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult
-
-  fun setActiveDeviceChecked(deviceId: String, platform: String) {
-    val result = setActiveDevice(deviceId, platform)
-    if (!result.success) {
-      throw McpConnectionException(result.message ?: "Failed to set active device")
-    }
-  }
 
   fun observe(platform: String = "android"): ObserveResult
 
@@ -174,6 +169,7 @@ interface AutoMobileClient {
     value: String?,
     type: String,
     platform: String = "android",
+    sessionUuid: String? = null,
   ): SetKeyValueResult
 
   fun removeKeyValue(
@@ -182,6 +178,7 @@ interface AutoMobileClient {
     fileName: String,
     key: String,
     platform: String = "android",
+    sessionUuid: String? = null,
   ): RemoveKeyValueResult
 
   fun clearKeyValueFile(
@@ -189,6 +186,7 @@ interface AutoMobileClient {
     appId: String,
     fileName: String,
     platform: String = "android",
+    sessionUuid: String? = null,
   ): ClearKeyValueResult
 
   fun callTool(name: String, arguments: JsonObject): JsonElement
@@ -222,7 +220,7 @@ interface AutoMobileClient {
   fun close() {}
 }
 
-private fun checkToolResponse(responseElement: JsonElement, json: Json): JsonElement {
+internal fun checkToolResponse(responseElement: JsonElement, json: Json): JsonElement {
   val response =
     responseElement as? JsonObject
       ?: throw McpConnectionException("Tool response was not an object")
@@ -241,14 +239,14 @@ private fun checkToolResponse(responseElement: JsonElement, json: Json): JsonEle
       json.decodeFromString<JsonElement>(text)
     } catch (error: Exception) {
       if (envelopeError) {
-        throw McpConnectionException(toolErrorMessage(json, text), error)
+        throw toolError(json, text, error)
       }
       throw McpConnectionException("Tool response contained invalid JSON", error)
     }
   val payloadObject = payload as? JsonObject
   val success = (payloadObject?.get("success") as? JsonPrimitive)?.booleanOrNull
   if (envelopeError || success == false) {
-    throw McpConnectionException(toolErrorMessage(json, text))
+    throw toolError(json, text)
   }
   return payload
 }
@@ -257,7 +255,28 @@ private fun checkToolResponse(responseElement: JsonElement, json: Json): JsonEle
 data class KillDeviceResult(
   val success: Boolean = true,
   val message: String? = null,
+  /**
+   * The daemon's structured error code for a failed kill, e.g.
+   * [DEVICE_OWNED_BY_OTHER_SESSION_CODE].
+   */
+  @Transient val code: String? = null,
 )
+
+/**
+ * Decodes a `killDevice` tool response; a failure becomes an unsuccessful result that keeps the
+ * daemon's error code, so a held-device refusal (#10785) stays distinguishable from other errors.
+ */
+internal fun decodeKillDeviceResponse(json: Json, response: JsonElement): KillDeviceResult =
+  try {
+    decodeToolResponse(json, response, serializer<KillDeviceResult>())
+  } catch (e: Exception) {
+    if (e is CancellationException) throw e
+    KillDeviceResult(
+      success = false,
+      message = e.message ?: "Failed to kill device",
+      code = (e as? McpToolErrorException)?.code,
+    )
+  }
 
 @Serializable
 data class UpdateServiceResult(
@@ -294,10 +313,23 @@ data class StartDeviceResult(
   val deviceId: String? = null,
   val runtime: StartDeviceRuntime? = null,
   val message: String? = null,
+  /**
+   * Set when the daemon refused the start as `device_cleanup_in_progress` (#10960): the wait in
+   * milliseconds before retrying, once the device's previous session finishes cleaning up.
+   */
+  @Transient val cleanupRetryAfterMs: Long? = null,
 ) {
   val resolvedDeviceId: String?
     get() = runtime?.deviceId ?: deviceId
 }
+
+/** The failed [StartDeviceResult] for [error], keeping a cleanup refusal's retry hint. */
+internal fun startDeviceFailure(error: Exception): StartDeviceResult =
+  StartDeviceResult(
+    success = false,
+    message = error.message ?: "Failed to start device",
+    cleanupRetryAfterMs = error.deviceCleanupRetryAfterMs(),
+  )
 
 @Serializable
 data class SetActiveDeviceResult(
@@ -343,6 +375,11 @@ data class InputActionResult(
   val textLength: Int? = null,
   val submitted: Boolean? = null,
   val key: String? = null,
+  /**
+   * The daemon's structured code for a refused input, e.g. [DEVICE_OWNED_BY_OTHER_SESSION_CODE]
+   * (#10698). Read from the socket response, not the result body.
+   */
+  val code: String? = null,
 )
 
 internal fun unsupportedInputAction(transportName: String, action: String): InputActionResult =
@@ -499,12 +536,12 @@ internal fun negotiateProtocolVersion(result: JsonObject): String {
     result["protocolVersion"]?.jsonPrimitive?.content
       ?: throw McpConnectionException(
         "Daemon's initialize response omitted protocolVersion. Expected one of " +
-          "${SUPPORTED_MCP_PROTOCOL_VERSIONS.sorted()}. Update the AutoMobile daemon."
+          "${SUPPORTED_MCP_PROTOCOL_VERSIONS.sorted()}. Update the AutoMobile daemon.",
       )
   if (negotiated !in SUPPORTED_MCP_PROTOCOL_VERSIONS) {
     throw McpConnectionException(
       "Daemon negotiated unsupported MCP protocol version '$negotiated'. This desktop build " +
-        "speaks ${SUPPORTED_MCP_PROTOCOL_VERSIONS.sorted()}. Update the AutoMobile desktop app."
+        "speaks ${SUPPORTED_MCP_PROTOCOL_VERSIONS.sorted()}. Update the AutoMobile desktop app.",
     )
   }
   return negotiated
@@ -530,21 +567,37 @@ internal fun <T> decodeToolResponse(
     response.content.firstOrNull { it.type == "text" }?.text
       ?: throw McpConnectionException("Tool response missing text content")
   if (response.isError) {
-    throw McpConnectionException(toolErrorMessage(json, text))
+    throw toolError(json, text)
   }
   return json.decodeFromString(serializer, text)
 }
 
-private fun toolErrorMessage(json: Json, text: String): String {
+/**
+ * The failure a tool error result reports, keeping the payload's structured `code` and `deviceId`
+ * (a refusal is `{success:false, error, code, deviceId, retryable}`, `shapeToolCallError.ts`) so
+ * callers can act on the code instead of the message.
+ */
+private fun toolError(json: Json, text: String, cause: Throwable? = null): McpToolErrorException {
   val payload = runCatching { json.decodeFromString<JsonElement>(text) }.getOrNull()
   val payloadObject = payload as? JsonObject
+  val code = payloadObject?.let {
+    (it["code"] as? JsonPrimitive)?.contentOrNull
+      ?: ((it["failure"] as? JsonObject)?.get("code") as? JsonPrimitive)?.contentOrNull
+  }
   val structuredMessage = payloadObject?.let {
     (it["error"] as? JsonPrimitive)?.contentOrNull
       ?: (it["message"] as? JsonPrimitive)?.contentOrNull
       ?: (it["reason"] as? JsonPrimitive)?.contentOrNull
       ?: (it["code"] as? JsonPrimitive)?.contentOrNull
   }
-  return structuredMessage ?: text.removePrefix("Error:").trim().ifBlank { "Tool operation failed" }
+  return McpToolErrorException(
+    message =
+      structuredMessage ?: text.removePrefix("Error:").trim().ifBlank { "Tool operation failed" },
+    code = code,
+    deviceId = (payloadObject?.get("deviceId") as? JsonPrimitive)?.contentOrNull,
+    cause = cause,
+    retryAfterMs = (payloadObject?.get("retryAfterMs") as? JsonPrimitive)?.longOrNull,
+  )
 }
 
 internal fun <T> decodeResourceResponse(

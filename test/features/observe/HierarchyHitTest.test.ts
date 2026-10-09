@@ -302,11 +302,28 @@ describe("AutoMobile overlay covers (#10715)", () => {
     expect(rowState(hierarchy)).toMatchObject({ occluded: true, affordances: [] });
   });
 
-  test("observe keeps a row actionable under a translucent overlay the APK reports", () => {
+  test("observe marks a row a translucent overlay and a dialog cover between them (#10715)", () => {
+    // Owner decision 2026-10-08 reverses #10615: opacity does not change where a tap lands.
     const hierarchy = hierarchyWith([
       { type: 1, windowLayer: 1, hierarchy: dialog },
       overlayWindow(rect(200, 400), { overlayPlacement: "fullscreen", overlayOpaque: false }),
     ]);
+    expect(rowState(hierarchy)).toMatchObject({ occluded: true, affordances: [] });
+  });
+
+  test("observe keeps a row actionable while an overlay leaves part of it exposed", () => {
+    const hierarchy = hierarchyWith([overlayWindow(rect(100, 400))]);
+    expect(rowState(hierarchy)?.affordances).toContain("tap");
     expect(rowState(hierarchy)?.occluded).toBeUndefined();
+  });
+
+  test("observe tests the screen-clipped row, as tapOn does: an off-screen remainder is not exposed", () => {
+    // The row runs past the 400px-wide screen; the overlay covers its whole on-screen part.
+    const wide = { ...row, bounds: { left: 0, top: 0, right: 600, bottom: 100 } };
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: { node: [] },
+      windows: [{ type: 1, windowLayer: 0, hierarchy: wide }, overlayWindow(rect(0, 400))],
+    };
+    expect(rowState(hierarchy)).toMatchObject({ occluded: true, affordances: [] });
   });
 });

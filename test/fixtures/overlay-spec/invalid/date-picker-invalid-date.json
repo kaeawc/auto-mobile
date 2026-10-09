@@ -1,0 +1,9 @@
+{
+  "spec": {
+    "id": "a",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": { "d": "2026-02-30" },
+    "root": { "type": "datePicker", "stateKey": "d" }
+  },
+  "expectedPath": "root.stateKey"
+}

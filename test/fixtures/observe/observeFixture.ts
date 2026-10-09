@@ -25,6 +25,20 @@ import { stringifyToolResponse } from "../../../src/utils/toolUtils";
 
 const tokenizer = new Tiktoken(cl100k_base);
 
+// BPE-encoding a serialized observe result costs milliseconds per call, and suites measure
+// the same serialization repeatedly (a shared baseline, bytes then tokens of one value). The
+// count is a pure function of the string, so memoize it by content for the test process.
+const tokenCounts = new Map<string, number>();
+
+function countTokens(serialized: string): number {
+  let count = tokenCounts.get(serialized);
+  if (count === undefined) {
+    count = tokenizer.encode(serialized).length;
+    tokenCounts.set(serialized, count);
+  }
+  return count;
+}
+
 /** Absolute path to the committed baseline home-screen observe fixture. */
 export const ANDROID_HOME_FIXTURE_PATH = join(import.meta.dir, "android-home.json");
 
@@ -134,7 +148,7 @@ export function measureValue(value: unknown): { bytes: number; tokens: number } 
   const serialized = stringifyToolResponse(value) ?? "";
   return {
     bytes: Buffer.byteLength(serialized, "utf8"),
-    tokens: tokenizer.encode(serialized).length,
+    tokens: countTokens(serialized),
   };
 }
 

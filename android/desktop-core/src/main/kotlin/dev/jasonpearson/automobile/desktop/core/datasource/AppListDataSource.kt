@@ -25,7 +25,7 @@ class FakeAppListDataSource : AppListDataSource {
         InstalledApp("com.example.myapp", "My App", false),
         InstalledApp("com.google.android.gms", "Google Play Services", false),
         InstalledApp("com.android.settings", "Settings", false),
-      )
+      ),
     )
   }
 }

@@ -511,7 +511,8 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(response.success).toBe(false);
     expect(response.error).toBe(
       "Device session session-a is no longer active (daemon-shutdown). " +
-        "Acquire a new device session before continuing.",
+        "The daemon shut down or restarted, or the device restarted, and this session was not " +
+        "restored. Acquire a new device session before continuing.",
     );
     expect(response.boundSessionLoss).toEqual({
       code: "bound_session_lost",

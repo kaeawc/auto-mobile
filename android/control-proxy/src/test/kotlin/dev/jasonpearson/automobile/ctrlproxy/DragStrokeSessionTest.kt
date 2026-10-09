@@ -218,7 +218,7 @@ class DragStrokeSessionTest {
         GesturePoint(
           segment.from.x + (segment.to.x - segment.from.x) * fraction,
           segment.from.y + (segment.to.y - segment.from.y) * fraction,
-        )
+        ),
       )
     }
 
@@ -231,7 +231,7 @@ class DragStrokeSessionTest {
         flight.cancelTasks.add(
           scheduler.schedule(injectionLatencyMs + sample.offsetMs) {
             if (active === flight) emit(sample.action, sample.pixel)
-          }
+          },
         )
       }
       // Insert after the last event at the same time, so the callback sees the updated pointer.
@@ -242,7 +242,7 @@ class DragStrokeSessionTest {
             completions.add(scheduler.nowMs)
             onComplete()
           }
-        }
+        },
       )
     }
 
@@ -340,7 +340,7 @@ class DragStrokeSessionTest {
 
   private class Harness(
     plan: List<GestureSegment> =
-      dragStrokePlan(GesturePoint(1f, 2f), GesturePoint(3f, 4f), 600L, 300L, 100L)
+      dragStrokePlan(GesturePoint(1f, 2f), GesturePoint(3f, 4f), 600L, 300L, 100L),
   ) {
     val dispatcher = Dispatcher()
     val timer = FakeGestureDeadline()

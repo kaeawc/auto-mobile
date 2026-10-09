@@ -86,7 +86,7 @@ class InteractiveOverlayHostTest {
   fun `relayout refreshes density without recreating view owner or composition and keeps touch through`() =
     runTest {
       host.show(
-        InteractiveOverlayRequest(OverlayPlacement.Sheet(OverlayPlacement.Edge.BOTTOM, 20f))
+        InteractiveOverlayRequest(OverlayPlacement.Sheet(OverlayPlacement.Edge.BOTTOM, 20f)),
       )
       val view = manager.view!!
       val owner = view.findViewTreeLifecycleOwner()
@@ -222,7 +222,7 @@ class InteractiveOverlayHostTest {
     host.show()
     manager.failUpdate = true
     assertFalse(
-      host.replace(InteractiveOverlayRequest(OverlayPlacement.Fullscreen(), opacityPercent = 40))
+      host.replace(InteractiveOverlayRequest(OverlayPlacement.Fullscreen(), opacityPercent = 40)),
     )
     assertEquals(OverlayPlacement.Floating(), host.currentPlacement)
     assertEquals(1f, manager.view!!.alpha, 0f)

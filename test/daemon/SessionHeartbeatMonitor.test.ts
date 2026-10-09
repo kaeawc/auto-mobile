@@ -619,15 +619,24 @@ describe("SessionHeartbeatMonitor", () => {
         timer,
       );
 
-      // Just past grace but well within the 60s idle window: still locked.
-      timer.advanceTime(30_000);
-      await monitor.tick();
+      // The owner's proxy keeps heartbeating (liveness only, #10729): well within the 60s
+      // idle window the device stays locked.
+      const heartbeatThenTick = async (ms: number): Promise<void> => {
+        for (let elapsed = 0; elapsed < ms && sessionManager.getSession(sessionId!);) {
+          timer.advanceTime(2_000);
+          elapsed += 2_000;
+          sessionManager.recordHeartbeat(sessionId!);
+          await monitor.tick();
+        }
+      };
+      await heartbeatThenTick(30_000);
       expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
 
-      // Past the idle window with no activity: swept and released on the next tick
-      // (monitor interval granularity), not the 5-minute cleanup sweep.
-      timer.advanceTime(31_000);
-      await monitor.tick();
+      // Past the idle window (plus the suspect grace a heartbeating session earns) with no
+      // tool activity: swept and released on a monitor tick (monitor interval granularity),
+      // not the 5-minute cleanup sweep.
+      await heartbeatThenTick(40_000);
+      await sessionManager.waitForSessionRelease(sessionId!);
 
       const device = pool.getDevice("emulator-5554")!;
       expect(device.status).toBe("idle");

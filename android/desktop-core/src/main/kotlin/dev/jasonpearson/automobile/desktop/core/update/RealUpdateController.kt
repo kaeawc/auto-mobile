@@ -88,7 +88,7 @@ class RealUpdateController(
     if (asset == null) {
       // A newer release exists but ships no installer for this OS — stay quiet, but leave a trace.
       LOG.warn(
-        "Release ${release.tagName} is newer but has no ${hostPlatform.assetSuffix} asset; staying UpToDate"
+        "Release ${release.tagName} is newer but has no ${hostPlatform.assetSuffix} asset; staying UpToDate",
       )
       mutableStatus.value = UpdateStatus.UpToDate
       return

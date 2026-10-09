@@ -7,6 +7,7 @@
  * all judge a lease the same way.
  */
 
+import type { SessionLivenessClock } from "./sessionClocks";
 import type { Session, SessionLivenessPolicy } from "./sessionManager";
 import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
 
@@ -66,6 +67,27 @@ export function livenessLeaseState(snapshot: LivenessOwnerLeaseSnapshot): Livene
 }
 
 /**
+ * The owner's hold reported with a refused claim (#10701): the lease phase, the time left in it,
+ * and the time until the hold ends entirely (lease plus suspect grace), after which a claim wins.
+ */
+export interface LivenessOwnerHold {
+  state: LivenessLeasePhase;
+  remainingMs: number;
+  holdRemainingMs: number;
+}
+
+/** Where the owner's hold stands, judged on the same snapshot the claim path judges. */
+export function livenessOwnerHold(snapshot: LivenessOwnerLeaseSnapshot): LivenessOwnerHold {
+  const { phase, remainingMs } = livenessLeaseState(snapshot);
+  const holdEnd = snapshot.heartbeatTimeoutMs + (snapshot.graceMs ?? 0);
+  return {
+    state: phase,
+    remainingMs,
+    holdRemainingMs: Math.max(0, holdEnd - (snapshot.now - snapshot.lastHeartbeat)),
+  };
+}
+
+/**
  * Whether the owner still holds the session: its lease is live or it is inside
  * the suspect window.
  *
@@ -81,12 +103,12 @@ export function isLivenessOwnerLeaseLive(snapshot: LivenessOwnerLeaseSnapshot): 
   return livenessLeaseState(snapshot).phase !== "lapsed";
 }
 
-/** The slice of a session the lease reads. */
+/**
+ * The slice of a session the lease reads: its liveness clocks, never an activity clock (#10703).
+ */
 export type LeaseSession = Pick<
   Session,
-  | "lastHeartbeat"
-  | "lastOwnerHeartbeat"
-  | "stallForgivenAt"
+  | SessionLivenessClock
   | "heartbeatTimeoutMs"
   | "livenessPolicy"
   | "hasReceivedHeartbeat"
@@ -123,6 +145,25 @@ export function ownerLeaseHeartbeat(
     session.lastOwnerHeartbeat ?? session.lastHeartbeat,
     session.stallForgivenAt ?? Number.NEGATIVE_INFINITY,
   );
+}
+
+/**
+ * Whether an owned session's owner lease was still running at `at` (#11080): `at` is within one
+ * lease of the owner's last heartbeat. The daemon's stall forgiveness asks this of a gap's start,
+ * so it excuses only owners that were live when the daemon stopped hearing them. Read from the
+ * raw `lastHeartbeat`, not the forgiven lease start, so successive late scans cannot chain one
+ * forgiveness onto the last for an owner that is gone. A session not owned (awaiting its
+ * rehydrated owner) has no owner lease to have lapsed, and an absent `at` asks nothing: both are
+ * treated as live.
+ */
+export function ownerLeaseLiveAt(
+  session: Pick<LeaseSession, "lastHeartbeat" | "heartbeatTimeoutMs" | "ownership">,
+  at: number | undefined,
+): boolean {
+  if (at === undefined || session.ownership !== "owned") {
+    return true;
+  }
+  return at - session.lastHeartbeat <= session.heartbeatTimeoutMs;
 }
 
 /**

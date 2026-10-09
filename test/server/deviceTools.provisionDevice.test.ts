@@ -1,3 +1,5 @@
+import { provisionCancellationOutcomes } from "../../src/server/provisionCancellationOutcomes";
+import { deviceAlreadyAssignedToAnotherSessionError } from "../../src/daemon/inputDeviceOwnership";
 import { FakeDeviceResourceObserver } from "../fakes/FakeDeviceResourceObserver";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { warmedTests } from "../helpers/warmedTests";
@@ -24,11 +26,6 @@ import {
   FileAndroidAvdConfigWriter,
   ProvisionDeviceError,
 } from "../../src/devices/exactDeviceProvisioning";
-import type {
-  ProvisionDeviceLifecycleOutcome,
-  ProvisionDeviceOperationStore,
-} from "../../src/db/provisionDeviceOperationRepository";
-import { ProvisionDeviceOperationConflictError } from "../../src/db/provisionDeviceOperationRepository";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
@@ -143,7 +140,7 @@ class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
             }
           : {}),
         capabilityInventory: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           capabilities: [{ id: "test.fake.capability", state: "available" }],
         },
       },
@@ -190,352 +187,12 @@ class StaleAndroidBootedDeviceCache extends FakeDeviceUtils {
   ];
 }
 
-class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore {
-  private readonly results = new Map<
-    string,
-    {
-      fingerprint: string;
-      attemptId: string;
-      result?: Record<string, unknown>;
-      creationStarted: boolean;
-      /** A completed operation whose replay is currently owned by an attempt. */
-      replaying: boolean;
-      /** A prior attempt reported a terminal failure, so the row is retryable. */
-      failed: boolean;
-      lifecycle: ProvisionDeviceLifecycleOutcome;
-      errorCode?: string;
-      errorMessage?: string;
-      expiresAtMs: number;
-    }
-  >();
-  private readonly forcedInProgress = new Set<string>();
-  completeError: Error | undefined;
-  completeReturnsFalse = false;
-  failCalls = 0;
-  readonly failures: { operationId: string; errorCode: string }[] = [];
-  readonly failCodes: string[] = [];
-  extendCalls = 0;
-
-  /** Simulate a "running" row left behind by a crashed/earlier attempt. */
-  markInProgress(operationId: string): void {
-    this.forcedInProgress.add(operationId);
-  }
-
-  async begin(
-    operationId: string,
-    requestFingerprint: string,
-    attemptId: string,
-    nowMs = 0,
-    expiresAtMs = Number.MAX_SAFE_INTEGER,
-  ) {
-    const prior = this.results.get(operationId);
-    if (prior && prior.expiresAtMs <= nowMs) {
-      this.results.delete(operationId);
-    }
-    if (this.forcedInProgress.has(operationId)) {
-      return { started: false as const, inProgress: true as const };
-    }
-    const existing = this.results.get(operationId);
-    if (!existing) {
-      this.results.set(operationId, {
-        fingerprint: requestFingerprint,
-        attemptId,
-        creationStarted: false,
-        replaying: false,
-        failed: false,
-        lifecycle: { state: "provisioning", phase: "admission" },
-        expiresAtMs,
-      });
-      return { started: true, reconcileExistingConfiguration: false } as const;
-    }
-    if (existing.fingerprint !== requestFingerprint) {
-      throw new ProvisionDeviceOperationConflictError(operationId);
-    }
-    // A replay is EXCLUSIVE: the repository moves a claimed replay to the
-    // non-terminal `replaying` status, so a concurrent begin() sees
-    // in-progress instead of being handed the same completed device.
-    if (existing.replaying) {
-      return { started: false as const, inProgress: true as const };
-    }
-    // Admission (and a replay) takes the fence, exactly as the repository's
-    // compare-and-set does.
-    if (existing.result) {
-      existing.attemptId = attemptId;
-      existing.replaying = true;
-      existing.expiresAtMs = expiresAtMs;
-      return {
-        started: false as const,
-        result: existing.result,
-        reconcileExistingConfiguration: existing.creationStarted,
-      };
-    }
-    // A still-`running` row is within its TTL, so a prior attempt may be
-    // executing it right now: the repository reports in-progress rather than
-    // re-entering the lifecycle. Only a terminally `failed` row is re-admitted
-    // (with a fresh fence); the fake must not hand out a second attempt while
-    // the first is still unwinding.
-    if (!existing.failed) {
-      return {
-        started: false as const,
-        inProgress: true as const,
-        lifecycle: existing.lifecycle,
-      };
-    }
-    if (
-      existing.errorCode &&
-      existing.errorMessage &&
-      ["cleanup_in_progress", "removed", "retained", "no_device_created"].includes(
-        existing.lifecycle.state,
-      )
-    ) {
-      const cleanupCompleted = existing.lifecycle.cleanup?.status === "succeeded";
-      return {
-        started: false as const,
-        failed: true as const,
-        errorCode: cleanupCompleted
-          ? (existing.lifecycle.reason?.code ?? existing.errorCode)
-          : existing.errorCode,
-        message: cleanupCompleted
-          ? (existing.lifecycle.reason?.message ?? existing.errorMessage)
-          : existing.errorMessage,
-        lifecycle: existing.lifecycle,
-      };
-    }
-    existing.attemptId = attemptId;
-    existing.failed = false;
-    existing.expiresAtMs = expiresAtMs;
-    return {
-      started: true as const,
-      reconcileExistingConfiguration: existing.creationStarted,
-    };
-  }
-
-  async markDeviceCreationStarted(operationId: string, attemptId: string): Promise<boolean> {
-    const operation = this.results.get(operationId);
-    if (!operation) {
-      throw new Error(`missing operation ${operationId}`);
-    }
-    if (
-      operation.attemptId !== attemptId ||
-      operation.failed ||
-      (operation.result !== undefined && !operation.replaying)
-    ) {
-      return false;
-    }
-    operation.creationStarted = true;
-    return true;
-  }
-
-  async recordLifecycleOutcome(
-    operationId: string,
-    attemptId: string,
-    lifecycle: ProvisionDeviceLifecycleOutcome,
-  ): Promise<boolean> {
-    const operation = this.results.get(operationId);
-    if (
-      !operation ||
-      operation.attemptId !== attemptId ||
-      (operation.result !== undefined && !operation.replaying)
-    ) {
-      return false;
-    }
-    operation.lifecycle = structuredClone(lifecycle);
-    return true;
-  }
-
-  async extend(operationId: string, attemptId: string, expiresAtMs: number): Promise<boolean> {
-    const operation = this.results.get(operationId);
-    if (!operation || operation.attemptId !== attemptId || operation.failed) {
-      return false;
-    }
-    this.extendCalls++;
-    operation.expiresAtMs = expiresAtMs;
-    return true;
-  }
-
-  expiresAt(operationId: string): number | undefined {
-    return this.results.get(operationId)?.expiresAtMs;
-  }
-
-  async complete(
-    operationId: string,
-    attemptId: string,
-    result: Record<string, unknown>,
-  ): Promise<boolean> {
-    if (this.completeError) {
-      throw this.completeError;
-    }
-    if (this.completeReturnsFalse) {
-      return false;
-    }
-    const operation = this.results.get(operationId);
-    if (!operation) {
-      throw new Error(`missing operation ${operationId}`);
-    }
-    if (
-      operation.attemptId !== attemptId ||
-      operation.failed ||
-      (operation.result !== undefined && !operation.replaying)
-    ) {
-      return false;
-    }
-    operation.result = result;
-    operation.replaying = false;
-    operation.failed = false;
-    return true;
-  }
-
-  setStoredResult(operationId: string, result: Record<string, unknown>): void {
-    const operation = this.results.get(operationId);
-    if (!operation) {
-      throw new Error(`missing operation ${operationId}`);
-    }
-    operation.result = result;
-  }
-
-  getStoredResult(operationId: string): Record<string, unknown> | undefined {
-    return this.results.get(operationId)?.result;
-  }
-
-  isFailed(operationId: string): boolean {
-    return this.results.get(operationId)?.failed === true;
-  }
-
-  takeOverAttempt(operationId: string, attemptId: string): void {
-    const operation = this.results.get(operationId);
-    if (!operation) {
-      throw new Error(`missing operation ${operationId}`);
-    }
-    operation.attemptId = attemptId;
-    operation.replaying = false;
-    operation.failed = false;
-  }
-
-  async fail(
-    operationId: string,
-    attemptId: string,
-    errorCode: string,
-    message: string,
-    options?: {
-      clearCreationStarted?: boolean;
-      lifecycleOutcome?: ProvisionDeviceLifecycleOutcome;
-    },
-  ): Promise<boolean> {
-    const operation = this.results.get(operationId);
-    if (
-      operation &&
-      (operation.attemptId !== attemptId ||
-        operation.failed ||
-        (operation.result !== undefined && !operation.replaying))
-    ) {
-      return false;
-    }
-    this.failCalls++;
-    this.failures.push({ operationId, errorCode });
-    this.failCodes.push(errorCode);
-    if (operation?.replaying) {
-      // A failed replay keeps the completed result recoverable: the row
-      // returns to `succeeded`, not `failed`.
-      operation.replaying = false;
-    } else if (operation) {
-      operation.failed = true;
-      operation.errorCode = errorCode;
-      operation.errorMessage = message;
-    }
-    if (operation && options?.lifecycleOutcome) {
-      operation.lifecycle = structuredClone(options.lifecycleOutcome);
-    }
-    if (options?.clearCreationStarted) {
-      if (!operation) {
-        throw new Error(`missing operation ${operationId}`);
-      }
-      operation.creationStarted = false;
-    }
-    return true;
-  }
-}
-
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
     resolve = done;
   });
   return { promise, resolve };
-}
-
-function blockNextCompletion(store: FakeProvisionDeviceOperationStore): {
-  entered: Promise<void>;
-  release: () => void;
-  settled: Promise<void>;
-} {
-  const entered = deferred();
-  const release = deferred();
-  const settled = deferred();
-  const complete = store.complete.bind(store);
-  let shouldBlock = true;
-  store.complete = async (...args) => {
-    try {
-      if (shouldBlock) {
-        shouldBlock = false;
-        entered.resolve();
-        await release.promise;
-      }
-      return await complete(...args);
-    } finally {
-      settled.resolve();
-    }
-  };
-  return { entered: entered.promise, release: release.resolve, settled: settled.promise };
-}
-
-function blockNextBegin(store: FakeProvisionDeviceOperationStore): {
-  entered: Promise<void>;
-  release: () => void;
-  settled: Promise<void>;
-} {
-  const entered = deferred();
-  const release = deferred();
-  const settled = deferred();
-  const begin = store.begin.bind(store);
-  let shouldBlock = true;
-  store.begin = async (...args) => {
-    try {
-      if (shouldBlock) {
-        shouldBlock = false;
-        entered.resolve();
-        await release.promise;
-      }
-      return await begin(...args);
-    } finally {
-      settled.resolve();
-    }
-  };
-  return { entered: entered.promise, release: release.resolve, settled: settled.promise };
-}
-
-function blockNextFailure(store: FakeProvisionDeviceOperationStore): {
-  entered: Promise<void>;
-  release: () => void;
-  settled: Promise<void>;
-} {
-  const entered = deferred();
-  const release = deferred();
-  const settled = deferred();
-  const fail = store.fail.bind(store);
-  let shouldBlock = true;
-  store.fail = async (...args) => {
-    try {
-      if (shouldBlock) {
-        shouldBlock = false;
-        entered.resolve();
-        await release.promise;
-      }
-      return await fail(...args);
-    } finally {
-      settled.resolve();
-    }
-  };
-  return { entered: entered.promise, release: release.resolve, settled: settled.promise };
 }
 
 async function flushMicrotasks(): Promise<void> {
@@ -547,10 +204,9 @@ async function flushMicrotasks(): Promise<void> {
 
 type ProvisionTestPlatform = "android" | "ios";
 
-function provisionTestArgs(platform: ProvisionTestPlatform, operationId: string) {
+function provisionTestArgs(platform: ProvisionTestPlatform) {
   return platform === "android"
     ? {
-        operationId,
         device: {
           platform,
           name: "phone-api-36-a",
@@ -563,7 +219,6 @@ function provisionTestArgs(platform: ProvisionTestPlatform, operationId: string)
         readiness: "automation" as const,
       }
     : {
-        operationId,
         device: {
           platform,
           name: "iPhone 17",
@@ -581,7 +236,7 @@ function provisionedTestDevice(
   platform: ProvisionTestPlatform,
   created: boolean,
 ): ExactProvisionedDevice {
-  const args = provisionTestArgs(platform, "unused");
+  const args = provisionTestArgs(platform);
   return {
     created,
     device: {
@@ -603,7 +258,7 @@ function configureProvisionBootAndTeardown(
   manager: FakeDeviceUtils,
   platform: ProvisionTestPlatform,
 ): void {
-  const deviceName = provisionTestArgs(platform, "unused").device.name;
+  const deviceName = provisionTestArgs(platform).device.name;
   let exitListener: (() => void) | undefined;
   const processHandle: any = {
     exitCode: null,
@@ -663,7 +318,6 @@ describe("provisionDevice handler", () => {
   let deviceManager: FakeDeviceUtils;
   let resourceObserver: FakeDeviceResourceObserver;
   let exactProvisioner: FakeExactDeviceProvisioner;
-  let operationStore: FakeProvisionDeviceOperationStore;
   let teardownOperationStore: FakeDeviceTeardownOperationStore;
   let restorePipelineOverrides: (() => void) | undefined;
 
@@ -692,7 +346,6 @@ describe("provisionDevice handler", () => {
     };
     deviceManager = new FakeDeviceUtils();
     exactProvisioner = new FakeExactDeviceProvisioner();
-    operationStore = new FakeProvisionDeviceOperationStore();
     teardownOperationStore = new FakeDeviceTeardownOperationStore();
     setDeviceToolsDependencies({
       env: autolockEnv,
@@ -700,7 +353,6 @@ describe("provisionDevice handler", () => {
       deviceManagerFactory: () => deviceManager,
       avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
       exactDeviceProvisionerFactory: () => exactProvisioner,
-      provisionDeviceOperationStoreFactory: () => operationStore,
       teardownDeviceOperationStoreFactory: () => teardownOperationStore,
       notifyResourcesChanged: async () => {},
       clearInstalledAppsForDevice: async () => {},
@@ -727,7 +379,7 @@ describe("provisionDevice handler", () => {
   afterAll(cleanup);
 
   test("resource settings require booting and reject profiles and raw daemon labels", () => {
-    const args = provisionTestArgs("ios", "resource-schema");
+    const args = provisionTestArgs("ios");
     expect(
       provisionDeviceSchema.safeParse({
         ...args,
@@ -756,7 +408,7 @@ describe("provisionDevice handler", () => {
       exactProvisioner.provision = async () => provisionedTestDevice(platform, false);
       deviceManager.setBootedDevices(platform, [
         {
-          name: provisionTestArgs(platform, "unused").device.name,
+          name: provisionTestArgs(platform).device.name,
           platform,
           deviceId: platform === "ios" ? "SIM-123" : "emulator-5554",
         },
@@ -769,7 +421,7 @@ describe("provisionDevice handler", () => {
         },
       });
       const args = {
-        ...provisionTestArgs(platform, `resources-${platform}`),
+        ...provisionTestArgs(platform),
         resources: { wallpaperRendering: "disabled" as const },
       };
       const response = await ToolRegistry.getTool("provisionDevice")!.handler(args);
@@ -779,11 +431,10 @@ describe("provisionDevice handler", () => {
         deadlineMs: timer.now() + (resources.requests[0]!.deadlineMs - timer.now()) / 2,
         signal: resources.requests[0]!.signal,
       });
-      expect(operationStore.getStoredResult(args.operationId)?.resources?.observed).toEqual(
-        resourceObserver.result,
-      );
+      const payload = JSON.parse((response as any).content[0].text);
+      expect(payload.resources?.observed).toEqual(resourceObserver.result);
       expect(resources.requests[0]!.device.platform).toBe(platform);
-      expect(JSON.parse((response as any).content[0].text)).toMatchObject({
+      expect(payload).toMatchObject({
         success: true,
         resources: { success: true, resources: { wallpaperRendering: { state: "disabled" } } },
       });
@@ -798,7 +449,7 @@ describe("provisionDevice handler", () => {
     ]);
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler(
-      provisionTestArgs("android", "ambiguous-running-avd"),
+      provisionTestArgs("android"),
     );
 
     expect((response as any).isError).toBe(true);
@@ -819,7 +470,7 @@ describe("provisionDevice handler", () => {
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler(
-      provisionTestArgs("android", "stale-cache-race"),
+      provisionTestArgs("android"),
     );
 
     expect((response as any).isError).toBe(true);
@@ -835,7 +486,7 @@ describe("provisionDevice handler", () => {
     deviceManager.failedPlatforms.add("android");
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler(
-      provisionTestArgs("android", "discovery-unavailable"),
+      provisionTestArgs("android"),
     );
 
     expect((response as any).isError).toBe(true);
@@ -854,7 +505,7 @@ describe("provisionDevice handler", () => {
     ]);
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler(
-      provisionTestArgs("android", "unresolved-running-avd"),
+      provisionTestArgs("android"),
     );
 
     expect((response as any).isError).toBe(true);
@@ -892,7 +543,7 @@ describe("provisionDevice handler", () => {
 
     try {
       const response = await ToolRegistry.getTool("provisionDevice")!.handler(
-        provisionTestArgs("android", "unresolved-pooled-adoption"),
+        provisionTestArgs("android"),
       );
 
       expect((response as any).isError).toBe(true);
@@ -929,7 +580,7 @@ describe("provisionDevice handler", () => {
     }
 
     const responsePromise = tool.handler(
-      { ...provisionTestArgs("android", "discovery-deadline-signal"), timeoutMs: 1_000 },
+      { ...provisionTestArgs("android"), timeoutMs: 1_000 },
       undefined,
       requestController.signal,
     );
@@ -998,7 +649,7 @@ describe("provisionDevice handler", () => {
         return discover(platform);
       };
       const firstArgs = {
-        ...provisionTestArgs("android", "policy-first"),
+        ...provisionTestArgs("android"),
         __mcpSessionId: "first",
       };
       policyReads = 0;
@@ -1012,7 +663,7 @@ describe("provisionDevice handler", () => {
       );
       expect(policyReads).toBe(1);
       const secondArgs = {
-        ...provisionTestArgs("android", "policy-second"),
+        ...provisionTestArgs("android"),
         __mcpSessionId: "second",
         device: {
           ...firstArgs.device,
@@ -1036,7 +687,7 @@ describe("provisionDevice handler", () => {
     setDeviceToolsDependencies({ ensureCtrlProxyReady: async () => {} });
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler(
-      provisionTestArgs("android", "single-fresh-match"),
+      provisionTestArgs("android"),
     );
 
     expect((response as any).isError).not.toBe(true);
@@ -1056,7 +707,7 @@ describe("provisionDevice handler", () => {
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler(
-      provisionTestArgs("android", "stale-exact-adoption"),
+      provisionTestArgs("android"),
     );
 
     expect((response as any).isError).not.toBe(true);
@@ -1086,7 +737,7 @@ describe("provisionDevice handler", () => {
       ensureCtrlProxyReady: async () => {},
     });
     const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("android", "observation-contradiction"),
+      ...provisionTestArgs("android"),
       resources: { wallpaperRendering: "disabled" },
     });
     expect(response.isError).toBe(true);
@@ -1100,7 +751,6 @@ describe("provisionDevice handler", () => {
         observationContradictions: ["wallpaperRendering"],
       },
     });
-    expect(operationStore.failCalls).toBe(0);
   });
 
   test("observation cancellation prevents provision readiness and binding", async () => {
@@ -1122,7 +772,7 @@ describe("provisionDevice handler", () => {
     });
     const response = await ToolRegistry.getTool("provisionDevice")!.handler(
       {
-        ...provisionTestArgs("android", "observation-cancel"),
+        ...provisionTestArgs("android"),
         resources: { wallpaperRendering: "disabled" },
       },
       undefined,
@@ -1157,7 +807,7 @@ describe("provisionDevice handler", () => {
       },
     });
     const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("android", "resource-timeout"),
+      ...provisionTestArgs("android"),
       timeoutMs: 60_000,
       resources: { wallpaperRendering: "disabled" },
     });
@@ -1166,9 +816,6 @@ describe("provisionDevice handler", () => {
     const payload = JSON.parse((response as any).content[0].text);
     expect(Object.hasOwn(payload, "sessionUuid")).toBe(false);
     expect(Object.hasOwn(payload, "sessionId")).toBe(true);
-    const persisted = operationStore.getStoredResult("resource-timeout")!;
-    expect(persisted.sessionId).toBe(payload.sessionId);
-    expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
     expect(payload).toMatchObject({
       success: false,
       created: true,
@@ -1177,7 +824,6 @@ describe("provisionDevice handler", () => {
       readiness: { status: "automation_ready" },
       resources: { success: false, resources: { wallpaperRendering: { state: "unknown" } } },
     });
-    expect(operationStore.failCalls).toBe(0);
   });
 
   test("teardown preemption after resource configuration prevents readiness and session binding", async () => {
@@ -1206,7 +852,7 @@ describe("provisionDevice handler", () => {
       },
     });
     const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("android", "resource-preemption"),
+      ...provisionTestArgs("android"),
       timeoutMs: 60_000,
       resources: { wallpaperRendering: "disabled" },
     });
@@ -1215,26 +861,6 @@ describe("provisionDevice handler", () => {
     expect(readinessCalls).toBe(0);
     expect((response as any).isError).toBe(true);
     expect(JSON.parse((response as any).content[0].text).sessionId).toBeUndefined();
-  });
-
-  test("a changed resource request conflicts with a reused operation ID", async () => {
-    const resources = new FakeDeviceResourceController();
-    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
-    deviceManager.setBootedDevices("android", [
-      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
-    ]);
-    setDeviceToolsDependencies({ deviceResourceControllerFactory: () => resources });
-    const tool = ToolRegistry.getTool("provisionDevice")!;
-    const args = {
-      ...provisionTestArgs("android", "resource-conflict"),
-      readiness: "none" as const,
-      resources: { wallpaperRendering: "disabled" as const },
-    };
-    await tool.handler(args);
-    const response = await tool.handler({ ...args, resources: { wallpaperRendering: "enabled" } });
-    expect((response as any).isError).toBe(true);
-    expect(JSON.parse((response as any).content[0].text).error.code).toBe("operation_conflict");
-    expect(resources.requests).toHaveLength(1);
   });
 
   test("unsupported resources return an explicit error while preserving the provisioned identity", async () => {
@@ -1250,7 +876,7 @@ describe("provisionDevice handler", () => {
     ]);
     setDeviceToolsDependencies({ deviceResourceControllerFactory: () => resources });
     const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("android", "unsupported-resources"),
+      ...provisionTestArgs("android"),
       readiness: "none",
       resources: { wallpaperRendering: "disabled" },
     });
@@ -1262,10 +888,199 @@ describe("provisionDevice handler", () => {
     });
   });
 
+  const SIM_UDID = "A1B2C3D4-0000-4000-8000-000000000001";
+  const simDevice = () => ({
+    ...provisionedTestDevice("ios", false).device,
+    deviceId: SIM_UDID,
+  });
+
+  const setupSimulator = (created: boolean, resources: FakeDeviceResourceController) => {
+    exactProvisioner.provision = async () => ({
+      ...provisionedTestDevice("ios", created),
+      device: simDevice(),
+    });
+    deviceManager.setBootedDevices("ios", [
+      {
+        name: provisionTestArgs("ios").device.name,
+        platform: "ios",
+        deviceId: SIM_UDID,
+      },
+    ]);
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
+    let readinessCalls = 0;
+    setDeviceToolsDependencies({
+      lifecycleCoordinator: coordinator,
+      deviceResourceControllerFactory: () => resources,
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+      },
+    });
+    return { coordinator, readinessCalls: () => readinessCalls };
+  };
+
+  const expectDeviceFree = async (coordinator: InMemoryVirtualDeviceLifecycleCoordinator) => {
+    const lease = await coordinator.reserve(
+      { kind: "stable", platform: "ios", stableId: SIM_UDID },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    lease.release();
+  };
+
+  test("iOS simulator profile (#6695): an unproven profile fails with typed drift, binds no session and frees the device", async () => {
+    const resources = new FakeDeviceResourceController();
+    resources.result.requested = { wallpaperRendering: "disabled", widgets: "disabled" };
+    resources.result.resources = {
+      wallpaperRendering: { state: "disabled" },
+      widgets: { state: "disabled" },
+    };
+    resourceObserver.result.resources.wallpaperRendering = { state: "disabled" };
+    resourceObserver.result.resources.widgets = { state: "enabled" };
+    const harness = setupSimulator(false, resources);
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("ios"),
+      resources: { wallpaperRendering: "disabled", widgets: "disabled" },
+    });
+
+    expect(response.isError).toBe(true);
+    const payload = JSON.parse(response.content[0].text);
+    expect(payload.sessionId).toBeUndefined();
+    expect(payload.error).toMatchObject({
+      code: "resource_profile_unproven",
+      retryable: false,
+      resourceDrift: [
+        {
+          resource: "widgets",
+          kind: "missingRequested",
+          expected: "disabled",
+          observed: { state: "enabled" },
+        },
+      ],
+    });
+    expect(payload.error.message).toContain("widgets (missingRequested");
+    expect(payload.error.message).not.toContain("wallpaperRendering (");
+    expect(harness.readinessCalls()).toBe(0);
+    // Partial transition: the override that did land stays (no compensating write)
+    // and remains recorded as AutoMobile-owned, so a retry or reconcile sees it.
+    expect(resources.requests).toHaveLength(1);
+    await expectDeviceFree(harness.coordinator);
+  });
+
+  test("iOS simulator profile (#6695): an unsupported resource rolls back a device this operation created", async () => {
+    const resources = new FakeDeviceResourceController();
+    resources.result.success = false;
+    resources.result.resources = {
+      wallpaperRendering: { state: "unsupported", reason: "group not installed" },
+    };
+    resourceObserver.result.resources.wallpaperRendering = { state: "unsupported" };
+    const provisioned = { ...provisionedTestDevice("ios", true), device: simDevice() };
+    configureProvisionBootAndTeardown(deviceManager, "ios");
+    const bootWait = deviceManager.waitForDeviceReady.bind(deviceManager);
+    deviceManager.waitForDeviceReady = async (...args) => ({
+      ...(await bootWait(...args)),
+      deviceId: SIM_UDID,
+    });
+    let readinessCalls = 0;
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          request.onBeforeCreate?.();
+          deviceManager.setDeviceImages("ios", [provisioned.device]);
+          return provisioned;
+        },
+      }),
+      deviceResourceControllerFactory: () => resources,
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+      },
+      idGenerator: new FakeIdGenerator(["cleanup-sim"]),
+    });
+    registerDeviceTools();
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("ios"),
+      resources: { wallpaperRendering: "disabled" },
+    });
+
+    expect(response.isError).toBe(true);
+    const payload = JSON.parse(response.content[0].text);
+    expect(payload.sessionId).toBeUndefined();
+    expect(payload.error.code).toBe("resource_profile_unproven");
+    expect(payload.error.resourceDrift).toMatchObject([
+      { resource: "wallpaperRendering", kind: "unsupported" },
+    ]);
+    expect(payload.cleanup).toMatchObject({ status: "succeeded", state: "destroyed" });
+    // A clean rollback is not a cleanup failure.
+    expect(payload.recovery.boundary).not.toBe("cleanup_failure");
+    expect(readinessCalls).toBe(0);
+    expect(await deviceManager.listDeviceImages("ios")).toEqual([]);
+  });
+
+  test("iOS simulator profile (#6695): unreadable evidence everywhere is a retryable command failure with its drift", async () => {
+    const resources = new FakeDeviceResourceController();
+    resources.result.resources = { wallpaperRendering: { state: "unknown" } };
+    resourceObserver.result.resources.wallpaperRendering = {
+      state: "unknown",
+      reason: "launchctl timed out",
+    };
+    const harness = setupSimulator(false, resources);
+    const args = {
+      ...provisionTestArgs("ios"),
+      resources: { wallpaperRendering: "disabled" as const },
+    };
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler(args);
+
+    const payload = JSON.parse(response.content[0].text);
+    expect(payload.error.retryable).toBe(true);
+    expect(payload.error.resourceDrift).toMatchObject([
+      { resource: "wallpaperRendering", kind: "commandFailure" },
+    ]);
+    expect(payload.sessionId).toBeUndefined();
+    await expectDeviceFree(harness.coordinator);
+  });
+
+  test.each([
+    ["unknown", { state: "unknown", reason: "launchctl timed out" }],
+    ["unsupported", { state: "unsupported" }],
+  ] as const)(
+    "iOS simulator profile (#11028): an observed %s never overrides a state the controller proved",
+    async (_name, observed) => {
+      const resources = new FakeDeviceResourceController();
+      resourceObserver.result.resources.wallpaperRendering = observed;
+      const harness = setupSimulator(false, resources);
+
+      const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+        ...provisionTestArgs("ios"),
+        resources: { wallpaperRendering: "disabled" },
+      });
+
+      expect(response.isError).not.toBe(true);
+      expect(JSON.parse(response.content[0].text).sessionId).toEqual(expect.any(String));
+      expect(harness.readinessCalls()).toBe(1);
+    },
+  );
+
+  test("iOS simulator profile (#6695): a proven profile binds the session", async () => {
+    const resources = new FakeDeviceResourceController();
+    resourceObserver.result.resources.wallpaperRendering = { state: "disabled" };
+    const harness = setupSimulator(false, resources);
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("ios"),
+      resources: { wallpaperRendering: "disabled" },
+    });
+
+    expect(response.isError).not.toBe(true);
+    const payload = JSON.parse(response.content[0].text);
+    expect(payload.sessionId).toEqual(expect.any(String));
+    expect(payload.resources.success).toBe(true);
+    expect(harness.readinessCalls()).toBe(1);
+  });
+
   test("accepts omitted boot and readiness with their documented defaults", () => {
     expect(
       provisionDeviceSchema.parse({
-        operationId: "operation-defaults",
         device: {
           platform: "android",
           name: "phone-api-36-a",
@@ -1282,7 +1097,7 @@ describe("provisionDevice handler", () => {
   });
 
   test("reserves enough outer request time for bounded rollback", () => {
-    const args = provisionTestArgs("android", "operation-max-provision-timeout");
+    const args = provisionTestArgs("android");
 
     expect(
       provisionDeviceSchema.parse({ ...args, timeoutMs: MAX_PROVISION_DEVICE_TIMEOUT_MS })
@@ -1295,7 +1110,6 @@ describe("provisionDevice handler", () => {
 
   test("accepts only documented display-cutout preferences", () => {
     const input = {
-      operationId: "operation-display-cutout-schema",
       device: {
         platform: "android" as const,
         name: "phone-api-36-a",
@@ -1339,7 +1153,6 @@ describe("provisionDevice handler", () => {
   ])("rejects unbootable memory for modern Play Store Android image %s", (runtime) => {
     expect(() =>
       provisionDeviceSchema.parse({
-        operationId: "operation-low-play-memory",
         device: {
           platform: "android",
           name: "phone-api-36-play",
@@ -1357,9 +1170,9 @@ describe("provisionDevice handler", () => {
     [
       "Play Store RAM below the product floor",
       {
-        ...provisionTestArgs("android", "handler-low-play-ram"),
+        ...provisionTestArgs("android"),
         device: {
-          ...provisionTestArgs("android", "handler-low-play-ram").device,
+          ...provisionTestArgs("android").device,
           spec: {
             runtime: "system-images;android-36;google_apis_playstore;x86_64",
             deviceType: "pixel_9",
@@ -1371,9 +1184,9 @@ describe("provisionDevice handler", () => {
     [
       "Android device with an iOS runtime",
       {
-        ...provisionTestArgs("android", "handler-cross-platform-runtime"),
+        ...provisionTestArgs("android"),
         device: {
-          ...provisionTestArgs("android", "handler-cross-platform-runtime").device,
+          ...provisionTestArgs("android").device,
           spec: {
             runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
             deviceType: "pixel_9",
@@ -1384,9 +1197,9 @@ describe("provisionDevice handler", () => {
     [
       "iOS device with Android-only configuration",
       {
-        ...provisionTestArgs("ios", "handler-ios-android-config"),
+        ...provisionTestArgs("ios"),
         device: {
-          ...provisionTestArgs("ios", "handler-ios-android-config").device,
+          ...provisionTestArgs("ios").device,
           spec: {
             runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
             deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
@@ -1412,7 +1225,6 @@ describe("provisionDevice handler", () => {
   ] as const)("accepts supported memory for Android image %s", (runtime, memoryMb) => {
     expect(
       provisionDeviceSchema.parse({
-        operationId: "operation-supported-memory",
         device: {
           platform: "android",
           name: "phone-api-36",
@@ -1426,13 +1238,13 @@ describe("provisionDevice handler", () => {
     ).toBe(memoryMb);
   });
 
-  test("creates the caller-specified device once and replays its structured result by operationId", async () => {
+  // #11065: a repeated call is a fresh provision, never a stored-result replay.
+  test("creates the caller-specified device and runs every call through the provisioner", async () => {
     const tool = ToolRegistry.getTool("provisionDevice");
     if (!tool) {
       throw new Error("provisionDevice not registered");
     }
     const args = {
-      operationId: "operation-5434",
       device: {
         platform: "android",
         name: "phone-api-36-a",
@@ -1464,7 +1276,7 @@ describe("provisionDevice handler", () => {
     );
     const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
-    expect(exactProvisioner.requests).toHaveLength(1);
+    expect(exactProvisioner.requests).toHaveLength(2);
     expect(exactProvisioner.requests[0]).toMatchObject({
       platform: "android",
       name: "phone-api-36-a",
@@ -1482,7 +1294,6 @@ describe("provisionDevice handler", () => {
     });
     expect(exactProvisioner.requests[0]?.signal).toBeInstanceOf(AbortSignal);
     expect(first).toMatchObject({
-      operationId: "operation-5434",
       created: true,
       adopted: false,
       lifecycleState: "created",
@@ -1497,7 +1308,8 @@ describe("provisionDevice handler", () => {
       },
       displayCutout: "hole_punch",
     });
-    expect(second).toEqual(first);
+    expect(first).not.toHaveProperty("operationId");
+    expect(second).toMatchObject({ created: true, lifecycleState: "created" });
   });
 
   test("provisionDevice.device preserves the configured display and capability inventory", async () => {
@@ -1512,7 +1324,7 @@ describe("provisionDevice handler", () => {
       screenHeight: 2400,
       screenDensity: 420,
       capabilityInventory: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         capabilities: [{ id: "test.fake.capability", state: "available" as const }],
       },
     };
@@ -1524,7 +1336,6 @@ describe("provisionDevice handler", () => {
     const provisioned = JSON.parse(
       (
         (await provisionTool.handler({
-          operationId: "operation-device-description-parity",
           device: {
             platform: "android",
             name: image.name,
@@ -1544,75 +1355,9 @@ describe("provisionDevice handler", () => {
     expect(provisioned.device.capabilityInventory).toEqual(listed.devices[0].capabilityInventory);
   });
 
-  test("releases the replay claim when nothing about the persisted result changed", async () => {
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-    const args = {
-      operationId: "operation-idempotent-replay-claim",
-      device: {
-        platform: "android" as const,
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
-          displayCutout: "hole_punch" as const,
-        },
-      },
-      boot: false,
-      readiness: "none" as const,
-    };
-
-    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    // A replay with no resources whose cutout fields are already current still
-    // owns the exclusive `replaying` claim taken by begin(); it has to end that
-    // claim, or every later identical call reports operation_in_progress for
-    // the rest of the operation TTL.
-    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    const third = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-
-    expect(second).toEqual(first);
-    expect(third).toEqual(first);
-    expect(third.error).toBeUndefined();
-  });
-
-  test("backfills cutout fields when replaying a legacy persisted result", async () => {
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-    const args = {
-      operationId: "operation-legacy-cutout-replay",
-      device: {
-        platform: "android" as const,
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
-        },
-      },
-      boot: false,
-      readiness: "none" as const,
-    };
-
-    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    const legacyResult = { ...first };
-    delete legacyResult.displayCutout;
-    legacyResult.resolvedSpec = { ...legacyResult.resolvedSpec };
-    delete legacyResult.resolvedSpec.displayCutout;
-    operationStore.setStoredResult(args.operationId, legacyResult);
-
-    const replay = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-
-    expect(replay).toMatchObject({
-      displayCutout: "hole_punch",
-      resolvedSpec: { displayCutout: "hole_punch" },
-    });
-    expect(replay).toEqual(operationStore.getStoredResult(args.operationId));
-  });
-
-  test("coordinates completed provisioning replays with teardown", async () => {
+  // #11065: without stored replays, the lifecycle lease is what serializes a
+  // repeated provision behind a concurrent teardown of the same exact device.
+  test("a repeated Android provision waits for a concurrent teardown's lifecycle lease", async () => {
     const timer = new FakeTimer();
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
     setDeviceToolsDependencies({ timer, lifecycleCoordinator });
@@ -1622,7 +1367,6 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
     const args = {
-      operationId: "operation-replay-lifecycle",
       device: {
         platform: "android" as const,
         name: "phone-api-36-a",
@@ -1640,22 +1384,23 @@ describe("provisionDevice handler", () => {
       { kind: "stable", platform: "android", stableId: args.device.name },
       { operation: "teardown", deadlineMs: 1_000 },
     );
-    let replaySettled = false;
-    const replay = tool.handler(args).finally(() => {
-      replaySettled = true;
+    let repeatSettled = false;
+    const repeat = tool.handler(args).finally(() => {
+      repeatSettled = true;
     });
 
     for (let attempt = 0; attempt < 10; attempt++) {
       await Promise.resolve();
     }
-    expect(replaySettled).toBe(false);
+    expect(repeatSettled).toBe(false);
+    expect(exactProvisioner.requests).toHaveLength(1);
 
     teardownLease.release();
-    await replay;
-    expect(exactProvisioner.requests).toHaveLength(1);
+    await repeat;
+    expect(exactProvisioner.requests).toHaveLength(2);
   });
 
-  test("coordinates configured iOS provisioning replays with teardown", async () => {
+  test("a repeated iOS provision waits for a concurrent teardown's lifecycle lease", async () => {
     const timer = new FakeTimer();
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
     setDeviceToolsDependencies({ timer, lifecycleCoordinator });
@@ -1665,7 +1410,7 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
     const args = {
-      ...provisionTestArgs("ios", "operation-replay-ios-lifecycle"),
+      ...provisionTestArgs("ios"),
       boot: false,
       readiness: "none" as const,
     };
@@ -1675,70 +1420,25 @@ describe("provisionDevice handler", () => {
     };
     await tool.handler(args);
     await Promise.resolve();
+    deviceManager.setDeviceImages("ios", [provisionedTestDevice("ios", false).device]);
     const teardownLease = await lifecycleCoordinator.reserve(
       { kind: "stable", platform: "ios", stableId: "SIM-123" },
       { operation: "teardown", deadlineMs: 1_000 },
     );
-    let replaySettled = false;
-    const replay = tool.handler(args).finally(() => {
-      replaySettled = true;
+    let repeatSettled = false;
+    const repeat = tool.handler(args).finally(() => {
+      repeatSettled = true;
     });
 
     for (let attempt = 0; attempt < 10; attempt++) {
       await Promise.resolve();
     }
-    expect(replaySettled).toBe(false);
-
-    teardownLease.release();
-    await replay;
+    expect(repeatSettled).toBe(false);
     expect(exactProvisioner.requests).toHaveLength(1);
-  });
 
-  test("slices one absolute deadline across a replay instead of re-granting timeoutMs", async () => {
-    const timer = new FakeTimer();
-    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
-    const readinessBudgets: number[] = [];
-    deviceManager.setDeviceImages("android", [
-      { name: "phone-api-36-a", platform: "android", isRunning: false },
-    ]);
-    setDeviceToolsDependencies({
-      timer,
-      lifecycleCoordinator,
-      ensureCtrlProxyReady: async ({ totalDeadlineMs }) => {
-        readinessBudgets.push(totalDeadlineMs - timer.now());
-      },
-    });
-    registerDeviceTools();
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-    const args = {
-      ...provisionTestArgs("android", "operation-replay-budget"),
-      timeoutMs: 60_000,
-    };
-
-    await tool.handler(args);
-    await Promise.resolve();
-    expect(readinessBudgets).toEqual([60_000]);
-
-    // A competing teardown holds the stable lease for almost the whole
-    // request budget. The replay's readiness must run inside what is LEFT of
-    // that budget, not a freshly re-granted timeoutMs.
-    const teardownLease = await lifecycleCoordinator.reserve(
-      { kind: "stable", platform: "android", stableId: args.device.name },
-      { operation: "teardown", deadlineMs: 10_000_000 },
-    );
-    const replay = tool.handler(args);
-    for (let attempt = 0; attempt < 10; attempt++) {
-      await Promise.resolve();
-    }
-    timer.advanceTime(59_000);
     teardownLease.release();
-    await replay;
-
-    expect(readinessBudgets).toHaveLength(2);
-    expect(readinessBudgets[1]).toBeLessThanOrEqual(1_000);
+    await repeat;
+    expect(exactProvisioner.requests).toHaveLength(2);
   });
 
   test("boots the exact device and runs automation readiness when requested", async () => {
@@ -1764,7 +1464,6 @@ describe("provisionDevice handler", () => {
     const result = JSON.parse(
       (
         (await tool.handler({
-          operationId: "operation-boot",
           device: {
             platform: "android",
             name: "phone-api-36-a",
@@ -1805,7 +1504,7 @@ describe("provisionDevice handler", () => {
       exactProvisioner.provision = async () => provisionedTestDevice(platform, false);
       deviceManager.setBootedDevices(platform, [
         {
-          name: provisionTestArgs(platform, "unused").device.name,
+          name: provisionTestArgs(platform).device.name,
           platform,
           deviceId: platform === "android" ? "emulator-5554" : "SIM-123",
         },
@@ -1814,7 +1513,7 @@ describe("provisionDevice handler", () => {
       const response = JSON.parse(
         (
           (await ToolRegistry.getTool("provisionDevice")!.handler({
-            ...provisionTestArgs(platform, `operation-public-session-${platform}`),
+            ...provisionTestArgs(platform),
             readiness: "none",
           })) as any
         ).content[0].text,
@@ -1823,9 +1522,6 @@ describe("provisionDevice handler", () => {
       expect(response.sessionId).toEqual(expect.any(String));
       expect(Object.hasOwn(response, "sessionUuid")).toBe(false);
       expect(Object.hasOwn(response, "sessionId")).toBe(true);
-      const persisted = operationStore.getStoredResult(`operation-public-session-${platform}`)!;
-      expect(persisted.sessionId).toBe(response.sessionId);
-      expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
     },
   );
 
@@ -1835,7 +1531,7 @@ describe("provisionDevice handler", () => {
       const response = JSON.parse(
         (
           (await ToolRegistry.getTool("provisionDevice")!.handler({
-            ...provisionTestArgs(platform, "operation-no-session"),
+            ...provisionTestArgs(platform),
             boot: false,
             readiness: "none",
           })) as any
@@ -1844,9 +1540,6 @@ describe("provisionDevice handler", () => {
 
       expect(Object.hasOwn(response, "sessionUuid")).toBe(false);
       expect(Object.hasOwn(response, "sessionId")).toBe(false);
-      const persisted = operationStore.getStoredResult("operation-no-session")!;
-      expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
-      expect(Object.hasOwn(persisted, "sessionId")).toBe(false);
     },
   );
 
@@ -1856,7 +1549,7 @@ describe("provisionDevice handler", () => {
       configureProvisionBootAndTeardown(deviceManager, platform);
       const provisioner: ExactDeviceProvisioner = {
         provision: async (request) => {
-          await request.onBeforeCreate?.();
+          request.onBeforeCreate?.();
           deviceManager.setDeviceImages(platform, [provisioned.device]);
           return provisioned;
         },
@@ -1866,7 +1559,7 @@ describe("provisionDevice handler", () => {
         ensureCtrlProxyReady: async () => {
           throw new Error("runner readiness failed");
         },
-        idGenerator: new FakeIdGenerator([`attempt-${platform}`, `cleanup-${platform}`]),
+        idGenerator: new FakeIdGenerator([`cleanup-${platform}`]),
       });
       registerDeviceTools();
       const tool = ToolRegistry.getTool("provisionDevice");
@@ -1875,8 +1568,7 @@ describe("provisionDevice handler", () => {
       }
 
       const response = JSON.parse(
-        ((await tool.handler(provisionTestArgs(platform, `operation-cleanup-${platform}`))) as any)
-          .content[0].text,
+        ((await tool.handler(provisionTestArgs(platform))) as any).content[0].text,
       );
 
       expect(response).toMatchObject({
@@ -1888,7 +1580,6 @@ describe("provisionDevice handler", () => {
         },
         cleanup: {
           status: "succeeded",
-          operationId: `cleanup-${platform}`,
           state: "destroyed",
         },
       });
@@ -1896,7 +1587,6 @@ describe("provisionDevice handler", () => {
         expect.stringContaining(`destroyDevice:${platform}:`),
       );
       expect(await deviceManager.listDeviceImages(platform)).toEqual([]);
-      expect(operationStore.failCalls).toBe(1);
     });
 
     test(`${platform}: never deletes an adopted device when readiness fails`, async () => {
@@ -1918,8 +1608,7 @@ describe("provisionDevice handler", () => {
       }
 
       const response = JSON.parse(
-        ((await tool.handler(provisionTestArgs(platform, `operation-adopted-${platform}`))) as any)
-          .content[0].text,
+        ((await tool.handler(provisionTestArgs(platform))) as any).content[0].text,
       );
 
       expect(response).toMatchObject({
@@ -1940,7 +1629,7 @@ describe("provisionDevice handler", () => {
       configureProvisionBootAndTeardown(deviceManager, platform);
       const provisioner: ExactDeviceProvisioner = {
         provision: async (request) => {
-          await request.onBeforeCreate?.();
+          request.onBeforeCreate?.();
           deviceManager.setDeviceImages(platform, [provisioned.device]);
           return provisioned;
         },
@@ -1957,10 +1646,7 @@ describe("provisionDevice handler", () => {
         ensureCtrlProxyReady: async () => {
           throw new Error("runner readiness failed");
         },
-        idGenerator: new FakeIdGenerator([
-          `attempt-failure-${platform}`,
-          `cleanup-failure-${platform}`,
-        ]),
+        idGenerator: new FakeIdGenerator([`cleanup-failure-${platform}`]),
       });
       registerDeviceTools();
       const tool = ToolRegistry.getTool("provisionDevice");
@@ -1969,11 +1655,7 @@ describe("provisionDevice handler", () => {
       }
 
       const response = JSON.parse(
-        (
-          (await tool.handler(
-            provisionTestArgs(platform, `operation-cleanup-failure-${platform}`),
-          )) as any
-        ).content[0].text,
+        ((await tool.handler(provisionTestArgs(platform))) as any).content[0].text,
       );
 
       expect(response).toMatchObject({
@@ -1988,7 +1670,6 @@ describe("provisionDevice handler", () => {
         },
         cleanup: {
           status: "failed",
-          operationId: `cleanup-failure-${platform}`,
           failure: {
             code: "operation_failed",
             phase: "destroy",
@@ -2009,14 +1690,16 @@ describe("provisionDevice handler", () => {
       releasedLease.release();
     });
 
-    test(`${platform}: replays a removed lifecycle without provisioning a duplicate`, async () => {
+    // #11065: a retry after a rolled-back failure is a fresh provision; the
+    // removed device is not resurrected from a stored failure.
+    test(`${platform}: retries a removed lifecycle as a fresh provision`, async () => {
       const provisioned = provisionedTestDevice(platform, true);
       configureProvisionBootAndTeardown(deviceManager, platform);
       let provisionCalls = 0;
       const provisioner: ExactDeviceProvisioner = {
         provision: async (request) => {
           provisionCalls++;
-          await request.onBeforeCreate?.();
+          request.onBeforeCreate?.();
           deviceManager.setDeviceImages(platform, [provisioned.device]);
           return provisioned;
         },
@@ -2030,17 +1713,14 @@ describe("provisionDevice handler", () => {
             throw new Error("first readiness attempt failed");
           }
         },
-        idGenerator: new FakeIdGenerator([
-          `attempt-retry-${platform}`,
-          `cleanup-retry-${platform}`,
-        ]),
+        idGenerator: new FakeIdGenerator([`cleanup-retry-${platform}`]),
       });
       registerDeviceTools();
       const tool = ToolRegistry.getTool("provisionDevice");
       if (!tool) {
         throw new Error("provisionDevice not registered");
       }
-      const args = provisionTestArgs(platform, `operation-retry-cleanup-${platform}`);
+      const args = provisionTestArgs(platform);
 
       const failed = JSON.parse(((await tool.handler(args)) as any).content[0].text);
       const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
@@ -2049,25 +1729,80 @@ describe("provisionDevice handler", () => {
         success: false,
         cleanup: { status: "succeeded" },
       });
-      expect(retried).toMatchObject({
-        success: false,
-        operationId: args.operationId,
-        error: { code: "platform_command_failed" },
-        lifecycle: {
-          state: "removed",
-          phase: "cleanup",
-          cleanup: { status: "succeeded" },
-          device: {
-            name: provisioned.device.name,
-            platform,
-            runtimeDeviceId: platform === "android" ? "emulator-5554" : "SIM-123",
-          },
+      expect(failed.lifecycle).toMatchObject({
+        state: "removed",
+        phase: "cleanup",
+        cleanup: { status: "succeeded" },
+        device: {
+          name: provisioned.device.name,
+          platform,
+          runtimeDeviceId: platform === "android" ? "emulator-5554" : "SIM-123",
         },
       });
-      expect(provisionCalls).toBe(1);
-      expect(readinessCalls).toBe(1);
+      expect(retried).toMatchObject({ created: true, lifecycleState: "ready" });
+      expect(provisionCalls).toBe(2);
+      expect(readinessCalls).toBe(2);
     });
   }
+
+  // #11065: concurrent provisions of the same exact device are serialized by
+  // the lifecycle lease, so the second one adopts what the first created.
+  test("serializes concurrent provisions of the same device so only one creates it", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    const created = provisionedTestDevice("android", true);
+    const firstEntered = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    let provisionCalls = 0;
+    let inProvisioner = 0;
+    let maxConcurrent = 0;
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          provisionCalls++;
+          inProvisioner++;
+          maxConcurrent = Math.max(maxConcurrent, inProvisioner);
+          try {
+            if ((await deviceManager.listDeviceImages("android")).length > 0) {
+              return { ...created, created: false };
+            }
+            request.onBeforeCreate?.();
+            deviceManager.setDeviceImages("android", [created.device]);
+            firstEntered.resolve();
+            await releaseFirst.promise;
+            return created;
+          } finally {
+            inProvisioner--;
+          }
+        },
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice")!;
+    const args = { ...provisionTestArgs("android"), boot: false, readiness: "none" as const };
+
+    const first = tool.handler(args);
+    await firstEntered.promise;
+    const second = tool.handler(args);
+    await flushMicrotasks();
+    expect(provisionCalls).toBe(1);
+
+    releaseFirst.resolve();
+    const [firstResponse, secondResponse] = await Promise.all([first, second]);
+
+    expect(JSON.parse((firstResponse as any).content[0].text)).toMatchObject({
+      created: true,
+      adopted: false,
+    });
+    expect(JSON.parse((secondResponse as any).content[0].text)).toMatchObject({
+      created: false,
+      adopted: true,
+    });
+    expect(provisionCalls).toBe(2);
+    expect(maxConcurrent).toBe(1);
+  });
 
   test("rolls back before a queued provision for the same device begins", async () => {
     const timer = new FakeTimer();
@@ -2082,7 +1817,7 @@ describe("provisionDevice handler", () => {
       lifecycleCoordinator,
       exactDeviceProvisionerFactory: () => ({
         provision: async (request) => {
-          await request.onBeforeCreate?.();
+          request.onBeforeCreate?.();
           deviceManager.setDeviceImages("android", [provisioned.device]);
           return provisioned;
         },
@@ -2095,21 +1830,19 @@ describe("provisionDevice handler", () => {
           throw new Error("first readiness attempt failed");
         }
       },
-      idGenerator: new FakeIdGenerator(["attempt-queued-provision", "cleanup-queued-provision"]),
+      idGenerator: new FakeIdGenerator(["cleanup-queued-provision"]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
     if (!tool) {
       throw new Error("provisionDevice not registered");
     }
-    const first = tool.handler(provisionTestArgs("android", "operation-queued-first"));
+    const first = tool.handler(provisionTestArgs("android"));
     await firstReadinessStarted.promise;
     let secondSettled = false;
-    const second = tool
-      .handler(provisionTestArgs("android", "operation-queued-second"))
-      .finally(() => {
-        secondSettled = true;
-      });
+    const second = tool.handler(provisionTestArgs("android")).finally(() => {
+      secondSettled = true;
+    });
 
     for (let attempt = 0; attempt < 10; attempt++) {
       await Promise.resolve();
@@ -2125,7 +1858,6 @@ describe("provisionDevice handler", () => {
       cleanup: { status: "succeeded" },
     });
     expect(secondResponse).toMatchObject({
-      operationId: "operation-queued-second",
       lifecycleState: "ready",
       readiness: { status: "automation_ready" },
     });
@@ -2137,12 +1869,12 @@ describe("provisionDevice handler", () => {
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => ({
         provision: async (request) => {
-          await request.onBeforeCreate?.();
+          request.onBeforeCreate?.();
           deviceManager.setDeviceImages("android", [created.device]);
           throw new Error("writing AVD memory configuration failed");
         },
       }),
-      idGenerator: new FakeIdGenerator(["attempt-partial-android", "cleanup-partial-android"]),
+      idGenerator: new FakeIdGenerator(["cleanup-partial-android"]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
@@ -2151,16 +1883,12 @@ describe("provisionDevice handler", () => {
     }
 
     const response = JSON.parse(
-      (
-        (await tool.handler(
-          provisionTestArgs("android", "operation-partial-create-android"),
-        )) as any
-      ).content[0].text,
+      ((await tool.handler(provisionTestArgs("android"))) as any).content[0].text,
     );
 
     expect(response).toMatchObject({
       success: false,
-      cleanup: { status: "succeeded", operationId: "cleanup-partial-android" },
+      cleanup: { status: "succeeded" },
     });
     expect(await deviceManager.listDeviceImages("android")).toEqual([]);
   });
@@ -2212,10 +1940,10 @@ describe("provisionDevice handler", () => {
           lifecycleCoordinator,
           timer,
         }),
-      idGenerator: new FakeIdGenerator(["attempt-cancelled-config", "cleanup-cancelled-config"]),
+      idGenerator: new FakeIdGenerator(["cleanup-cancelled-config"]),
     });
     registerDeviceTools();
-    const baseArgs = provisionTestArgs("android", "operation-cancelled-config");
+    const baseArgs = provisionTestArgs("android");
     const args = {
       ...baseArgs,
       device: {
@@ -2301,13 +2029,10 @@ describe("provisionDevice handler", () => {
           lifecycleCoordinator,
           timer,
         }),
-      idGenerator: new FakeIdGenerator([
-        "attempt-started-config-write",
-        "cleanup-started-config-write",
-      ]),
+      idGenerator: new FakeIdGenerator(["cleanup-started-config-write"]),
     });
     registerDeviceTools();
-    const baseArgs = provisionTestArgs("android", "operation-started-config-write");
+    const baseArgs = provisionTestArgs("android");
     const args = {
       ...baseArgs,
       device: {
@@ -2377,6 +2102,7 @@ describe("provisionDevice handler", () => {
     const releaseMutation = Promise.withResolvers<void>();
     const created = provisionedTestDevice("android", true);
     let provisionCalls = 0;
+    let imagesAtRetry: unknown;
     configureProvisionBootAndTeardown(deviceManager, "android");
     setDeviceToolsDependencies({
       timer,
@@ -2384,22 +2110,22 @@ describe("provisionDevice handler", () => {
       exactDeviceProvisionerFactory: () => ({
         provision: async (request) => {
           provisionCalls++;
-          await request.onBeforeCreate?.();
+          if (provisionCalls > 1) {
+            imagesAtRetry = await deviceManager.listDeviceImages("android");
+            return created;
+          }
+          request.onBeforeCreate?.();
           deviceManager.setDeviceImages("android", [created.device]);
           mutationStarted.resolve();
           await releaseMutation.promise;
           throw request.signal?.reason ?? new Error("cancelled");
         },
       }),
-      idGenerator: new FakeIdGenerator([
-        "attempt-unsettled-mutation",
-        "cleanup-unsettled-mutation",
-        "cleanup-settled-mutation",
-      ]),
+      idGenerator: new FakeIdGenerator(["cleanup-unsettled-mutation", "cleanup-settled-mutation"]),
     });
     registerDeviceTools();
     const args = {
-      ...provisionTestArgs("android", "operation-unsettled-mutation"),
+      ...provisionTestArgs("android"),
       boot: false,
       readiness: "none" as const,
       timeoutMs: 1_000,
@@ -2435,55 +2161,142 @@ describe("provisionDevice handler", () => {
         cleanup: { status: "in_progress" },
       },
     });
-    expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
-    await flushMicrotasks();
-    const queried = JSON.parse(
-      (
-        (await ToolRegistry.getTool("provisionDevice")!.handler(args)) as {
-          content: { text: string }[];
-        }
-      ).content[0].text,
-    );
-    expect(queried).toMatchObject({
-      success: false,
-      operationId: args.operationId,
-      error: { code: "cleanup_failed" },
-      lifecycle: { state: "cleanup_in_progress", cleanup: { status: "in_progress" } },
+    expect(response.recovery.nextAction).toMatchObject({
+      action: "retry",
+      automaticRetrySafe: false,
     });
+    expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
+
+    // #11065: a concurrent provision of the same exact device waits on the
+    // lifecycle lease the deferred cleanup still holds, then runs afresh.
+    let queuedSettled = false;
+    const queued = ToolRegistry.getTool("provisionDevice")!
+      .handler(args)
+      .finally(() => {
+        queuedSettled = true;
+      });
+    await flushMicrotasks();
+    expect(queuedSettled).toBe(false);
     expect(provisionCalls).toBe(1);
 
-    let replacementAcquired = false;
-    const replacementLeasePromise = lifecycleCoordinator
-      .reserve(
-        { kind: "stable", platform: "android", stableId: args.device.name },
-        { operation: "provision", deadlineMs: timer.now() + 10_000 },
-      )
-      .then((lease) => {
+    releaseMutation.resolve();
+    const queuedResponse = JSON.parse(
+      ((await queued) as { content: { text: string }[] }).content[0].text,
+    );
+    expect(imagesAtRetry).toEqual([]);
+    expect(provisionCalls).toBe(2);
+    expect(queuedResponse).toMatchObject({ created: true, lifecycleState: "created" });
+  });
+
+  // #11064: a `simctl create` still in flight at the deadline must not be
+  // missed by an early rollback discovery and recorded as no_device_created.
+  describe("iOS rollback with simctl create in flight", () => {
+    const iosArgs = () => ({
+      ...provisionTestArgs("ios"),
+      boot: false,
+      readiness: "none" as const,
+      timeoutMs: 1_000,
+    });
+
+    function inFlightIosCreate(timer: FakeTimer) {
+      const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+      const mutationStarted = Promise.withResolvers<void>();
+      const finishCreate = Promise.withResolvers<boolean>();
+      const created = provisionedTestDevice("ios", true);
+      configureProvisionBootAndTeardown(deviceManager, "ios");
+      setDeviceToolsDependencies({
+        timer,
+        lifecycleCoordinator,
+        exactDeviceProvisionerFactory: () => ({
+          provision: async (request) => {
+            request.onBeforeCreate?.();
+            mutationStarted.resolve();
+            // The simulator only appears in inventory once the create lands.
+            if (await finishCreate.promise) {
+              deviceManager.setDeviceImages("ios", [created.device]);
+            }
+            throw request.signal?.reason ?? new Error("cancelled");
+          },
+        }),
+      });
+      registerDeviceTools();
+      const selectorReservation = async () =>
+        await lifecycleCoordinator.reserve(
+          { kind: "selector", platform: "ios", selector: created.device.name },
+          { operation: "provision", deadlineMs: timer.now() + 10_000 },
+        );
+      return { mutationStarted, finishCreate, created, selectorReservation };
+    }
+
+    test("waits for the create to settle, then rolls the simulator back", async () => {
+      const timer = new FakeTimer();
+      const { mutationStarted, finishCreate, created } = inFlightIosCreate(timer);
+      const args = iosArgs();
+
+      const responsePromise = ToolRegistry.getTool("provisionDevice")!.handler(args);
+      await mutationStarted.promise;
+      timer.advanceTime(1_000);
+      await flushMicrotasks();
+      // The create lands inside the rollback budget.
+      finishCreate.resolve(true);
+      const response = JSON.parse(
+        ((await responsePromise) as { content: { text: string }[] }).content[0].text,
+      );
+
+      expect(response).toMatchObject({
+        success: false,
+        provisionFailure: { code: "timeout" },
+        cleanup: { status: "succeeded" },
+        lifecycle: { state: "removed", device: { platform: "ios", stableId: "SIM-123" } },
+      });
+      expect(response.lifecycle.state).not.toBe("no_device_created");
+      expect(
+        deviceManager
+          .getExecutedOperations()
+          .filter((operation) => operation.startsWith("destroyDevice:")),
+      ).toHaveLength(1);
+      expect(await deviceManager.listDeviceImages("ios")).not.toContainEqual(created.device);
+    });
+
+    test("records an unresolved create as retained and keeps the lease until it settles", async () => {
+      const timer = new FakeTimer();
+      const { mutationStarted, finishCreate, selectorReservation } = inFlightIosCreate(timer);
+      const args = iosArgs();
+
+      const responsePromise = ToolRegistry.getTool("provisionDevice")!.handler(args);
+      await mutationStarted.promise;
+      timer.advanceTime(1_000);
+      await flushMicrotasks();
+      // The create outlives the whole rollback budget.
+      timer.advanceTime(60_000);
+      const response = JSON.parse(
+        ((await responsePromise) as { content: { text: string }[] }).content[0].text,
+      );
+
+      expect(response).toMatchObject({
+        success: false,
+        provisionFailure: { code: "timeout" },
+        cleanup: { status: "failed", failure: { code: "target_identity_unresolved" } },
+        lifecycle: { state: "retained", cleanup: { status: "failed" } },
+        recovery: {
+          outcomes: { deviceCreation: "unknown" },
+          nextAction: { action: "obtain_further_evidence", automaticRetrySafe: false },
+        },
+      });
+      expect(response.lifecycle.device).toBeUndefined();
+
+      let replacementAcquired = false;
+      const replacement = selectorReservation().then((lease) => {
         replacementAcquired = true;
         return lease;
       });
-    await Promise.resolve();
-    expect(replacementAcquired).toBe(false);
+      await flushMicrotasks();
+      expect(replacementAcquired).toBe(false);
 
-    releaseMutation.resolve();
-    const replacementLease = await replacementLeasePromise;
-    expect(await deviceManager.listDeviceImages("android")).toEqual([]);
-    await flushMicrotasks();
-    const settled = JSON.parse(
-      (
-        (await ToolRegistry.getTool("provisionDevice")!.handler(args)) as {
-          content: { text: string }[];
-        }
-      ).content[0].text,
-    );
-    expect(settled).toMatchObject({
-      success: false,
-      operationId: args.operationId,
-      error: { code: "timeout" },
-      lifecycle: { state: "removed", cleanup: { status: "succeeded" } },
+      finishCreate.resolve(false);
+      (await replacement).release();
+      expect(replacementAcquired).toBe(true);
     });
-    expect(provisionCalls).toBe(1);
-    replacementLease.release();
   });
 
   test("keeps a committed provision when the post-commit resource notification fails", async () => {
@@ -2492,7 +2305,7 @@ describe("provisionDevice handler", () => {
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => ({
         provision: async (request) => {
-          await request.onBeforeCreate?.();
+          request.onBeforeCreate?.();
           deviceManager.setDeviceImages("android", [created.device]);
           return created;
         },
@@ -2501,11 +2314,7 @@ describe("provisionDevice handler", () => {
       notifyResourcesChanged: async () => {
         throw new Error("resource notification transport closed");
       },
-      idGenerator: new FakeIdGenerator([
-        "attempt-notify-failure",
-        "session-notify-failure",
-        "cleanup-notify-failure",
-      ]),
+      idGenerator: new FakeIdGenerator(["session-notify-failure", "cleanup-notify-failure"]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
@@ -2514,8 +2323,7 @@ describe("provisionDevice handler", () => {
     }
 
     const response = JSON.parse(
-      ((await tool.handler(provisionTestArgs("android", "operation-notify-failure"))) as any)
-        .content[0].text,
+      ((await tool.handler(provisionTestArgs("android"))) as any).content[0].text,
     );
 
     // Session + pool ownership are already committed by the time the
@@ -2544,7 +2352,7 @@ describe("provisionDevice handler", () => {
       setDeviceToolsDependencies({
         exactDeviceProvisionerFactory: () => ({
           provision: async (request) => {
-            await request.onBeforeCreate?.();
+            request.onBeforeCreate?.();
             deviceManager.setDeviceImages(platform, [created.device]);
             return created;
           },
@@ -2558,7 +2366,7 @@ describe("provisionDevice handler", () => {
       const response = JSON.parse(
         (
           (await ToolRegistry.getTool("provisionDevice")!.handler({
-            ...provisionTestArgs(platform, `stopped-notify-failure-${platform}`),
+            ...provisionTestArgs(platform),
             boot: false,
             readiness: "none",
           })) as any
@@ -2573,7 +2381,6 @@ describe("provisionDevice handler", () => {
       });
       expect(response.error).toBeUndefined();
       expect(response.cleanup).toBeUndefined();
-      expect(operationStore.failCalls).toBe(0);
       expect(
         deviceManager
           .getExecutedOperations()
@@ -2589,7 +2396,7 @@ describe("provisionDevice handler", () => {
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => ({
         provision: async (request) => {
-          await request.onBeforeCreate?.();
+          request.onBeforeCreate?.();
           deviceManager.setDeviceImages("android", [created.device]);
           return created;
         },
@@ -2601,7 +2408,7 @@ describe("provisionDevice handler", () => {
     let responseSettled = false;
     const request = ToolRegistry.getTool("provisionDevice")!
       .handler({
-        ...provisionTestArgs("android", "stopped-notify-pending"),
+        ...provisionTestArgs("android"),
         boot: false,
         readiness: "none",
       })
@@ -2630,13 +2437,13 @@ describe("provisionDevice handler", () => {
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => ({
         provision: async (request) => {
-          await request.onBeforeCreate?.();
+          request.onBeforeCreate?.();
           // simctl created the simulator, but its UDID never reached us.
           deviceManager.setDeviceImages("ios", [created.device]);
           throw new Error("reading the created simulator UDID failed");
         },
       }),
-      idGenerator: new FakeIdGenerator(["attempt-partial-ios", "cleanup-partial-ios"]),
+      idGenerator: new FakeIdGenerator(["cleanup-partial-ios"]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
@@ -2645,8 +2452,7 @@ describe("provisionDevice handler", () => {
     }
 
     const response = JSON.parse(
-      ((await tool.handler(provisionTestArgs("ios", "operation-partial-create-ios"))) as any)
-        .content[0].text,
+      ((await tool.handler(provisionTestArgs("ios"))) as any).content[0].text,
     );
 
     // The rollback target is resolved by re-reading the simulator inventory,
@@ -2655,7 +2461,6 @@ describe("provisionDevice handler", () => {
       success: false,
       cleanup: {
         status: "succeeded",
-        operationId: "cleanup-partial-ios",
         target: { platform: "ios", stableId: "SIM-123", stableName: "iPhone 17" },
       },
     });
@@ -2668,7 +2473,7 @@ describe("provisionDevice handler", () => {
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => ({
         provision: async (request) => {
-          await request.onBeforeCreate?.();
+          request.onBeforeCreate?.();
           deviceManager.setDeviceImages("android", [created.device]);
           return created;
         },
@@ -2684,9 +2489,7 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
 
-    const response = await tool.handler(
-      provisionTestArgs("android", "operation-recovery-fresh-android"),
-    );
+    const response = await tool.handler(provisionTestArgs("android"));
 
     // A transport routing conflict does not invalidate the healthy device, so
     // the recovery error must keep its identity instead of being wrapped by
@@ -2712,7 +2515,7 @@ describe("provisionDevice handler", () => {
         provision: async (request) => {
           provisionCalls++;
           if (provisionCalls === 1) {
-            await request.onBeforeCreate?.();
+            request.onBeforeCreate?.();
             deviceManager.setDeviceImages("android", [created.device]);
             return created;
           }
@@ -2733,18 +2536,14 @@ describe("provisionDevice handler", () => {
           });
         }
       },
-      idGenerator: new FakeIdGenerator([
-        "attempt-handoff-first",
-        "attempt-handoff-retry",
-        "session-handoff-retry",
-      ]),
+      idGenerator: new FakeIdGenerator(["session-handoff-retry"]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
     if (!tool) {
       throw new Error("provisionDevice not registered");
     }
-    const args = provisionTestArgs("android", "operation-handoff-fresh-android");
+    const args = provisionTestArgs("android");
     const requestController = new AbortController();
     const first = tool.handler(args, undefined, requestController.signal);
     await readinessStarted.promise;
@@ -2761,6 +2560,15 @@ describe("provisionDevice handler", () => {
       },
     });
     expect(failed.cleanup).toBeUndefined();
+    expect(failed.recovery).toMatchObject({
+      schemaVersion: 2,
+      boundary: "daemon_handoff",
+      originalError: { code: "daemon_handoff_interrupted" },
+      device: { ownership: "created_by_request" },
+      outcomes: { deviceCreation: "created" },
+      freshness: { source: "snapshot" },
+    });
+    expect(failed.recovery.nextAction.automaticRetrySafe).toBe(true);
     expect(
       deviceManager
         .getExecutedOperations()
@@ -2768,11 +2576,12 @@ describe("provisionDevice handler", () => {
     ).toEqual([]);
     expect(await deviceManager.listDeviceImages("android")).toEqual([created.device]);
 
+    // #11065: the retry is a fresh provision that adopts the AVD the
+    // interrupted request created, instead of creating another.
     const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
     expect(retried).toMatchObject({
-      operationId: args.operationId,
-      created: true,
-      adopted: false,
+      created: false,
+      adopted: true,
       lifecycleState: "ready",
       sessionId: "session-handoff-retry",
     });
@@ -2823,10 +2632,10 @@ describe("provisionDevice handler", () => {
           lifecycleCoordinator,
           timer,
         }),
-      idGenerator: new FakeIdGenerator(["attempt-handoff-config-write"]),
+      idGenerator: new FakeIdGenerator([]),
     });
     registerDeviceTools();
-    const baseArgs = provisionTestArgs("android", "operation-handoff-config-write");
+    const baseArgs = provisionTestArgs("android");
     const args = {
       ...baseArgs,
       device: {
@@ -2889,7 +2698,9 @@ describe("provisionDevice handler", () => {
     ).toEqual([]);
   });
 
-  test("replays a retained lifecycle without adopting and deleting it on retry", async () => {
+  // #11065: a retry after a failed cleanup re-runs the lifecycle; it adopts the
+  // retained device, so its own readiness failure never deletes it.
+  test("a retry after a failed cleanup adopts the retained device and never deletes it", async () => {
     const adopted = provisionedTestDevice("android", false);
     configureProvisionBootAndTeardown(deviceManager, "android");
     const originalDestroyDevice = deviceManager.destroyDevice.bind(deviceManager);
@@ -2907,7 +2718,7 @@ describe("provisionDevice handler", () => {
         provision: async (request) => {
           provisionCalls++;
           if (provisionCalls === 1) {
-            await request.onBeforeCreate?.();
+            request.onBeforeCreate?.();
             deviceManager.setDeviceImages("android", [adopted.device]);
             throw new Error("writing AVD memory configuration failed");
           }
@@ -2918,9 +2729,7 @@ describe("provisionDevice handler", () => {
         throw new Error("retry readiness failed");
       },
       idGenerator: new FakeIdGenerator([
-        "attempt-partial-first-android",
         "cleanup-partial-first-android",
-        "attempt-partial-retry-android",
         "cleanup-partial-retry-android",
       ]),
     });
@@ -2929,25 +2738,28 @@ describe("provisionDevice handler", () => {
     if (!tool) {
       throw new Error("provisionDevice not registered");
     }
-    const args = provisionTestArgs("android", "operation-partial-retry-android");
+    const args = provisionTestArgs("android");
 
     const initial = JSON.parse(((await tool.handler(args)) as any).content[0].text);
     const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
     expect(initial).toMatchObject({
       success: false,
-      cleanup: { status: "failed", operationId: "cleanup-partial-first-android" },
+      cleanup: { status: "failed" },
+      recovery: {
+        boundary: "cleanup_failure",
+        originalError: { message: expect.stringContaining("writing AVD memory configuration") },
+        outcomes: { deviceCreation: "created" },
+        cleanup: { status: "failed_device_retained" },
+        nextAction: { action: "perform_cleanup", automaticRetrySafe: false },
+      },
     });
     expect(retried).toMatchObject({
       success: false,
-      operationId: args.operationId,
-      error: { code: "cleanup_failed" },
-      lifecycle: {
-        state: "retained",
-        cleanup: { status: "failed", operationId: "cleanup-partial-first-android" },
-      },
+      error: { message: expect.stringContaining("retry readiness failed") },
     });
-    expect(provisionCalls).toBe(1);
+    expect(retried.cleanup).toBeUndefined();
+    expect(provisionCalls).toBe(2);
     expect(await deviceManager.listDeviceImages("android")).toEqual([adopted.device]);
   });
 
@@ -2961,7 +2773,7 @@ describe("provisionDevice handler", () => {
         provision: async (request) => {
           provisionCalls++;
           if (provisionCalls === 1) {
-            await request.onBeforeCreate?.();
+            request.onBeforeCreate?.();
             deviceManager.setDeviceImages("android", [created.device]);
             throw new Error("writing AVD memory configuration failed");
           }
@@ -2971,14 +2783,14 @@ describe("provisionDevice handler", () => {
       ensureCtrlProxyReady: async () => {
         throw new Error("replacement readiness failed");
       },
-      idGenerator: new FakeIdGenerator(["attempt-original-android", "cleanup-original-android"]),
+      idGenerator: new FakeIdGenerator(["cleanup-original-android"]),
     });
     registerDeviceTools();
     const tool = ToolRegistry.getTool("provisionDevice");
     if (!tool) {
       throw new Error("provisionDevice not registered");
     }
-    const args = provisionTestArgs("android", "operation-cleaned-up-retry-android");
+    const args = provisionTestArgs("android");
 
     const initial = JSON.parse(((await tool.handler(args)) as any).content[0].text);
     deviceManager.setDeviceImages("android", [replacement.device]);
@@ -2986,7 +2798,7 @@ describe("provisionDevice handler", () => {
 
     expect(initial).toMatchObject({
       success: false,
-      cleanup: { status: "succeeded", operationId: "cleanup-original-android" },
+      cleanup: { status: "succeeded" },
     });
     expect(retried).toMatchObject({ success: false });
     expect(retried.cleanup).toBeUndefined();
@@ -3034,7 +2846,6 @@ describe("provisionDevice handler", () => {
     const result = JSON.parse(
       (
         (await tool.handler({
-          operationId: "operation-adopt-running",
           device: {
             platform: "android",
             name: "phone-api-36-a",
@@ -3114,7 +2925,6 @@ describe("provisionDevice handler", () => {
     const response = JSON.parse(
       (
         (await tool.handler({
-          operationId: "operation-ios-running-identity",
           device: {
             platform: "ios",
             name: "phone-api-36-a",
@@ -3176,7 +2986,7 @@ describe("provisionDevice handler", () => {
     }
 
     const pending = tool.handler({
-      ...provisionTestArgs("ios", "operation-ios-selector-contended"),
+      ...provisionTestArgs("ios"),
       boot: false,
       readiness: "none",
       timeoutMs: 60_000,
@@ -3204,7 +3014,6 @@ describe("provisionDevice handler", () => {
     const response = JSON.parse(
       (
         (await tool.handler({
-          operationId: "operation-ios-discovery-incomplete",
           device: {
             platform: "ios",
             name: "iPhone 17",
@@ -3248,7 +3057,7 @@ describe("provisionDevice handler", () => {
     const response = JSON.parse(
       (
         (await ToolRegistry.getTool("provisionDevice")!.handler(
-          provisionTestArgs("android", "operation-android-discovery-incomplete"),
+          provisionTestArgs("android"),
         )) as any
       ).content[0].text,
     );
@@ -3270,7 +3079,7 @@ describe("provisionDevice handler", () => {
     const created = provisionedTestDevice("android", true);
     const failDiscoveryAfterCreate = configurePostCreateAndroidDiscoveryFailure(deviceManager);
     exactProvisioner.provision = async (request) => {
-      await request.onBeforeCreate?.();
+      request.onBeforeCreate?.();
       deviceManager.setDeviceImages("android", [created.device]);
       failDiscoveryAfterCreate();
       return created;
@@ -3279,7 +3088,7 @@ describe("provisionDevice handler", () => {
     const response = JSON.parse(
       (
         (await ToolRegistry.getTool("provisionDevice")!.handler(
-          provisionTestArgs("android", "operation-created-android-discovery-incomplete"),
+          provisionTestArgs("android"),
         )) as any
       ).content[0].text,
     );
@@ -3299,7 +3108,7 @@ describe("provisionDevice handler", () => {
     const created = provisionedTestDevice("android", true);
     const failDiscoveryAfterCreate = configurePostCreateAndroidDiscoveryFailure(deviceManager);
     exactProvisioner.provision = async (request) => {
-      await request.onBeforeCreate?.();
+      request.onBeforeCreate?.();
       deviceManager.setDeviceImages("android", [created.device]);
       failDiscoveryAfterCreate();
       return created;
@@ -3310,7 +3119,7 @@ describe("provisionDevice handler", () => {
     const response = JSON.parse(
       (
         (await ToolRegistry.getTool("provisionDevice")!.handler(
-          provisionTestArgs("android", "operation-created-android-discovery-cleanup-failure"),
+          provisionTestArgs("android"),
         )) as any
       ).content[0].text,
     );
@@ -3386,7 +3195,6 @@ describe("provisionDevice handler", () => {
       }
 
       const provision = provisionTool.handler({
-        operationId: "operation-ios-created-lock",
         device: {
           platform: "ios",
           name: created.device.name,
@@ -3441,171 +3249,6 @@ describe("provisionDevice handler", () => {
     }
   });
 
-  test("rebinds a live session before replaying a completed boot operation", async () => {
-    deviceManager.setDeviceImages("android", [
-      {
-        name: "phone-api-36-a",
-        platform: "android",
-        isRunning: false,
-      },
-    ]);
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-    const args = {
-      operationId: "operation-rebind-session",
-      device: {
-        platform: "android" as const,
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
-        },
-      },
-      boot: true,
-      readiness: "none" as const,
-    };
-
-    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    await Promise.resolve();
-    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-
-    expect(exactProvisioner.requests).toHaveLength(2);
-    expect(exactProvisioner.requests[1]?.reconcileExistingConfiguration).toBe(false);
-    expect(deviceManager.getCallCount("getBootedDevices")).toBeGreaterThanOrEqual(2);
-    for (const response of [first, second]) {
-      expect(Object.hasOwn(response, "sessionUuid")).toBe(false);
-      expect(Object.hasOwn(response, "sessionId")).toBe(true);
-    }
-    const persisted = operationStore.getStoredResult(args.operationId)!;
-    expect(persisted.sessionId).toBe(second.sessionId);
-    expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
-    expect(second.sessionId).not.toBe(first.sessionId);
-    expect(second).toMatchObject({
-      lifecycleState: "ready",
-      sessionId: expect.any(String),
-    });
-  });
-
-  test.each([false, true])(
-    "returns a completed boot operation while its session is still live (resource verification: %s)",
-    async (configureResources) => {
-      const resourceController = new FakeDeviceResourceController();
-      setDeviceToolsDependencies({ deviceResourceControllerFactory: () => resourceController });
-      const timer = new FakeTimer();
-      const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-      const pool = new DevicePool(
-        isolatedPoolDependencies(sessionManager, "daemon-session", {
-          env: autolockEnv,
-          timer: timer,
-          deviceManager: deviceManager,
-        }),
-      );
-      const bootedDevice = {
-        name: "phone-api-36-a",
-        platform: "android" as const,
-        deviceId: "mock-phone-api-36-a",
-      };
-      deviceManager.setDeviceImages("android", [
-        {
-          name: "phone-api-36-a",
-          platform: "android",
-          isRunning: false,
-        },
-      ]);
-      await pool.initializeWithDevices([bootedDevice]);
-      DaemonState.getInstance().initialize(sessionManager, pool);
-      let readinessCalls = 0;
-      setDeviceToolsDependencies({
-        timer,
-        ensureCtrlProxyReady: async ({ totalDeadlineMs }) => {
-          expect(totalDeadlineMs).toBeGreaterThan(timer.now());
-          readinessCalls++;
-        },
-      });
-
-      const tool = ToolRegistry.getTool("provisionDevice");
-      if (!tool) {
-        throw new Error("provisionDevice not registered");
-      }
-      const args = {
-        operationId: "operation-live-session",
-        ...(configureResources ? { resources: { wallpaperRendering: "disabled" as const } } : {}),
-        device: {
-          platform: "android" as const,
-          name: "phone-api-36-a",
-          spec: {
-            runtime: "system-images;android-36;google_apis;x86_64",
-            deviceType: "pixel_9",
-          },
-        },
-        boot: true,
-        readiness: "automation" as const,
-        timeoutMs: 60_000,
-      };
-
-      const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-      const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-
-      for (const response of [first, second]) {
-        expect(Object.hasOwn(response, "sessionUuid")).toBe(false);
-        expect(Object.hasOwn(response, "sessionId")).toBe(true);
-      }
-      expect(second).toEqual(first);
-      const persisted = operationStore.getStoredResult(args.operationId)!;
-      expect(persisted.sessionId).toBe(second.sessionId);
-      expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
-      expect(exactProvisioner.requests).toHaveLength(1);
-      expect(deviceManager.getCallCount("startDevice")).toBe(1);
-      expect(readinessCalls).toBe(2);
-      expect(resourceController.requests).toHaveLength(configureResources ? 2 : 0);
-      expect(resourceObserver.requests).toHaveLength(configureResources ? 2 : 0);
-      if (configureResources) {
-        expect(operationStore.getStoredResult(args.operationId)?.resources?.observed).toEqual(
-          resourceObserver.result,
-        );
-        expect(resourceObserver.requests[1]).toEqual({
-          device: resourceController.requests[1]!.device,
-          deadlineMs: timer.now() + (resourceController.requests[1]!.deadlineMs - timer.now()) / 2,
-          signal: resourceController.requests[1]!.signal,
-        });
-        resourceObserver.result.resources.wallpaperRendering = { state: "enabled" };
-        await tool.handler(args);
-        expect(operationStore.getStoredResult(args.operationId)?.resources).toMatchObject({
-          success: false,
-          observationContradictions: ["wallpaperRendering"],
-          observed: resourceObserver.result,
-        });
-      }
-      if (configureResources) {
-        resourceController.onRequest = async (request) => {
-          timer.advanceTime(request.deadlineMs - timer.now());
-        };
-        resourceController.result = {
-          ...resourceController.result,
-          success: false,
-          resources: { wallpaperRendering: { state: "unknown", reason: "drift" } },
-        };
-        const drift = await tool.handler(args);
-        expect((drift as any).isError).toBe(true);
-        const driftPayload = JSON.parse((drift as any).content[0].text);
-        expect(Object.hasOwn(driftPayload, "sessionUuid")).toBe(false);
-        expect(Object.hasOwn(driftPayload, "sessionId")).toBe(true);
-        expect(driftPayload.sessionId).toBe(first.sessionId);
-        expect(exactProvisioner.requests).toHaveLength(1);
-        expect(readinessCalls).toBe(4);
-        expect(operationStore.getStoredResult(args.operationId)?.resources).toMatchObject({
-          success: false,
-        });
-        const persistedDrift = operationStore.getStoredResult(args.operationId)!;
-        expect(persistedDrift.sessionId).toBe(driftPayload.sessionId);
-        expect(Object.hasOwn(persistedDrift, "sessionUuid")).toBe(false);
-      }
-      sessionManager.stopCleanupTimer();
-    },
-  );
-
   // #6227 (round 6 P1): `readiness: "none"` deliberately skips CtrlProxy /
   // accessibility-service setup in `ensureProvisionDeviceReadiness`, so the
   // freshly-bound session must NOT be recorded as `automationReady` — that
@@ -3650,7 +3293,6 @@ describe("provisionDevice handler", () => {
     const response = JSON.parse(
       (
         (await tool.handler({
-          operationId: "operation-readiness-none-record",
           device: {
             platform: "android",
             name: "phone-api-36-a",
@@ -3714,7 +3356,6 @@ describe("provisionDevice handler", () => {
       const response = JSON.parse(
         (
           (await tool.handler({
-            operationId: "operation-readiness-none-upgrade",
             device: {
               platform: "android",
               name: "phone-api-36-a",
@@ -3758,12 +3399,9 @@ describe("provisionDevice handler", () => {
     }
   });
 
-  test("marks the operation row terminal when a fresh attempt hits MCP session recovery", async () => {
+  test("reports MCP session recovery as a transient failure the caller can retry", async () => {
     // McpSessionRecoveryInProgressError is explicitly transient ("cannot remap
-    // until recovery finishes"), so the caller is expected to retry. Leaving
-    // the freshly admitted "running" row untouched would brick the
-    // operationId for the whole PROVISION_DEVICE_OPERATION_TTL_MS (~30m) with
-    // nothing actually running.
+    // until recovery finishes"), so the caller is expected to retry.
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => ({
         provision: async () => {
@@ -3778,713 +3416,21 @@ describe("provisionDevice handler", () => {
     }
 
     const response = await tool.handler({
-      ...provisionTestArgs("android", "operation-recovery-terminal"),
+      ...provisionTestArgs("android"),
       boot: false,
       readiness: "none",
     });
 
     expect(JSON.stringify(response)).toContain("recovering a device");
-    expect(operationStore.failures).toEqual([
-      { operationId: "operation-recovery-terminal", errorCode: "session_recovery_in_progress" },
-    ]);
   });
 
-  test("reconnecting during recovery preserves the live session and completed operation", async () => {
-    const originalAutolock = autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-    autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
-    const timer = new FakeTimer();
-    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      isolatedPoolDependencies(sessionManager, "daemon-session", {
-        env: autolockEnv,
-        timer: timer,
-        deviceManager: deviceManager,
-      }),
-    );
-    const bootedDevice = {
-      name: "phone-api-36-a",
-      platform: "android" as const,
-      deviceId: "mock-phone-api-36-a",
-    };
-    try {
-      deviceManager.setDeviceImages("android", [
-        {
-          name: "phone-api-36-a",
-          platform: "android",
-          isRunning: false,
-        },
-      ]);
-      await pool.initializeWithDevices([bootedDevice]);
-      DaemonState.getInstance().initialize(sessionManager, pool);
-      const tool = ToolRegistry.getTool("provisionDevice");
-      if (!tool) {
-        throw new Error("provisionDevice not registered");
-      }
-      const args = {
-        operationId: "operation-reconnected-mcp-session",
-        device: {
-          platform: "android" as const,
-          name: "phone-api-36-a",
-          spec: {
-            runtime: "system-images;android-36;google_apis;x86_64",
-            deviceType: "pixel_9",
-          },
-        },
-        boot: true,
-        readiness: "none" as const,
-      };
-
-      const first = JSON.parse(
-        (
-          (await tool.handler({
-            ...args,
-            __mcpSessionId: "mcp-session-original",
-          })) as any
-        ).content[0].text,
-      );
-      const recoveringDevice = {
-        ...bootedDevice,
-        deviceId: "recovering-device",
-        name: "Recovery AVD",
-      };
-      await pool.addDevice(recoveringDevice);
-      const recovery = await pool.reserveDeviceForShutdown(recoveringDevice.deviceId, undefined, {
-        mcpSessionId: "mcp-session-reconnected",
-        expectedSessionId: undefined,
-      });
-      const rejected = await tool.handler({ ...args, __mcpSessionId: "mcp-session-reconnected" });
-      expect(JSON.stringify(rejected)).toContain("recovering a device");
-      expect(sessionManager.getSession(first.sessionId)).not.toBeNull();
-      expect(pool.getDevice(bootedDevice.deviceId)?.sessionId).toBe(first.sessionId);
-      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-original")).toBe(
-        first.sessionId,
-      );
-      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-reconnected")).toBeUndefined();
-      // The deferred replay releases its exclusive replay claim, and doing so
-      // must leave the completed result intact for the retry below.
-      expect(operationStore.failCodes).toEqual(["session_recovery_in_progress"]);
-      expect(operationStore.getStoredResult(args.operationId)).toBeDefined();
-      recovery!.releaseRecoveryRouteLease();
-      await recovery!.release();
-      const second = JSON.parse(
-        (
-          (await tool.handler({
-            ...args,
-            __mcpSessionId: "mcp-session-reconnected",
-          })) as any
-        ).content[0].text,
-      );
-
-      for (const response of [first, second]) {
-        expect(Object.hasOwn(response, "sessionUuid")).toBe(false);
-        expect(Object.hasOwn(response, "sessionId")).toBe(true);
-      }
-      expect(second).toEqual(first);
-      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-reconnected", "android")).toBe(
-        first.sessionId,
-      );
-      const persisted = operationStore.getStoredResult(args.operationId)!;
-      expect(persisted.sessionId).toBe(second.sessionId);
-      expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
-    } finally {
-      sessionManager.stopCleanupTimer();
-      if (originalAutolock === undefined) {
-        delete autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-      } else {
-        autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
-      }
-    }
-  });
-
-  test("releases a live replay session when automation readiness fails", async () => {
-    const timer = new FakeTimer();
-    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      isolatedPoolDependencies(sessionManager, "daemon-session", {
-        env: autolockEnv,
-        timer: timer,
-        deviceManager: deviceManager,
-      }),
-    );
-    const bootedDevice = {
-      name: "phone-api-36-a",
-      platform: "android" as const,
-      deviceId: "mock-phone-api-36-a",
-    };
-    deviceManager.setDeviceImages("android", [
-      {
-        name: "phone-api-36-a",
-        platform: "android",
-        isRunning: false,
-      },
-    ]);
-    await pool.initializeWithDevices([bootedDevice]);
-    DaemonState.getInstance().initialize(sessionManager, pool);
-    let readinessCalls = 0;
-    setDeviceToolsDependencies({
-      ensureCtrlProxyReady: async () => {
-        readinessCalls++;
-        if (readinessCalls === 2) {
-          throw new Error("readiness failed");
-        }
-      },
-    });
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-    const args = {
-      operationId: "operation-replay-readiness-failure",
-      device: {
-        platform: "android" as const,
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
-        },
-      },
-      boot: true,
-      readiness: "automation" as const,
-    };
-
-    await tool.handler(args);
-    const failedReplay = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-
-    expect(failedReplay).toMatchObject({
-      success: false,
-      error: { code: "platform_command_failed" },
-    });
-    expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
-      sessionId: null,
-      status: "idle",
-    });
-    expect(operationStore.failCalls).toBe(1);
-    sessionManager.stopCleanupTimer();
-  });
-
-  test("rebinds an errored persisted session instead of replaying its stale readiness", async () => {
-    const timer = new FakeTimer();
-    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      isolatedPoolDependencies(sessionManager, "daemon-session", {
-        env: autolockEnv,
-        timer: timer,
-        deviceManager: deviceManager,
-      }),
-    );
-    const bootedDevice = {
-      name: "phone-api-36-a",
-      platform: "android" as const,
-      deviceId: "mock-phone-api-36-a",
-    };
-    deviceManager.setDeviceImages("android", [
-      {
-        name: "phone-api-36-a",
-        platform: "android",
-        isRunning: false,
-      },
-    ]);
-    await pool.initializeWithDevices([bootedDevice]);
-    DaemonState.getInstance().initialize(sessionManager, pool);
-
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-    const args = {
-      operationId: "operation-errored-session",
-      device: {
-        platform: "android" as const,
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
-        },
-      },
-      boot: true,
-      readiness: "none" as const,
-    };
-
-    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    const pooledDevice = pool.getDevice(bootedDevice.deviceId);
-    if (!pooledDevice) {
-      throw new Error("expected pooled device");
-    }
-    pooledDevice.status = "error";
-    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-
-    for (const response of [first, second]) {
-      expect(Object.hasOwn(response, "sessionUuid")).toBe(false);
-      expect(Object.hasOwn(response, "sessionId")).toBe(true);
-    }
-    const persisted = operationStore.getStoredResult(args.operationId)!;
-    expect(persisted.sessionId).toBe(second.sessionId);
-    expect(Object.hasOwn(persisted, "sessionUuid")).toBe(false);
-    expect(second.sessionId).not.toBe(first.sessionId);
-    expect(second).toMatchObject({
-      lifecycleState: "ready",
-      sessionId: expect.any(String),
-    });
-    expect(exactProvisioner.requests).toHaveLength(2);
-    expect(pool.getDevice(bootedDevice.deviceId)?.status).toBe("busy");
-    sessionManager.stopCleanupTimer();
-  });
-
-  test("releases the bound session when completion persistence fails", async () => {
-    const timer = new FakeTimer();
-    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      isolatedPoolDependencies(sessionManager, "daemon-session", {
-        env: autolockEnv,
-        timer: timer,
-        deviceManager: deviceManager,
-      }),
-    );
-    const bootedDevice = {
-      name: "phone-api-36-a",
-      platform: "android" as const,
-      deviceId: "mock-phone-api-36-a",
-    };
-    deviceManager.setDeviceImages("android", [
-      {
-        name: "phone-api-36-a",
-        platform: "android",
-        isRunning: false,
-      },
-    ]);
-    await pool.initializeWithDevices([bootedDevice]);
-    DaemonState.getInstance().initialize(sessionManager, pool);
-    sessionManager.stopCleanupTimer();
-    const releaseEntered = deferred();
-    const releaseGate = deferred();
-    const releaseSettled = deferred();
-    const releaseSession = sessionManager.releaseSession.bind(sessionManager);
-    sessionManager.releaseSession = async (...releaseArgs) => {
-      releaseEntered.resolve();
-      await releaseGate.promise;
-      try {
-        return await releaseSession(...releaseArgs);
-      } finally {
-        releaseSettled.resolve();
-      }
-    };
-    operationStore.completeError = new Error("database unavailable");
-    const failure = blockNextFailure(operationStore);
-    setDeviceToolsDependencies({ timer });
-    registerDeviceTools();
-
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-    const request = tool.handler({
-      operationId: "operation-persistence-failure",
-      device: {
-        platform: "android",
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
-        },
-      },
-      boot: true,
-      readiness: "none",
-      timeoutMs: 1_000,
-    });
-    await releaseEntered.promise;
-    expect(operationStore.failCalls).toBe(0);
-    releaseGate.resolve();
-    await releaseSettled.promise;
-    await failure.entered;
-    let settled = false;
-    void request.then(() => {
-      settled = true;
-    });
-    await flushMicrotasks();
-    expect(settled).toBe(false);
-
-    timer.advanceTime(1_000);
-    const response = JSON.parse(((await request) as any).content[0].text);
-    expect(response).toMatchObject({
-      success: false,
-      error: {
-        code: "platform_command_failed",
-      },
-    });
-
-    failure.release();
-    await Promise.all([failure.settled, releaseSettled.promise]);
-    expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
-      sessionId: null,
-      status: "idle",
-    });
-    expect(operationStore.failCalls).toBe(1);
-  });
-
-  test("waits for an in-flight TTL refresh before releasing a failed completion session", async () => {
-    const timer = new FakeTimer();
-    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      isolatedPoolDependencies(sessionManager, "daemon-session", {
-        env: autolockEnv,
-        timer: timer,
-        deviceManager: deviceManager,
-      }),
-    );
-    const bootedDevice = {
-      name: "phone-api-36-a",
-      platform: "android" as const,
-      deviceId: "mock-phone-api-36-a",
-    };
-    deviceManager.setDeviceImages("android", [
-      { name: bootedDevice.name, platform: "android", isRunning: false },
-    ]);
-    await pool.initializeWithDevices([bootedDevice]);
-    DaemonState.getInstance().initialize(sessionManager, pool);
-    sessionManager.stopCleanupTimer();
-
-    const extendEntered = deferred();
-    const extendGate = deferred();
-    const extend = operationStore.extend.bind(operationStore);
-    operationStore.extend = async (...args) => {
-      extendEntered.resolve();
-      await extendGate.promise;
-      return await extend(...args);
-    };
-    let releaseCalls = 0;
-    const releaseSession = sessionManager.releaseSession.bind(sessionManager);
-    sessionManager.releaseSession = async (...args) => {
-      releaseCalls++;
-      return await releaseSession(...args);
-    };
-    operationStore.completeError = new Error("database unavailable");
-    setDeviceToolsDependencies({ timer });
-    registerDeviceTools();
-
-    const request = ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("android", "operation-refresh-before-release"),
-      boot: true,
-      readiness: "none",
-    });
-    await extendEntered.promise;
-    await flushMicrotasks();
-    expect(releaseCalls).toBe(0);
-    extendGate.resolve();
-    expect(JSON.parse(((await request) as any).content[0].text).error.code).toBe(
-      "platform_command_failed",
-    );
-    expect(releaseCalls).toBe(1);
-    sessionManager.stopCleanupTimer();
-  });
-
-  test("keeps a failed replay non-replayable until its bound session is released", async () => {
-    const timer = new FakeTimer();
-    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      isolatedPoolDependencies(sessionManager, "daemon-session", {
-        env: autolockEnv,
-        timer: timer,
-        deviceManager: deviceManager,
-      }),
-    );
-    const bootedDevice = {
-      name: "phone-api-36-a",
-      platform: "android" as const,
-      deviceId: "mock-phone-api-36-a",
-    };
-    deviceManager.setDeviceImages("android", [
-      {
-        name: "phone-api-36-a",
-        platform: "android",
-        isRunning: false,
-      },
-    ]);
-    await pool.initializeWithDevices([bootedDevice]);
-    DaemonState.getInstance().initialize(sessionManager, pool);
-    sessionManager.stopCleanupTimer();
-    setDeviceToolsDependencies({ timer });
-    registerDeviceTools();
-    const args = {
-      ...provisionTestArgs("android", "replay-persistence-failure-release-order"),
-      boot: true,
-      readiness: "none" as const,
-      timeoutMs: 1_000,
-    };
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-
-    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    const releaseEntered = deferred();
-    const releaseGate = deferred();
-    const releaseSettled = deferred();
-    const releaseSession = sessionManager.releaseSession.bind(sessionManager);
-    sessionManager.releaseSession = async (...releaseArgs) => {
-      releaseEntered.resolve();
-      await releaseGate.promise;
-      try {
-        return await releaseSession(...releaseArgs);
-      } finally {
-        releaseSettled.resolve();
-      }
-    };
-    operationStore.completeError = new Error("database unavailable");
-    const failure = blockNextFailure(operationStore);
-    let failureEntered = false;
-    void failure.entered.then(() => {
-      failureEntered = true;
-    });
-
-    const replayRequest = tool.handler(args);
-    await releaseEntered.promise;
-    await flushMicrotasks();
-    expect(failureEntered).toBe(false);
-    expect(operationStore.failCalls).toBe(0);
-
-    const replayExpiry = operationStore.expiresAt(args.operationId);
-    if (replayExpiry === undefined) {
-      throw new Error("replay operation was not persisted");
-    }
-    // The release remains stalled past the replay's original TTL. The injected
-    // timer must extend it before a separate process retries the operation.
-    timer.advanceTime(replayExpiry + 1);
-    await flushMicrotasks();
-    expect(operationStore.extendCalls).toBeGreaterThan(1);
-
-    // A separate server process has no entry in this module-local map; clear
-    // it to exercise the durable begin() result that such a retry observes.
-    resetDeviceToolsDependencies();
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => deviceManager,
-      exactDeviceProvisionerFactory: () => exactProvisioner,
-      provisionDeviceOperationStoreFactory: () => operationStore,
-      teardownDeviceOperationStoreFactory: () => teardownOperationStore,
-      notifyResourcesChanged: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    registerDeviceTools();
-    const pendingRetry = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    expect(pendingRetry.error.code).toBe("operation_in_progress");
-
-    releaseGate.resolve();
-    await releaseSettled.promise;
-    await failure.entered;
-    failure.release();
-    const replay = JSON.parse(((await replayRequest) as any).content[0].text);
-    expect(replay).toMatchObject({
-      success: false,
-      error: { code: "platform_command_failed" },
-    });
-    expect(operationStore.failCalls).toBe(1);
-    expect(sessionManager.getAllSessionIds()).toEqual([]);
-    expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
-      sessionId: null,
-      status: "idle",
-    });
-
-    operationStore.completeError = undefined;
-    const retry = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    expect(retry.sessionId).toEqual(expect.any(String));
-    expect(retry.sessionId).not.toBe(first.sessionId);
-    expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
-      sessionId: retry.sessionId,
-      status: "busy",
-    });
-    sessionManager.stopCleanupTimer();
-  });
-
-  test("persists a completion failure after bound session release rejects", async () => {
-    const timer = new FakeTimer();
-    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      isolatedPoolDependencies(sessionManager, "daemon-session", {
-        env: autolockEnv,
-        timer: timer,
-        deviceManager: deviceManager,
-      }),
-    );
-    const bootedDevice = {
-      name: "phone-api-36-a",
-      platform: "android" as const,
-      deviceId: "mock-phone-api-36-a",
-    };
-    deviceManager.setDeviceImages("android", [
-      {
-        name: "phone-api-36-a",
-        platform: "android",
-        isRunning: false,
-      },
-    ]);
-    await pool.initializeWithDevices([bootedDevice]);
-    DaemonState.getInstance().initialize(sessionManager, pool);
-    sessionManager.stopCleanupTimer();
-    operationStore.completeError = new Error("database unavailable");
-    const complete = operationStore.complete.bind(operationStore);
-    operationStore.complete = async (...completeArgs) => {
-      sessionManager.releaseSession = async () => {
-        throw new Error("release unavailable");
-      };
-      return await complete(...completeArgs);
-    };
-    setDeviceToolsDependencies({ timer });
-    registerDeviceTools();
-
-    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("android", "release-rejection-persistence"),
-      boot: true,
-      readiness: "none",
-    });
-    const payload = JSON.parse((response as any).content[0].text);
-
-    expect(payload.error.code).toBe("platform_command_failed");
-    expect(operationStore.failCalls).toBe(1);
-    expect(operationStore.isFailed("release-rejection-persistence")).toBe(true);
-    sessionManager.stopCleanupTimer();
-  });
-
-  test("retains superseded completion handling without failing the newer attempt", async () => {
-    operationStore.completeReturnsFalse = true;
-
-    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("android", "operation-superseded-completion"),
-      boot: false,
-      readiness: "none",
-    });
-    const payload = JSON.parse((response as any).content[0].text);
-
-    expect(payload.error.code).toBe("operation_superseded");
-    expect(operationStore.failCalls).toBe(0);
-    expect(operationStore.getStoredResult("operation-superseded-completion")).toBeUndefined();
-  });
-
-  test("retains creation ownership when a completed boot operation rebinds", async () => {
-    let calls = 0;
-    const replayProvisioner: ExactDeviceProvisioner = {
-      provision: async (request) => {
-        calls++;
-        return {
-          created: calls === 1,
-          device: {
-            name: request.name,
-            platform: "android",
-            isRunning: false,
-          },
-          resolvedSpec: {
-            ...request.spec,
-            displayCutout: classifyDisplayCutout(request.platform, request.spec.deviceType),
-          },
-        };
-      },
-    };
-    deviceManager.setDeviceImages("android", [
-      {
-        name: "phone-api-36-a",
-        platform: "android",
-        isRunning: false,
-      },
-    ]);
-    setDeviceToolsDependencies({
-      exactDeviceProvisionerFactory: () => replayProvisioner,
-    });
-    registerDeviceTools();
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-    const args = {
-      operationId: "operation-preserve-created",
-      device: {
-        platform: "android" as const,
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
-        },
-      },
-      boot: true,
-      readiness: "none" as const,
-    };
-
-    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-
-    expect(calls).toBe(2);
-    expect(first).toMatchObject({ created: true, adopted: false });
-    expect(second).toMatchObject({ created: true, adopted: false });
-  });
-
-  test("takes creation ownership when a rebind re-creates a device the first attempt adopted", async () => {
-    let calls = 0;
-    const replayProvisioner: ExactDeviceProvisioner = {
-      provision: async (request) => {
-        calls++;
-        // The adopted device disappeared between attempts, so the rebind
-        // genuinely creates it.
-        if (calls > 1) {
-          await request.onBeforeCreate?.();
-        }
-        return {
-          created: calls > 1,
-          device: {
-            name: request.name,
-            platform: "android",
-            isRunning: false,
-          },
-          resolvedSpec: {
-            ...request.spec,
-            displayCutout: classifyDisplayCutout(request.platform, request.spec.deviceType),
-          },
-        };
-      },
-    };
-    deviceManager.setDeviceImages("android", [
-      {
-        name: "phone-api-36-a",
-        platform: "android",
-        isRunning: false,
-      },
-    ]);
-    setDeviceToolsDependencies({
-      exactDeviceProvisionerFactory: () => replayProvisioner,
-    });
-    registerDeviceTools();
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-    const args = {
-      operationId: "operation-rebind-recreated",
-      device: {
-        platform: "android" as const,
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
-        },
-      },
-      boot: true,
-      readiness: "none" as const,
-    };
-
-    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    const second = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-
-    expect(calls).toBe(2);
-    expect(first).toMatchObject({ created: false, adopted: true });
-    // A caller that only deletes what AutoMobile created must not be told this
-    // device was adopted.
-    expect(second).toMatchObject({ created: true, adopted: false });
-  });
-
-  test("preserves the removed lifecycle after a successful rollback", async () => {
+  test("a retry after a successful rollback provisions afresh", async () => {
     let calls = 0;
     const retryingProvisioner: ExactDeviceProvisioner = {
       provision: async (request) => {
         calls++;
         if (calls === 1) {
-          await request.onBeforeCreate?.();
+          request.onBeforeCreate?.();
         } else {
           deviceManager.setBootedDevices("android", [
             { name: request.name, platform: "android", deviceId: "emulator-5554" },
@@ -4527,7 +3473,6 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
     const args = {
-      operationId: "operation-retry-created-ownership",
       device: {
         platform: "android" as const,
         name: "phone-api-36-a",
@@ -4543,16 +3488,15 @@ describe("provisionDevice handler", () => {
     const failed = JSON.parse(((await tool.handler(args)) as any).content[0].text);
     const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
 
-    expect(failed).toMatchObject({ success: false });
-    expect(retried).toMatchObject({
+    expect(failed).toMatchObject({
       success: false,
-      operationId: args.operationId,
       lifecycle: { state: "removed", cleanup: { status: "succeeded" } },
     });
-    expect(calls).toBe(1);
+    expect(retried).toMatchObject({ lifecycleState: "ready" });
+    expect(calls).toBe(2);
   });
 
-  test("cancels the lifecycle and reports request_cancelled when the last waiter aborts", async () => {
+  test("cancels the lifecycle and reports request_cancelled when its caller aborts", async () => {
     let provisionSignal: AbortSignal | undefined;
     let observedAbort = false;
     setDeviceToolsDependencies({
@@ -4577,16 +3521,25 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
     const args = {
-      ...provisionTestArgs("android", "operation-sole-caller-abort"),
+      ...provisionTestArgs("android"),
       boot: false,
       readiness: "none" as const,
+      // The daemon forwards its per-call key; the outcome is published under it (#11065).
+      __mcpLiveDeadlineKey: "forwarded-call-key",
     };
 
     const caller = new AbortController();
+    const published: unknown[] = [];
+    const awaited = provisionCancellationOutcomes
+      .await("forwarded-call-key", 60_000, new FakeTimer())
+      .then((outcome) => published.push(outcome));
     const call = tool.handler(args, undefined, caller.signal);
     await Promise.resolve();
     caller.abort(new Error("client went away"));
     const response = await call;
+    await awaited;
+    // The socket layer's abandoned-request reply receives the same typed result (#11074).
+    expect(published).toEqual([response]);
     for (let attempt = 0; attempt < 10; attempt++) {
       await Promise.resolve();
     }
@@ -4599,10 +3552,61 @@ describe("provisionDevice handler", () => {
     expect(JSON.parse((response as any).content[0].text)).toMatchObject({
       success: false,
       error: { code: "request_cancelled" },
-      operationId: args.operationId,
-      operationContinues: false,
+      recovery: {
+        boundary: "caller_cancellation",
+        outcomes: { settlement: "settled", deviceCreation: "not_created" },
+        nextAction: { action: "retry", automaticRetrySafe: true },
+      },
     });
-    expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
+  });
+
+  // #11064: the cancellation response must not tell the caller to reacquire
+  // the device the rollback just destroyed.
+  test("a cancelled provision whose rollback removed the device reports it removed", async () => {
+    const platform = "android" as const;
+    const provisioned = provisionedTestDevice(platform, true);
+    configureProvisionBootAndTeardown(deviceManager, platform);
+    const readinessEntered = deferred();
+    const releaseReadiness = deferred();
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          request.onBeforeCreate?.();
+          deviceManager.setDeviceImages(platform, [provisioned.device]);
+          return provisioned;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        readinessEntered.resolve();
+        await releaseReadiness.promise;
+        throw new Error("readiness aborted by cancellation");
+      },
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = provisionTestArgs(platform);
+
+    const caller = new AbortController();
+    const call = tool.handler(args, undefined, caller.signal);
+    await readinessEntered.promise;
+    caller.abort(new Error("client went away"));
+    releaseReadiness.resolve();
+    const response = JSON.parse(((await call) as { content: { text: string }[] }).content[0].text);
+
+    expect(response).toMatchObject({
+      error: { code: "request_cancelled" },
+      recovery: {
+        boundary: "caller_cancellation",
+        phaseReached: "cleanup",
+        outcomes: { settlement: "settled" },
+        cleanup: { status: "reported_complete_unverified" },
+        nextAction: { action: "retry", automaticRetrySafe: true },
+      },
+    });
+    expect(response.recovery.nextAction.action).not.toBe("reacquire_retained_device");
   });
 
   test("releases the stable lifecycle lease when the cold-boot settlement rejects", async () => {
@@ -4650,7 +3654,7 @@ describe("provisionDevice handler", () => {
       lifecycleCoordinator,
       exactDeviceProvisionerFactory: () => ({
         provision: async (request) => {
-          await request.onBeforeCreate?.();
+          request.onBeforeCreate?.();
           deviceManager.setDeviceImages(platform, [provisioned.device]);
           return provisioned;
         },
@@ -4665,7 +3669,7 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
 
-    await tool.handler(provisionTestArgs(platform, "operation-rejected-cold-boot-settlement"));
+    await tool.handler(provisionTestArgs(platform));
     for (let drain = 0; drain < 25; drain++) {
       await Promise.resolve();
     }
@@ -4706,7 +3710,7 @@ describe("provisionDevice handler", () => {
       throw new Error("provisionDevice not registered");
     }
     const args = {
-      ...provisionTestArgs("android", "operation-retry-after-sole-abort"),
+      ...provisionTestArgs("android"),
       boot: false,
       readiness: "none" as const,
     };
@@ -4722,7 +3726,11 @@ describe("provisionDevice handler", () => {
     const cancelled = JSON.parse(((await call) as any).content[0].text);
     expect(cancelled).toMatchObject({
       error: { code: "request_cancelled" },
-      operationContinues: false,
+      recovery: {
+        boundary: "caller_cancellation",
+        outcomes: { settlement: "settled", deviceCreation: "not_created" },
+        nextAction: { action: "retry", automaticRetrySafe: true },
+      },
     });
 
     // Once cancellation is reported, a retry runs its own provision instead
@@ -4734,207 +3742,8 @@ describe("provisionDevice handler", () => {
     const retried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
     expect(retried.error?.code).not.toBe("request_cancelled");
     expect(retried.error).toBeUndefined();
-    expect(retried).toMatchObject({ operationId: args.operationId });
+    expect(retried).toMatchObject({ created: true });
     expect(provisionCalls).toBe(2);
-  });
-
-  test("tells a detaching joiner that the shared operation continues", async () => {
-    const timer = new FakeTimer();
-    let resolveProvision!: (result: ExactProvisionedDevice) => void;
-    setDeviceToolsDependencies({
-      timer,
-      exactDeviceProvisionerFactory: () => ({
-        provision: async () =>
-          await new Promise<ExactProvisionedDevice>((resolve) => {
-            resolveProvision = resolve;
-          }),
-      }),
-    });
-    registerDeviceTools();
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-    const args = {
-      ...provisionTestArgs("android", "operation-joiner-abort"),
-      boot: false,
-      readiness: "none" as const,
-    };
-
-    const initiator = tool.handler(args);
-    await Promise.resolve();
-    const joinerController = new AbortController();
-    const joiner = tool.handler(args, undefined, joinerController.signal);
-    await Promise.resolve();
-    joinerController.abort(new Error("joiner disconnected"));
-    let joinerSettled = false;
-    void joiner.then(() => {
-      joinerSettled = true;
-    });
-    await flushMicrotasks();
-    expect(joinerSettled).toBe(false);
-
-    resolveProvision(provisionedTestDevice("android", true));
-    const joinerResponse = await joiner;
-
-    expect(JSON.parse((joinerResponse as any).content[0].text)).toMatchObject({
-      success: false,
-      error: { code: "request_cancelled" },
-      operationId: args.operationId,
-      operationContinues: true,
-    });
-
-    expect(JSON.parse(((await initiator) as any).content[0].text)).toMatchObject({
-      operationId: args.operationId,
-    });
-  });
-
-  test("keeps a shared operation running when its initiating caller aborts", async () => {
-    const timer = new FakeTimer();
-    let resolveProvision!: (result: ExactProvisionedDevice) => void;
-    let provisionSignal: AbortSignal | undefined;
-    const pendingProvisioner: ExactDeviceProvisioner = {
-      provision: async (request) =>
-        await new Promise<ExactProvisionedDevice>((resolve) => {
-          provisionSignal = request.signal;
-          resolveProvision = resolve;
-        }),
-    };
-    setDeviceToolsDependencies({
-      timer,
-      exactDeviceProvisionerFactory: () => pendingProvisioner,
-    });
-    registerDeviceTools();
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-    const args = {
-      operationId: "operation-shared-abort",
-      device: {
-        platform: "android" as const,
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "system-images;android-36;google_apis;x86_64",
-          deviceType: "pixel_9",
-        },
-      },
-      boot: false,
-      readiness: "none" as const,
-    };
-    const firstCaller = new AbortController();
-    const first = tool.handler(args, undefined, firstCaller.signal);
-    await Promise.resolve();
-    const second = tool.handler(args);
-    firstCaller.abort(new Error("first caller disconnected"));
-    let firstSettled = false;
-    void first.then(() => {
-      firstSettled = true;
-    });
-    await flushMicrotasks();
-    expect(firstSettled).toBe(false);
-    expect(provisionSignal?.aborted).toBe(false);
-
-    resolveProvision({
-      created: true,
-      device: {
-        name: "phone-api-36-a",
-        platform: "android",
-        isRunning: false,
-      },
-      resolvedSpec: {
-        ...args.device.spec,
-        displayCutout: classifyDisplayCutout(args.device.platform, args.device.spec.deviceType),
-      },
-    });
-
-    expect(JSON.parse(((await second) as any).content[0].text)).toMatchObject({
-      operationId: "operation-shared-abort",
-    });
-    expect(JSON.parse(((await first) as any).content[0].text)).toMatchObject({ success: false });
-    expect(provisionSignal?.aborted).toBe(false);
-  });
-
-  test("returns a typed operation conflict when an operationId is reused for a different request", async () => {
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-    const base = {
-      operationId: "operation-conflict",
-      device: {
-        platform: "ios",
-        name: "phone-api-36-a",
-        spec: {
-          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
-          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-          displayCutout: "any",
-        },
-      },
-      boot: false,
-      readiness: "none",
-    };
-
-    await tool.handler(base);
-    const conflicting = JSON.parse(
-      (
-        (await tool.handler({
-          ...base,
-          device: {
-            ...base.device,
-            spec: {
-              ...base.device.spec,
-              displayCutout: "dynamic_island",
-            },
-          },
-        })) as any
-      ).content[0].text,
-    );
-
-    expect(conflicting).toMatchObject({
-      success: false,
-      error: {
-        code: "operation_conflict",
-      },
-    });
-  });
-
-  test("reports in-progress instead of re-running provisioning for an already-running operation", async () => {
-    operationStore.markInProgress("operation-already-running");
-
-    const tool = ToolRegistry.getTool("provisionDevice");
-    if (!tool) {
-      throw new Error("provisionDevice not registered");
-    }
-
-    const response = JSON.parse(
-      (
-        (await tool.handler({
-          operationId: "operation-already-running",
-          device: {
-            platform: "android",
-            name: "phone-api-36-a",
-            spec: {
-              runtime: "system-images;android-36;google_apis;x86_64",
-              deviceType: "pixel_9",
-            },
-          },
-          boot: false,
-          readiness: "none",
-        })) as any
-      ).content[0].text,
-    );
-
-    expect(response).toMatchObject({
-      success: false,
-      error: {
-        code: "operation_in_progress",
-      },
-    });
-    // The lifecycle must never run for an in-progress row -- otherwise this is
-    // just the #6652 defect-1 restart bug wearing a different response shape.
-    expect(exactProvisioner.requests).toHaveLength(0);
-    expect(operationStore.failCalls).toBe(0);
   });
 
   test.each(["android", "ios"] as const)(
@@ -4952,7 +3761,7 @@ describe("provisionDevice handler", () => {
       };
       setDeviceToolsDependencies({ timer });
       const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-        ...provisionTestArgs(platform, `boot-timeout-${platform}`),
+        ...provisionTestArgs(platform),
         timeoutMs: 180_000,
       });
       const payload = JSON.parse((response as any).content[0].text);
@@ -5004,7 +3813,7 @@ describe("provisionDevice handler", () => {
       });
       try {
         const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-          ...provisionTestArgs("android", `delayed-release-${failReadiness}`),
+          ...provisionTestArgs("android"),
           timeoutMs: 1_000,
         });
         const payload = JSON.parse((response as any).content[0].text);
@@ -5049,288 +3858,13 @@ describe("provisionDevice handler", () => {
     pool.bindOrReuseDeviceSession = async () => await new Promise<string>(() => {});
     setDeviceToolsDependencies({ timer, ensureCtrlProxyReady: async () => {} });
     const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("android", "pending-final-binding"),
+      ...provisionTestArgs("android"),
       timeoutMs: 1_000,
     });
     const payload = JSON.parse((response as any).content[0].text);
     expect(payload.error.code).toBe("timeout");
     expect(payload.error.message).toContain("binding the device session");
     expect(sessionManager.getAllSessionIds()).toEqual([]);
-  });
-
-  test("bounds stopped provisioning completion by the original deadline", async () => {
-    const timer = new FakeTimer();
-    setDeviceToolsDependencies({ timer });
-    registerDeviceTools();
-    const completion = blockNextCompletion(operationStore);
-    const args = {
-      ...provisionTestArgs("android", "pending-stopped-completion"),
-      boot: false,
-      readiness: "none" as const,
-      timeoutMs: 1_000,
-    };
-
-    let payload: Record<string, any> | undefined;
-    const request = ToolRegistry.getTool("provisionDevice")!
-      .handler(args)
-      .then((response) => {
-        payload = JSON.parse((response as any).content[0].text);
-        return response;
-      });
-    await completion.entered;
-    timer.advanceTime(10_000);
-    await flushMicrotasks();
-    const payloadAtDeadline = payload;
-
-    let retryPayload: Record<string, any> | undefined;
-    let persistedRetry: Record<string, unknown> | undefined;
-    try {
-      expect(payloadAtDeadline?.error.code).toBe("timeout");
-      expect(payloadAtDeadline?.error.message).toContain("persisting the final operation result");
-      expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
-      expect(operationStore.failCalls).toBe(1);
-
-      const retry = await ToolRegistry.getTool("provisionDevice")!.handler(args);
-      retryPayload = JSON.parse((retry as any).content[0].text);
-      persistedRetry = structuredClone(operationStore.getStoredResult(args.operationId));
-    } finally {
-      completion.release();
-      await request;
-      await completion.settled;
-      await flushMicrotasks();
-    }
-
-    expect(retryPayload).toMatchObject({ lifecycleState: "created" });
-    expect(operationStore.getStoredResult(args.operationId)).toEqual(persistedRetry);
-  });
-
-  test.each(["android", "ios"] as const)(
-    "%s bounds a blocked operation admission without starting a device mutation",
-    async (platform) => {
-      const timer = new FakeTimer();
-      setDeviceToolsDependencies({ timer });
-      registerDeviceTools();
-      const begin = blockNextBegin(operationStore);
-      const args = {
-        ...provisionTestArgs(platform, `pending-operation-begin-${platform}`),
-        readiness: "none" as const,
-        timeoutMs: 1_000,
-      };
-      let payload: Record<string, any> | undefined;
-      const request = ToolRegistry.getTool("provisionDevice")!
-        .handler(args)
-        .then((response) => {
-          payload = JSON.parse((response as any).content[0].text);
-          return response;
-        });
-
-      await begin.entered;
-      timer.advanceTime(1_000);
-      await flushMicrotasks();
-      const payloadAtDeadline = payload;
-      try {
-        expect(payloadAtDeadline?.error).toMatchObject({
-          code: "timeout",
-          message: expect.stringContaining("starting provision operation"),
-        });
-        expect(exactProvisioner.requests).toHaveLength(0);
-        expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
-      } finally {
-        begin.release();
-        await request;
-        await begin.settled;
-        await flushMicrotasks();
-      }
-
-      expect(exactProvisioner.requests).toHaveLength(0);
-      expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
-      expect(operationStore.failures).toEqual([
-        { operationId: args.operationId, errorCode: "timeout" },
-      ]);
-    },
-  );
-
-  test.each(["android", "ios"] as const)(
-    "%s does not hold a failed provision open for persistence and fences its late settlement",
-    async (platform) => {
-      const timer = new FakeTimer();
-      exactProvisioner.provision = async () => {
-        throw new Error("provisioning backend failed");
-      };
-      setDeviceToolsDependencies({ timer });
-      registerDeviceTools();
-      const failure = blockNextFailure(operationStore);
-      const args = {
-        ...provisionTestArgs(platform, `pending-failure-persistence-${platform}`),
-        boot: false,
-        readiness: "none" as const,
-        timeoutMs: 1_000,
-      };
-      let payload: Record<string, any> | undefined;
-      const request = ToolRegistry.getTool("provisionDevice")!
-        .handler(args)
-        .then((response) => {
-          payload = JSON.parse((response as any).content[0].text);
-          return response;
-        });
-
-      await failure.entered;
-      timer.advanceTime(1_000);
-      await flushMicrotasks();
-      const payloadAtDeadline = payload;
-      try {
-        expect(payloadAtDeadline?.error).toMatchObject({
-          code: "platform_command_failed",
-          message: expect.stringContaining("provisioning backend failed"),
-        });
-
-        operationStore.takeOverAttempt(args.operationId, "replacement-attempt");
-      } finally {
-        failure.release();
-        await request;
-        await failure.settled;
-      }
-
-      expect(operationStore.failCalls).toBe(0);
-    },
-  );
-
-  test("releases a booted session when final completion exceeds the original deadline", async () => {
-    const timer = new FakeTimer();
-    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    sessionManager.stopCleanupTimer();
-    const pool = new DevicePool(
-      isolatedPoolDependencies(sessionManager, "daemon-session", {
-        env: autolockEnv,
-        timer: timer,
-        deviceManager: deviceManager,
-      }),
-    );
-    const bootedDevice = {
-      name: "phone-api-36-a",
-      platform: "android" as const,
-      deviceId: "mock-phone-api-36-a",
-    };
-    deviceManager.setDeviceImages("android", [
-      {
-        name: "phone-api-36-a",
-        platform: "android",
-        isRunning: false,
-      },
-    ]);
-    await pool.initializeWithDevices([bootedDevice]);
-    DaemonState.getInstance().initialize(sessionManager, pool);
-    const releaseEntered = deferred();
-    const releaseGate = deferred();
-    const releaseSettled = deferred();
-    const releaseSession = sessionManager.releaseSession.bind(sessionManager);
-    sessionManager.releaseSession = async (...releaseArgs) => {
-      releaseEntered.resolve();
-      await releaseGate.promise;
-      try {
-        return await releaseSession(...releaseArgs);
-      } finally {
-        releaseSettled.resolve();
-      }
-    };
-    setDeviceToolsDependencies({ timer });
-    registerDeviceTools();
-    const completion = blockNextCompletion(operationStore);
-    const failure = blockNextFailure(operationStore);
-    const args = {
-      ...provisionTestArgs("android", "pending-booted-completion"),
-      boot: true,
-      readiness: "none" as const,
-      timeoutMs: 1_000,
-    };
-
-    let payload: Record<string, any> | undefined;
-    const request = ToolRegistry.getTool("provisionDevice")!
-      .handler(args)
-      .then((response) => {
-        payload = JSON.parse((response as any).content[0].text);
-        return response;
-      });
-    await completion.entered;
-    timer.advanceTime(10_000);
-    await flushMicrotasks();
-    await releaseEntered.promise;
-    const payloadAtDeadline = payload;
-
-    await request;
-    expect(payloadAtDeadline?.error.code).toBe("timeout");
-    expect(payloadAtDeadline?.error.message).toContain("persisting the final operation result");
-    expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
-      sessionId: expect.any(String),
-      status: "busy",
-    });
-    const pendingRetryResponse = await ToolRegistry.getTool("provisionDevice")!.handler(args);
-    const pendingRetry = JSON.parse((pendingRetryResponse as any).content[0].text);
-    expect(pendingRetry.error.code).toBe("operation_in_progress");
-
-    releaseGate.resolve();
-    await releaseSettled.promise;
-    await failure.entered;
-    failure.release();
-    await failure.settled;
-    expect(sessionManager.getAllSessionIds()).toEqual([]);
-    expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
-    expect(operationStore.failCalls).toBe(1);
-
-    const retryResponse = await ToolRegistry.getTool("provisionDevice")!.handler(args);
-    const retry = JSON.parse((retryResponse as any).content[0].text);
-    const persistedRetry = structuredClone(operationStore.getStoredResult(args.operationId));
-    expect(retry.sessionId).toEqual(expect.any(String));
-
-    completion.release();
-    await completion.settled;
-    await flushMicrotasks();
-    expect(operationStore.getStoredResult(args.operationId)).toEqual(persistedRetry);
-    expect(pool.getDevice(bootedDevice.deviceId)).toMatchObject({
-      sessionId: retry.sessionId,
-      status: "busy",
-    });
-  });
-
-  test("releases a replay claim when final completion exceeds the original deadline", async () => {
-    const timer = new FakeTimer();
-    setDeviceToolsDependencies({ timer });
-    registerDeviceTools();
-    const args = {
-      ...provisionTestArgs("android", "pending-replay-completion"),
-      boot: false,
-      readiness: "none" as const,
-      timeoutMs: 1_000,
-    };
-    const firstResponse = await ToolRegistry.getTool("provisionDevice")!.handler(args);
-    const first = JSON.parse((firstResponse as any).content[0].text);
-    const persisted = structuredClone(operationStore.getStoredResult(args.operationId));
-    const completion = blockNextCompletion(operationStore);
-
-    let payload: Record<string, any> | undefined;
-    const request = ToolRegistry.getTool("provisionDevice")!
-      .handler(args)
-      .then((response) => {
-        payload = JSON.parse((response as any).content[0].text);
-        return response;
-      });
-    await completion.entered;
-    timer.advanceTime(10_000);
-    await flushMicrotasks();
-    const payloadAtDeadline = payload;
-
-    completion.release();
-    await request;
-    await completion.settled;
-    await flushMicrotasks();
-
-    expect(payloadAtDeadline?.error.code).toBe("timeout");
-    expect(payloadAtDeadline?.error.message).toContain("persisting the final operation result");
-    expect(operationStore.getStoredResult(args.operationId)).toEqual(persisted);
-    expect(operationStore.failCalls).toBe(1);
-
-    const replay = await ToolRegistry.getTool("provisionDevice")!.handler(args);
-    expect(JSON.parse((replay as any).content[0].text)).toEqual(first);
   });
 
   test("enforces timeoutMs across exact provisioning before boot begins", async () => {
@@ -5359,7 +3893,6 @@ describe("provisionDevice handler", () => {
     }
 
     const args = {
-      operationId: "operation-timeout",
       device: {
         platform: "android",
         name: "phone-api-36-a",
@@ -5382,7 +3915,6 @@ describe("provisionDevice handler", () => {
 
     expect(JSON.parse(((await response) as any).content[0].text)).toMatchObject({
       success: false,
-      operationId: args.operationId,
       error: {
         code: "timeout",
       },
@@ -5394,13 +3926,6 @@ describe("provisionDevice handler", () => {
     });
     expect(provisionSignal?.aborted).toBe(true);
     expect(deviceManager.wasMethodCalled("startDevice")).toBe(false);
-    const queried = JSON.parse(((await tool.handler(args)) as any).content[0].text);
-    expect(queried).toMatchObject({
-      success: false,
-      operationId: args.operationId,
-      error: { code: "timeout" },
-      lifecycle: { state: "no_device_created" },
-    });
     expect(provisionCalls).toBe(1);
   });
 
@@ -5421,7 +3946,7 @@ describe("provisionDevice handler", () => {
       }
 
       const response = await tool.handler({
-        ...provisionTestArgs("android", `operation-internal-${param}`),
+        ...provisionTestArgs("android"),
         boot: false,
         readiness: "none",
         [param]: value,
@@ -5429,7 +3954,6 @@ describe("provisionDevice handler", () => {
 
       expect((response as any).isError).toBeUndefined();
       expect(JSON.parse((response as any).content[0].text)).toMatchObject({
-        operationId: `operation-internal-${param}`,
         lifecycleState: "created",
       });
     },
@@ -5442,7 +3966,7 @@ describe("provisionDevice handler", () => {
     }
 
     const response = await tool.handler({
-      ...provisionTestArgs("android", "operation-invalid-args"),
+      ...provisionTestArgs("android"),
       boot: false,
       readiness: "none",
       totallyUnknownKey: "nope",
@@ -5496,7 +4020,7 @@ describe("provisionDevice handler", () => {
     });
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("android", "cold-boot-settlement"),
+      ...provisionTestArgs("android"),
       timeoutMs: 60_000,
     });
     expect((response as any).isError).toBe(true);
@@ -5545,14 +4069,13 @@ describe("provisionDevice handler", () => {
     });
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("android", "readiness-budget-timeout"),
+      ...provisionTestArgs("android"),
       timeoutMs: 60_000,
     });
 
     expect(JSON.parse((response as any).content[0].text)).toMatchObject({
       error: { code: "timeout", retryable: true },
     });
-    expect(operationStore.failCodes).toEqual(["timeout"]);
   });
 
   test.each(["device_lost", "device_offline"] as const)(
@@ -5600,9 +4123,7 @@ describe("provisionDevice handler", () => {
         ensureCtrlProxyReady: (request) => service.ensureReady(request),
       });
 
-      const response = JSON.parse(
-        await provisionResponseText(provisionTestArgs("android", `real-readiness-${code}`)),
-      );
+      const response = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
       expect(response).toMatchObject({
         error: {
           code,
@@ -5614,12 +4135,34 @@ describe("provisionDevice handler", () => {
           ...(code === "device_lost" ? { incidentId: "readiness-incident" } : {}),
         },
       });
-      expect(operationStore.failCodes).toEqual([code]);
       expect(timer.getSleepHistory()).toEqual([]);
     },
   );
 
-  test("preserves missing-device diagnostics and reuses the failed operation identity", async () => {
+  test("a device held by another session is a typed retryable device_owned_by_other_session failure", async () => {
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        throw deviceAlreadyAssignedToAnotherSessionError("emulator-5554");
+      },
+    });
+
+    const response = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+    expect(response).toMatchObject({
+      error: {
+        code: "device_owned_by_other_session",
+        retryable: true,
+        deviceId: "emulator-5554",
+      },
+    });
+  });
+
+  // #11065: a repeated call re-runs readiness instead of replaying a stored failure.
+  test("preserves missing-device diagnostics and re-runs readiness on a repeated call", async () => {
     deviceManager.setBootedDevices("android", [
       { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
     ]);
@@ -5643,13 +4186,12 @@ describe("provisionDevice handler", () => {
         );
       },
     });
-    const args = provisionTestArgs("android", "missing-device-operation-reuse");
+    const args = provisionTestArgs("android");
 
     const first = JSON.parse(await provisionResponseText(args));
-    const replay = JSON.parse(await provisionResponseText(args));
+    const repeated = JSON.parse(await provisionResponseText(args));
 
     expect(first).toMatchObject({
-      operationId: "missing-device-operation-reuse",
       error: {
         code: "device_lost",
         providerCode: "device_lost",
@@ -5661,8 +4203,17 @@ describe("provisionDevice handler", () => {
         daemonBuild: expect.any(String),
       },
     });
-    expect(replay).toMatchObject(first);
-    expect(readinessCalls).toBe(1);
+    expect(repeated.error).toMatchObject(first.error);
+    expect(readinessCalls).toBe(2);
+    expect(first.recovery).toMatchObject({
+      boundary: "readiness_failure",
+      // The recorded lifecycle says this request created nothing.
+      outcomes: { deviceCreation: "not_created" },
+      cleanup: { status: "unnecessary" },
+      originalError: { code: "device_lost" },
+      nextAction: { action: "retry", automaticRetrySafe: true },
+    });
+    expect(first.recovery).not.toHaveProperty("operationId");
   });
 
   test("reports a non-retryable identity conflict from the provisioning path", async () => {
@@ -5674,7 +4225,7 @@ describe("provisionDevice handler", () => {
     };
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler(
-      provisionTestArgs("android", "identity-conflict-retryability"),
+      provisionTestArgs("android"),
     );
 
     expect(JSON.parse((response as any).content[0].text)).toMatchObject({
@@ -5687,7 +4238,7 @@ describe("provisionDevice handler", () => {
     const created = provisionedTestDevice("android", true);
     configureProvisionBootAndTeardown(deviceManager, "android");
     exactProvisioner.provision = async (request) => {
-      await request.onBeforeCreate?.();
+      request.onBeforeCreate?.();
       deviceManager.setDeviceImages("android", [created.device]);
       throw new ProvisionDeviceError("timeout", "provisioning timed out");
     };
@@ -5695,7 +4246,7 @@ describe("provisionDevice handler", () => {
     const response = JSON.parse(
       (
         (await ToolRegistry.getTool("provisionDevice")!.handler(
-          provisionTestArgs("android", "timeout-rollback-success"),
+          provisionTestArgs("android"),
         )) as any
       ).content[0].text,
     );
@@ -5707,13 +4258,13 @@ describe("provisionDevice handler", () => {
     });
   });
 
-  test("publishes and replays the terminal lifecycle after a cold-boot readiness timeout", async () => {
+  test("publishes the terminal lifecycle after a cold-boot readiness timeout", async () => {
     const created = provisionedTestDevice("android", true);
     configureProvisionBootAndTeardown(deviceManager, "android");
     let provisionCalls = 0;
     exactProvisioner.provision = async (request) => {
       provisionCalls++;
-      await request.onBeforeCreate?.();
+      request.onBeforeCreate?.();
       deviceManager.setDeviceImages("android", [created.device]);
       return created;
     };
@@ -5722,22 +4273,14 @@ describe("provisionDevice handler", () => {
       ensureCtrlProxyReady: async () => {
         throw new ProvisionDeviceError("timeout", "automation readiness exceeded the deadline");
       },
-      idGenerator: new FakeIdGenerator([
-        "attempt-cold-timeout",
-        "cleanup-cold-timeout",
-        "query-cold-timeout",
-      ]),
+      idGenerator: new FakeIdGenerator(["cleanup-cold-timeout", "query-cold-timeout"]),
     });
     registerDeviceTools();
-    const args = provisionTestArgs("android", "cold-timeout-lifecycle");
+    const args = provisionTestArgs("android");
 
     const first = JSON.parse(
       ((await ToolRegistry.getTool("provisionDevice")!.handler(args)) as any).content[0].text,
     );
-    const queried = JSON.parse(
-      ((await ToolRegistry.getTool("provisionDevice")!.handler(args)) as any).content[0].text,
-    );
-
     const lifecycle = {
       state: "removed",
       phase: "cleanup",
@@ -5754,18 +4297,10 @@ describe("provisionDevice handler", () => {
       cleanup: {
         status: "succeeded",
         reason: "readiness_timeout",
-        operationId: "cleanup-cold-timeout",
       },
     };
     expect(first).toMatchObject({
       success: false,
-      operationId: args.operationId,
-      error: { code: "timeout" },
-      lifecycle,
-    });
-    expect(queried).toMatchObject({
-      success: false,
-      operationId: args.operationId,
       error: { code: "timeout" },
       lifecycle,
     });
@@ -5782,7 +4317,7 @@ describe("provisionDevice handler", () => {
     const created = provisionedTestDevice("android", true);
     configureProvisionBootAndTeardown(deviceManager, "android");
     exactProvisioner.provision = async (request) => {
-      await request.onBeforeCreate?.();
+      request.onBeforeCreate?.();
       deviceManager.setDeviceImages("android", [created.device]);
       throw new ProvisionDeviceError("timeout", "provisioning timed out");
     };
@@ -5793,7 +4328,7 @@ describe("provisionDevice handler", () => {
     const response = JSON.parse(
       (
         (await ToolRegistry.getTool("provisionDevice")!.handler(
-          provisionTestArgs("android", "timeout-rollback-failure"),
+          provisionTestArgs("android"),
         )) as any
       ).content[0].text,
     );
@@ -5852,7 +4387,7 @@ describe("provisionDevice handler", () => {
     });
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("android", "boot-budget-slice"),
+      ...provisionTestArgs("android"),
       timeoutMs: 60_000,
     });
 
@@ -5870,6 +4405,72 @@ describe("provisionDevice handler", () => {
   // autolock client, so it reset the shared per-device CtrlProxy manager and
   // rewrote device resource settings on another MCP client's live device, only
   // failing afterwards at the bind.
+  // #11065: with no operationId replay, a second client's provision of the
+  // same exact device can never attach to the first client's session; it is
+  // refused by session ownership while the first client keeps the device.
+  test("refuses a concurrent provision of the same device from another MCP client", async () => {
+    const originalAutolock = autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessionManager.stopCleanupTimer();
+    const pool = new DevicePool(
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
+    try {
+      const booted = {
+        name: "phone-api-36-a",
+        platform: "android" as const,
+        deviceId: "emulator-5554",
+      };
+      deviceManager.setBootedDevices("android", [booted]);
+      deviceManager.setDeviceImages("android", [
+        { name: "phone-api-36-a", platform: "android", isRunning: true },
+      ]);
+      await pool.initializeWithDevices([booted]);
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+      let readinessCalls = 0;
+      setDeviceToolsDependencies({
+        timer,
+        ensureCtrlProxyReady: async () => {
+          readinessCalls++;
+        },
+      });
+      const tool = ToolRegistry.getTool("provisionDevice")!;
+      const args = { ...provisionTestArgs("android"), timeoutMs: 60_000 };
+
+      const first = JSON.parse(
+        ((await tool.handler({ ...args, __mcpSessionId: "client-a" })) as any).content[0].text,
+      );
+      const firstSessionId: string = first.sessionId;
+      const second = JSON.parse(
+        ((await tool.handler({ ...args, __mcpSessionId: "client-b" })) as any).content[0].text,
+      );
+
+      expect(first.lifecycleState).toBe("ready");
+      expect(typeof firstSessionId).toBe("string");
+      expect(second).toMatchObject({ success: false });
+      expect(second.error.message).toContain("already assigned to another session");
+      expect(second.sessionId).toBeUndefined();
+      expect(readinessCalls).toBe(1);
+      expect(pool.getDevice(booted.deviceId)?.sessionId).toBe(firstSessionId);
+      expect(pool.resolveAutolockSessionForMcpSession("client-a", "android")).toBe(firstSessionId);
+      expect(pool.resolveAutolockSessionForMcpSession("client-b", "android")).toBeUndefined();
+    } finally {
+      sessionManager.stopCleanupTimer();
+      if (originalAutolock === undefined) {
+        delete autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      } else {
+        autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+      }
+    }
+  });
+
   test("does not touch a device autolocked to another MCP client", async () => {
     const originalAutolock = autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
@@ -5915,7 +4516,7 @@ describe("provisionDevice handler", () => {
       });
 
       const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-        ...provisionTestArgs("android", "autolocked-elsewhere"),
+        ...provisionTestArgs("android"),
         timeoutMs: 60_000,
         resources: { wallpaperRendering: "disabled" as const },
         __mcpSessionId: "my-mcp-client",
@@ -6009,7 +4610,7 @@ describe("provisionDevice handler", () => {
 
     try {
       const request = ToolRegistry.getTool("provisionDevice")!.handler({
-        ...provisionTestArgs("android", "cancelled-autolock-release"),
+        ...provisionTestArgs("android"),
         timeoutMs: 60_000,
         __mcpSessionId: "provision-mcp-client",
       });
@@ -6111,7 +4712,7 @@ describe("provisionDevice handler", () => {
 
     try {
       const request = ToolRegistry.getTool("provisionDevice")!.handler({
-        ...provisionTestArgs("android", "cancelled-autolock-session-creation"),
+        ...provisionTestArgs("android"),
         timeoutMs: 60_000,
         __mcpSessionId: "provision-mcp-client",
       });
@@ -6191,7 +4792,7 @@ describe("provisionDevice handler", () => {
     });
 
     const response = await ToolRegistry.getTool("provisionDevice")!.handler({
-      ...provisionTestArgs("android", "readiness-reservation-owner"),
+      ...provisionTestArgs("android"),
       timeoutMs: 60_000,
     });
 
@@ -6223,7 +4824,7 @@ describe("provisionDevice handler", () => {
     }
 
     await tool.handler({
-      ...provisionTestArgs("android", "operation-queued-deadline"),
+      ...provisionTestArgs("android"),
       boot: false,
       readiness: "none",
       timeoutMs: 100_000,

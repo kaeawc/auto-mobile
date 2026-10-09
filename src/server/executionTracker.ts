@@ -10,6 +10,12 @@ import {
   rememberDeviceLossAbort,
 } from "./deviceLossOutcome";
 import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+
+const SESSIONLESS_DEVICE_ACQUIRED_REMEDY =
+  "another session acquired it while this call was in flight, so the call was cancelled. " +
+  "Acquire the device (setActiveDevice) and retry with that session's sessionUuid, or wait for " +
+  "the holder to release it.";
 
 interface ActiveExecution {
   id: string;
@@ -42,11 +48,38 @@ interface ActiveExecution {
    */
   readOnlySessionAccess?: boolean;
   /**
+   * The call passed session admission (#10824). A call refused at admission (a suspect or expired
+   * session, a non-holder) still ends, and its end must not restart the session's idle or liveness
+   * clocks: only an admitted call is session use.
+   */
+  sessionAdmitted?: boolean;
+  /**
+   * The call was a device read (`deviceReadOnly` for its args): watching, which is not use of the
+   * session it ran under (#10964, #10974).
+   */
+  deviceReadCall?: boolean;
+  /**
    * Reads the request's current absolute deadline (live: progress may extend it), on the
    * tracker's clock. Undefined when the call was admitted without a deadline (#10712).
    */
   readDeadlineMs?: () => number | undefined;
+  /**
+   * Devices this call was admitted to drive without a session, because no session held them
+   * (#10829). A session that acquires one of them cancels the call: it may not keep driving the
+   * new holder's device.
+   */
+  sessionlessDeviceUse?: Set<string>;
 }
+
+/** How a session-bearing execution ended: whether it was ever admitted under its session. */
+export interface SessionExecutionEnd {
+  admitted: boolean;
+}
+
+export type SessionExecutionEndListener = (
+  sessionUuids: readonly string[],
+  end: SessionExecutionEnd,
+) => void;
 
 export type ExecutionScope = "session" | "global";
 
@@ -104,7 +137,7 @@ export class ExecutionTracker {
   private sessionUuidExecutions = new Map<string, Set<string>>();
   private autolockSessionExecutions = new Map<string, Set<string>>();
   private executionEndListeners = new Set<() => void>();
-  private sessionExecutionEndListeners = new Set<(sessionUuids: readonly string[]) => void>();
+  private sessionExecutionEndListeners = new Set<SessionExecutionEndListener>();
   private timer: Timer;
   private idGenerator: IdGenerator;
   private daemonRestartPrepared = false;
@@ -279,9 +312,11 @@ export class ExecutionTracker {
    * Observe the end of every tool execution that belonged to a device session, with the session
    * UUIDs it ran under (explicit, resolved-autolock and provisional-autolock). The daemon restarts a
    * session's idle window from here, so idleness counts from the end of the last call, not its
-   * start. Returns the unsubscribe function.
+   * start — but only for an admitted call (`end.admitted`, #10824): a call refused at admission is
+   * reported so deferred releases it vetoed can re-arm, and must not count as use. Returns the
+   * unsubscribe function.
    */
-  onSessionExecutionEnded(listener: (sessionUuids: readonly string[]) => void): () => void {
+  onSessionExecutionEnded(listener: SessionExecutionEndListener): () => void {
     this.sessionExecutionEndListeners.add(listener);
     return () => {
       this.sessionExecutionEndListeners.delete(listener);
@@ -317,6 +352,95 @@ export class ExecutionTracker {
     return deadlines.length === 0 ? undefined : Math.max(...deadlines);
   }
 
+  /**
+   * Mark an execution as admitted under its session (#10824). Set once the call's session admission
+   * (or, for `input/*`, its ownership checks) passed; only an admitted execution's end is use.
+   */
+  markSessionAdmitted(executionId: string): void {
+    const execution = this.executions.get(executionId);
+    if (execution) {
+      execution.sessionAdmitted = true;
+    }
+  }
+
+  /**
+   * Record that a sessionless call passed the ownership check for `deviceId` while no session held
+   * it, and will now drive it (#10829). Watching calls are not recorded: they stay allowed on a held
+   * device.
+   */
+  markSessionlessDeviceUse(executionId: string, deviceId: string): void {
+    const execution = this.executions.get(executionId);
+    if (execution) {
+      execution.sessionlessDeviceUse ??= new Set();
+      execution.sessionlessDeviceUse.add(deviceId);
+    }
+  }
+
+  /** Drop a mark when the call's readiness settled on another device than it was admitted to. */
+  unmarkSessionlessDeviceUse(executionId: string, deviceId: string): void {
+    this.executions.get(executionId)?.sessionlessDeviceUse?.delete(deviceId);
+  }
+
+  /**
+   * A session just acquired `deviceId`: abort every sessionless call admitted to drive it while it
+   * was free, synchronously, with the same typed ownership refusal a new sessionless call gets
+   * (#10829). `excludeExecutionId` spares the call performing the acquisition. Returns the count.
+   */
+  cancelSessionlessDeviceUse(
+    deviceId: string,
+    options: { excludeExecutionId?: string } = {},
+  ): number {
+    let cancelled = 0;
+    for (const execution of this.executions.values()) {
+      if (
+        execution.id === options.excludeExecutionId ||
+        !execution.sessionlessDeviceUse?.has(deviceId) ||
+        execution.abortController.signal.aborted
+      ) {
+        continue;
+      }
+      this.abortExecution(
+        execution,
+        new InputDeviceOwnedError(
+          execution.toolName,
+          deviceId,
+          undefined,
+          SESSIONLESS_DEVICE_ACQUIRED_REMEDY,
+        ),
+      );
+      cancelled++;
+      logger.info(
+        `[ExecutionTracker] Cancelled sessionless execution ${execution.id} on ${deviceId}: a session acquired the device (tool=${execution.toolName})`,
+      );
+    }
+    return cancelled;
+  }
+
+  /** Mark an execution as a device read (`deviceReadOnly`), which does not use its session. */
+  markDeviceReadCall(executionId: string): void {
+    const execution = this.executions.get(executionId);
+    if (execution) {
+      execution.deviceReadCall = true;
+    }
+  }
+
+  /**
+   * The session a running execution was admitted under and used (#10974): its explicit session or
+   * the one routing resolved for it (autolock, or the holder of a `deviceId`-only call). Undefined
+   * for a call not admitted under a session, a device read, or an inventory read.
+   */
+  getAdmittedSessionUse(executionId: string): string | undefined {
+    const execution = this.executions.get(executionId);
+    if (
+      !execution?.sessionAdmitted ||
+      execution.deviceReadCall ||
+      execution.readOnlySessionAccess
+    ) {
+      return undefined;
+    }
+    return execution.sessionUuid ?? execution.resolvedAutolockSessionUuid;
+  }
+
   /** Mark an execution as a read-only inventory call, whose end is not session use. */
   markReadOnlySessionAccess(executionId: string): void {
     const execution = this.executions.get(executionId);
@@ -343,7 +467,7 @@ export class ExecutionTracker {
     }
     for (const listener of this.sessionExecutionEndListeners) {
       try {
-        listener(sessionUuids);
+        listener(sessionUuids, { admitted: execution.sessionAdmitted === true });
       } catch (error) {
         // A listener's failure must not stop the remaining listeners or the execution's teardown.
         logger.warn(

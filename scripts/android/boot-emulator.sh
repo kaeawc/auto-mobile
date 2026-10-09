@@ -74,6 +74,118 @@ unlock_keyguard() {
   exit 1
 }
 
+# Window titles of the system ANR and crash dialogs currently on screen, one per line.
+system_error_dialogs() {
+  adb -s "${device_id}" shell dumpsys window windows 2>/dev/null \
+    | grep -E '^[[:space:]]*Window #[0-9]+ Window\{' \
+    | grep -oE 'Application (Not Responding|Error): [A-Za-z0-9._:]+' \
+    | sort -u || true
+}
+
+# A slow software-rendered boot can ANR SystemUI or the launcher, and the ANR dialog stays up after
+# the process recovers. It sits centered on the display, where a test that taps the middle of a
+# target lands on "Close app" mid-test; for SystemUI that kills it and re-locks the device (nightly
+# Foldable Posture lane). Cancel such dialogs before tests start. Cancelling an ANR or crash dialog
+# kills its process ("user request after error"), so a cancelled SystemUI dialog waits for SystemUI
+# to restart and then verifies the keyguard again. A dialog that survives only warns.
+systemui_pid() {
+  adb -s "${device_id}" shell pidof com.android.systemui 2>/dev/null | tr -d '[:space:]' || true
+}
+
+wait_for_systemui_restart() {
+  local previous_pid="$1"
+  local attempts="${AUTOMOBILE_SYSTEMUI_RESTART_RETRIES:-30}"
+  local delay="${AUTOMOBILE_SYSTEMUI_RESTART_SLEEP_SECONDS:-1}"
+  local attempt pid
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    pid="$(systemui_pid)"
+    if [[ -n "${pid}" && "${pid}" != "${previous_pid}" ]]; then
+      progress "SystemUI restarted (pid ${previous_pid:-none} -> ${pid})."
+      return 0
+    fi
+    sleep "${delay}"
+  done
+  printf 'warning: SystemUI did not restart after its error dialog was dismissed (pid %s)\n' \
+    "${previous_pid:-none}" >&2
+}
+
+dismiss_system_error_dialogs() {
+  local attempts="${AUTOMOBILE_ERROR_DIALOG_RETRIES:-3}"
+  local delay="${AUTOMOBILE_ERROR_DIALOG_RETRY_SLEEP_SECONDS:-1}"
+  local attempt dialogs initial systemui_before=""
+  local -a broadcast_pids=()
+  initial="$(system_error_dialogs)"
+  if [[ -z "${initial}" ]]; then
+    return 0
+  fi
+  printf '%s\n' "${initial}" > "${diagnostics_dir}/system-error-dialogs.txt"
+  if [[ "${initial}" == *": com.android.systemui"* ]]; then
+    systemui_before="$(systemui_pid)"
+  fi
+  dialogs="${initial}"
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    progress "Dismissing system error dialogs (attempt ${attempt}/${attempts}): ${dialogs//$'\n'/, }"
+    # `am broadcast` waits for every receiver, and a still-hung ANR process may be one of them; send
+    # it in the background so the bounded dialog check below decides when to give up.
+    adb -s "${device_id}" shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 &
+    broadcast_pids+=("$!")
+    sleep "${delay}"
+    dialogs="$(system_error_dialogs)"
+    if [[ -z "${dialogs}" ]]; then
+      break
+    fi
+  done
+  kill ${broadcast_pids[@]+"${broadcast_pids[@]}"} 2>/dev/null || true
+  wait ${broadcast_pids[@]+"${broadcast_pids[@]}"} 2>/dev/null || true
+  if [[ "${initial}" == *": com.android.systemui"* ]]; then
+    wait_for_systemui_restart "${systemui_before}"
+    unlock_keyguard
+    dialogs="$(system_error_dialogs)"
+  fi
+  if [[ -n "${dialogs}" ]]; then
+    printf 'warning: system error dialogs are still showing after boot: %s\n' "${dialogs//$'\n'/, }" >&2
+  fi
+}
+
+# Post-boot package optimisation (artd/dexopt) runs for minutes after a cold emulator boot and
+# stalls system_server up to ~2.7 s, so the first taps of a test time out at 5 s (nightly Foldable
+# Posture lane, #10806). Run the background dexopt job once, synchronously and bounded, so the stall
+# is spent here instead of inside a test. `cmd package bg-dexopt-job` blocks until the job finishes
+# on API 34+; the host-side deadline covers images where it does not. Timeout only warns.
+# AUTOMOBILE_POST_BOOT_SETTLE_SECONDS=0 disables the step.
+settle_post_boot_optimization() {
+  local budget="${AUTOMOBILE_POST_BOOT_SETTLE_SECONDS:-120}"
+  local step="${AUTOMOBILE_POST_BOOT_SETTLE_POLL_SECONDS:-1}"
+  local deadline job_pid booted
+  if [[ "${budget}" -le 0 ]]; then
+    return 0
+  fi
+  deadline=$((SECONDS + budget))
+  while ((SECONDS < deadline)); do
+    booted="$(adb -s "${device_id}" shell getprop sys.boot_completed 2>/dev/null | tr -d '[:space:]' || true)"
+    [[ "${booted}" == 1 ]] && break
+    sleep "${step}"
+  done
+  if [[ "${booted:-}" != 1 ]]; then
+    printf 'warning: sys.boot_completed was not set within %ss; skipping post-boot settle\n' "${budget}" >&2
+    return 0
+  fi
+  progress "Waiting up to ${budget}s for background dexopt to finish."
+  adb -s "${device_id}" shell cmd package bg-dexopt-job >/dev/null 2>&1 &
+  job_pid="$!"
+  while kill -0 "${job_pid}" 2>/dev/null; do
+    if ((SECONDS >= deadline)); then
+      kill "${job_pid}" 2>/dev/null || true
+      wait "${job_pid}" 2>/dev/null || true
+      printf 'warning: background dexopt did not finish within %ss; continuing\n' "${budget}" >&2
+      return 0
+    fi
+    sleep "${step}"
+  done
+  wait "${job_pid}" 2>/dev/null || true
+  progress "Background dexopt settled."
+}
+
 mkdir -p "${diagnostics_dir}"
 progress "Starting AutoMobile Android boot for AVD '${avd_name}' (deadline ${timeout_ms}ms)."
 set +e
@@ -106,7 +218,9 @@ if ! device_id="$(jq -er '.deviceId | strings | select(length > 0)' "${boot_stdo
   progress "Boot returned no device id; diagnostics are in ${diagnostics_dir}."
   exit 1
 fi
+settle_post_boot_optimization
 unlock_keyguard
+dismiss_system_error_dialogs
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   echo "emulator_serial=${device_id}" >> "${GITHUB_OUTPUT}"
 fi

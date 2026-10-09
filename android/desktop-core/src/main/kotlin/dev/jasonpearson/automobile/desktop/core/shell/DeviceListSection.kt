@@ -60,6 +60,8 @@ fun DeviceListSection(
   modifier: Modifier = Modifier,
   devices: List<BootedDeviceInfo>? = null,
   onKillDevice: ((String) -> Unit)? = null,
+  /** Why the last kill of a device failed, by device id; shown under its row. */
+  killDeviceErrors: Map<String, String> = emptyMap(),
 ) {
   val colors = SharedTheme.globalColors
   var expanded by remember { mutableStateOf(true) }
@@ -83,7 +85,7 @@ fun DeviceListSection(
           val daemonClient =
             withContext(Dispatchers.IO) {
               dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createFromProcess(
-                connectedProcess
+                connectedProcess,
               )
             }
           dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient(daemonClient)
@@ -139,7 +141,7 @@ fun DeviceListSection(
         compareByDescending<BootedDeviceInfo> {
             (it.runtime.deviceId ?: it.identity.stableId) in favoriteDeviceIds
           }
-          .thenBy { it.name }
+          .thenBy { it.name },
       )
     }
 
@@ -206,6 +208,7 @@ fun DeviceListSection(
             favoriteDeviceIds = favoriteDeviceIds,
             onToggleFavorite = onToggleFavorite,
             onKillDevice = onKillDevice,
+            killDeviceErrors = killDeviceErrors,
             showUnavailableActions = devices == null,
           )
         }
@@ -220,6 +223,7 @@ fun DeviceListSection(
             favoriteDeviceIds = favoriteDeviceIds,
             onToggleFavorite = onToggleFavorite,
             onKillDevice = onKillDevice,
+            killDeviceErrors = killDeviceErrors,
             showUnavailableActions = devices == null,
           )
         }
@@ -239,6 +243,7 @@ private fun DevicePlatformGroup(
   favoriteDeviceIds: Set<String>,
   onToggleFavorite: ((deviceId: String) -> Unit)?,
   onKillDevice: ((String) -> Unit)?,
+  killDeviceErrors: Map<String, String>,
   showUnavailableActions: Boolean,
 ) {
   val colors = SharedTheme.globalColors
@@ -274,6 +279,16 @@ private fun DevicePlatformGroup(
             }
           } else null,
       )
+      killDeviceErrors[deviceId]?.let { message ->
+        Text(
+          message,
+          fontSize = 10.sp,
+          color = Color(0xFFE53935),
+          maxLines = 3,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.padding(horizontal = 8.dp),
+        )
+      }
     }
   }
 }

@@ -280,7 +280,7 @@ fun DeviceStreamView(
             onClick = {
               source.disconnect()
               source.connect(column.deviceId)
-            }
+            },
           ) {
             Text("Reconnect")
           }
@@ -477,7 +477,7 @@ private fun DeviceStreamContent(
               onClick = {
                 source.disconnect()
                 source.connect(column.deviceId)
-              }
+              },
             ) {
               Text("Reconnect")
             }

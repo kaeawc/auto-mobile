@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { indexOfNamed, loadJobs, loadJobSteps, stepNamed } from "../helpers/workflowSteps";
 
-const WORKFLOW = ".github/workflows/pull_request.yml";
+const WORKFLOW = ".github/workflows/xctestrunner-simulator-tests.yml";
 const JOB_ID = "ios-xctest-runner-simulator-tests";
 const SOURCE_BUILT_DERIVED_DATA = "/tmp/automobile-ctrl-proxy";
 

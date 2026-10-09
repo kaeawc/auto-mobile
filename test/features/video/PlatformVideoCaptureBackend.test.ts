@@ -687,6 +687,30 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       expect(probedPaths).toEqual([outputPath]);
     });
 
+    test("reports the container duration separately from wall-clock time", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const codecProbe = {
+        async codec(): Promise<string | undefined> {
+          return "h264";
+        },
+        async durationMs(): Promise<number | undefined> {
+          return 18200;
+        },
+      };
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer, codecProbe);
+      const fakeProcess = new FakeChildProcess(fakeTimer);
+      fakeProcess.exitCode = 0;
+      const outputPath = path.join(tempDir, "duration.mp4");
+      await writeVideoFixture(outputPath, Buffer.alloc(64, 1));
+
+      const result = await backend.stop(buildAndroidStopHandle(outputPath, fakeProcess));
+
+      expect(result.videoDurationMs).toBe(18200);
+      expect(result.durationMs).toBeUndefined();
+    });
+
     // issue #6291: stopping immediately after start races screenrecord's own
     // flush on the device, so a fixed 1s wait isn't always enough — poll the
     // device file's size until it stabilizes before ever attempting the pull.

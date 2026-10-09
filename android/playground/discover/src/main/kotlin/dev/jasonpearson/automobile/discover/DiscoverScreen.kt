@@ -51,9 +51,9 @@ fun DiscoverVideoScreen(
     Scaffold(
       topBar = {
         AutoMobileTopAppBar(
-          title = { Text(text = "Discover", fontSize = 24.sp, fontWeight = FontWeight.Bold) }
+          title = { Text(text = "Discover", fontSize = 24.sp, fontWeight = FontWeight.Bold) },
         )
-      }
+      },
     ) { paddingValues ->
       Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
         TabRow(selectedTabIndex = pagerState.currentPage, modifier = Modifier.fillMaxWidth()) {

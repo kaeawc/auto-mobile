@@ -182,6 +182,9 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
           windowLayer: 100,
         });
       }
+      // Restore the shared clock afterwards: a jump back (or ahead) would leave later
+      // tests with host sequence numbers the client treats as stale or out of window.
+      const clockBefore = timer.now();
       timer.setCurrentTime(1791181941935);
       const detector = spyOn(
         client.getHierarchyNavigationDetector(),
@@ -199,6 +202,7 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
         expect(build).toHaveBeenCalledWith(activeWindow.appId);
         expect(payload.packageName).toBe(""); // Input capture is not relabeled in place.
       } finally {
+        timer.setCurrentTime(clockBefore);
         detector.mockRestore();
         build.mockRestore();
         packages.mockRestore();
@@ -369,6 +373,94 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
       type: "tap",
       elementText: "com.example.app button",
       elementResourceId: "com.example.app:id/button",
+    });
+  });
+
+  test("keeps each app's newest SDK navigation route as its screen identity", async () => {
+    const playground = "dev.jasonpearson.automobile.playground";
+    await sendNavigation("HomeDestination", playground);
+    await sendNavigation("DemoContrastDestination", playground);
+    await sendNavigation("OtherDestination", "com.example.other");
+
+    expect(client.getSdkScreenIdentity(playground)).toMatchObject({
+      platform: "android",
+      source: "sdk",
+      confidence: "high",
+      components: { bundleId: playground, navigationRoute: "DemoContrastDestination" },
+    });
+    expect(client.getSdkScreenIdentity("com.example.never-reported")).toBeUndefined();
+    expect(client.getSdkScreenIdentity()).toBeUndefined();
+  });
+
+  describe("SDK route lifecycle", () => {
+    const app = "dev.jasonpearson.automobile.playground.lifecycle";
+
+    test("clears one app's route and wakes its waiters empty", async () => {
+      await sendNavigation("HomeDestination", app);
+      await sendNavigation("HomeDestination", "com.example.sibling.lifecycle");
+      const waiting = client.awaitSdkScreenIdentityAfter(app, timer.now() + 1_000, 300);
+      client.clearSdkScreenIdentity(app);
+
+      expect(await waiting).toBeUndefined();
+      expect(client.getSdkScreenIdentity(app)).toBeUndefined();
+      expect(client.getSdkScreenIdentityReceivedAtMs(app)).toBeUndefined();
+      expect(client.getSdkScreenIdentity("com.example.sibling.lifecycle")).toBeDefined();
+    });
+
+    test("drops every route when the SDK link closes", async () => {
+      await sendNavigation("HomeDestination", app);
+      client.onConnectionClosed();
+      expect(client.getSdkScreenIdentity(app)).toBeUndefined();
+    });
+
+    test("drops the route of an app that crashed", async () => {
+      await sendNavigation("HomeDestination", app);
+      socket?.simulateMessage(
+        JSON.stringify({
+          type: "crash_event",
+          timestamp: timer.now(),
+          event: {
+            exceptionClass: "java.lang.IllegalStateException",
+            stackTrace: "at Foo.bar",
+            threadName: "main",
+            packageName: app,
+            deviceInfo: {},
+          },
+        }),
+      );
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        await timer.advanceTimersByTimeAsync(1);
+      }
+      expect(client.getSdkScreenIdentity(app)).toBeUndefined();
+    });
+
+    test("a waiter resolves with the first route newer than its start", async () => {
+      await sendNavigation("HomeDestination", app);
+      const since = client.getSdkScreenIdentityReceivedAtMs(app)!;
+      // The route already held predates `since`, so the waiter keeps waiting for a newer one.
+      const waiting = client.awaitSdkScreenIdentityAfter(app, since, 300);
+      await timer.advanceTimersByTimeAsync(5);
+      await sendNavigation("DemoContrastDestination", app);
+
+      expect(await waiting).toMatchObject({
+        components: { navigationRoute: "DemoContrastDestination" },
+      });
+    });
+
+    test("a waiter gives up after its bound", async () => {
+      await sendNavigation("HomeDestination", app);
+      const since = client.getSdkScreenIdentityReceivedAtMs(app)!;
+      const waiting = client.awaitSdkScreenIdentityAfter(app, since, 300);
+      await timer.advanceTimersByTimeAsync(300);
+      expect(await waiting).toBeUndefined();
+      expect(client.getSdkScreenIdentity(app)).toBeDefined();
+    });
+
+    test("a route already newer than the start answers at once", async () => {
+      await sendNavigation("HomeDestination", app);
+      const answer = await client.awaitSdkScreenIdentityAfter(app, -1, 300);
+      expect(answer).toBeDefined();
     });
   });
 });

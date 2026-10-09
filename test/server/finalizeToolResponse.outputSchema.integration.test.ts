@@ -1,7 +1,7 @@
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
-import Ajv2020 from "ajv/dist/2020";
+import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { createMcpServer } from "../../src/server/index";
 import {
   DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
@@ -145,9 +145,7 @@ describe("spilled output-schema residue contract (#6950)", () => {
 
     expect(generatedSchema!.properties?.artifact).toBeDefined();
     expect(generatedSchema!.required).not.toContain("artifact");
-    expect(
-      new Ajv2020({ strict: false }).compile(generatedSchema!)(finalized.structuredContent),
-    ).toBe(true);
+    expect(compileAjv2020(generatedSchema!)(finalized.structuredContent)).toBe(true);
   });
 
   test.each(

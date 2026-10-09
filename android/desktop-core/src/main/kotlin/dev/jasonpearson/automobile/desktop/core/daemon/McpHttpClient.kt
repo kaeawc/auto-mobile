@@ -207,7 +207,7 @@ class McpHttpClient(
       decodeToolResponse(json, response, serializer<StartDeviceResult>())
     } catch (e: Exception) {
       if (e is CancellationException) throw e
-      StartDeviceResult(success = false, message = e.message ?: "Failed to start device")
+      startDeviceFailure(e)
     }
   }
 
@@ -246,12 +246,7 @@ class McpHttpClient(
     force: Boolean,
   ): KillDeviceResult {
     val response = callTool("killDevice", killDeviceArguments(name, deviceId, platform, force))
-    return try {
-      decodeToolResponse(json, response, serializer<KillDeviceResult>())
-    } catch (e: Exception) {
-      if (e is CancellationException) throw e
-      KillDeviceResult(success = false, message = e.message ?: "Failed to kill device")
-    }
+    return decodeKillDeviceResponse(json, response)
   }
 
   override fun getDaemonStatus():
@@ -283,6 +278,7 @@ class McpHttpClient(
     value: String?,
     type: String,
     platform: String,
+    sessionUuid: String?,
   ): SetKeyValueResult {
     val response =
       callTool(
@@ -295,6 +291,7 @@ class McpHttpClient(
           put("key", JsonPrimitive(key))
           put("value", if (value != null) JsonPrimitive(value) else JsonNull)
           put("type", JsonPrimitive(type))
+          sessionUuid?.takeIf { it.isNotBlank() }?.let { put("sessionUuid", JsonPrimitive(it)) }
         },
       )
     return try {
@@ -311,6 +308,7 @@ class McpHttpClient(
     fileName: String,
     key: String,
     platform: String,
+    sessionUuid: String?,
   ): RemoveKeyValueResult {
     val response =
       callTool(
@@ -321,6 +319,7 @@ class McpHttpClient(
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
           put("key", JsonPrimitive(key))
+          sessionUuid?.takeIf { it.isNotBlank() }?.let { put("sessionUuid", JsonPrimitive(it)) }
         },
       )
     return try {
@@ -336,6 +335,7 @@ class McpHttpClient(
     appId: String,
     fileName: String,
     platform: String,
+    sessionUuid: String?,
   ): ClearKeyValueResult {
     val response =
       callTool(
@@ -345,6 +345,7 @@ class McpHttpClient(
           put("platform", JsonPrimitive(platform))
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
+          sessionUuid?.takeIf { it.isNotBlank() }?.let { put("sessionUuid", JsonPrimitive(it)) }
         },
       )
     return try {
@@ -546,7 +547,7 @@ class McpHttpClient(
       }
     if (rpcResponse.error != null) {
       throw McpConnectionException(
-        "MCP HTTP error ${rpcResponse.error.code}: ${rpcResponse.error.message}"
+        "MCP HTTP error ${rpcResponse.error.code}: ${rpcResponse.error.message}",
       )
     }
     rpcResponse.resultFor(request.method)
@@ -614,7 +615,7 @@ class McpHttpClient(
       resetSession()
       throw McpConnectionException(
         "MCP session lost: $endpoint answered 404 Session not found again after re-initializing; " +
-          "the daemon is not keeping the new session"
+          "the daemon is not keeping the new session",
       )
     }
     return replayed
@@ -658,7 +659,7 @@ class McpHttpClient(
       }
     }
     throw McpConnectionException(
-      "MCP HTTP event stream ended without a reply to ${request.method} (id ${request.id})"
+      "MCP HTTP event stream ended without a reply to ${request.method} (id ${request.id})",
     )
   }
 
@@ -705,5 +706,5 @@ class McpHttpClient(
 internal fun JsonRpcResponse.resultFor(method: String): JsonElement =
   result
     ?: throw McpConnectionException(
-      "JSON-RPC $method response contained no result; check the MCP server response."
+      "JSON-RPC $method response contained no result; check the MCP server response.",
     )

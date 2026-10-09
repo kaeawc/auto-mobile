@@ -81,7 +81,7 @@ class NavigationViewModel(
         when (val result = dataSource.getNavigationGraph()) {
           is Result.Success -> {
             LOG.info(
-              "Navigation data loaded: ${result.data.screens.size} screens, ${result.data.transitions.size} transitions"
+              "Navigation data loaded: ${result.data.screens.size} screens, ${result.data.transitions.size} transitions",
             )
             _state.value = NavigationUiState.Content(graph = result.data)
           }

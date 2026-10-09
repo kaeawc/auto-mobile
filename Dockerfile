@@ -23,11 +23,11 @@
 ARG ZULU_VERSION=21.0.2
 ARG PLATFORM=linux/amd64
 ARG BUN_VERSION=1.3.14
-ARG KTFMT_VERSION=0.64
+ARG KTFMT_VERSION=0.65
 # Keep in sync with scripts/ktfmt/ktfmt_version.sh (KTFMT_VERSION), the repo's canonical pin.
-# Computed locally from the downloaded GitHub Releases asset on 2026-09-27:
-# https://github.com/facebook/ktfmt/releases/download/v0.64/ktfmt-0.64-with-dependencies.jar
-ARG KTFMT_SHA256=b8fbb814808d8da33f74a7bbacb6d1748cef81c0202a7f829b87139520b51273
+# Computed locally from the downloaded GitHub Releases asset on 2026-10-08:
+# https://github.com/facebook/ktfmt/releases/download/v0.65/ktfmt-0.65-with-dependencies.jar
+ARG KTFMT_SHA256=aba9753b6ab387926179ab7318ba8e0c33dad483ebc72f633e79522265b15214
 ARG LYCHEE_VERSION=0.19.1
 ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
 ARG ANDROID_PLATFORM_VERSION=37

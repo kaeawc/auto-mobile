@@ -7,6 +7,7 @@ import { ActionableError, type BootedDevice, type Platform } from "../models";
 import {
   getTestRecordingStatus,
   startTestRecording,
+  getStoppedTestRecording,
   stopTestRecording,
 } from "../server/testRecordingManager";
 import { TestRecordingCommand, TestRecordingResponse } from "./testRecordingSocketTypes";
@@ -185,7 +186,13 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
           deviceId: selected.deviceId,
         });
         const device = await this.deviceResolution.readyDevice(selected);
-        const result = await startTestRecording(device);
+        const result = await startTestRecording(
+          device,
+          undefined,
+          undefined,
+          undefined,
+          request.sessionUuid,
+        );
         return {
           success: true,
           recordingId: result.recordingId,
@@ -199,9 +206,11 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
       case "status": {
         // Status reveals the active recording's device/id; require a live
         // session so it is not readable by an unauthenticated caller (issue #4752).
+        // It is a read, so a live non-owner watches a held device (#10970).
         this.authenticator.authorize({
           sessionUuid: request.sessionUuid,
           deviceId: request.deviceId,
+          admitViewer: true,
         });
         const recording = getTestRecordingStatus();
         if (!recording) {
@@ -220,6 +229,15 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
     // recordingId-only guard in stopTestRecording is not an ownership check
     // (issue #4752).
     const active = getTestRecordingStatus();
+    // A stop by id after a release-time stop returns the owner's retained plan (#10958).
+    // It needs no device and no live session: the owning session's uuid is the scope.
+    const retained =
+      !active && request.recordingId
+        ? getStoppedTestRecording(request.recordingId, request.sessionUuid)
+        : undefined;
+    if (retained) {
+      return this.toStopResponse(retained);
+    }
     this.authenticator.authorize({
       sessionUuid: request.sessionUuid,
       deviceId: active?.deviceId ?? request.deviceId,
@@ -231,6 +249,12 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
       throw new ActionableError(`No active recording found for device ${request.deviceId}.`);
     }
     const result = await stopTestRecording(request.recordingId, request.planName);
+    return this.toStopResponse(result);
+  }
+
+  private toStopResponse(
+    result: Awaited<ReturnType<typeof stopTestRecording>>,
+  ): TestRecordingResponse {
     return {
       success: true,
       recordingId: result.recordingId,

@@ -27,8 +27,9 @@ test("observe description and docs agree with the fixed retention contract", () 
   );
   expect(SCREENSHOT_PATH_MIN_LIFETIME_MS).toBe(600_000);
   expect(description.toLowerCase()).toContain(
-    "each screenshot path is valid for at least 10 minutes after the response that returned it",
+    "each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure",
   );
+  expect(description.toLowerCase()).toContain("new captures are never refused");
   expect(docs).toContain("**at least 10 minutes after return**");
   expect(docs).toContain(`**128 MiB and ${MAX_SCREENSHOT_PATH_PROTECTIONS} files**`);
   expect(docs).toContain("process-start grace");

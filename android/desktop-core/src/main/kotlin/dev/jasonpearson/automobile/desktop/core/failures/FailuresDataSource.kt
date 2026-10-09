@@ -52,7 +52,7 @@ class MockFailuresDataSource(private val clock: Clock = SystemClock) : FailuresD
       TimelineData(
         dataPoints = generateMockTimelineData(dateRange, aggregation, clock),
         previousPeriodTotals = generateMockPreviousPeriodTotals(dateRange),
-      )
+      ),
     )
   }
 }
@@ -71,7 +71,7 @@ class EmptyFailuresDataSource : FailuresDataSource {
       TimelineData(
         dataPoints = emptyList(),
         previousPeriodTotals = PeriodTotals(0, 0, 0),
-      )
+      ),
     )
   }
 }
@@ -132,7 +132,7 @@ class McpFailuresDataSource(
               response.previousPeriodTotals.toolFailures,
               response.previousPeriodTotals.nonfatals,
             ),
-        )
+        ),
       )
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")

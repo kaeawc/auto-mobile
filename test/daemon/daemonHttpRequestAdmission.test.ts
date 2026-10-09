@@ -9,7 +9,8 @@ import type {
   ServerResponse,
 } from "node:http";
 import { logger } from "../../src/utils/logger";
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { Daemon } from "../../src/daemon/daemon";
 import { MCP_STREAMABLE_PATH } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -158,6 +159,11 @@ async function harness(
   return { server, transport };
 }
 
+// harness() constructs a Daemon, which initializes the process-wide DaemonState.
+afterEach(() => {
+  DaemonState.getInstance().reset();
+});
+
 describe("Daemon HTTP request admission", () => {
   test.each(["evil.com:41321", "127.0.0.1:41322", undefined])(
     "rejects a non-loopback or mismatched Host header %s before MCP transport",
@@ -254,7 +260,10 @@ describe("HTTP heartbeat during release", () => {
         // A released session is gone: the client must learn that, like the socket route.
         expect(after.statusCode).toBe(404);
         expect(after.body).toBe(
-          JSON.stringify({ error: `Session not found: ${releasingSessionId}` }),
+          JSON.stringify({
+            error: `Session not found: ${releasingSessionId}`,
+            releaseReason: "explicit-release",
+          }),
         );
         expect(heartbeat).toHaveBeenCalledTimes(0);
         // The unknown-session refusal is a liveness no-op, including when the

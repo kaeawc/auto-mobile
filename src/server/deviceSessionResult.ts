@@ -3,6 +3,7 @@ import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
 import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
+import { DEVICE_CLEANUP_IN_PROGRESS_CODE } from "../daemon/deviceAcquisitionRefusals";
 
 /**
  * The tools that acquire a device and mint a device session, returning its
@@ -96,16 +97,43 @@ export function getDeviceSessionIdFromResult(result: unknown): string | undefine
 }
 
 /**
+ * The device description a device-start tool result carries. getAndroid/getApple/startDevice
+ * answer with the description itself; provisionDevice nests it under `device` beside its
+ * top-level `sessionId` (#10821).
+ */
+function readDeviceDescription(result: unknown): Record<string, unknown> | undefined {
+  const payload = readToolEnvelopePayload(result)?.payload;
+  if (!payload || "platform" in payload || "runtime" in payload) {
+    return payload;
+  }
+  const nested = payload.device;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    return nested as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+/**
  * The device id a device-start tool result describes, from `runtime.deviceId` beside the session
  * UUID. A proxy records it so a liveness handover can name the device (#10053).
  */
 export function getDeviceIdFromResult(result: unknown): string | undefined {
-  const runtime = readToolEnvelopePayload(result)?.payload?.runtime;
+  const runtime = readDeviceDescription(result)?.runtime;
   if (!runtime || typeof runtime !== "object" || !("deviceId" in runtime)) {
     return undefined;
   }
   const { deviceId } = runtime;
   return typeof deviceId === "string" && deviceId.trim().length > 0 ? deviceId : undefined;
+}
+
+/**
+ * The platform a device-start tool result describes (the device description's top-level
+ * `platform`). A proxy records it so a call routed by a `platform` selector can tell which of its
+ * sessions it reached (#10692).
+ */
+export function getDevicePlatformFromResult(result: unknown): "android" | "ios" | undefined {
+  const platform = readDeviceDescription(result)?.platform;
+  return platform === "android" || platform === "ios" ? platform : undefined;
 }
 
 /**
@@ -124,6 +152,32 @@ export function declaresDeviceSessionSuspect(result: unknown): boolean {
     "code" in error &&
     error.code === DAEMON_SESSION_SUSPECT_CODE
   );
+}
+
+/**
+ * Whether `name` binds a device and so can be refused while the device's previous session is still
+ * cleaning up (#10960): the acquisition tools plus `setActiveDevice`. Only these are safe to
+ * re-forward on that refusal, because a refused bind never reached a device.
+ */
+export function isDeviceBindingTool(name: string): boolean {
+  return name === "setActiveDevice" || isDeviceSessionAcquisitionTool(name);
+}
+
+/** The retry hint of a typed `device_cleanup_in_progress` refusal result, when it is one. */
+export function readDeviceCleanupInProgressRefusal(
+  result: unknown,
+): { retryAfterMs?: number } | undefined {
+  if (!result || typeof result !== "object" || !("isError" in result) || result.isError !== true) {
+    return undefined;
+  }
+  const payload = readToolEnvelopePayload(result)?.payload;
+  if (!payload || payload.code !== DEVICE_CLEANUP_IN_PROGRESS_CODE) {
+    return undefined;
+  }
+  const { retryAfterMs } = payload;
+  return typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs) && retryAfterMs >= 0
+    ? { retryAfterMs }
+    : {};
 }
 
 /** The session a suspect refusal names and how long the daemon keeps it reserved. */

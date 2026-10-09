@@ -75,7 +75,7 @@ class HierarchyExtractErrorFramesTest {
     // guard against the JDK type explicitly so a JobCancellationException subtype is never
     // converted into a client-facing error frame.
     assertNull(
-      HierarchyExtractErrorFrames.thrownFrame(UUID, JavaCancellationException("cancelled"))
+      HierarchyExtractErrorFrames.thrownFrame(UUID, JavaCancellationException("cancelled")),
     )
   }
 
@@ -100,7 +100,7 @@ class HierarchyExtractErrorFramesTest {
     assertTrue(
       HierarchyExtractErrorFrames.thrownFrame(UUID, IOException("x"))!!
         .error
-        .startsWith(HierarchyExtractErrorFrames.THROWN_PREFIX)
+        .startsWith(HierarchyExtractErrorFrames.THROWN_PREFIX),
     )
   }
 }

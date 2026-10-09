@@ -140,7 +140,7 @@ YAML
 @test "junit-runner heap dumps are namespaced by job" {
   names="$(upload_artifact_names ".github/workflows/pull_request.yml")"
   [[ "$names" == *$'junit-runner-unit-tests\tjunit-runner-heap-dumps-unit'* ]]
-  [[ "$names" == *$'junit-runner-emulator-tests\tjunit-runner-heap-dumps-emulator'* ]]
+  [[ "$names" == *$'android-emulator-tests\tjunit-runner-heap-dumps-emulator'* ]]
 }
 
 @test "junit-runner heap dump uploads stay failure-gated and tolerant" {

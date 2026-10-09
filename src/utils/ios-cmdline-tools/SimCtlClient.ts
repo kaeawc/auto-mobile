@@ -1,4 +1,5 @@
 import { buildSimctlArgs } from "./simctlArgs";
+import { parseSimctlDeviceList } from "./simctlDeviceList";
 import { detectImageMimeType } from "../screenshot/imageHeaderDimensions";
 import { errorMessage } from "../describeUnknownError";
 import { trackAmbient } from "../PerfContext";
@@ -79,6 +80,8 @@ export interface AppleDevice {
   isAvailable: boolean;
   availabilityError?: string;
   deviceTypeIdentifier?: string;
+  /** Device data directory size in bytes, as reported by `simctl list devices`. */
+  dataPathSize?: number;
   runtime?: string;
   model?: string;
   os_version?: string;
@@ -1090,7 +1093,7 @@ export class SimCtlClient implements SimCtl {
 
     try {
       perf.startOperation("jsonParse");
-      const simulatorData = JSON.parse(result.stdout);
+      const simulatorData = parseSimctlDeviceList(result.stdout);
       perf.endOperation("jsonParse");
       return simulatorData as SimulatorList;
     } catch (error) {

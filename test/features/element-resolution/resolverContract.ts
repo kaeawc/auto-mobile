@@ -15,7 +15,7 @@ import type {
 import type { ResolverSelector } from "../../../src/server/elementSelectorSchemas";
 
 const searchable = new SearchableHierarchy();
-const resolver = new ElementResolver(() => 0.99);
+const defaultResolver = new ElementResolver(() => 0.99);
 
 function selectorFor(
   kind: ContractQuery["kind"],
@@ -57,7 +57,15 @@ export function contractAction(testCase: ContractCase): ResolutionAction {
 }
 
 export class ResolverContractAdapter implements ContractResolver {
-  constructor(private readonly testCase: ContractCase) {}
+  private readonly resolver: ElementResolver;
+
+  /** `random` overrides the default 0.99 draw used for "random" selection strategies. */
+  constructor(
+    private readonly testCase: ContractCase,
+    random?: () => number,
+  ) {
+    this.resolver = random ? new ElementResolver(random) : defaultResolver;
+  }
 
   resolve(capture: ContractCapture, query: ContractQuery): ContractResolution {
     const anchorValue = this.testCase.observed.elementId ?? this.testCase.observed.label;
@@ -71,7 +79,7 @@ export class ResolverContractAdapter implements ContractResolver {
           sibling: selectorFor(query.kind, query.value),
         }
       : selectorFor(query.kind, query.value, query);
-    const result = resolver.resolve(
+    const result = this.resolver.resolve(
       { id: capture.name, nodes: searchable.project(capture.hierarchy) },
       selector,
       { action: query.intent === "focus-input" ? "focus" : contractAction(this.testCase) },

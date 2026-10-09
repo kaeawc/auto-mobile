@@ -1,0 +1,31 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "notify_a": false
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": [
+          {
+            "id": "a"
+          }
+        ],
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "switch",
+          "stateKey": "notify_{item.nope}"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].stateKey"
+}

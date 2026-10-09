@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopInputAllocation
+import dev.jasonpearson.automobile.desktop.core.daemon.INPUT_NOT_ALLOCATED_ERROR
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
+import dev.jasonpearson.automobile.desktop.core.daemon.InputAllocatingClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -41,7 +44,7 @@ class DaemonEmulatorControlExecutorTest {
             buildJsonObject {
               put("type", "text")
               put("text", payload.toString())
-            }
+            },
           )
         },
       )
@@ -57,7 +60,7 @@ class DaemonEmulatorControlExecutorTest {
           buildJsonObject {
             put("type", "text")
             put("text", """{"code":"device_lost","reason":"confirmed-unavailable"}""")
-          }
+          },
         )
       },
     )
@@ -72,7 +75,7 @@ class DaemonEmulatorControlExecutorTest {
           buildJsonObject {
             put("type", "text")
             put("text", text)
-          }
+          },
         )
       },
     )
@@ -89,13 +92,13 @@ class DaemonEmulatorControlExecutorTest {
   }
 
   @Test
-  fun `rotate sets the active device then calls rotate with the target orientation`() = runTest {
+  fun `rotate calls rotate with the target orientation and allocates nothing itself`() = runTest {
     val client = FakeAutoMobileClient()
     executor(client)
       .run("emulator-5554", Platform.Android, EmulatorControl.Rotate, Orientation.Landscape)
 
-    // Active device is set before any tool call.
-    assertEquals("setActiveDevice", client.calls.first())
+    // #10730: allocation belongs to the desktop session's input client, never a setActiveDevice.
+    assertTrue("setActiveDevice" !in client.calls)
     assertTrue(
       "rotate enables its exact tool",
       client.toolCalls.any {
@@ -116,7 +119,7 @@ class DaemonEmulatorControlExecutorTest {
               put("platform", "android")
               put("deviceId", "emulator-5554")
             }
-      }
+      },
     )
   }
 
@@ -126,7 +129,7 @@ class DaemonEmulatorControlExecutorTest {
     executor(client)
       .run("emulator-5554", Platform.Android, EmulatorControl.Snapshot, Orientation.Portrait)
 
-    assertEquals("setActiveDevice", client.calls.first())
+    assertTrue("setActiveDevice" !in client.calls)
     assertTrue(
       client.toolCalls.any {
         it.name == "setToolEnabled" &&
@@ -135,7 +138,7 @@ class DaemonEmulatorControlExecutorTest {
               put("toolName", "deviceSnapshot")
               put("enabled", true)
             }
-      }
+      },
     )
     assertTrue(
       client.toolCalls.any {
@@ -146,7 +149,7 @@ class DaemonEmulatorControlExecutorTest {
               put("platform", "android")
               put("deviceId", "emulator-5554")
             }
-      }
+      },
     )
   }
 
@@ -155,7 +158,7 @@ class DaemonEmulatorControlExecutorTest {
     val client = FakeAutoMobileClient()
     executor(client).run("booted-ipad", Platform.Ios, EmulatorControl.Unlock, Orientation.Portrait)
 
-    assertEquals("setActiveDevice", client.calls.first())
+    assertTrue("setActiveDevice" !in client.calls)
     assertTrue(
       client.toolCalls.any {
         it.name == "wakeAndUnlock" &&
@@ -164,7 +167,7 @@ class DaemonEmulatorControlExecutorTest {
               put("platform", "ios")
               put("deviceId", "booted-ipad")
             }
-      }
+      },
     )
   }
 
@@ -186,6 +189,24 @@ class DaemonEmulatorControlExecutorTest {
   }
 
   @Test
+  fun `pressButton goes through the session-naming input client when one is given`() = runTest {
+    // #10698: the daemon accepts input for a held device only from its holder, so the desktop hands
+    // the executor a client that names its session.
+    val client = FakeAutoMobileClient().apply { transportName = "Unix Socket" }
+    val inputClient = FakeAutoMobileClient().apply { transportName = "Unix Socket" }
+    DaemonEmulatorControlExecutor(
+        client,
+        inputClient = inputClient,
+        foregroundAppResolver = FakeForegroundAppResolver(appId = null),
+        ioDispatcher = UnconfinedTestDispatcher(),
+      )
+      .pressButton("emulator-5554", Platform.Android, DeviceButton.Back)
+
+    assertTrue(client.inputPressButtonCalls.isEmpty())
+    assertEquals("back", inputClient.inputPressButtonCalls.single().button)
+  }
+
+  @Test
   fun `a non-Unix transport routes pressButton through the pressButton MCP tool`() = runTest {
     // MCP HTTP/STDIO transports don't serve the direct input/* helpers, so the command bar must
     // fall back to the transport-agnostic pressButton tool (its pre-fast-path behavior) instead of
@@ -194,7 +215,7 @@ class DaemonEmulatorControlExecutorTest {
     executor(client).pressButton("emulator-5554", Platform.Android, DeviceButton.Home)
 
     assertTrue(client.inputPressButtonCalls.isEmpty())
-    assertEquals("setActiveDevice", client.calls.first())
+    assertTrue("setActiveDevice" !in client.calls)
     assertTrue(
       client.toolCalls.any {
         it.name == "pressButton" &&
@@ -204,7 +225,7 @@ class DaemonEmulatorControlExecutorTest {
               put("platform", "android")
               put("deviceId", "emulator-5554")
             }
-      }
+      },
     )
   }
 
@@ -299,26 +320,68 @@ class DaemonEmulatorControlExecutorTest {
   }
 
   @Test
-  fun `active-device failure prevents the control tool call`() = runTest {
-    val client =
-      FakeAutoMobileClient().apply {
-        setActiveDeviceResult =
-          dev.jasonpearson.automobile.desktop.core.daemon.SetActiveDeviceResult(
-            success = false,
-            message = "Device is unavailable",
-          )
-      }
+  fun `every device control runs on the desktop input client, none on the shared client`() =
+    runTest {
+      // #10730: rotate, snapshot, unlock and locale are active use, so they allocate through the
+      // desktop session's input client; the shared graph client never touches the device.
+      val client = FakeAutoMobileClient().apply { transportName = "Unix Socket" }
+      val inputClient =
+        FakeAutoMobileClient().apply {
+          transportName = "Unix Socket"
+          callToolResult = toolResponse(success = true, message = "")
+        }
+      val executor =
+        DaemonEmulatorControlExecutor(
+          client,
+          inputClient = inputClient,
+          foregroundAppResolver = FakeForegroundAppResolver(appId = "com.example.app"),
+          ioDispatcher = UnconfinedTestDispatcher(),
+        )
 
-    // run() controls still bind the active device first; a bind failure must block the tool call.
-    // (pressButton no longer sets the active device — it targets deviceId directly.)
-    try {
-      executor(client)
-        .run("emulator-5554", Platform.Android, EmulatorControl.Rotate, Orientation.Landscape)
-      fail("Expected active-device failure")
-    } catch (error: McpConnectionException) {
-      assertEquals("Device is unavailable", error.message)
-      assertTrue(client.toolCalls.none { it.name == "rotate" })
+      listOf(EmulatorControl.Rotate, EmulatorControl.Snapshot, EmulatorControl.Unlock).forEach {
+        executor.run("emulator-5554", Platform.Android, it, Orientation.Landscape)
+      }
+      executor.setLocale("emulator-5554", Platform.Android, "de-DE")
+
+      assertTrue(client.calls.isEmpty())
+      assertTrue(client.toolCalls.isEmpty())
+      assertEquals(
+        listOf("rotate", "deviceSnapshot", "wakeAndUnlock", "changeLocalization"),
+        inputClient.toolCalls.map { it.name }.filter { it != "setToolEnabled" },
+      )
     }
+
+  @Test
+  fun `a control on a device another session holds is refused before any tool call`() = runTest {
+    val delegate =
+      FakeAutoMobileClient().apply { callToolResult = toolResponse(success = true, message = "") }
+    val allocations = mutableListOf<String>()
+    val inputClient =
+      InputAllocatingClient(
+        delegate,
+        DesktopInputAllocation { deviceId ->
+          allocations += deviceId
+          false
+        },
+      )
+    val executor =
+      DaemonEmulatorControlExecutor(
+        FakeAutoMobileClient(),
+        inputClient = inputClient,
+        foregroundAppResolver = FakeForegroundAppResolver(appId = null),
+        ioDispatcher = UnconfinedTestDispatcher(),
+      )
+
+    try {
+      executor.run("emulator-5554", Platform.Android, EmulatorControl.Rotate, Orientation.Landscape)
+      fail("Expected the refused allocation to drop the control")
+    } catch (error: McpConnectionException) {
+      assertEquals(INPUT_NOT_ALLOCATED_ERROR, error.message)
+    }
+
+    assertEquals(listOf("emulator-5554"), allocations)
+    assertTrue(delegate.toolCalls.none { it.name == "rotate" })
+    assertTrue("setActiveDevice" !in delegate.calls)
   }
 
   @Test
@@ -334,7 +397,7 @@ class DaemonEmulatorControlExecutorTest {
               put("toolName", "changeLocalization")
               put("enabled", true)
             }
-      }
+      },
     )
     assertTrue(
       "iOS locale is device-wide — no appId",
@@ -390,7 +453,7 @@ class DaemonEmulatorControlExecutorTest {
               put("deviceId", "emulator-5554")
               put("appId", "com.example.app")
             }
-      }
+      },
     )
   }
 

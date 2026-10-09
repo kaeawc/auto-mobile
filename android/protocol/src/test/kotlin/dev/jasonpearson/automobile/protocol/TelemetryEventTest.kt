@@ -190,7 +190,7 @@ class TelemetryEventTest {
     assertEquals(
       "network_request",
       SdkEventSerializer.getEventType(
-        SdkNetworkRequestEvent(timestamp = 1L, url = "u", method = "GET")
+        SdkNetworkRequestEvent(timestamp = 1L, url = "u", method = "GET"),
       ),
     )
     assertEquals(
@@ -202,13 +202,13 @@ class TelemetryEventTest {
           url = "u",
           direction = WebSocketFrameDirection.SENT,
           frameType = WebSocketFrameType.TEXT,
-        )
+        ),
       ),
     )
     assertEquals(
       "log",
       SdkEventSerializer.getEventType(
-        SdkLogEvent(timestamp = 1L, level = 3, tag = "T", message = "M")
+        SdkLogEvent(timestamp = 1L, level = 3, tag = "T", message = "M"),
       ),
     )
     assertEquals(

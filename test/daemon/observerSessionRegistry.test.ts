@@ -106,13 +106,15 @@ describe("ObserverSessionRegistry", () => {
     expect(registry.canObserveDevice(sessionId, "idle", ownership)).toBe(false);
   });
 
-  test("restart loses registrations and has no timers to leak", () => {
+  test("restart loses registrations and disposal leaks no expiry timer", () => {
     registry.register(sessionId, "desktop");
     const restarted = new ObserverSessionRegistry(timer);
     expect(restarted.heartbeat(sessionId)).toBe(false);
     expect(restarted.list()).toEqual([]);
-    expect(timer.getPendingTimeoutCount()).toBe(0);
+    // Only the registry holding an observer arms its expiry sweep (#11076).
+    expect(timer.getPendingTimeoutCount()).toBe(1);
     registry.dispose();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(registry.list()).toEqual([]);
     expect(registry.register(sessionId, "desktop").accepted).toBe(false);
     restarted.dispose();
@@ -222,5 +224,53 @@ describe("ObserverSessionRegistry", () => {
     expect(pool.getStats().idle).toBe(0);
     expect(pool.getStats().assigned).toBe(2);
     expect(registry.list()).toHaveLength(1);
+  });
+});
+
+describe("ObserverSessionRegistry gone callback", () => {
+  test("fires on explicit release and heartbeat expiry but not on promotion", () => {
+    const timer = new FakeTimer();
+    const gone: string[] = [];
+    const registry = new ObserverSessionRegistry(timer, 10000, (id) => gone.push(id));
+    registry.register("a", "c");
+    registry.register("b", "c");
+    registry.register("c", "c");
+    registry.release("a");
+    registry.release("b", "promotion");
+    expect(gone).toEqual(["a"]);
+    timer.advanceTime(10000);
+    registry.list();
+    expect(gone).toEqual(["a", "c"]);
+    registry.dispose();
+  });
+
+  test("a heartbeat timeout fires on the injected timer without any registry lookup (#11076)", () => {
+    const timer = new FakeTimer();
+    const gone: string[] = [];
+    const registry = new ObserverSessionRegistry(timer, 10000, (id) => gone.push(id));
+    registry.register("a", "c");
+    timer.advanceTime(5000);
+    registry.register("b", "c");
+    timer.advanceTime(4000);
+    // A heartbeat pushes "a" past the first sweep; that sweep fires early and re-arms.
+    expect(registry.heartbeat("a")).toBe(true);
+    timer.advanceTime(1000);
+    expect(gone).toEqual([]);
+    timer.advanceTime(5000);
+    expect(gone).toEqual(["b"]);
+    timer.advanceTime(4000);
+    expect(gone).toEqual(["b", "a"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    registry.dispose();
+  });
+
+  test("dispose cancels the pending sweep", () => {
+    const timer = new FakeTimer();
+    const gone: string[] = [];
+    const registry = new ObserverSessionRegistry(timer, 10000, (id) => gone.push(id));
+    registry.register("a", "c");
+    registry.dispose();
+    timer.advanceTime(20000);
+    expect(gone).toEqual([]);
   });
 });

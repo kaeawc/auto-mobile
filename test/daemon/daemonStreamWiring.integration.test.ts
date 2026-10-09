@@ -36,6 +36,8 @@ import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { logger } from "../../src/utils/logger";
+import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
+import type { ObserveResult } from "../../src/models";
 import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
 import type {
   OnNavigationGraphRequestedCallback,
@@ -1334,7 +1336,8 @@ describe("Daemon stream wiring", () => {
       }
     });
 
-    test("refuses an all-device subscribe that expands to a device owned by another session", async () => {
+    // Watching stored values is a read (#10830): another session's device is watched too.
+    test("an all-device subscribe also watches a device owned by another session", async () => {
       const { daemon, internals } = await daemonWithPool(
         [
           { id: "emulator-5554", platform: "android" },
@@ -1353,23 +1356,21 @@ describe("Daemon stream wiring", () => {
       })) as typeof AndroidCtrlProxyClient.getExistingInstance;
 
       try {
-        await expect(
-          internals.applyStorageSubscriptionRequest({
-            deviceId: null,
-            sessionUuid: "caller-session",
-            packageName: "com.example",
-            fileName: "prefs.xml",
-            subscribe: true,
-          }),
-        ).rejects.toThrow(/emulator-5556/);
-        expect(touched).toEqual(["emulator-5554"]);
+        await internals.applyStorageSubscriptionRequest({
+          deviceId: null,
+          sessionUuid: "caller-session",
+          packageName: "com.example",
+          fileName: "prefs.xml",
+          subscribe: true,
+        });
+        expect(touched).toEqual(["emulator-5554", "emulator-5556"]);
       } finally {
         AndroidCtrlProxyClient.getExistingInstance = originalGetExistingInstance;
         daemon.getSessionManager().stopCleanupTimer();
       }
     });
 
-    test("reports a per-device observation failure for another session's device", async () => {
+    test("reports a per-device observation failure for an unknown session", async () => {
       const { daemon, internals } = await daemonWithPool(
         [{ id: "emulator-5556", platform: "android" }],
         new Set(),
@@ -1383,15 +1384,88 @@ describe("Daemon stream wiring", () => {
         internals.setupDeviceDataStreamCallback();
         const observations = await stream.observationHandler!({
           deviceId: null,
-          sessionUuid: "caller-session",
+          sessionUuid: "stranger-session",
           signal: new AbortController().signal,
         });
         expect(observations).toHaveLength(1);
         expect(observations[0]?.deviceId).toBe("emulator-5556");
-        expect(observations[0]?.observation.error).toMatch(/different daemon session/);
+        expect(observations[0]?.observation.error).toMatch(/not an active daemon session/);
       } finally {
         daemon.getSessionManager().stopCleanupTimer();
       }
+    });
+
+    // #10967: the session observe pipeline can rebind the accessibility service and set up
+    // CtrlProxy; on a device another session holds, a viewer gets only the connect-only read.
+    async function observeAs(options: {
+      requester: string;
+      holder: string | null;
+      platform: "android" | "ios";
+    }): Promise<{ paths: string[]; error: string | undefined }> {
+      const { daemon, internals } = await daemonWithPool(
+        [{ id: "device-1", platform: options.platform }],
+        new Set(),
+      );
+      internals.sessionManager.getSession = (sessionUuid) =>
+        sessionUuid === options.requester || sessionUuid === options.holder ? {} : null;
+      internals.sessionManager.getSessionForDevice = () => options.holder;
+      const stream = new FakeDeviceDataStreamServer();
+      internals.getDeviceSessionRoutingTargets = () => targets(stream);
+      const paths: string[] = [];
+      const observation: ObserveResult = {
+        observationId: "observed",
+        updatedAt: 0,
+        screenSize: { width: 1, height: 1 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      };
+      const deviceRead = spyOn(RealObserveScreen.prototype, "executeDeviceRead").mockImplementation(
+        async () => {
+          paths.push("device-read");
+          return observation;
+        },
+      );
+      const sessionObserve = spyOn(RealObserveScreen.prototype, "execute").mockImplementation(
+        async () => {
+          paths.push("session-pipeline");
+          return observation;
+        },
+      );
+      try {
+        internals.setupDeviceSessionRouting();
+        internals.setupDeviceDataStreamCallback();
+        // An all-device request: the pooled entry is listed rather than looked up by serial.
+        const observations = await stream.observationHandler!({
+          deviceId: null,
+          sessionUuid: options.requester,
+          signal: new AbortController().signal,
+        });
+        return { paths, error: observations[0]?.observation.error };
+      } finally {
+        deviceRead.mockRestore();
+        sessionObserve.mockRestore();
+        daemon.getSessionManager().stopCleanupTimer();
+      }
+    }
+
+    for (const platform of ["android", "ios"] as const) {
+      test(`a viewer's request_observation on a held ${platform} device takes the connect-only read`, async () => {
+        const { paths, error } = await observeAs({
+          requester: "viewer-session",
+          holder: "owner-session",
+          platform,
+        });
+        expect(error).toBeUndefined();
+        expect(paths).toEqual(["device-read"]);
+      });
+    }
+
+    test("the holder's own request_observation keeps the session observe pipeline", async () => {
+      const { paths } = await observeAs({
+        requester: "owner-session",
+        holder: "owner-session",
+        platform: "ios",
+      });
+      expect(paths).toEqual(["session-pipeline"]);
     });
   });
 });

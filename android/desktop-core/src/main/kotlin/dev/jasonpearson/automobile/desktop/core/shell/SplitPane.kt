@@ -172,7 +172,7 @@ fun VerticalSplitPane(
   Column(modifier = modifier.fillMaxSize().onSizeChanged { totalHeightPx = it.height }) {
     Box(
       modifier =
-        Modifier.weight(if (showSecond) fraction.coerceIn(0.01f, 0.99f) else 1f).fillMaxWidth()
+        Modifier.weight(if (showSecond) fraction.coerceIn(0.01f, 0.99f) else 1f).fillMaxWidth(),
     ) {
       first()
     }

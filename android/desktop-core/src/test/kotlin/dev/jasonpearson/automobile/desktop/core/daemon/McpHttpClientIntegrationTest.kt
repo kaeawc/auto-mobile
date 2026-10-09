@@ -41,7 +41,7 @@ class McpHttpClientIntegrationTest {
             buildJsonObject {
               put("type", "text")
               put("text", textJson)
-            }
+            },
           )
         },
       )
@@ -93,7 +93,7 @@ class McpHttpClientIntegrationTest {
   @Test
   fun `listResources returns configured resources`() {
     daemon.addResource(
-      McpResource(uri = "automobile://devices", name = "devices", description = "List devices")
+      McpResource(uri = "automobile://devices", name = "devices", description = "List devices"),
     )
 
     val resources = client.listResources()
@@ -113,7 +113,7 @@ class McpHttpClientIntegrationTest {
           uri = uri,
           mimeType = "application/json",
           text = """{"devices":[]}""",
-        )
+        ),
       ),
     )
 
@@ -153,7 +153,7 @@ class McpHttpClientIntegrationTest {
     daemon.setToolResponse(
       "startDevice",
       mcpToolResponse(
-        """{"success":true,"runtime":{"deviceId":"emulator-5554"},"message":"started"}"""
+        """{"success":true,"runtime":{"deviceId":"emulator-5554"},"message":"started"}""",
       ),
     )
 

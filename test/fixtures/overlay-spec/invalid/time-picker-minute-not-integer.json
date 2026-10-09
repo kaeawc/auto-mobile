@@ -1,0 +1,9 @@
+{
+  "spec": {
+    "id": "a",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": { "h": 7, "m": 1.5 },
+    "root": { "type": "timePicker", "hourKey": "h", "minuteKey": "m" }
+  },
+  "expectedPath": "root.minuteKey"
+}

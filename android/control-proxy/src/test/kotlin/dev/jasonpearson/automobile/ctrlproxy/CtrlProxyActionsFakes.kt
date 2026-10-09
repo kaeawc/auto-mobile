@@ -267,6 +267,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun requestScreenshot(requestId: String?) = record("requestScreenshot", requestId)
 
+  override fun requestScreenshot(requestId: String?, displayId: Int?, hideOverlays: Boolean) =
+    record("requestScreenshot", requestId, displayId, hideOverlays)
+
   override fun requestSwipe(
     requestId: String?,
     x1: Double,

@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { ActionableError, type BootedDevice, type PlanStep } from "../../src/models";
 import {
+  getStoppedTestRecording,
   getTestRecordingStatus,
+  isTestRecordingOwnedBy,
   startTestRecording,
   stopTestRecording,
 } from "../../src/server/testRecordingManager";
@@ -73,6 +75,55 @@ const start = async (
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 const otherDevice: BootedDevice = { ...device, deviceId: "emulator-5556" };
+
+describe("testRecordingManager ownership", () => {
+  test("a recording is owned by the session that started it, on its device only", async () => {
+    const timer = new FakeTimer();
+    const recorder = new FakeRecorder();
+    const pending = startTestRecording(
+      device,
+      timer,
+      new CountingIdGenerator("recording"),
+      () => recorder,
+      "session-a",
+    );
+    await Promise.resolve();
+    recorder.startGate.resolve();
+    await pending;
+
+    expect(isTestRecordingOwnedBy("session-a", device.deviceId)).toBe(true);
+    expect(isTestRecordingOwnedBy("session-b", device.deviceId)).toBe(false);
+    expect(isTestRecordingOwnedBy("session-a", otherDevice.deviceId)).toBe(false);
+
+    recorder.steps.push(capturedStep);
+    await stopTestRecording(undefined, "owned", timer);
+    expect(isTestRecordingOwnedBy("session-a", device.deviceId)).toBe(false);
+  });
+});
+
+describe("testRecordingManager retained plan (#10958)", () => {
+  test("an owned recording's plan stays fetchable by its owner after the stop, and only by it", async () => {
+    const timer = new FakeTimer();
+    const recorder = new FakeRecorder();
+    const pending = startTestRecording(
+      device,
+      timer,
+      new CountingIdGenerator("recording"),
+      () => recorder,
+      "session-a",
+    );
+    await Promise.resolve();
+    recorder.startGate.resolve();
+    const { recordingId } = await pending;
+    recorder.steps.push(capturedStep);
+
+    const stopped = await stopTestRecording(undefined, "owned", timer);
+
+    expect(getStoppedTestRecording(recordingId, "session-a")).toEqual(stopped);
+    expect(getStoppedTestRecording(recordingId, "session-b")).toBeUndefined();
+    expect(getStoppedTestRecording(recordingId, undefined)).toBeUndefined();
+  });
+});
 
 describe("testRecordingManager startup reservation", () => {
   test("same-device callers join one start; a different device is refused", async () => {

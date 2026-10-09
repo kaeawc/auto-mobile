@@ -6,23 +6,20 @@ import { loadJobSteps, stepNamed } from "../helpers/workflowSteps";
 // Every exclusion names the job that checks the real tree. Keep this next to
 // the guard so a new registry entry requires an explicit CI coverage decision.
 const EXCLUDED_WITH_REASON: Readonly<Record<string, string>> = {
-  "node-format": "PR format-check: bun run format:check",
-  "markdown-bash":
-    "PR bats-integration-tests: validate-markdown-bash.bats scans commands and skills",
+  "ctrl-proxy-xcodegen-drift":
+    "PR ios-xcode-build (heavy self-hosted Mac lane, #11011): xcodegen-drift-check.sh --all on macOS (XcodeGen has no Linux build; this entry skips off-host)",
+  "node-format": "PR fast-validation Check formatting step: bun run format:check",
   lychee:
     "merge.yml validate-documentation-links: online links; PR fast-validation runs lychee-offline",
-  "debug-tags": "PR bats-tests serial pass: validate-no-debug-log-tags.bats scans src/",
-  "host-shell-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh (diff ratchet)",
-  "git-metadata-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh",
-  "ffmpeg-execution-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh",
+  "host-shell-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh (diff ratchet)",
+  "git-metadata-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh",
+  "ffmpeg-execution-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh",
   "sdkmanager-execution-boundary":
     "PR node-host-integration-tests: sdkManagerExecutionBoundary.integration.test.ts scans src/",
   "archive-extraction-boundary": "PR node-unit-tests: archiveExtractionBoundary.test.ts scans src/",
-  "xcodebuild-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh (diff ratchet)",
-  "daemon-launcher-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh",
-  "process-safety": "PR ts-code-coverage: lint -> check-boundaries.sh",
-  "datetime-now-literal":
-    "PR bats-tests serial pass: validate-no-datetime-now-literal.bats scans migrations",
+  "xcodebuild-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh (diff ratchet)",
+  "daemon-launcher-boundary": "PR ts-build-and-test: lint -> check-boundaries.sh",
+  "process-safety": "PR ts-build-and-test: lint -> check-boundaries.sh",
 };
 
 function selectedChecks(run: string): string[] {
@@ -92,6 +89,11 @@ describe("Fast Validation registry coverage", () => {
       // existing docs guards stay in the main fan-out.
       expect(mainSelected).toEqual(
         expect.arrayContaining(["docs-assets", "env-var-docs", "lfs-pointers"]),
+      );
+      // BATS is path-filtered (#10889), so the real-tree scans it used to be
+      // the only PR coverage for must run in Fast Validation on every PR.
+      expect(mainSelected).toEqual(
+        expect.arrayContaining(["debug-tags", "datetime-now-literal", "markdown-bash"]),
       );
       expect(offlineSelected).toEqual(["lychee-offline"]);
     },

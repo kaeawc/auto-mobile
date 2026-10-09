@@ -1,3 +1,4 @@
+import { isTruthy } from "../../../models/Element";
 import { Element, ObserveResult, SwipeDirection, SwipeOnOptions } from "../../../models";
 import { boundsArea, boundsEqual } from "../../../utils/bounds";
 import { getScreenBounds as getScreenBoundsFromSize } from "../../../utils/screenBounds";
@@ -79,6 +80,14 @@ export class AutoTargetSelector implements AutoTargetSelectorService {
     const axis = this.knownScrollAxis(element);
     return (
       axis === undefined || (direction === "up" || direction === "down") === (axis === "vertical")
+    );
+  }
+
+  /** Scroll-flagged or a known pager/list class, with an axis compatible with `direction`. */
+  scrollsInDirection(element: Element, direction: SwipeDirection): boolean {
+    return (
+      (isTruthy(element.scrollable) || this.knownScrollAxis(element) !== undefined) &&
+      this.matchesDirection(element, direction)
     );
   }
 

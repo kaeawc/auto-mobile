@@ -35,7 +35,7 @@ class RealPerformanceDataSourceTest {
             listOf(
               entry(id = 1, deviceId = "device-A", touchLatencyMs = 50.0),
               entry(id = 2, deviceId = "device-B", touchLatencyMs = 999.0),
-            )
+            ),
         )
     }
   }

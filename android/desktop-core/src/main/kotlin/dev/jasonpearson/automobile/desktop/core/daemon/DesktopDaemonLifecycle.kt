@@ -19,7 +19,7 @@ internal interface DaemonSocketChecker {
 }
 
 internal class FileDaemonSocketChecker(
-  private val socketPath: String = DaemonSocketPaths.socketPath()
+  private val socketPath: String = DaemonSocketPaths.socketPath(),
 ) : DaemonSocketChecker {
   override fun isReady(): Boolean {
     if (!File(socketPath).exists()) return false
@@ -106,7 +106,7 @@ internal class JsonDaemonPidFileReader(
           version =
             pidData["version"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() },
           launchArguments = (pidData["options"] as? JsonObject)?.toLaunchArguments().orEmpty(),
-        )
+        ),
       )
     } catch (_: Exception) {
       DaemonPidReadResult.Unreadable
@@ -245,13 +245,13 @@ internal object SystemDaemonCommandExecutor : DaemonCommandExecutor {
   internal fun commandTimeoutMillis(
     startupTimeoutOverride: String? =
       System.getenv("AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS")
-        ?: System.getenv("AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS")
+        ?: System.getenv("AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS"),
   ): Long {
     val startupTimeoutMillis =
       startupTimeoutOverride?.toLongOrNull()?.takeIf { it > 0 }
         ?: DEFAULT_DAEMON_STARTUP_TIMEOUT_MILLIS
     return (startupTimeoutMillis.coerceAtMost(
-      (Long.MAX_VALUE - TERMINATION_TIMEOUT_MILLIS) / DAEMON_STARTUP_LIFECYCLE_BUDGETS
+      (Long.MAX_VALUE - TERMINATION_TIMEOUT_MILLIS) / DAEMON_STARTUP_LIFECYCLE_BUDGETS,
     ) * DAEMON_STARTUP_LIFECYCLE_BUDGETS) + TERMINATION_TIMEOUT_MILLIS
   }
 
@@ -595,7 +595,7 @@ internal class DesktopDaemonLifecycle(
         when (result) {
           is DaemonLifecycleResult.Ready -> DaemonLifecyclePhase.Completed(result.restarted)
           is DaemonLifecycleResult.Failure -> DaemonLifecyclePhase.Failed(result.message)
-        }
+        },
       )
       result
     }
@@ -605,7 +605,7 @@ internal class DesktopDaemonLifecycle(
       expectedVersionProvider()
         ?: return DaemonLifecycleResult.Failure(
           "Cannot verify the AutoMobile daemon version because this desktop build has no version. " +
-            "Rebuild or reinstall the desktop application, then try again."
+            "Rebuild or reinstall the desktop application, then try again.",
         )
     val currentDaemon =
       when (val readResult = readPidStateWithRetry()) {
@@ -613,7 +613,7 @@ internal class DesktopDaemonLifecycle(
         DaemonPidReadResult.Absent -> null
         DaemonPidReadResult.Unreadable ->
           return DaemonLifecycleResult.Failure(
-            "Could not read the AutoMobile daemon state. Wait a moment for startup to finish, then retry."
+            "Could not read the AutoMobile daemon state. Wait a moment for startup to finish, then retry.",
           )
       }
     val currentVersion = currentDaemon?.version
@@ -633,7 +633,7 @@ internal class DesktopDaemonLifecycle(
     if (declaresFullVersion(expectedVersion)) {
       return DaemonLifecycleResult.Failure(
         "AutoMobile desktop source build $expectedVersion cannot start a matching published daemon. " +
-          "Start the daemon from the same checkout, then try again."
+          "Start the daemon from the same checkout, then try again.",
       )
     }
 
@@ -648,7 +648,7 @@ internal class DesktopDaemonLifecycle(
       }
       if (installResult.timedOut) {
         return DaemonLifecycleResult.Failure(
-          "Timed out while installing Bun. Check your network connection and retry."
+          "Timed out while installing Bun. Check your network connection and retry.",
         )
       }
       if (installResult.exitCode != 0) {
@@ -658,13 +658,13 @@ internal class DesktopDaemonLifecycle(
             append("Could not install Bun automatically")
             detail?.let { append(": $it") }
             append(". Install Bun manually, then try again.")
-          }
+          },
         )
       }
       runner = packageRunnerResolver.resolve(osName)
       if (runner == null) {
         return DaemonLifecycleResult.Failure(
-          "Bun installed, but bunx could not be found. Restart AutoMobile and try again."
+          "Bun installed, but bunx could not be found. Restart AutoMobile and try again.",
         )
       }
     }
@@ -683,7 +683,7 @@ internal class DesktopDaemonLifecycle(
       } catch (error: Exception) {
         return DaemonLifecycleResult.Failure(
           "Could not $action AutoMobile $expectedVersion: ${error.message ?: error.javaClass.simpleName}. " +
-            "Install Bun so bunx is available, then try again."
+            "Install Bun so bunx is available, then try again.",
         )
       }
     if (commandResult.cancelled) {
@@ -693,14 +693,14 @@ internal class DesktopDaemonLifecycle(
       if (commandResult.timedOut) {
         return DaemonLifecycleResult.Failure(
           "Timed out while trying to $action AutoMobile $expectedVersion. " +
-            "Check the daemon logs and retry."
+            "Check the daemon logs and retry.",
         )
       }
       val detail =
         commandResult.output.trim().takeIf { it.isNotEmpty() }
           ?: "Install @kaeawc/auto-mobile@$expectedVersion and try again."
       return DaemonLifecycleResult.Failure(
-        "Could not $action AutoMobile $expectedVersion (exit code ${commandResult.exitCode}). $detail"
+        "Could not $action AutoMobile $expectedVersion (exit code ${commandResult.exitCode}). $detail",
       )
     }
 
@@ -718,7 +718,7 @@ internal class DesktopDaemonLifecycle(
     return DaemonLifecycleResult.Failure(
       "AutoMobile daemon version mismatch: desktop requires $expectedVersion, but the daemon " +
         "reports ${actualVersion ?: "no version"}. Stop the existing daemon and retry so " +
-        "@kaeawc/auto-mobile@$expectedVersion can start."
+        "@kaeawc/auto-mobile@$expectedVersion can start.",
     )
   }
 

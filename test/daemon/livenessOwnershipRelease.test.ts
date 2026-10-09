@@ -40,6 +40,22 @@ describe("deliberate liveness ownership release", () => {
     request("daemon/heartbeat", { sessionId, livenessOwnerToken: token });
   const release = (token = OWNER, sessionId = SESSION) =>
     request("daemon/releaseLivenessOwnership", { sessionId, livenessOwnerToken: token });
+  /**
+   * A tick writes the activity row only when it differs from the last one issued (#11079). Fail
+   * one tool-call write (which rolls its own refresh back) so the next tick re-issues the row,
+   * giving the race a write to suspend in.
+   */
+  async function forgetStoredActivity(sessionId = SESSION): Promise<void> {
+    const failing = spyOn(persistence, "recordActivity").mockRejectedValueOnce(
+      new Error("activity write failed"),
+    );
+    try {
+      await expect(manager.getOrCreateSession(sessionId)).rejects.toThrow();
+      expect(failing).toHaveBeenCalledTimes(1);
+    } finally {
+      failing.mockRestore();
+    }
+  }
 
   beforeEach(async () => {
     timer = new FakeTimer();
@@ -107,6 +123,7 @@ describe("deliberate liveness ownership release", () => {
       const id = "tick-adopted";
       await manager.createSession(id, DEVICE, "android");
       expect((await tick(OWNER, id)).success).toBe(true);
+      await forgetStoredActivity(id);
       timer.advanceTime(4_000);
       const entered = Promise.withResolvers<void>();
       const resume = Promise.withResolvers<void>();
@@ -417,6 +434,7 @@ describe("deliberate liveness ownership release", () => {
   test.each([false, true])(
     "release vs owner tick is gated, releaseFirst=%s",
     async (releaseFirst) => {
+      await forgetStoredActivity();
       timer.advanceTime(4_000);
       const entered = Promise.withResolvers<void>();
       const resume = Promise.withResolvers<void>();
@@ -533,6 +551,7 @@ describe("deliberate liveness ownership release", () => {
   });
 
   test("an older failed heartbeat cannot roll back activity across release", async () => {
+    await forgetStoredActivity();
     const entered = Promise.withResolvers<void>();
     const failed = Promise.withResolvers<void>();
     const logged = Promise.withResolvers<void>();

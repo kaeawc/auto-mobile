@@ -2,11 +2,12 @@
 #
 # Guards the "required status check" gate wiring in pull_request.yml (PR #3860).
 #
-# ios-build-gate / codeql-gate / shell-tests-gate are always() roll-up jobs that
-# report STABLE context names so their families' deterministic build/scan legs
-# can be promoted to required checks without the matrix-skip footgun (a gated-out
+# ide-plugin-gate / ios-build-gate / shell-tests-gate are always() roll-up jobs
+# that report STABLE context names ("IDE Plugin", "iOS Build", "Shell Tests") that
+# the green-main ruleset requires, without the matrix-skip footgun (a gated-out
 # matrix job reports its literal "(${{ ... }})" name, which would hang a required
-# check as "Expected").
+# check as "Expected"). Non-required roll-ups were removed: each cost a runner
+# slot per PR without blocking a merge.
 #
 # These gates roll up NAMED jobs, so their completeness depends on humans keeping
 # each gate's `needs:` in sync. The required-checks config lives in GitHub's
@@ -40,13 +41,11 @@ wiring_requires_yq() {
 @test "required gate jobs exist with stable context names" {
   wiring_requires_yq
   local job expected
-  for job in ios-build-gate codeql-gate shell-tests-gate node-tests-gate runtime-graph-gate; do
+  for job in ide-plugin-gate ios-build-gate shell-tests-gate; do
     case "$job" in
+      ide-plugin-gate) expected="IDE Plugin" ;;
       ios-build-gate) expected="iOS Build" ;;
-      codeql-gate) expected="CodeQL" ;;
       shell-tests-gate) expected="Shell Tests" ;;
-      node-tests-gate) expected="Node Tests" ;;
-      runtime-graph-gate) expected="Pinned Runtime Graph Gate" ;;
     esac
     run yq -r ".jobs.\"${job}\".name" "$WF"
     [ "$status" -eq 0 ]
@@ -58,7 +57,7 @@ wiring_requires_yq() {
   # A required check that never posts hangs as "Expected"; always() guarantees a
   # success/failure/skipped conclusion in every path.
   wiring_requires_yq
-  for job in ios-build-gate codeql-gate shell-tests-gate node-tests-gate runtime-graph-gate; do
+  for job in ios-build-gate shell-tests-gate; do
     run yq -r ".jobs.\"${job}\".if" "$WF"
     [ "$status" -eq 0 ]
     [[ "$output" == "always() &&"* ]]
@@ -87,7 +86,7 @@ wiring_requires_yq() {
   # never `exit 1`s is a permanent false-green. Pin the failure semantics so
   # weakening the loop (e.g. exit 1 -> exit 0) fails this guard.
   wiring_requires_yq
-  for job in ios-build-gate codeql-gate shell-tests-gate node-tests-gate runtime-graph-gate; do
+  for job in ios-build-gate shell-tests-gate; do
     run yq -r "
       .jobs.\"${job}\".steps[]
       | select(.name == \"Check results\")
@@ -99,128 +98,126 @@ wiring_requires_yq() {
   done
 }
 
-@test "codeql-gate rolls up codeql-node" {
-  block="$(job_block codeql-gate)"
-  [[ "$block" == *"- codeql-node"* ]]
-  [[ "$block" == *"needs.codeql-node.result"* ]]
-}
-
-@test "shell-tests-gate rolls up unit and integration BATS jobs" {
+@test "shell-tests-gate rolls up the BATS job (unit + integration lanes)" {
   block="$(job_block shell-tests-gate)"
   [[ "$block" == *"- bats-tests"* ]]
   [[ "$block" == *"needs.bats-tests.result"* ]]
-  [[ "$block" == *"- bats-integration-tests"* ]]
-  [[ "$block" == *"needs.bats-integration-tests.result"* ]]
+  # The integration lane is a step of bats-tests (folded to save a runner slot).
+  [[ "$block" != *"bats-integration-tests"* ]]
 }
 
-@test "Android emulator compile smoke includes test-source compilation" {
-  block="$(job_block android-emulator-compile-smoke)"
-  [[ -n "$block" ]]
-  [[ "$block" == *":junit-runner:compileTestKotlin"* ]]
-  [[ "$block" == *":playground:app:compileDebugUnitTestKotlin"* ]]
-}
-
-@test "node-tests-gate rolls up complete unit, timing-budget, and host integration lanes" {
-  block="$(job_block node-tests-gate)"
-  [[ "$block" == *"- node-unit-tests"* ]]
-  [[ "$block" == *"needs.node-unit-tests.result"* ]]
-  [[ "$block" == *"- node-unit-timing-budget"* ]]
-  [[ "$block" == *"needs.node-unit-timing-budget.result"* ]]
-  [[ "$block" == *"- node-host-integration-tests"* ]]
-  [[ "$block" == *"needs.node-host-integration-tests.result"* ]]
-}
-
-@test "advisory roll-ups warn without weakening their hard dependencies" {
-  local ios android node webrtc ios_hard_results ios_advisory_results android_hard_results android_advisory_results node_hard_results node_advisory_results webrtc_hard_results webrtc_advisory_results
-  ios="$(job_block ios-gate)"
-  android="$(job_block android-gate)"
-  node="$(job_block node-tests-gate)"
-  webrtc="$(job_block webrtc-gate)"
-
-  for block in "$ios" "$android" "$node" "$webrtc"; do
-    [[ "$block" == *"hard_results"* ]]
-    [[ "$block" == *"advisory_results"* ]]
-    [[ "$block" == *'::warning::'*'advisory: '*' lane failed; classify with scripts/ci/classify-failure.sh <run-id>'* ]]
-  done
-
-  ios_hard_results="${ios#*hard_results=(}"
-  ios_hard_results="${ios_hard_results%%$'\n          )'*}"
-  ios_advisory_results="${ios#*advisory_results=(}"
-  ios_advisory_results="${ios_advisory_results%%$'\n          )'*}"
-  [[ "$ios_hard_results" == *'"ios-build-gate='* ]]
-  [[ "$ios_hard_results" == *'"ios-playground-tests='* ]]
-  [[ "$ios_advisory_results" != *'"ios-xctest-runner-simulator-tests='* ]]
-  [[ "$ios_advisory_results" != *'"ios-build-gate='* ]]
-  [[ "$ios_advisory_results" != *'"ios-playground-tests='* ]]
-  [[ "$ios_hard_results" != *'"ios-xctest-runner-simulator-tests='* ]]
-  android_hard_results="${android#*hard_results=(}"
-  android_hard_results="${android_hard_results%%$'\n          )'*}"
-  android_advisory_results="${android#*advisory_results=(}"
-  android_advisory_results="${android_advisory_results%%$'\n          )'*}"
-  [[ "$android_hard_results" == *'"build-android-control-proxy='* ]]
-  [[ "$android_hard_results" == *'"android-emulator-compile-smoke='* ]]
-  [[ "$android_advisory_results" == *'"junit-runner-emulator-tests='* ]]
-  [[ "$android_advisory_results" != *'"build-android-control-proxy='* ]]
-  [[ "$android_advisory_results" != *'"android-emulator-compile-smoke='* ]]
-  [[ "$android_hard_results" != *'"junit-runner-emulator-tests='* ]]
-  node_hard_results="${node#*hard_results=(}"
-  node_hard_results="${node_hard_results%%$'\n          )'*}"
-  node_advisory_results="${node#*advisory_results=(}"
-  node_advisory_results="${node_advisory_results%%$'\n          )'*}"
-  [[ "$node_hard_results" == *'"node-unit-tests='* ]]
-  [[ "$node_hard_results" == *'"node-host-integration-tests='* ]]
-  [[ "$node_advisory_results" == *'"node-unit-timing-budget='* ]]
-  webrtc_hard_results="${webrtc#*hard_results=(}"
-  webrtc_hard_results="${webrtc_hard_results%%$'\n          )'*}"
-  webrtc_advisory_results="${webrtc#*advisory_results=(}"
-  webrtc_advisory_results="${webrtc_advisory_results%%$'\n          )'*}"
-  [[ "$webrtc_hard_results" == *'"detect-changes='* ]]
-  [[ "$webrtc_hard_results" == *'"webrtc-integration-test='* ]]
-  [[ "$webrtc_advisory_results" == *'"android-device-webrtc='* ]]
-  [[ "$webrtc_advisory_results" == *'"ios-device-webrtc='* ]]
-  [[ "$webrtc_advisory_results" != *'"webrtc-integration-test='* ]]
-}
-
-@test "advisory loops tolerate empty result maps under bash strict mode" {
+@test "BATS runs only on shell-relevant changes while Shell Tests always reports (#10889)" {
   wiring_requires_yq
-  local gate script tmpfile
-  for gate in ios-gate android-gate node-tests-gate webrtc-gate; do
-    script="$(yq -r ".jobs.\"${gate}\".steps[] | select(.name == \"Check results\") | .run" "$WF" | sed -E 's/\$\{\{ needs\.[A-Za-z0-9_-]+\.result \}\}/success/g')"
-    tmpfile="$BATS_TEST_TMPDIR/${gate}.sh"
-    printf '%s\n' "$script" >"$tmpfile"
-    run /bin/bash -u -e -o pipefail "$tmpfile"
-    [ "$status" -eq 0 ]
-    [[ "$output" != *"bad array subscript"* ]]
+  local condition
+  condition="$(yq -r '.jobs."bats-tests".if' "$WF")"
+  [[ "$condition" == *"needs.detect-changes.outputs.shell_changed == 'true'"* ]]
+  # The required roll-up must not inherit the path filter: it always posts, and a
+  # skipped bats-tests is not a failure.
+  condition="$(yq -r '.jobs."shell-tests-gate".if' "$WF")"
+  [[ "$condition" == "always()"* ]]
+  [[ "$condition" != *"shell_changed"* ]]
+  [[ "$(job_block shell-tests-gate)" == *'"$r" == "failure" || "$r" == "cancelled"'* ]]
+
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-shell")
+    | (.with.filters | from_yaml | .shell[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  local path
+  for path in "scripts/**" "test/bats/**" ".github/**" "package.json" "bun.lock" "skills/**" ".agents/**" "oxlint-plugins/**"; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
   done
+  # A TypeScript-only change must not trigger the suite.
+  [[ $'\n'"$output"$'\n' != *$'\n'"src/**"$'\n'* ]]
+  [[ "$(yq -r '.jobs."detect-changes".outputs.shell_changed' "$WF")" == *"steps.filter-shell.outputs.shell"* ]]
+}
+
+@test "host :junit-runner:test runs in exactly one PR job (#10892)" {
+  wiring_requires_yq
+  # gradle-task-run invocations only; the emulator suites drive the same task
+  # against a booted device through the android-emulator action's script.
+  run yq -r '
+    .jobs[]
+    | select([.steps[]? | select(.uses == "./.github/actions/gradle-task-run" and ((.with."gradle-tasks" // "") | test("(^| ):junit-runner:test( |$)")))] | length > 0)
+    | key
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "junit-runner-unit-tests" ]
+  [[ "$(yq -r '.jobs."junit-runner-unit-tests".name' "$WF")" == "Run JUnit Runner Unit Tests" ]]
+}
+
+@test "emulator lanes fail fast on compile errors through the build jobs (#10890)" {
+  wiring_requires_yq
+  [[ -z "$(job_block android-emulator-compile-smoke)" ]]
+  # Each module the removed compile smoke compiled is compiled by a build job
+  # the emulator lanes depend on.
+  [[ "$(job_block build-android-control-proxy)" == *":control-proxy:assembleDebug"* ]]
+  [[ "$(job_block build-playground-app)" == *":playground:app:assembleDebug"* ]]
+  [[ "$(job_block build-playground-app)" == *":playground:app:compileDebugUnitTestKotlin"* ]]
+  [[ "$(job_block junit-runner-unit-tests)" == *'gradle-tasks: ":junit-runner:test"'* ]]
+  local job needs
+  for job in android-emulator-tests; do
+    needs="$(yq -r ".jobs.\"${job}\".needs[]" "$WF")"
+    [[ $'\n'"$needs"$'\n' == *$'\n'"build-android-control-proxy"$'\n'* ]]
+    [[ $'\n'"$needs"$'\n' == *$'\n'"build-playground-app"$'\n'* ]]
+    [[ $'\n'"$needs"$'\n' == *$'\n'"junit-runner-unit-tests"$'\n'* ]]
+  done
+  # The SDK Debug Inspector Consumer guard the smoke carried stays on PRs.
+  [[ "$(job_block jvm-consumer-checks)" == *"validate-sdk-debug-inspector-consumer.sh --skip-publish"* ]]
+}
+
+@test "both emulator suites share one booted emulator with separate reports (#10891)" {
+  wiring_requires_yq
+  [[ -z "$(job_block junit-runner-emulator-tests)" ]]
+  [[ -z "$(job_block playground-automobile-emulator-tests)" ]]
+  # Exactly one PR job boots an emulator for these suites (the WHEP capture job
+  # boots its own for a different test).
+  run yq -r '
+    .jobs[]
+    | select([.steps[]? | select(.uses == "./.github/actions/android-emulator" and ((.with.script // "") | test("junit-runner|playground|run-emulator-suites")))] | length > 0)
+    | key
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "android-emulator-tests" ]
+  run yq -r '.jobs."android-emulator-tests".steps[] | select(.uses == "./.github/actions/android-emulator") | .with.script' "$WF"
+  [[ "$output" == "../scripts/android/run-emulator-suites.sh "* ]]
+  run yq -r '.jobs."android-emulator-tests".steps[] | select(.uses == "mikepenz/action-junit-report@v6") | .with.check_name + "|" + .with.report_paths' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'JUnit Runner Emulator Test Report|android/junit-runner/build/test-results/**/*.xml\nPlayground Automobile Emulator Test Report|android/playground/**/build/test-results/**/*.xml' ]
 }
 
 @test "portable PR matrices leave macOS coverage to nightly" {
   wiring_requires_yq
   local job expected
-  for job in bats-tests bats-integration-tests; do
+  for job in bats-tests; do
     run yq -r ".jobs.\"${job}\".strategy.matrix.os[]" "$WF"
     [ "$status" -eq 0 ]
     [ "$output" = "ubuntu-latest" ]
   done
-  for job in node-unit-tests node-host-integration-tests; do
-    run yq -r ".jobs.\"${job}\".strategy.matrix.os[]" "$WF"
-    [ "$status" -eq 0 ]
-    [ "$output" = $'ubuntu-latest\nwindows-latest' ]
-  done
+  # The Windows host-integration leg runs inside the required Windows build job
+  # (#10894); the Linux unit run lives in ts-build-and-test (#10893).
+  run yq -r '.jobs."node-host-integration-tests".strategy.matrix.os[]' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ubuntu-latest" ]
+  [[ -z "$(job_block node-unit-tests)" ]]
 }
 
 @test "unit, integration, and stress jobs invoke their canonical lanes" {
-  local unit host bats_unit bats_integration
-  unit="$(job_block node-unit-tests)"
+  local unit windows host bats_unit
+  unit="$(job_block ts-build-and-test)"
+  windows="$(job_block mcp-build-and-test)"
   host="$(job_block node-host-integration-tests)"
   bats_unit="$(job_block bats-tests)"
-  bats_integration="$(job_block bats-integration-tests)"
 
   [[ "$unit" == *"bash scripts/test-ts.sh unit"* ]]
   [[ "$host" == *"bash scripts/test-ts.sh integration"* ]]
   [[ "$host" == *"bash scripts/test-ts.sh stress"* ]]
+  [[ "$windows" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$windows" == *"bash scripts/test-ts.sh integration"* ]]
+  [[ "$windows" == *"bash scripts/test-ts.sh stress"* ]]
   [[ "$bats_unit" == *"scripts/ci/run-bats.sh unit"* ]]
-  [[ "$bats_integration" == *"scripts/ci/run-bats.sh integration"* ]]
+  [[ "$bats_unit" == *"scripts/ci/run-bats.sh integration"* ]]
   [[ "$bats_unit" != *"AUTOMOBILE_BATS_SERIAL_ONLY"* ]]
 }
 
@@ -234,14 +231,33 @@ wiring_requires_yq() {
   [ "$dependencies" = $'detect-changes\nfast-validation' ]
 }
 
-@test "PR and merge TypeScript coverage have setup headroom beyond the 12 minute wall budget" {
+@test "merge TypeScript coverage has setup headroom beyond the 12 minute wall budget" {
   wiring_requires_yq
-  local workflow
-  for workflow in "$WF" .github/workflows/merge.yml; do
-    run yq -r '.jobs."ts-code-coverage"."timeout-minutes" >= 20' "$workflow"
-    [ "$status" -eq 0 ]
-    [ "$output" = "true" ]
-  done
+  run yq -r '.jobs."ts-code-coverage"."timeout-minutes" >= 20' .github/workflows/merge.yml
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
+@test "PRs run the Node unit suite once on Linux; coverage stays on merge (#10893)" {
+  wiring_requires_yq
+  # The required check name survives on the lint/typecheck/build job.
+  run yq -r '.jobs."ts-build-and-test".name' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "Node TypeScript Build and Test (ubuntu-latest)" ]
+  [[ -z "$(job_block ts-code-coverage)" ]]
+  # No PR job runs the suite under coverage.
+  [[ "$(cat "$WF")" != *"run-ts-coverage.sh"* ]]
+  [[ "$(cat "$WF")" != *"test-ts.sh coverage"* ]]
+  # The required Ubuntu job is the one Linux unit run, with the 100ms budget;
+  # the Node Unit Tests matrix no longer has an Ubuntu leg. merge.yml keeps
+  # producing coverage for the README badge.
+  local ubuntu
+  ubuntu="$(job_block ts-build-and-test)"
+  [[ "$ubuntu" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$ubuntu" == *"scripts/validate-bun-test-timings.sh"* ]]
+  [[ "$(yq -r '.jobs."node-unit-tests".strategy.matrix.os[]' "$WF")" != *"ubuntu"* ]]
+  [[ "$(job_block node-unit-tests)" != *"validate-bun-test-timings.sh"* ]]
+  [[ "$(job_block ts-code-coverage .github/workflows/merge.yml)" == *"run-ts-coverage.sh"* ]]
 }
 
 @test "merge TypeScript coverage uploads diagnostics after failures with bounded retention" {
@@ -284,21 +300,20 @@ wiring_requires_yq() {
   [ "$output" = "windows-latest" ]
 }
 
-@test "nightly preserves the moved macOS portable test lanes" {
-  local workflow=".github/workflows/nightly.yml"
-  local bats_unit bats_integration unit host
-  bats_unit="$(job_block macos-bats-tests "$workflow")"
-  bats_integration="$(job_block macos-bats-integration-tests "$workflow")"
-  unit="$(job_block macos-node-unit-tests "$workflow")"
-  host="$(job_block macos-node-host-integration-tests "$workflow")"
-
-  for block in "$bats_unit" "$bats_integration" "$unit" "$host"; do
-    [[ "$block" == *"runs-on: macos-latest"* ]]
-    [[ "$block" == *"scripts/ci/install-bun-deps.sh"* ]]
+@test "nightly macOS portable test lanes run on CircleCI, not hosted GitHub (#11010)" {
+  wiring_requires_yq
+  local circle=".circleci/continue_config.yml"
+  local job host
+  for job in macos-bats-tests macos-bats-integration-tests macos-node-unit-tests macos-node-host-integration-tests; do
+    [[ -z "$(job_block "$job" ".github/workflows/nightly.yml")" ]]
+    run yq -r ".jobs.\"${job}\".steps[].run.command // \"\"" "$circle"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"scripts/ci/install-bun-deps.sh"* ]]
   done
-  [[ "$bats_unit" == *"scripts/ci/run-bats.sh unit"* ]]
-  [[ "$bats_integration" == *"scripts/ci/run-bats.sh integration"* ]]
-  [[ "$unit" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$(yq -r '.jobs."macos-bats-tests".steps[].run.command // ""' "$circle")" == *"scripts/ci/run-bats.sh unit"* ]]
+  [[ "$(yq -r '.jobs."macos-bats-integration-tests".steps[].run.command // ""' "$circle")" == *"scripts/ci/run-bats.sh integration"* ]]
+  [[ "$(yq -r '.jobs."macos-node-unit-tests".steps[].run.command // ""' "$circle")" == *"bash scripts/test-ts.sh unit"* ]]
+  host="$(yq -r '.jobs."macos-node-host-integration-tests".steps[].run.command // ""' "$circle")"
   [[ "$host" == *"bash scripts/test-ts.sh integration"* ]]
   [[ "$host" == *"bash scripts/test-ts.sh stress"* ]]
 }
@@ -321,6 +336,19 @@ wiring_requires_yq() {
   [[ "$ios" == *"AUTOMOBILE_WEBRTC_DEVICE_PLATFORM: ios"* ]]
   [[ "$ios" == *"bun run test:integration:webrtc-device"* ]]
   [[ ! -e ".github/workflows/webrtc-device-integration.yml" ]]
+}
+
+@test "iOS WHEP capture runs on Namespace macOS for same-repo PRs with heavy-lane and fork fallbacks (#11012)" {
+  wiring_requires_yq
+  run yq -r '.jobs."ios-device-webrtc"."runs-on"' "$WF"
+  [ "$status" -eq 0 ]
+  local same="github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository"
+  [ "$output" = "\${{ (${same} && vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (${same} && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('[\"self-hosted\",\"automobile-mac-heavy\"]') || 'macos-26' }}" ]
+  run yq -r '.jobs."ios-device-webrtc"."timeout-minutes"' "$WF"
+  [ "$output" -le 30 ]
+  # No CircleCI copy (#11012).
+  run yq -r '.jobs | has("ios-device-webrtc")' .circleci/continue_config.yml
+  [ "$output" = "false" ]
 }
 
 @test "PR WebRTC device jobs share path and opt-in gating" {
@@ -357,36 +385,31 @@ wiring_requires_yq() {
   done
 }
 
-@test "webrtc-gate rolls up publisher and device coverage" {
-  local block
-  block="$(job_block webrtc-gate)"
-  for job in webrtc-integration-test android-device-webrtc ios-device-webrtc; do
-    [[ "$block" == *"- $job"* ]]
-    [[ "$block" == *"needs.$job.result"* ]]
+@test "desktop_core change detection covers the desktop wire-contract fixtures (#10838)" {
+  # The daemon-side TS test writes test/fixtures/desktop-wire/*.json and the Kotlin
+  # DesktopWireFixtureCompositionTest (desktop-core) replays them. A daemon-only PR that
+  # regenerates the fixtures must still trigger the Kotlin replay.
+  wiring_requires_yq
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-desktop-core")
+    | (.with.filters | from_yaml | .desktop_core[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  local path
+  for path in \
+    "android/desktop-core/**" \
+    "test/fixtures/desktop-wire/**" \
+    "test/daemon/desktopWireContract.test.ts" \
+    "test/daemon/helpers/desktopWireHarness.ts"; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
   done
 }
 
-@test "runtime-graph-gate rolls up runtime-graph-verification (#5421)" {
-  wiring_requires_yq
-  run yq -r '.jobs."runtime-graph-gate".needs[]' "$WF"
-  [ "$status" -eq 0 ]
-  [[ $'\n'"$output"$'\n' == *$'\nruntime-graph-verification\n'* ]]
-
-  run yq -r '
-    .jobs."runtime-graph-gate".steps[]
-    | select(.name == "Check results")
-    | .run
-  ' "$WF"
-  [ "$status" -eq 0 ]
-  printf '%s\n' "$output" \
-    | grep -Fqx '  [runtime-graph-verification]="${{ needs.runtime-graph-verification.result }}"'
-}
-
-@test "runtime-graph-verification runs the clean-room pinned-graph check exactly once (#5421)" {
-  # The heavy pack+install verification must live in its own required-able job
-  # and NOT be duplicated back into the benchmarks job (it was extracted from
-  # there). Read parsed `run` fields so a commented-out command cannot satisfy
-  # the guard.
+@test "node-checks runs the clean-room pinned-graph check exactly once (#5421, #10894)" {
+  # The heavy pack+install verification runs exactly once per PR, as its own
+  # step of the combined Node Checks job. Read parsed `run` fields so a
+  # commented-out command cannot satisfy the guard.
   wiring_requires_yq
   run yq -r '
     [.jobs[] | .steps[]? | .run? | select(. == "bash scripts/ci/verify-pinned-runtime-graph.sh")]
@@ -396,27 +419,58 @@ wiring_requires_yq() {
   [ "$output" -eq 1 ]
 
   run yq -r '
-    .jobs."runtime-graph-verification".steps[]
+    .jobs."node-checks".steps[]
     | select(.name == "Verify pinned runtime dependency graph (#5421)")
     | .run
   ' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = "bash scripts/ci/verify-pinned-runtime-graph.sh" ]
 
-  # Gated to the same source/dependency surface as benchmarks, minus the
-  # automated sha256-only chores.
-  run yq -r '.jobs."runtime-graph-verification".if' "$WF"
+  # Gated to the source/dependency surface (ts_changed, via the job env), and
+  # the job skips the automated sha256-only chores.
+  run yq -r '.jobs."node-checks".if' "$WF"
   [ "$status" -eq 0 ]
-  [ "$output" = "needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'" ]
+  [[ "$output" == *"needs.detect-changes.outputs.sha256_only != 'true'"* ]]
+  run yq -r '.jobs."node-checks".env.TS_CHANGED' "$WF"
+  [ "$output" = '${{ needs.detect-changes.outputs.ts_changed }}' ]
+  run yq -r '.jobs."node-checks".steps[] | select(.name == "Verify pinned runtime dependency graph (#5421)") | .if' "$WF"
+  [[ "$output" == *"env.TS_CHANGED == 'true'"* ]]
 
   # Preserves the ci-logs artifact upload.
   run yq -r '
-    .jobs."runtime-graph-verification".steps[]
+    .jobs."node-checks".steps[]
     | select(.name == "Upload Pinned Runtime Graph Report")
     | .with.name
   ' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = "pinned-runtime-graph-report" ]
+}
+
+@test "small Node and JVM checks share runner slots; each check still runs (#10894)" {
+  wiring_requires_yq
+  local job
+  for job in bun-audit memory-leak-detection benchmarks runtime-graph-verification junit-runner-kotlin-consumer-compatibility node-unit-tests build-junit-runner-library; do
+    [[ -z "$(job_block "$job")" ]]
+  done
+  [ "$(yq -r '.jobs."node-checks".name' "$WF")" = "Node Checks" ]
+  [ "$(yq -r '.jobs."jvm-consumer-checks".name' "$WF")" = "JVM Consumer Checks" ]
+  local checks
+  checks="$(job_block node-checks)"
+  [[ "$checks" == *"bun pm audit"* ]]
+  [[ "$checks" == *"bun run test:memory-leaks"* ]]
+  [[ "$checks" == *"bun run benchmark-context"* ]]
+  [[ "$checks" == *"verify-pinned-runtime-graph.sh"* ]]
+  checks="$(job_block jvm-consumer-checks)"
+  [[ "$checks" == *":junitRunner:assemble"* ]]
+  [[ "$checks" == *"validate-sdk-debug-inspector-consumer.sh"* ]]
+  [[ "$checks" == *"validate-junit-runner-kotlin-consumer.sh"* ]]
+  # A failed check must not skip the checks after it.
+  run yq -r '.jobs."node-checks".steps[] | select(.name == "Run Memory Leak Detection" or .name == "Run MCP Benchmarks" or .name == "Verify pinned runtime dependency graph (#5421)") | .if' "$WF"
+  [ "$(grep -c '!cancelled()' <<< "$output")" -eq 3 ]
+  run yq -r '.jobs."jvm-consumer-checks".steps[] | select(.name == "Validate Kotlin 2.2 consumer compatibility" or .name == "Publish SDK and check its public API") | .if' "$WF"
+  [ "$(grep -c '!cancelled()' <<< "$output")" -eq 2 ]
+  run yq -r '.jobs."mcp-build-and-test".steps[] | select(.name == "Run complete unit lane" or .name == "Run host integration lane" or .name == "Run stress lane") | .if' "$WF"
+  [ "$(grep -c "!cancelled() && steps.mcp-build.outcome == 'success'" <<< "$output")" -eq 3 ]
 }
 
 @test "runtime-graph verification runs when its workflow wiring changes (#5421)" {
@@ -431,13 +485,40 @@ wiring_requires_yq() {
   [[ $'\n'"$output"$'\n' == *$'\n.github/actions/setup-auto-mobile-npm-package/**\n'* ]]
 }
 
-@test "ios-gate reuses ios-build-gate so build-leg membership is declared once" {
-  # The broad non-required "iOS" gate must not re-list the build jobs (that would
-  # double the drift surface); it depends on ios-build-gate instead.
-  block="$(job_block ios-gate)"
-  [[ -n "$block" ]]
-  [[ "$block" == *"- ios-build-gate"* ]]
-  [[ "$block" == *"needs.ios-build-gate.result"* ]]
-  [[ "$block" != *"- ios-swift-packages"* ]]
-  [[ "$block" != *"- ios-xcode-build"* ]]
+@test "non-required roll-up gates stay removed (runner-slot budget)" {
+  # Each roll-up costs a runner slot (plus queue time) per PR. Only names the
+  # green-main ruleset requires may have a gate; these were advisory and removed.
+  local job
+  for job in ios-gate android-gate codeql-gate node-tests-gate webrtc-gate runtime-graph-gate; do
+    [[ -z "$(job_block "$job")" ]]
+  done
+  wiring_requires_yq
+  run yq -r '.jobs[].name' "$WF"
+  [ "$status" -eq 0 ]
+  local name
+  for name in "iOS" "Android" "CodeQL" "Node Tests" "WebRTC" "Pinned Runtime Graph Gate"; do
+    [[ $'\n'"$output"$'\n' != *$'\n'"$name"$'\n'* ]]
+  done
+}
+
+@test "ide-plugin-gate rolls up the IDE plugin build and unit tests" {
+  block="$(job_block ide-plugin-gate)"
+  [[ "$block" == *"- build-ide-plugin"* ]]
+  [[ "$block" == *"needs.build-ide-plugin.result"* ]]
+  [[ "$block" == *"- ide-plugin-unit-tests"* ]]
+  [[ "$block" == *"needs.ide-plugin-unit-tests.result"* ]]
+}
+
+@test "merge.yml runs the desktop wire-contract replay on every merge (#10983)" {
+  wiring_requires_yq
+  local merge=".github/workflows/merge.yml"
+  # The job is enabled (the old `if: ${{ false }}` is gone) ...
+  run yq -r '.jobs."desktop-core-unit-tests".if // "enabled"' "$merge"
+  [ "$status" -eq 0 ]
+  [ "$output" = "enabled" ]
+  # ... and runs the wire replay, not an unrelated slice of desktop-core.
+  run yq -r '.jobs."desktop-core-unit-tests".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks" + " " + .with."gradle-flags"' "$merge"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *":desktop-core:test"* ]]
+  [[ "$output" == *"*DesktopWireFixtureCompositionTest"* ]]
 }

@@ -1,4 +1,9 @@
 import { captureAutolockPolicy } from "./deviceAutolockPolicy";
+import {
+  deviceAlreadyAssignedToAnotherSessionError,
+  InputDeviceOwnedError,
+} from "./inputDeviceOwnership";
+import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { logger } from "../utils/logger";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
@@ -80,6 +85,15 @@ export interface DeviceAutolockPoolPort {
   getPooledSessionIdentity(device: PooledDevice): Session | undefined;
   getMcpSessionRecoveryDevice(client: string): PooledDevice | undefined;
   isAdbServerResetQuarantined(id: string): boolean;
+  /** Refuse a device another live daemon claims, like an explicit bind (#10980). */
+  assertNotClaimedByForeignDaemon(deviceId: string, platform: Platform): Promise<void>;
+  /** Publish this daemon's claim, rolling a fresh acquisition back when another daemon won. */
+  claimAcquiredDevice(
+    sessionId: string,
+    deviceId: string,
+    heldBefore: string | null,
+    platform: Platform,
+  ): Promise<void>;
 }
 
 /** Owns implicit MCP routing and exclusive autolock acquisition. Pool mutations stay on its injected port. */
@@ -137,7 +151,11 @@ export class DeviceAutolockManager {
     if (!(policy.autolockEnabled ?? captureAutolockPolicy(this.env))) {
       return undefined;
     }
-    return this.pool.withTargetDeviceDiscovery({
+    // Two daemons must never drive one device (#10980, #11071): check before assigning, then
+    // publish the claim or roll the acquisition back, as an explicit bind does.
+    await this.pool.assertNotClaimedByForeignDaemon(deviceId, platform);
+    const heldBefore = this.pool.getDevice(deviceId)?.sessionId ?? null;
+    const sessionId = await this.pool.withTargetDeviceDiscovery({
       deviceId,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
       unavailableMessage: this.unavailableMessage(deviceId),
@@ -157,6 +175,10 @@ export class DeviceAutolockManager {
           collectCancellationSettlement,
         }),
     });
+    if (sessionId) {
+      await this.pool.claimAcquiredDevice(sessionId, deviceId, heldBefore, platform);
+    }
+    return sessionId;
   }
 
   private async autolockDeviceExclusive({
@@ -253,9 +275,12 @@ export class DeviceAutolockManager {
     // extend `expiresAt`. A heartbeat (a stdio proxy ticks one every few seconds
     // for as long as it is connected) proves the owner is alive, not that the
     // device is in use, so it must not extend the idle deadline (#10656, #10658).
-    // The heartbeat timeout is aligned with the idle timeout so a client that
-    // never heartbeats (CLI) is not reaped by the daemon's 10s heartbeat watchdog
-    // before the configured idle timeout.
+    // Liveness uses the default owner lease (`sessionLivenessWindows.ts`), the
+    // same as a bound session: an owner that stops heartbeating without closing
+    // its connection frees the device within lease + grace + one scan (~10 s),
+    // not after the idle window (#10729). A `--cli` owner never heartbeats; it
+    // declares the CLI liveness policy, which moves the session onto wall-clock
+    // idleness instead.
     const session = await this.pool.createSessionOrRestore(device, assignmentSnapshot, () =>
       this.pool
         .getSessionManager()
@@ -264,7 +289,7 @@ export class DeviceAutolockManager {
           deviceId,
           platform,
           timeoutMs,
-          timeoutMs,
+          undefined,
           this.pool.stableDeviceIdFor(device),
         ),
     );
@@ -424,10 +449,7 @@ export class DeviceAutolockManager {
       mcpSessionId &&
       this.mcpSessionAutolockMap.get(mcpSessionId) !== client.expectedSessionId
     ) {
-      throw new ActionableError(
-        `Device '${device.id}' is already assigned to another session. ` +
-          "Acquire a different device or wait for its owner to release it.",
-      );
+      throw deviceAlreadyAssignedToAnotherSessionError(device.id);
     }
     const session = device.sessionId
       ? this.pool.getSessionManager().getSession(device.sessionId)
@@ -436,10 +458,7 @@ export class DeviceAutolockManager {
       return undefined;
     }
     if (!this.isOwnedAutolockSession(device, session, mcpSessionId)) {
-      throw new ActionableError(
-        `Device '${device.id}' is already assigned to another session. ` +
-          "Acquire a different device or wait for its owner to release it.",
-      );
+      throw deviceAlreadyAssignedToAnotherSessionError(device.id);
     }
     return session;
   }
@@ -747,15 +766,22 @@ export class DeviceAutolockManager {
       return;
     }
 
-    if (device.autolockSessionId !== sessionUuid) {
-      throw new ActionableError(
-        `Device '${deviceId}' is locked to another session.\n` +
-          `Autolock is enabled, so tool calls must either come from the same MCP session ` +
-          `that called 'getAndroid' or 'getApple', or include the sessionUuid returned for this device.\n\n` +
-          `Options:\n` +
-          `  - Pass the sessionUuid from getAndroid or getApple that locked this device\n` +
-          `  - Use getAndroid or getApple to lock a different available device\n` +
-          `  - Wait for the idle timeout to release this device`,
+    // A derived `${base}:${label}` session counts as its base, as in the input/* ownership check.
+    const sessionManager = this.pool.getSessionManager();
+    const base = (uuid: string) =>
+      resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
+    if (!sessionUuid || base(device.autolockSessionId) !== base(sessionUuid)) {
+      // Typed (device_owned_by_other_session) so the JUnit runner's held-device wait and the CLI
+      // held-device hint recognize it (#10833).
+      throw new InputDeviceOwnedError(
+        "Tool call",
+        deviceId,
+        sessionUuid,
+        "autolock is enabled, so tool calls must either come from the same MCP session that " +
+          "called 'getAndroid' or 'getApple', or include the sessionUuid returned for this " +
+          "device. Options: pass the sessionUuid from getAndroid or getApple that locked this " +
+          "device; use getAndroid or getApple to lock a different available device; or wait for " +
+          "the idle timeout to release this device.",
       );
     }
   }

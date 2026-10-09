@@ -131,7 +131,7 @@ class NavigationGraphLayoutTest {
               listOf(
                 NavigationGraphSummaryNode(1, "Heavy", 100),
                 NavigationGraphSummaryNode(2, "Light", 1),
-              )
+              ),
           ),
         size = IntSize(400, 400),
         baseRadiusPx = 20f,
@@ -152,7 +152,7 @@ class NavigationGraphLayoutTest {
               listOf(
                 NavigationGraphSummaryNode(1, "A", 5),
                 NavigationGraphSummaryNode(2, "B", 5),
-              )
+              ),
           ),
         size = IntSize(400, 400),
         baseRadiusPx = 20f,

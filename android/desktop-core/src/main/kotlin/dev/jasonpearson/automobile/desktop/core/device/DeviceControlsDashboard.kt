@@ -28,9 +28,11 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.daemon.ActiveRecordingTracker
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSyncMode
+import dev.jasonpearson.automobile.desktop.core.daemon.TrackedRecording
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingActions
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingArtifact
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfig
@@ -48,10 +50,11 @@ private val LOG = LoggerFactory.getLogger("DeviceControlsDashboard")
 /**
  * Device appearance, video recording, and screen sharing.
  *
- * Appearance is a *global* control: `appearance.sock` takes no device id and applies to every
- * pooled device, so it is presented that way rather than as a per-device toggle. Recording is
- * per-device and spans two transports -- the start/stop verbs are MCP tool calls, while quality and
- * retention live on `video-recording.sock`.
+ * Appearance is a stored daemon setting, not a per-device toggle: `appearance.sock` takes no device
+ * id, saves the mode, and applies it only to the devices this session controls (#10831). A change
+ * takes control of the selected device first so it reaches that device. Recording is per-device and
+ * spans two transports -- the start/stop verbs are MCP tool calls, while quality and retention live
+ * on `video-recording.sock`.
  *
  * Screen sharing starts the daemon's WebRTC publisher, which pushes the device's screen to a
  * coordination server for browsers and CI dashboards to watch over WHEP. There is deliberately no
@@ -66,6 +69,12 @@ fun DeviceControlsDashboard(
   streamClient: WebRtcStreamClient?,
   activeDeviceId: String?,
   modifier: Modifier = Modifier,
+  /** The recording this dashboard started, shared with the session so a hidden host keeps it. */
+  activeRecordings: ActiveRecordingTracker = remember { ActiveRecordingTracker() },
+  /** The daemon session the recording would be started under, to scope its artifact lookup. */
+  sessionUuidProvider: () -> String? = { null },
+  /** The device the session just stopped holding (idle, hidden, daemon), if any (#10978). */
+  releasedDeviceId: String? = null,
 ) {
   val colors = SharedTheme.globalColors
   val scope = rememberCoroutineScope()
@@ -75,7 +84,7 @@ fun DeviceControlsDashboard(
   var recordingConfig by remember { mutableStateOf<VideoRecordingConfig?>(null) }
   var artifacts by remember { mutableStateOf<List<VideoRecordingArtifact>>(emptyList()) }
   var manifestPath by remember { mutableStateOf<String?>(null) }
-  var isRecording by remember { mutableStateOf(false) }
+  val recording = activeRecordings.current
   var busy by remember { mutableStateOf(false) }
   var notice by remember { mutableStateOf<String?>(null) }
   var error by remember { mutableStateOf<String?>(null) }
@@ -131,6 +140,39 @@ fun DeviceControlsDashboard(
     }
   }
 
+  // Stops by recording id, which needs no device, so it never allocates one and still works after
+  // the device was released or the selection moved. The tracker is cleared whatever the outcome:
+  // a failed stop must not leave the button stuck on "Stop" (#10978).
+  suspend fun finishRecording(tracked: TrackedRecording, outcome: String): String {
+    try {
+      val result =
+        recordingActions?.stopRecording(
+          tracked.deviceId,
+          tracked.recordingId,
+          tracked.ownerSessionUuid,
+        )
+      artifacts = result?.recordings.orEmpty()
+      manifestPath = result?.manifestPath
+      val count = artifacts.size
+      return if (result?.segmented == true) {
+        "$outcome — $count segment(s) across ${result.sessions.size} session(s)"
+      } else {
+        "$outcome — $count recording(s)"
+      }
+    } finally {
+      activeRecordings.clear()
+    }
+  }
+
+  // The session released the recorded device: the daemon already stopped and finalized the
+  // recording, so show it as stopped by the release and offer its artifact.
+  LaunchedEffect(releasedDeviceId) {
+    val tracked = activeRecordings.current
+    if (releasedDeviceId != null && tracked != null && tracked.deviceId == releasedDeviceId) {
+      run("Fetch recording") { finishRecording(tracked, "Stopped by release") }
+    }
+  }
+
   Column(
     modifier = modifier.fillMaxSize().padding(12.dp),
     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -147,7 +189,8 @@ fun DeviceControlsDashboard(
       Hint("Appearance control is unavailable on this daemon.", colors.text.normal)
     } else {
       Text(
-        "Applies to all connected devices.",
+        "Applies to the devices this session controls; changing it takes control of the " +
+          "selected device.",
         fontSize = 9.sp,
         color = colors.text.normal.copy(alpha = 0.5f),
       )
@@ -164,9 +207,9 @@ fun DeviceControlsDashboard(
               appearance = result.config
               appliedMode = result.appliedMode
               if (result.appliedMode == null) {
-                // The daemon omits appliedMode when the device pool is empty; saying "applied"
-                // would be a lie.
-                "Saved ${mode.wireName} — no connected devices to apply it to yet"
+                // The daemon omits appliedMode when this session controls no device; saying
+                // "applied" would be a lie.
+                "Saved ${mode.wireName} — this session controls no device to apply it to yet"
               } else {
                 "Applied ${result.appliedMode.wireName}"
               }
@@ -206,32 +249,33 @@ fun DeviceControlsDashboard(
 
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
       Chip(
-        label = if (isRecording) "Stop" else "Record",
-        accent = if (isRecording) Color(0xFFE53935) else Color(0xFF4CAF50),
-        enabled = recordingActions != null && activeDeviceId != null && !busy,
+        label = if (recording != null) "Stop" else "Record",
+        accent = if (recording != null) Color(0xFFE53935) else Color(0xFF4CAF50),
+        enabled =
+          recordingActions != null && (recording != null || activeDeviceId != null) && !busy,
       ) {
-        val deviceId = activeDeviceId ?: return@Chip
-        if (isRecording) {
-          run("Stop recording") {
-            val result = recordingActions?.stopRecording(deviceId)
-            artifacts = result?.recordings.orEmpty()
-            manifestPath = result?.manifestPath
-            isRecording = false
-            val count = artifacts.size
-            if (result?.segmented == true) {
-              "Stopped — $count segment(s) across ${result.sessions.size} session(s)"
-            } else {
-              "Stopped — $count recording(s)"
-            }
-          }
+        if (recording != null) {
+          run("Stop recording") { finishRecording(recording, "Stopped") }
         } else {
+          val deviceId = activeDeviceId ?: return@Chip
+          val ownerSessionUuid = sessionUuidProvider()
           run("Start recording") {
-            recordingActions?.startRecording(deviceId)
-            isRecording = true
+            val started = recordingActions?.startRecording(deviceId).orEmpty()
+            started.firstOrNull()?.let {
+              activeRecordings.begin(TrackedRecording(deviceId, it.recordingId, ownerSessionUuid))
+            }
             "Recording…"
           }
         }
       }
+    }
+
+    if (recording != null) {
+      Hint(
+        "Recording ${recording.deviceId}. Selecting another device releases this one and stops " +
+          "the recording.",
+        colors.text.normal.copy(alpha = 0.6f),
+      )
     }
 
     recordingConfig?.let { current ->
@@ -347,7 +391,7 @@ private fun Chip(label: String, accent: Color, enabled: Boolean = true, onClick:
         .let {
           if (enabled) it.clickable(onClick = onClick).pointerHoverIcon(PointerIcon.Hand) else it
         }
-        .padding(horizontal = 8.dp, vertical = 3.dp)
+        .padding(horizontal = 8.dp, vertical = 3.dp),
   ) {
     Text(label, fontSize = 9.sp, softWrap = false, color = accent.copy(alpha = alpha))
   }

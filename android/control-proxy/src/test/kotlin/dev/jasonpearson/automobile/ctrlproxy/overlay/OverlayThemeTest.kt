@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.*
+import kotlinx.serialization.json.Json
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -44,7 +45,7 @@ class OverlayThemeTest {
   fun `the leading chain is searched when the root paints nothing`() {
     val nested =
       OverlayBoxNode(
-        children = listOf(OverlayBoxNode(style = styled("#101010"), children = emptyList()))
+        children = listOf(OverlayBoxNode(style = styled("#101010"), children = emptyList())),
       )
     assertNull(overlayAuthoredTheme(model(OverlaySpacerNode()).root))
     assertEquals(true, overlayAuthoredTheme(model(nested).root)?.dark)
@@ -94,7 +95,7 @@ class OverlayThemeTest {
   fun `a seed keeps its hue in the primary colour`() {
     val scheme = overlaySeedColorScheme(Color(0xFF0000FF), dark = false)
     assertTrue(
-      scheme.primary.blue > scheme.primary.red && scheme.primary.blue > scheme.primary.green
+      scheme.primary.blue > scheme.primary.red && scheme.primary.blue > scheme.primary.green,
     )
   }
 
@@ -151,7 +152,7 @@ class OverlayThemeTest {
               children = emptyList(),
             ),
             OverlayBoxNode(style = styled("#FFFFFF"), children = emptyList()),
-          )
+          ),
       )
     assertEquals(false, overlayAuthoredTheme(model(hidden).root)?.dark)
   }
@@ -296,10 +297,105 @@ class OverlayThemeTest {
   }
 
   @Test
+  fun `per-corner radii decode, round-trip and render with omitted corners square`() {
+    val json = kotlinx.serialization.json.Json
+    val corners =
+      json.decodeFromString(OverlayCornerRadiusSerializer, """{"topStart":16,"topEnd":4.5}""")
+    assertEquals(OverlayCornerRadius.Corners(topStart = 16.0, topEnd = 4.5), corners)
+    assertEquals(
+      """{"topStart":16.0,"topEnd":4.5}""",
+      json.encodeToString(OverlayCornerRadiusSerializer, corners),
+    )
+    assertEquals(
+      RoundedCornerShape(topStart = 16.dp, topEnd = 4.5.dp, bottomEnd = 0.dp, bottomStart = 0.dp),
+      overlayCornerShape(Shapes(), corners),
+    )
+    for (bad in listOf("""{"top":1}""", """{"topStart":-1}""", """{"topStart":"4"}""")) {
+      assertThrows(bad, kotlinx.serialization.SerializationException::class.java) {
+        json.decodeFromString(OverlayCornerRadiusSerializer, bad)
+      }
+    }
+  }
+
+  @Test
   fun `host dismiss colours are translucent and contrast with the scheme`() {
     val dark = overlayDismissColors(true)
     val light = overlayDismissColors(false)
     assertTrue(dark.background.alpha < 1f && light.background.alpha < 1f)
     assertNotEquals(dark.content, light.content)
+  }
+
+  private val roleNames =
+    OverlaySpecThemeColors.serializer().descriptor.let { d ->
+      (0 until d.elementsCount).map(d::getElementName) - setOf("seed", "source")
+    }
+
+  @Test
+  fun `every role override replaces exactly the role it names`() {
+    assertEquals(36, roleNames.size)
+    val base = lightColorScheme()
+    roleNames.forEach { role ->
+      val colors = Json.decodeFromString<OverlaySpecThemeColors>("""{"$role":"#010203"}""")
+      val scheme = base.withRoleOverrides(colors)
+      assertEquals(role, Color(0xFF010203), overlayColorRole(scheme, role))
+      roleNames
+        .filter { it != role }
+        .forEach { assertEquals(role, overlayColorRole(base, it), overlayColorRole(scheme, it)) }
+    }
+  }
+
+  @Test
+  fun `role overrides apply over a seed scheme and keep the rest of it`() {
+    val root = model(OverlaySpacerNode()).root
+    val theme =
+      overlayThemeSpec(
+        root,
+        false,
+        OverlaySpecTheme(
+          mode = "light",
+          colors = OverlaySpecThemeColors(seed = "#6750A4", primary = "#FF0000"),
+        ),
+      )
+    val scheme = overlayColorScheme(theme)
+    val seeded = overlaySeedColorScheme(Color(0xFF6750A4), false)
+    assertEquals(Color(0xFFFF0000), scheme.primary)
+    assertEquals(seeded.secondary, scheme.secondary)
+    assertEquals(seeded.surface, scheme.surface)
+  }
+
+  @Test
+  fun `role overrides apply over the device scheme too`() {
+    val theme =
+      overlayThemeSpec(
+        model(OverlaySpacerNode()).root,
+        false,
+        OverlaySpecTheme(colors = OverlaySpecThemeColors(source = "device", error = "#00FF00")),
+      )
+    val dynamic = lightColorScheme(primary = Color(0xFF123456))
+    val scheme = overlayColorScheme(theme, dynamic)
+    assertEquals(Color(0xFF123456), scheme.primary)
+    assertEquals(Color(0xFF00FF00), scheme.error)
+  }
+
+  @Test
+  fun `with no mode a dark background override selects dark for content and host chrome`() {
+    val lightAuthored = model(OverlayBoxNode(style = styled("#FFFFFF"), children = emptyList()))
+    val explicit =
+      OverlaySpecTheme(colors = OverlaySpecThemeColors(background = "#101010", primary = "#FF0000"))
+    val theme = overlayThemeSpec(lightAuthored.root, false, explicit)
+    assertTrue(theme.dark)
+    assertNull(theme.surface) // the light authored background must not paint a dark scheme
+    assertEquals(Color(0xFF101010), overlayColorScheme(theme).background)
+    assertEquals(darkColorScheme().onSurface, overlayColorScheme(theme).onSurface)
+    assertEquals(true, overlayHostDark(lightAuthored.copy(theme = explicit)))
+  }
+
+  @Test
+  fun `an explicit mode still wins over a background override`() {
+    val explicit =
+      OverlaySpecTheme(mode = "light", colors = OverlaySpecThemeColors(surface = "#101010"))
+    val root = model(OverlaySpacerNode())
+    assertFalse(overlayThemeSpec(root.root, true, explicit).dark)
+    assertEquals(false, overlayHostDark(root.copy(theme = explicit)))
   }
 }

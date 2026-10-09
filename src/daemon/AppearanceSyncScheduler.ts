@@ -11,8 +11,13 @@ import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appe
 const DEFAULT_SYNC_INTERVAL_MS = 10000;
 export const DEFAULT_APPEARANCE_APPLY_DEADLINE_MS = 10_000;
 
-interface AppearanceSyncTarget extends BootedDevice {
+export interface AppearanceSyncTarget extends BootedDevice {
   incarnation?: number;
+  /**
+   * Base UUID of the session that holds the device. Its appearance config (#10976) decides whether
+   * and how the device follows the host. A target without one uses the global config.
+   */
+  sessionKey?: string;
 }
 
 interface AppliedAppearance {
@@ -88,7 +93,7 @@ export class AppearanceSyncScheduler {
       return;
     }
     try {
-      const config = await this.dependencies.getConfig();
+      const config = await this.dependencies.getConfig(device.sessionKey);
       if (!config.syncWithHost || this.stopped) {
         return;
       }
@@ -141,32 +146,39 @@ export class AppearanceSyncScheduler {
   }
 
   private async tick(): Promise<void> {
-    const config = await this.dependencies.getConfig();
-    if (this.stopped) {
-      return;
-    }
-    if (!config.syncWithHost) {
-      this.lastAppliedModes.clear();
-      return;
-    }
-
-    const mode = await this.dependencies.resolveMode(config);
-    if (this.stopped) {
-      return;
-    }
     const targets = this.scope?.getTargets() ?? this.dependencies.getTargets();
-    if (targets.length === 0) {
+    if (this.stopped) {
       return;
     }
-
+    // Each device follows the config of the session that holds it (#10976), so one session's
+    // choice never re-themes a device another session holds.
+    const modes = new Map<string, Promise<AppearanceMode>>();
     for (const device of targets) {
       if (this.stopped) {
         return;
       }
-      if (this.isAlreadyApplied(device, mode)) {
-        continue;
-      }
       try {
+        const config = await this.dependencies.getConfig(device.sessionKey);
+        if (this.stopped) {
+          return;
+        }
+        if (!config.syncWithHost) {
+          this.lastAppliedModes.delete(device.deviceId);
+          continue;
+        }
+        const modeKey = `${config.syncWithHost}:${config.defaultMode}`;
+        let resolved = modes.get(modeKey);
+        if (!resolved) {
+          resolved = this.dependencies.resolveMode(config);
+          modes.set(modeKey, resolved);
+        }
+        const mode = await resolved;
+        if (this.stopped) {
+          return;
+        }
+        if (this.isAlreadyApplied(device, mode)) {
+          continue;
+        }
         await this.applyToDevice(device, mode);
       } catch (error) {
         logger.warn(`[Appearance] Failed to apply host sync mode to ${device.deviceId}: ${error}`);
@@ -228,18 +240,20 @@ export class AppearanceSyncScheduler {
       const pooledDevices = pool.getAllDevices();
       if (pooledDevices.length > 0) {
         const sessions = daemonState.getSessionManager().getAllSessions();
-        return pooledDevices
-          .filter(
-            (device) =>
-              device.platform === "android" &&
-              sessions.some((session) => session.assignedDevice === device.id),
-          )
-          .map((device) => ({
-            deviceId: device.id,
-            name: device.id,
-            platform: device.platform,
-            incarnation: device.incarnation,
-          }));
+        return pooledDevices.flatMap((device) => {
+          const holder = sessions.find((session) => session.assignedDevice === device.id);
+          return device.platform === "android" && holder
+            ? [
+                {
+                  deviceId: device.id,
+                  name: device.id,
+                  platform: device.platform,
+                  incarnation: device.incarnation,
+                  sessionKey: holder.sessionId,
+                },
+              ]
+            : [];
+        });
       }
     }
 
@@ -266,8 +280,6 @@ export async function triggerAppearanceSync(): Promise<void> {
   await scheduler.trigger();
 }
 
-export async function syncAppearanceForDevice(
-  device: BootedDevice & { incarnation?: number },
-): Promise<void> {
+export async function syncAppearanceForDevice(device: AppearanceSyncTarget): Promise<void> {
   await scheduler.syncDevice(device);
 }

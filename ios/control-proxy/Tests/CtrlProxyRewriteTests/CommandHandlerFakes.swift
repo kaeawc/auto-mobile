@@ -318,6 +318,14 @@ final class FakeDisplayGestureProvider: DisplayGestureProviding {
         return symbolsAvailable
     }
 
+    var pinches: [DisplayPinch] = []
+
+    func synthesizePinch(_ pinch: DisplayPinch) throws -> Bool {
+        pinches.append(pinch)
+        if let synthesisError { throw synthesisError }
+        return symbolsAvailable
+    }
+
     func coordinate(selection: GestureCoordinateSelection) throws -> GestureCoordinateSelection {
         selections.append(selection)
         return selection
@@ -328,12 +336,17 @@ final class FakeDisplayGestureProvider: DisplayGestureProviding {
         actions.append(duration > 0 ? "tapPress" : "tap")
     }
 
+    var dragPresses: [TimeInterval] = []
+    var dragHolds: [TimeInterval] = []
+
     func drag(
         _: GestureCoordinateSelection, to _: GestureCoordinateSelection,
-        press _: TimeInterval, velocity _: Double?, hold _: TimeInterval
+        press: TimeInterval, velocity _: Double?, hold: TimeInterval
     )
         throws
     {
+        dragPresses.append(press)
+        dragHolds.append(hold)
         actions.append("drag")
     }
 }

@@ -86,7 +86,7 @@ export class DefaultDeviceResourceObserver implements DeviceResourceObserver {
       adbFactory?: Pick<AdbClientFactory, "create">;
       simctl?: Pick<SimCtl, "executeCommandArgs">;
       plist?: Pick<PlistReader, "readJsonFile">;
-      timer?: Pick<Timer, "now">;
+      timer?: Pick<Timer, "now" | "sleep">;
       readDirectory?: (path: string) => Promise<string[]>;
     } = {},
   ) {

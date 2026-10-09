@@ -210,6 +210,11 @@
             "occludedByViewId": {
               "type": "string"
             },
+            "occluded": {
+              "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+              "type": "boolean",
+              "const": true
+            },
             "class": {
               "type": "string"
             },
@@ -1112,7 +1117,7 @@
           "const": "cancel-on-request-abort"
         },
         "force": {
-          "description": "Drop every AVD-name comparison on the way to the kill -- the emulator-console probe that confirms which AVD is running on this serial, and the platform kill's own check against a fresh discovery -- and act on whatever occupies the serial. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. It does NOT select a different serial, and a serial with nothing running on it still refuses. Nor does it override the refusal raised when this daemon's pool entry for the serial was retired and replaced while the action was being prepared, or deleteDevice's refusal to delete a stopped image while a booted emulator that cannot be identified at all is attached. Android emulators only; accepted and ignored for iOS and physical devices.",
+          "description": "Drop every AVD-name comparison on the way to the kill -- the emulator-console probe that confirms which AVD is running on this serial, and the platform kill's own check against a fresh discovery -- and act on whatever occupies the serial. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. It does NOT select a different serial, and a serial with nothing running on it still refuses. Nor does it override the refusal raised when this daemon's pool entry for the serial was retired and replaced while the action was being prepared, or deleteDevice's refusal to delete a stopped image while a booted emulator that cannot be identified at all is attached. Android emulators only; accepted and ignored for iOS and physical devices. Separately, on any platform, force also stops a device another session holds, which is otherwise refused.",
           "default": false,
           "type": "boolean"
         },
@@ -1557,6 +1562,10 @@
         },
         "cleanupClearAppData": {
           "description": "Clear app data",
+          "type": "boolean"
+        },
+        "holdSessionOnFailure": {
+          "description": "Keep session and device after a failed run (caller recovers, then releases)",
           "type": "boolean"
         },
         "captureObserveSteps": {
@@ -2178,6 +2187,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -2199,6 +2209,7 @@
               "provisionDevice",
               "putAppFile",
               "recentApps",
+              "reconcileDeviceResources",
               "recordSteps",
               "removeKeyValue",
               "resetAppLogs",
@@ -2303,6 +2314,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -2324,6 +2336,7 @@
               "provisionDevice",
               "putAppFile",
               "recentApps",
+              "reconcileDeviceResources",
               "recordSteps",
               "removeKeyValue",
               "resetAppLogs",
@@ -2401,6 +2414,9 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -2444,7 +2460,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -2478,6 +2495,9 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -2957,6 +2977,39 @@
           "required": ["supported"],
           "additionalProperties": {}
         },
+        "cameraPoster": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "type": "boolean"
+            },
+            "verified": {
+              "type": "boolean"
+            },
+            "method": {
+              "type": "string"
+            },
+            "warning": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string",
+              "enum": ["image", "qr", "clear"]
+            },
+            "surface": {
+              "type": "string",
+              "enum": ["wall", "table"]
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
         "clock": {
           "type": "object",
           "properties": {
@@ -3022,6 +3075,9 @@
       },
       "required": ["message"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3086,7 +3142,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3130,7 +3187,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3164,6 +3222,9 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3219,6 +3280,9 @@
       },
       "required": ["scope", "key"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3481,6 +3545,9 @@
       "required": ["x", "y"],
       "additionalProperties": false,
       "description": "Preview which hierarchy nodes sit beneath one absolute point without dispatching input."
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3575,6 +3642,11 @@
           },
           "additionalProperties": false
         },
+        "layer": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -3590,7 +3662,50 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/debugOnly": true
+      "automobile/debugOnly": true,
+      "automobile/deviceReadOnly": true
+    }
+  },
+  {
+    "name": "inspectPackageSigning",
+    "description": "Android: fresh read of one package's presence (installed/absent/unknown) for a user and its SHA-256 signing certificates (complete signer set, rotation history). Never cached.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "userId": {
+          "description": "Android user/profile to inspect; when omitted it is resolved and reported",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId"],
+      "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3603,6 +3718,20 @@
         "artifactPath": {
           "description": "App artifact path (.apk, .app, or .ipa)",
           "type": "string"
+        },
+        "expectedSigningSha256": {
+          "description": "Android: complete signer set (SHA-256 of every signing certificate) an already installed copy must have before it is replaced; any other signer set, or signers that cannot be read, refuses the install. See inspectPackageSigning.",
+          "minItems": 1,
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:[0-9a-fA-F]{2}:?){31}[0-9a-fA-F]{2}$"
+          }
+        },
+        "allowDestructiveRecovery": {
+          "description": "Android: false refuses the uninstall-and-reinstall recovery after INSTALL_FAILED_VERSION_DOWNGRADE (default true)",
+          "type": "boolean"
         },
         "platform": {
           "type": "string",
@@ -3783,7 +3912,7 @@
           "additionalProperties": false
         },
         "force": {
-          "description": "Drop every AVD-name comparison on the way to the kill -- the emulator-console probe that confirms which AVD is running on this serial, and the platform kill's own check against a fresh discovery -- and act on whatever occupies the serial. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. It does NOT select a different serial, and a serial with nothing running on it still refuses. Nor does it override the refusal raised when this daemon's pool entry for the serial was retired and replaced while the action was being prepared, or deleteDevice's refusal to delete a stopped image while a booted emulator that cannot be identified at all is attached. Android emulators only; accepted and ignored for iOS and physical devices.",
+          "description": "Drop every AVD-name comparison on the way to the kill -- the emulator-console probe that confirms which AVD is running on this serial, and the platform kill's own check against a fresh discovery -- and act on whatever occupies the serial. Use only when the console has wedged and the normal call refuses because the AVD name cannot be confirmed. This does not override the conflict check, it removes it: force means 'act on whatever emulator currently occupies this serial', including a different AVD that took the serial over. It does NOT select a different serial, and a serial with nothing running on it still refuses. Nor does it override the refusal raised when this daemon's pool entry for the serial was retired and replaced while the action was being prepared, or deleteDevice's refusal to delete a stopped image while a booted emulator that cannot be identified at all is attached. Android emulators only; accepted and ignored for iOS and physical devices. Separately, on any platform, force also stops a device another session holds, which is otherwise refused.",
           "default": false,
           "type": "boolean"
         }
@@ -4086,6 +4215,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -4262,6 +4394,15 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
+                      },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                         "type": "boolean",
@@ -4358,6 +4499,15 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
                       },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
@@ -4523,6 +4673,14 @@
                 "settled": {
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
+                },
+                "settleMs": {
+                  "description": "Same name/meaning as a full observation's `settleMs` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Same name/meaning as a full observation's `settlePolls` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
                 },
                 "accessibilityAuditSkipped": {
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
@@ -5184,6 +5342,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -5451,6 +5612,11 @@
                     "occludedByViewId": {
                       "type": "string"
                     },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "class": {
                       "type": "string"
                     },
@@ -5697,6 +5863,11 @@
                     },
                     "occludedByViewId": {
                       "type": "string"
+                    },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "class": {
                       "type": "string"
@@ -6562,6 +6733,14 @@
                   "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
                   "type": "boolean"
                 },
+                "settleMs": {
+                  "description": "Milliseconds the hierarchy-stability gate spent re-observing (issue #9591). Present only when the gate ran. With `settled: false`, a value near the gate's budget means the screen kept changing or each read was slow; a value well below it means the gate stopped early.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Re-observations the hierarchy-stability gate took (issue #9591). Two are needed to settle; fewer at the budget means reads were too slow to compare.",
+                  "type": "number"
+                },
                 "accessibilityAuditSkipped": {
                   "description": "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
@@ -7043,6 +7222,10 @@
             "occludedByViewId": {
               "type": "string"
             },
+            "occluded": {
+              "type": "boolean",
+              "const": true
+            },
             "node": {
               "anyOf": [
                 {
@@ -7101,6 +7284,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -7140,7 +7326,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -8685,7 +8872,7 @@
   },
   {
     "name": "observe",
-    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is valid for at least 10 minutes after the response that returned it; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. The shared 128 MiB / 4096-file cap refuses new captures without deleting live paths: default screenshot provenance degrades with a reason; explicit settled, crop and inline-image requests fail. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
+    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is kept for at least 10 minutes after the response that returned it unless evicted early under capacity pressure, so a returned path is not guaranteed to survive until its expiresAt; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. At the shared 128 MiB / 4096-file cap, new captures are never refused: the least recently returned screenshots are evicted early, unreferenced ones first and then referenced ones, to admit them. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -9408,6 +9595,10 @@
             },
             "occludedByViewId": {
               "type": "string"
+            },
+            "occluded": {
+              "type": "boolean",
+              "const": true
             },
             "node": {
               "anyOf": [
@@ -10168,6 +10359,15 @@
                     "checked": {
                       "type": "boolean"
                     },
+                    "selected": {
+                      "description": "AutoMobile overlay rows only: the selected tab or option.",
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "state": {
+                      "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                      "type": "string"
+                    },
                     "enabled": {
                       "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                       "type": "boolean",
@@ -10263,6 +10463,15 @@
                     },
                     "checked": {
                       "type": "boolean"
+                    },
+                    "selected": {
+                      "description": "AutoMobile overlay rows only: the selected tab or option.",
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "state": {
+                      "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                      "type": "string"
                     },
                     "enabled": {
                       "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
@@ -10564,6 +10773,9 @@
         "screenshotScaleProvenance": {
           "type": "string",
           "enum": ["raster-dimensions", "native-scale-confirmed"]
+        },
+        "screenshotIncludesOverlay": {
+          "type": "boolean"
         },
         "screenshotSettled": {
           "type": "boolean"
@@ -11956,6 +12168,15 @@
               "checked": {
                 "type": "boolean"
               },
+              "selected": {
+                "description": "AutoMobile overlay rows only: the selected tab or option.",
+                "type": "boolean",
+                "const": true
+              },
+              "state": {
+                "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                "type": "string"
+              },
               "enabled": {
                 "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                 "type": "boolean",
@@ -12052,6 +12273,15 @@
               },
               "checked": {
                 "type": "boolean"
+              },
+              "selected": {
+                "description": "AutoMobile overlay rows only: the selected tab or option.",
+                "type": "boolean",
+                "const": true
+              },
+              "state": {
+                "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                "type": "string"
               },
               "enabled": {
                 "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
@@ -12401,6 +12631,11 @@
             "occludedByViewId": {
               "type": "string"
             },
+            "occluded": {
+              "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+              "type": "boolean",
+              "const": true
+            },
             "class": {
               "type": "string"
             },
@@ -12648,6 +12883,11 @@
             "occludedByViewId": {
               "type": "string"
             },
+            "occluded": {
+              "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+              "type": "boolean",
+              "const": true
+            },
             "class": {
               "type": "string"
             },
@@ -12894,6 +13134,11 @@
             },
             "occludedByViewId": {
               "type": "string"
+            },
+            "occluded": {
+              "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+              "type": "boolean",
+              "const": true
             },
             "class": {
               "type": "string"
@@ -13169,6 +13414,11 @@
             "occludedByViewId": {
               "type": "string"
             },
+            "occluded": {
+              "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+              "type": "boolean",
+              "const": true
+            },
             "class": {
               "type": "string"
             },
@@ -13417,6 +13667,11 @@
               },
               "occludedByViewId": {
                 "type": "string"
+              },
+              "occluded": {
+                "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                "type": "boolean",
+                "const": true
               },
               "class": {
                 "type": "string"
@@ -14262,6 +14517,7 @@
       }
     },
     "_meta": {
+      "automobile/deviceReadOnly": true,
       "ui": {
         "resourceUri": "ui://automobile/observe"
       }
@@ -14788,6 +15044,11 @@
           "description": "Auto-target pinchable containers",
           "type": "boolean"
         },
+        "layer": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -15222,6 +15483,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -15398,6 +15662,15 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
+                      },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                         "type": "boolean",
@@ -15494,6 +15767,15 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
                       },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
@@ -15659,6 +15941,14 @@
                 "settled": {
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
+                },
+                "settleMs": {
+                  "description": "Same name/meaning as a full observation's `settleMs` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Same name/meaning as a full observation's `settlePolls` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
                 },
                 "accessibilityAuditSkipped": {
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
@@ -16320,6 +16610,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -16587,6 +16880,11 @@
                     "occludedByViewId": {
                       "type": "string"
                     },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "class": {
                       "type": "string"
                     },
@@ -16833,6 +17131,11 @@
                     },
                     "occludedByViewId": {
                       "type": "string"
+                    },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "class": {
                       "type": "string"
@@ -17698,6 +18001,14 @@
                   "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
                   "type": "boolean"
                 },
+                "settleMs": {
+                  "description": "Milliseconds the hierarchy-stability gate spent re-observing (issue #9591). Present only when the gate ran. With `settled: false`, a value near the gate's budget means the screen kept changing or each read was slow; a value well below it means the gate stopped early.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Re-observations the hierarchy-stability gate took (issue #9591). Two are needed to settle; fewer at the budget means reads were too slow to compare.",
+                  "type": "number"
+                },
                 "accessibilityAuditSkipped": {
                   "description": "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
@@ -18112,6 +18423,10 @@
             "occludedByViewId": {
               "type": "string"
             },
+            "occluded": {
+              "type": "boolean",
+              "const": true
+            },
             "node": {
               "anyOf": [
                 {
@@ -18133,7 +18448,7 @@
   },
   {
     "name": "prototype",
-    "description": "Show (always a full spec), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which overlays it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, awaitEvent; sizes are points; reset is Android only). A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1. A device-persistent overlay keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising overlay_persistence_replay_v1 and is refused otherwise.",
+    "description": "Show (always a full spec, inline as spec or from a local JSON file as specPath), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which overlays it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, inspect, awaitEvent; sizes are points). A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/toggle/increment/decrement/dismiss. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the overlay excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session overlay is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"overlay\" calls fail saying so) and it returns with the app; a device-persistent overlay is not tied to an app. Status makes no device request, marks an overlay suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1. A device-persistent overlay keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising overlay_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (overlay_inspect_v1) for the one overlay it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -18143,7 +18458,7 @@
           "enum": ["show", "dismiss", "status", "inspect", "awaitEvent"]
         },
         "spec": {
-          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp or none|extraSmall|small|medium|large|extraLarge|full), optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising overlay_window_options_v1.",
+          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising overlay_window_options_v1.",
           "type": "object",
           "properties": {
             "id": {
@@ -18266,6 +18581,115 @@
                     "source": {
                       "type": "string",
                       "enum": ["device"]
+                    },
+                    "primary": {
+                      "type": "string",
+                      "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                    },
+                    "onPrimary": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "primaryContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onPrimaryContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "inversePrimary": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "secondary": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onSecondary": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "secondaryContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onSecondaryContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "tertiary": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onTertiary": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "tertiaryContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onTertiaryContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "background": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onBackground": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surface": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onSurface": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceVariant": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onSurfaceVariant": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceTint": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "inverseSurface": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "inverseOnSurface": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "error": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onError": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "errorContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "onErrorContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "outline": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "outlineVariant": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "scrim": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceBright": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceDim": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceContainer": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceContainerHigh": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceContainerHighest": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceContainerLow": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
+                    },
+                    "surfaceContainerLowest": {
+                      "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
                     }
                   },
                   "additionalProperties": false,
@@ -18315,6 +18739,10 @@
                       "minLength": 1
                     },
                     "testTag": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "contentDescription": {
                       "type": "string",
                       "minLength": 1
                     },
@@ -18375,7 +18803,7 @@
                               },
                               "key": {
                                 "type": "string",
-                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$"
                               },
                               "value": {
                                 "anyOf": [
@@ -18402,8 +18830,7 @@
                                 "enum": ["toggle"]
                               },
                               "key": {
-                                "type": "string",
-                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                               }
                             },
                             "required": ["type", "key"],
@@ -18417,8 +18844,7 @@
                                 "enum": ["increment"]
                               },
                               "key": {
-                                "type": "string",
-                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                               },
                               "by": {
                                 "type": "number"
@@ -18435,8 +18861,7 @@
                                 "enum": ["decrement"]
                               },
                               "key": {
-                                "type": "string",
-                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                               },
                               "by": {
                                 "type": "number"
@@ -18594,6 +19019,28 @@
                                 "extraLarge",
                                 "full"
                               ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "topStart": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "topEnd": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "bottomEnd": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "bottomStart": {
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           ]
                         },
@@ -18615,6 +19062,9 @@
                           "type": "number",
                           "minimum": 0
                         },
+                        "shadowColor": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
+                        },
                         "gradient": {
                           "anyOf": [
                             {
@@ -18633,8 +19083,7 @@
                                     "type": "object",
                                     "properties": {
                                       "color": {
-                                        "type": "string",
-                                        "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                                        "$ref": "#/properties/spec/properties/theme/properties/colors/properties/primary"
                                       },
                                       "position": {
                                         "type": "number",
@@ -18677,9 +19126,17 @@
                           "type": "number",
                           "minimum": 0.000001
                         },
+                        "offset": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/2/properties/offset"
+                        },
                         "alpha": {
                           "type": "number",
                           "minimum": 0,
+                          "maximum": 1
+                        },
+                        "pressScale": {
+                          "type": "number",
+                          "minimum": 0.5,
                           "maximum": 1
                         },
                         "alignment": {
@@ -18731,6 +19188,25 @@
                           "type": "integer",
                           "minimum": 1,
                           "maximum": 2147483647
+                        },
+                        "lineHeight": {
+                          "type": "number",
+                          "minimum": 0.000001
+                        },
+                        "letterSpacing": {
+                          "type": "number"
+                        },
+                        "textDecoration": {
+                          "type": "string",
+                          "enum": ["none", "underline", "lineThrough", "underlineLineThrough"]
+                        },
+                        "fontStyle": {
+                          "type": "string",
+                          "enum": ["normal", "italic"]
+                        },
+                        "overflow": {
+                          "type": "string",
+                          "enum": ["clip", "ellipsis", "visible"]
                         },
                         "fontFamily": {
                           "anyOf": [
@@ -18785,8 +19261,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "type": "string",
-                                    "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                                   },
                                   "equals": {
                                     "anyOf": [
@@ -18809,7 +19284,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                                   },
                                   "notEquals": {
                                     "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/equals"
@@ -18822,7 +19297,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                                   },
                                   "gt": {
                                     "type": "number"
@@ -18835,7 +19310,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                                   },
                                   "lt": {
                                     "type": "number"
@@ -18932,6 +19407,13 @@
                               },
                               "required": ["x", "y", "width", "height"],
                               "additionalProperties": false
+                            },
+                            "alignment": {
+                              "type": "string",
+                              "enum": ["cover", "top", "bottom", "start", "end"]
+                            },
+                            "offset": {
+                              "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/2/properties/offset"
                             }
                           },
                           "required": ["type", "bounds"],
@@ -18988,8 +19470,7 @@
                               "additionalProperties": false
                             },
                             "alignment": {
-                              "type": "string",
-                              "enum": ["cover", "top", "bottom", "start", "end"]
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor/anyOf/0/properties/alignment"
                             },
                             "offset": {
                               "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/2/properties/offset"
@@ -19050,7 +19531,7 @@
                             }
                           },
                           "minItems": 1,
-                          "maxItems": 32
+                          "maxItems": 128
                         },
                         "as": {
                           "type": "string",
@@ -19083,6 +19564,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19132,6 +19616,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19180,6 +19667,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19220,6 +19710,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19267,6 +19760,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19312,6 +19808,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19350,6 +19849,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19376,8 +19878,7 @@
                       "enum": ["textField"]
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "placeholder": {
                       "type": "string"
@@ -19394,6 +19895,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19421,8 +19925,7 @@
                       "enum": ["switch"]
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "label": {
                       "type": "string",
@@ -19440,6 +19943,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19467,8 +19973,7 @@
                       "enum": ["checkbox"]
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "label": {
                       "type": "string",
@@ -19486,6 +19991,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19536,6 +20044,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19562,8 +20073,7 @@
                       "enum": ["radioGroup"]
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "options": {
                       "type": "array",
@@ -19597,6 +20107,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19644,8 +20157,7 @@
                               "enum": ["switch"]
                             },
                             "stateKey": {
-                              "type": "string",
-                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                             }
                           },
                           "required": ["type", "stateKey"],
@@ -19659,8 +20171,7 @@
                               "enum": ["checkbox"]
                             },
                             "stateKey": {
-                              "type": "string",
-                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                             }
                           },
                           "required": ["type", "stateKey"],
@@ -19695,6 +20206,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19721,8 +20235,7 @@
                       "enum": ["slider"]
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "label": {
                       "type": "string",
@@ -19749,6 +20262,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19781,11 +20297,10 @@
                     },
                     "variant": {
                       "type": "string",
-                      "enum": ["assist", "filter"]
+                      "enum": ["assist", "filter", "input", "suggestion"]
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     }
                   },
                   "required": ["type", "label"],
@@ -19799,6 +20314,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19849,6 +20367,628 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["iconButton"]
+                    },
+                    "icon": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": ["standard", "filled", "tonal", "outlined"]
+                    }
+                  },
+                  "required": ["type", "icon"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["fab"]
+                    },
+                    "icon": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "size": {
+                      "type": "string",
+                      "enum": ["small", "regular", "large"]
+                    }
+                  },
+                  "required": ["type", "icon"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["segmentedButton"]
+                    },
+                    "stateKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["value", "label"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 2,
+                      "maxItems": 5
+                    }
+                  },
+                  "required": ["type", "stateKey", "options"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["topAppBar"]
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": ["small", "centerAligned", "medium", "large"]
+                    },
+                    "navigationIcon": {
+                      "type": "object",
+                      "properties": {
+                        "icon": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "onTap": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items"
+                          },
+                          "minItems": 1,
+                          "maxItems": 32
+                        }
+                      },
+                      "required": ["icon", "label"],
+                      "additionalProperties": false
+                    },
+                    "actions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/root/anyOf/19/properties/navigationIcon"
+                      },
+                      "minItems": 1,
+                      "maxItems": 3
+                    }
+                  },
+                  "required": ["type", "title"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["divider"]
+                    },
+                    "orientation": {
+                      "type": "string",
+                      "enum": ["horizontal", "vertical"]
+                    }
+                  },
+                  "required": ["type"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["badge"]
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": ["type"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["progress"]
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": ["linear", "circular"]
+                    },
+                    "stateKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                    },
+                    "max": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["type"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["dialog"]
+                    },
+                    "openWhen": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                        },
+                        "equals": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["key", "equals"],
+                      "additionalProperties": false
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "icon": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                    },
+                    "confirm": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "onTap": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/19/properties/navigationIcon/properties/onTap"
+                        }
+                      },
+                      "required": ["label"],
+                      "additionalProperties": false
+                    },
+                    "dismiss": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/23/properties/confirm"
+                    },
+                    "child": {
+                      "$ref": "#/properties/spec/properties/root"
+                    }
+                  },
+                  "required": ["type", "openWhen", "confirm"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["snackbar"]
+                    },
+                    "openWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/23/properties/openWhen"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "action": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/23/properties/confirm"
+                    },
+                    "durationMs": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 600000
+                    }
+                  },
+                  "required": ["type", "openWhen", "text"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["timePicker"]
+                    },
+                    "hourKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                    },
+                    "minuteKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                    },
+                    "is24Hour": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["type", "hourKey", "minuteKey"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["datePicker"]
+                    },
+                    "stateKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                    }
+                  },
+                  "required": ["type", "stateKey"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19896,6 +21036,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19940,6 +21083,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19994,8 +21140,7 @@
                       "minLength": 1
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "scrollable": {
                       "type": "boolean"
@@ -20012,6 +21157,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -20041,7 +21189,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/18/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/29/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -20051,8 +21199,7 @@
                       "minLength": 1
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     }
                   },
                   "required": ["type", "items"],
@@ -20066,6 +21213,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -20093,18 +21243,7 @@
                       "enum": ["bottomSheet"]
                     },
                     "openWhen": {
-                      "type": "object",
-                      "properties": {
-                        "key": {
-                          "type": "string",
-                          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
-                        },
-                        "equals": {
-                          "type": "boolean"
-                        }
-                      },
-                      "required": ["key", "equals"],
-                      "additionalProperties": false
+                      "$ref": "#/properties/spec/properties/root/anyOf/23/properties/openWhen"
                     },
                     "detents": {
                       "type": "array",
@@ -20146,12 +21285,56 @@
                   },
                   "required": ["type", "openWhen", "detents", "child"],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "description": "Replaced on the host by components[component].root with {props.<field>} bound in the fields repeat binds; a placeholder that is the whole value keeps the prop's type",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": ["use"]
+                    },
+                    "component": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                    },
+                    "props": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": ["string", "number", "boolean"]
+                      }
+                    }
+                  },
+                  "required": ["type", "component"],
+                  "additionalProperties": false
                 }
               ]
+            },
+            "components": {
+              "type": "object",
+              "description": "Reusable node templates by name, placed with {type:\"use\",component,props}; expanded on the host before validation (use nesting up to 8 deep, no cycles, every prop used); limits apply to the expanded spec",
+              "propertyNames": {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "root": {
+                    "$ref": "#/properties/spec/properties/root"
+                  }
+                },
+                "required": ["root"],
+                "additionalProperties": false
+              }
             }
           },
           "required": ["id", "window", "root"],
           "additionalProperties": false
+        },
+        "specPath": {
+          "description": "show only: instead of spec, an absolute path of a local JSON file holding the same spec (up to 1048576 bytes) that the daemon reads and validates like an inline spec; the path is never sent to the device. Exactly one of spec or specPath. Use it for a spec a script generated, instead of pasting the JSON into the call.",
+          "type": "string",
+          "minLength": 1
         },
         "display": {
           "description": "show only: panel key, role, or active to show the overlay on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising overlay_display_id_v1; a disconnected panel is refused. Ignored, with a warning, by a same-id show without reset, which keeps the display the overlay is on.",
@@ -20276,6 +21459,11 @@
                 "description": "Adopted overlays only: true when the device keeps the overlay after the host disconnects (window.persistence: device), false when it ends with the session",
                 "type": "boolean"
               },
+              "suspended": {
+                "description": "Android only: the overlay is hidden because the app it was shown over is not in front (as of the last inspect); its state is kept and it returns with the app. Absent when visible and on iOS",
+                "type": "boolean",
+                "const": true
+              },
               "displayId": {
                 "description": "Android logical display the overlay was shown on; absent for the default display",
                 "type": "integer",
@@ -20375,6 +21563,11 @@
             "persistent": {
               "description": "Adopted overlays only: true when the device keeps the overlay after the host disconnects (window.persistence: device), false when it ends with the session",
               "type": "boolean"
+            },
+            "suspended": {
+              "description": "Android only: the overlay is hidden because the app it was shown over is not in front (as of the last inspect); its state is kept and it returns with the app. Absent when visible and on iOS",
+              "type": "boolean",
+              "const": true
             },
             "displayId": {
               "description": "Android logical display the overlay was shown on; absent for the default display",
@@ -20504,8 +21697,68 @@
           }
         },
         "warning": {
-          "description": "show succeeded but needs attention: names what to do about missingAssets, or that display was ignored by a same-id show",
+          "description": "show succeeded or awaitEvent timed out, and it needs attention: names what to do about missingAssets, that display was ignored by a same-id show, or (awaitEvent timeout) that the overlay is hidden because its app is not in front",
           "type": "string"
+        },
+        "anchors": {
+          "description": "show with element anchors: each anchored node's path and the app element bounds it was resolved to, as observe reports them (boundsPx: px on Android, points on iOS) and in spec units (bounds: dp on Android, points on iOS). Resolved once at show; the overlay does not follow later scrolling or layout, so show again to re-anchor.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "alignment": {
+                "type": "string",
+                "enum": ["cover", "top", "bottom", "start", "end"]
+              },
+              "boundsPx": {
+                "type": "object",
+                "properties": {
+                  "left": {
+                    "type": "number"
+                  },
+                  "top": {
+                    "type": "number"
+                  },
+                  "right": {
+                    "type": "number"
+                  },
+                  "bottom": {
+                    "type": "number"
+                  }
+                },
+                "required": ["left", "top", "right", "bottom"],
+                "additionalProperties": false
+              },
+              "bounds": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "width": {
+                    "type": "number"
+                  },
+                  "height": {
+                    "type": "number"
+                  }
+                },
+                "required": ["x", "y", "width", "height"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["path", "alignment", "boundsPx", "bounds"],
+            "additionalProperties": false
+          }
+        },
+        "hierarchyUpdatedAt": {
+          "description": "show with element anchors: device timestamp of the hierarchy they were resolved against",
+          "type": "number"
         },
         "deviceDroppedEvents": {
           "description": "inspect only: events the device dropped from its offline buffer (200 per device) since CtrlProxy started; a gap in sequences shows which",
@@ -20606,11 +21859,6 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "operationId": {
-          "description": "Caller-generated idempotency key",
-          "type": "string",
-          "minLength": 1
-        },
         "resources": {
           "description": "Resource settings applied after boot and before automation readiness. Requires boot=true; omitted resources stay unchanged.",
           "type": "object",
@@ -21112,6 +22360,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -21133,6 +22382,7 @@
               "provisionDevice",
               "putAppFile",
               "recentApps",
+              "reconcileDeviceResources",
               "recordSteps",
               "removeKeyValue",
               "resetAppLogs",
@@ -21168,16 +22418,13 @@
           }
         }
       },
-      "required": ["operationId", "device"],
+      "required": ["device"],
       "additionalProperties": false
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "operationId": {
-          "type": "string"
-        },
         "device": {
           "type": "object",
           "properties": {
@@ -21790,7 +23037,6 @@
         "timing": {}
       },
       "required": [
-        "operationId",
         "device",
         "requestedSpec",
         "resolvedSpec",
@@ -21970,6 +23216,359 @@
           "type": "string"
         }
       },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reconcileDeviceResources",
+    "description": "Compare an iOS Simulator with a requested resource map (workload profile) and report typed drift: missingRequested, ownedExtra (overrides AutoMobile applied earlier), unsupported, commandFailure. Report-only by default; repair applies only the drifted delta, re-reads, and succeeds only when every requested resource is proven.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "resources": {
+          "description": "Requested workload profile: the resource map the simulator should match. It has no name; its identity is the returned profileFingerprint.",
+          "type": "object",
+          "properties": {
+            "wallpaperRendering": {
+              "description": "Home and Lock Screen wallpaper rendering; excludes widgets and Live Activities.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "widgets": {
+              "description": "Widget refresh, including app widgets; excludes wallpaper and Live Activities.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "liveActivities": {
+              "description": "Live Activities and Dynamic Island updates; excludes wallpaper and widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "healthServices": {
+              "description": "HealthKit data and Health app background work. Health integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "homeServices": {
+              "description": "HomeKit accessories and automations. Home integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "fitnessServices": {
+              "description": "Apple Fitness, coaching, activity awards, and activity sharing.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "familyServices": {
+              "description": "Family Sharing, family approvals, and parental controls. Changes restriction behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "screenTime": {
+              "description": "Screen Time limits and usage tracking. Changes restriction behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "newsServices": {
+              "description": "Apple News background content.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "weatherServices": {
+              "description": "Apple Weather background forecasts.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "tipsServices": {
+              "description": "Apple Tips background content.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "gameServices": {
+              "description": "Game Center and saved-game synchronization; excludes controller input.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mapsSync": {
+              "description": "Maps favorites, history, background updates, and suggested destinations; excludes MapKit rendering and location services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "advertising": {
+              "description": "Promoted Apple content; excludes advertising privacy preferences and app integrity services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "diagnosticReporting": {
+              "description": "Diagnostic collectors, feedback, location analytics, and call-quality reporting; reduces diagnostic evidence, not call transport.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "photoAnalysis": {
+              "description": "Background Photos analysis; may reduce photo search and recognition. Preserves library access, cloud transfers, and shared media-analysis infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "assistantSuggestions": {
+              "description": "Siri inference, knowledge, and proactive suggestions; preserves speech, system voices, and shared language/model infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appleIntelligence": {
+              "description": "Apple Intelligence orchestration and generative experiences; system writing tools and intelligence integrations may become unavailable. Preserves shared model and speech services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "searchIndexing": {
+              "description": "Spotlight and Settings search, including app-provided system indexes; excludes an app's own search service.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appStoreServices": {
+              "description": "App Store installation/update services; excludes push and StoreKit payment services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appleMediaSync": {
+              "description": "Apple Music and subscribed/purchased media background services; excludes generic audio/video playback and StoreKit payments.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mailServices": {
+              "description": "Apple Mail background services. Mail-based sign-in email workflows may be unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "calendarServices": {
+              "description": "Local Calendar database access; excludes server-side calendar integrations in apps.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "reminderServices": {
+              "description": "Apple Reminders database and background work; excludes reminders maintained by other apps.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "personalDataSync": {
+              "description": "Exchange, CalDAV, and CardDAV synchronization; preserves local Contacts database access.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "safariSync": {
+              "description": "Safari bookmark/history synchronization; preserves associated domains, shared credentials, browsing protections, and WebKit.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "icloudSettingsSync": {
+              "description": "iCloud system-settings synchronization and storage-plan recommendations; preserves accounts, credentials, CloudKit data, Drive, and Photos transfers.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "messagingMaintenance": {
+              "description": "Apple Messages history cleanup, attachment transfer, and FaceTime message storage; preserves identity, message database XPC helpers, and system calling services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "watchConnectivity": {
+              "description": "Paired Watch and companion-device communication.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "carPlay": {
+              "description": "CarPlay vehicle connectivity.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "tvRemote": {
+              "description": "Apple TV discovery and remote control.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "findMy": {
+              "description": "Find My device-location services; excludes general location APIs.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "continuity": {
+              "description": "Nearby-device Continuity discovery; cross-device workflows may stop working. Preserves system share sheets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "walletServices": {
+              "description": "Wallet, Apple Pay, digital identity, and merchant services. Payment sheets, including dependent StoreKit workflows, may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "businessServices": {
+              "description": "Apple business messaging services; excludes ordinary app messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "backgroundSync": {
+              "description": "General OS background app scheduling. Control is unsupported to preserve application behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "animations": {
+              "description": "Android system animation scales: disabled sets all three to zero; enabled sets them to one. Excludes app-owned animation.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "screensavers": {
+              "description": "Android dream/screensaver activation; excludes wallpaper and widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "backup": {
+              "description": "Android Backup Manager scheduling for the current user; disables backup and restore test behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mailApp": {
+              "description": "Android optional mail apps, including Gmail. Removes mail intent handlers; preserves other apps' messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "calendarApp": {
+              "description": "Android Calendar app availability; preserves CalendarProvider.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "contactsApp": {
+              "description": "Android Contacts app availability; preserves ContactsProvider.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mapsApp": {
+              "description": "Android Google Maps app; external navigation intents become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "videoApp": {
+              "description": "Android YouTube app; native video links become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "musicApp": {
+              "description": "Android YouTube Music app; preserves shared audio playback.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "photosApp": {
+              "description": "Android Google Photos app; changes cloud photo sources and choosers. Preserves MediaProvider and DocumentsUI.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "assistantApp": {
+              "description": "Android Google Search/Assistant app, including voice and home-search integrations.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "digitalWellbeing": {
+              "description": "Android Digital Wellbeing usage tracking, focus, and app limits.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "printing": {
+              "description": "Android print spooler and print recommendations; printing becomes unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "accessibilityApps": {
+              "description": "Optional Android accessibility apps. Active accessibility services are protected.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "textToSpeech": {
+              "description": "Android Google speech synthesis; speech-dependent functionality becomes unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "storeApp": {
+              "description": "Android Play Store app; installation, updates, billing and licensing may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "healthConnect": {
+              "description": "Android Health Connect controller and backup app; health integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "adServices": {
+              "description": "Android AdServices API package; advertising/privacy APIs may fail. Does not remove mainline/APEX infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "onDevicePersonalization": {
+              "description": "Android on-device personalization service package; dependent APIs may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "wallpaperApps": {
+              "description": "Android wallpaper picker and optional live-wallpaper apps; changes wallpaper selection. Does not disable the shared wallpaper framework or widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "dialerApp": {
+              "description": "Optional Android dialer apps. Default role holders remain protected.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "messagesApp": {
+              "description": "Optional Android SMS/Messages apps. Default role holders remain protected; excludes other apps' messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "googleServicesFramework": {
+              "description": "Android Google Services Framework; aggressive control that can break Google account and push integrations.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "googlePlayServices": {
+              "description": "Android Google Play services; aggressive control that breaks dependent push, authentication, location and other integrations. Keep enabled for workflows that depend on those services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "icloudSync": {
+              "description": "Broad iCloud/account synchronization. Control is unsupported; use the narrower icloudSettingsSync setting.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            }
+          },
+          "additionalProperties": false
+        },
+        "repair": {
+          "description": "Apply only the drifted requested entries, then re-read and fail closed. Defaults to false (report only).",
+          "type": "boolean"
+        },
+        "releaseOwnedExtras": {
+          "description": "With repair, re-enable services AutoMobile disabled earlier that this profile omits. Never touches overrides AutoMobile did not apply.",
+          "type": "boolean"
+        },
+        "timeoutMs": {
+          "description": "Total reconciliation budget in milliseconds. Defaults to 300000.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 890000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["resources"],
       "additionalProperties": false
     }
   },
@@ -22530,6 +24129,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -22706,6 +24308,15 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
+                      },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                         "type": "boolean",
@@ -22802,6 +24413,15 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
                       },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
@@ -22967,6 +24587,14 @@
                 "settled": {
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
+                },
+                "settleMs": {
+                  "description": "Same name/meaning as a full observation's `settleMs` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Same name/meaning as a full observation's `settlePolls` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
                 },
                 "accessibilityAuditSkipped": {
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
@@ -23628,6 +25256,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -23895,6 +25526,11 @@
                     "occludedByViewId": {
                       "type": "string"
                     },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "class": {
                       "type": "string"
                     },
@@ -24141,6 +25777,11 @@
                     },
                     "occludedByViewId": {
                       "type": "string"
+                    },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "class": {
                       "type": "string"
@@ -25006,6 +26647,14 @@
                   "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
                   "type": "boolean"
                 },
+                "settleMs": {
+                  "description": "Milliseconds the hierarchy-stability gate spent re-observing (issue #9591). Present only when the gate ran. With `settled: false`, a value near the gate's budget means the screen kept changing or each read was slow; a value well below it means the gate stopped early.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Re-observations the hierarchy-stability gate took (issue #9591). Two are needed to settle; fewer at the budget means reads were too slow to compare.",
+                  "type": "number"
+                },
                 "accessibilityAuditSkipped": {
                   "description": "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
@@ -25414,6 +27063,10 @@
             "occludedByViewId": {
               "type": "string"
             },
+            "occluded": {
+              "type": "boolean",
+              "const": true
+            },
             "node": {
               "anyOf": [
                 {
@@ -25440,6 +27093,11 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "layer": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -26581,7 +28239,7 @@
   },
   {
     "name": "setDeviceState",
-    "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. On an iOS Simulator networkCondition is per-app only: profile offline or none with appId, within a session, refuses the app's new connections through the opt-in network-extension filter under a renewed 15s lease; release, rebind, expiry or a missed renewal removes it, and other sessions cannot clear it. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
+    "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. cameraPoster sets or clears a virtual-scene back-camera poster (image path or generated QR, wall or table surface) on a running Android emulator through the emulator console, without a restart; it persists until cleared or the AVD is cold-booted, iOS and physical Android return unsupported, a console refusal (for example an AVD whose back camera is not virtualscene) is returned as an error, and the default camera pose may not face the poster. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. On an iOS Simulator networkCondition is per-app only: profile offline or none with appId, within a session, refuses the app's new connections through the opt-in network-extension filter under a renewed 15s lease; release, rebind, expiry or a missed renewal removes it, and other sessions cannot clear it. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -26910,6 +28568,66 @@
                 "mode": {
                   "type": "string",
                   "const": "stop"
+                }
+              },
+              "required": ["mode"],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "cameraPoster": {
+          "description": "Set (mode image or qr) or clear a virtual-scene back-camera poster on a RUNNING Android emulator via the emulator console, with no restart. surface defaults to wall. The AVD back camera must be virtualscene (see startDevice cameraPosterPath/cameraPosterQr). The console cannot confirm the poster is visible; the default camera pose may not face it.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "image"
+                },
+                "path": {
+                  "description": "Host PNG/JPG/JPEG path; must not contain whitespace.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "surface": {
+                  "type": "string",
+                  "enum": ["wall", "table"]
+                }
+              },
+              "required": ["mode", "path"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "qr"
+                },
+                "text": {
+                  "description": "Payload encoded into a generated QR poster.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "surface": {
+                  "type": "string",
+                  "enum": ["wall", "table"]
+                }
+              },
+              "required": ["mode", "text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "clear"
+                },
+                "surface": {
+                  "type": "string",
+                  "enum": ["wall", "table"]
                 }
               },
               "required": ["mode"],
@@ -27378,6 +29096,39 @@
           "required": ["supported"],
           "additionalProperties": {}
         },
+        "cameraPoster": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "type": "boolean"
+            },
+            "verified": {
+              "type": "boolean"
+            },
+            "method": {
+              "type": "string"
+            },
+            "warning": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string",
+              "enum": ["image", "qr", "clear"]
+            },
+            "surface": {
+              "type": "string",
+              "enum": ["wall", "table"]
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
         "clock": {
           "type": "object",
           "properties": {
@@ -27679,6 +29430,10 @@
         "locked": {
           "type": "boolean"
         },
+        "keyguardDismissed": {
+          "type": "boolean",
+          "const": true
+        },
         "warnings": {
           "type": "array",
           "items": {
@@ -27806,6 +29561,7 @@
             "hitTest",
             "homeScreen",
             "identifyInteractions",
+            "inspectPackageSigning",
             "installApp",
             "keyboard",
             "killDevice",
@@ -27827,6 +29583,7 @@
             "provisionDevice",
             "putAppFile",
             "recentApps",
+            "reconcileDeviceResources",
             "recordSteps",
             "removeKeyValue",
             "resetAppLogs",
@@ -27897,6 +29654,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -27918,6 +29676,7 @@
               "provisionDevice",
               "putAppFile",
               "recentApps",
+              "reconcileDeviceResources",
               "recordSteps",
               "removeKeyValue",
               "resetAppLogs",
@@ -28230,6 +29989,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -28523,6 +30285,11 @@
           "description": "Swipe speed preset",
           "type": "string",
           "enum": ["slow", "normal", "fast"]
+        },
+        "layer": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
         },
         "platform": {
           "type": "string",
@@ -29194,6 +30961,11 @@
           "type": "string",
           "enum": ["tap", "longPress", "doubleTap"]
         },
+        "layer": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
+        },
         "durationMs": {
           "description": "Long-press duration in milliseconds (500–10000; default 1000); only with longPress",
           "type": "integer",
@@ -29520,6 +31292,11 @@
             },
             "occludedByViewId": {
               "type": "string"
+            },
+            "occluded": {
+              "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+              "type": "boolean",
+              "const": true
             },
             "class": {
               "type": "string"
@@ -29919,6 +31696,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -30095,6 +31875,15 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
+                      },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                         "type": "boolean",
@@ -30191,6 +31980,15 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
                       },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
@@ -30356,6 +32154,14 @@
                 "settled": {
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
+                },
+                "settleMs": {
+                  "description": "Same name/meaning as a full observation's `settleMs` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Same name/meaning as a full observation's `settlePolls` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
                 },
                 "accessibilityAuditSkipped": {
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
@@ -31017,6 +32823,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -31284,6 +33093,11 @@
                     "occludedByViewId": {
                       "type": "string"
                     },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "class": {
                       "type": "string"
                     },
@@ -31530,6 +33344,11 @@
                     },
                     "occludedByViewId": {
                       "type": "string"
+                    },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "class": {
                       "type": "string"
@@ -32394,6 +34213,14 @@
                 "settled": {
                   "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
                   "type": "boolean"
+                },
+                "settleMs": {
+                  "description": "Milliseconds the hierarchy-stability gate spent re-observing (issue #9591). Present only when the gate ran. With `settled: false`, a value near the gate's budget means the screen kept changing or each read was slow; a value well below it means the gate stopped early.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Re-observations the hierarchy-stability gate took (issue #9591). Two are needed to settle; fewer at the budget means reads were too slow to compare.",
+                  "type": "number"
                 },
                 "accessibilityAuditSkipped": {
                   "description": "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
@@ -33061,6 +34888,11 @@
                   "occludedByViewId": {
                     "type": "string"
                   },
+                  "occluded": {
+                    "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                    "type": "boolean",
+                    "const": true
+                  },
                   "class": {
                     "type": "string"
                   },
@@ -33309,6 +35141,10 @@
             },
             "occludedByViewId": {
               "type": "string"
+            },
+            "occluded": {
+              "type": "boolean",
+              "const": true
             },
             "node": {
               "anyOf": [
@@ -33604,6 +35440,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -33780,6 +35619,15 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
+                      },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                         "type": "boolean",
@@ -33876,6 +35724,15 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
                       },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
@@ -34041,6 +35898,14 @@
                 "settled": {
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
+                },
+                "settleMs": {
+                  "description": "Same name/meaning as a full observation's `settleMs` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Same name/meaning as a full observation's `settlePolls` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
                 },
                 "accessibilityAuditSkipped": {
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
@@ -34702,6 +36567,9 @@
                   "type": "string",
                   "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
+                "screenshotIncludesOverlay": {
+                  "type": "boolean"
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -34969,6 +36837,11 @@
                     "occludedByViewId": {
                       "type": "string"
                     },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "class": {
                       "type": "string"
                     },
@@ -35215,6 +37088,11 @@
                     },
                     "occludedByViewId": {
                       "type": "string"
+                    },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "class": {
                       "type": "string"
@@ -36080,6 +37958,14 @@
                   "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
                   "type": "boolean"
                 },
+                "settleMs": {
+                  "description": "Milliseconds the hierarchy-stability gate spent re-observing (issue #9591). Present only when the gate ran. With `settled: false`, a value near the gate's budget means the screen kept changing or each read was slow; a value well below it means the gate stopped early.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Re-observations the hierarchy-stability gate took (issue #9591). Two are needed to settle; fewer at the budget means reads were too slow to compare.",
+                  "type": "number"
+                },
                 "accessibilityAuditSkipped": {
                   "description": "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
@@ -36503,6 +38389,10 @@
             "occludedByViewId": {
               "type": "string"
             },
+            "occluded": {
+              "type": "boolean",
+              "const": true
+            },
             "node": {
               "anyOf": [
                 {
@@ -36538,6 +38428,16 @@
         "keepData": {
           "description": "Keep app data after uninstall (Android only, default false)",
           "type": "boolean"
+        },
+        "expectedSigningSha256": {
+          "description": "Android: complete signer set (SHA-256 of every signing certificate) the installed package must have; a different signer set, absence, or signers that cannot be read refuses the uninstall, and removal is confirmed by a fresh presence read.",
+          "minItems": 1,
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:[0-9a-fA-F]{2}:?){31}[0-9a-fA-F]{2}$"
+          }
         },
         "platform": {
           "type": "string",

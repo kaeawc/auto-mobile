@@ -17,7 +17,7 @@ class CtrlProxyScreenshotWireTest {
     assertEquals(
       CtrlProxyScreenshotWire.RATE_LIMITED_ERROR,
       CtrlProxyScreenshotWire.errorMessageForCode(
-        AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT
+        AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT,
       ),
     )
   }
@@ -27,7 +27,7 @@ class CtrlProxyScreenshotWireTest {
     assertEquals(
       CtrlProxyScreenshotWire.GENERIC_ERROR,
       CtrlProxyScreenshotWire.errorMessageForCode(
-        AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR
+        AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR,
       ),
     )
   }

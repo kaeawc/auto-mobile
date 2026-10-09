@@ -51,7 +51,7 @@ class OverlayStateLogicTest {
     assertNull(OverlayIncrementAction("name").nextValue(state))
     assertNull(
       OverlayIncrementAction("count", by = Double.MAX_VALUE)
-        .nextValue(mapOf("count" to OverlayScalar.Numeric(Double.MAX_VALUE)))
+        .nextValue(mapOf("count" to OverlayScalar.Numeric(Double.MAX_VALUE))),
     )
   }
 
@@ -66,7 +66,7 @@ class OverlayStateLogicTest {
     assertNull(OverlayDecrementAction("missing").nextValue(state))
     assertNull(
       OverlayDecrementAction("count", by = Double.MAX_VALUE)
-        .nextValue(mapOf("count" to OverlayScalar.Numeric(-Double.MAX_VALUE)))
+        .nextValue(mapOf("count" to OverlayScalar.Numeric(-Double.MAX_VALUE))),
     )
   }
 
@@ -100,7 +100,7 @@ class OverlayStateLogicTest {
       resolveOverlayStyle(
         OverlayStyle(elevation = 4.0, gradient = gradient, aspectRatio = 2.0),
         listOf(
-          OverlayStyleWhen(eq("on", OverlayScalar.BooleanValue(true)), OverlayStyle(alpha = 0.5))
+          OverlayStyleWhen(eq("on", OverlayScalar.BooleanValue(true)), OverlayStyle(alpha = 0.5)),
         ),
         state,
       )
@@ -114,7 +114,7 @@ class OverlayStateLogicTest {
           OverlayStyleWhen(
             eq("on", OverlayScalar.BooleanValue(true)),
             OverlayStyle(elevation = 8.0, aspectRatio = 1.0),
-          )
+          ),
         ),
         state,
       )
@@ -122,5 +122,54 @@ class OverlayStateLogicTest {
     assertEquals(1.0, overridden.aspectRatio!!, 0.0)
     assertEquals(base, resolveOverlayStyle(base, null, state))
     assertEquals(OverlayStyle(), resolveOverlayStyle(null, entries.subList(1, 2), state))
+  }
+
+  @Test
+  fun `styleWhen carries every style property, so no field is silently dropped by the merge`() {
+    val full =
+      OverlayStyle(
+        width = OverlayDimension.Fill,
+        height = OverlayDimension.Dp(40.0),
+        weight = 2.0,
+        minWidth = 1.0,
+        maxWidth = 300.0,
+        minHeight = 2.0,
+        maxHeight = 200.0,
+        padding = OverlayPadding(1.0, 2.0, 3.0, 4.0),
+        background = "#112233",
+        cornerRadius = OverlayCornerRadius.Corners(topStart = 8.0),
+        border = OverlayBorder(1.0, "primary"),
+        elevation = 6.0,
+        shadowColor = "#80FF0000",
+        gradient =
+          OverlayRadialGradient(
+            listOf(OverlayGradientStop("#000000"), OverlayGradientStop("#ffffff")),
+          ),
+        aspectRatio = 1.5,
+        offset = OverlayOffset(2.0, -3.0),
+        alpha = 0.5,
+        pressScale = 0.9,
+        alignment = "center",
+        arrangement = "spaceBetween",
+        spacing = 4.0,
+        textSize = 18.0,
+        fontWeight = 700,
+        color = "onSurface",
+        textAlign = "center",
+        maxLines = 2,
+        lineHeight = 24.0,
+        letterSpacing = -0.5,
+        textDecoration = "underline",
+        fontStyle = "italic",
+        overflow = "ellipsis",
+        fontFamily = OverlayFontFamily.Named("serif"),
+        textStyle = "titleLarge",
+      )
+    val on = eq("on", OverlayScalar.BooleanValue(true))
+    assertEquals(full, resolveOverlayStyle(null, listOf(OverlayStyleWhen(on, full)), state))
+    assertEquals(
+      full,
+      resolveOverlayStyle(full, listOf(OverlayStyleWhen(on, OverlayStyle())), state),
+    )
   }
 }

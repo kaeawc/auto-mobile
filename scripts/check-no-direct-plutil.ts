@@ -1,12 +1,13 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
+import { sortedReaddirEntriesSync } from "../src/utils/io";
 
 const SOURCE_ROOT = "src";
 const OWNER = join("src", "utils", "ios-cmdline-tools", "PlistClient.ts");
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return sortedReaddirEntriesSync(directory).flatMap((entry) => {
     const path = join(directory, entry.name);
     return entry.isDirectory()
       ? sourceFiles(path)

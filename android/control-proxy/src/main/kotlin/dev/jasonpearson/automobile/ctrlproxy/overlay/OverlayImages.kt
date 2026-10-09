@@ -73,10 +73,13 @@ class BitmapOverlayImageDecoder(private val maxPixels: Long = DEFAULT_MAX_DECODE
       Log.w(TAG, "Overlay image bytes are not decodable (${bytes.size} bytes)")
       return null
     }
-    val options =
-      BitmapFactory.Options().apply {
-        inSampleSize = overlayImageSampleSize(bounds.outWidth, bounds.outHeight, target, maxPixels)
-      }
+    val sampleSize = overlayImageSampleSize(bounds.outWidth, bounds.outHeight, target, maxPixels)
+    if (!overlayImageFitsBudget(bounds.outWidth, bounds.outHeight, sampleSize, maxPixels)) {
+      // The sample size is capped, so a header claiming absurd dimensions stays over budget.
+      Log.w(TAG, "Overlay image ${bounds.outWidth}x${bounds.outHeight} exceeds the decode budget")
+      return null
+    }
+    val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
     return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.let(::BitmapOverlayImage)
   }
 

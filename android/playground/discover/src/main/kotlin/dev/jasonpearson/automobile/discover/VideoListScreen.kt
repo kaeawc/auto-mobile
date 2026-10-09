@@ -82,7 +82,7 @@ fun VideoCard(video: VideoData, onClick: () -> Unit) {
           AutoMobileContentCard(
             colors =
               CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
               ),
             shape = RoundedCornerShape(4.dp),
           ) {

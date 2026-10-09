@@ -186,4 +186,37 @@ describe("BunSqliteConnectionState BEGIN IMMEDIATE busy retry", () => {
       expect(executed).toHaveLength(3);
     });
   });
+  describe("total wait budget for autocommit statements (#11079)", () => {
+    const slowBusy = (timer: FakeTimer, waitedMs: number) => () => {
+      timer.advanceTime(waitedMs);
+      return busy();
+    };
+    const UPDATE = CompiledQuery.raw("update device_sessions set updated_at = 1");
+
+    it("does not retry a write that already waited the full busy_timeout", async () => {
+      const timer = new FakeTimer();
+      const { db, executed } = scriptedDatabase([
+        slowBusy(timer, 5_000),
+        slowBusy(timer, 5_000),
+        null,
+      ]);
+      const { state } = connection(db, 3, timer);
+
+      await expect(state.executeQuery(UPDATE, Symbol("write"))).rejects.toThrow();
+
+      // One busy_timeout, not attempts x busy_timeout.
+      expect(executed).toHaveLength(1);
+      expect(timer.getSleepHistory()).toHaveLength(0);
+    });
+
+    it("still retries fast BUSY failures within the budget", async () => {
+      const timer = new FakeTimer();
+      const { db, executed } = scriptedDatabase([busy(), busy(), null]);
+      const { state } = connection(db, 3, timer);
+
+      await state.executeQuery(UPDATE, Symbol("write"));
+
+      expect(executed).toHaveLength(3);
+    });
+  });
 });

@@ -96,9 +96,11 @@ class RecoveryToolContractTest {
           },
         ),
       "typeText" to
-        listOf({
-          AutoMobileAgent.TypeTextTool(client).execute(AutoMobileAgent.TypeTextTool.Args("hi"))
-        }),
+        listOf(
+          {
+            AutoMobileAgent.TypeTextTool(client).execute(AutoMobileAgent.TypeTextTool.Args("hi"))
+          },
+        ),
       "sendKeys" to
         listOf(
           {
@@ -130,7 +132,7 @@ class RecoveryToolContractTest {
           {
             AutoMobileAgent.ScrollTool(client)
               .execute(
-                AutoMobileAgent.ScrollTool.Args("a:id/list", "down", lookForText = "Settings")
+                AutoMobileAgent.ScrollTool.Args("a:id/list", "down", lookForText = "Settings"),
               )
           },
           {
@@ -141,37 +143,47 @@ class RecoveryToolContractTest {
                   "down",
                   lookForText = "Settings",
                   lookForElementId = "a:id/settings",
-                )
+                ),
               )
           },
         ),
       "waitFor" to
-        listOf({
-          // The capturing client's observe result contains the text, so the first poll matches.
-          AutoMobileAgent.WaitForTool(client)
-            .execute(AutoMobileAgent.WaitForTool.Args(text = "Settings"))
-        }),
+        listOf(
+          {
+            // The capturing client's observe result contains the text, so the first poll matches.
+            AutoMobileAgent.WaitForTool(client)
+              .execute(AutoMobileAgent.WaitForTool.Args(text = "Settings"))
+          },
+        ),
       "goBack" to
         listOf({ AutoMobileAgent.GoBackTool(client).execute(AutoMobileAgent.GoBackTool.Args()) }),
       "pressButton" to
-        listOf({
-          AutoMobileAgent.PressButtonTool(client)
-            .execute(AutoMobileAgent.PressButtonTool.Args("home"))
-        }),
+        listOf(
+          {
+            AutoMobileAgent.PressButtonTool(client)
+              .execute(AutoMobileAgent.PressButtonTool.Args("home"))
+          },
+        ),
       "launchApp" to
-        listOf({
-          AutoMobileAgent.LaunchAppTool(client).execute(AutoMobileAgent.LaunchAppTool.Args("a.b"))
-        }),
+        listOf(
+          {
+            AutoMobileAgent.LaunchAppTool(client).execute(AutoMobileAgent.LaunchAppTool.Args("a.b"))
+          },
+        ),
       "terminateApp" to
-        listOf({
-          AutoMobileAgent.TerminateAppTool(client)
-            .execute(AutoMobileAgent.TerminateAppTool.Args("a.b"))
-        }),
+        listOf(
+          {
+            AutoMobileAgent.TerminateAppTool(client)
+              .execute(AutoMobileAgent.TerminateAppTool.Args("a.b"))
+          },
+        ),
       "doubleTapOn" to
-        listOf({
-          AutoMobileAgent.DoubleTapOnTool(client)
-            .execute(AutoMobileAgent.DoubleTapOnTool.Args(1, 2))
-        }),
+        listOf(
+          {
+            AutoMobileAgent.DoubleTapOnTool(client)
+              .execute(AutoMobileAgent.DoubleTapOnTool.Args(1, 2))
+          },
+        ),
       "longPressOn" to
         listOf(
           {
@@ -206,6 +218,25 @@ class RecoveryToolContractTest {
       problems.isEmpty(),
       "tool calls that violate schemas/tool-definitions.json:\n" + problems.joinToString("\n"),
     )
+  }
+
+  @Test
+  fun `a device-pinned observe still validates against the observe schema`() {
+    // observe advertises deviceId; the pin turns a raw observe into project=full because the
+    // daemon rejects raw on a sessionless deviceId read (#10089).
+    val client = CapturingClient()
+    val pinned = DevicePinningMCPClient(client, "emulator-5556")
+    runBlocking {
+      AutoMobileAgent.ObserveTool(pinned).execute(AutoMobileAgent.ObserveTool.Args())
+      AutoMobileAgent.ObserveTool(pinned).execute(AutoMobileAgent.ObserveTool.Args(raw = true))
+      AutoMobileAgent.WaitForTool(pinned)
+        .execute(AutoMobileAgent.WaitForTool.Args(text = "Settings"))
+    }
+
+    assertEquals(3, client.calls.size)
+    client.calls.forEach { assertEquals("emulator-5556", it.parameters["deviceId"]) }
+    val problems = client.calls.flatMap(::violations)
+    assertTrue(problems.isEmpty(), problems.joinToString("\n"))
   }
 
   @Test

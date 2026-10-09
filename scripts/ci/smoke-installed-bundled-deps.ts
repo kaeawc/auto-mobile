@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /** Import the bundled closure from the installed tarball without starting AutoMobile. */
-import { readdirSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -8,6 +8,7 @@ import {
   type BundledPackage,
   type PackageJson,
 } from "../release/trim-bundled-deps";
+import { sortedReaddirSync } from "../../src/utils/io";
 
 /** Packages with only declarations or commands have no module to smoke-import. */
 export function importSkipReason(
@@ -103,7 +104,7 @@ if (import.meta.main) {
     }
     const result = await smokeInstalledBundledDeps(path.resolve(root), {
       collect: collectBundledPackages,
-      filenames: (directory) => readdirSync(directory),
+      filenames: (directory) => sortedReaddirSync(directory),
       importer: importInstalledPackage,
     });
     console.log(

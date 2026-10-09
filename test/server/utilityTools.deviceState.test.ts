@@ -1,7 +1,7 @@
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import Ajv from "ajv";
+import { compileAjv } from "../helpers/jsonSchemaCompile";
 import fs from "node:fs";
 import path from "node:path";
 import { registerUtilityTools } from "../../src/server/utilityTools";
@@ -372,8 +372,7 @@ describe("device state tools", () => {
     const ncSchema = setDeviceState!.inputSchema.properties?.networkCondition;
     expect(ncSchema).toBeDefined();
 
-    const ajv = new Ajv({ allErrors: true, strict: false });
-    const validate = ajv.compile(ncSchema as object);
+    const validate = compileAjv(ncSchema, { allErrors: true, strict: false });
 
     // Unsupported conditional keywords are stripped from the advertised schema.
     expect(validate({ profile: "offline", delayMs: 500 })).toBe(true);
@@ -453,9 +452,10 @@ describe("device state tools", () => {
       inputSchema: { properties: Record<string, unknown> };
     }>;
     const definition = definitions.find((value) => value.name === "setDeviceState")!;
-    const validate = new Ajv({ strict: false, validateFormats: false }).compile(
-      definition.inputSchema.properties.clock as object,
-    );
+    const validate = compileAjv(definition.inputSchema.properties.clock, {
+      strict: false,
+      validateFormats: false,
+    });
     expect(validate({ mode: "set", instant: "2026-10-01T00:00:00Z" })).toBe(true);
     expect(validate({ mode: "set", instant: "2026-10-01T00:00:00" })).toBe(false);
     expect(validate({ mode: "advance", byMs: 315360000000 })).toBe(true);
@@ -499,7 +499,7 @@ describe("device state tools", () => {
     const schema = definitions.find((definition) => definition.name === "setDeviceState")
       ?.inputSchema.properties.location;
     expect(schema).toBeDefined();
-    const validate = new Ajv({ strict: false }).compile(schema as object);
+    const validate = compileAjv(schema, { strict: false });
     expect(validate({ mode: "static", latitude: 90, longitude: -180 })).toBe(true);
     expect(validate({ mode: "static", latitude: 91, longitude: 0 })).toBe(false);
     expect(validate({ mode: "static", latitude: 0, longitude: 181 })).toBe(false);
@@ -873,7 +873,12 @@ describe("device state tools", () => {
         platform: "ios",
         sessionUuid: "session-a",
       }),
-    ).rejects.toThrow(/already assigned to session session-b/);
+    ).rejects.toMatchObject({
+      message: expect.stringMatching(/already assigned to session session-b/),
+      // Typed like the input/* and tools/call refusals (#10832); clients match the code.
+      code: "device_owned_by_other_session",
+      deviceId: "sim-b",
+    });
 
     expect(sessionManager.getSession("session-a")?.assignedDevice).toBe("sim-a");
     expect(devicePool.getDevice("sim-a")?.sessionId).toBe("session-a");

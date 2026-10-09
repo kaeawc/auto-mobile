@@ -49,7 +49,6 @@ import {
   setSegmentedSessionRecordingDependencies,
   setSegmentedSessionTimer,
 } from "../../src/server/videoRecordingTools";
-import type { ProvisionDeviceOperationStore } from "../../src/db/provisionDeviceOperationRepository";
 import type {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
@@ -1037,11 +1036,86 @@ describe("deleteDevice handler", () => {
     await pool.assignMultipleDevices(["session-1"], 1_000, "ios");
     manager.killError = new Error("The device is already shut down.");
 
-    const response = await teardownTool().handler(request("ios", device.deviceId!, device.name));
+    // The holder tears its own device down; another session would be refused (#10785).
+    const response = await teardownTool().handler({
+      ...request("ios", device.deviceId!, device.name),
+      sessionUuid: "session-1",
+    });
 
     expect(responseBody(response).state).toBe("destroyed");
     expect(pool.getDevice(device.deviceId!)).toBeNull();
     expect(sessionManager.getSessionForDevice(device.deviceId!)).toBeNull();
+  });
+
+  describe("a booted device another session holds (#10785)", () => {
+    const device: BootedDevice = { platform: "ios", name: "iPhone 16", deviceId: "IOS-HELD-1" };
+    let sessionManager: SessionManager;
+
+    const holdDevice = async () => {
+      const timer = new FakeTimer();
+      sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
+      const pool = new DevicePool(
+        createDevicePoolDependencies(sessionManager, "daemon-session", {
+          timer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: manager,
+          retryExecutor: new DefaultRetryExecutor(timer),
+        }),
+      );
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      manager.setBootedDevices("ios", [device]);
+      manager.setDeviceImages("ios", [{ ...device, isRunning: true }]);
+      await pool.addDevice(device, { ...device, isRunning: true });
+      await pool.assignMultipleDevices(["holder-session"], 1_000, "ios");
+    };
+
+    test("is refused to another session before teardown is accepted", async () => {
+      await holdDevice();
+
+      const response = await teardownTool().handler({
+        ...request("ios", device.deviceId, device.name),
+        sessionUuid: "other-session",
+      });
+
+      const body = responseBody(response);
+      expect(body.state).toBe("failed");
+      expect(body.failure).toEqual({
+        code: "device_owned_by_other_session",
+        phase: "precondition",
+        message:
+          `deleteDevice refused: device '${device.deviceId}' is held by another session. ` +
+          "Session other-session does not hold it; call it with the holding session's " +
+          "sessionUuid, wait for the holder to release the device, or pass force: true to stop " +
+          "it anyway.",
+      });
+      expect(manager.killedDevices).toEqual([]);
+      expect(manager.destroyRequests).toEqual([]);
+      expect(sessionManager.getSessionForDevice(device.deviceId)).toBe("holder-session");
+    });
+
+    test("is refused to a sessionless caller", async () => {
+      await holdDevice();
+
+      const response = await teardownTool().handler(request("ios", device.deviceId, device.name));
+
+      expect((responseBody(response).failure as { code: string }).code).toBe(
+        "device_owned_by_other_session",
+      );
+      expect(manager.killedDevices).toEqual([]);
+    });
+
+    test("force: true tears it down for a non-holder", async () => {
+      await holdDevice();
+
+      const response = await teardownTool().handler({
+        ...request("ios", device.deviceId, device.name),
+        sessionUuid: "other-session",
+        force: true,
+      });
+
+      expect(responseBody(response).state).toBe("destroyed");
+      expect(manager.killedDevices.map((killed) => killed.deviceId)).toEqual([device.deviceId]);
+    });
   });
 
   test.each([false, true])("evicts an absent cached iOS manager by name: %s", async (byName) => {
@@ -3498,14 +3572,6 @@ describe("deleteDevice handler", () => {
     });
     manager.setDeviceImages("android", [device]);
     let provisionCalls = 0;
-    const provisionOperationStore: ProvisionDeviceOperationStore = {
-      begin: async () => ({ started: true, reconcileExistingConfiguration: false }),
-      markDeviceCreationStarted: async () => true,
-      recordLifecycleOutcome: async () => true,
-      extend: async () => true,
-      complete: async () => true,
-      fail: async () => true,
-    };
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => ({
         provision: async (provisionRequest) => {
@@ -3521,14 +3587,12 @@ describe("deleteDevice handler", () => {
           };
         },
       }),
-      provisionDeviceOperationStoreFactory: () => provisionOperationStore,
     });
     registerDeviceTools();
 
     const teardown = teardownTool().handler(request("android", device.name, device.name));
     await destroyStarted;
     const provision = provisionDeviceTool().handler({
-      operationId: "12e6f783-b794-47b8-b8a1-8619677820f0",
       device: {
         platform: "android",
         name: device.name,
@@ -3571,14 +3635,6 @@ describe("deleteDevice handler", () => {
     });
     manager.setDeviceImages("ios", [device]);
     let provisionCalls = 0;
-    const provisionOperationStore: ProvisionDeviceOperationStore = {
-      begin: async () => ({ started: true, reconcileExistingConfiguration: false }),
-      markDeviceCreationStarted: async () => true,
-      recordLifecycleOutcome: async () => true,
-      extend: async () => true,
-      complete: async () => true,
-      fail: async () => true,
-    };
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => ({
         provision: async (provisionRequest) => {
@@ -3590,14 +3646,12 @@ describe("deleteDevice handler", () => {
           };
         },
       }),
-      provisionDeviceOperationStoreFactory: () => provisionOperationStore,
     });
     registerDeviceTools();
 
     const teardown = teardownTool().handler(request("ios", device.deviceId!, device.name));
     await destroyStarted;
     const provision = provisionDeviceTool().handler({
-      operationId: "72e6f783-b794-47b8-b8a1-8619677820f0",
       device: {
         platform: "ios",
         name: device.name,

@@ -28,6 +28,9 @@ export type OverlayAgentRequestType =
   | "put_overlay_asset"
   | "remove_overlay_asset"
   | "get_overlay_status"
+  // Screenshot hide (#9305), advertised together with the `screenshot_hide_overlay_v1` capability.
+  | "hide_for_capture"
+  | "restore_after_capture"
   // Test hook: the agent advertises it only when launched with
   // AUTOMOBILE_OVERLAY_AGENT_TEST_HOOKS=1 (scripts/ios/overlay-agent-smoke.sh does that).
   | "simulate_tap";

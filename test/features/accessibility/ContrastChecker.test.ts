@@ -3,13 +3,16 @@
  * Tests WCAG color contrast calculations and requirements
  */
 
-import { expect, describe, it, beforeEach, spyOn } from "bun:test";
+import { expect, describe, it, beforeAll, beforeEach, spyOn } from "bun:test";
+import { readFileSync } from "fs";
 import { logger } from "../../../src/utils/logger";
 import * as path from "path";
 import { ContrastChecker } from "../../../src/features/accessibility/ContrastChecker";
+import { resolveImageBackend } from "../../../src/utils/image/backend/resolveImageBackend";
 import type { Element } from "../../../src/models/Element";
 import { FakeImageBackend } from "../../fakes/FakeImageBackend";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { SeededRandom } from "../../fakes/SeededRandom";
 
 /** Build a uniform RGBA raw image for backend-seam tests. */
 function uniformRaw(
@@ -67,6 +70,13 @@ describe("ContrastChecker", function () {
   let checker: ContrastChecker;
   const fixturesDir = path.join(__dirname, "../../fixtures/screenshots");
   const syntheticScreenshotPath = "/synthetic/contrast.png";
+
+  // The first decode lazily loads the image library; pay that here, not in the first test.
+  beforeAll(async function () {
+    await resolveImageBackend().rawPixels(
+      readFileSync(path.join(fixturesDir, "black-on-white.png")),
+    );
+  });
 
   beforeEach(function () {
     checker = new ContrastChecker();
@@ -484,6 +494,57 @@ describe("ContrastChecker", function () {
       expect(batch.outsideImage).toEqual([outside]);
       expect(batch.results.has(outside)).toBe(false);
       expect(batch.results.get(inside)).not.toBeNull();
+    });
+  });
+
+  describe("Underlying colour search", function () {
+    // The search the summed-area table replaced: widen the clamped square one radius at a
+    // time and return the first opaque sample in dx-major order.
+    function widenedScan(image: ReturnType<typeof uniformRaw>, x: number, y: number) {
+      for (let radius = 1; radius <= 12; radius++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          for (let dy = -radius; dy <= radius; dy++) {
+            const sx = Math.round(Math.min(Math.max(x + dx, 0), image.width - 1));
+            const sy = Math.round(Math.min(Math.max(y + dy, 0), image.height - 1));
+            const idx = (image.width * sy + sx) * 4;
+            if (image.data[idx + 3] === 255) {
+              return { r: image.data[idx], g: image.data[idx + 1], b: image.data[idx + 2] };
+            }
+          }
+        }
+      }
+      return null;
+    }
+
+    it("finds the same opaque pixel as the widening scan, including at edges and beyond 12", function () {
+      const random = new SeededRandom(10_220);
+      const search = new ContrastChecker({ compositeOverlays: true }) as unknown as {
+        findUnderlyingColor(
+          image: ReturnType<typeof uniformRaw>,
+          x: number,
+          y: number,
+        ): { r: number; g: number; b: number } | null;
+      };
+      const mismatches: string[] = [];
+      for (const density of [0, 0.005, 0.03, 0.2]) {
+        const image = uniformRaw(31, 27, 0, 0, 0);
+        for (let index = 0; index < image.width * image.height; index++) {
+          image.data[index * 4] = index % 251;
+          image.data[index * 4 + 1] = (index * 7) % 253;
+          image.data[index * 4 + 2] = (index * 13) % 255;
+          image.data[index * 4 + 3] = random.next() < density ? 255 : 128;
+        }
+        for (let y = 0; y < image.height; y++) {
+          for (let x = 0; x < image.width; x++) {
+            const expected = JSON.stringify(widenedScan(image, x, y));
+            const actual = JSON.stringify(search.findUnderlyingColor(image, x, y));
+            if (actual !== expected) {
+              mismatches.push(`density ${density} (${x},${y}): ${actual} != ${expected}`);
+            }
+          }
+        }
+      }
+      expect(mismatches).toEqual([]);
     });
   });
 

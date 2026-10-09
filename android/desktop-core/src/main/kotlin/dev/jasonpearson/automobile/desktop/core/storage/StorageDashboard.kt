@@ -208,7 +208,7 @@ fun StorageDashboard(
       if (!response.success) {
         if (!handledStorageSubscriptionRequestIds.add(response.requestId)) return@collect
         LOG.warn(
-          "StorageDashboard: failed to enable live updates for ${response.key.fileName}: ${response.error}"
+          "StorageDashboard: failed to enable live updates for ${response.key.fileName}: ${response.error}",
         )
         return@collect
       }
@@ -330,7 +330,7 @@ fun StorageDashboard(
 
   LaunchedEffect(dataSourceMode, clientProvider, deviceId, packageName) {
     LOG.info(
-      "StorageDashboard LaunchedEffect: mode=$dataSourceMode, clientProvider=${if (clientProvider != null) "present" else "null"}, deviceId=$deviceId, packageName=$packageName"
+      "StorageDashboard LaunchedEffect: mode=$dataSourceMode, clientProvider=${if (clientProvider != null) "present" else "null"}, deviceId=$deviceId, packageName=$packageName",
     )
     isLoading = true
     databaseError = null
@@ -434,7 +434,7 @@ fun StorageDashboard(
           modifier =
             Modifier.clip(RoundedCornerShape(6.dp))
               .background(
-                if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent
+                if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent,
               )
               .clickable { selectedTab = tab }
               .pointerHoverIcon(PointerIcon.Hand)

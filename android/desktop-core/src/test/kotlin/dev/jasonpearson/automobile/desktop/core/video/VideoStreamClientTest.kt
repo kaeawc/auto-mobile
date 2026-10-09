@@ -761,7 +761,7 @@ class VideoStreamClientTest {
           .putInt(CODEC_ID_H264)
           .putInt(0)
           .putInt(0)
-          .array()
+          .array(),
       )
       var flags = 0L
       rotation?.let {
@@ -774,7 +774,7 @@ class VideoStreamClientTest {
           .order(ByteOrder.BIG_ENDIAN)
           .putLong(flags)
           .putInt(annexB.size)
-          .array()
+          .array(),
       )
       out.write(annexB)
       out.flush()
@@ -783,7 +783,7 @@ class VideoStreamClientTest {
     /** Writes a zero-payload heartbeat packet (bit 60, non-config), matching the daemon relay. */
     private fun writeHeartbeat(out: OutputStream) {
       out.write(
-        ByteBuffer.allocate(12).order(ByteOrder.BIG_ENDIAN).putLong(1L shl 60).putInt(0).array()
+        ByteBuffer.allocate(12).order(ByteOrder.BIG_ENDIAN).putLong(1L shl 60).putInt(0).array(),
       )
       out.flush()
     }

@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isSpecified
 import dev.jasonpearson.automobile.protocol.OverlayCornerRadius
 import dev.jasonpearson.automobile.protocol.OverlaySpecTheme
+import dev.jasonpearson.automobile.protocol.OverlaySpecThemeColors
 import dev.jasonpearson.automobile.protocol.OverlaySpecThemeShapes
 import dev.jasonpearson.automobile.protocol.OverlaySpecThemeTypography
 
@@ -40,6 +41,8 @@ internal data class OverlayThemeSpec(
   val seed: Color? = null,
   /** The spec asked for device dynamic colour; honoured only when the OS supports it. */
   val dynamicColor: Boolean = false,
+  /** Explicit per-role hex overrides, painted over whichever scheme the rest selects. */
+  val roles: OverlaySpecThemeColors? = null,
 )
 
 /**
@@ -55,14 +58,27 @@ internal fun overlayThemeSpec(
   explicit: OverlaySpecTheme? = null,
 ): OverlayThemeSpec {
   val authored = overlayAuthoredTheme(root)
-  val dark = overlayExplicitDark(explicit?.mode, systemDark) ?: authored?.dark ?: systemDark
+  val dark =
+    overlayExplicitDark(explicit?.mode, systemDark)
+      ?: overlayRoleSurfaceDark(explicit?.colors)
+      ?: authored?.dark
+      ?: systemDark
   val seed = explicit?.colors?.seed?.let(::overlayColor)
   val dynamic = explicit?.colors?.source == DEVICE_COLOR_SOURCE
   // Authored surfaces only match a scheme of the same polarity, and never override explicit
   // colours.
   val surface = authored?.surface?.takeIf { seed == null && !dynamic && authored.dark == dark }
-  return OverlayThemeSpec(dark, surface, seed, dynamic)
+  return OverlayThemeSpec(dark, surface, seed, dynamic, explicit?.colors)
 }
+
+/**
+ * With no `mode`, an explicit `background` (else `surface`) role override is the screen colour the
+ * author chose, so its luminance decides light or dark the way an authored background does.
+ */
+private fun overlayRoleSurfaceDark(colors: OverlaySpecThemeColors?): Boolean? =
+  (colors?.background ?: colors?.surface)?.let {
+    overlayColor(it).luminance() < DARK_LUMINANCE_CEILING
+  }
 
 /** `light`/`dark` decide outright, `system` follows the device, and null means "not specified". */
 private fun overlayExplicitDark(mode: String?, systemDark: Boolean): Boolean? =
@@ -97,17 +113,23 @@ internal fun overlayHostDark(model: OverlayRenderModel): Boolean? =
     "light" -> false
     "dark" -> true
     "system" -> null
-    else -> overlayAuthoredTheme(model.root)?.dark
+    else -> overlayRoleSurfaceDark(model.theme?.colors) ?: overlayAuthoredTheme(model.root)?.dark
   }
 
 /**
  * [dynamicScheme] is the device's Material You scheme, supplied only on API 31+. It is used when
  * the spec asked for device colour; otherwise a seed generates the scheme, else the baseline
- * palette is used with the authored surface painted over it.
+ * palette is used with the authored surface painted over it. Explicit role overrides are applied
+ * last, over any of those.
  */
 internal fun overlayColorScheme(
   theme: OverlayThemeSpec,
   dynamicScheme: ColorScheme? = null,
+): ColorScheme = overlayBaseColorScheme(theme, dynamicScheme).withRoleOverrides(theme.roles)
+
+private fun overlayBaseColorScheme(
+  theme: OverlayThemeSpec,
+  dynamicScheme: ColorScheme?,
 ): ColorScheme {
   if (theme.dynamicColor && dynamicScheme != null) return dynamicScheme
   theme.seed?.let {
@@ -122,6 +144,51 @@ internal fun overlayColorScheme(
     surfaceContainerLow = surface,
     surfaceContainerHigh = surface,
     surfaceContainerHighest = surface,
+  )
+}
+
+/** This scheme with every role [roles] names replaced by that hex colour; null keeps it as is. */
+internal fun ColorScheme.withRoleOverrides(roles: OverlaySpecThemeColors?): ColorScheme {
+  // Seed and source alone name no role: keep this scheme instance.
+  if (roles == null || roles == OverlaySpecThemeColors(roles.seed, roles.source)) return this
+  fun String?.hex(): Color? = this?.let(::overlayColor)
+  return copy(
+    primary = roles.primary.hex() ?: primary,
+    onPrimary = roles.onPrimary.hex() ?: onPrimary,
+    primaryContainer = roles.primaryContainer.hex() ?: primaryContainer,
+    onPrimaryContainer = roles.onPrimaryContainer.hex() ?: onPrimaryContainer,
+    inversePrimary = roles.inversePrimary.hex() ?: inversePrimary,
+    secondary = roles.secondary.hex() ?: secondary,
+    onSecondary = roles.onSecondary.hex() ?: onSecondary,
+    secondaryContainer = roles.secondaryContainer.hex() ?: secondaryContainer,
+    onSecondaryContainer = roles.onSecondaryContainer.hex() ?: onSecondaryContainer,
+    tertiary = roles.tertiary.hex() ?: tertiary,
+    onTertiary = roles.onTertiary.hex() ?: onTertiary,
+    tertiaryContainer = roles.tertiaryContainer.hex() ?: tertiaryContainer,
+    onTertiaryContainer = roles.onTertiaryContainer.hex() ?: onTertiaryContainer,
+    background = roles.background.hex() ?: background,
+    onBackground = roles.onBackground.hex() ?: onBackground,
+    surface = roles.surface.hex() ?: surface,
+    onSurface = roles.onSurface.hex() ?: onSurface,
+    surfaceVariant = roles.surfaceVariant.hex() ?: surfaceVariant,
+    onSurfaceVariant = roles.onSurfaceVariant.hex() ?: onSurfaceVariant,
+    surfaceTint = roles.surfaceTint.hex() ?: surfaceTint,
+    inverseSurface = roles.inverseSurface.hex() ?: inverseSurface,
+    inverseOnSurface = roles.inverseOnSurface.hex() ?: inverseOnSurface,
+    error = roles.error.hex() ?: error,
+    onError = roles.onError.hex() ?: onError,
+    errorContainer = roles.errorContainer.hex() ?: errorContainer,
+    onErrorContainer = roles.onErrorContainer.hex() ?: onErrorContainer,
+    outline = roles.outline.hex() ?: outline,
+    outlineVariant = roles.outlineVariant.hex() ?: outlineVariant,
+    scrim = roles.scrim.hex() ?: scrim,
+    surfaceBright = roles.surfaceBright.hex() ?: surfaceBright,
+    surfaceDim = roles.surfaceDim.hex() ?: surfaceDim,
+    surfaceContainer = roles.surfaceContainer.hex() ?: surfaceContainer,
+    surfaceContainerHigh = roles.surfaceContainerHigh.hex() ?: surfaceContainerHigh,
+    surfaceContainerHighest = roles.surfaceContainerHighest.hex() ?: surfaceContainerHighest,
+    surfaceContainerLow = roles.surfaceContainerLow.hex() ?: surfaceContainerLow,
+    surfaceContainerLowest = roles.surfaceContainerLowest.hex() ?: surfaceContainerLowest,
   )
 }
 
@@ -393,7 +460,10 @@ internal fun overlayResolveColor(scheme: ColorScheme, literal: Color?, spec: Str
 internal fun overlayThemedColor(literal: Color?, spec: String?): Color? =
   overlayResolveColor(MaterialTheme.colorScheme, literal, spec)
 
-/** A `cornerRadius` as a shape: dp as a rounded corner, a token as the theme's Shapes step. */
+/**
+ * A `cornerRadius` as a shape: dp as a rounded corner, a token as the theme's Shapes step, and
+ * per-corner radii as a rounded shape with each omitted corner square.
+ */
 internal fun overlayCornerShape(shapes: Shapes, radius: OverlayCornerRadius): Shape =
   when (radius) {
     is OverlayCornerRadius.Dp -> RoundedCornerShape(radius.dp.toFloat().dp)
@@ -407,6 +477,13 @@ internal fun overlayCornerShape(shapes: Shapes, radius: OverlayCornerRadius): Sh
         "full" -> RoundedCornerShape(percent = FULL_CORNER_PERCENT)
         else -> RoundedCornerShape(0.dp)
       }
+    is OverlayCornerRadius.Corners ->
+      RoundedCornerShape(
+        topStart = (radius.topStart ?: 0.0).toFloat().dp,
+        topEnd = (radius.topEnd ?: 0.0).toFloat().dp,
+        bottomEnd = (radius.bottomEnd ?: 0.0).toFloat().dp,
+        bottomStart = (radius.bottomStart ?: 0.0).toFloat().dp,
+      )
   }
 
 /** Material You colours need API 31; older devices fall through to the seed or baseline. */

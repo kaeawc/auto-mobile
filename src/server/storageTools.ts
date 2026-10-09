@@ -691,7 +691,12 @@ export function registerStorageTools(): void {
     "List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter).",
     listDataStoresSchema,
     listDataStoresHandler,
-    { defaultEnabled: false, embeddedSdkOnly: true },
+    {
+      defaultEnabled: false,
+      embeddedSdkOnly: true,
+      // Reads only; a non-holder watches a held device through the read-only path (#10830).
+      deviceReadOnly: true,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -699,7 +704,12 @@ export function registerStorageTools(): void {
     "Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter).",
     getDataStoreSchema,
     getDataStoreHandler,
-    { defaultEnabled: false, embeddedSdkOnly: true },
+    {
+      defaultEnabled: false,
+      embeddedSdkOnly: true,
+      // Reads only; a non-holder watches a held device through the read-only path (#10830).
+      deviceReadOnly: true,
+    },
   );
 
   ToolRegistry.registerDeviceAware(

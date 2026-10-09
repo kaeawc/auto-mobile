@@ -14,8 +14,8 @@ required CI jobs.
 1. Run `scripts/prepush-shell.sh`; it compares the branch to `origin/main`, or
    `main` when the remote-tracking ref is unavailable, and selects only the
    applicable fast checks plus targeted BATS files.
-2. Run `bun run format` before pushing. A failed Check Formatting job also
-   makes Fast Validation fail at its formatter gate.
+2. Run `bun run format` before pushing. Fast Validation runs
+   `bun run format:check` as its first check and fails on drift.
 3. If `runtime-pins`, `sharp-matrix`, or `pin-runtime-deps.bats` fails and
    `bun.lock` and/or `package.json` changed in the diff, run
    `bun scripts/release/pin-runtime-deps.ts --write` and commit `package.json`,

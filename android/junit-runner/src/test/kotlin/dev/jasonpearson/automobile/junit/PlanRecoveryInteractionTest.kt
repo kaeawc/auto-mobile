@@ -45,6 +45,7 @@ class PlanRecoveryInteractionTest {
   private val json = Json { ignoreUnknownKeys = true }
   private lateinit var daemon: PlanInteractionDaemon
   private lateinit var recordingAgent: PlanInteractionRecordingAgent
+  private lateinit var heartbeat: PlanInteractionHeartbeat
 
   @Before
   fun setup() {
@@ -52,7 +53,8 @@ class PlanRecoveryInteractionTest {
     recordingAgent = PlanInteractionRecordingAgent()
     DaemonSocketClientManager.testClient = daemon
     AutoMobileSharedUtils.testDeviceChecker = PlanInteractionDeviceChecker()
-    DaemonHeartbeat.testController = PlanInteractionHeartbeat()
+    heartbeat = PlanInteractionHeartbeat()
+    DaemonHeartbeat.testController = heartbeat
     AutoMobilePlanExecutor.testAgent = recordingAgent
     System.setProperty("automobile.ci.mode", "false")
   }
@@ -153,12 +155,116 @@ class PlanRecoveryInteractionTest {
   }
 
   @Test
+  fun `recovery and the resumed plan reuse the failed attempt's session`() {
+    daemon.cannedFailure = failedPayload { it }
+    val result = executeSimplePlan()
+
+    assertTrue(result.success)
+    val failedAttemptSession = daemon.sessionUuidArgs[0]
+    assertNotNull(failedAttemptSession)
+    assertEquals(failedAttemptSession, recordingAgent.contexts.single().sessionUuid)
+    assertEquals(failedAttemptSession, daemon.sessionUuidArgs[1])
+  }
+
+  // ── #10834: the device stays held between the failed attempt and recovery ──
+
+  @Test
+  fun `a failed attempt keeps its session for recovery and the resume takes it over`() {
+    daemon.cannedFailure = failedPayload { it }
+    val result = executeSimplePlan()
+
+    assertTrue(result.success)
+    assertEquals(
+      "only the attempt recovery may follow asks the daemon to hold its session",
+      listOf(true, null),
+      daemon.holdSessionOnFailureArgs,
+    )
+    assertEquals(
+      "the resumed plan releases the session itself, the runner does not",
+      emptyList<Pair<String, String?>>(),
+      daemon.daemonMethodCalls,
+    )
+  }
+
+  @Test
+  fun `a failed recovery releases the held session`() {
+    daemon.cannedFailure = failedPayload { it }
+    recordingAgent.recoverySucceeds = false
+
+    val result = executeSimplePlan()
+
+    assertFalse(result.success)
+    assertTrue(result.aiRecoveryAttempted)
+    assertEquals(
+      listOf("daemon/releaseSession" to daemon.sessionUuidArgs[0]),
+      daemon.daemonMethodCalls,
+    )
+  }
+
+  // ── #11072: a session the daemon released is never driven again ──
+
+  @Test
+  fun `a session the daemon released before recovery fails fast with the daemon's reason`() {
+    daemon.cannedFailure = failedPayload { it }
+    heartbeat.onRegister = { sessionId ->
+      // The executePlan heartbeat got a 404 while the plan ran.
+      heartbeat.losses[sessionId] =
+        DaemonSessionLoss(sessionId, "heartbeat-timeout", "Session not found: $sessionId")
+    }
+
+    val result = executeSimplePlan()
+
+    assertFalse(result.success)
+    assertTrue("recovery never ran on a freed device", recordingAgent.contexts.isEmpty())
+    assertFalse(result.aiRecoveryAttempted)
+    assertEquals("no resume on the released session", 1, daemon.startSteps.size)
+    assertTrue(result.errorMessage.orEmpty().contains("releaseReason: heartbeat-timeout"))
+    assertEquals(
+      "the daemon already freed it; nothing to release",
+      emptyList<Pair<String, String?>>(),
+      daemon.daemonMethodCalls,
+    )
+  }
+
+  @Test
+  fun `a session released while recovery runs is never resumed`() {
+    daemon.cannedFailure = failedPayload { it }
+    recordingAgent.onRecovery = { context ->
+      val sessionId = checkNotNull(context.sessionUuid)
+      heartbeat.losses[sessionId] = DaemonSessionLoss(sessionId, "idle", "Session not found")
+    }
+
+    val result = executeSimplePlan()
+
+    assertFalse(result.success)
+    assertTrue(result.aiRecoveryAttempted)
+    assertFalse(result.aiRecoverySuccessful)
+    assertEquals("no resume on the released session", 1, daemon.startSteps.size)
+    assertTrue(result.errorMessage.orEmpty().contains("releaseReason: idle"))
+  }
+
+  @Test
+  fun `a failure with no recovery to follow holds nothing`() {
+    daemon.cannedFailure = failedPayload { it }
+    val result =
+      AutoMobilePlanExecutor.execute(
+        "test-plans/launch-clock-app.yaml",
+        emptyMap(),
+        AutoMobilePlanExecutionOptions(aiAssistance = false),
+      )
+
+    assertFalse(result.success)
+    assertEquals(listOf<Boolean?>(null), daemon.holdSessionOnFailureArgs)
+    assertEquals(emptyList<Pair<String, String?>>(), daemon.daemonMethodCalls)
+  }
+
+  @Test
   fun `a multi-device failure pins the label's mapped device id`() {
     daemon.cannedFailure = failedPayload { payload ->
       payload.with(
         "deviceMapping" to
           JsonObject(
-            mapOf("A" to JsonPrimitive("emulator-5554"), "B" to JsonPrimitive("emulator-5556"))
+            mapOf("A" to JsonPrimitive("emulator-5554"), "B" to JsonPrimitive("emulator-5556")),
           ),
         failedStep = { it.with("device" to JsonPrimitive("B")) },
       )
@@ -256,9 +362,9 @@ class PlanRecoveryInteractionTest {
               .jsonObject
               .getValue("text")
               .jsonPrimitive
-              .content
+              .content,
           )
-          .jsonObject
+          .jsonObject,
       )
     return planResponse(payload)
   }
@@ -313,10 +419,10 @@ private fun planResponse(payload: JsonObject): DaemonResponse {
         "content" to
           JsonArray(
             listOf(
-              JsonObject(mapOf("type" to JsonPrimitive("text"), "text" to JsonPrimitive(text)))
-            )
-          )
-      )
+              JsonObject(mapOf("type" to JsonPrimitive("text"), "text" to JsonPrimitive(text))),
+            ),
+          ),
+      ),
     )
   return DaemonResponse(id = "t", type = "mcp_response", success = true, result = result)
 }
@@ -334,6 +440,9 @@ private class PlanInteractionDaemon : DaemonToolClient {
   val sentPlans = mutableListOf<List<Map<*, *>>>()
   val startSteps = mutableListOf<Int>()
   val deviceIdArgs = mutableListOf<String?>()
+  val sessionUuidArgs = mutableListOf<String?>()
+  val holdSessionOnFailureArgs = mutableListOf<Boolean?>()
+  val daemonMethodCalls = mutableListOf<Pair<String, String?>>()
   private var calls = 0
   override var sessionUuid: String = "plan-interaction-session"
 
@@ -356,6 +465,10 @@ private class PlanInteractionDaemon : DaemonToolClient {
     val startStep = arguments["startStep"]?.jsonPrimitive?.content?.toInt() ?: 0
     startSteps.add(startStep)
     deviceIdArgs.add((arguments["deviceId"] as? JsonPrimitive)?.contentOrNull)
+    sessionUuidArgs.add((arguments["sessionUuid"] as? JsonPrimitive)?.contentOrNull)
+    holdSessionOnFailureArgs.add(
+      (arguments["holdSessionOnFailure"] as? JsonPrimitive)?.contentOrNull?.toBoolean(),
+    )
     val steps = decodeSteps(arguments)
     sentPlans.add(steps)
 
@@ -369,6 +482,15 @@ private class PlanInteractionDaemon : DaemonToolClient {
 
   override fun readResource(uri: String, timeoutMs: Long): DaemonResponse {
     throw IllegalStateException("readResource not configured for $uri")
+  }
+
+  override fun callDaemonMethod(
+    method: String,
+    params: JsonObject,
+    timeoutMs: Long,
+  ): DaemonResponse {
+    daemonMethodCalls.add(method to (params["sessionId"] as? JsonPrimitive)?.contentOrNull)
+    return DaemonResponse(id = "method", type = "daemon_response", success = true)
   }
 
   private fun decodeSteps(arguments: JsonObject): List<Map<*, *>> {
@@ -388,9 +510,9 @@ private class PlanInteractionDaemon : DaemonToolClient {
             mapOf(
               "success" to JsonPrimitive(true),
               "message" to (step["text"]?.let { JsonPrimitive(it.toString()) } ?: JsonNull),
-            )
+            ),
           ),
-      )
+      ),
     )
 
   private fun isSkipped(step: Map<*, *>) = step["optional"] == true
@@ -411,8 +533,8 @@ private class PlanInteractionDaemon : DaemonToolClient {
               "stepIndex" to JsonPrimitive(index),
               "tool" to JsonPrimitive(step["tool"].toString()),
               "error" to JsonPrimitive("Element not found"),
-            )
-          )
+            ),
+          ),
         )
       } else {
         completed.add(entry(index, step))
@@ -433,8 +555,8 @@ private class PlanInteractionDaemon : DaemonToolClient {
           "deviceId" to JsonPrimitive("emulator-5554"),
           "skippedSteps" to skipped,
           "toolResults" to completed,
-        )
-      )
+        ),
+      ),
     )
   }
 
@@ -452,15 +574,15 @@ private class PlanInteractionDaemon : DaemonToolClient {
                 "stepIndex" to JsonPrimitive(failAt),
                 "tool" to JsonPrimitive(steps[failAt]["tool"].toString()),
                 "error" to JsonPrimitive("Element not found"),
-              )
+              ),
             ),
           "error" to JsonPrimitive("Element not found"),
           "platform" to JsonPrimitive("android"),
           "deviceId" to JsonPrimitive("emulator-5554"),
           "skippedSteps" to skipped,
           "toolResults" to completed,
-        )
-      )
+        ),
+      ),
     )
   }
 }
@@ -468,13 +590,20 @@ private class PlanInteractionDaemon : DaemonToolClient {
 private class PlanInteractionRecordingAgent :
   AutoMobileAgent(recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = true)) {
   val contexts = mutableListOf<FailedStepContext>()
+  var recoverySucceeds = true
+  var onRecovery: (FailedStepContext) -> Unit = {}
 
   override fun attemptAiRecovery(
     context: FailedStepContext,
     secretValues: List<String>,
   ): RecoveryOutcome {
     contexts.add(context)
-    return RecoveryOutcome(success = true, recoveryTimeMs = 1, observeResultAfterRecovery = "{}")
+    onRecovery(context)
+    return RecoveryOutcome(
+      success = recoverySucceeds,
+      recoveryTimeMs = 1,
+      observeResultAfterRecovery = "{}",
+    )
   }
 }
 
@@ -487,9 +616,14 @@ private class PlanInteractionDeviceChecker : DeviceChecker {
 }
 
 private class PlanInteractionHeartbeat : DaemonHeartbeatController {
+  val losses = mutableMapOf<String, DaemonSessionLoss>()
+  var onRegister: (String) -> Unit = {}
+
   override fun startBackground(intervalMs: Long) = java.io.Closeable {}
 
-  override fun registerSession(sessionId: String) = Unit
+  override fun registerSession(sessionId: String) = onRegister(sessionId)
 
   override fun unregisterSession(sessionId: String) = Unit
+
+  override fun sessionLoss(sessionId: String): DaemonSessionLoss? = losses[sessionId]
 }

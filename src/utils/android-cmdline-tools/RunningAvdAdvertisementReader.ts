@@ -1,7 +1,8 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { logger } from "../logger";
+import { sortedReaddirSync } from "../io";
 
 /**
  * Reads the host-side advertisement an emulator process writes while it owns an
@@ -46,7 +47,7 @@ export class TmpdirRunningAvdAdvertisementReader implements RunningAvdAdvertisem
       return false;
     }
 
-    const pidFiles = readdirSync(this.runningDir)
+    const pidFiles = sortedReaddirSync(this.runningDir)
       .filter((file) => file.startsWith("pid_") && file.endsWith(".ini"))
       // Sorted so a scan reads the directory in the same order every time.
       .sort();

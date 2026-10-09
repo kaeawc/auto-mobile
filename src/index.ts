@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+// Must stay first: captures the launcher pid before anything else runs (#11041).
+import "./daemon/processEntry";
 import "./runtime/reflectMetadata";
 import { errorMessage } from "./utils/describeUnknownError";
 import { bootstrapEnvironment } from "./utils/envBootstrap";
@@ -23,7 +25,7 @@ import { configureToolSelectionCliDefaults } from "./features/toolSelection/Sess
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
 import { persistedOutputReductionOverrides } from "./features/featureFlags/persistedOutputReductionOverrides";
 import { resolveActionsCompactMetadata } from "./utils/outputReductionFlags";
-import { hasGlobalHelpFlag } from "./cli/helpFlag";
+import { hasGlobalHelpFlag, isCliHelpInvocation } from "./cli/helpFlag";
 import { getGlobalVersionOutput } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
 import { getMcpServerVersion } from "./utils/mcpVersion";
@@ -323,12 +325,19 @@ async function main() {
     // Reclaim artifacts leaked by previous daemons without gating stdio
     // readiness. The sweeps are best-effort maintenance, not a prerequisite for
     // serving a new client (issue #4581).
-    startStartupMaintenance({
-      platform: process.platform,
-      startAndroidSweep: () => AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(),
-      startIosReap: () => IOSCtrlProxyManager.startOrphanRunnerReapOnStartup(),
-    });
-    if (skipCtrlProxyDownload) {
+    // Usage-only `--cli help` talks to no device, so it skips the prefetches
+    // and cache maintenance entirely (#10792).
+    const skipDeviceStartupWork = isCliHelpInvocation(cliMode, cliArgs);
+    if (!skipDeviceStartupWork) {
+      startStartupMaintenance({
+        platform: process.platform,
+        startAndroidSweep: () => AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(),
+        startIosReap: () => IOSCtrlProxyManager.startOrphanRunnerReapOnStartup(),
+      });
+    }
+    if (skipDeviceStartupWork) {
+      startupBenchmark.recordPhase("androidCtrlProxyPrefetch", 0);
+    } else if (skipCtrlProxyDownload) {
       logger.info(
         `CtrlProxy downloads disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`,
       );
@@ -344,7 +353,7 @@ async function main() {
 
     // Start the iOS build prefetch asynchronously so it can be ready for first
     // use. Runner cleanup above is also asynchronous and bounded.
-    if (process.platform === "darwin") {
+    if (process.platform === "darwin" && !skipDeviceStartupWork) {
       if (skipCtrlProxyDownload) {
         logger.info(
           `CtrlProxy iOS prefetch disabled (${SKIP_CTRL_PROXY_DOWNLOAD_FLAG} or ${SKIP_CTRL_PROXY_DOWNLOAD_ENV})`,

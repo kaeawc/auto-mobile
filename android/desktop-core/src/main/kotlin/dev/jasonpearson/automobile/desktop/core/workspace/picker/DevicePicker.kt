@@ -108,7 +108,7 @@ fun DevicePicker(
             onClick = {
               onRecoverDaemon()
               onAction(DevicePickerAction.Refresh)
-            }
+            },
           ) {
             Text("Retry")
           }
@@ -199,7 +199,7 @@ private fun FilterRail(
     Modifier.width(240.dp)
       .fillMaxHeight()
       .background(MaterialTheme.colorScheme.surfaceVariant)
-      .padding(12.dp)
+      .padding(12.dp),
   ) {
     OutlinedTextField(
       value = content.filters.query,
@@ -247,7 +247,7 @@ private fun OptionRow(opt: FilterOption, onClick: () -> Unit) {
         .background(
           if (opt.selected) Accent else MaterialTheme.colorScheme.surface,
           RoundedCornerShape(3.dp),
-        )
+        ),
     ) {
       if (opt.selected) Text("✓", color = Color.White, style = MaterialTheme.typography.labelSmall)
     }
@@ -363,6 +363,7 @@ private fun DeviceGrid(
         selected = device.uiKey in content.selectedIds,
         booting = device.state == DeviceState.Booting || device.uiKey in content.bootingIds,
         error = content.bootErrors[device.uiKey],
+        finishingPreviousSession = device.uiKey in content.finishingPreviousSessionIds,
         thumbnail = thumbnail,
         onClick = { multiSelect ->
           when {
@@ -388,6 +389,7 @@ private fun DeviceCard(
   selected: Boolean,
   booting: Boolean,
   error: String?,
+  finishingPreviousSession: Boolean,
   thumbnail: @Composable (PickerDevice, Boolean) -> Unit,
   onClick: (multiSelect: Boolean) -> Unit,
 ) {
@@ -412,10 +414,10 @@ private fun DeviceCard(
               val mods = windowInfo.keyboardModifiers
               onClick(mods.isShiftPressed || mods.isMetaPressed || mods.isCtrlPressed)
             }
-          else Modifier
+          else Modifier,
         )
         .semantics { contentDescription = cardDescription(displayName, booted, booting, error) }
-        .padding(12.dp)
+        .padding(12.dp),
   ) {
     thumbnail(device, booting)
     Spacer(Modifier.height(8.dp))
@@ -455,7 +457,7 @@ private fun DeviceCard(
     )
     if (!booted) {
       Text(
-        bootAffordance(booting, error),
+        bootAffordance(booting, error, finishingPreviousSession),
         style = MaterialTheme.typography.labelSmall,
         color = if (error != null) MaterialTheme.colorScheme.error else Accent,
       )
@@ -476,8 +478,13 @@ private fun cardDescription(
     else -> "Boot $displayName"
   }
 
-private fun bootAffordance(booting: Boolean, error: String?): String =
+private fun bootAffordance(
+  booting: Boolean,
+  error: String?,
+  finishingPreviousSession: Boolean = false,
+): String =
   when {
+    booting && finishingPreviousSession -> "Finishing previous session…"
     booting -> "Booting…"
     error != null -> "Boot failed · Click to retry"
     else -> "Click to boot"

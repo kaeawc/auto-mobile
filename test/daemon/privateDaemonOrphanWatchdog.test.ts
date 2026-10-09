@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS,
   PrivateDaemonOrphanWatchdog,
+  HARNESS_PRIVATE_DAEMON_ENV,
+  DAEMON_LAUNCHER_PID_ENV,
   isHarnessPrivateDaemon,
+  resolveLauncherPid,
   resolvePrivateDaemonOrphanIdleMs,
   type PrivateDaemonOrphanPort,
 } from "../../src/daemon/privateDaemonOrphanWatchdog";
@@ -12,11 +15,15 @@ const IDLE_MS = 10 * 60_000;
 
 class FakeOrphanPort implements PrivateDaemonOrphanPort {
   ppid = 1;
+  launcher = 4242;
   clients = 0;
   sessions = 0;
   shutdowns: string[] = [];
   parentPid(): number {
     return this.ppid;
+  }
+  launcherPid(): number {
+    return this.launcher;
   }
   clientCount(): number {
     return this.clients;
@@ -54,6 +61,14 @@ describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
     expect(watchdog.check()).toBe(true);
     expect(port.shutdowns).toHaveLength(1);
     expect(watchdog.check()).toBe(false);
+  });
+
+  test("shuts down when a Linux subreaper (ppid not 1) adopts the daemon", () => {
+    port.ppid = 777;
+    expect(watchdog.check()).toBe(false);
+    timer.setCurrentTime(IDLE_MS);
+    expect(watchdog.check()).toBe(true);
+    expect(port.shutdowns).toHaveLength(1);
   });
 
   test("never shuts down while the launching parent is alive", () => {
@@ -99,7 +114,10 @@ describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
 
   test("arms only for harness-style private daemons, never a custom long-lived socket", () => {
     const defaultSocket = "/tmp/auto-mobile-daemon-501.sock";
-    const harnessEnv = { AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/priv/aux" };
+    const harnessEnv = {
+      AUTOMOBILE_DAEMON_SOCKET_PATH: "/tmp/priv/daemon.sock",
+      AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/priv/aux",
+    };
     expect(isHarnessPrivateDaemon("/tmp/priv/daemon.sock", defaultSocket, harnessEnv)).toBe(true);
     // A user's own daemon on a custom control socket, with shared aux sockets.
     expect(isHarnessPrivateDaemon("/Users/me/am.sock", defaultSocket, {})).toBe(false);
@@ -115,10 +133,53 @@ describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
     ).toBe(0);
   });
 
+  test("an aux-dir-only daemon's suffixed socket is not a harness marker (#10906)", () => {
+    const defaultSocket = "/tmp/auto-mobile-daemon-501.sock";
+    // #10881: AUTOMOBILE_AUX_SOCKET_DIR alone moves the control socket to a suffixed path.
+    const suffixedSocket = "/tmp/auto-mobile-daemon-501-0123456789.sock";
+    const auxOnly = { AUTOMOBILE_AUX_SOCKET_DIR: "/Users/me/am-aux" };
+    expect(isHarnessPrivateDaemon(suffixedSocket, defaultSocket, auxOnly)).toBe(false);
+  });
+
+  test("the explicit harness marker arms or disarms the watchdog regardless of paths", () => {
+    const defaultSocket = "/tmp/auto-mobile-daemon-501.sock";
+    const suffixedSocket = "/tmp/auto-mobile-daemon-501-0123456789.sock";
+    expect(
+      isHarnessPrivateDaemon(suffixedSocket, defaultSocket, {
+        [HARNESS_PRIVATE_DAEMON_ENV]: "1",
+        AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/lane/aux",
+      }),
+    ).toBe(true);
+    expect(
+      isHarnessPrivateDaemon(defaultSocket, defaultSocket, { [HARNESS_PRIVATE_DAEMON_ENV]: "1" }),
+    ).toBe(true);
+    expect(
+      isHarnessPrivateDaemon("/tmp/priv/daemon.sock", defaultSocket, {
+        [HARNESS_PRIVATE_DAEMON_ENV]: "0",
+        AUTOMOBILE_DAEMON_SOCKET_PATH: "/tmp/priv/daemon.sock",
+        AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/priv/aux",
+      }),
+    ).toBe(false);
+  });
+
   test("a zero idle timeout disables the watchdog", async () => {
     const disabled = new PrivateDaemonOrphanWatchdog(port, 0, timer);
     disabled.start();
     await timer.advanceTimeAsync(IDLE_MS * 10);
     expect(port.shutdowns).toEqual([]);
+  });
+});
+
+describe("resolveLauncherPid (#11041)", () => {
+  test("uses the parent pid captured at process entry by default", () => {
+    expect(resolveLauncherPid(4242, {})).toBe(4242);
+  });
+
+  test("a launcher-provided pid wins over a late-read subreaper pid", () => {
+    expect(resolveLauncherPid(777, { [DAEMON_LAUNCHER_PID_ENV]: "4242" })).toBe(4242);
+  });
+
+  test.each(["", "abc", "0", "1", "-5", "12.5"])("ignores invalid launcher pid %p", (value) => {
+    expect(resolveLauncherPid(4242, { [DAEMON_LAUNCHER_PID_ENV]: value })).toBe(4242);
   });
 });

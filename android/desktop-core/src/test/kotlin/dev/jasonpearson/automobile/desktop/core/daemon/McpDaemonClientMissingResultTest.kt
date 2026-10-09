@@ -19,7 +19,7 @@ class McpDaemonClientMissingResultTest {
         clientWithResult(null).registerSession("00000000-0000-4000-8000-000000000001", "desktop")
       }
     assertTrue(
-      error.message.orEmpty().contains("daemon/registerSession response contained no result")
+      error.message.orEmpty().contains("daemon/registerSession response contained no result"),
     )
   }
 
@@ -41,6 +41,6 @@ class McpDaemonClientMissingResultTest {
             success = true,
             result = result?.let(DaemonJson::parseToJsonElement),
           )
-        }
+        },
     )
 }

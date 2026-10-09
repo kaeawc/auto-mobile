@@ -279,7 +279,7 @@ object RegexLiteralScanner {
             'r' -> '\r'
             'b' -> '\b'
             else -> next
-          }
+          },
         )
         i += 2
       }

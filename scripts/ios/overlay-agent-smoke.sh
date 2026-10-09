@@ -13,8 +13,9 @@
 # demo's `like-button` twice and asserts the host receives overlay_event "liked" with an
 # increasing sequence. This exercises the spec action and event path, not UIKit touch delivery.
 #
-# CI: the advisory CircleCI "Prototype Simulator" job (.circleci/continue_config.yml), one matrix
-# leg per iOS version, runs this when the overlay agent's inputs change. It is not a required check.
+# CI: the advisory "Prototype Simulator" job (.github/workflows/pull_request.yml, heavy self-hosted
+# Mac lane for same-repo PRs, #11011), one matrix leg per iOS version, runs this when the overlay
+# agent's inputs change. It is not a required check.
 #
 # Usage: scripts/ios/overlay-agent-smoke.sh <ios-version|latest>   e.g. 26, 18.5, latest
 #

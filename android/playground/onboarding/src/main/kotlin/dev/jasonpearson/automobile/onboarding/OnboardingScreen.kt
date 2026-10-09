@@ -92,7 +92,9 @@ fun OnboardingScreen(onFinish: () -> Unit) {
 
     Column(
       modifier =
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding()
+        Modifier.fillMaxSize()
+          .background(MaterialTheme.colorScheme.background)
+          .safeDrawingPadding(),
     ) {
       // Skip button
       Row(
@@ -134,7 +136,7 @@ fun OnboardingScreen(onFinish: () -> Unit) {
                 coroutineScope.launch {
                   pagerState.animateScrollToPage(pagerState.currentPage - 1)
                 }
-              }
+              },
             ) {
               Text(stringResource(id = R.string.onboarding_back))
             }
@@ -159,7 +161,7 @@ fun OnboardingScreen(onFinish: () -> Unit) {
               text =
                 if (pagerState.currentPage < pages.size - 1)
                   stringResource(id = R.string.onboarding_next)
-                else stringResource(id = R.string.onboarding_get_started)
+                else stringResource(id = R.string.onboarding_get_started),
             )
           }
         }
@@ -211,7 +213,7 @@ fun DrawablePageContent(page: OnboardingPage.Drawable, modifier: Modifier = Modi
             SpanStyle(
               color = MaterialTheme.colorScheme.primary,
               textDecoration = TextDecoration.Underline,
-            )
+            ),
         ) {
           pushStringAnnotation("url", githubUrl)
           append(stringResource(id = R.string.onboarding_opensource_description_part2))
@@ -273,7 +275,7 @@ fun EmojiPageContent(page: OnboardingPage.Emoji, modifier: Modifier = Modifier) 
             SpanStyle(
               color = MaterialTheme.colorScheme.primary,
               textDecoration = TextDecoration.Underline,
-            )
+            ),
         ) {
           pushStringAnnotation("url", githubUrl)
           append(stringResource(id = R.string.onboarding_opensource_description_part2))
@@ -314,8 +316,8 @@ fun PageIndicators(pageCount: Int, currentPage: Int, modifier: Modifier = Modifi
                 MaterialTheme.colorScheme.primary
               } else {
                 MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-              }
-            )
+              },
+            ),
       )
     }
   }

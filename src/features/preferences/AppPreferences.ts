@@ -23,6 +23,7 @@ import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlC
 import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models";
+import { findIosSimulatorAppProcess } from "../action/CrashApp";
 import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
 import { logger } from "../../utils/logger";
 import { float32ToJavaString } from "../../utils/float32ToJavaString";
@@ -127,6 +128,10 @@ interface AndroidPreferenceEntry {
 }
 
 const IOS_PREFERENCE_SDK_TIMEOUT_MS = 2_500;
+const IOS_PROCESS_PROBE_TIMEOUT_MS = 5_000;
+// CtrlProxy's complete pre-dispatch foreground gate, with the optional wire prefix.
+const IOS_RUNNER_FOREGROUND_GATE_PATTERN =
+  /^(?:Command execution failed: )?iOS key-value storage requires \S+ to be the foreground app$/;
 const IOS_PLIST_READ_WARNING =
   "This value comes from the on-disk plist and may lag a running app because cfprefsd can hold newer values.";
 const IOS_PLIST_WRITE_WARNING =
@@ -447,25 +452,64 @@ export class AppPreferences {
       try {
         return await operation({ kind: "sdk", store, client });
       } catch (error) {
-        const detail = errorMessage(error);
-        if (detail.includes("mutation_not_authorized")) {
-          throw new ActionableError(
-            `iOS key-value storage mutation is not authorized: ${IOS_STORAGE_MUTATION_AUTHORIZATION_HINT}`,
-          );
-        }
-        if (write) {
-          assertIosPreferenceSdkWriteNotDispatched(error);
-        }
-        if (!isIosPreferenceSdkUnavailable(error)) {
-          throw toActionableError(error, "Failed to access iOS app UserDefaults");
-        }
-        // A pre-dispatch refusal cannot have written; reads may also retry transport misses.
-        logger.debug(`iOS preference SDK unavailable: ${detail}`, error);
+        await this.assertIosSdkFailureAllowsContainerFallback(error, input.appId, write);
       }
     }
     return operation(
       await this.resolveIosContainerPreferenceStore(input, store, domain, deadlineMs, write),
     );
+  }
+
+  /** Throws unless the SDK failure may be retried through the container plist. */
+  private async assertIosSdkFailureAllowsContainerFallback(
+    error: unknown,
+    appId: string,
+    write: boolean,
+  ): Promise<void> {
+    const detail = errorMessage(error);
+    if (detail.includes("mutation_not_authorized")) {
+      throw new ActionableError(
+        `iOS key-value storage mutation is not authorized: ${IOS_STORAGE_MUTATION_AUTHORIZATION_HINT}`,
+      );
+    }
+    if (write && (await this.isIosForegroundRefusalForStoppedApp(error, appId))) {
+      // The runner refused before dispatch and the app has no process, so there is
+      // no in-memory copy to clobber: seeding the container plist is safe (#10794).
+      logger.debug(`iOS preference write seeding container for stopped app: ${detail}`);
+      return;
+    }
+    if (write) {
+      assertIosPreferenceSdkWriteNotDispatched(error);
+    }
+    if (!isIosPreferenceSdkUnavailable(error)) {
+      throw toActionableError(error, "Failed to access iOS app UserDefaults");
+    }
+    // A pre-dispatch refusal cannot have written; reads may also retry transport misses.
+    logger.debug(`iOS preference SDK unavailable: ${detail}`, error);
+  }
+
+  /**
+   * True only for the runner's pre-dispatch foreground gate when the app has no
+   * simulator process at all. A backgrounded (running) app keeps its refusal, and
+   * an unanswerable process probe fails closed.
+   */
+  private async isIosForegroundRefusalForStoppedApp(
+    error: unknown,
+    appId: string,
+  ): Promise<boolean> {
+    if (!IOS_RUNNER_FOREGROUND_GATE_PATTERN.test(errorMessage(error))) {
+      return false;
+    }
+    try {
+      const processList = await this.getSimctl().executeCommandArgs(
+        ["spawn", this.device.deviceId, "launchctl", "list"],
+        IOS_PROCESS_PROBE_TIMEOUT_MS,
+      );
+      return findIosSimulatorAppProcess(processList.stdout, appId) === null;
+    } catch (probeError) {
+      logger.warn(`iOS app process probe failed: ${errorMessage(probeError)}`, probeError);
+      return false;
+    }
   }
 
   private async resolveIosContainerPreferenceStore(

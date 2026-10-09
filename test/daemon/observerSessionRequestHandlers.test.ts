@@ -7,7 +7,10 @@ import {
   DAEMON_REGISTER_SESSION_METHOD,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "../../src/daemon/constants";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import {
+  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+  SessionManager,
+} from "../../src/daemon/sessionManager";
 import {
   ObserverSessionRegistry,
   type ObserverSessionStore,
@@ -253,7 +256,8 @@ describe("registration-only daemon requests", () => {
         success: true,
         result: { sessionId },
       });
-      expect(timer.getPendingTimeoutCount()).toBe(0);
+      // Only the observer's expiry sweep (#11076); no device-session timer.
+      expect(timer.getPendingTimeoutCount()).toBe(1);
     } finally {
       finishSetup.resolve();
       await release;
@@ -280,7 +284,8 @@ describe("registration-only daemon requests", () => {
         error: `Session ${sessionId} release is still in progress after ${SESSION_RELEASE_DRAIN_TIMEOUT_MS}ms; retry registration`,
       });
       expect(registry.list()).toEqual([]);
-      expect(timer.getPendingTimeoutCount()).toBe(0);
+      // Only the still-running release's own write deadline (#10836) remains.
+      expect(timer.getPendingTimeouts()).toEqual([SESSION_RELEASE_PERSIST_TIMEOUT_MS]);
       expect(timer.getPendingSleepCount()).toBe(0);
     } finally {
       persistence.finishRelease.resolve();
@@ -325,7 +330,8 @@ describe("registration-only daemon requests", () => {
       });
       expect(registry.list()).toHaveLength(1);
       expect(manager.getSession(sessionId)).toBeNull();
-      expect(timer.getPendingTimeoutCount()).toBe(0);
+      // Only the observer's expiry sweep (#11076); no device-session timer.
+      expect(timer.getPendingTimeoutCount()).toBe(1);
     } finally {
       persistence.finishRelease.reject(new Error("release write failed"));
       await releaseError;

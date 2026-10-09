@@ -303,7 +303,7 @@ class SdkEventBatchBroadcastHandlerTest {
               timestamp = 0L,
               destination = "home",
               source = NavigationSourceType.CUSTOM,
-            )
+            ),
           ),
       )
     val batchJson = SdkEventSerializer.toJson(batch)
@@ -411,7 +411,7 @@ class CtrlProxyEventBatchReceiverTest {
               timestamp = 0L,
               destination = "home",
               source = NavigationSourceType.CUSTOM,
-            )
+            ),
           ),
       )
     val intent =

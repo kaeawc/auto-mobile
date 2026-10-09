@@ -218,6 +218,25 @@ const locationInputSchema = z.union([
   z.object({ mode: z.literal("stop") }).strict(),
 ]);
 
+const cameraPosterSurfaceSchema = z.enum(["wall", "table"]).optional();
+const cameraPosterInputSchema = z.union([
+  z
+    .object({
+      mode: z.literal("image"),
+      path: z.string().min(1).describe("Host PNG/JPG/JPEG path; must not contain whitespace."),
+      surface: cameraPosterSurfaceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal("qr"),
+      text: z.string().min(1).describe("Payload encoded into a generated QR poster."),
+      surface: cameraPosterSurfaceSchema,
+    })
+    .strict(),
+  z.object({ mode: z.literal("clear"), surface: cameraPosterSurfaceSchema }).strict(),
+]);
+
 // In direct/sessionless mode there is no session lifecycle owner to enforce a
 // networkCondition TTL, so accepting `expiresInSeconds` there would echo a TTL we
 // will never honor and leave the emulator shaped indefinitely (issue #6085 review
@@ -476,6 +495,14 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
           .describe(
             "Set a static fix, start a timed route, or stop route playback on an Android emulator or iOS Simulator.",
           ),
+        cameraPoster: cameraPosterInputSchema
+          .optional()
+          .describe(
+            "Set (mode image or qr) or clear a virtual-scene back-camera poster on a RUNNING Android emulator " +
+              "via the emulator console, with no restart. surface defaults to wall. The AVD back camera must be " +
+              "virtualscene (see startDevice cameraPosterPath/cameraPosterQr). The console cannot confirm the " +
+              "poster is visible; the default camera pose may not face it.",
+          ),
       })
       .strict(),
   ).refine(
@@ -485,7 +512,8 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
       values.connectivity !== undefined ||
       values.networkCondition !== undefined ||
       values.location !== undefined ||
-      values.clock !== undefined,
+      values.clock !== undefined ||
+      values.cameraPoster !== undefined,
     {
       message: "At least one device state field must be provided",
     },
@@ -810,6 +838,11 @@ const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocal
   );
 };
 
+/** A call with no set field reads (#10965); fontScale, density, theme or reset is control. */
+function isDisplayConfigRead(args: DisplayConfigArgs): boolean {
+  return !displayConfigArgsAreSet(args);
+}
+
 const displayConfigHandler = async (device: BootedDevice, args: DisplayConfigArgs) => {
   const displayConfig = new DisplayConfig(device);
   const result = displayConfigArgsAreSet(args)
@@ -966,6 +999,7 @@ export function registerUtilityTools(
           networkCondition: args.networkCondition,
           location: args.location,
           clock: args.clock,
+          cameraPoster: args.cameraPoster,
         },
         capture.failure,
       );
@@ -983,6 +1017,7 @@ export function registerUtilityTools(
         networkCondition: args.networkCondition,
         location: args.location,
         clock: args.clock,
+        cameraPoster: args.cameraPoster,
       });
 
     const result = await runSessionBiometricMutation(
@@ -1023,7 +1058,7 @@ export function registerUtilityTools(
     "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only (via `simctl ui appearance`); physical iOS devices are unsupported. On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance.",
     displayConfigSchema,
     displayConfigHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, deviceReadOnly: isDisplayConfigRead },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1032,12 +1067,17 @@ export function registerUtilityTools(
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     getDeviceStateSchema,
     createGetDeviceStateHandler(options.networkFilterBridge),
-    { defaultEnabled: false, outputSchema: getDeviceStateResultSchema },
+    {
+      defaultEnabled: false,
+      outputSchema: getDeviceStateResultSchema,
+      // Reads only; a non-holder watches a held device through the read-only path (#10830).
+      deviceReadOnly: true,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. On an iOS Simulator networkCondition is per-app only: profile offline or none with appId, within a session, refuses the app's new connections through the opt-in network-extension filter under a renewed 15s lease; release, rebind, expiry or a missed renewal removes it, and other sessions cannot clear it." +
+    "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. cameraPoster sets or clears a virtual-scene back-camera poster (image path or generated QR, wall or table surface) on a running Android emulator through the emulator console, without a restart; it persists until cleared or the AVD is cold-booted, iOS and physical Android return unsupported, a console refusal (for example an AVD whose back camera is not virtualscene) is returned as an error, and the default camera pose may not face the poster. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. On an iOS Simulator networkCondition is per-app only: profile offline or none with appId, within a session, refuses the app's new connections through the opt-in network-extension filter under a renewed 15s lease; release, rebind, expiry or a missed renewal removes it, and other sessions cannot clear it." +
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     setDeviceStateSchema,
     setDeviceStateHandler,

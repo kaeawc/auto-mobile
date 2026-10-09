@@ -32,11 +32,10 @@ export class OverlayDetector implements OverlayAnalyzer {
     const containerBounds = containerElement.bounds;
 
     // `containerElement` is whatever findTargetElement's own resolution
-    // (ElementFinder.findElementByResourceId/findElementByText) already
-    // selected for the swipe — an area-sorted pick among possibly several
-    // same-selector matches. finder.findContainerNode() answers a different
-    // question (the first traversal match, used elsewhere to scope nested
-    // searches) and can name a different node than the one actually being
+    // (ElementResolver) already selected for the swipe — a ranked pick among
+    // possibly several same-selector matches. A first-traversal-match container
+    // lookup answers a different question (used to scope nested searches)
+    // and can name a different node than the one actually being
     // swiped when the selector is ambiguous. Anchoring ancestor-exemption to
     // that other node exempted the wrong element's ancestors while treating
     // the real target's ancestor as a full-cover overlay — reproducing the
@@ -72,7 +71,20 @@ export class OverlayDetector implements OverlayAnalyzer {
       containerNode,
     );
 
+    // A window drawn BELOW the container's own window cannot obstruct it: its
+    // nodes are under the container on screen, so a touch inside the container
+    // lands on the container's window first. Counting them shrank a swipe on a
+    // node inside an AutoMobile overlay window to the few pixels between the
+    // app buttons underneath it (#10752). `rootGroups` is topmost-first, so
+    // every group after the container's is below it. When the container's
+    // window is unknown (no windows, or the node did not resolve), every
+    // window still counts, as before.
+    const containerWindowIndex = this.findContainerWindowIndex(rootGroups, parser, containerNode);
+
     rootGroups.forEach((rootNodes, windowIndex) => {
+      if (containerWindowIndex !== null && windowIndex > containerWindowIndex) {
+        return;
+      }
       const windowRank = totalWindows - windowIndex;
       let nodeOrder = 0;
 
@@ -427,6 +439,40 @@ export class OverlayDetector implements OverlayAnalyzer {
     return ancestors;
   }
 
+  /**
+   * Index in `rootGroups` (topmost-first) of the window whose tree contains
+   * `containerNode` by identity, or null when there is no resolved node or it
+   * sits in no window group. Window trees share node objects with the merged
+   * main hierarchy, so a node resolved from either source is found here.
+   */
+  private findContainerWindowIndex(
+    rootGroups: ViewHierarchyNode[][],
+    parser: ElementParser,
+    containerNode: ViewHierarchyNode | null,
+  ): number | null {
+    if (!containerNode || rootGroups.length < 2) {
+      return null;
+    }
+    const index = rootGroups.findIndex((rootNodes) =>
+      rootNodes.some((rootNode) => this.treeContains(rootNode, parser, containerNode)),
+    );
+    return index === -1 ? null : index;
+  }
+
+  private treeContains(
+    rootNode: ViewHierarchyNode,
+    parser: ElementParser,
+    target: ViewHierarchyNode,
+  ): boolean {
+    let found = false;
+    parser.traverseNode(rootNode, (node: ViewHierarchyNode) => {
+      if (node === target) {
+        found = true;
+      }
+    });
+    return found;
+  }
+
   private isClickableNode(nodeProperties: Record<string, unknown>): boolean {
     return isTruthyFlag(nodeProperties.clickable) || isTruthyFlag(nodeProperties.focusable);
   }
@@ -442,12 +488,11 @@ export class OverlayDetector implements OverlayAnalyzer {
    * the node actually lives in rather than a different one that would never
    * contain it.
    *
-   * Searches the SAME source set in the SAME order ElementFinder itself
-   * uses to resolve an element: the main hierarchy first, then the
+   * Searches the main hierarchy first, then the
    * per-window hierarchies (topmost-first), stopping at the first source
    * that has any match at all. Scanning only the per-window hierarchies —
    * which is all `rootGroups` holds once any window exists — would miss a
-   * container that the finder actually resolved from the main hierarchy,
+   * container that the resolver actually resolved from the main hierarchy,
    * and a same-id/same-bounds look-alike sitting in a popup window could
    * then be mistaken for the (never-checked) real match.
    *

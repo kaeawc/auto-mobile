@@ -105,7 +105,7 @@ fun DeviceControlBlockedNotice(
     modifier =
       modifier
         .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
-        .padding(horizontal = 8.dp, vertical = 4.dp)
+        .padding(horizontal = 8.dp, vertical = 4.dp),
   ) {
     Text(
       text = text,

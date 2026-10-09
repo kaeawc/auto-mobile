@@ -54,7 +54,8 @@ internal fun OverlayDecrementAction.nextValue(state: Map<String, OverlayScalar>)
 /**
  * The base style with every `styleWhen` entry whose condition holds merged over it, in authored
  * order, so a later matching entry wins per property. A present property replaces the base value as
- * a whole (`padding` and `border` are replaced, not merged edge by edge).
+ * a whole (`padding`, `border`, `offset` and per-corner `cornerRadius` are replaced, not merged
+ * field by field).
  */
 internal fun resolveOverlayStyle(
   base: OverlayStyle?,
@@ -73,14 +74,22 @@ private fun OverlayStyle.mergedOver(overlay: OverlayStyle): OverlayStyle =
   OverlayStyle(
     width = overlay.width ?: width,
     height = overlay.height ?: height,
+    weight = overlay.weight ?: weight,
+    minWidth = overlay.minWidth ?: minWidth,
+    maxWidth = overlay.maxWidth ?: maxWidth,
+    minHeight = overlay.minHeight ?: minHeight,
+    maxHeight = overlay.maxHeight ?: maxHeight,
     padding = overlay.padding ?: padding,
     background = overlay.background ?: background,
     cornerRadius = overlay.cornerRadius ?: cornerRadius,
     border = overlay.border ?: border,
     elevation = overlay.elevation ?: elevation,
+    shadowColor = overlay.shadowColor ?: shadowColor,
     gradient = overlay.gradient ?: gradient,
     aspectRatio = overlay.aspectRatio ?: aspectRatio,
+    offset = overlay.offset ?: offset,
     alpha = overlay.alpha ?: alpha,
+    pressScale = overlay.pressScale ?: pressScale,
     alignment = overlay.alignment ?: alignment,
     arrangement = overlay.arrangement ?: arrangement,
     spacing = overlay.spacing ?: spacing,
@@ -89,5 +98,11 @@ private fun OverlayStyle.mergedOver(overlay: OverlayStyle): OverlayStyle =
     color = overlay.color ?: color,
     textAlign = overlay.textAlign ?: textAlign,
     maxLines = overlay.maxLines ?: maxLines,
+    lineHeight = overlay.lineHeight ?: lineHeight,
+    letterSpacing = overlay.letterSpacing ?: letterSpacing,
+    textDecoration = overlay.textDecoration ?: textDecoration,
+    fontStyle = overlay.fontStyle ?: fontStyle,
+    overflow = overlay.overflow ?: overflow,
     fontFamily = overlay.fontFamily ?: fontFamily,
+    textStyle = overlay.textStyle ?: textStyle,
   )

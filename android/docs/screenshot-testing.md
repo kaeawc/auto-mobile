@@ -135,3 +135,26 @@ look at the renders locally on another OS (not for committing):
 ./gradlew -p android :control-proxy:testDebugUnitTest --tests '*OverlaySpecContentScreenshotTest' \
   -Dscreenshot.record=true -Dscreenshot.reference.os=any
 ```
+
+The gallery covers every node type (`fullscreen-all-nodes`, the doc examples), the Material
+components (`material-controls`, `material-slider-chip-card`, `selection-controls`), style tokens
+(colour roles, corners, elevation, gradients, aspect ratio, `when` styles, text roles, row weights)
+and the theme options (seed, typography and shapes, and a `system` theme on a light and a dark
+device).
+
+### Previewing a spec without a device
+
+`scripts/android/overlay-preview.sh` renders any spec files through the same harness
+(`OverlayPreviewRenderTest`) and writes `<spec-name>.png` per spec, plus `contact-sheet.png` when
+there is more than one. It runs on any OS, because nothing is compared:
+
+```bash
+scripts/android/overlay-preview.sh --width 411 --height 891 --density 420 --theme dark \
+  --out scratch/overlay-preview my-spec.json other-spec.json
+```
+
+`--width`/`--height` (dp, default 360 x 640) set the surface the overlay lays out in, `--density`
+(dpi, default 160) its pixel density, and `--theme` (`light` or `dark`) the device night mode, which
+only affects specs whose theme mode is `system` or unset. The PNG is the overlay content's own
+bounds with a transparent background; window placement (floating anchors, sheets over an app) is
+not composited. Expect about half a minute with a warm Gradle daemon.

@@ -3,7 +3,8 @@
 **Status:** Phase 8 geometry matching is implemented. Containment uses per-coordinate
 sorted indices and signed-area ranking; nearest matching uses coordinate windows
 with L∞ distance, then document order. Worst case remains O(n) per distinct query.
-Golden-replay validation of real hierarchy pairs is pending a live runner.
+Golden replay of seven real Playground hierarchy pairs found no merged-output
+difference from the old loop-order tie-break (#5837; see `golden-replay.md`).
 **Scope:** pure logic in `HierarchyMerger` (`Sources/CtrlProxy*/HierarchyMerger.swift`).
 Decoupled from the concurrency migration — can land as its own PR.
 
@@ -39,9 +40,10 @@ worst case remains `O(n)`.
 
 ## Validation and remaining work
 
-Capture real `(xcuitest, sdk)` hierarchy pairs from a live runner and compare
-merged output to quantify which frames are affected by the nearest-match tie-break
-change. Bounds arithmetic is now overflow-safe: unrepresentable absolute coordinate
+Real `(xcuitest, sdk)` pairs captured from a live simulator runner are replayed
+through both tie-breaks by `HierarchyMergerGoldenReplayTests`. None of the 50
+tolerance-only queries in the corpus changes its match (`golden-replay.md` has the
+per-fixture table). Bounds arithmetic is now overflow-safe: unrepresentable absolute coordinate
 differences saturate to `Int.max` and are excluded from tolerance matches; tolerance
 windows saturate at `Int.min`/`Int.max`. Signed dimensions and areas saturate by sign,
 and centers retain origin + half the saturated signed dimension (truncated toward
@@ -50,5 +52,5 @@ previously non-overflowing inputs are preserved.
 
 Done: containment indexing with signed-area/document-order selection, and ±tol
 coordinate-window matching with nearest-distance/document-order selection.
-Remaining: run the golden replay on a live runner and document the observed
-nearest-match differences.
+Also done: golden replay on a live runner. No nearest-match differences were
+observed; the result is documented in `golden-replay.md`.

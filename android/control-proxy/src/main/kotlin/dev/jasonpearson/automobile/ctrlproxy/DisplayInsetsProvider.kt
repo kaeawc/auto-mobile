@@ -43,19 +43,19 @@ internal fun observationInsetsFromWindowInsets(
           toSystemInsetsInfo(windowInsets.getInsets(android.view.WindowInsets.Type.systemBars())),
         stable =
           toSystemInsetsInfo(
-            windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars())
+            windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars()),
           ),
       ),
     displayCutout =
       toSystemInsetsInfo(
-        windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.displayCutout())
+        windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.displayCutout()),
       ),
     displayCutoutInfo = displayCutoutInfo,
     systemGestures =
       toSystemInsetsInfo(windowInsets.getInsets(android.view.WindowInsets.Type.systemGestures())),
     mandatorySystemGestures =
       toSystemInsetsInfo(
-        windowInsets.getInsets(android.view.WindowInsets.Type.mandatorySystemGestures())
+        windowInsets.getInsets(android.view.WindowInsets.Type.mandatorySystemGestures()),
       ),
     tappableElement =
       toSystemInsetsInfo(windowInsets.getInsets(android.view.WindowInsets.Type.tappableElement())),

@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "liked_a": false
+    },
+    "root": {
+      "type": "text",
+      "text": "Like",
+      "onTap": [
+        {
+          "type": "toggle",
+          "key": "liked_{item.id}"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.onTap[0].key"
+}

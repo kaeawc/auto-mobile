@@ -65,7 +65,6 @@ const REQUIRED_SCOPES_BY_JOB_ID: Record<string, readonly string[]> = {
     "ios/auto-mobile-sdk/",
   ],
   "ios-xctest-runner-simulator-tests": ["ios/control-proxy/"],
-  "ios-xcode-build-sweep": ["ios/"],
 };
 
 function isDerivedDataCacheStep(step: WorkflowStep): boolean {
@@ -178,9 +177,10 @@ function collectDerivedDataCacheSteps(workflowRelativePath: string): JobStep[] {
 
 describe("DerivedData cache keys hash every build input", () => {
   for (const workflow of [
+    // merge.yml and nightly.yml no longer build Xcode projects; their macOS
+    // jobs run on CircleCI without an actions/cache DerivedData layer (#11010).
     ".github/workflows/pull_request.yml",
-    ".github/workflows/merge.yml",
-    ".github/workflows/nightly.yml",
+    ".github/workflows/xctestrunner-simulator-tests.yml",
   ]) {
     test(`${workflow} DerivedData cache keys cover non-Swift build inputs`, () => {
       const steps = collectDerivedDataCacheSteps(workflow);

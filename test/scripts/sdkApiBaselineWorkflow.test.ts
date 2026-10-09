@@ -13,19 +13,24 @@ const build = readFileSync(
 for (const workflow of ["pull_request", "merge"]) {
   const path = `.github/workflows/${workflow}.yml`;
   const jobs = loadJobs(path);
-  const androidSteps = loadJobSteps(path, "sdk-debug-inspector-consumer");
+  // The PR lane runs the SDK consumer check inside JVM Consumer Checks to save a
+  // runner slot (#10890, #10894); merge.yml still runs it as its own job.
+  const sdkJob =
+    workflow === "pull_request" ? "jvm-consumer-checks" : "sdk-debug-inspector-consumer";
+  const androidSteps = loadJobSteps(path, sdkJob);
+  const isSdkStep = (step: { uses?: string; with?: Record<string, unknown> }): boolean =>
+    step.uses === "./.github/actions/gradle-task-run" &&
+    String(step.with?.["gradle-tasks"]).includes(":auto-mobile-sdk:apiCheck");
 
   describe(`${workflow} SDK API baseline`, () => {
     test("checks Android while publishing release classes on the existing hosted runner", () => {
-      const step = androidSteps.find(
-        (candidate) => candidate.uses === "./.github/actions/gradle-task-run",
-      );
+      const step = androidSteps.find(isSdkStep);
       expect(step?.with?.["gradle-tasks"]).toContain(":auto-mobile-sdk:apiCheck");
       expect(step?.with?.["gradle-tasks"]).toContain(":auto-mobile-sdk:publishToMavenLocal");
       expect(step?.with?.["reuse-configuration-cache"]).toBe(true);
-      expect(jobs["sdk-debug-inspector-consumer"]?.["runs-on"]).toBe("ubuntu-latest");
+      expect(jobs[sdkJob]?.["runs-on"]).toBe("ubuntu-latest");
       if (workflow === "pull_request") {
-        expect(jobs["sdk-debug-inspector-consumer"]?.if).toContain("android_should_run");
+        expect(jobs[sdkJob]?.if).toContain("android_should_run");
       }
     });
 
@@ -37,17 +42,12 @@ for (const workflow of ["pull_request", "merge"]) {
           .replace(/^-|-$/g, "")
           .slice(0, 64)
           .replace(/-$/, "");
-      const sdkStep = androidSteps.find(
-        (step) => step.uses === "./.github/actions/gradle-task-run",
-      );
+      const sdkStep = androidSteps.find(isSdkStep);
       const sdkName = sanitize(String(sdkStep?.with?.["gradle-tasks"]));
       expect(sdkName).toContain("auto-mobile-sdk-apiCheck");
-      for (const [jobId, job] of Object.entries(jobs)) {
-        if (jobId === "sdk-debug-inspector-consumer") {
-          continue;
-        }
+      for (const job of Object.values(jobs)) {
         for (const step of job.steps ?? []) {
-          if (step.uses === "./.github/actions/gradle-task-run") {
+          if (step.uses === "./.github/actions/gradle-task-run" && !isSdkStep(step)) {
             expect(sanitize(String(step.with?.["gradle-tasks"]))).not.toBe(sdkName);
           }
         }

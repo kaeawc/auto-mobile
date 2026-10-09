@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import Ajv2020 from "ajv/dist/2020";
+import { compileAjv2020 } from "../../../helpers/jsonSchemaCompile";
 import {
   screenshotOptionsSchema,
   validateScreenshotOptions,
@@ -18,7 +18,7 @@ describe("screenshot encoding options", () => {
     if (!observe) {
       throw new Error("observe tool definition is missing");
     }
-    advertised = new Ajv2020({ strict: false }).compile(observe.inputSchema);
+    advertised = compileAjv2020(observe.inputSchema);
   });
   const cases: Array<[object, boolean]> = [
     [{}, true],

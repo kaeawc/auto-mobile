@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import contract from "../../../schemas/overlay-spec-contract.json";
+import { BOUND_STATE_KEY_PATTERN } from "./overlayTemplate";
 export const { MAX_OVERLAY_SPEC_BYTES, MAX_OVERLAY_EMIT_PAYLOAD_BYTES } = contract.limits;
 export type OverlayJson =
   | null
@@ -9,15 +10,19 @@ export type OverlayJson =
   | boolean
   | OverlayJson[]
   | { [key: string]: OverlayJson };
-const jsonValueSchema: z.ZodType<OverlayJson> = z.lazy(() =>
-  z.union([
-    z.null(),
-    z.string(),
-    z.number().finite(),
-    z.boolean(),
-    z.array(jsonValueSchema),
-    z.record(jsonValueSchema),
-  ]),
+// zod v3 calls a lazy schema's getter on every parse, so each getter builds its schema once and
+// returns that same instance afterwards instead of rebuilding it for every nested value.
+let jsonValueUnion: z.ZodType<OverlayJson> | undefined;
+const jsonValueSchema: z.ZodType<OverlayJson> = z.lazy(
+  () =>
+    (jsonValueUnion ??= z.union([
+      z.null(),
+      z.string(),
+      z.number().finite(),
+      z.boolean(),
+      z.array(jsonValueSchema),
+      z.record(jsonValueSchema),
+    ])),
 );
 // Preserve arbitrary JSON keys: Zod record decoding deliberately drops __proto__.
 const overlayJsonSchema = z.custom<OverlayJson>(
@@ -41,19 +46,21 @@ const boundsSchema = z
   })
   .strict();
 // Reuse the existing interaction contract's type; anchors reject ambiguous selection.
-const containerSchema: z.ZodType<ElementContainerSelector> = z.lazy(() =>
-  z
-    .object({
-      elementId: z.string().min(1).optional(),
-      text: z
-        .string()
-        .refine((value) => value.trim().length > 0)
-        .optional(),
-      index: z.number().finite().int().min(0).max(2147483647).optional(),
-      selectionStrategy: z.literal("unique").optional(),
-      container: containerSchema.optional(),
-    })
-    .strict(),
+let containerObject: z.ZodType<ElementContainerSelector> | undefined;
+const containerSchema: z.ZodType<ElementContainerSelector> = z.lazy(
+  () =>
+    (containerObject ??= z
+      .object({
+        elementId: z.string().min(1).optional(),
+        text: z
+          .string()
+          .refine((value) => value.trim().length > 0)
+          .optional(),
+        index: z.number().finite().int().min(0).max(2147483647).optional(),
+        selectionStrategy: z.literal("unique").optional(),
+        container: containerSchema.optional(),
+      })
+      .strict()),
 );
 const selectorSchema = z
   .object({
@@ -63,7 +70,8 @@ const selectorSchema = z
     container: containerSchema.optional(),
   })
   .strict();
-const stateKeySchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
+// State-key fields also take repeat placeholders such as `liked_{item.id}` (#11051).
+const stateKeySchema = z.string().regex(BOUND_STATE_KEY_PATTERN);
 const scalarSchema = z.union([z.string(), z.number().finite(), z.boolean()]);
 export type OverlayCondition =
   | { key: string; equals: string | number | boolean }
@@ -73,20 +81,20 @@ export type OverlayCondition =
   | { all: OverlayCondition[] }
   | { any: OverlayCondition[] }
   | { not: OverlayCondition };
-const conditionSchema: z.ZodType<OverlayCondition> = z.lazy(() =>
-  z.union([
-    z.object({ key: stateKeySchema, equals: scalarSchema }).strict(),
-    z.object({ key: stateKeySchema, notEquals: scalarSchema }).strict(),
-    z.object({ key: stateKeySchema, gt: z.number().finite() }).strict(),
-    z.object({ key: stateKeySchema, lt: z.number().finite() }).strict(),
-    z.object({ all: z.array(conditionSchema).min(1).max(16) }).strict(),
-    z.object({ any: z.array(conditionSchema).min(1).max(16) }).strict(),
-    z.object({ not: conditionSchema }).strict(),
-  ]),
+let conditionUnion: z.ZodType<OverlayCondition> | undefined;
+const conditionSchema: z.ZodType<OverlayCondition> = z.lazy(
+  () =>
+    (conditionUnion ??= z.union([
+      z.object({ key: stateKeySchema, equals: scalarSchema }).strict(),
+      z.object({ key: stateKeySchema, notEquals: scalarSchema }).strict(),
+      z.object({ key: stateKeySchema, gt: z.number().finite() }).strict(),
+      z.object({ key: stateKeySchema, lt: z.number().finite() }).strict(),
+      z.object({ all: z.array(conditionSchema).min(1).max(16) }).strict(),
+      z.object({ any: z.array(conditionSchema).min(1).max(16) }).strict(),
+      z.object({ not: conditionSchema }).strict(),
+    ])),
 );
-const sheetConditionSchema = z
-  .object({ key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/), equals: z.boolean() })
-  .strict();
+const sheetConditionSchema = z.object({ key: stateKeySchema, equals: z.boolean() }).strict();
 const safeAreaPaddingSchema = z
   .object({
     edges: z
@@ -116,7 +124,7 @@ const paddingSchema = z
   })
   .strict();
 /** Material 3 ColorScheme roles a colour field can name instead of a hex value. */
-const COLOR_ROLES = [
+export const OVERLAY_COLOR_ROLES = [
   "primary",
   "onPrimary",
   "primaryContainer",
@@ -164,9 +172,18 @@ const CORNER_RADIUS_TOKENS = [
   "extraLarge",
   "full",
 ] as const;
+/** Per-corner dp radii; an omitted corner is square. */
+const cornerRadiiSchema = z
+  .object({
+    topStart: z.number().finite().min(0).optional(),
+    topEnd: z.number().finite().min(0).optional(),
+    bottomEnd: z.number().finite().min(0).optional(),
+    bottomStart: z.number().finite().min(0).optional(),
+  })
+  .strict();
 const colorValueSchema = z.union([
   z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/),
-  z.enum(COLOR_ROLES),
+  z.enum(OVERLAY_COLOR_ROLES),
 ]);
 const borderSchema = z
   .object({
@@ -223,12 +240,17 @@ const styleSchema = z
     maxHeight: z.number().finite().min(0).optional(),
     padding: paddingSchema.optional(),
     background: colorValueSchema.optional(),
-    cornerRadius: z.union([z.number().finite().min(0), z.enum(CORNER_RADIUS_TOKENS)]).optional(),
+    cornerRadius: z
+      .union([z.number().finite().min(0), z.enum(CORNER_RADIUS_TOKENS), cornerRadiiSchema])
+      .optional(),
     border: borderSchema.optional(),
     elevation: z.number().finite().min(0).optional(),
+    shadowColor: colorValueSchema.optional(),
     gradient: gradientSchema.optional(),
     aspectRatio: z.number().finite().min(1e-6).optional(),
+    offset: offsetSchema.optional(),
     alpha: z.number().finite().min(0).max(1).optional(),
+    pressScale: z.number().finite().min(0.5).max(1).optional(),
     alignment: z
       .enum([
         "topStart",
@@ -251,6 +273,11 @@ const styleSchema = z
     color: colorValueSchema.optional(),
     textAlign: z.enum(["start", "center", "end", "justify"]).optional(),
     maxLines: z.number().finite().int().min(1).max(2147483647).optional(),
+    lineHeight: z.number().finite().min(1e-6).optional(),
+    letterSpacing: z.number().finite().optional(),
+    textDecoration: z.enum(["none", "underline", "lineThrough", "underlineLineThrough"]).optional(),
+    fontStyle: z.enum(["normal", "italic"]).optional(),
+    overflow: z.enum(["clip", "ellipsis", "visible"]).optional(),
     fontFamily: z
       .union([
         z.enum(["default", "sansSerif", "serif", "monospace"]),
@@ -268,17 +295,28 @@ const itemSchema = z
     image: z.string().min(1).optional(),
   })
   .strict();
+const anchorAlignmentSchema = z.enum(["cover", "top", "bottom", "start", "end"]);
+// Bounds are screen-space dp. The host resolves an element anchor into a bounds anchor carrying
+// the same alignment and offset, so the device only ever lays out bounds (#9316).
 export const anchorSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.enum(["bounds"]), bounds: boundsSchema }).strict(),
+  z
+    .object({
+      type: z.enum(["bounds"]),
+      bounds: boundsSchema,
+      alignment: anchorAlignmentSchema.optional(),
+      offset: offsetSchema.optional(),
+    })
+    .strict(),
   z
     .object({
       type: z.enum(["element"]),
       selector: selectorSchema,
-      alignment: z.enum(["cover", "top", "bottom", "start", "end"]),
+      alignment: anchorAlignmentSchema,
       offset: offsetSchema.optional(),
     })
     .strict(),
 ]);
+export type OverlayAnchor = z.infer<typeof anchorSchema>;
 export const placementSchema = z.discriminatedUnion("type", [
   z
     .object({
@@ -332,27 +370,27 @@ export const actionSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.enum(["setState"]),
-      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      key: stateKeySchema,
       value: z.union([z.string(), z.number().finite(), z.boolean()]),
     })
     .strict(),
   z
     .object({
       type: z.enum(["toggle"]),
-      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      key: stateKeySchema,
     })
     .strict(),
   z
     .object({
       type: z.enum(["increment"]),
-      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      key: stateKeySchema,
       by: z.number().finite().optional(),
     })
     .strict(),
   z
     .object({
       type: z.enum(["decrement"]),
-      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      key: stateKeySchema,
       by: z.number().finite().optional(),
     })
     .strict(),
@@ -361,6 +399,8 @@ export const actionSchema = z.discriminatedUnion("type", [
 const commonNodeShape = {
   id: z.string().min(1).optional(),
   testTag: z.string().min(1).optional(),
+  // The node's accessible label, read by observe and screen readers in place of its text (#10446).
+  contentDescription: z.string().min(1).optional(),
   onTap: z.array(actionSchema).min(1).max(32).optional(),
   style: styleSchema.optional(),
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
@@ -375,7 +415,7 @@ const repeatItemSchema = z.record(
   z.union([z.string(), z.number().finite(), z.boolean()]),
 );
 const repeatSchema = z
-  .object({ items: z.array(repeatItemSchema).min(1).max(32), as: keySchema })
+  .object({ items: z.array(repeatItemSchema).min(1).max(128), as: keySchema })
   .strict();
 const repeatShape = { repeat: repeatSchema.optional() };
 const boxBaseSchema = z
@@ -411,7 +451,7 @@ const textFieldBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["textField"]),
-    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    stateKey: stateKeySchema,
     placeholder: z.string().optional(),
   })
   .strict();
@@ -419,7 +459,7 @@ const switchBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["switch"]),
-    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    stateKey: stateKeySchema,
     label: z.string().min(1).optional(),
   })
   .strict();
@@ -427,7 +467,7 @@ const checkboxBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["checkbox"]),
-    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    stateKey: stateKeySchema,
     label: z.string().min(1).optional(),
   })
   .strict();
@@ -444,7 +484,7 @@ const radioGroupBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["radioGroup"]),
-    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    stateKey: stateKeySchema,
     options: z
       .array(z.object({ value: z.string().min(1), label: z.string().min(1) }).strict())
       .min(2)
@@ -455,13 +495,13 @@ const listItemTrailingSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.enum(["switch"]),
-      stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      stateKey: stateKeySchema,
     })
     .strict(),
   z
     .object({
       type: z.enum(["checkbox"]),
-      stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      stateKey: stateKeySchema,
     })
     .strict(),
   z.object({ type: z.enum(["icon"]), name: iconNameSchema }).strict(),
@@ -480,7 +520,7 @@ const sliderBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["slider"]),
-    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    stateKey: stateKeySchema,
     label: z.string().min(1).optional(),
     min: z.number().finite(),
     max: z.number().finite(),
@@ -492,11 +532,8 @@ const chipBaseSchema = z
     ...commonNodeShape,
     type: z.enum(["chip"]),
     label: z.string().min(1),
-    variant: z.enum(["assist", "filter"]).optional(),
-    stateKey: z
-      .string()
-      .regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/)
-      .optional(),
+    variant: z.enum(["assist", "filter", "input", "suggestion"]).optional(),
+    stateKey: stateKeySchema.optional(),
   })
   .strict();
 const cardBaseSchema = z
@@ -505,6 +542,107 @@ const cardBaseSchema = z
     type: z.enum(["card"]),
     variant: z.enum(["filled", "elevated", "outlined"]).optional(),
   })
+  .strict();
+const stateKeyFieldSchema = stateKeySchema;
+const actionListSchema = z.array(actionSchema).min(1).max(32);
+// An icon-only control in a top app bar: the icon, its accessible label and its tap.
+const appBarActionSchema = z
+  .object({ icon: iconNameSchema, label: z.string().min(1), onTap: actionListSchema.optional() })
+  .strict();
+// A dialog or snackbar button: a tap closes its container, then runs `onTap`.
+const dialogButtonSchema = z
+  .object({ label: z.string().min(1), onTap: actionListSchema.optional() })
+  .strict();
+const iconButtonBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["iconButton"]),
+    icon: iconNameSchema,
+    variant: z.enum(["standard", "filled", "tonal", "outlined"]).optional(),
+  })
+  .strict();
+const fabBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["fab"]),
+    icon: iconNameSchema,
+    label: z.string().min(1).optional(),
+    size: z.enum(["small", "regular", "large"]).optional(),
+  })
+  .strict();
+const segmentedButtonBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["segmentedButton"]),
+    stateKey: stateKeyFieldSchema,
+    options: z
+      .array(z.object({ value: z.string().min(1), label: z.string().min(1) }).strict())
+      .min(2)
+      .max(5),
+  })
+  .strict();
+const topAppBarBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["topAppBar"]),
+    title: z.string().min(1),
+    variant: z.enum(["small", "centerAligned", "medium", "large"]).optional(),
+    navigationIcon: appBarActionSchema.optional(),
+    actions: z.array(appBarActionSchema).min(1).max(3).optional(),
+  })
+  .strict();
+const dividerBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["divider"]),
+    orientation: z.enum(["horizontal", "vertical"]).optional(),
+  })
+  .strict();
+const badgeBaseSchema = z
+  .object({ ...commonNodeShape, type: z.enum(["badge"]), text: z.string().min(1).optional() })
+  .strict();
+const progressBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["progress"]),
+    variant: z.enum(["linear", "circular"]).optional(),
+    stateKey: stateKeyFieldSchema.optional(),
+    max: z.number().finite().optional(),
+  })
+  .strict();
+const dialogBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["dialog"]),
+    openWhen: sheetConditionSchema,
+    title: z.string().min(1).optional(),
+    text: z.string().min(1).optional(),
+    icon: iconNameSchema.optional(),
+    confirm: dialogButtonSchema,
+    dismiss: dialogButtonSchema.optional(),
+  })
+  .strict();
+const snackbarBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["snackbar"]),
+    openWhen: sheetConditionSchema,
+    text: z.string().min(1),
+    action: dialogButtonSchema.optional(),
+    durationMs: z.number().int().min(1).max(600000).optional(),
+  })
+  .strict();
+const timePickerBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["timePicker"]),
+    hourKey: stateKeyFieldSchema,
+    minuteKey: stateKeyFieldSchema,
+    is24Hour: z.boolean().optional(),
+  })
+  .strict();
+const datePickerBaseSchema = z
+  .object({ ...commonNodeShape, type: z.enum(["datePicker"]), stateKey: stateKeyFieldSchema })
   .strict();
 const scrollBaseSchema = z
   .object({
@@ -522,10 +660,7 @@ const tabBarBaseSchema = z
     type: z.enum(["tabBar"]),
     items: z.array(itemSchema).min(1).max(32),
     pager: z.string().min(1).optional(),
-    stateKey: z
-      .string()
-      .regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/)
-      .optional(),
+    stateKey: stateKeySchema.optional(),
     scrollable: z.boolean().optional(),
   })
   .strict();
@@ -535,10 +670,7 @@ const bottomNavBaseSchema = z
     type: z.enum(["bottomNav"]),
     items: z.array(itemSchema).min(2).max(5),
     pager: z.string().min(1).optional(),
-    stateKey: z
-      .string()
-      .regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/)
-      .optional(),
+    stateKey: stateKeySchema.optional(),
   })
   .strict();
 const bottomSheetBaseSchema = z
@@ -572,35 +704,59 @@ export type OverlayNode =
   | z.infer<typeof sliderBaseSchema>
   | z.infer<typeof chipBaseSchema>
   | (z.infer<typeof cardBaseSchema> & { children: OverlayNode[] })
+  | z.infer<typeof iconButtonBaseSchema>
+  | z.infer<typeof fabBaseSchema>
+  | z.infer<typeof segmentedButtonBaseSchema>
+  | z.infer<typeof topAppBarBaseSchema>
+  | z.infer<typeof dividerBaseSchema>
+  | z.infer<typeof badgeBaseSchema>
+  | z.infer<typeof progressBaseSchema>
+  | (z.infer<typeof dialogBaseSchema> & { child?: OverlayNode })
+  | z.infer<typeof snackbarBaseSchema>
+  | z.infer<typeof timePickerBaseSchema>
+  | z.infer<typeof datePickerBaseSchema>
   | (z.infer<typeof scrollBaseSchema> & { child: OverlayNode })
   | (z.infer<typeof pagerBaseSchema> & { children: OverlayNode[] })
   | z.infer<typeof tabBarBaseSchema>
   | z.infer<typeof bottomNavBaseSchema>
   | (z.infer<typeof bottomSheetBaseSchema> & { child: OverlayNode });
-export const overlayNodeSchema: z.ZodType<OverlayNode, z.ZodTypeDef, unknown> = z.lazy(() =>
-  z.discriminatedUnion("type", [
-    boxBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
-    rowBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
-    columnBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
-    textBaseSchema,
-    imageBaseSchema,
-    iconBaseSchema,
-    spacerBaseSchema,
-    textFieldBaseSchema,
-    switchBaseSchema,
-    checkboxBaseSchema,
-    buttonBaseSchema,
-    radioGroupBaseSchema,
-    listItemBaseSchema,
-    sliderBaseSchema,
-    chipBaseSchema,
-    cardBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
-    scrollBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
-    pagerBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(1) }),
-    tabBarBaseSchema,
-    bottomNavBaseSchema,
-    bottomSheetBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
-  ]),
+let overlayNodeUnion: z.ZodType<OverlayNode, z.ZodTypeDef, unknown> | undefined;
+export const overlayNodeSchema: z.ZodType<OverlayNode, z.ZodTypeDef, unknown> = z.lazy(
+  () =>
+    (overlayNodeUnion ??= z.discriminatedUnion("type", [
+      boxBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
+      rowBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
+      columnBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
+      textBaseSchema,
+      imageBaseSchema,
+      iconBaseSchema,
+      spacerBaseSchema,
+      textFieldBaseSchema,
+      switchBaseSchema,
+      checkboxBaseSchema,
+      buttonBaseSchema,
+      radioGroupBaseSchema,
+      listItemBaseSchema,
+      sliderBaseSchema,
+      chipBaseSchema,
+      cardBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
+      iconButtonBaseSchema,
+      fabBaseSchema,
+      segmentedButtonBaseSchema,
+      topAppBarBaseSchema,
+      dividerBaseSchema,
+      badgeBaseSchema,
+      progressBaseSchema,
+      dialogBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema).optional() }),
+      snackbarBaseSchema,
+      timePickerBaseSchema,
+      datePickerBaseSchema,
+      scrollBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
+      pagerBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(1) }),
+      tabBarBaseSchema,
+      bottomNavBaseSchema,
+      bottomSheetBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
+    ])),
 );
 const windowSchema = z
   .object({
@@ -620,6 +776,13 @@ const windowSchema = z
       ),
   })
   .strict();
+/**
+ * Explicit hex overrides for individual scheme roles, applied over the seed, device or baseline
+ * scheme in both light and dark.
+ */
+const themeColorRoleSchemas = Object.fromEntries(
+  OVERLAY_COLOR_ROLES.map((role) => [role, hexColorSchema.optional()]),
+) as Record<(typeof OVERLAY_COLOR_ROLES)[number], z.ZodOptional<typeof hexColorSchema>>;
 const themeColorsSchema = z
   .object({
     seed: z
@@ -627,6 +790,7 @@ const themeColorsSchema = z
       .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
       .optional(),
     source: z.enum(["device"]).optional(),
+    ...themeColorRoleSchemas,
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0);
@@ -688,6 +852,17 @@ export const OVERLAY_NODE_TYPES = [
   "slider",
   "chip",
   "card",
+  "iconButton",
+  "fab",
+  "segmentedButton",
+  "topAppBar",
+  "divider",
+  "badge",
+  "progress",
+  "dialog",
+  "snackbar",
+  "timePicker",
+  "datePicker",
   "scroll",
   "pager",
   "tabBar",

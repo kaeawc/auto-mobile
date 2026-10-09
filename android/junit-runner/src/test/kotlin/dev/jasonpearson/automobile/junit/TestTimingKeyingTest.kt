@@ -149,7 +149,7 @@ class TestTimingKeyingTest {
         "testMethod" to JsonPrimitive(testMethod),
         "averageDurationMs" to JsonPrimitive(averageMs),
         "sampleSize" to JsonPrimitive(1),
-      )
+      ),
     )
 
   private fun successResponse(): DaemonResponse =
@@ -168,11 +168,11 @@ class TestTimingKeyingTest {
                       "type" to JsonPrimitive("text"),
                       "text" to
                         JsonPrimitive("""{"success":true,"executedSteps":1,"totalSteps":1}"""),
-                    )
-                  )
-                )
-              )
-          )
+                    ),
+                  ),
+                ),
+              ),
+          ),
         ),
     )
 }

@@ -1,4 +1,6 @@
 import { isSessionReleasing } from "./sessionReleaseState";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import {
   cancelAndReleaseSession,
   releaseSessionAndDevice,
@@ -12,6 +14,7 @@ import {
   type ObserverSessionStore,
 } from "./observerSessionRegistry";
 import {
+  DAEMON_INSTANCE_CHANGED_CODE,
   DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
   DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
@@ -19,6 +22,7 @@ import {
   DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
   DAEMON_SESSION_NOT_FOUND_CODE,
   DaemonRequest,
+  releasedSessionNotFoundFields,
 } from "./types";
 import {
   DeviceLabelMap,
@@ -27,7 +31,11 @@ import {
   Session,
   type SessionReleaseSnapshot,
 } from "./sessionManager";
-import type { LivenessLeasePhase, LivenessLeaseState } from "./livenessOwnerLease";
+import type {
+  LivenessLeasePhase,
+  LivenessLeaseState,
+  LivenessOwnerHold,
+} from "./livenessOwnerLease";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
 import type { DeviceSessionRecord, RetiredDeviceSession } from "./deviceSessionRegistry";
 import type { BootedDevice } from "../models";
@@ -36,6 +44,7 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
+  DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_LIST_DEVICE_SESSIONS_METHOD,
@@ -44,7 +53,7 @@ import {
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { executionTracker } from "../server/executionTracker";
-import { sessionHoldDiagnostics } from "./sessionHoldDiagnostics";
+import { sessionHoldDiagnostics, vetoedIdleReleaseAt } from "./sessionHoldDiagnostics";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
 import {
   daemonDeviceLeaseActivitySources,
@@ -66,8 +75,16 @@ export const INPUT_TYPE_TEXT_APPEND_CAPABILITY = "input/typeText.mode:append";
  */
 export const INPUT_GESTURE_STREAM_CAPABILITY = "input/gestureStream";
 
+/**
+ * Identifies this daemon process. A restarted daemon reports a different value, so a proxy can
+ * tell a daemon that resumed after a stall from a new one (#10989).
+ */
+const DAEMON_PROCESS_INSTANCE = `${process.pid}:${performance.timeOrigin}`;
+
 export interface DaemonStateAccess {
   isInitialized(): boolean;
+  /** Overrides this process's {@link DAEMON_PROCESS_INSTANCE} (tests). */
+  getDaemonInstance?(): string;
   /** Overrides the production lease-activity sources (tests). */
   getDeviceLeaseActivitySources?(): DeviceLeaseActivitySources;
   /** Overrides the production lease-relinquish policy and release (tests). */
@@ -80,6 +97,8 @@ export interface DaemonStateAccess {
     waitForSessionReleaseWithin?(sessionId: string, timeoutMs: number): Promise<boolean>;
     getAllSessions?(): Session[];
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
+    /** Why a session this daemon released was released; undefined for a never-issued UUID. */
+    getReleasedSessionReason?(sessionId: string): Promise<string | undefined>;
     recordHeartbeat?(sessionId: string): void;
     /** Claim the token permitted to refresh this session's liveness. */
     claimLivenessOwnership?(sessionId: string, ownerToken: string): Promise<LivenessClaimOutcome>;
@@ -91,6 +110,8 @@ export interface DaemonStateAccess {
     hasLivenessOwnership?(sessionId: string, ownerToken: string): boolean;
     /** Lease phase (live, suspect, lapsed) and time remaining in it; absent for `cli-idle` (#10051). */
     getSessionLeaseState?(sessionId: string): LivenessLeaseState | undefined;
+    /** The current owner's hold, reported with a refused claim (#10701). */
+    getOwnerLeaseHold?(sessionId: string): LivenessOwnerHold | undefined;
     /** Recover daemon-local ownership only when no token is currently recorded. */
     claimUnownedLivenessOwnership?(sessionId: string, ownerToken: string): boolean;
     /** Opt a one-shot `--cli`-owned session out of the heartbeat contract (#6870). */
@@ -157,13 +178,18 @@ export type DaemonMethodResult = {
   success: boolean;
   result?: Record<string, unknown>;
   error?: string;
+  /** With a session-not-found `code`: why a session the daemon knows is released was released. */
+  releaseReason?: string;
+  /** With `releaseReason`: an idle-window release (#10832). */
+  idle?: true;
   code?:
     | typeof DAEMON_SESSION_NOT_FOUND_CODE
     | typeof DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
     | typeof DAEMON_LIVENESS_OWNER_UNOWNED_CODE
     | typeof DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE
     | typeof DAEMON_LIVENESS_OWNER_CONFLICT_CODE
-    | typeof DAEMON_LIVENESS_OWNER_IS_PROXY_CODE;
+    | typeof DAEMON_LIVENESS_OWNER_IS_PROXY_CODE
+    | typeof DAEMON_INSTANCE_CHANGED_CODE;
 };
 
 /** Device-session listing entry; a quarantined UUID cannot be subscribed to until identity resolves. */
@@ -256,40 +282,45 @@ export async function handleDaemonRequest(
   return handleInitializedDaemonRequest(request, state, executions);
 }
 
+type InitializedDaemonMethodHandler = (
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+  executions?: SessionExecutionCanceller,
+) => DaemonMethodResult | Promise<DaemonMethodResult>;
+
+/** Socket daemon methods served once the daemon is initialized, by method name. */
+const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonMethodHandler> =
+  new Map<string, InitializedDaemonMethodHandler>([
+    [DAEMON_REGISTER_SESSION_METHOD, handleRegisterSession],
+    [DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD, handleReleaseLivenessOwnership],
+    [DAEMON_HEARTBEAT_METHOD, handleHeartbeat],
+    [DAEMON_TOKEN_OWNED_SESSIONS_METHOD, handleTokenOwnedSessions],
+    ["daemon/refreshDevices", handleRefreshDevices],
+    ["daemon/availableDevices", handleAvailableDevices],
+    ["daemon/sessionInfo", (request, state) => handleSessionInfo(request, state)],
+    ["daemon/activeSessions", (request, state) => handleActiveSessions(request, state)],
+    [
+      "daemon/releaseSession",
+      (request, state, executions) => handleReleaseSession(request, state, executions),
+    ],
+    [DAEMON_LIST_DEVICE_SESSIONS_METHOD, handleListDeviceSessions],
+    [DAEMON_DEVICE_LEASE_STATUS_METHOD, handleDeviceLeaseStatus],
+    [DAEMON_RELINQUISH_DEVICE_LEASE_METHOD, handleRelinquishDeviceLease],
+  ]);
+
 async function handleInitializedDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
   executions?: SessionExecutionCanceller,
 ): Promise<DaemonMethodResult> {
-  switch (request.method) {
-    case DAEMON_REGISTER_SESSION_METHOD:
-      return handleRegisterSession(request, state);
-    case DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD:
-      return handleReleaseLivenessOwnership(request, state);
-    case DAEMON_HEARTBEAT_METHOD:
-      return handleHeartbeat(request, state);
-    case "daemon/refreshDevices":
-      return handleRefreshDevices(request, state);
-    case "daemon/availableDevices":
-      return handleAvailableDevices(request, state);
-    case "daemon/sessionInfo":
-      return handleSessionInfo(request, state);
-    case "daemon/activeSessions":
-      return handleActiveSessions(request, state);
-    case "daemon/releaseSession":
-      return handleReleaseSession(request, state, executions);
-    case DAEMON_LIST_DEVICE_SESSIONS_METHOD:
-      return handleListDeviceSessions(request, state);
-    case DAEMON_DEVICE_LEASE_STATUS_METHOD:
-      return handleDeviceLeaseStatus(request, state);
-    case DAEMON_RELINQUISH_DEVICE_LEASE_METHOD:
-      return handleRelinquishDeviceLease(request, state);
-    default:
-      return {
-        success: false,
-        error: `Unsupported daemon method: ${request.method}`,
-      };
+  const handler = INITIALIZED_DAEMON_METHOD_HANDLERS.get(request.method);
+  if (!handler) {
+    return {
+      success: false,
+      error: `Unsupported daemon method: ${request.method}`,
+    };
   }
+  return await handler(request, state, executions);
 }
 
 async function handleReleaseLivenessOwnership(
@@ -333,6 +364,42 @@ async function handleReleaseLivenessOwnership(
 }
 
 /**
+ * The live sessions the given liveness owner token owns (#10990), so a proxy restarted with its
+ * stable token can resume all of them. A releasing session is no longer resumable and is left out.
+ */
+export function handleTokenOwnedSessions(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): DaemonMethodResult {
+  const parsed = z
+    .object({ livenessOwnerToken: z.string().refine((token) => token.trim().length > 0) })
+    .safeParse(request.params);
+  if (!parsed.success) {
+    return { success: false, error: "livenessOwnerToken parameter required" };
+  }
+  const { livenessOwnerToken } = parsed.data;
+  const manager = state.getSessionManager();
+  const sessions = (manager.getAllSessions?.() ?? []).filter(
+    (session) =>
+      session.livenessOwnerToken === livenessOwnerToken &&
+      !isSessionReleasing(manager, session.sessionId, session),
+  );
+  return {
+    success: true,
+    result: {
+      sessions: sessions.map((session) => ({
+        sessionId: session.sessionId,
+        deviceId: session.assignedDevice,
+        platform: session.platform,
+        // The daemon's own idle clock, so the resuming proxy judges idleness from the last tool
+        // call rather than from the resume (#10656).
+        lastUsedAt: session.lastUsedAt,
+      })),
+    },
+  };
+}
+
+/**
  * True once a token-bearing proxy owns, or has a claim pending on, the session.
  * A tokenless heartbeat (socket or HTTP) must then be a liveness no-op: it
  * predates liveness ownership and must not renew the owner lease or deadlines.
@@ -342,6 +409,38 @@ export function isTokenOwnedOrClaimPending(session: {
   livenessOwnershipClaims?: { size: number };
 }): boolean {
   return session.livenessOwnerToken !== undefined || !!session.livenessOwnershipClaims?.size;
+}
+
+/**
+ * Session-not-found answer. A session the daemon knows it released also says why
+ * (`releaseReason`, #10730; `idle: true` for an idle-window release, #10832) so a client can tell
+ * an idle release from a restart or lapsed owner;
+ * a UUID the daemon never issued stays a plain not-found.
+ */
+async function sessionNotFoundResult(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): Promise<DaemonMethodResult> {
+  const releaseReason = await lookupReleasedSessionReason(manager, sessionId);
+  return {
+    success: false,
+    error: `Session not found: ${sessionId}`,
+    code: DAEMON_SESSION_NOT_FOUND_CODE,
+    ...releasedSessionNotFoundFields(releaseReason),
+  };
+}
+
+/** The recorded release reason, or undefined when unknown or the lookup fails (best-effort). */
+export async function lookupReleasedSessionReason(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): Promise<string | undefined> {
+  try {
+    return await manager.getReleasedSessionReason?.(sessionId);
+  } catch (error) {
+    logger.warn(`Release reason lookup failed for ${sessionId}: ${errorMessage(error)}`, error);
+    return undefined;
+  }
 }
 
 async function handleHeartbeat(
@@ -355,6 +454,9 @@ async function handleHeartbeat(
         idleTimeoutMs?: number;
         livenessOwnerToken?: string;
         claimLivenessOwnership?: boolean;
+        reportIdleRelease?: boolean;
+        reportDaemonInstance?: boolean;
+        expectedDaemonInstance?: string;
         livenessOwnerKind?: string;
       }
     | undefined;
@@ -365,6 +467,19 @@ async function handleHeartbeat(
       error: "sessionId parameter required",
     };
   }
+  const daemonInstance = state.getDaemonInstance?.() ?? DAEMON_PROCESS_INSTANCE;
+  const instanceRefusal = refuseOtherDaemonInstance(
+    heartbeatParams?.expectedDaemonInstance,
+    daemonInstance,
+    sessionId,
+  );
+  if (instanceRefusal) {
+    return instanceRefusal;
+  }
+  const ackReport: HeartbeatAckReport = {
+    idleRelease: heartbeatParams?.reportIdleRelease === true,
+    ...(heartbeatParams?.reportDaemonInstance === true ? { daemonInstance } : {}),
+  };
   const manager = state.getSessionManager();
   const session = manager.getSession(sessionId);
   if (!session || isSessionReleasing(manager, sessionId, session)) {
@@ -374,11 +489,7 @@ async function handleHeartbeat(
     ) {
       return { success: true, result: { sessionId } };
     }
-    return {
-      success: false,
-      error: `Session not found: ${sessionId}`,
-      code: DAEMON_SESSION_NOT_FOUND_CODE,
-    };
+    return sessionNotFoundResult(manager, sessionId);
   }
   const keeperRefusal = refuseCliKeeperOnProxySession(heartbeatParams?.livenessOwnerKind, session);
   if (keeperRefusal) {
@@ -419,7 +530,7 @@ async function handleHeartbeat(
       // A verified keeper proves only that its current owner is still
       // alive. Policy changes are explicit claims, never recurring ticks.
       manager.recordHeartbeat?.(sessionId);
-      return { success: true, result: { sessionId } };
+      return heartbeatAck(manager, sessionId, ackReport);
     }
   }
   // A one-shot `--cli` client declares itself here (issue #6870) so the
@@ -432,14 +543,11 @@ async function handleHeartbeat(
     // reflect this invocation's override (issue #6870 review). The manager
     // re-validates and bounds it.
     manager.adoptCliLivenessPolicy?.(sessionId, heartbeatParams.idleTimeoutMs);
-    return {
-      success: true,
-      result: {
-        sessionId,
-        livenessPolicy: "cli-idle",
-        idleTimeoutMs: manager.getSession(sessionId)?.heartbeatTimeoutMs,
-      },
-    };
+    // Reports the idle instant like every other ack when asked (#10972).
+    return heartbeatAck(manager, sessionId, ackReport, {
+      livenessPolicy: "cli-idle",
+      idleTimeoutMs: manager.getSession(sessionId)?.heartbeatTimeoutMs,
+    });
   }
   if (
     heartbeatParams?.livenessPolicy === HEARTBEAT_SESSION_LIVENESS_POLICY ||
@@ -453,14 +561,69 @@ async function handleHeartbeat(
     // `restoreHeartbeatLivenessPolicy` records the heartbeat itself as part
     // of re-stamping the deadlines off the restored timeouts.
     if (manager.restoreHeartbeatLivenessPolicy?.(sessionId)) {
-      return {
-        success: true,
-        result: { sessionId, livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY },
-      };
+      return heartbeatAck(manager, sessionId, ackReport, {
+        livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+      });
     }
   }
   manager.recordHeartbeat?.(sessionId);
-  return { success: true, result: { sessionId } };
+  return heartbeatAck(manager, sessionId, ackReport);
+}
+
+/** What a heartbeat asked its acknowledgement to report besides the session id. */
+interface HeartbeatAckReport {
+  idleRelease: boolean;
+  /** This daemon's process instance, when the heartbeat asked for it (#10989). */
+  daemonInstance?: string;
+}
+
+/**
+ * Refuse, before anything changes, a heartbeat meant for another daemon process (#10989). A proxy
+ * probing for a daemon that resumed after a stall names the process it last heard from, so a
+ * restarted daemon is not adopted behind the harness's back.
+ */
+function refuseOtherDaemonInstance(
+  expected: unknown,
+  daemonInstance: string,
+  sessionId: string,
+): DaemonMethodResult | undefined {
+  if (typeof expected !== "string" || expected === daemonInstance) {
+    return undefined;
+  }
+  return {
+    success: false,
+    code: DAEMON_INSTANCE_CHANGED_CODE,
+    error: `The daemon was restarted since this heartbeat's owner last heard from it, so the heartbeat for session ${sessionId} was refused and nothing changed. Resume the session by naming its sessionUuid in a tool call.`,
+  };
+}
+
+/**
+ * A heartbeat acknowledgement that also reports when the daemon would idle-release the session
+ * when the heartbeat asks (`reportIdleRelease`, so other clients' wire fixtures stay as they are)
+ * (`idleReleaseAt`, an epoch-ms instant from the daemon's own idle window, veto included, the same
+ * value `session-info` reports). It reports without extending anything: the proxy judges idleness
+ * by the daemon's clock instead of its own (#10823). The value only moves when a tool call does,
+ * so consecutive acks of an idle session are identical.
+ */
+function heartbeatAck(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+  report: HeartbeatAckReport,
+  extra: Record<string, unknown> = {},
+): DaemonMethodResult {
+  const session = manager.getSession(sessionId);
+  const instance =
+    report.daemonInstance === undefined ? {} : { daemonInstance: report.daemonInstance };
+  const idle =
+    report.idleRelease && session
+      ? {
+          idleReleaseAt: vetoedIdleReleaseAt(
+            session,
+            manager.getIdleReleaseExecutionVeto?.(sessionId),
+          ),
+        }
+      : {};
+  return { success: true, result: { sessionId, ...extra, ...idle, ...instance } };
 }
 
 /**
@@ -526,6 +689,7 @@ function rejectHeartbeatWithoutOwnership(
     outcome === "claimed" && !stillOwns ? "superseded" : outcome,
     sessionId,
     currentSession.livenessOwnerToken !== undefined,
+    () => manager.getOwnerLeaseHold?.(sessionId),
   );
 }
 
@@ -548,12 +712,17 @@ function livenessOwnershipFailure(
   outcome: LivenessClaimOutcome,
   sessionId: string,
   hasOwner: boolean,
+  ownerHold: () => LivenessOwnerHold | undefined,
 ): DaemonMethodResult | undefined {
   if (outcome === "conflict") {
+    const liveness = ownerHold();
     return {
       success: false,
       code: DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
       error: `Session ${sessionId} is owned by another liveness owner whose lease is still live, so this claim was rejected and nothing changed. Retry after the owner's lease expires, or claim with the owner's stable token.`,
+      // How long the owner's hold lasts, so a challenger waits out the daemon's lease rather than
+      // its own idea of it (#10701).
+      ...(liveness ? { result: { liveness } } : {}),
     };
   }
   if (outcome === "superseded" && !hasOwner) {
@@ -648,11 +817,7 @@ export async function handleSessionInfo(
   const manager = state.getSessionManager();
   const session = manager.getSession(sessionId);
   if (!session) {
-    return {
-      success: false,
-      error: `Session not found: ${sessionId}`,
-      code: DAEMON_SESSION_NOT_FOUND_CODE,
-    };
+    return sessionNotFoundResult(manager, sessionId);
   }
   return {
     success: true,

@@ -273,3 +273,56 @@ describe("pooled observation floor clock domain (issue #9895)", () => {
     expect(result?.observation.error).toBeDefined();
   });
 });
+
+describe("viewer read on a held device (#10967)", () => {
+  interface Device {
+    id: string;
+    platform: "android" | "ios";
+  }
+
+  function setup(held: ReadonlySet<string>) {
+    const calls: string[] = [];
+    const executor = createPooledObservationExecutor<Device>({
+      hostRequestStartMs: 0,
+      readAndroidDeviceClockMs: async (device) => {
+        calls.push(`clock:${device.id}`);
+        return 0;
+      },
+      observe: async (device) => {
+        calls.push(`session:${device.id}`);
+        return successfulObservation();
+      },
+      viewerRead: {
+        applies: (device) => held.has(device.id),
+        observe: async (device) => {
+          calls.push(`read:${device.id}`);
+          return successfulObservation();
+        },
+      },
+    });
+    const run = (devices: Device[]) =>
+      runObservationRequestBatch(devices, executor, {
+        timer: new FakeTimer(),
+        signal: new AbortController().signal,
+        idGenerator: new CountingIdGenerator("batch"),
+      });
+    return { run, calls };
+  }
+
+  test("a held device gets only the connect-only read; a free one keeps the session pipeline", async () => {
+    const { run, calls } = setup(new Set(["held-emu", "held-sim"]));
+
+    await run([
+      { id: "held-emu", platform: "android" },
+      { id: "held-sim", platform: "ios" },
+      { id: "free-emu", platform: "android" },
+    ]);
+
+    expect([...calls].sort()).toEqual([
+      "clock:free-emu",
+      "read:held-emu",
+      "read:held-sim",
+      "session:free-emu",
+    ]);
+  });
+});

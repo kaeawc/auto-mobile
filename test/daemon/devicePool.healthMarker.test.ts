@@ -1,7 +1,7 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { logger } from "../../src/utils/logger";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { CLOCK_RESTORE_TIMEOUT_MS, SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError } from "../../src/models/ActionableError";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -392,11 +392,14 @@ test("clock timeout surfaces reason while the original restore remains quarantin
   const release = h.manager.releaseSession("old");
   try {
     await flush();
-    await h.timer.advanceTimeAsync(1000);
+    await h.timer.advanceTimeAsync(CLOCK_RESTORE_TIMEOUT_MS);
     await flush();
     await release;
     await h.pool.releaseDevice(device.deviceId, "old");
-    expect(h.pool.getDeviceHealthMarker(device.deviceId)).toEqual({ reason: "clock", since: 2000 });
+    expect(h.pool.getDeviceHealthMarker(device.deviceId)).toEqual({
+      reason: "clock",
+      since: 1000 + CLOCK_RESTORE_TIMEOUT_MS,
+    });
     expect(h.pool.getStats().idle).toBe(0);
     await expect(h.pool.assignDeviceToSession("next", "android")).rejects.toThrow("clock");
     h.succeed();

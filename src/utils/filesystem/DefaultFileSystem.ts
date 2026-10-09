@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { promises as fsPromises } from "node:fs";
-import { readFileAsync, readdirAsync } from "../io";
+import { readFileAsync, sortedReaddir } from "../io";
 import { logger } from "../logger";
 
 export async function pathExists(filePath: string): Promise<boolean> {
@@ -143,7 +143,7 @@ export class DefaultFileSystem implements FileSystem {
   }
 
   async readdir(dirPath: string): Promise<string[]> {
-    return readdirAsync(dirPath);
+    return sortedReaddir(dirPath);
   }
 
   existsSync(filePath: string): boolean {

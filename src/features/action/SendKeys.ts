@@ -12,7 +12,8 @@ import {
 } from "../../utils/AbortContext";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
-import { selectablePanels } from "../../models/DisplayPanel";
+import { selectablePanels, type DisplayPanel } from "../../models/DisplayPanel";
+import { parseTopFocusedDisplayId } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
@@ -59,6 +60,7 @@ import {
   passwordTextPlaceholder,
   redactPasswordImeFailure,
   verifyImeCommitResult,
+  confirmImeCommitAfterSyncLoss,
   withImeFailure,
   type ImeFailureDiagnostic,
 } from "./imeFailureDiagnostics";
@@ -1833,6 +1835,19 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       );
       progress.safeToRestore = this.canRestoreAfterImeCommit(result, prior, priorSubtype);
       progress.result = result;
+      const syncConfirmed = await this.confirmImeCommitAfterSyncLoss(
+        result,
+        text,
+        routing,
+        operation,
+      );
+      // Identity means the sync-loss read-back did not apply or could not confirm the text.
+      if (syncConfirmed !== result) {
+        return {
+          outcome: { ...this.withTextWarnings(syncConfirmed, [clearWarning]), resolvedMode: mode },
+          safeToRestore: progress.safeToRestore,
+        };
+      }
       if (result.success && mode === "ime" && text.length > 0) {
         const verifiedResult = await this.verifyImeCommit(result, text, routing, operation);
         return {
@@ -1896,8 +1911,26 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     routing: ImeCommitRouting,
     operation: SendKeysOperation,
   ): Promise<TextActionResult> {
+    return verifyImeCommitResult(result, text, this.imeReadBack(text, routing, operation));
+  }
+
+  /** The device dispatched every unit but lost its sync barrier: re-read the editor (#10799). */
+  private confirmImeCommitAfterSyncLoss(
+    result: TextActionResult,
+    text: string,
+    routing: ImeCommitRouting,
+    operation: SendKeysOperation,
+  ): Promise<TextActionResult> {
+    return confirmImeCommitAfterSyncLoss(result, text, this.imeReadBack(text, routing, operation));
+  }
+
+  private imeReadBack(
+    text: string,
+    routing: ImeCommitRouting,
+    operation: SendKeysOperation,
+  ): Parameters<typeof verifyImeCommitResult>[2] {
     const { signal, display } = routing;
-    return verifyImeCommitResult(result, text, {
+    return {
       timer: this.timer,
       settleMs: IME_COMMIT_READ_BACK_SETTLE_MS,
       observe: () =>
@@ -1916,7 +1949,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       passwordField: routing.passwordField,
       // Explicit modes skip the pre-type observe; the read-back still shows a password field.
       isPasswordField: focusedFieldIsPassword,
-    });
+    };
   }
 
   private imeReadBackLacksRequiredFocus(
@@ -3579,9 +3612,39 @@ export class SendKeys {
     if (focusedPanel?.key === observation.display.key) {
       return;
     }
+    // CtrlProxy only returns the pinned display's windows, so an unfocused pin cannot see which
+    // display holds focus. Ask the system, on this refusal path only.
+    const namedPanel = focusedPanel ?? (await this.topFocusedPanel(signal));
+    const retarget = namedPanel
+      ? ` Target it with setActiveDevice {display: "${namedPanel.key}"}, or use`
+      : " Use";
     throw new ActionableError(
-      `sendKeys on display "${observation.display.key}" requires a selector for text, clear, or IME keys because the focused panel is ${focusedPanel ? `"${focusedPanel.key}"` : "unknown"}. Use tapOn to focus a field on display "${observation.display.key}", or clear the pin with setActiveDevice {display: null}.`,
+      `sendKeys on display "${observation.display.key}" requires a selector for text, clear, or IME keys because the focused panel is ${namedPanel ? `"${namedPanel.key}"` : "unknown"}.${retarget} tapOn to focus a field on display "${observation.display.key}", or clear the pin with setActiveDevice {display: null}.`,
     );
+  }
+
+  private async topFocusedPanel(signal?: AbortSignal): Promise<DisplayPanel | undefined> {
+    try {
+      const adb = this.adbFactory.create(this.device);
+      const result = await adb.executeCommand(
+        "shell dumpsys window | grep mTopFocusedDisplayId",
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      );
+      const displayId = parseTopFocusedDisplayId(result.stdout);
+      return await new ObservedAndroidDisplayCache(this.timer).panelForLogicalId(
+        this.device,
+        adb,
+        displayId,
+        signal,
+      );
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(`sendKeys top focused display lookup failed: ${errorMessage(error)}`, error);
+      return undefined;
+    }
   }
 
   private async executeBoundedIosIme(

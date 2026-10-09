@@ -92,19 +92,19 @@ object ScreenshotEnvironment {
         fail(
           "No screenshot baseline for '$name' at ${result.baseline.path}. " +
             "Record it with: ./gradlew -p android :desktop-core:test -D$RECORD_PROPERTY=true, " +
-            "then commit the PNG alongside the test."
+            "then commit the PNG alongside the test.",
         )
       is ScreenshotComparator.Result.SizeMismatch ->
         fail(
           "Screenshot '$name' size changed: baseline ${result.expectedWidth}x${result.expectedHeight}, " +
-            "actual ${result.actualWidth}x${result.actualHeight}. Rejected image: ${result.actualFile.path}"
+            "actual ${result.actualWidth}x${result.actualHeight}. Rejected image: ${result.actualFile.path}",
         )
       is ScreenshotComparator.Result.Mismatch ->
         fail(
           "Screenshot '$name' differs: ${result.differentPixelCount} pixels " +
             "(${"%.4f".format(Locale.ROOT, result.differentPixelRatio * 100)}%) exceed tolerance. " +
             "Diff: ${result.diffFile.path}, rejected: ${result.actualFile.path}. " +
-            "If intentional, re-record with -D$RECORD_PROPERTY=true."
+            "If intentional, re-record with -D$RECORD_PROPERTY=true.",
         )
     }
   }

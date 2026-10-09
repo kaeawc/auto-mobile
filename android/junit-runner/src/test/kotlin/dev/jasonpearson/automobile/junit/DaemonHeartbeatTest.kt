@@ -1,5 +1,8 @@
 package dev.jasonpearson.automobile.junit
 
+import com.sun.net.httpserver.HttpServer
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -7,6 +10,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -35,6 +40,97 @@ class DaemonHeartbeatTest {
     assertEquals(listOf("s1", "s1", "s1"), fake.sentSessions)
     assertFalse(fake.manager.isRunning)
     assertEquals(0, fake.manager.holderCount)
+  }
+
+  @Test
+  fun `a 404 heartbeat records the daemon's reason and stops heartbeating the session`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { sessionId ->
+      if (sessionId == "lost") {
+        throw DaemonSessionReleasedException(sessionId, "idle", "Session not found: lost")
+      }
+    }
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("lost")
+    fake.manager.addSession("live")
+    fake.onSleep = { if (fake.sleepIntervals.size == 2) handle.close() }
+
+    fake.runnables.single().run()
+
+    assertEquals(
+      DaemonSessionLoss("lost", "idle", "Session not found: lost"),
+      fake.manager.sessionLoss("lost"),
+    )
+    assertNull(fake.manager.sessionLoss("live"))
+    assertEquals("the released session is sent once", 1, fake.sentSessions.count { it == "lost" })
+    assertEquals(2, fake.sentSessions.count { it == "live" })
+
+    // A released UUID is terminal: registering it again (recovery) never heartbeats it.
+    fake.manager.addSession("lost")
+    fake.sentSessions.clear()
+    val again = fake.manager.start(10L)
+    fake.onSleep = { again.close() }
+    fake.runnables.last().run()
+    assertFalse(fake.sentSessions.contains("lost"))
+  }
+
+  @Test
+  fun `a transient heartbeat failure keeps the session heartbeating`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { throw java.io.IOException("connection refused") }
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("s1")
+    fake.onSleep = { if (fake.sleepIntervals.size == 2) handle.close() }
+
+    fake.runnables.single().run()
+
+    assertEquals(listOf("s1", "s1"), fake.sentSessions)
+    assertNull(fake.manager.sessionLoss("s1"))
+  }
+
+  @Test
+  fun `the http heartbeat maps a 404 to the daemon's release reason`() {
+    withHeartbeatServer(
+      404,
+      """{"error":"Session not found: s1","releaseReason":"heartbeat-timeout"}""",
+    ) { url ->
+      val error =
+        assertThrows(DaemonSessionReleasedException::class.java) {
+          DaemonHeartbeat.sendHeartbeat(url, "s1")
+        }
+      assertEquals("s1", error.sessionId)
+      assertEquals("heartbeat-timeout", error.releaseReason)
+      assertEquals("Session not found: s1", error.message)
+    }
+    withHeartbeatServer(404, """{"error":"Session not found: s2"}""") { url ->
+      val error =
+        assertThrows(DaemonSessionReleasedException::class.java) {
+          DaemonHeartbeat.sendHeartbeat(url, "s2")
+        }
+      assertNull(error.releaseReason)
+    }
+    withHeartbeatServer(200, """{"status":"ok"}""") { url ->
+      DaemonHeartbeat.sendHeartbeat(url, "s3")
+    }
+    withHeartbeatServer(500, """{"error":"boom"}""") { url ->
+      assertThrows(java.io.IOException::class.java) { DaemonHeartbeat.sendHeartbeat(url, "s4") }
+    }
+  }
+
+  private fun withHeartbeatServer(status: Int, body: String, block: (java.net.URL) -> Unit) {
+    val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
+    server.createContext("/heartbeat") { exchange ->
+      exchange.requestBody.use { it.readBytes() }
+      val bytes = body.toByteArray()
+      exchange.sendResponseHeaders(status, bytes.size.toLong())
+      exchange.responseBody.use { it.write(bytes) }
+    }
+    server.start()
+    try {
+      block(java.net.URL("http://127.0.0.1:${server.address.port}/heartbeat"))
+    } finally {
+      server.stop(0)
+    }
   }
 
   @Test
@@ -119,6 +215,7 @@ class DaemonHeartbeatTest {
     val commands = mutableListOf<List<String>>()
     val resolver =
       DaemonUserIdResolver(
+        envProvider = { null },
         osName = { "Linux" },
         userName = { throw AssertionError("Successful UID must not use the fallback") },
         runCommand = {
@@ -193,6 +290,7 @@ class DaemonHeartbeatTest {
     var userNameCalls = 0
     val resolver =
       DaemonUserIdResolver(
+        envProvider = { null },
         osName = { "Windows 11" },
         userName = {
           userNameCalls++
@@ -239,13 +337,17 @@ class DaemonHeartbeatTest {
 
   private class HeartbeatFake {
     val sentSessions = mutableListOf<String>()
+    var onSend: (String) -> Unit = {}
     val sleepIntervals = mutableListOf<Long>()
     val threadNames = mutableListOf<String>()
     val runnables = mutableListOf<Runnable>()
     var onSleep: () -> Unit = { throw AssertionError("Unexpected sleep") }
     val manager =
       BackgroundHeartbeatManager(
-        sendHeartbeat = { sentSessions.add(it) },
+        sendHeartbeat = {
+          sentSessions.add(it)
+          onSend(it)
+        },
         sleeper = {
           sleepIntervals.add(it)
           assertTrue("Loop must stop deterministically", sleepIntervals.size <= 3)

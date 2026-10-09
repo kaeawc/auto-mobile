@@ -46,7 +46,7 @@ class RealNavigationDataSource(
       val graphText =
         contents.firstOrNull()?.text
           ?: return Result.Success(
-            NavigationGraph(screens = emptyList(), transitions = emptyList())
+            NavigationGraph(screens = emptyList(), transitions = emptyList()),
           )
 
       // Parse the MCP navigation graph response

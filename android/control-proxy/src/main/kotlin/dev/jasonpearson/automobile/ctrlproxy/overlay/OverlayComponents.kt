@@ -204,7 +204,7 @@ internal fun RenderOverlaySlider(
         change(it)
         true
       }
-    }
+    },
   ) {
     if (node.text.isNotEmpty()) OverlayComponentLabel(node)
     Slider(
@@ -244,7 +244,7 @@ internal fun RenderOverlayChip(
       .toggleable(node.checked, role = Role.Checkbox) {
         interact(OverlayInteraction.Toggle(key, actions))
       }
-      .then(modifier)
+      .then(modifier),
   ) {
     Surface(
       shape = FilterChipDefaults.shape,

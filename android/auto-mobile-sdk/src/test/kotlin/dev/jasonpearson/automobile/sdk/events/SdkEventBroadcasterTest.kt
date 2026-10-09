@@ -207,7 +207,7 @@ class SdkEventBroadcasterTest {
 
     override fun loadPending(): List<PendingEventBatch> =
       listOf(
-        PendingEventBatch("original", listOf(SdkLifecycleEvent(timestamp = 1L, kind = "replay")))
+        PendingEventBatch("original", listOf(SdkLifecycleEvent(timestamp = 1L, kind = "replay"))),
       )
 
     override fun removeBatch(batchId: String) {

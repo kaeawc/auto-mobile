@@ -43,7 +43,7 @@ class DeviceSessionSupersededForwarderTest {
 
       assertEquals(
         listOf(
-          WorkspaceAction.RefreshDeviceSessionUuids(mapOf(event.deviceId to event.successorUuid))
+          WorkspaceAction.RefreshDeviceSessionUuids(mapOf(event.deviceId to event.successorUuid)),
         ),
         actions,
       )
@@ -80,7 +80,7 @@ class DeviceSessionSupersededForwarderTest {
 
       assertEquals(
         listOf(
-          WorkspaceAction.RefreshDeviceSessionUuids(mapOf(event.deviceId to event.successorUuid))
+          WorkspaceAction.RefreshDeviceSessionUuids(mapOf(event.deviceId to event.successorUuid)),
         ),
         actions,
       )
@@ -96,7 +96,7 @@ class DeviceSessionSupersededForwarderTest {
       val vm = WorkspaceViewModel(this)
       val actions = mutableListOf<WorkspaceAction>()
       vm.onAction(
-        WorkspaceAction.ObserveDevice(column(event.retiredUuid).copy(deviceId = "other-device"))
+        WorkspaceAction.ObserveDevice(column(event.retiredUuid).copy(deviceId = "other-device")),
       )
       val before = vm.state.value
 

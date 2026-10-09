@@ -328,6 +328,11 @@ export function registerLocationRouteSessionCleanup(
     }
     registry.forget(deviceId);
   };
-  manager.onSessionRelease(cleanup);
+  // A terminal upgrade of a finished release would stop the device's next owner's route (#10825).
+  manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
+    if (!releaseOptions?.upgradeOnly) {
+      cleanup(sessionId, deviceId);
+    }
+  });
   manager.onSessionDeviceUnbound(cleanup);
 }

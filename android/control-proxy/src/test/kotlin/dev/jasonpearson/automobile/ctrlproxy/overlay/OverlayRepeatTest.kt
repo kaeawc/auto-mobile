@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import dev.jasonpearson.automobile.protocol.*
+import java.io.File
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -37,11 +39,11 @@ class OverlayRepeatTest {
         spec(
           list(
             OverlayTextNode(
-              text = "{index}: {item.label} costs {item.price} ({item.on}) {other.x}"
+              text = "{index}: {item.label} costs {item.price} ({item.on}) {other.x}",
             ),
             OverlayRowNode(children = listOf(OverlayTextNode(text = "{item.label}!"))),
-          )
-        )
+          ),
+        ),
       )
     val rows = model.root.children
     assertEquals(
@@ -80,12 +82,12 @@ class OverlayRepeatTest {
                   listOf(
                     OverlayCondition("picked", equals = OverlayScalar.Text("{item.id}")),
                     OverlayCondition(
-                      not = OverlayCondition("slot", equals = OverlayScalar.Text("{index}"))
+                      not = OverlayCondition("slot", equals = OverlayScalar.Text("{index}")),
                     ),
-                  )
+                  ),
               ),
               OverlayStyle(background = "#2255CC"),
-            )
+            ),
           ),
         onTap =
           listOf(
@@ -172,16 +174,73 @@ class OverlayRepeatTest {
           "b" to OverlayScalar.Numeric(1e15),
           "c" to OverlayScalar.Numeric(1e21),
           "d" to OverlayScalar.Numeric(-2.5),
-        )
+        ),
       )
     val model =
       mapOverlaySpec(
-        spec(list(OverlayTextNode(text = "{item.a} {item.b} {item.c} {item.d}"), repeat = big))
+        spec(list(OverlayTextNode(text = "{item.a} {item.b} {item.c} {item.d}"), repeat = big)),
       )
     assertEquals(
       "999999999999999 1000000000000000 1000000000000000000000 -2.5",
       model.root.children.single().text,
     )
+  }
+
+  @Test
+  fun `component labels and button actions bind per item`() {
+    val open = OverlaySheetCondition("open", true)
+    fun button(label: String, name: String) =
+      OverlayDialogButton(label, listOf(OverlayEmitAction(name)))
+    val template =
+      listOf(
+        OverlayButtonNode(label = "Open {item.label}"),
+        OverlayFabNode(icon = "add", label = "New {index}"),
+        OverlaySegmentedButtonNode(
+          stateKey = "mode",
+          options = listOf(OverlayRadioOption("a", "{item.label} A"), OverlayRadioOption("b", "B")),
+        ),
+        OverlayTopAppBarNode(
+          title = "{item.label} ({item.price})",
+          navigationIcon =
+            OverlayAppBarAction("menu", "Back {item.label}", listOf(OverlayEmitAction("b{index}"))),
+          actions = listOf(OverlayAppBarAction("delete", "Del {item.label}")),
+        ),
+        OverlayDialogNode(
+          openWhen = open,
+          title = "Remove {item.label}?",
+          text = "{item.price} left",
+          confirm = button("Remove {item.label}", "rm-{item.id}"),
+          dismiss = OverlayDialogButton("Keep {item.label}"),
+        ),
+        OverlaySnackbarNode(
+          openWhen = open,
+          text = "Removed {item.label}",
+          action = button("Undo {item.label}", "undo-{index}"),
+        ),
+      )
+    val bound = overlayChildEntries(list(*template.toTypedArray()), "root").map { it.node }
+    val second = bound.drop(template.size)
+    assertEquals("Open Beta", (second[0] as OverlayButtonNode).label)
+    assertEquals("New 1", (second[1] as OverlayFabNode).label)
+    val segmented = second[2] as OverlaySegmentedButtonNode
+    assertEquals(listOf("Beta A", "B"), segmented.options.map { it.label })
+    assertEquals(listOf("a", "b"), segmented.options.map { it.value })
+    val bar = second[3] as OverlayTopAppBarNode
+    assertEquals("Beta (4.5)", bar.title)
+    assertEquals("Back Beta", bar.navigationIcon?.label)
+    assertEquals(listOf(OverlayEmitAction("b1")), bar.navigationIcon?.onTap)
+    assertEquals("Del Beta", bar.actions?.single()?.label)
+    val dialog = second[4] as OverlayDialogNode
+    assertEquals("Remove Beta?", dialog.title)
+    assertEquals("4.5 left", dialog.text)
+    assertEquals("Remove Beta", dialog.confirm.label)
+    assertEquals(listOf(OverlayEmitAction("rm-7")), dialog.confirm.onTap)
+    assertEquals("Keep Beta", dialog.dismiss?.label)
+    val snackbar = second[5] as OverlaySnackbarNode
+    assertEquals("Removed Beta", snackbar.text)
+    assertEquals("Undo Beta", snackbar.action?.label)
+    assertEquals(listOf(OverlayEmitAction("undo-1")), snackbar.action?.onTap)
+    assertEquals("Open Alpha", (bound[0] as OverlayButtonNode).label)
   }
 
   @Test
@@ -194,7 +253,52 @@ class OverlayRepeatTest {
     assertEquals("root.children[0].onTap[0].name", failure.error.path)
     assertEquals("Expanded emit name is empty for item 1", failure.error.message)
     assertTrue(
-      OverlaySpecValidator.validate(json("row-{item.id}")) is OverlaySpecValidation.Success
+      OverlaySpecValidator.validate(json("row-{item.id}")) is OverlaySpecValidation.Success,
     )
+  }
+
+  private fun fixture(name: String): OverlaySpec {
+    val file =
+      generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
+        .map { File(it, "test/fixtures/overlay-spec/valid/$name.json") }
+        .first { it.isFile }
+    val validated = OverlaySpecValidator.validate(file.readText())
+    return (validated as? OverlaySpecValidation.Success)?.spec ?: error(validated.toString())
+  }
+
+  @Test
+  fun `bound state keys toggle and style each row independently`() = runTest {
+    val runtime = OverlayRuntime(fixture("repeat-state-keys"), nextSequence = { 0L })
+    fun rows() = mapOverlaySpec(runtime.current.spec).root.children.map { it.children }
+    fun liked() = rows().map { row -> row[2].visible }
+    val likeKeys =
+      rows().map { row ->
+        ((row[1].source as OverlayTextNode).onTap!!.single() as OverlayToggleAction).key
+      }
+    assertEquals(listOf("liked_a", "liked_b"), likeKeys)
+    assertEquals(listOf(false, true), liked())
+    val switches = rows().map { row -> (row[3].source as OverlaySwitchNode).stateKey }
+    assertEquals(listOf("notify_a", "notify_b"), switches)
+    val trailing = rows().map { row -> (row[5].source as OverlayListItemNode).trailing }
+    assertEquals(
+      listOf(OverlayListItemCheckbox("saved_a"), OverlayListItemCheckbox("saved_b")),
+      trailing,
+    )
+    val dialogs = rows().map { row -> (row[6].source as OverlayDialogNode).openWhen.key }
+    assertEquals(listOf("open_a", "open_b"), dialogs)
+
+    fun likeColors() = rows().map { row -> row[1].style.color }
+    val likedColor = likeColors()[1]
+    assertNotEquals(likedColor, likeColors()[0])
+
+    runtime.handle(OverlayInteraction.Tap((rows()[0][1].source as OverlayTextNode).onTap!!))
+    assertEquals(listOf(true, true), liked())
+    assertEquals(listOf(likedColor, likedColor), likeColors())
+    runtime.handle(OverlayInteraction.Tap((rows()[1][1].source as OverlayTextNode).onTap!!))
+    assertEquals(listOf(true, false), liked())
+    assertEquals(OverlayScalar.BooleanValue(true), runtime.current.state["liked_a"])
+    assertEquals(OverlayScalar.BooleanValue(false), runtime.current.state["liked_b"])
+    assertEquals(likedColor, likeColors()[0])
+    assertNotEquals(likedColor, likeColors()[1])
   }
 }

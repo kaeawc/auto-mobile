@@ -21,7 +21,7 @@ Bun TypeScript MCP server providing Android & iOS device automation capabilities
 - Write terminal output to `scratch/` when not visible
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation
 - Run `scripts/prepush-android.sh` from the repository root before pushing changes under `android/`; its scoped Detekt pass is a smoke check, not a substitute for the full-tree CI Detekt job.
-- For Playground/JUnit-runner emulator CI red, inspect `.github/actions/android-emulator` boot diagnostics first: no runner-health means an infra/runner-health question, while booted tests that fail are a regression.
+- For Playground/JUnit-runner emulator CI red (on PRs both suites run in the one `Run Android Emulator Tests` job, `scripts/android/run-emulator-suites.sh`), inspect `.github/actions/android-emulator` boot diagnostics first: no runner-health means an infra/runner-health question, while booted tests that fail are a regression.
 - Copy `android/local.properties` from a working checkout into each new Android worktree; it is gitignored and required for Gradle SDK resolution.
 - Ktfmt normalizes `runCatching{}.getOrNull()` to `runCatching {}.getOrNull()` once; write the spaced form and do not mistake that first rewrite for a non-idempotent formatter.
 - Before adding a helper, parser, or dependency, search `src/`, `scripts/lib/`, `package.json`, and the runtime standard library. Prefer the standard library, then an existing direct dependency, then an existing repository helper, then a small tested helper. Do not parse JSON, YAML, XML, or TypeScript with line regexes when a structured parser or typed module contract exists. For new packages, state which built-in and installed alternatives were checked. Preserve injected interfaces/FakeTimer seams where tests need deterministic control.
@@ -181,8 +181,9 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 # Codex specific
 
 - GitHub interactions use the GitHub CLI (`gh`).
-- A red `iOS`, `Android`, `Node Tests`, or `WebRTC` roll-up does not by itself
-  prove a required lane failed. Run `bash scripts/ci/classify-failure.sh <run-id>`
+- Only required checks have roll-up gates (`IDE Plugin`, `iOS Build`,
+  `Shell Tests`); a red advisory job does not by itself prove a required lane
+  failed. Run `bash scripts/ci/classify-failure.sh <run-id>`
   before rerunning or changing code; it identifies the specific upstream lane
   and consults `scripts/ci/known-flakes.txt`. For integration-test or runtime-graph input changes, run
   `bash scripts/prepush-integration.sh` before pushing. See `ci-failure-triage`.
@@ -203,7 +204,7 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 ### Workflow Skills
 
 - check-ci: Inspect PR checks, fetch failing logs, reproduce likely failures locally, and summarize next steps. Path: `skills/check-ci/SKILL.md`.
-- ci-failure-triage: Classify failed pull-request workflow runs, distinguish hard from advisory roll-ups, and avoid re-fixing documented non-fixes. Path: `skills/ci-failure-triage/SKILL.md`.
+- ci-failure-triage: Classify failed pull-request workflow runs, distinguish required from advisory jobs, and avoid re-fixing documented non-fixes. Path: `skills/ci-failure-triage/SKILL.md`.
 - shell-prepush: Use this workflow skill before pushing shell or scripts changes to run scoped fast validation and targeted BATS tests, interpret stale dependency-pin failures, and retrieve empty Fast Validation logs from artifacts. Path: `skills/shell-prepush/SKILL.md`.
 - github-pr-feedback: Collect every PR discussion and review thread, triage it, and safely resolve feedback after verified fixes without posting comments. Path: `skills/github-pr-feedback/SKILL.md`.
 - dead-code: Detect and remove dead code using repo scripts and targeted validation. Path: `skills/dead-code/SKILL.md`.
@@ -227,7 +228,8 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 - Run `scripts/prepush-ios.sh` before pushing any Swift change. It enforces the
   pinned SwiftFormat 0.54.6, SwiftLint's error-severity rules, and the
   simulator-free XCTestRunner package subset.
-- `XCTestRunner Simulator Tests` is advisory, not required. Classify it from
+- `XCTestRunner Simulator Tests` is advisory, not required, and runs nightly or
+  on a PR labelled `run-ios-sim` (`xctestrunner-simulator-tests.yml`). Classify it from
   the exact job log before rerunning or changing code. The 2026-09-07–13
   signatures were: CtrlProxy UI-test action timed out after five minutes;
   CtrlProxy still running after forced teardown; video recording's `simctl list`

@@ -10,6 +10,7 @@
 SCRIPT="scripts/all_fast_validate_checks.sh"
 COHERENCE_SCRIPT="scripts/check-bun-version-coherence.ts"
 COHERENCE_FIXTURE=".github/actions/bun-version-coherence-fixture/action.yml"
+COHERENCE_WORKFLOW_FIXTURE=".github/workflows/zz-bun-coherence-fixture.yml"
 LIST_CHECKS_FIXTURE=""
 
 setup() {
@@ -18,6 +19,7 @@ setup() {
 
 teardown() {
   rm -rf "$(dirname "$COHERENCE_FIXTURE")"
+  rm -f "$COHERENCE_WORKFLOW_FIXTURE"
   if [[ -n "${LIST_CHECKS_FIXTURE}" ]]; then
     rm -rf "${LIST_CHECKS_FIXTURE}"
   fi
@@ -109,6 +111,28 @@ teardown() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"bun-version-coherence-fixture/action.yml"* ]]
   [[ "$output" == *"0.1.0"* ]]
+}
+
+@test "Bun coherence allows only the declared advisory Bun 1.4 canary" {
+  run bun "$COHERENCE_SCRIPT"
+  [ "$status" -eq 0 ]
+
+  printf '%s\n' \
+    'name: Bun coherence fixture' \
+    'on: workflow_dispatch' \
+    'jobs:' \
+    '  some-other-job:' \
+    '    runs-on: ubuntu-latest' \
+    '    steps:' \
+    '      - uses: oven-sh/setup-bun@v2' \
+    '        with:' \
+    '          bun-version: 1.4.2' > "$COHERENCE_WORKFLOW_FIXTURE"
+
+  run bun "$COHERENCE_SCRIPT"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"zz-bun-coherence-fixture.yml"* ]]
+  [[ "$output" == *"1.4.2"* ]]
 }
 
 @test "fast validation registers the tool definitions drift check" {

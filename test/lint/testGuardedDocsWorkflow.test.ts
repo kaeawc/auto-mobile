@@ -240,7 +240,12 @@ describe("contract-bearing docs keep their Node test guard in CI", () => {
   });
 
   test("Node unit test skip still depends on the guarded docs-only output", () => {
-    expect(workflow.jobs["node-unit-tests"].if).toContain(
+    expect(workflow.jobs["ts-build-and-test"].if).toContain(
+      "needs.detect-changes.outputs.docs_only != 'true'",
+    );
+    // The Windows unit lane (#10894) is skipped through this required job's
+    // step guard, so the job itself always reports.
+    expect(workflow.jobs["mcp-build-and-test"].env.RUN_MCP_BUILD_TEST).toContain(
       "needs.detect-changes.outputs.docs_only != 'true'",
     );
   });

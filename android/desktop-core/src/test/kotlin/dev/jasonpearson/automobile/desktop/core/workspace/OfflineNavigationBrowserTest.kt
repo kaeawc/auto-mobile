@@ -95,8 +95,8 @@ class OfflineNavigationBrowserTest {
           listOf(
             appSummary("com.example.shopping", "Shopping"),
             appSummary("com.example.banking", null),
-          )
-        )
+          ),
+        ),
       )
     setContent {
       CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
@@ -205,7 +205,7 @@ class OfflineNavigationBrowserTest {
           if (attempts.getAndIncrement() == 0)
             Result.Error(RuntimeException("daemon down"), "daemon down")
           else Result.Success(listOf(appSummary("com.example.app", "Sample")))
-        }
+        },
       )
     setContent {
       CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
@@ -266,9 +266,9 @@ class OfflineNavigationBrowserTest {
             SuppliedDataSource(
               apps = {
                 Result.Success(
-                  listOf(appSummary("com.example.a", "AppA"), appSummary("com.example.b", "AppB"))
+                  listOf(appSummary("com.example.a", "AppA"), appSummary("com.example.b", "AppB")),
                 )
-              }
+              },
             )
           "com.example.a" ->
             SuppliedDataSource(
@@ -277,9 +277,9 @@ class OfflineNavigationBrowserTest {
                   NavigationGraph(
                     listOf(screen("Alpha").copy(screenshotUri = "shot?appId=com.example.a")),
                     emptyList(),
-                  )
+                  ),
                 )
-              }
+              },
             )
           else ->
             SuppliedDataSource(
@@ -288,9 +288,9 @@ class OfflineNavigationBrowserTest {
                   NavigationGraph(
                     listOf(screen("Beta").copy(screenshotUri = "shot?appId=com.example.b")),
                     emptyList(),
-                  )
+                  ),
                 )
-              }
+              },
             )
         }
       }
@@ -345,7 +345,7 @@ class OfflineNavigationBrowserTest {
           appsResult = Result.Success(listOf(appSummary("com.example.app", "Sample"))),
           graphResult =
             Result.Success(
-              NavigationGraph(listOf(screen("Alpha").copy(screenshotUri = uri)), emptyList())
+              NavigationGraph(listOf(screen("Alpha").copy(screenshotUri = uri)), emptyList()),
             ),
         )
       setContent {
@@ -378,7 +378,7 @@ class OfflineNavigationBrowserTest {
         appsResult = Result.Success(listOf(appSummary("com.example.app", "Sample"))),
         graphResult =
           Result.Success(
-            NavigationGraph(listOf(screen("Alpha").copy(screenshotUri = uri)), emptyList())
+            NavigationGraph(listOf(screen("Alpha").copy(screenshotUri = uri)), emptyList()),
           ),
       )
     setContent {

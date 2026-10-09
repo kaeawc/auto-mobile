@@ -23,6 +23,7 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { daemonHeartbeatHandler } from "../helpers/daemonHeartbeatHandler";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
@@ -210,15 +211,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
   test("adoptCliSessionLiveness declares the policy for a result-minted session", async () => {
     const client = new FakeDaemonClient({
       toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("minted") : undefined),
-      onCallDaemonMethod: async (method, params) => {
-        if (method === DAEMON_HEARTBEAT_METHOD && typeof params.sessionId === "string") {
-          if (params.livenessPolicy === CLI_SESSION_LIVENESS_POLICY) {
-            sessionManager.adoptCliLivenessPolicy(params.sessionId);
-          } else {
-            sessionManager.recordHeartbeat(params.sessionId);
-          }
-        }
-      },
+      onCallDaemonMethod: daemonHeartbeatHandler(sessionManager),
     });
     await sessionManager.createSession("minted", "emulator-5554", "android", 30 * 60_000);
     const proxy = proxyOver(client);
@@ -282,15 +275,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
   test("the declared session outlives the think-time that reaps a heartbeat session", async () => {
     const client = new FakeDaemonClient({
       toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("minted") : undefined),
-      onCallDaemonMethod: async (method, params) => {
-        if (method === DAEMON_HEARTBEAT_METHOD && typeof params.sessionId === "string") {
-          if (params.livenessPolicy === CLI_SESSION_LIVENESS_POLICY) {
-            sessionManager.adoptCliLivenessPolicy(params.sessionId);
-          } else {
-            sessionManager.recordHeartbeat(params.sessionId);
-          }
-        }
-      },
+      onCallDaemonMethod: daemonHeartbeatHandler(sessionManager),
     });
     await sessionManager.createSession("minted", "emulator-5554", "android", 30 * 60_000);
     const reaped: Array<{ sessionId: string; reason: string }> = [];
@@ -706,15 +691,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         name === "tapOn"
           ? { content: [{ type: "text", text: "No element matched the selector" }], isError: true }
           : undefined,
-      onCallDaemonMethod: async (method, params) => {
-        if (method === DAEMON_HEARTBEAT_METHOD && typeof params.sessionId === "string") {
-          if (params.livenessPolicy === CLI_SESSION_LIVENESS_POLICY) {
-            sessionManager.adoptCliLivenessPolicy(params.sessionId);
-          } else {
-            sessionManager.recordHeartbeat(params.sessionId);
-          }
-        }
-      },
+      onCallDaemonMethod: daemonHeartbeatHandler(sessionManager),
     });
     await sessionManager.createSession("joined", "emulator-5554", "android", 30 * 60_000);
     const proxy = proxyOver(client);
@@ -868,6 +845,8 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
           livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
           livenessOwnerToken: "old-mcp-token",
           claimLivenessOwnership: true,
+          reportIdleRelease: true,
+          reportDaemonInstance: true,
         },
       });
 
@@ -911,6 +890,8 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
           sessionId: sessionUuid,
           livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
           livenessOwnerToken: "old-mcp-token",
+          reportIdleRelease: true,
+          reportDaemonInstance: true,
         },
       });
       expect(sessionManager.getSession(sessionUuid)).toMatchObject({

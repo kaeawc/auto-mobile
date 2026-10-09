@@ -1,0 +1,126 @@
+{
+  "id": "labels",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "open": false,
+    "mode": "a"
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "as": "item",
+      "items": [
+        {
+          "id": "a",
+          "name": "Alpha",
+          "n": 3
+        },
+        {
+          "id": "b",
+          "name": "Beta",
+          "n": 4
+        }
+      ]
+    },
+    "children": [
+      {
+        "type": "button",
+        "label": "Open {item.name}",
+        "onTap": [
+          {
+            "type": "emit",
+            "name": "open-{item.id}"
+          }
+        ]
+      },
+      {
+        "type": "fab",
+        "icon": "add",
+        "label": "New {item.name}"
+      },
+      {
+        "type": "segmentedButton",
+        "stateKey": "mode",
+        "options": [
+          {
+            "value": "x",
+            "label": "{item.name} one"
+          },
+          {
+            "value": "y",
+            "label": "{index} two"
+          }
+        ]
+      },
+      {
+        "type": "topAppBar",
+        "title": "{item.name} ({item.n})",
+        "navigationIcon": {
+          "icon": "menu",
+          "label": "Back from {item.name}",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "back-{item.id}"
+            }
+          ]
+        },
+        "actions": [
+          {
+            "icon": "delete",
+            "label": "Delete {item.name}",
+            "onTap": [
+              {
+                "type": "emit",
+                "name": "delete-{item.id}"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "dialog",
+        "openWhen": {
+          "key": "open",
+          "equals": true
+        },
+        "title": "Remove {item.name}?",
+        "text": "{item.n} items go away.",
+        "confirm": {
+          "label": "Remove {item.name}",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "remove-{item.id}"
+            }
+          ]
+        },
+        "dismiss": {
+          "label": "Keep {item.name}"
+        }
+      },
+      {
+        "type": "snackbar",
+        "openWhen": {
+          "key": "open",
+          "equals": true
+        },
+        "text": "Removed {item.name}",
+        "action": {
+          "label": "Undo {item.name}",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "undo-{item.id}"
+            }
+          ]
+        },
+        "durationMs": 2500
+      }
+    ]
+  }
+}

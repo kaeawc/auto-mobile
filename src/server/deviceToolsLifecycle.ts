@@ -10,7 +10,13 @@ import {
 } from "../devices/deviceTeardownService";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
 import { logger } from "../utils/logger";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import type { ProgressCallback } from "./toolRegistry";
+import {
+  assertLifecycleCallerHoldsDevice,
+  lifecycleRequester,
+  type LifecycleRequester,
+} from "./lifecycleDeviceOwnership";
 import {
   DEVICE_SHUTDOWN_TIMEOUT_MS,
   PooledAvdIdentityError,
@@ -85,11 +91,46 @@ type TeardownState = {
   lastVerificationFailure?: TeardownToolResponse;
 };
 
+/**
+ * Refuse to tear down a booted device another session holds (#10785), as a typed precondition
+ * failure so the teardown is never accepted. Returns undefined when the caller may proceed.
+ */
+function teardownOwnershipRefusal(
+  args: TeardownDeviceArgs,
+  target: TeardownResolvedTarget,
+  requester: LifecycleRequester | undefined,
+): TeardownToolResponse | undefined {
+  if (!requester || !target.wasBooted) {
+    return undefined;
+  }
+  try {
+    assertLifecycleCallerHoldsDevice({
+      toolName: "deleteDevice",
+      device: target.bootedDevice,
+      requester,
+      force: args.force ?? false,
+    });
+    return undefined;
+  } catch (error) {
+    if (!(error instanceof InputDeviceOwnedError)) {
+      throw error;
+    }
+    return createTeardownFailureResponse(
+      args,
+      "precondition",
+      error.code,
+      error.message,
+      target.device,
+    );
+  }
+}
+
 function createDeleteDeviceWorkflow(
   args: TeardownDeviceArgs,
   deps: DeviceToolsDependencies,
   deadlineMs: number,
   timeoutMs: number,
+  requester: LifecycleRequester | undefined,
 ): DeviceTeardownWorkflow<TeardownState, "accepted" | "not_required", TeardownToolResponse> {
   return {
     resolve: async (requestAbortSignal, lifecycleLease) => {
@@ -109,6 +150,10 @@ function createDeleteDeviceWorkflow(
       const resolution = await resolveTeardownTarget(context);
       if ("response" in resolution) {
         return { response: resolution.response };
+      }
+      const ownershipRefusal = teardownOwnershipRefusal(args, resolution.target, requester);
+      if (ownershipRefusal) {
+        return { response: ownershipRefusal };
       }
       const runtime = resolution.target.wasBooted ? resolution.target.bootedDevice : undefined;
       const androidManager =
@@ -224,6 +269,13 @@ export function createLifecycleHandlers() {
     _progress?: ProgressCallback,
     abortSignal?: AbortSignal,
   ) => {
+    // A device another session holds stops only for its holder or an explicit force (#10785).
+    assertLifecycleCallerHoldsDevice({
+      toolName: "killDevice",
+      device: args.device,
+      requester: lifecycleRequester(args),
+      force: args.force ?? false,
+    });
     const deps = getDeviceToolsDependencies();
     const requestAbortSignal = abortSignal ?? getAbortSignal();
     const deadlineMs = deps.timer.now() + DEVICE_SHUTDOWN_TIMEOUT_MS;
@@ -297,6 +349,8 @@ export function createLifecycleHandlers() {
     callerSignal: AbortSignal | undefined,
     teardownService: DeviceTeardownService,
     lifecycleLease?: VirtualDeviceLifecycleLease,
+    /** The deleteDevice caller; omitted by internal rollbacks of a device the caller created. */
+    requester?: LifecycleRequester,
   ): Promise<TeardownToolResponse> {
     const timeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
     const deadlineMs = deps.timer.now() + timeoutMs;
@@ -315,7 +369,7 @@ export function createLifecycleHandlers() {
           cancellationPolicy: args.cancellationPolicy ? "cancel-on-caller-abort" : undefined,
           lifecycleLease,
         },
-        createDeleteDeviceWorkflow(args, deps, deadlineMs, timeoutMs),
+        createDeleteDeviceWorkflow(args, deps, deadlineMs, timeoutMs, requester),
       );
     } catch (error) {
       const message = String(error instanceof Error ? error.message : error);
@@ -342,6 +396,8 @@ export function createLifecycleHandlers() {
       deps,
       abortSignal ?? getAbortSignal(),
       getDeviceTeardownService(deps),
+      undefined,
+      lifecycleRequester(args),
     );
   };
 

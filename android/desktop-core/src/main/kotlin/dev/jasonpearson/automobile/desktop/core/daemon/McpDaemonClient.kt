@@ -11,7 +11,6 @@ import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
-import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -66,6 +65,20 @@ class McpDaemonClient(
    */
   private val inputRequestTimeoutMs: Long = INPUT_REQUEST_TIMEOUT_MS,
   private val statusRequestTimeoutMs: Long = STATUS_REQUEST_TIMEOUT_MS,
+  /**
+   * Hang ceiling for the session keep-alive requests (`daemon/heartbeat`,
+   * `daemon/registerSession`, #11072). They run on a 2 s timer, so a daemon that accepts but never
+   * replies must fail the tick as a lapse rather than stall every later tick.
+   */
+  private val sessionKeepaliveTimeoutMs: Long = SESSION_KEEPALIVE_TIMEOUT_MS,
+  /**
+   * The daemon session input frames act for (#10698). A device a session holds takes input only
+   * from that session, so a client that drives a device its desktop session holds (but is not
+   * itself bound to that session, like the per-action pane clients) names it here. Read per frame,
+   * so a rotated session is picked up; null sends sessionless input, accepted for unheld devices.
+   * Defaults to this client's own [sessionUuid].
+   */
+  private val inputSessionUuidProvider: () -> String? = { null },
 ) : AutoMobileClient {
   private var daemonLifecycle: DaemonLifecycleEnsurer? =
     if (socketPathValue == DaemonSocketPaths.socketPath()) DesktopDaemonLifecycle() else null
@@ -74,7 +87,14 @@ class McpDaemonClient(
     socketPathValue: String,
     daemonLifecycle: DaemonLifecycleEnsurer,
     statusRequestTimeoutMs: Long = STATUS_REQUEST_TIMEOUT_MS,
-  ) : this(socketPathValue = socketPathValue, statusRequestTimeoutMs = statusRequestTimeoutMs) {
+    sessionUuid: String? = null,
+    sessionKeepaliveTimeoutMs: Long = SESSION_KEEPALIVE_TIMEOUT_MS,
+  ) : this(
+    socketPathValue = socketPathValue,
+    sessionUuid = sessionUuid,
+    statusRequestTimeoutMs = statusRequestTimeoutMs,
+    sessionKeepaliveTimeoutMs = sessionKeepaliveTimeoutMs,
+  ) {
     this.daemonLifecycle = daemonLifecycle
   }
 
@@ -267,7 +287,7 @@ class McpDaemonClient(
     return try {
       decodeToolResponse(json, response, serializer<StartDeviceResult>())
     } catch (e: Exception) {
-      StartDeviceResult(success = false, message = e.message ?: "Failed to start device")
+      startDeviceFailure(e)
     }
   }
 
@@ -309,11 +329,7 @@ class McpDaemonClient(
     force: Boolean,
   ): KillDeviceResult {
     val response = callTool("killDevice", killDeviceArguments(name, deviceId, platform, force))
-    return try {
-      decodeToolResponse(json, response, serializer<KillDeviceResult>())
-    } catch (e: Exception) {
-      KillDeviceResult(success = false, message = e.message ?: "Failed to kill device")
-    }
+    return decodeKillDeviceResponse(json, response)
   }
 
   override fun getDaemonStatus():
@@ -552,7 +568,7 @@ class McpDaemonClient(
         BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
       val writer =
         BufferedWriter(
-          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8),
         )
       return PersistentChannel(channel, reader, writer)
     } catch (e: Exception) {
@@ -563,7 +579,7 @@ class McpDaemonClient(
       }
       if (expired.get()) {
         throw DaemonUnavailableException(
-          "Gesture stream connect timed out after ${inputRequestTimeoutMs}ms"
+          "Gesture stream connect timed out after ${inputRequestTimeoutMs}ms",
         )
       }
       throw e
@@ -629,7 +645,7 @@ class McpDaemonClient(
           id = UUID.randomUUID().toString(),
           type = "mcp_request",
           method = method,
-          params = buildJsonObject(params),
+          params = withInputSession(buildJsonObject(params)),
           clientVersion = clientVersion,
           timeoutMs = inputRequestTimeoutMs,
         )
@@ -673,7 +689,12 @@ class McpDaemonClient(
 
   private fun DaemonResponse.toInputActionResult(method: String): InputActionResult {
     if (!success) {
-      return InputActionResult(action = method, success = false, error = error)
+      return InputActionResult(
+        action = method,
+        success = false,
+        error = error,
+        code = code?.contentOrNull,
+      )
     }
     val body =
       result
@@ -693,6 +714,7 @@ class McpDaemonClient(
     value: String?,
     type: String,
     platform: String,
+    sessionUuid: String?,
   ): SetKeyValueResult {
     val response =
       sendRequest(
@@ -705,6 +727,11 @@ class McpDaemonClient(
           put("key", JsonPrimitive(key))
           put("value", if (value != null) JsonPrimitive(value) else JsonNull)
           put("type", JsonPrimitive(type))
+          (sessionUuid ?: this@McpDaemonClient.sessionUuid)
+            ?.takeIf { it.isNotBlank() }
+            ?.let {
+              put("sessionUuid", JsonPrimitive(it))
+            }
         },
       )
     val responseResult = ensureSuccess(response, "ide/setKeyValue")
@@ -721,6 +748,7 @@ class McpDaemonClient(
     fileName: String,
     key: String,
     platform: String,
+    sessionUuid: String?,
   ): RemoveKeyValueResult {
     val response =
       sendRequest(
@@ -731,6 +759,11 @@ class McpDaemonClient(
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
           put("key", JsonPrimitive(key))
+          (sessionUuid ?: this@McpDaemonClient.sessionUuid)
+            ?.takeIf { it.isNotBlank() }
+            ?.let {
+              put("sessionUuid", JsonPrimitive(it))
+            }
         },
       )
     val responseResult = ensureSuccess(response, "ide/removeKeyValue")
@@ -746,6 +779,7 @@ class McpDaemonClient(
     appId: String,
     fileName: String,
     platform: String,
+    sessionUuid: String?,
   ): ClearKeyValueResult {
     val response =
       sendRequest(
@@ -755,6 +789,11 @@ class McpDaemonClient(
           put("platform", JsonPrimitive(platform))
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
+          (sessionUuid ?: this@McpDaemonClient.sessionUuid)
+            ?.takeIf { it.isNotBlank() }
+            ?.let {
+              put("sessionUuid", JsonPrimitive(it))
+            }
         },
       )
     val responseResult = ensureSuccess(response, "ide/clearKeyValueFile")
@@ -832,12 +871,20 @@ class McpDaemonClient(
     }
   }
 
-  /** Registers an identity without binding or reserving any device. */
+  /**
+   * Registers an identity without binding or reserving any device.
+   *
+   * Runs from the session's heartbeat loop, so it never runs the lifecycle preflight (#11072): a
+   * missing or other-version daemon is a lapse the loop retries, never a reason to start or restart
+   * the shared daemon. Only user-initiated requests (input, Retry) run the preflight.
+   */
   fun registerSession(sessionId: String, clientName: String): RegisterSessionResult {
     val response =
       sendRequest(
         DAEMON_REGISTER_SESSION_METHOD,
         json.encodeToJsonElement(RegisterSessionRequest(sessionId, clientName)).jsonObject,
+        timeoutMs = sessionKeepaliveTimeoutMs,
+        skipLifecyclePreflight = true,
       )
     val responseResult = ensureSuccess(response, "daemon/registerSession")
     return json.decodeFromJsonElement(serializer<RegisterSessionResult>(), responseResult)
@@ -855,14 +902,29 @@ class McpDaemonClient(
     ownedSessionUuids.remove(sessionId)
   }
 
-  /** Refreshes the heartbeat for this client's daemon session, if it owns one. */
+  /**
+   * Refreshes the heartbeat for this client's daemon session, if it owns one.
+   *
+   * A passive keep-alive (#11072): it skips the lifecycle preflight, so a heartbeat tick never
+   * starts a daemon the user stopped or restarts one of another version (which dropped every other
+   * harness's sessions), and it is bounded by [sessionKeepaliveTimeoutMs]. A missing or wedged
+   * daemon fails the tick, which the session loop treats as a lapse.
+   */
   internal fun heartbeatSession() {
     val sessionId = sessionUuid ?: return
     val response =
       sendRequest(
         "daemon/heartbeat",
         buildJsonObject { put("sessionId", JsonPrimitive(sessionId)) },
+        timeoutMs = sessionKeepaliveTimeoutMs,
+        skipLifecyclePreflight = true,
       )
+    if (!response.success && response.code?.contentOrNull == SESSION_NOT_FOUND_CODE) {
+      throw DaemonSessionNotFoundException(
+        response.error ?: "Session not found",
+        response.releaseReason,
+      )
+    }
     ensureSuccess(response)
   }
 
@@ -886,13 +948,25 @@ class McpDaemonClient(
         ?: throw DaemonUnavailableException("Tool-selection response missing profile UUID")
   }
 
+  /** [params] plus the `sessionUuid` input acts for, when there is one (#10698). */
+  private fun withInputSession(params: JsonObject): JsonObject {
+    val session = inputSessionUuidProvider() ?: sessionUuid
+    if (session.isNullOrBlank() || "sessionUuid" in params) return params
+    return JsonObject(params + ("sessionUuid" to JsonPrimitive(session)))
+  }
+
   private fun sendInputRequest(method: String, params: JsonObject): InputActionResult {
     // Input rides the tighter deadline: a hung input/* call froze the pane's whole input path
     // (single dispatch thread + FIFO mutex), and live interaction would rather shed one tap
     // after 5s than sit dead for a minute.
-    val response = sendRequest(method, params, timeoutMs = inputRequestTimeoutMs)
+    val response = sendRequest(method, withInputSession(params), timeoutMs = inputRequestTimeoutMs)
     if (!response.success) {
-      return InputActionResult(action = method, success = false, error = response.error)
+      return InputActionResult(
+        action = method,
+        success = false,
+        error = response.error,
+        code = response.code?.contentOrNull,
+      )
     }
     val result =
       response.result
@@ -966,7 +1040,7 @@ class McpDaemonClient(
           .capabilities
       } catch (_: Exception) {
         return DaemonCapabilitiesProbe.Failure(
-          "Daemon capability probe returned an invalid result."
+          "Daemon capability probe returned an invalid result.",
         )
       }
     val resolved = capabilities.toSet()
@@ -1023,11 +1097,12 @@ class McpDaemonClient(
           params = params,
           clientVersion = clientVersion,
           timeoutMs = timeoutMs,
-        )
+        ),
       )
     }
-    // Status is a passive health probe. Its purpose is to report a wedged daemon, so running the
-    // lifecycle preflight first can itself hang before the request watchdog is armed.
+    // Status and the session keep-alives are passive. Status reports a wedged daemon, so running
+    // the lifecycle preflight first can itself hang before the request watchdog is armed; a
+    // keep-alive must never start or restart the shared daemon (#11072).
     if (!skipLifecyclePreflight) {
       ensureVersionMatchedDaemon()
     }
@@ -1063,11 +1138,11 @@ class McpDaemonClient(
         channel.connect(address)
         val reader =
           BufferedReader(
-            InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
+            InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8),
           )
         val writer =
           BufferedWriter(
-            OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+            OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8),
           )
 
         val request =
@@ -1089,7 +1164,7 @@ class McpDaemonClient(
       } catch (e: Exception) {
         if (expired.get()) {
           throw DaemonUnavailableException(
-            "Daemon request '$method' timed out after ${timeoutMs}ms"
+            "Daemon request '$method' timed out after ${timeoutMs}ms",
           )
         }
         throw e
@@ -1123,7 +1198,7 @@ class McpDaemonClient(
     }
     return response.result
       ?: throw DaemonUnavailableException(
-        "JSON-RPC $method response contained no result; check the daemon response."
+        "JSON-RPC $method response contained no result; check the daemon response.",
       )
   }
 
@@ -1164,6 +1239,9 @@ class McpDaemonClient(
      */
     const val STATUS_REQUEST_TIMEOUT_MS = 5_000L
 
+    /** Hang ceiling for `daemon/heartbeat` and `daemon/registerSession` (#11072). */
+    const val SESSION_KEEPALIVE_TIMEOUT_MS = 2_000L
+
     // One shared daemon thread arms/cancels every request deadline. It only ever runs a
     // channel.close() for a request that overran its ceiling, so it stays idle in normal use.
     private val requestWatchdog =
@@ -1189,42 +1267,15 @@ object DaemonSocketPaths {
 
   internal fun socketPath(
     userId: CachedDaemonUserId,
-    override: String? =
-      System.getenv("AUTOMOBILE_DAEMON_SOCKET_PATH")
-        ?: System.getenv("AUTO_MOBILE_DAEMON_SOCKET_PATH"),
-  ): String = resolveDaemonPath(override, { "/tmp/auto-mobile-daemon-${userId.value}.sock" })
+    envProvider: (String) -> String? = System::getenv,
+  ): String =
+    AutoMobileSocketPaths.daemonStatePath(DaemonStateFile.SOCKET, { userId.value }, envProvider)
 
   internal fun pidFilePath(
     userId: CachedDaemonUserId,
-    override: String? =
-      System.getenv("AUTOMOBILE_DAEMON_PID_FILE_PATH")
-        ?: System.getenv("AUTO_MOBILE_DAEMON_PID_FILE_PATH"),
+    envProvider: (String) -> String? = System::getenv,
   ): String =
-    resolveDaemonPath(
-      override,
-      { "/tmp/auto-mobile-daemon-${userId.value}.pid" },
-      System.getenv("AUTOMOBILE_DAEMON_LAUNCH_CWD") ?: System.getProperty("user.dir", "."),
-    )
-
-  internal fun resolveDaemonPath(
-    override: String?,
-    defaultPath: String,
-    daemonLaunchCwd: String =
-      System.getenv("AUTOMOBILE_DAEMON_LAUNCH_CWD") ?: System.getProperty("user.dir", "."),
-  ): String = resolveDaemonPath(override, { defaultPath }, daemonLaunchCwd)
-
-  /** [defaultPath] is lazy so an explicit [override] never pays for the default's uid lookup. */
-  internal fun resolveDaemonPath(
-    override: String?,
-    defaultPath: () -> String,
-    daemonLaunchCwd: String =
-      System.getenv("AUTOMOBILE_DAEMON_LAUNCH_CWD") ?: System.getProperty("user.dir", "."),
-  ): String {
-    val configuredPath = override?.trim().takeUnless { it.isNullOrEmpty() } ?: return defaultPath()
-    val path = Path.of(configuredPath)
-    return if (path.isAbsolute) configuredPath
-    else Path.of(daemonLaunchCwd, configuredPath).toString()
-  }
+    AutoMobileSocketPaths.daemonStatePath(DaemonStateFile.PID, { userId.value }, envProvider)
 
   /** Version this desktop client declares to the daemon's version handshake gate. */
   fun resolveClientVersion(): String? =
@@ -1345,6 +1396,16 @@ data class DaemonResponse(
   val success: Boolean,
   val result: JsonElement? = null,
   val error: String? = null,
+  /**
+   * The daemon's structured error code: a string such as [DEVICE_OWNED_BY_OTHER_SESSION_CODE], or a
+   * JSON-RPC number (`src/daemon/types.ts`), so it is kept as a primitive.
+   */
+  val code: JsonPrimitive? = null,
+  /**
+   * With a session-not-found [code]: why the daemon released a session it knows (e.g.
+   * `heartbeat-timeout`, `cleanup-expired`); absent for a UUID it never issued (#10730).
+   */
+  val releaseReason: String? = null,
 )
 
 @Serializable private data class DaemonCapabilitiesResult(val capabilities: List<String>)
@@ -1369,4 +1430,11 @@ private sealed interface DaemonCapabilitiesProbe {
 
 private val sharedDaemonCapabilities = ConcurrentHashMap<SocketIdentity, Set<String>>()
 
-class DaemonUnavailableException(message: String) : McpConnectionException(message)
+open class DaemonUnavailableException(message: String) : McpConnectionException(message)
+
+/** The daemon answered "session not found" and, for a session it released, [releaseReason] why. */
+class DaemonSessionNotFoundException(message: String, val releaseReason: String?) :
+  DaemonUnavailableException(message)
+
+/** The wire `code` of a session-not-found answer (`DAEMON_SESSION_NOT_FOUND_CODE` in types.ts). */
+private const val SESSION_NOT_FOUND_CODE = "daemon_session_not_found"

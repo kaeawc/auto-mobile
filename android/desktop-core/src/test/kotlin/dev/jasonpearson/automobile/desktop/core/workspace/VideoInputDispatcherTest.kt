@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
 import dev.jasonpearson.automobile.desktop.core.control.testSnapshot
+import dev.jasonpearson.automobile.desktop.core.daemon.DEVICE_OWNED_BY_OTHER_SESSION_CODE
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import dev.jasonpearson.automobile.desktop.domain.DeviceKeyModifiers
@@ -68,6 +69,64 @@ class VideoInputDispatcherTest {
     // never reject it as "stale frame context" — the pane cannot wedge.
     assertNull(call.frameContext)
     assertTrue("close" in client.calls)
+    scope.cancel()
+  }
+
+  @Test
+  fun `a tap the daemon refuses as held elsewhere reports the device`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client =
+      FakeAutoMobileClient().apply {
+        inputTapResult =
+          InputActionResult(
+            action = "input/tap",
+            success = false,
+            error = "input/tap refused: device 'emulator-5554' is held by another session.",
+            code = DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+          )
+      }
+    var reports = 0
+    val dispatcher =
+      VideoInputDispatcher(
+        scope = scope,
+        clientProvider = { client },
+        platform = { "android" },
+        deviceId = "emulator-5554",
+        tracer = InteractionLatencyTracer(),
+        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        onDeviceHeldElsewhere = { reports++ },
+      )
+
+    dispatcher.tap(inBounds)
+    advanceUntilIdle()
+
+    assertEquals(1, reports)
+    scope.cancel()
+  }
+
+  @Test
+  fun `a tap rejected for another reason reports nothing`() = runTest {
+    val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+    val client =
+      FakeAutoMobileClient().apply {
+        inputTapResult = InputActionResult(action = "input/tap", success = false, error = "boom")
+      }
+    var reports = 0
+    val dispatcher =
+      VideoInputDispatcher(
+        scope = scope,
+        clientProvider = { client },
+        platform = { "android" },
+        deviceId = "emulator-5554",
+        tracer = InteractionLatencyTracer(),
+        ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+        onDeviceHeldElsewhere = { reports++ },
+      )
+
+    dispatcher.tap(inBounds)
+    advanceUntilIdle()
+
+    assertEquals(0, reports)
     scope.cancel()
   }
 
@@ -316,7 +375,7 @@ class VideoInputDispatcherTest {
       assertNotNull(
         scope
           .streamingDispatcher(client, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds)
+          .beginGestureStream(testSnapshot(), inBounds),
       )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
@@ -353,7 +412,7 @@ class VideoInputDispatcherTest {
       assertNotNull(
         scope
           .streamingDispatcher(client, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds)
+          .beginGestureStream(testSnapshot(), inBounds),
       )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
@@ -376,6 +435,43 @@ class VideoInputDispatcherTest {
   }
 
   @Test
+  fun `a stream start refused as held elsewhere reports it and sends no fallback swipe`() =
+    runTest {
+      val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+      val client =
+        FakeAutoMobileClient().apply {
+          gestureFrameResult =
+            InputActionResult(
+              action = "input/gestureStart",
+              success = false,
+              code = DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+            )
+        }
+      var reports = 0
+      val dispatcher =
+        VideoInputDispatcher(
+          scope = scope,
+          clientProvider = { client },
+          platform = { "android" },
+          deviceId = "emulator-5554",
+          tracer = InteractionLatencyTracer(),
+          ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+          streamingEnabled = true,
+          onDeviceHeldElsewhere = { reports++ },
+        )
+      val handle = assertNotNull(dispatcher.beginGestureStream(testSnapshot(), inBounds))
+      handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
+      handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
+      advanceUntilIdle()
+
+      assertEquals(1, reports)
+      assertTrue(client.openedGestureStreams.single().closed)
+      // The atomic fallback would be refused the same way, so none is sent.
+      assertTrue(client.inputSwipeCalls.isEmpty())
+      scope.cancel()
+    }
+
+  @Test
   fun `two dispatchers on one device produce distinct gesture ids`() = runTest {
     val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
     val clientA = FakeAutoMobileClient()
@@ -383,13 +479,13 @@ class VideoInputDispatcherTest {
     assertNotNull(
         scope
           .streamingDispatcher(clientA, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds)
+          .beginGestureStream(testSnapshot(), inBounds),
       )
       .end(DevicePoint(x = 360, y = 1400, inBounds = true))
     assertNotNull(
         scope
           .streamingDispatcher(clientB, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds)
+          .beginGestureStream(testSnapshot(), inBounds),
       )
       .end(DevicePoint(x = 360, y = 1400, inBounds = true))
     advanceUntilIdle()
@@ -415,7 +511,7 @@ class VideoInputDispatcherTest {
       assertNotNull(
         scope
           .streamingDispatcher(client, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds)
+          .beginGestureStream(testSnapshot(), inBounds),
       )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))

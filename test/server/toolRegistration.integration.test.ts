@@ -4,8 +4,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createMcpServer } from "../../src/server";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../src/utils/debug";
-import { compileJsonSchema } from "../helpers/jsonSchemaCompile";
-import Ajv2020 from "ajv/dist/2020";
+import { compileAjv2020, compileJsonSchema } from "../helpers/jsonSchemaCompile";
 
 /**
  * Tool Registration Regression Tests
@@ -173,7 +172,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     const schemaPath = path.join(process.cwd(), "schemas", "tool-definitions.json");
     const schemas = JSON.parse(await fs.readFile(schemaPath, "utf-8")) as ToolSchemaDefinition[];
     const tapOn = schemas.find((schema) => schema.name === "tapOn");
-    const validate = new Ajv2020({ strict: false }).compile(tapOn!.inputSchema);
+    const validate = compileAjv2020(tapOn!.inputSchema);
     const baseInput = {
       selector: { accessibilityLink: "Terms of Service" },
     };

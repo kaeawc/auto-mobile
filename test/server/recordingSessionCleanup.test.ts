@@ -1,0 +1,421 @@
+import { describe, expect, spyOn, test } from "bun:test";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { logger } from "../../src/utils/logger";
+import type { SessionManager } from "../../src/daemon/sessionManager";
+import {
+  createOwnerlessRecordingAcquisitionCleanup,
+  registerRecordingSessionCleanup,
+  takeRecordingIdsFinalizedByRelease,
+  type RecordingSessionCleanupDeps,
+} from "../../src/server/recordingSessionCleanup";
+
+type CleanupManager = Parameters<typeof registerRecordingSessionCleanup>[0] &
+  Parameters<typeof createOwnerlessRecordingAcquisitionCleanup>[0];
+type ReleaseCallback = Parameters<SessionManager["onSessionRelease"]>[0];
+type UnboundCallback = Parameters<SessionManager["onSessionDeviceUnbound"]>[0];
+
+class FakeSessionManager implements CleanupManager {
+  releaseCallbacks: ReleaseCallback[] = [];
+  unboundCallbacks: UnboundCallback[] = [];
+  pendingCleanups: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
+  acquisitionCleanups: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
+
+  onSessionRelease(callback: ReleaseCallback): void {
+    this.releaseCallbacks.push(callback);
+  }
+  onSessionDeviceUnbound(callback: UnboundCallback): void {
+    this.unboundCallbacks.push(callback);
+  }
+  registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
+    this.pendingCleanups.push({ deviceId, cleanup });
+  }
+
+  registerAcquisitionDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
+    this.acquisitionCleanups.push({ deviceId, cleanup });
+  }
+
+  release(sessionId: string, deviceId: string, upgradeOnly = false): void {
+    for (const callback of this.releaseCallbacks) {
+      callback(
+        sessionId,
+        deviceId,
+        "idle-timeout",
+        {
+          sessionId,
+          deviceId,
+          releaseReason: "idle-timeout",
+          releasedAtMs: 0,
+          terminal: false,
+          heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
+        },
+        { upgradeOnly },
+      );
+    }
+  }
+
+  async settle(): Promise<void> {
+    await Promise.all(
+      [...this.pendingCleanups, ...this.acquisitionCleanups].map((entry) => entry.cleanup),
+    );
+  }
+}
+
+/** In-memory recording backend: one active recording per device, like the real manager. */
+class FakeRecordings implements RecordingSessionCleanupDeps {
+  active = new Map<
+    string,
+    { recordingId: string; deviceId: string; ownerSessionUuid: string | undefined }
+  >();
+  segmentedStops: string[] = [];
+  testRecording: { ownerSessionUuid: string | undefined; deviceId: string } | null = null;
+  testStops = 0;
+  stopFailure: Error | null = null;
+  /** When set, video stops never settle (a wedged backend). */
+  hangStops = false;
+  /** Segmented sessions the owner has; their stop hangs when `hangSegmented` is set. */
+  segmentedIds: string[] = [];
+  hangSegmented = false;
+  timer = new FakeTimer();
+  incomplete: string[] = [];
+  capMs = 120_000;
+
+  start(deviceId: string, ownerSessionUuid: string | undefined): void {
+    if (this.active.has(deviceId)) {
+      throw new Error(`Video recording already active for device ${deviceId}`);
+    }
+    this.active.set(deviceId, {
+      recordingId: `rec-${ownerSessionUuid ?? "ownerless"}`,
+      deviceId,
+      ownerSessionUuid,
+    });
+  }
+
+  activeRecordingIdsForOwner(sessionId: string | undefined, deviceId: string): string[] {
+    const video = [...this.active.values()]
+      .filter((record) => record.deviceId === deviceId && record.ownerSessionUuid === sessionId)
+      .map((record) => record.recordingId);
+    const all = [...video, ...this.segmentedIds];
+    return this.isTestRecordingOwnedBy(sessionId, deviceId) ? [...all, `test-${sessionId}`] : all;
+  }
+  hasRecordingsToStop(sessionId: string | undefined, deviceId: string): boolean {
+    return this.active.size > 0 || this.isTestRecordingOwnedBy(sessionId, deviceId);
+  }
+  async stopSegmentedRecordings(sessionId: string | undefined, deviceId: string): Promise<void> {
+    if (this.hangSegmented) {
+      await new Promise<void>(() => {});
+    }
+    this.segmentedStops.push(`${sessionId}@${deviceId}`);
+    this.segmentedIds = [];
+  }
+  async listActiveVideoRecordings(deviceId: string) {
+    return [...this.active.values()].filter((record) => record.deviceId === deviceId);
+  }
+  finalizeCapMs(): number {
+    return this.capMs;
+  }
+  async markVideoRecordingIncomplete(recordingId: string): Promise<void> {
+    this.incomplete.push(recordingId);
+    for (const [deviceId, record] of this.active) {
+      if (record.recordingId === recordingId) {
+        this.active.delete(deviceId);
+      }
+    }
+  }
+  async stopVideoRecording(recordingId: string): Promise<void> {
+    if (this.hangStops) {
+      await new Promise<void>(() => {});
+    }
+    if (this.stopFailure) {
+      throw this.stopFailure;
+    }
+    for (const [deviceId, record] of this.active) {
+      if (record.recordingId === recordingId) {
+        this.active.delete(deviceId);
+      }
+    }
+  }
+  isTestRecordingOwnedBy(sessionId: string | undefined, deviceId: string): boolean {
+    return (
+      this.testRecording !== null &&
+      this.testRecording.ownerSessionUuid === sessionId &&
+      this.testRecording.deviceId === deviceId
+    );
+  }
+  async stopTestRecording(): Promise<void> {
+    this.testStops += 1;
+    this.testRecording = null;
+  }
+}
+
+function setup() {
+  const manager = new FakeSessionManager();
+  const recordings = new FakeRecordings();
+  registerRecordingSessionCleanup(manager, recordings);
+  return { manager, recordings };
+}
+
+describe("registerRecordingSessionCleanup", () => {
+  test("idle release stops the owner's recording and the next owner can start one", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    expect(() => recordings.start("SIM-1", "session-b")).toThrow("already active");
+
+    manager.release("session-a", "SIM-1");
+    await manager.settle();
+
+    expect(recordings.active.size).toBe(0);
+    expect(manager.pendingCleanups.map((entry) => entry.deviceId)).toEqual(["SIM-1"]);
+    recordings.start("SIM-1", "session-b");
+    expect(recordings.active.get("SIM-1")?.ownerSessionUuid).toBe("session-b");
+  });
+
+  test("release captures the recording ids it finalizes before stopping them, once", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    recordings.testRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
+
+    manager.release("session-a", "SIM-1");
+    // Capture happens synchronously, so it holds even after the stops removed the recordings.
+    await manager.settle();
+
+    expect(recordings.active.size).toBe(0);
+    expect(takeRecordingIdsFinalizedByRelease("session-a")).toEqual([
+      "rec-session-a",
+      "test-session-a",
+    ]);
+    expect(takeRecordingIdsFinalizedByRelease("session-a")).toEqual([]);
+  });
+
+  test("a foreign owner's recording and an upgrade-only release name nothing", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-b");
+
+    manager.release("session-a", "SIM-1");
+    expect(takeRecordingIdsFinalizedByRelease("session-a")).toEqual([]);
+
+    recordings.start("SIM-2", "session-c");
+    manager.release("session-c", "SIM-2", true);
+    expect(takeRecordingIdsFinalizedByRelease("session-c")).toEqual([]);
+  });
+
+  test("a recording owned by another session on the device is left alone", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-b");
+
+    manager.release("session-a", "SIM-1");
+    await manager.settle();
+
+    expect(recordings.active.has("SIM-1")).toBe(true);
+  });
+
+  test("releasing a session without a recording is a no-op", () => {
+    const { manager, recordings } = setup();
+
+    manager.release("session-a", "SIM-1");
+
+    expect(manager.pendingCleanups).toHaveLength(0);
+    expect(recordings.segmentedStops).toHaveLength(0);
+  });
+
+  test("a stop failure does not reject the registered cleanup", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    recordings.stopFailure = new Error("adb died");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+
+    try {
+      manager.release("session-a", "SIM-1");
+
+      await expect(manager.settle()).resolves.toBeUndefined();
+      expect(recordings.active.has("SIM-1")).toBe(true);
+      expect(warn.mock.calls.some(([message]) => String(message).includes("adb died"))).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("release finalizes the session's segmented recordings", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+
+    manager.release("session-a", "SIM-1");
+    await manager.settle();
+
+    expect(recordings.segmentedStops).toEqual(["session-a@SIM-1"]);
+  });
+
+  test("release stops the owner's test recording", async () => {
+    const { manager, recordings } = setup();
+    recordings.testRecording = { ownerSessionUuid: "session-a", deviceId: "emulator-5554" };
+
+    manager.release("session-a", "emulator-5554");
+    await manager.settle();
+
+    expect(recordings.testStops).toBe(1);
+    expect(recordings.testRecording).toBeNull();
+  });
+
+  test("a test recording owned by another session survives the release", async () => {
+    const { manager, recordings } = setup();
+    recordings.testRecording = { ownerSessionUuid: "session-b", deviceId: "emulator-5554" };
+
+    manager.release("session-a", "emulator-5554");
+    await manager.settle();
+
+    expect(recordings.testStops).toBe(0);
+  });
+
+  test("a terminal upgrade of a finished release does not stop the next owner's recording", () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+
+    manager.release("session-a", "SIM-1", true);
+
+    expect(manager.pendingCleanups).toHaveLength(0);
+  });
+
+  test("a stop that never settles is force-stopped and marked incomplete at the cap, freeing the device (#10957)", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    recordings.hangStops = true;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+
+    try {
+      manager.release("session-a", "SIM-1");
+      let settled = false;
+      const done = manager.settle().then(() => {
+        settled = true;
+      });
+
+      await recordings.timer.advanceTimersByTimeAsync(119_999);
+      expect(settled).toBe(false);
+      expect(recordings.active.has("SIM-1")).toBe(true);
+
+      await recordings.timer.advanceTimersByTimeAsync(1);
+      await done;
+
+      expect(settled).toBe(true);
+      expect(recordings.incomplete).toEqual(["rec-session-a"]);
+      recordings.start("SIM-1", "session-b");
+      expect(warn.mock.calls.some(([message]) => String(message).includes("exceeded"))).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a stop that settles within the cap is not marked incomplete", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+
+    manager.release("session-a", "SIM-1");
+    await manager.settle();
+
+    expect(recordings.incomplete).toEqual([]);
+    expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  describe("finalize cap covers every recording (#11041)", () => {
+    test("a hung segmented stop force-stops the segment and the test recording, not just the single-file one", async () => {
+      const { manager, recordings } = setup();
+      recordings.start("SIM-1", "session-a");
+      recordings.segmentedIds = ["seg-1"];
+      recordings.testRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
+      recordings.hangSegmented = true;
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        manager.release("session-a", "SIM-1");
+        const done = manager.settle();
+        await recordings.timer.advanceTimersByTimeAsync(120_000);
+        await done;
+        expect([...recordings.incomplete].sort()).toEqual([
+          "rec-session-a",
+          "seg-1",
+          "test-session-a",
+        ]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("recordings finalized before the cap are not marked incomplete", async () => {
+      const { manager, recordings } = setup();
+      recordings.start("SIM-1", "session-a");
+      recordings.segmentedIds = ["seg-1"];
+      recordings.testRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
+      recordings.hangStops = true;
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        manager.release("session-a", "SIM-1");
+        const done = manager.settle();
+        await recordings.timer.advanceTimersByTimeAsync(120_000);
+        await done;
+        expect([...recordings.incomplete].sort()).toEqual(["rec-session-a", "test-session-a"]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
+
+  describe("owner-less recordings on acquisition (#10961)", () => {
+    test("a sessionless recording is stopped when a session acquires the device, then the new owner can start", async () => {
+      const { manager, recordings } = setup();
+      const onAcquire = createOwnerlessRecordingAcquisitionCleanup(manager, recordings);
+      recordings.start("SIM-1", undefined);
+      expect(() => recordings.start("SIM-1", "session-b")).toThrow("already active");
+
+      onAcquire("SIM-1");
+      await manager.settle();
+
+      expect(recordings.active.size).toBe(0);
+      // Tracked as acquisition cleanup so the holder's own reuse is not refused (#11041).
+      expect(manager.pendingCleanups).toHaveLength(0);
+      expect(manager.acquisitionCleanups.map((entry) => entry.deviceId)).toEqual(["SIM-1"]);
+      recordings.start("SIM-1", "session-b");
+    });
+
+    test("a recording owned by a session is left alone", async () => {
+      const { manager, recordings } = setup();
+      const onAcquire = createOwnerlessRecordingAcquisitionCleanup(manager, recordings);
+      recordings.start("SIM-1", "session-b");
+
+      onAcquire("SIM-1");
+      await manager.settle();
+
+      expect(recordings.active.has("SIM-1")).toBe(true);
+    });
+
+    test("a sessionless test recording is stopped", async () => {
+      const { manager, recordings } = setup();
+      const onAcquire = createOwnerlessRecordingAcquisitionCleanup(manager, recordings);
+      recordings.testRecording = { ownerSessionUuid: undefined, deviceId: "emulator-5554" };
+
+      onAcquire("emulator-5554");
+      await manager.settle();
+
+      expect(recordings.testStops).toBe(1);
+    });
+
+    test("a stop that never settles is capped like a release-time stop", async () => {
+      const { manager, recordings } = setup();
+      const onAcquire = createOwnerlessRecordingAcquisitionCleanup(manager, recordings);
+      recordings.start("SIM-1", undefined);
+      recordings.hangStops = true;
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        onAcquire("SIM-1");
+        const done = manager.settle();
+        await recordings.timer.advanceTimersByTimeAsync(120_000);
+        await done;
+        expect(recordings.incomplete).toEqual(["rec-ownerless"]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("no recordings means no pending cleanup", () => {
+      const { manager, recordings } = setup();
+      createOwnerlessRecordingAcquisitionCleanup(manager, recordings)("SIM-1");
+      expect(manager.acquisitionCleanups).toHaveLength(0);
+    });
+  });
+});

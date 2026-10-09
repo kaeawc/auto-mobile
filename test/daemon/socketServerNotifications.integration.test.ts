@@ -233,6 +233,27 @@ describe("UnixSocketServer notification broadcast", () => {
     });
   });
 
+  test("a session-released frame names the recordings the release finalized (#10958)", async () => {
+    const subscriber = await connectedClient();
+    subscriber.send(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);
+    await subscriber.waitForFrames(1);
+
+    SessionReleaseBroadcaster.emit("session-a", "idle-timeout", undefined, {
+      recordingIds: ["rec-1", "rec-2"],
+    });
+    SessionReleaseBroadcaster.emit("session-b", "idle-timeout", undefined, { recordingIds: [] });
+    await subscriber.waitForFrames(3);
+
+    expect(subscriber.frames[1]).toEqual({
+      type: "daemon_notification",
+      method: SESSION_RELEASED_NOTIFICATION_METHOD,
+      sessionId: "session-a",
+      reason: "idle-timeout",
+      recordingIds: ["rec-1", "rec-2"],
+    });
+    expect(subscriber.frames[2]).not.toHaveProperty("recordingIds");
+  });
+
   test("quiesce rejects new work while preserving concurrent shutdown releases (#6336)", async () => {
     const subscriberA = await connectedClient();
     const subscriberB = await connectedClient();

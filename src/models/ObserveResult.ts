@@ -117,6 +117,13 @@ export interface SkeletonElement {
   occluded?: true;
   /** Present only for a `toggle` affordance: the current checked state. */
   checked?: boolean;
+  /**
+   * AutoMobile overlay rows only (rows from CtrlProxy's own overlay windows): the selected tab or
+   * option (#10446). App rows never carry it, as observe output for apps is unchanged.
+   */
+  selected?: true;
+  /** AutoMobile overlay rows only: the node's state description, e.g. a pager's `Page 1 of 3`. */
+  state?: string;
   /** Explicit disabled state on either platform; omitted means enabled. */
   enabled?: false;
   /**
@@ -205,6 +212,15 @@ export type ObserveResult = {
    * before the observation reaches the wire.
    */
   screenshotCaptureAttempted?: boolean;
+
+  /**
+   * Set by `observe` with `layer: "app"` while an AutoMobile overlay is on screen and the
+   * observation carries a screenshot (issue #9305). False when the capture was taken with the
+   * overlay hidden device-side (`screenshot_hide_overlay_v1`); true when the device could not hide
+   * it, so the screenshot and any crop still show the overlay over the app. The capture stamps
+   * false when it asks for hiding; observe reports the field only in the overlay-showing case.
+   */
+  screenshotIncludesOverlay?: boolean;
 
   /** Whether this observation's requested settled screenshot was validated on disk. */
   screenshotSettled?: boolean;
@@ -425,6 +441,16 @@ export type ObserveResult = {
    *    expired, or the action was not navigation-class and was never gated.
    */
   settled?: boolean;
+
+  /**
+   * Milliseconds the embedded-observation gate spent re-observing (#9591). Present only when the
+   * gate ran. `settled: false` with this near the gate's budget means the screen kept changing or
+   * reads were slow; well below it means the gate stopped early.
+   */
+  settleMs?: number;
+
+  /** Re-observations the embedded gate took; with `settleMs`, separates slow reads from motion. */
+  settlePolls?: number;
 
   /** True if a declarative waitFor condition or stability wait timed out. */
   timedOut?: boolean;

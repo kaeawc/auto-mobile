@@ -16,6 +16,7 @@ import { DAEMON_VERSION, HEARTBEAT_SESSION_LIVENESS_POLICY } from "../../src/dae
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { daemonHeartbeatHandler } from "../helpers/daemonHeartbeatHandler";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { ActionableError } from "../../src/models";
 import { logger } from "../../src/utils/logger";
@@ -60,11 +61,7 @@ function matchingDaemonManager(): FakeDaemonManager {
 // monitor consults.
 function heartbeatForwardingClient(sessionManager: SessionManager): FakeDaemonClient {
   return new FakeDaemonClient({
-    onCallDaemonMethod: (method, params) => {
-      if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
-        sessionManager.recordHeartbeat(params.sessionId);
-      }
-    },
+    onCallDaemonMethod: daemonHeartbeatHandler(sessionManager),
   });
 }
 
@@ -613,6 +610,8 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
             livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
             livenessOwnerToken: expect.any(String),
             claimLivenessOwnership: true,
+            reportIdleRelease: true,
+            reportDaemonInstance: true,
           },
         },
       ]);
@@ -888,6 +887,8 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
             sessionId: BOUND_SESSION,
             livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
             livenessOwnerToken: expect.any(String),
+            reportIdleRelease: true,
+            reportDaemonInstance: true,
           },
         },
       ]);

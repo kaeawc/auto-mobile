@@ -16,7 +16,7 @@
  *   bun scripts/webrtc/aggregate-egress-baseline.ts <artifacts-dir> [platform]
  */
 
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   aggregateCaptureStageRecords,
@@ -24,6 +24,7 @@ import {
   type CaptureBaselineSummary,
   type CaptureStageRecord,
 } from "../../test/helpers/captureStageTimeline";
+import { sortedReaddirEntries } from "../../src/utils/io";
 
 /** Structural check that a parsed JSON value is a capture-stage record, not some other artifact JSON. */
 function isCaptureStageRecord(value: unknown): value is CaptureStageRecord {
@@ -40,7 +41,7 @@ function isCaptureStageRecord(value: unknown): value is CaptureStageRecord {
 
 /** List every `*.json` file under `dir`, recursing into per-run artifact subdirectories. */
 async function listJsonFiles(dir: string): Promise<string[]> {
-  const entries = await readdir(dir, { withFileTypes: true });
+  const entries = await sortedReaddirEntries(dir);
   const files: string[] = [];
   for (const entry of entries) {
     const full = path.join(dir, entry.name);

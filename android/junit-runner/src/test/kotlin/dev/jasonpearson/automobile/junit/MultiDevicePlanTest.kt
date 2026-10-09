@@ -114,10 +114,10 @@ class TwoDevicePlainPlanTest {
                   perDeviceStepResult("observe", "B"),
                   perDeviceStepResult("terminateApp", "A"),
                   perDeviceStepResult("terminateApp", "B"),
-                )
+                ),
               ),
-          )
-        )
+          ),
+        ),
       ),
     )
 
@@ -148,10 +148,10 @@ class TwoDevicePlainPlanTest {
                   "tool" to JsonPrimitive("observe"),
                   "error" to JsonPrimitive("Assertion failed: expected content not visible"),
                   "device" to JsonPrimitive("B"),
-                )
+                ),
               ),
-          )
-        )
+          ),
+        ),
       ),
     )
 
@@ -177,8 +177,8 @@ class TwoDevicePlainPlanTest {
           "success" to JsonPrimitive(true),
           "executedSteps" to JsonPrimitive(executedSteps),
           "totalSteps" to JsonPrimitive(totalSteps),
-        )
-      )
+        ),
+      ),
     )
 
   private fun perDeviceStepResult(toolName: String, device: String): JsonObject =
@@ -187,7 +187,7 @@ class TwoDevicePlainPlanTest {
         "toolName" to JsonPrimitive(toolName),
         "success" to JsonPrimitive(true),
         "device" to JsonPrimitive(device),
-      )
+      ),
     )
 
   private fun buildDaemonResponse(payload: JsonObject): DaemonResponse {
@@ -206,11 +206,11 @@ class TwoDevicePlainPlanTest {
                     mapOf(
                       "type" to JsonPrimitive("text"),
                       "text" to JsonPrimitive(textPayload),
-                    )
-                  )
-                )
-              )
-          )
+                    ),
+                  ),
+                ),
+              ),
+          ),
         ),
       error = null,
     )
@@ -333,10 +333,10 @@ class TwoDeviceCriticalSectionPlanTest {
                   perDeviceStepResult("criticalSection", "B"),
                   perDeviceStepResult("terminateApp", "A"),
                   perDeviceStepResult("terminateApp", "B"),
-                )
+                ),
               ),
-          )
-        )
+          ),
+        ),
       ),
     )
 
@@ -367,10 +367,10 @@ class TwoDeviceCriticalSectionPlanTest {
                   "tool" to JsonPrimitive("inputText"),
                   "error" to JsonPrimitive("Timeout waiting for input element"),
                   "device" to JsonPrimitive("A"),
-                )
+                ),
               ),
-          )
-        )
+          ),
+        ),
       ),
     )
 
@@ -395,8 +395,8 @@ class TwoDeviceCriticalSectionPlanTest {
           "success" to JsonPrimitive(true),
           "executedSteps" to JsonPrimitive(executedSteps),
           "totalSteps" to JsonPrimitive(totalSteps),
-        )
-      )
+        ),
+      ),
     )
 
   private fun perDeviceStepResult(toolName: String, device: String): JsonObject =
@@ -405,7 +405,7 @@ class TwoDeviceCriticalSectionPlanTest {
         "toolName" to JsonPrimitive(toolName),
         "success" to JsonPrimitive(true),
         "device" to JsonPrimitive(device),
-      )
+      ),
     )
 
   private fun buildDaemonResponse(payload: JsonObject): DaemonResponse {
@@ -424,11 +424,11 @@ class TwoDeviceCriticalSectionPlanTest {
                     mapOf(
                       "type" to JsonPrimitive("text"),
                       "text" to JsonPrimitive(textPayload),
-                    )
-                  )
-                )
-              )
-          )
+                    ),
+                  ),
+                ),
+              ),
+          ),
         ),
       error = null,
     )

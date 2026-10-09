@@ -24,6 +24,9 @@ public final class AutoMobilePlanExecutor: Sendable {
     // Nil = no AI recovery (no injected handler and no model API key in the environment); the executor
     // then behaves exactly as it did before this feature — a failed step throws.
     private let recoveryHandler: PlanRecoveryHandler?
+    // Heartbeats and releases a session the daemon held for recovery (#10834 / #11072). Nil (HTTP
+    // transport) never asks the daemon to hold a failed attempt's session.
+    private let heldSessionController: HeldSessionControlling?
 
     public init(
         configuration: Configuration,
@@ -36,7 +39,8 @@ public final class AutoMobilePlanExecutor: Sendable {
         recoveryModelConfig: RecoveryModelConfig? = RecoveryModelConfig.resolve(),
         daemonEnsurer: AutoMobileDaemonEnsuring = SystemDaemonEnsurer(),
         deadlineScheduler: any DeadlineScheduler = SystemDeadlineScheduler(),
-        idGenerator: @escaping @Sendable () -> String = { UUID().uuidString }
+        idGenerator: @escaping @Sendable () -> String = { UUID().uuidString },
+        heldSessionController: HeldSessionControlling? = nil
     ) {
         self.deadlineScheduler = deadlineScheduler
         self.configuration = configuration
@@ -44,6 +48,13 @@ public final class AutoMobilePlanExecutor: Sendable {
         self.logger = logger
         self.daemonEnsurer = daemonEnsurer
         self.idGenerator = idGenerator
+        if let heldSessionController = heldSessionController {
+            self.heldSessionController = heldSessionController
+        } else if case let .daemonUnixSocket(path) = configuration.transport {
+            self.heldSessionController = DaemonSocketHeldSessionController(socketPath: path)
+        } else {
+            self.heldSessionController = nil
+        }
 
         if let mcpClient = mcpClient {
             self.mcpClient = mcpClient
@@ -123,11 +134,14 @@ public final class AutoMobilePlanExecutor: Sendable {
                 if attempt > 0 {
                     logger.info("Retry attempt \(attempt + 1) of \(configuration.retryCount + 1)")
                 }
+                // A transient retry runs under a fresh session (#11072), as on Android: the failed
+                // attempt's session was released (by the daemon, or by this runner when it was held
+                // for recovery), and a released UUID is terminal on the daemon.
                 return try await executeAttempt(
                     startStep: configuration.startStep,
                     recoveryAlreadyAttempted: false,
                     deviceIdOverride: nil,
-                    sessionUuidOverride: sessionUuid,
+                    sessionUuidOverride: attempt == 0 ? sessionUuid : idGenerator(),
                     testMetadata: testMetadata
                 )
             } catch is CancellationError {
@@ -245,7 +259,14 @@ public final class AutoMobilePlanExecutor: Sendable {
         let sessionUuid = sessionUuidOverride
         PerfTimer.log("sessionUuid=\(sessionUuid)")
 
-        let arguments = PerfTimer.measure("buildExecutePlanArguments") {
+        // Ask the daemon to keep this attempt's session and device on failure only when AI recovery
+        // may follow (#10834 / #11072); every path that does not resume on it releases it.
+        let holdForRecovery = await recoveryMayFollow(
+            recoveryAlreadyAttempted: recoveryAlreadyAttempted,
+            testMetadata: testMetadata
+        )
+
+        var arguments = PerfTimer.measure("buildExecutePlanArguments") {
             buildExecutePlanArguments(
                 planContent: substituted,
                 sessionUuid: sessionUuid,
@@ -255,6 +276,9 @@ public final class AutoMobilePlanExecutor: Sendable {
                 deviceLabels: planMetadata.deviceLabels,
                 testMetadata: testMetadata
             )
+        }
+        if holdForRecovery {
+            arguments["holdSessionOnFailure"] = true
         }
         PerfTimer.log("arguments built, keys=\(arguments.keys.sorted())")
 
@@ -268,13 +292,22 @@ public final class AutoMobilePlanExecutor: Sendable {
                 timeout: configuration.timeoutSeconds
             )
             try Task.checkCancellation()
-            let response = try await mcpClient.callTool(
-                name: "executePlan", arguments: arguments, timeout: configuration.timeoutSeconds
-            )
-            try Task.checkCancellation()
-            PerfTimer.log("executePlan response received, length=\(response.text.count) chars")
-            let result = try PerfTimer.measure("decodeExecutePlanResult") {
-                try decodeExecutePlanResult(from: response.text)
+            let result: ExecutePlanResult
+            do {
+                let response = try await mcpClient.callTool(
+                    name: "executePlan", arguments: arguments, timeout: configuration.timeoutSeconds
+                )
+                try Task.checkCancellation()
+                PerfTimer.log("executePlan response received, length=\(response.text.count) chars")
+                result = try PerfTimer.measure("decodeExecutePlanResult") {
+                    try decodeExecutePlanResult(from: response.text)
+                }
+            } catch {
+                // No failure result reaches recovery, so a session the daemon may hold is freed now.
+                if holdForRecovery {
+                    await releaseHeldSession(sessionUuid)
+                }
+                throw error
             }
             PerfTimer
                 .log(
@@ -291,7 +324,8 @@ public final class AutoMobilePlanExecutor: Sendable {
                 sessionUuid: sessionUuid,
                 deviceIdOverride: deviceIdOverride,
                 recoveryAlreadyAttempted: recoveryAlreadyAttempted,
-                testMetadata: testMetadata
+                testMetadata: testMetadata,
+                sessionHeld: holdForRecovery
             )
         } catch is CancellationError {
             throw CancellationError()
@@ -320,11 +354,19 @@ public final class AutoMobilePlanExecutor: Sendable {
         sessionUuid: String,
         deviceIdOverride: String?,
         recoveryAlreadyAttempted: Bool,
-        testMetadata: TestMetadata?
+        testMetadata: TestMetadata?,
+        sessionHeld: Bool
     )
         async throws -> ExecutePlanResult
     {
         let failureMessage = buildFailureMessage(from: result)
+        // Only the resumed plan takes over a held session (and releases it when it ends); every other
+        // outcome releases it here.
+        let releaseHeld = { [self] in
+            if sessionHeld {
+                await releaseHeldSession(sessionUuid)
+            }
+        }
 
         // Cheap local gates first; the feature-flag read (which may hit the daemon) is last and runs
         // only when a handler is present, so the no-recovery path adds zero daemon traffic.
@@ -336,6 +378,7 @@ public final class AutoMobilePlanExecutor: Sendable {
               !(testMetadata?.isCi ?? false),
               await recoveryConfigProvider.isRecoveryEnabled()
         else {
+            await releaseHeld()
             throw ExecutorError.executionFailed(failureMessage)
         }
 
@@ -349,11 +392,26 @@ public final class AutoMobilePlanExecutor: Sendable {
             deviceIdOverride: deviceIdOverride
         )
 
-        try Task.checkCancellation()
+        do {
+            try Task.checkCancellation()
+        } catch {
+            await releaseHeld()
+            throw error
+        }
+        // Keep the held session alive while recovery's calls (which carry it) drive the device, or the
+        // daemon's heartbeat lease frees it mid-recovery.
+        let heartbeat = sessionHeld ? heldSessionController?.startHeartbeating(sessionId: sessionUuid) : nil
         let outcome = await handler.attemptRecovery(context)
-        try Task.checkCancellation()
+        heartbeat?.stop()
+        do {
+            try Task.checkCancellation()
+        } catch {
+            await releaseHeld()
+            throw error
+        }
         if !outcome.success {
             logger.warn("AI recovery failed")
+            await releaseHeld()
             throw ExecutorError.executionFailed("\(failureMessage)\n  AI recovery attempted but did not succeed.")
         }
 
@@ -371,6 +429,25 @@ public final class AutoMobilePlanExecutor: Sendable {
         resumeResult.aiRecoveryAttempted = true
         resumeResult.aiRecoverySuccessful = resumeResult.success
         return resumeResult
+    }
+
+    /// Whether a failure of this attempt would go on to AI recovery (see `handleFailure`); the feature
+    /// flag, which may hit the daemon, is read last and only when a handler exists.
+    private func recoveryMayFollow(recoveryAlreadyAttempted: Bool, testMetadata: TestMetadata?) async -> Bool {
+        guard configuration.aiAssistance,
+              !recoveryAlreadyAttempted,
+              recoveryHandler != nil,
+              heldSessionController != nil,
+              !(testMetadata?.isCi ?? false)
+        else {
+            return false
+        }
+        return await recoveryConfigProvider.isRecoveryEnabled()
+    }
+
+    private func releaseHeldSession(_ sessionUuid: String) async {
+        logger.info("Releasing session \(sessionUuid) held for AI recovery")
+        await heldSessionController?.release(sessionId: sessionUuid)
     }
 
     private func buildFailedStepContext(

@@ -592,7 +592,7 @@ private fun LogsFilterBar(
             onClick = {
               onOpenViews()
               viewsOpen = true
-            }
+            },
           ) {
             Text("Saved views", fontSize = 11.sp)
           }
@@ -670,7 +670,7 @@ private fun LevelChip(level: LogLevel, isEnabled: Boolean, onToggle: () -> Unit)
           stateDescription = if (isEnabled) "Shown" else "Hidden"
           selected = isEnabled
           role = Role.Switch
-        }
+        },
   ) {
     Text(
       level.letter,

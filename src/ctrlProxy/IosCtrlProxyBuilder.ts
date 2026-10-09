@@ -47,6 +47,7 @@ import {
   type CtrlProxyCodesignVerifier,
   DefaultCtrlProxyCodesignVerifier,
 } from "../utils/ios-cmdline-tools/CtrlProxyCodesignVerifier";
+import { sortedReaddir, sortedReaddirEntries } from "../utils/io";
 
 /**
  * When truthy (`1`/`true`), a failed `codesign --verify`, a failed
@@ -461,7 +462,7 @@ export class IosCtrlProxyBuilder {
 
     const productsDir = path.join(this.config.derivedDataPath, "Build", "Products");
     try {
-      const files = await fs.readdir(productsDir);
+      const files = await sortedReaddir(productsDir);
       const xctestrunFiles = files.filter(
         (file) =>
           file.endsWith(".xctestrun") &&
@@ -577,7 +578,7 @@ export class IosCtrlProxyBuilder {
   public async cleanStaleXctestrunFiles(): Promise<void> {
     const productsDir = path.join(this.config.derivedDataPath, "Build", "Products");
     try {
-      const files = await fs.readdir(productsDir);
+      const files = await sortedReaddir(productsDir);
       const xctestrunFiles = files.filter(
         (file) =>
           file.endsWith(".xctestrun") &&
@@ -1968,7 +1969,7 @@ export class IosCtrlProxyBuilder {
       }
       let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
       try {
-        entries = await fs.readdir(current, { withFileTypes: true });
+        entries = await sortedReaddirEntries(current);
       } catch (error) {
         logger.warn(`CtrlProxy xctestrun directory scan failed: ${errorMessage(error)}`, error);
         continue;

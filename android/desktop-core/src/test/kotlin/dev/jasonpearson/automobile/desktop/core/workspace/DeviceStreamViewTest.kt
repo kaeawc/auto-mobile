@@ -275,7 +275,7 @@ class DeviceStreamViewTest {
 
       onNodeWithText("Screen Recording needs approval").assertIsDisplayed()
       onNodeWithText(
-          "Enable Custom Capture Helper in System Settings to discover and observe iOS Simulator windows."
+          "Enable Custom Capture Helper in System Settings to discover and observe iOS Simulator windows.",
         )
         .assertIsDisplayed()
       onNodeWithText("Open System Settings").performClick()
@@ -711,12 +711,15 @@ class DeviceStreamViewTest {
     assertTrue(noRelay.contains("Live mirroring unavailable"))
     assertTrue(
       noRelay.contains(
-        "This daemon has no video-stream relay. Update or restart the daemon to enable live mirroring."
-      )
+        "This daemon has no video-stream relay. Update or restart the daemon to enable live mirroring.",
+      ),
     )
     val refused =
       streamStatusHint(
-        VideoStreamState.Unavailable("No connected device with id ghost.", UnavailableCause.REFUSED)
+        VideoStreamState.Unavailable(
+          "No connected device with id ghost.",
+          UnavailableCause.REFUSED,
+        ),
       )
     assertTrue(refused.contains("Live mirroring refused"))
     assertTrue(refused.contains("No connected device with id ghost."))

@@ -378,7 +378,12 @@ jobs:
             files+=(
               /tmp/desktop/AutoMobile-${VERSION}-macos.dmg
               /tmp/desktop/AutoMobile-${VERSION}-linux.deb
+              "/tmp/desktop/AutoMobile-${VERSION}-linux.deb.sha256"
             )
+            # Checksum only: no release signing key is available to this job (the
+            # Maven GPG key id is malformed), so no detached .deb signature (#4726).
+            bash scripts/release/write-asset-checksum.sh \
+              "/tmp/desktop/AutoMobile-${VERSION}-linux.deb" >/dev/null
           fi
 
           # Use the GitHub Release API directly through gh. `gh release create`

@@ -45,7 +45,7 @@ class VideoRecordingClientTest {
           buildJsonObject {
             put("type", "text")
             put("text", bodyJson)
-          }
+          },
         )
       },
     )
@@ -137,7 +137,7 @@ class VideoRecordingClientTest {
         VideoRecordingSocketClient(socketPathValue = s.socketPath.toString())
           .getConfig()
           .evictedRecordingIds
-          .isEmpty()
+          .isEmpty(),
       )
     }
   }
@@ -150,7 +150,7 @@ class VideoRecordingClientTest {
     assertTrue(
       assertFailsWith<McpConnectionException> { client.getConfig() }
         .message!!
-        .contains("/tmp/no-video-am.sock")
+        .contains("/tmp/no-video-am.sock"),
     )
   }
 
@@ -161,7 +161,7 @@ class VideoRecordingClientTest {
     val client = FakeAutoMobileClient()
     client.callToolResult =
       toolResponse(
-        """{"action":"start","count":1,"recordings":[{"recordingId":"rec-1","filePath":"/tmp/rec-1.mp4"}]}"""
+        """{"action":"start","count":1,"recordings":[{"recordingId":"rec-1","filePath":"/tmp/rec-1.mp4"}]}""",
       )
 
     val recordings = McpVideoRecordingActions { client }.startRecording("emulator-5554")
@@ -180,7 +180,7 @@ class VideoRecordingClientTest {
     val delegate = FakeAutoMobileClient()
     delegate.callToolResult =
       toolResponse(
-        """{"action":"start","count":1,"recordings":[{"recordingId":"rec-1","filePath":"/tmp/rec-1.mp4"}]}"""
+        """{"action":"start","count":1,"recordings":[{"recordingId":"rec-1","filePath":"/tmp/rec-1.mp4"}]}""",
       )
     val client =
       object : AutoMobileClient by delegate {
@@ -229,7 +229,7 @@ class VideoRecordingClientTest {
     val client = FakeAutoMobileClient()
     client.callToolResult =
       toolResponse(
-        """{"action":"stop","count":1,"recordings":[{"recordingId":"rec-1","filePath":"/tmp/rec-1.mp4","segmentIndex":0}]}"""
+        """{"action":"stop","count":1,"recordings":[{"recordingId":"rec-1","filePath":"/tmp/rec-1.mp4","segmentIndex":0}]}""",
       )
 
     val result = McpVideoRecordingActions { client }.stopRecording("emulator-5554", "rec-1")
@@ -237,6 +237,22 @@ class VideoRecordingClientTest {
     assertTrue(!result.segmented)
     assertNull(result.manifestPath)
     assertEquals(1, result.recordings.size)
+  }
+
+  @Test
+  fun `a stop by recording id names no device so the daemon allocates none (#10978)`() {
+    val client = FakeAutoMobileClient()
+    client.callToolResult =
+      toolResponse(
+        """{"action":"stop","count":1,"recordings":[{"recordingId":"rec-1","filePath":"/tmp/rec-1.mp4"}]}""",
+      )
+
+    McpVideoRecordingActions { client }.stopRecording("emulator-5554", "rec-1", "session-a")
+
+    val arguments = client.toolCalls.last().arguments
+    assertNull(arguments["deviceId"])
+    assertEquals("rec-1", arguments["recordingId"]?.jsonPrimitive?.content)
+    assertEquals("session-a", arguments["sessionUuid"]?.jsonPrimitive?.content)
   }
 
   @Test
@@ -252,7 +268,7 @@ class VideoRecordingClientTest {
            {"recordingId":"rec-3","filePath":"/tmp/a/2.mp4","segmentIndex":2,"sessionId":"rec-1"}
          ]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     val result = McpVideoRecordingActions { client }.stopRecording("emulator-5554")
@@ -294,7 +310,7 @@ class VideoRecordingClientTest {
     val client = FakeAutoMobileClient()
     client.callToolResult =
       toolResponse(
-        """{"action":"stop","count":1,"segmented":true,"recordings":[{"recordingId":"rec-1","filePath":"/tmp/0.mp4","segmentIndex":0,"sessionId":"rec-1"}]}"""
+        """{"action":"stop","count":1,"segmented":true,"recordings":[{"recordingId":"rec-1","filePath":"/tmp/0.mp4","segmentIndex":0,"sessionId":"rec-1"}]}""",
       )
 
     val result = McpVideoRecordingActions { client }.stopRecording("emulator-5554")

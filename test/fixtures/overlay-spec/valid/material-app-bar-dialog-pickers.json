@@ -1,0 +1,88 @@
+{
+  "id": "alarm",
+  "window": { "placement": { "type": "fullscreen" } },
+  "state": {
+    "editing": false,
+    "saved": false,
+    "hour": 7,
+    "minute": 30,
+    "date": "2026-10-08",
+    "repeat": "weekdays",
+    "upload": 0.4
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "topAppBar",
+        "testTag": "bar",
+        "title": "Alarms",
+        "variant": "centerAligned",
+        "navigationIcon": { "icon": "menu", "label": "Menu" },
+        "actions": [
+          {
+            "icon": "settings",
+            "label": "Settings",
+            "onTap": [{ "type": "emit", "name": "settings" }]
+          }
+        ]
+      },
+      {
+        "type": "segmentedButton",
+        "testTag": "repeat",
+        "stateKey": "repeat",
+        "options": [
+          { "value": "once", "label": "Once" },
+          { "value": "weekdays", "label": "Weekdays" },
+          { "value": "daily", "label": "Daily" }
+        ]
+      },
+      { "type": "divider" },
+      { "type": "progress", "stateKey": "upload" },
+      { "type": "progress", "variant": "circular" },
+      { "type": "badge", "text": "3" },
+      { "type": "chip", "label": "Snooze", "variant": "suggestion" },
+      { "type": "chip", "label": "Work", "variant": "input" },
+      {
+        "type": "iconButton",
+        "icon": "delete",
+        "variant": "tonal",
+        "contentDescription": "Delete alarm"
+      },
+      {
+        "type": "fab",
+        "icon": "add",
+        "label": "New alarm",
+        "onTap": [{ "type": "setState", "key": "editing", "value": true }]
+      },
+      { "type": "fab", "icon": "edit", "size": "small" },
+      {
+        "type": "dialog",
+        "testTag": "edit",
+        "openWhen": { "key": "editing", "equals": true },
+        "icon": "alarm",
+        "title": "Edit alarm",
+        "text": "Set the time and date.",
+        "confirm": {
+          "label": "Save",
+          "onTap": [{ "type": "setState", "key": "saved", "value": true }]
+        },
+        "dismiss": { "label": "Cancel" },
+        "child": {
+          "type": "column",
+          "children": [
+            { "type": "timePicker", "hourKey": "hour", "minuteKey": "minute", "is24Hour": true },
+            { "type": "datePicker", "stateKey": "date" }
+          ]
+        }
+      },
+      {
+        "type": "snackbar",
+        "openWhen": { "key": "saved", "equals": true },
+        "text": "Alarm set for {hour}:{minute}",
+        "action": { "label": "Undo", "onTap": [{ "type": "emit", "name": "undo" }] },
+        "durationMs": 4000
+      }
+    ]
+  }
+}

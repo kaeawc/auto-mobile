@@ -3,8 +3,10 @@ import { logger } from "../utils/logger";
 
 /** What the watchdog observes about this daemon process. */
 export interface PrivateDaemonOrphanPort {
-  /** Current parent PID; 1 once the launching parent has exited and init adopted us. */
+  /** Current parent PID; changes (to 1, or to a subreaper's pid) once the launcher exits. */
   parentPid(): number;
+  /** The parent PID recorded when this daemon started: the launcher. */
+  launcherPid(): number;
   /** Open control-socket and auxiliary-socket connections and in-flight HTTP requests. */
   clientCount(): number;
   /**
@@ -30,18 +32,60 @@ export function resolvePrivateDaemonOrphanIdleMs(env: NodeJS.ProcessEnv = proces
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS;
 }
 
+/** A launcher that knows its own pid can pass it explicitly, which wins over the parent pid. */
+export const DAEMON_LAUNCHER_PID_ENV = "AUTOMOBILE_DAEMON_LAUNCHER_PID";
+
 /**
- * A harness-style private daemon (a test, lane, or acceptance run) isolates both
- * its control socket and its auxiliary socket directory. A user's long-lived
- * daemon that merely uses a custom control socket is never subject to the
- * watchdog, nor is the resident daemon on the default socket.
+ * The launcher pid the orphan watchdog compares the parent against: the launcher-provided
+ * `AUTOMOBILE_DAEMON_LAUNCHER_PID` when it is a valid pid, else the parent pid captured at
+ * process entry (#11041).
+ */
+export function resolveLauncherPid(
+  entryParentPid: number,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = env[DAEMON_LAUNCHER_PID_ENV]?.trim() ?? "";
+  const parsed = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed > 1 ? parsed : entryParentPid;
+}
+
+/** Explicit harness marker: `1` arms the orphan watchdog, `0` opts a daemon out of it. */
+export const HARNESS_PRIVATE_DAEMON_ENV = "AUTOMOBILE_HARNESS_PRIVATE_DAEMON";
+
+/**
+ * A harness-style private daemon (a test, lane, or acceptance run) is one whose
+ * launcher says so (`AUTOMOBILE_HARNESS_PRIVATE_DAEMON=1`), or, failing an explicit
+ * marker, one that both EXPLICITLY overrides its control socket
+ * (`AUTOMOBILE_DAEMON_SOCKET_PATH`) to a non-default path and isolates its
+ * auxiliary socket directory -- the shape of every ad-hoc private daemon behind
+ * #10497. The effective socket path alone is not evidence: since #10881 any
+ * `AUTOMOBILE_AUX_SOCKET_DIR` daemon gets a suffixed control socket, so a user's
+ * long-lived daemon configured with only an aux dir must not be shut down 15
+ * minutes after its launcher exits (#10906). Neither is a user's daemon that
+ * merely uses a custom control socket, nor the resident daemon on the default one.
  */
 export function isHarnessPrivateDaemon(
   socketPath: string,
   defaultSocketPath: string,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return socketPath !== defaultSocketPath && (env.AUTOMOBILE_AUX_SOCKET_DIR?.trim() ?? "") !== "";
+  const marker = env[HARNESS_PRIVATE_DAEMON_ENV]?.trim();
+  if (marker === "1" || marker === "0") {
+    return marker === "1";
+  }
+  const explicitSocket = firstNonBlank(env, [
+    "AUTOMOBILE_DAEMON_SOCKET_PATH",
+    "AUTO_MOBILE_DAEMON_SOCKET_PATH",
+  ]);
+  return (
+    explicitSocket !== "" &&
+    socketPath !== defaultSocketPath &&
+    firstNonBlank(env, ["AUTOMOBILE_AUX_SOCKET_DIR"]) !== ""
+  );
+}
+
+function firstNonBlank(env: NodeJS.ProcessEnv, keys: string[]): string {
+  return keys.map((key) => env[key]?.trim() ?? "").find((value) => value !== "") ?? "";
 }
 
 /**
@@ -80,6 +124,16 @@ export class PrivateDaemonOrphanWatchdog {
     }
   }
 
+  /**
+   * The launcher is gone once init adopted us or any other process did: under a
+   * Linux subreaper (systemd --user, container inits) the new parent is not pid 1
+   * but is still not the launcher we recorded at start.
+   */
+  private isOrphaned(): boolean {
+    const parent = this.port.parentPid();
+    return parent === INIT_PID || parent !== this.port.launcherPid();
+  }
+
   /** One check; returns true when it requested shutdown. */
   check(): boolean {
     if (this.shutdownRequested) {
@@ -90,7 +144,7 @@ export class PrivateDaemonOrphanWatchdog {
       this.lastClientActivityCount !== null && activityCount !== this.lastClientActivityCount;
     this.lastClientActivityCount = activityCount;
     const orphanedAndIdle =
-      this.port.parentPid() === INIT_PID &&
+      this.isOrphaned() &&
       !clientSinceLastCheck &&
       this.port.clientCount() === 0 &&
       this.port.liveSessionCount() === 0;

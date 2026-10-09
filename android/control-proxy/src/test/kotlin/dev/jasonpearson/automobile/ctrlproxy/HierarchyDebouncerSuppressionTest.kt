@@ -137,7 +137,7 @@ class HierarchyDebouncerSuppressionTest {
               initialEventWaitMs = 0,
             )
           }
-            .exceptionOrNull()
+            .exceptionOrNull(),
         )
       }
     try {
@@ -152,7 +152,7 @@ class HierarchyDebouncerSuppressionTest {
                 initialEventWaitMs = 0,
               )
             }
-              .exceptionOrNull()
+              .exceptionOrNull(),
           )
         }
       try {
@@ -213,7 +213,7 @@ class HierarchyDebouncerSuppressionTest {
             initialEventWaitMs = 0,
           )
         }
-          .exceptionOrNull()
+          .exceptionOrNull(),
       )
     }
     try {

@@ -442,7 +442,10 @@ describe("requests during device session release", () => {
       const error = await admission;
       expect(error).toBeInstanceOf(TerminalSessionError);
       expect(assignments).toBe(0);
-      expect(await handleDaemonRequest(request("daemon/heartbeat"), state)).toEqual(notFound);
+      expect(await handleDaemonRequest(request("daemon/heartbeat"), state)).toEqual({
+        ...notFound,
+        releaseReason: reason,
+      });
       expect(await handleDaemonRequest(request("daemon/releaseSession"), state)).toEqual(
         alreadyReleased,
       );
@@ -536,7 +539,10 @@ describe("requests during device session release", () => {
           expect(h.manager.isAdmittedForAutomation(session)).toBe(false);
           expect(h.manager.getSession(sessionId)).toBeNull();
           expect(h.manager.getSessionForDevice(session.assignedDevice)).toBeNull();
-          expect(await h.request("daemon/heartbeat")).toEqual(notFound);
+          expect(await h.request("daemon/heartbeat")).toEqual({
+            ...notFound,
+            releaseReason: "explicit-release",
+          });
           expect(await h.persistence.getSession?.(sessionId)).toMatchObject({
             status: "released",
             release_reason: "explicit-release",

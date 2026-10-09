@@ -128,7 +128,7 @@ internal class AutoMobileNetworkInterceptor(
               requestBody = reqBody,
               responseBody = if (bodiesEnabled) mockRule.responseBody else null,
               contentType = mockRule.contentType,
-            )
+            ),
           )
         }
         return mockedResponse
@@ -167,7 +167,7 @@ internal class AutoMobileNetworkInterceptor(
             error = e.message,
             requestHeaders = reqHeaders,
             requestBody = reqBody,
-          )
+          ),
         )
       }
       throw e
@@ -303,7 +303,7 @@ internal class AutoMobileNetworkInterceptor(
               error = errorMsg,
               requestHeaders = reqHeaders,
               requestBody = reqBody,
-            )
+            ),
           )
         }
         return Response.Builder()
@@ -331,7 +331,7 @@ internal class AutoMobileNetworkInterceptor(
               error = errorMsg,
               requestHeaders = reqHeaders,
               requestBody = reqBody,
-            )
+            ),
           )
         }
         throw when (sim.errorType) {

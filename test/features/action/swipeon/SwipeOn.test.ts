@@ -11,7 +11,7 @@ import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeWindow } from "../../../fakes/FakeWindow";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
-import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
+import { ScriptedElementLookup } from "../../../fakes/ScriptedElementLookup";
 import type { Element, ViewHierarchyResult } from "../../../../src/models";
 
 describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
@@ -25,7 +25,7 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
   let fakeTimer: FakeTimer;
   let fakeAccessibilityDetector: FakeAccessibilityDetector;
   let fakeCtrlProxy: FakeCtrlProxy;
-  let finder: FakeElementFinder;
+  let lookup: ScriptedElementLookup;
   let scrollResolver: FakeScrollElementResolver;
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
 
@@ -86,10 +86,10 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     fakeWindow.configureCachedActiveWindow(null);
-    finder = new FakeElementFinder();
-    scrollResolver = new FakeScrollElementResolver(finder);
+    lookup = new ScriptedElementLookup();
+    scrollResolver = new FakeScrollElementResolver(lookup);
     scrollResolver.setNextScrollableContainer(container);
-    finder.nextElementByResourceId = container;
+    lookup.nextElementByResourceId = container;
   });
 
   afterEach(() => {
@@ -163,7 +163,7 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
     fakeObserveScreen.setObserveResult(() =>
       scrolledForward() ? createObserveResult(TARGET_REVEALED) : createObserveResult("top"),
     );
-    finder.findElementByText = (hierarchy: ViewHierarchyResult, _text: string) =>
+    lookup.findElementByText = (hierarchy: ViewHierarchyResult, _text: string) =>
       hierarchyShowsTarget(hierarchy) ? target : null;
 
     const swipeOn = createSwipeOn();

@@ -6,6 +6,7 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { provisionCancellationOutcomes } from "../../src/server/provisionCancellationOutcomes";
 import { DAEMON_RESPONSE_GRACE_MS, DaemonClient } from "../../src/daemon/client";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
@@ -176,6 +177,7 @@ interface FakeToolCall {
   name: string;
   signal: AbortSignal | undefined;
   settle: (value: unknown) => void;
+  arguments?: Record<string, unknown>;
 }
 
 function createFakeDaemonState() {
@@ -347,6 +349,152 @@ describe("UnixSocketServer cancel frame (issue #6384)", () => {
       );
     } finally {
       await client.close();
+    }
+  });
+});
+
+describe("UnixSocketServer provisionDevice cancel reply (issue #11074)", () => {
+  let socketPath: string;
+  let server: UnixSocketServer;
+  let serverTimer: FakeTimer;
+  let calls: FakeToolCall[];
+  let callsChanged: Condition;
+
+  beforeEach(async () => {
+    socketPath = tempSocketPath("daemon-provision-cancel");
+    calls = [];
+    callsChanged = new Condition();
+    serverTimer = new FakeTimer();
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(),
+      serverTimer,
+    );
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: (
+        params: { name: string; arguments?: Record<string, unknown> },
+        _schema: unknown,
+        options?: { signal?: AbortSignal },
+      ) =>
+        new Promise((resolve, reject) => {
+          const signal = options?.signal;
+          calls.push({ name: params.name, signal, settle: resolve, arguments: params.arguments });
+          signal?.addEventListener("abort", () => {
+            reject(signal.reason);
+            callsChanged.notify();
+          });
+          callsChanged.notify();
+        }),
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+    await removeSocketFile(socketPath);
+  });
+
+  async function cancelProvision(): Promise<DaemonResponse> {
+    const socket = new Socket();
+    const responses = new Map<string, DaemonResponse>();
+    const responded = new Condition();
+    await new Promise<void>((resolve) => socket.connect(socketPath, resolve));
+    let buffer = "";
+    socket.on("data", (data) => {
+      buffer += data.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines.filter((l) => l.trim())) {
+        const response: DaemonResponse = JSON.parse(line);
+        responses.set(response.id, response);
+      }
+      responded.notify();
+    });
+    try {
+      socket.write(
+        JSON.stringify({
+          id: "prov",
+          type: "mcp_request",
+          method: "tools/call",
+          params: { name: "provisionDevice", arguments: {} },
+        } satisfies DaemonRequest) + "\n",
+      );
+      await callsChanged.until(() => calls.length === 1, "the provision forward to start");
+      socket.write(
+        JSON.stringify({
+          id: "cancel-prov",
+          type: "daemon_request",
+          method: DAEMON_CANCEL_REQUEST_METHOD,
+          params: { requestId: "prov" },
+        } satisfies DaemonRequest) + "\n",
+      );
+      await callsChanged.until(() => calls[0].signal?.aborted === true, "the forward to abort");
+      // The handler finishes its rollback after the daemon abandoned the request, and publishes
+      // under the per-call key the daemon forwarded with it (#11065: no operationId).
+      const callKey = calls[0].arguments?.__mcpLiveDeadlineKey;
+      expect(typeof callKey).toBe("string");
+      await callsChanged.until(
+        () => provisionCancellationOutcomes.isAwaiting(callKey as string),
+        "the daemon to await the handler result",
+      );
+      provisionCancellationOutcomes.publish(callKey as string, {
+        isError: true,
+        content: [{ type: "text", text: '{"error":{"code":"request_cancelled"},"recovery":{}}' }],
+      });
+      await responded.until(() => responses.has("prov"), "the provision answer");
+      return responses.get("prov")!;
+    } finally {
+      socket.destroy();
+    }
+  }
+
+  test("the reply to a cancelled provisionDevice carries the handler's request_cancelled result", async () => {
+    const response = await cancelProvision();
+
+    expect(response.success).toBe(true);
+    expect(response.result.content[0].text).toContain("request_cancelled");
+  });
+
+  test("without a handler result the reply stays the generic abandonment error", async () => {
+    const socket = new Socket();
+    await new Promise<void>((resolve) => socket.connect(socketPath, resolve));
+    let received = "";
+    const responded = new Condition();
+    socket.on("data", (data) => {
+      received += data.toString();
+      responded.notify();
+    });
+    try {
+      socket.write(
+        JSON.stringify({
+          id: "prov2",
+          type: "mcp_request",
+          method: "tools/call",
+          params: { name: "provisionDevice", arguments: {} },
+        }) + "\n",
+      );
+      await callsChanged.until(() => calls.length === 1, "the provision forward to start");
+      socket.write(
+        JSON.stringify({
+          id: "cancel-prov2",
+          type: "daemon_request",
+          method: DAEMON_CANCEL_REQUEST_METHOD,
+          params: { requestId: "prov2" },
+        }) + "\n",
+      );
+      await callsChanged.until(() => calls[0].signal?.aborted === true, "the forward to abort");
+      await responded.until(() => received.includes("cancel-prov2"), "the cancel ack");
+      serverTimer.advanceTime(60_000);
+      await responded.until(() => received.includes('"id":"prov2"'), "the provision answer");
+      expect(received).toContain("cancelled by its client");
+    } finally {
+      socket.destroy();
     }
   });
 });

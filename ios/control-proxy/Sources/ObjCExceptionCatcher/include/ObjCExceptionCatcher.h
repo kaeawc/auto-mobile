@@ -117,9 +117,20 @@ FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizePinch(
 );
 
 /// Single touch on an explicit display; unavailable symbols permit a public-coordinate fallback.
+/// The finger presses for pressDuration, moves for moveDuration, then rests at the end point
+/// for holdDuration before lifting (a drag's drop hold).
 FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeDisplayTouch(
     CGFloat startX, CGFloat startY, CGFloat endX, CGFloat endY,
-    NSTimeInterval pressDuration, NSTimeInterval moveDuration,
+    NSTimeInterval pressDuration, NSTimeInterval moveDuration, NSTimeInterval holdDuration,
+    unsigned long long displayID, NSInteger interfaceOrientation,
+    BOOL *_Nullable symbolsUnavailable, NSString *_Nullable *_Nullable errorMessage
+);
+
+/// Two-finger pinch on an explicit display. The caller supplies display-space endpoints (already
+/// mapped from observed space), so the rotated inner panel of an unfolded iPhone Duo receives the
+/// pinch axis the host observed. Unavailable symbols permit the main-screen pinch fallback.
+FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeDisplayPinch(
+    ObjCPinchPoints points, NSTimeInterval duration,
     unsigned long long displayID, NSInteger interfaceOrientation,
     BOOL *_Nullable symbolsUnavailable, NSString *_Nullable *_Nullable errorMessage
 );

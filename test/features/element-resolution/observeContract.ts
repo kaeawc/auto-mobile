@@ -9,12 +9,6 @@ import type {
 } from "../../../src/models";
 import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
-import { stableNodeSelectorForElement } from "../../../src/features/talkback/TalkBackTapStrategy";
-import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
-import {
-  hasVisibleScreenPart,
-  screenSizeForOffscreenCheck,
-} from "../../../src/features/utility/ElementGeometry";
 import type { ElementSelectionStrategy } from "../../../src/models/ElementSelectionStrategy";
 
 export interface ContractCapture {
@@ -36,7 +30,6 @@ export interface ContractResolution {
   candidates: Element[];
   chosen: Element | null;
 }
-/** S2 supplies a real resolver adapter here; legacy is only the reference side. */
 export interface ContractResolver {
   resolve(capture: ContractCapture, query: ContractQuery): ContractResolution;
 }
@@ -204,119 +197,12 @@ export function publicTextCases(cases: ContractCase[]): ContractCase[] {
   return [...unique.values()];
 }
 
-/**
- * The retired DefaultElementSelector's pick over finder candidates (#10268): drop matches with no
- * on-screen part, then honour an explicit index, else take the first or use the injected RNG for
- * "random". Kept only so the legacy reference side of this migration contract stays fixed.
- */
-function pickLegacy(
-  candidates: Element[],
-  hierarchy: ViewHierarchyResult,
-  query: ContractQuery,
-  random: () => number,
-): Element | null {
-  const screen = screenSizeForOffscreenCheck(hierarchy);
-  const visible = candidates.filter((element) => hasVisibleScreenPart(element.bounds, screen));
-  if (query.index !== undefined) {
-    return visible[query.index] ?? null;
-  }
-  if (visible.length === 0) {
-    return null;
-  }
-  const raw = query.strategy === "random" ? Math.floor(random() * visible.length) : 0;
-  return visible[Number.isFinite(raw) ? Math.min(visible.length - 1, Math.max(0, raw)) : 0];
-}
-
-export class LegacyContractResolver implements ContractResolver {
-  private readonly finder = new DefaultElementFinder();
-  constructor(private readonly random: () => number = () => 0) {}
-  resolve({ hierarchy }: ContractCapture, query: ContractQuery): ContractResolution {
-    const candidates = this.candidates(hierarchy, query);
-    return { candidates, chosen: pickLegacy(candidates, hierarchy, query, this.random) };
-  }
-  private candidates(hierarchy: ViewHierarchyResult, query: ContractQuery): Element[] {
-    const { value, container } = query;
-    if (query.kind === "elementId") {
-      return query.sibling
-        ? this.finder.findClickableSiblingsOfResourceId(hierarchy, value, container, false)
-        : this.finder.findElementsByResourceId(hierarchy, value, container, false, false);
-    }
-    if (query.kind === "testTag") {
-      return this.finder.findElementsByTestTag(hierarchy, value, container, false);
-    }
-    if (query.sibling) {
-      return this.finder.findClickableSiblingsOfText(hierarchy, value, container, true, false);
-    }
-    return this.finder.findElementsByText(
-      hierarchy,
-      value,
-      container,
-      true,
-      false,
-      false,
-      true,
-      query.intent ?? "tap",
-    );
-  }
-}
-
 export function boundsKey(element: Element | null): string | null {
   if (!element) {
     return null;
   }
   const { left, top, right, bottom } = element.bounds;
   return [left, top, right, bottom].join(",");
-}
-
-/** Compare chosen target AND ordered candidate identity, so matching counts cannot hide drift. */
-export function compareResolvers(
-  cases: ContractCase[],
-  reference: ContractResolver,
-  candidate: ContractResolver,
-): string[] {
-  return cases
-    .filter(({ capture, query }) => {
-      const signature = (resolver: ContractResolver) => {
-        const result = resolver.resolve(capture, query);
-        const identity = (element: Element | null) =>
-          element
-            ? [
-                element["resource-id"],
-                element["view-id"],
-                boundsKey(element),
-                element.text,
-                element["content-desc"],
-                element["ios-accessibility-label"],
-                element.value,
-                element.class,
-                element.className,
-                element["hierarchy-source"],
-                element["test-tag"],
-                stableNodeSelectorForElement(element),
-                element.clickable,
-                element.scrollable,
-                element["long-clickable"],
-                element.longClickable,
-                element.checkable,
-                element.checked,
-                element.actions,
-                element.focusable,
-                element["input-type"],
-                element.focused,
-                element.isFocused,
-                element["has-keyboard-focus"],
-                element["accessibility-focused"],
-                element.accessibilityFocused,
-              ]
-            : null;
-        return JSON.stringify({
-          chosen: identity(result.chosen),
-          candidates: result.candidates.map(identity),
-        });
-      };
-      return signature(reference) !== signature(candidate);
-    })
-    .map(({ key }) => key);
 }
 
 /** Finding-keyed exact cases, never whole-fixture exemptions. Stale entries must be removed. */

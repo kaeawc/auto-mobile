@@ -1,4 +1,7 @@
 import { AdbCommandTimeoutError } from "../utils/android-cmdline-tools/AdbClient";
+import { createDefaultIosBootInstrumentation } from "../features/iosSimFleet/defaultIosBootInstrumentation";
+import type { IosBootInstrumentation } from "../features/iosSimFleet/IosBootInstrumentation";
+import type { SimulatorWorkloadProfile } from "../models/DeviceResourceReconciliation";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 export type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
@@ -9,7 +12,7 @@ import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClien
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import {
-  DevicectlDeviceLister,
+  getSharedDevicectlDeviceLister,
   type IosPhysicalDeviceLister,
   type PhysicalIosDeviceDiscovery,
 } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
@@ -181,6 +184,8 @@ export interface DeviceDestroyOptions {
 /** Options applied only when starting a new virtual-device process. */
 export interface DeviceStartOptions {
   cameraPosterPath?: string;
+  /** iOS only: the resource profile this boot is for, so boot durations compare per profile. */
+  resourceProfile?: SimulatorWorkloadProfile;
 }
 
 /**
@@ -410,6 +415,8 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private readonly physicalIosDevices: IosPhysicalDeviceLister;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   private readonly timer: Pick<Timer, "now">;
+  private iosBootInstrumentationOverride: IosBootInstrumentation | null = null;
+  private defaultIosBootInstrumentation: IosBootInstrumentation | null = null;
 
   /**
    * Create a PlatformDeviceManager instance
@@ -429,9 +436,24 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     this.adb = adb || defaultAdbClientFactory.create(null);
     this.simctl = simctl || new SimCtlClient();
     this.emulator = emulator || new AndroidEmulatorClient();
-    this.physicalIosDevices = physicalIosDevices || new DevicectlDeviceLister();
+    this.physicalIosDevices = physicalIosDevices || getSharedDevicectlDeviceLister();
     this.lifecycleCoordinator = lifecycleCoordinator;
     this.timer = timer;
+  }
+
+  /** Replaces boot-duration recording and capacity gating for iOS boots (tests, embedders). */
+  withIosBootInstrumentation(instrumentation: IosBootInstrumentation): this {
+    this.iosBootInstrumentationOverride = instrumentation;
+    return this;
+  }
+
+  /** Per-manager default: durations recorded in memory; the capacity gate is env-flag opt-in. */
+  private get iosBootInstrumentation(): IosBootInstrumentation {
+    this.defaultIosBootInstrumentation ??= createDefaultIosBootInstrumentation({
+      simctl: this.simctl,
+      timer: defaultTimer,
+    });
+    return this.iosBootInstrumentationOverride ?? this.defaultIosBootInstrumentation;
   }
 
   private async canDiscoverIosLocally(signal?: AbortSignal): Promise<boolean> {
@@ -1065,12 +1087,30 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           );
         }
         return {
-          process: await this.simctl.startSimulator(device.deviceId, timeoutMs),
+          process: await this.bootIosSimulator(device.deviceId, device, timeoutMs, options),
           outcome: "launched",
         };
       default:
         throw new ActionableError("Unknown platform");
     }
+  }
+
+  private bootIosSimulator(
+    udid: string,
+    device: DeviceInfo,
+    timeoutMs: number,
+    options: DeviceStartOptions,
+  ): Promise<ChildProcess> {
+    return this.iosBootInstrumentation.run(
+      {
+        udid,
+        runtime: device.runtimeId,
+        profile: options.resourceProfile,
+        timeoutMs,
+        signal: getAbortSignal(),
+      },
+      (remainingMs) => this.simctl.startSimulator(udid, remainingMs),
+    );
   }
 
   /**

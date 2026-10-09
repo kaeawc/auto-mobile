@@ -1136,6 +1136,44 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertEqual(resolved.height, 852)
     }
 
+    func testResolveScreenDimensions_swapsDuoRootWhenListRowsExtendPastThePanelBottom() {
+        // Frames captured from the unfolded iPhone Duo Playground Demos list (#8379): the
+        // collection view is exactly the swapped frame and its last row sits below it.
+        let root = ElementBounds(left: 0, top: 0, right: 669, bottom: 951)
+        let list = UIElementInfo(
+            bounds: ElementBounds(left: 0, top: 0, right: 951, bottom: 669),
+            node: [UIElementInfo(bounds: ElementBounds(left: 20, top: 651, right: 867, bottom: 729))]
+        )
+        let navigationBar = UIElementInfo(bounds: ElementBounds(left: 0, top: 24, right: 951, bottom: 82))
+        let resolved = ElementLocator.resolveScreenDimensions(
+            rootBounds: root, fallbackWidth: 466, fallbackHeight: 678, elements: [navigationBar, list]
+        )
+        XCTAssertEqual(resolved.width, 951)
+        XCTAssertEqual(resolved.height, 669)
+    }
+
+    func testResolveScreenDimensions_keepsPortraitWhenWideChildIsNotExactlySwapped() {
+        let root = ElementBounds(left: 0, top: 0, right: 669, bottom: 951)
+        let carousel = UIElementInfo(bounds: ElementBounds(left: 0, top: 0, right: 951, bottom: 700))
+        let row = UIElementInfo(bounds: ElementBounds(left: 0, top: 800, right: 669, bottom: 900))
+        let resolved = ElementLocator.resolveScreenDimensions(
+            rootBounds: root, fallbackWidth: 669, fallbackHeight: 951, elements: [carousel, row]
+        )
+        XCTAssertEqual(resolved.width, 669)
+        XCTAssertEqual(resolved.height, 951)
+    }
+
+    func testResolveScreenDimensions_exactSwappedChildStillRejectsOverflowPastSwappedRightEdge() {
+        let root = ElementBounds(left: 0, top: 0, right: 669, bottom: 951)
+        let swapped = UIElementInfo(bounds: ElementBounds(left: 0, top: 0, right: 951, bottom: 669))
+        let wide = UIElementInfo(bounds: ElementBounds(left: 0, top: 700, right: 1200, bottom: 760))
+        let resolved = ElementLocator.resolveScreenDimensions(
+            rootBounds: root, fallbackWidth: 669, fallbackHeight: 951, elements: [swapped, wide]
+        )
+        XCTAssertEqual(resolved.width, 669)
+        XCTAssertEqual(resolved.height, 951)
+    }
+
     func testResolveScreenDimensions_usesRootBoundsWithNonZeroOrigin() {
         let root = ElementBounds(left: 10, top: 20, right: 410, bottom: 820)
         let resolved = ElementLocator.resolveScreenDimensions(
@@ -1166,6 +1204,48 @@ final class ElementLocatorTests: XCTestCase {
         )
         XCTAssertEqual(resolved.width, 402)
         XCTAssertEqual(resolved.height, 874)
+    }
+
+    // MARK: - Empty editable value (#9078)
+
+    func testEnteredTextValue_emptyEditableEmitsExplicitEmptyString() {
+        XCTAssertEqual(
+            ElementLocator.enteredTextValue(rawValue: "", isTextInput: true, isPassword: false),
+            ""
+        )
+    }
+
+    func testEnteredTextValue_unreadableEditableIsOmitted() {
+        XCTAssertNil(
+            ElementLocator.enteredTextValue(rawValue: nil, isTextInput: true, isPassword: false)
+        )
+    }
+
+    func testEnteredTextValue_nonEmptyEditableIsPassedThrough() {
+        XCTAssertEqual(
+            ElementLocator.enteredTextValue(rawValue: "draft", isTextInput: true, isPassword: false),
+            "draft"
+        )
+    }
+
+    func testEnteredTextValue_nonEditableEmptyValueIsOmitted() {
+        XCTAssertNil(
+            ElementLocator.enteredTextValue(rawValue: "", isTextInput: false, isPassword: false)
+        )
+        XCTAssertNil(
+            ElementLocator.enteredTextValue(rawValue: "1", isTextInput: false, isPassword: false)
+        )
+    }
+
+    func testEnteredTextValue_secureFieldNeverExposesContentOrEmptiness() {
+        XCTAssertNil(
+            ElementLocator.enteredTextValue(rawValue: "", isTextInput: true, isPassword: true)
+        )
+        let masked = ElementLocator.enteredTextValue(
+            rawValue: "hunter2", isTextInput: true, isPassword: true
+        )
+        XCTAssertEqual(masked, "•••••••")
+        XCTAssertFalse(masked?.contains("hunter2") ?? true)
     }
 
     // MARK: - Typed text input fallback (#4644)

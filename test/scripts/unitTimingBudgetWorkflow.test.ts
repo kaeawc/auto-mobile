@@ -21,7 +21,7 @@ const callers = readdirSync(workflowDir)
 describe("unit timing validator workflow budgets", () => {
   test("discovers both existing timing gates", () => {
     expect(callers.map(({ file, id }) => `${file}:${id}`)).toContain(
-      "pull_request.yml:node-unit-timing-budget",
+      "pull_request.yml:ts-build-and-test",
     );
     expect(callers.map(({ file, id }) => `${file}:${id}`)).toContain("merge.yml:node-unit-tests");
   });
@@ -60,8 +60,40 @@ describe("unit timing validator workflow budgets", () => {
   }
 });
 
-const budgetSteps =
-  loadJobs(".github/workflows/pull_request.yml")["node-unit-timing-budget"].steps ?? [];
+const prJobs = loadJobs(".github/workflows/pull_request.yml");
+// The required Ubuntu job is the one Linux unit run per PR (#10893).
+const budgetSteps = prJobs["ts-build-and-test"].steps ?? [];
+
+test("timing budget runs on the leg that produced the reports, not a separate job", () => {
+  // A separate job cost a runner slot, queue wait, checkout and bun install
+  // per PR just to download these JUnit reports.
+  expect(prJobs["node-unit-timing-budget"]).toBeUndefined();
+  // No other PR job runs the timing validator (the Windows unit lane is in
+  // mcp-build-and-test, #10894).
+  expect(
+    Object.entries(prJobs)
+      .filter(([id]) => id !== "ts-build-and-test")
+      .some(([, job]) =>
+        (job.steps ?? []).some((step) =>
+          step.run?.includes("scripts/validate-bun-test-timings.sh"),
+        ),
+      ),
+  ).toBe(false);
+  const laneIndex = budgetSteps.findIndex((step) =>
+    step.run?.includes("bash scripts/test-ts.sh unit"),
+  );
+  const enforceIndex = budgetSteps.findIndex((step) =>
+    step.run?.includes("scripts/validate-bun-test-timings.sh"),
+  );
+  const enforce = budgetSteps[enforceIndex];
+  expect(laneIndex).toBeGreaterThanOrEqual(0);
+  expect(enforceIndex).toBeGreaterThan(laneIndex);
+  expect(enforce?.if).toBeUndefined();
+  expect(enforce?.env?.BUN_TEST_TIMING_REPORT_DIR).toBe(
+    budgetSteps[laneIndex].env?.AUTOMOBILE_UNIT_JUNIT_DIR,
+  );
+  expect(enforce?.env?.BUN_TEST_TIMING_BASE_REF).toBe("${{ github.event.pull_request.base.sha }}");
+});
 
 test("timing budget uploads its summary after enforcement even on failure", () => {
   const enforceIndex = budgetSteps.findIndex((step) =>

@@ -1,0 +1,406 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "components": {
+      "block": {
+        "root": {
+          "type": "column",
+          "children": [
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            },
+            {
+              "type": "spacer"
+            }
+          ]
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        },
+        {
+          "type": "use",
+          "component": "block"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[19] (use block) → components.block.root.children[79]",
+  "expectedMessage": "Expanded node limit exceeded"
+}

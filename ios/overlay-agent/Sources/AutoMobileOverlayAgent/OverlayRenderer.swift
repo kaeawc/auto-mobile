@@ -19,19 +19,55 @@ extension EnvironmentValues {
     }
 }
 
+private struct PaletteKey: EnvironmentKey {
+    static let defaultValue = OverlayPalette.make(theme: nil, systemDark: false)
+}
+
+extension EnvironmentValues {
+    /// The active spec theme's resolved palette; the baseline when the spec has no `theme`.
+    var overlayPalette: OverlayPalette {
+        get { self[PaletteKey.self] }
+        set { self[PaletteKey.self] = newValue }
+    }
+}
+
+private struct TypographyKey: EnvironmentKey {
+    static let defaultValue = OverlayTypography.standard
+}
+
+private struct ShapesKey: EnvironmentKey {
+    static let defaultValue = OverlayShapes.standard
+}
+
+extension EnvironmentValues {
+    /// The active spec theme's type scale and corner scale; Material 3 stock when it has none.
+    var overlayTypography: OverlayTypography {
+        get { self[TypographyKey.self] }
+        set { self[TypographyKey.self] = newValue }
+    }
+
+    var overlayShapes: OverlayShapes {
+        get { self[ShapesKey.self] }
+        set { self[ShapesKey.self] = newValue }
+    }
+}
+
 extension Color {
+    init(_ rgba: OverlayRGBA) {
+        self.init(.sRGB, red: rgba.red, green: rgba.green, blue: rgba.blue, opacity: rgba.alpha)
+    }
+
     /// `#RRGGBB` or `#AARRGGBB`, matching the spec's Android-style hex.
     init?(hex: String?) {
-        guard let hex, hex.hasPrefix("#"), let value = UInt64(hex.dropFirst(), radix: 16) else { return nil }
-        let digits = hex.count - 1
-        let alpha = digits == 8 ? Double((value >> 24) & 0xFF) / 255 : 1
-        self.init(
-            .sRGB,
-            red: Double((value >> 16) & 0xFF) / 255,
-            green: Double((value >> 8) & 0xFF) / 255,
-            blue: Double(value & 0xFF) / 255,
-            opacity: alpha
-        )
+        guard let rgba = OverlayRGBA(hex: hex) else { return nil }
+        self.init(rgba)
+    }
+}
+
+extension OverlayPalette {
+    /// A colour field as a hex literal or a Material role name from the theme; nil if neither.
+    func color(_ spec: String?) -> Color? {
+        resolve(spec).map { Color($0) }
     }
 }
 
@@ -49,6 +85,11 @@ func swiftUIAlignment(_ name: String?) -> Alignment {
     }
 }
 
+/// SF Symbol for a built-in (Material) icon name; unknown names draw a placeholder.
+func overlaySymbol(_ name: String?, fallback: String = "questionmark.square") -> String {
+    name.flatMap { sfSymbols[$0] } ?? fallback
+}
+
 private let sfSymbols: [String: String] = [
     "home": "house", "search": "magnifyingglass", "settings": "gearshape", "person": "person",
     "favorite": "heart", "add": "plus", "close": "xmark", "check": "checkmark",
@@ -61,17 +102,87 @@ private let sfSymbols: [String: String] = [
     "pause": "pause.fill", "stop": "stop.fill", "mail": "envelope", "phone": "phone",
     "location_on": "mappin.and.ellipse", "calendar_today": "calendar", "visibility": "eye",
     "lock": "lock", "logout": "rectangle.portrait.and.arrow.right",
+    "alarm": "alarm", "schedule": "clock", "event": "calendar", "today": "calendar",
+    "remove": "minus", "expand_more": "chevron.down", "expand_less": "chevron.up",
+    "more_horiz": "ellipsis", "account_circle": "person.crop.circle", "send": "paperplane",
+    "bookmark": "bookmark", "thumb_up": "hand.thumbsup", "photo_camera": "camera",
+    "image": "photo", "music_note": "music.note", "wifi": "wifi", "sort": "arrow.up.arrow.down",
+    "filter_list": "line.3.horizontal.decrease", "content_copy": "doc.on.doc",
 ]
 
 struct NodeView: View {
     let node: OverlayNode
     @ObservedObject var model: OverlayModel
+    /// Dialogs and snackbars draw nothing in place; `OverlayModalLayer` draws them with this set.
+    var presentedAsModal = false
+    /// Anchored nodes draw nothing in place; `OverlayAnchorLayer` draws them with this set (#10803).
+    var anchorPlaced = false
+    /// A `cover` anchor's size, which replaces the authored width and height.
+    var coverSize: CGSize?
+    /// Set by a parent that lays its children out through `OverlayNode.drawnChildren`.
+    var inStackSlot = false
     @Environment(\.pagerContext) private var pager
+    @Environment(\.overlayPalette) private var palette
+    @Environment(\.overlayTypography) private var typography
+    @Environment(\.overlayShapes) private var shapes
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        if isVisible {
-            styled(content)
+        // A node that draws nothing here (hidden, anchored elsewhere, a modal not yet in its layer)
+        // returns no view at all: a stack puts its spacing around an empty ZStack too, which left
+        // a gap Android does not (#10912). Container parents also leave such children out.
+        if !drawsNow {
+            EmptyView()
+        } else if inStackSlot || node.visibleWhen == nil {
+            // A parent that lays children out through `drawnChildren` inserts and removes this node
+            // itself, inside its own `.animation(value: layoutSignature)`, so the transition rides
+            // on the node and the parent drives the animation. No wrapping ZStack: a ZStack places
+            // its child at the size it measured, and a row re-laid out at exactly its ideal width
+            // shares that width out evenly, cutting "Edit"/"Save" short (#10899).
+            styled(content).transition(transition.swiftUITransition)
+        } else {
+            // Parents without that filter (a root, a scroll child, a pager page): the conditional
+            // lives in a stable container so the insertion/removal has one whose animation is
+            // driven by `isVisible`; a bare `Group` is flattened into the parent's children, which
+            // left a trailing conditional child undrawn and its transition un-animated (#10898).
+            // The container passes its parent's proposal through, unlike a ZStack (see above).
+            OverlayLayeredLayout(alignment: .topLeading) {
+                if isVisible {
+                    styled(content).transition(transition.swiftUITransition)
+                }
+            }
+            .animation(transition == .instant ? nil : .easeInOut(duration: 0.25), value: isVisible)
         }
+    }
+
+    /// `visibleWhen` appears and disappears with the node's `transition`; instant when motion is
+    /// off (spec `motion: "none"` or the system's Reduce Motion), as on Android (#10442).
+    private var transition: OverlayVisibilityTransition {
+        let motion = OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+        return node.visibleWhen == nil ? .instant : motion.visibility(transition: node.transition)
+    }
+
+    /// Whether anything is drawn for the node in the slot this view occupies. Unfiltered parents
+    /// still hold a hidden `visibleWhen` node's stable (empty) container for its animation.
+    private var drawsNow: Bool {
+        guard presentedAsModal || !overlayModalTypes.contains(node.type), drawnHere else { return false }
+        return isVisible || !inStackSlot && node.visibleWhen != nil
+    }
+
+    /// Siblings slide into freed space when a child appears, disappears or resizes (Android's
+    /// `animateContentSize`, #10442); nil keeps it instant under `motion: "none"` or Reduce Motion.
+    private var sizeAnimation: Animation? {
+        OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            .containerSizeDuration.map { .easeInOut(duration: $0) }
+    }
+
+    private var layoutSignature: [String] {
+        node.containerLayoutSignature(state: model.state) { model.holds($0) }
+    }
+
+    /// An anchored node is drawn by its window's anchor layer, never in its parent's slot.
+    private var drawnHere: Bool {
+        node.anchor == nil || anchorPlaced || presentedAsModal
     }
 
     private var isVisible: Bool {
@@ -81,29 +192,41 @@ struct NodeView: View {
 
     /// Controls that run `onTap` from their own action, so the generic tap gesture stays off them.
     private var handlesOwnTap: Bool {
-        ["switch", "checkbox", "button"].contains(node.type)
+        [
+            "switch", "checkbox", "button", "slider", "chip", "radioGroup", "listItem", "iconButton",
+            "fab", "segmentedButton", "topAppBar", "timePicker", "datePicker", "dialog", "snackbar",
+        ].contains(node.type)
     }
 
-    private var style: Style? { node.style }
+    /// Unstyled text and icons follow the theme's onSurface once the spec has a theme (Android's
+    /// LocalContentColor); a themeless spec keeps the system primary colour.
+    private var contentColor: Color {
+        palette.themed ? palette.color(role: "onSurface").map { Color($0) } ?? .primary : .primary
+    }
+
+    /// `style` with every matching `styleWhen` entry merged over it.
+    private var style: Style? { node.resolvedStyle(state: model.state) }
 
     @ViewBuilder private var content: some View {
         switch node.type {
         case "box":
-            ZStack(alignment: swiftUIAlignment(style?.alignment)) { children }
+            // Layered like a ZStack, but a row inside keeps the width it measured (#10899).
+            OverlayLayeredLayout(alignment: swiftUIAlignment(style?.alignment)) { children }
+                .animation(sizeAnimation, value: layoutSignature)
         case "row":
             HStack(alignment: .center, spacing: style?.spacing ?? 0) { arranged(horizontal: true) }
+                .animation(sizeAnimation, value: layoutSignature)
         case "column":
             VStack(alignment: .leading, spacing: style?.spacing ?? 0) { arranged(horizontal: false) }
+                .animation(sizeAnimation, value: layoutSignature)
         case "text":
             textView
         case "image":
             imageView
         case "icon":
-            Image(systemName: sfSymbols[node.name ?? ""] ?? "questionmark.square")
-                .font(.system(size: style?.textSize ?? 24))
-                .foregroundColor(Color(hex: style?.color) ?? .primary)
-                // Decorative: the spec has no content description for icons.
-                .accessibilityHidden(true)
+            // Decorative unless it has an authored description or is tappable; the decorative
+            // case is a text glyph (see `OverlayGlyph`) so no image element is exposed.
+            iconView
         case "spacer":
             Color.clear.frame(width: 0, height: 0)
         case "textField":
@@ -125,14 +248,51 @@ struct NodeView: View {
             navBar
         case "bottomSheet":
             sheet
+        case "slider":
+            OverlaySliderView(node: node, model: model, style: style)
+        case "chip":
+            OverlayChipView(node: node, model: model, style: style)
+        case "card":
+            OverlayCardView(node: node, model: model, style: style)
+        case "radioGroup":
+            OverlayRadioGroupView(node: node, model: model, style: style)
+        case "listItem":
+            OverlayListItemView(node: node, model: model, style: style)
+        case "iconButton":
+            OverlayIconButtonView(node: node, model: model, style: style)
+        case "fab":
+            OverlayFabView(node: node, model: model, style: style)
+        case "segmentedButton":
+            OverlaySegmentedButtonView(node: node, model: model)
+        case "topAppBar":
+            OverlayTopAppBarView(node: node, model: model, style: style, title: interpolated(node.title))
+        case "divider":
+            OverlayDividerView(node: node, style: style)
+        case "badge":
+            OverlayBadgeView(text: interpolated(node.text), style: style, tagged: node.identifier != nil)
+        case "progress":
+            OverlayProgressView(node: node, model: model)
+        case "timePicker":
+            OverlayTimePickerView(node: node, model: model)
+        case "datePicker":
+            OverlayDatePickerView(node: node, model: model)
+        case "dialog":
+            OverlayDialogView(
+                node: node,
+                model: model,
+                title: interpolated(node.title),
+                text: node.text.map(interpolated)
+            )
+        case "snackbar":
+            OverlaySnackbarView(node: node, model: model, text: interpolated(node.text))
         default:
             EmptyView()
         }
     }
 
     @ViewBuilder private var children: some View {
-        ForEach(Array((node.children ?? []).enumerated()), id: \.offset) { _, child in
-            NodeView(node: child, model: model)
+        ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+            NodeView(node: entry.node, model: model, inStackSlot: true)
         }
     }
 
@@ -140,37 +300,61 @@ struct NodeView: View {
     /// wrap-sized row or column does not grow to fill its parent.
     @ViewBuilder
     private func arranged(horizontal _: Bool) -> some View {
-        let nodes = node.children ?? []
+        let nodes = node.drawnChildren(holds: model.holds)
         let mode = style?.arrangement ?? "start"
         let outer = mode == "spaceAround" || mode == "spaceEvenly"
         if outer { Spacer(minLength: 0) }
-        ForEach(Array(nodes.enumerated()), id: \.offset) { index, child in
+        ForEach(Array(nodes.enumerated()), id: \.element.offset) { index, entry in
             if index > 0, mode.hasPrefix("space") { Spacer(minLength: 0) }
-            NodeView(node: child, model: model)
+            NodeView(node: entry.node, model: model, inStackSlot: true)
         }
         if outer { Spacer(minLength: 0) }
     }
 
+    private var pagerPosition: PagerPosition? {
+        pager.map { PagerPosition(page: $0.page, count: $0.count) }
+    }
+
     private var interpolatedText: String {
-        var text = node.text ?? ""
-        if let pager {
-            text = text.replacingOccurrences(of: "{page}", with: String(pager.page + 1))
-                .replacingOccurrences(of: "{pageCount}", with: String(pager.count))
+        interpolated(node.text)
+    }
+
+    private func interpolated(_ text: String?) -> String {
+        interpolateOverlayText(text ?? "", state: model.state, pager: pagerPosition)
+    }
+
+    @ViewBuilder private var iconView: some View {
+        let symbol = sfSymbols[node.name ?? ""] ?? "questionmark.square"
+        if accessibilityLabelOverride == nil {
+            OverlayGlyph(symbol: symbol)
+                .font(.system(size: style?.textSize ?? 24))
+                .foregroundColor(palette.color(style?.color) ?? contentColor)
+        } else {
+            Image(systemName: symbol)
+                .font(.system(size: style?.textSize ?? 24))
+                .foregroundColor(palette.color(style?.color) ?? contentColor)
         }
-        for (key, value) in model.state where text.contains("{\(key)}") {
-            text = text.replacingOccurrences(of: "{\(key)}", with: value.displayString)
-        }
-        return text
+    }
+
+    /// Text nodes already read their text, so only an authored description or a tappable icon's
+    /// name needs to be applied explicitly.
+    private var accessibilityLabelOverride: String? {
+        guard node.contentDescription != nil || ["icon", "iconButton", "fab"].contains(node.type) else { return nil }
+        return node.accessibilityLabel(
+            state: model.state,
+            pager: pagerPosition,
+            tappable: node.onTap != nil
+        )
     }
 
     private var textView: some View {
-        let size = style?.textSize ?? 14
-        let design: Font.Design = switch style?.fontFamily {
-        case "serif": .serif
-        case "monospace": .monospaced
-        default: .default
+        let resolved = typography.resolve(style)
+        let design: Font.Design = switch resolved.design {
+        case .serif: .serif
+        case .monospaced: .monospaced
+        case .standard: .default
         }
-        let weight: Font.Weight = switch style?.fontWeight ?? 400 {
+        let weight: Font.Weight = switch resolved.weight {
         case ..<200: .ultraLight
         case ..<300: .thin
         case ..<400: .light
@@ -187,11 +371,20 @@ struct NodeView: View {
         default: .leading
         }
         // Scaled with Dynamic Type, unlike the Android bug #10436.
-        return Text(interpolatedText)
-            .font(.system(size: UIFontMetrics.default.scaledValue(for: size), weight: weight, design: design))
-            .foregroundColor(Color(hex: style?.color) ?? .primary)
+        let scaled = UIFontMetrics.default.scaledValue(for: resolved.size)
+        var text = Text(interpolatedText)
+            .font(.system(size: scaled, weight: weight, design: design))
+        if style?.fontStyle == "italic" { text = text.italic() }
+        let decoration = style?.textDecoration
+        if decoration == "underline" || decoration == "underlineLineThrough" { text = text.underline() }
+        if decoration == "lineThrough" || decoration == "underlineLineThrough" { text = text.strikethrough() }
+        return text
+            .tracking(resolved.letterSpacing)
+            .lineSpacing(max(0, (resolved.lineHeight.map { $0 * scaled / resolved.size } ?? scaled) - scaled))
+            .foregroundColor(palette.color(style?.color) ?? contentColor)
             .multilineTextAlignment(alignment)
             .lineLimit(style?.maxLines)
+            .truncationMode(.tail)
     }
 
     @ViewBuilder private var imageView: some View {
@@ -219,21 +412,33 @@ struct NodeView: View {
         model.toggle(key, then: node.onTap ?? [])
     }
 
-    @ViewBuilder private var switchView: some View {
-        let binding = Binding(get: { isOn }, set: { _ in toggleBound() })
-        if let label = node.label {
-            Toggle(label, isOn: binding)
-        } else {
-            Toggle("", isOn: binding).labelsHidden()
+    /// One element per switch, shaped exactly like a list row with a trailing switch: the button
+    /// is the element, named by its label text, with the toggle trait and an on/off value. The
+    /// track is drawn in SwiftUI; a `Toggle` hosts a `UISwitch` whose own elements XCUITest listed
+    /// beside the combined one. `accessibilityElement(children: .ignore)` on the button wrapped it
+    /// in a second element: XCUITest listed the button (tappable, untagged) and the wrapper (the
+    /// testTag, label and value, not tappable) at the same bounds (#10899).
+    private var switchView: some View {
+        Button(action: toggleBound) {
+            HStack(spacing: 8) {
+                if let label = node.label {
+                    Text(label).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                OverlaySwitchTrack(isOn: isOn)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityValue(isOn ? "1" : "0")
+        .accessibilityAddTraits(.isToggle)
     }
 
     /// iOS has no checkbox control: a button whose checked square reads as selected.
     private var checkboxView: some View {
         Button(action: toggleBound) {
             HStack(spacing: 8) {
-                Image(systemName: isOn ? "checkmark.square.fill" : "square")
-                    .accessibilityHidden(true)
+                OverlayGlyph(symbol: isOn ? "checkmark.square.fill" : "square")
                 if let label = node.label { Text(label) }
             }
             .frame(minHeight: 44)
@@ -244,13 +449,38 @@ struct NodeView: View {
         .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 
+    /// Filled (default), tonal, elevated, outlined or text, with an optional leading icon.
     @ViewBuilder private var buttonView: some View {
-        let button = Button(node.label ?? "") { model.run(node.onTap ?? []) }
+        let button = Button { model.run(node.onTap ?? []) } label: {
+            if let icon = node.icon {
+                // The icon is decoration: a hidden glyph, so the button is one element named by
+                // its label rather than also exposing the icon's name (#10899).
+                HStack(spacing: 6) {
+                    OverlayGlyph(symbol: overlaySymbol(icon))
+                    buttonLabel
+                }
+            } else {
+                buttonLabel
+            }
+        }
+        .accessibilityLabel(node.label ?? "")
+        // A button claims its label's width before its siblings shrink, so a tight row never cuts
+        // "Save" to "Sa..." (#10899); a label wider than the row wraps rather than overflowing,
+        // as on Android (#10912).
+        .layoutPriority(1)
         switch node.variant {
-        case "outlined": button.buttonStyle(.bordered)
+        case "outlined", "tonal": button.buttonStyle(.bordered)
+        case "elevated": button.buttonStyle(.bordered).shadow(color: .black.opacity(0.2), radius: 2, y: 1)
         case "text": button.buttonStyle(.borderless)
         default: button.buttonStyle(.borderedProminent)
         }
+    }
+
+    /// Wraps onto more lines when the row is narrower than the label, never truncating.
+    private var buttonLabel: some View {
+        Text(node.label ?? "")
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var navSelection: Int {
@@ -264,11 +494,11 @@ struct NodeView: View {
         return HStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 Button {
-                    model.select(index: index, pager: node.pager, key: node.stateKey)
+                    model.select(index: index, pager: node.pager, key: node.stateKey, then: node.onTap ?? [])
                 } label: {
                     VStack(spacing: 2) {
                         if let icon = item.icon {
-                            Image(systemName: sfSymbols[icon] ?? "circle")
+                            OverlayGlyph(symbol: sfSymbols[icon] ?? "circle")
                         }
                         Text(item.label).font(.caption)
                     }
@@ -305,10 +535,27 @@ struct NodeView: View {
 
     // MARK: Style
 
+    private var cornerShape: UnevenRoundedRectangle {
+        switch style?.cornerRadius.map(shapes.resolve) {
+        case let .uniform(radius)?:
+            UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
+                topLeading: radius, bottomLeading: radius, bottomTrailing: radius, topTrailing: radius
+            ))
+        case .token?:
+            UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii())
+        case let .corners(topStart, topEnd, bottomEnd, bottomStart)?:
+            UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
+                topLeading: topStart, bottomLeading: bottomStart, bottomTrailing: bottomEnd, topTrailing: topEnd
+            ))
+        case nil:
+            UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii())
+        }
+    }
+
     private func styled(_ view: some View) -> some View {
         let padding = style?.padding
         let insets = safeAreaEdges
-        let radius = style?.cornerRadius ?? 0
+        let shape = cornerShape
         return view
             .padding(EdgeInsets(
                 top: (padding?.top ?? 0) + insets.top,
@@ -317,21 +564,26 @@ struct NodeView: View {
                 trailing: (padding?.end ?? 0) + insets.right
             ))
             .modifier(SizeModifier(
-                width: style?.width,
-                height: style?.height,
+                width: coverSize.map { .points($0.width) } ?? style?.width,
+                height: coverSize.map { .points($0.height) } ?? style?.height,
                 alignment: contentAlignment,
                 fillsByDefault: node.type == "spacer"
             ))
-            .background(Color(hex: style?.background) ?? .clear)
-            .clipShape(RoundedRectangle(cornerRadius: radius))
+            .background(palette.color(style?.background) ?? .clear)
+            .clipShape(shape)
             .overlay(
-                RoundedRectangle(cornerRadius: radius)
-                    .stroke(Color(hex: style?.border?.color) ?? .clear, lineWidth: style?.border?.width ?? 0)
+                shape.stroke(palette.color(style?.border?.color) ?? .clear, lineWidth: style?.border?.width ?? 0)
             )
+            .shadow(
+                color: (style?.elevation ?? 0) > 0 ? palette.color(style?.shadowColor) ?? .black.opacity(0.25) : .clear,
+                radius: style?.elevation ?? 0
+            )
+            .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
             .opacity(style?.alpha ?? 1)
-            .modifier(TapModifier(actions: handlesOwnTap ? nil : node.onTap, model: model))
+            .modifier(TapModifier(actions: handlesOwnTap ? nil : node.onTap, model: model, style: style))
             .modifier(IdentifierModifier(
                 identifier: node.testTag ?? node.id,
+                label: accessibilityLabelOverride,
                 grouping: grouping
             ))
     }
@@ -339,7 +591,12 @@ struct NodeView: View {
     /// Containers get their own accessibility element so a testTag names the container instead of
     /// being copied onto every descendant. A tappable container reads as one button.
     private var grouping: AccessibilityGrouping {
-        guard ["box", "row", "column", "scroll", "pager"].contains(node.type) else { return .leaf }
+        // Composite controls always contain their parts, so each part keeps its own
+        // `<tag>.<part>` identifier, label and selected state.
+        if ["radioGroup", "segmentedButton", "topAppBar", "dialog", "snackbar"].contains(node.type) {
+            return .contain
+        }
+        guard ["box", "row", "column", "scroll", "pager", "card"].contains(node.type) else { return .leaf }
         return node.onTap == nil ? .contain : .combine
     }
 
@@ -364,7 +621,7 @@ struct NodeView: View {
 
     private var safeAreaEdges: UIEdgeInsets {
         guard let edges = node.safeAreaPadding?.edges else { return .zero }
-        let all = model.safeInsets
+        let all = model.contentSafeInsets
         return UIEdgeInsets(
             top: edges.contains("top") ? all.top : 0,
             left: edges.contains("start") ? all.left : 0,
@@ -381,17 +638,10 @@ private struct SizeModifier: ViewModifier {
     let fillsByDefault: Bool
 
     func body(content: Content) -> some View {
-        content
-            .frame(
-                width: fixed(width),
-                height: fixed(height),
-                alignment: alignment
-            )
-            .frame(
-                maxWidth: fills(width) ? .infinity : nil,
-                maxHeight: fills(height) ? .infinity : nil,
-                alignment: alignment
-            )
+        // Not `frame(maxWidth: nil, maxHeight: nil)`: see `OverlayLayeredLayout` (#10899).
+        OverlayLayeredLayout(fillsWidth: fills(width), fillsHeight: fills(height), alignment: alignment) {
+            content.frame(width: fixed(width), height: fixed(height), alignment: alignment)
+        }
     }
 
     private func fixed(_ dimension: Dimension?) -> CGFloat? {
@@ -408,14 +658,29 @@ private struct SizeModifier: ViewModifier {
 private struct TapModifier: ViewModifier {
     let actions: [OverlayAction]?
     let model: OverlayModel
+    let style: Style?
+
+    @GestureState private var pressed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         if let actions {
+            let scale = style?.scale(pressed: pressed) ?? 1
+            // Spec `motion: "none"` snaps like Reduce Motion (#10885).
+            let spring = OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+                .pressScaleDuration.map { Animation.spring(duration: $0) }
             // Whole padded frame is tappable, with a 44 pt minimum target (Android bug #10435).
             content
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
+                // Scales the drawn node only; motion off snaps instead of springing.
+                .scaleEffect(scale)
+                .animation(spring, value: scale)
                 .onTapGesture { model.run(actions) }
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0, maximumDistance: 10)
+                        .updating($pressed) { _, state, _ in state = true }
+                )
                 .accessibilityAddTraits(.isButton)
         } else {
             content
@@ -431,18 +696,41 @@ enum AccessibilityGrouping {
 
 private struct IdentifierModifier: ViewModifier {
     let identifier: String?
+    let label: String?
     let grouping: AccessibilityGrouping
 
     func body(content: Content) -> some View {
-        switch (identifier, grouping) {
-        case (nil, _):
+        labelled(identified(content))
+    }
+
+    /// A label needs its own accessibility element: on a bare container SwiftUI would spread it
+    /// over the children.
+    @ViewBuilder
+    private func identified(_ content: Content) -> some View {
+        if identifier == nil, label == nil || grouping == .leaf {
             content
-        case let (identifier?, .leaf):
-            content.accessibilityIdentifier(identifier)
-        case let (identifier?, .contain):
-            content.accessibilityElement(children: .contain).accessibilityIdentifier(identifier)
-        case let (identifier?, .combine):
-            content.accessibilityElement(children: .combine).accessibilityIdentifier(identifier)
+        } else if let identifier {
+            grouped(content).accessibilityIdentifier(identifier)
+        } else {
+            grouped(content)
+        }
+    }
+
+    @ViewBuilder
+    private func grouped(_ content: Content) -> some View {
+        switch grouping {
+        case .leaf: content
+        case .contain: content.accessibilityElement(children: .contain)
+        case .combine: content.accessibilityElement(children: .combine)
+        }
+    }
+
+    @ViewBuilder
+    private func labelled(_ content: some View) -> some View {
+        if let label {
+            content.accessibilityLabel(label)
+        } else {
+            content
         }
     }
 }
@@ -452,6 +740,7 @@ private struct IdentifierModifier: ViewModifier {
 struct PagerView: View {
     let node: OverlayNode
     @ObservedObject var model: OverlayModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var pagerId: String { node.id ?? "" }
     private var pages: [OverlayNode] { node.children ?? [] }
@@ -463,8 +752,14 @@ struct PagerView: View {
         )
     }
 
+    /// Page changes animate unless spec `motion: "none"` or Reduce Motion is on (#10442).
+    private var pageAnimation: Animation? {
+        OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled
+            ? .easeInOut(duration: 0.25) : nil
+    }
+
     private var fills: Bool {
-        if case .fill = node.style?.height { return true }
+        if case .fill = node.resolvedStyle(state: model.state)?.height { return true }
         return false
     }
 
@@ -480,6 +775,7 @@ struct PagerView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .animation(pageAnimation, value: selection.wrappedValue)
             // Pages own the safe area themselves (safeAreaPadding), as on Android.
             .ignoresSafeArea()
         } else {
@@ -493,8 +789,21 @@ struct PagerView: View {
                         if value.translation.width < -40 { model.setPage(pagerId, index + 1) }
                         if value.translation.width > 40 { model.setPage(pagerId, index - 1) }
                     })
-                    .animation(.easeInOut(duration: 0.2), value: index)
+                    .animation(pageAnimation, value: index)
             }
+        }
+    }
+}
+
+extension OverlayVisibilityTransition {
+    /// The SwiftUI insertion/removal for a `visibleWhen` node; `expand` grows from the top edge.
+    var swiftUITransition: AnyTransition {
+        switch self {
+        case .instant: .identity
+        case .fade: .opacity
+        case .expand: .scale(scale: 0.01, anchor: .top).combined(with: .opacity)
+        case .slide: .move(edge: .top).combined(with: .opacity)
+        case .standard: .scale(scale: 0.01, anchor: .top).combined(with: .opacity)
         }
     }
 }

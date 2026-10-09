@@ -53,7 +53,7 @@ class OverlaySpecTest {
       Json.parseToJsonElement(
           checkNotNull(javaClass.getResourceAsStream("/overlay-spec-contract.json"))
             .readBytes()
-            .decodeToString()
+            .decodeToString(),
         )
         .jsonObject
     val variants =
@@ -78,6 +78,75 @@ class OverlaySpecTest {
   }
 
   @Test
+  fun `theme colours have the same fields in the Kotlin model and the shared contract`() {
+    val definitions =
+      Json.parseToJsonElement(
+          checkNotNull(javaClass.getResourceAsStream("/overlay-spec-contract.json"))
+            .readBytes()
+            .decodeToString(),
+        )
+        .jsonObject
+        .getValue("definitions")
+        .jsonObject
+    val fields = definitions.getValue("themeColors").jsonObject.getValue("fields").jsonObject.keys
+    val descriptor = OverlaySpecThemeColors.serializer().descriptor
+    assertEquals(fields, (0 until descriptor.elementsCount).map(descriptor::getElementName).toSet())
+    // Every override is exactly one of the colour roles a style colour can name.
+    val roles =
+      definitions
+        .getValue("colorValue")
+        .jsonObject
+        .getValue("options")
+        .jsonArray
+        .map { it.jsonObject }
+        .single { it.getValue("kind").jsonPrimitive.content == "enum" }
+        .getValue("values")
+        .jsonArray
+        .map { it.jsonPrimitive.content }
+        .toSet()
+    assertEquals(roles, fields - setOf("seed", "source"))
+  }
+
+  @Test
+  fun `style has the same fields in the Kotlin model and the shared contract`() {
+    val contract =
+      Json.parseToJsonElement(
+          checkNotNull(javaClass.getResourceAsStream("/overlay-spec-contract.json"))
+            .readBytes()
+            .decodeToString(),
+        )
+        .jsonObject
+    val fields =
+      contract
+        .getValue("definitions")
+        .jsonObject
+        .getValue("style")
+        .jsonObject
+        .getValue("fields")
+        .jsonObject
+        .keys
+    val descriptor = OverlayStyle.serializer().descriptor
+    assertEquals(fields, (0 until descriptor.elementsCount).map(descriptor::getElementName).toSet())
+  }
+
+  @Test
+  fun `per-corner radii accept only the four named nonnegative corners`() {
+    fun spec(radius: String) =
+      """{"id":"a","window":{"placement":{"type":"fullscreen"}},""" +
+        """"root":{"type":"box","children":[],"style":{"cornerRadius":$radius}}}"""
+    val accepted = OverlaySpecValidator.validate(spec("""{"topStart":12,"bottomEnd":0}"""))
+    assertTrue(accepted is OverlaySpecValidation.Success, accepted.toString())
+    assertEquals(
+      OverlayCornerRadius.Corners(topStart = 12.0, bottomEnd = 0.0),
+      (accepted as OverlaySpecValidation.Success).spec.root.style?.cornerRadius,
+    )
+    for (bad in listOf("""{"top":1}""", """{"topEnd":-1}""", """{"topEnd":"large"}""")) {
+      val rejected = OverlaySpecValidator.validate(spec(bad))
+      assertTrue(rejected is OverlaySpecValidation.Failure, bad)
+    }
+  }
+
+  @Test
   fun `button and list item icons accept the full icon set`() {
     for (root in
       listOf(
@@ -94,12 +163,25 @@ class OverlaySpecTest {
   }
 
   @Test
+  fun `bound state keys take placeholders and reject any other brace text`() {
+    for (key in listOf("liked", "liked_{item.id}", "{index}_{props.k}", "9_{item.id}")) assertTrue(
+      OverlayRepeatTemplate.isBoundKey(key),
+      key,
+    )
+    for (key in
+      listOf("9a", "", "liked_{item}", "liked-{item.id}", "liked_{item.id", "{}")) assertFalse(
+      OverlayRepeatTemplate.isBoundKey(key),
+      key,
+    )
+  }
+
+  @Test
   fun `raw byte limit includes whitespace and accepts its exact boundary`() {
     val input = validJson.getValue(valid.first())
     val padding =
       OverlaySpecValidator.MAX_OVERLAY_SPEC_BYTES - input.toByteArray(Charsets.UTF_8).size
     assertTrue(
-      OverlaySpecValidator.validate(input + " ".repeat(padding)) is OverlaySpecValidation.Success
+      OverlaySpecValidator.validate(input + " ".repeat(padding)) is OverlaySpecValidation.Success,
     )
     val rejected =
       OverlaySpecValidator.validate(input + " ".repeat(padding + 1))

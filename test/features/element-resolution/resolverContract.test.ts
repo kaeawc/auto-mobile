@@ -1,34 +1,17 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import {
-  compareResolvers,
-  contractCases,
-  LegacyContractResolver,
-  loadContractCaptures,
-} from "./observeContract";
+import { contractCases, loadContractCaptures } from "./observeContract";
 import { candidateIdentity, observedCandidates, ResolverContractAdapter } from "./resolverContract";
 
 const cases = loadContractCaptures(join(import.meta.dir, "../../fixtures/observe")).flatMap(
   contractCases,
 );
-const legacy = new LegacyContractResolver();
 
 for (const testCase of cases) {
-  test(`S2 candidates and legacy differential: ${testCase.key}`, () => {
-    const adapter = new ResolverContractAdapter(testCase);
-    const current = adapter.resolve(testCase.capture, testCase.query);
-    const previous = legacy.resolve(testCase.capture, testCase.query);
-    const expected = observedCandidates(testCase, cases);
+  test(`S2 candidates: ${testCase.key}`, () => {
+    const current = new ResolverContractAdapter(testCase).resolve(testCase.capture, testCase.query);
     // Every ordered candidate is checked, including known roundtrip-gap cases.
-    expect(current.candidates.map(candidateIdentity)).toEqual(expected);
-    const differs = compareResolvers([testCase], legacy, adapter);
-    if (differs.length === 0) {
-      expect(current).toEqual(previous);
-    } else {
-      // Candidate identity is checked above. The richer differential also
-      // detects metadata and action changes when the candidates are identical.
-      expect(differs).toEqual([testCase.key]);
-    }
+    expect(current.candidates.map(candidateIdentity)).toEqual(observedCandidates(testCase, cases));
   });
 }
 
@@ -38,9 +21,9 @@ test("unindexed duplicate labels use the displayed default row in every captured
     const key = `${entry.capture.name}:${entry.query.value}`;
     groups.set(key, [...(groups.get(key) ?? []), entry]);
   }
-  const duplicates = [...groups.entries()].filter(([, entries]) => entries.length > 1);
+  const duplicates = [...groups.values()].filter((entries) => entries.length > 1);
   expect(duplicates).toHaveLength(6);
-  for (const [key, entries] of duplicates) {
+  for (const entries of duplicates) {
     const first = entries.find((entry) => entry.query.index === 0) ?? entries[0];
     const query = { ...first.query, index: undefined };
     const current = new ResolverContractAdapter(first).resolve(first.capture, query);
@@ -49,16 +32,5 @@ test("unindexed duplicate labels use the displayed default row in every captured
       elementId: first.observed.elementId,
       bounds: first.observed.bounds.join(","),
     });
-    const previous = legacy.resolve(first.capture, query);
-    const previousChoice = previous.chosen && candidateIdentity(previous.chosen);
-    if (
-      (key.includes("diff/scroll-") && key.endsWith(":Settings")) ||
-      (key.startsWith("ios-reminders-") && key.endsWith(":Buy milk"))
-    ) {
-      // Legacy chooses a different child or list row; S2 keeps the ranked observed control.
-      expect(previousChoice).not.toEqual(candidateIdentity(current.chosen!));
-    } else {
-      expect(previousChoice).toEqual(candidateIdentity(current.chosen!));
-    }
   }
 });

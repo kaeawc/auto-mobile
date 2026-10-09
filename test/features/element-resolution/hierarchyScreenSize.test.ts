@@ -7,6 +7,10 @@ import {
 import { issue8379Hierarchy, issue8379SyntheticOutlier } from "../../fixtures/issue8379Hierarchy";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { swipeScreenSize } from "../../../src/features/action/swipeon/iosChromeInsets";
+import { DefaultElementGeometry } from "../../../src/features/utility/ElementGeometry";
+import { getScreenBounds } from "../../../src/utils/screenBounds";
+import demosRawHierarchy from "../../fixtures/ios-duo/issue8379-demos-raw-hierarchy.json";
 test("outer application bounds stay authoritative when cleanup collapses wrappers to one button", () => {
   const hierarchy = {
     hierarchy: {
@@ -234,4 +238,69 @@ test("invalid iOS scale or pixel fields do not override the tree proof", () => {
       }),
     ).toEqual({ width: 669, height: 951 });
   }
+});
+
+// Captured 2026-10-08 on an unfolded iPhone Duo (iOS 27.1): the Playground Demos list has
+// rows below the inner panel's bottom edge and the runner reports portrait pixels (#8379).
+function capturedDemosHierarchy(): ViewHierarchyResult {
+  return structuredClone(demosRawHierarchy) as unknown as ViewHierarchyResult;
+}
+
+test("captured Duo Demos list with rows past the panel bottom resolves landscape", () => {
+  for (const flag of [false, true]) {
+    expect(extractHierarchyScreenSize(capturedDemosHierarchy(), flag)).toEqual({
+      width: 951,
+      height: 669,
+    });
+  }
+});
+
+test("captured Duo Demos list swipes up inside the inner panel", () => {
+  const viewHierarchy = projectActionableHierarchy(
+    "ios",
+    normalizeIosHierarchy(capturedDemosHierarchy()),
+    true,
+  );
+  const observation = {
+    screenSize: { width: 669, height: 951 },
+    systemInsets: { top: 0, right: 84, bottom: 34, left: 0 },
+    viewHierarchy,
+  } as Parameters<typeof swipeScreenSize>[0]["observation"];
+  const screen = swipeScreenSize({ observation, platform: "ios" })!;
+  expect(screen).toEqual({ width: 951, height: 669 });
+  const swipe = new DefaultElementGeometry().getSwipeWithinBounds(
+    "up",
+    getScreenBounds(screen, observation.systemInsets),
+  );
+  expect(swipe.startY).toBeLessThan(669);
+  expect(swipe.endY).toBeLessThan(swipe.startY);
+  expect(swipe.startX).toBeLessThan(951);
+});
+
+test("a wide but not exactly swapped child with portrait overflow stays portrait", () => {
+  const root = { left: 0, top: 0, right: 669, bottom: 951 };
+  const carousel = { left: 0, top: 0, right: 951, bottom: 700 };
+  const row = { left: 0, top: 800, right: 669, bottom: 900 };
+  expect(
+    extractHierarchyScreenSize({
+      hierarchy: {
+        bounds: root,
+        node: { bounds: root, node: [{ bounds: carousel }, { bounds: row }] },
+      },
+    }),
+  ).toEqual({ width: 669, height: 951 });
+});
+
+test("an exactly swapped child still cannot extend past the swapped right edge", () => {
+  const root = { left: 0, top: 0, right: 669, bottom: 951 };
+  const swapped = { left: 0, top: 0, right: 951, bottom: 669 };
+  const wide = { left: 0, top: 700, right: 1200, bottom: 760 };
+  expect(
+    extractHierarchyScreenSize({
+      hierarchy: {
+        bounds: root,
+        node: { bounds: root, node: [{ bounds: swapped }, { bounds: wide }] },
+      },
+    }),
+  ).toEqual({ width: 669, height: 951 });
 });

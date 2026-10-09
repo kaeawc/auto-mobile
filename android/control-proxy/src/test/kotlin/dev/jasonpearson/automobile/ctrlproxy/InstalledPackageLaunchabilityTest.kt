@@ -51,7 +51,7 @@ class InstalledPackageLaunchabilityTest {
       PackageInfo().apply {
         this.packageName = packageName
         this.applicationInfo = applicationInfo
-      }
+      },
     )
     if (launcherLabel != null) {
       val component = ComponentName(packageName, "$packageName.EntryActivity")
@@ -61,7 +61,7 @@ class InstalledPackageLaunchabilityTest {
           this.applicationInfo = applicationInfo
           nonLocalizedLabel = launcherLabel
           name = component.className
-        }
+        },
       )
       shadow.addIntentFilterForActivity(
         component,

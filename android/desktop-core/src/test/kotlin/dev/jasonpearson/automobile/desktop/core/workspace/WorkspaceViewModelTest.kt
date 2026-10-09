@@ -1,9 +1,12 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import dev.jasonpearson.automobile.desktop.core.daemon.DEVICE_OWNED_BY_OTHER_SESSION_CODE
+import dev.jasonpearson.automobile.desktop.core.daemon.McpToolErrorException
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoaderRegistry
 import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -73,8 +76,8 @@ class WorkspaceViewModelTest {
           platform = Platform.Android,
           activeTool = Tool.Storage,
           deviceSessionUuid = "epoch-a",
-        )
-      )
+        ),
+      ),
     )
 
     vm.onAction(WorkspaceAction.SetFirstPaneFraction("a", 0.5f))
@@ -86,8 +89,8 @@ class WorkspaceViewModelTest {
           name = "Device a (restarted)",
           platform = Platform.Android,
           deviceSessionUuid = "epoch-b",
-        )
-      )
+        ),
+      ),
     )
 
     val state = vm.state.value as WorkspaceUiState.Content
@@ -123,8 +126,8 @@ class WorkspaceViewModelTest {
           platform = Platform.Android,
           activeTool = Tool.Storage,
           deviceSessionUuid = "epoch-a",
-        )
-      )
+        ),
+      ),
     )
     vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
 
@@ -133,8 +136,8 @@ class WorkspaceViewModelTest {
         mapOf(
           "a" to "epoch-b",
           "not-open" to "unreachable",
-        )
-      )
+        ),
+      ),
     )
 
     val state = vm.state.value as WorkspaceUiState.Content
@@ -154,6 +157,18 @@ class WorkspaceViewModelTest {
       assertEquals(listOf("a"), state.columns.map { it.deviceId })
       assertEquals("a", state.focusedDeviceId)
     }
+
+  @Test
+  fun `closing the focused pane moves focus to the survivor`() = testScope.runTest {
+    // Focus allocates nothing (#10730), so inheriting it cannot take a device (#10697).
+    val vm = WorkspaceViewModel(this)
+    vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+    vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
+
+    vm.onAction(WorkspaceAction.CloseDevice("b"))
+
+    assertEquals("a", (vm.state.value as WorkspaceUiState.Content).focusedDeviceId)
+  }
 
   @Test
   fun `closing the last column returns to Empty`() = testScope.runTest {
@@ -232,7 +247,7 @@ class WorkspaceViewModelTest {
             Platform.Ios,
             EmulatorControl.Snapshot,
             Orientation.Portrait,
-          )
+          ),
         ),
         exec.requests,
       )
@@ -256,6 +271,65 @@ class WorkspaceViewModelTest {
       assertEquals(Orientation.Portrait, col.orientation)
       assertEquals(Orientation.Portrait, exec.requests.last().orientation)
     }
+
+  private fun heldElsewhere(deviceId: String) =
+    McpToolErrorException(
+      "rotate refused: device '$deviceId' is held by another session.",
+      code = DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+      deviceId = deviceId,
+    )
+
+  private fun WorkspaceViewModel.orientationOf(deviceId: String): Orientation =
+    (state.value as WorkspaceUiState.Content).columns.first { it.deviceId == deviceId }.orientation
+
+  @Test
+  fun `a refused Rotate restores the orientation and reports the device held elsewhere`() =
+    testScope.runTest {
+      val exec = FakeEmulatorControlExecutor().apply { error = heldElsewhere("a") }
+      val vm = WorkspaceViewModel(this, exec)
+      vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+      val effects = mutableListOf<WorkspaceEffect>()
+      val collector = launch { vm.effect.collect { effects += it } }
+
+      vm.onAction(WorkspaceAction.RunControl("a", EmulatorControl.Rotate))
+      advanceUntilIdle()
+
+      assertEquals(Orientation.Portrait, vm.orientationOf("a"))
+      assertEquals(listOf<WorkspaceEffect>(WorkspaceEffect.DeviceHeldElsewhere("a")), effects)
+      collector.cancel()
+    }
+
+  @Test
+  fun `a Rotate failing for another reason restores the orientation and reports nothing`() =
+    testScope.runTest {
+      val exec = FakeEmulatorControlExecutor().apply { error = RuntimeException("boom") }
+      val vm = WorkspaceViewModel(this, exec)
+      vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+      val effects = mutableListOf<WorkspaceEffect>()
+      val collector = launch { vm.effect.collect { effects += it } }
+
+      vm.onAction(WorkspaceAction.RunControl("a", EmulatorControl.Rotate))
+      advanceUntilIdle()
+
+      assertEquals(Orientation.Portrait, vm.orientationOf("a"))
+      assertTrue(effects.isEmpty())
+      collector.cancel()
+    }
+
+  @Test
+  fun `a refused device button reports the device held elsewhere`() = testScope.runTest {
+    val exec = FakeEmulatorControlExecutor().apply { error = heldElsewhere("a") }
+    val vm = WorkspaceViewModel(this, exec)
+    vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
+    val effects = mutableListOf<WorkspaceEffect>()
+    val collector = launch { vm.effect.collect { effects += it } }
+
+    vm.onAction(WorkspaceAction.PressDeviceButton("a", DeviceButton.Home))
+    advanceUntilIdle()
+
+    assertEquals(listOf<WorkspaceEffect>(WorkspaceEffect.DeviceHeldElsewhere("a")), effects)
+    collector.cancel()
+  }
 
   @Test
   fun `RunControl swallows an executor failure without crashing the workspace`() =

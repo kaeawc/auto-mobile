@@ -538,6 +538,19 @@ export interface DeviceLocksTable {
   updated_at: Generated<string>;
 }
 
+/** AutoMobile-applied simulator service overrides per incarnation (#6694). */
+export interface DeviceResourceApplicationsTable {
+  /** Stable serialization of platform, UDID, runtime and device type. */
+  identity_key: string;
+  udid: string;
+  runtime_id: string;
+  device_type_id: string;
+  /** JSON DeviceResourceConfiguration of owned overrides. */
+  resources_json: string;
+  profile_fingerprint: string;
+  updated_at_ms: number;
+}
+
 /** Bounded, durable diagnostics for unexpectedly lost Android emulators. */
 export interface EmulatorLossIncidentsTable {
   id: Generated<number>;
@@ -548,23 +561,6 @@ export interface EmulatorLossIncidentsTable {
   revision: number;
   incident_json: string;
   created_at: Generated<string>;
-}
-
-export interface ProvisionDeviceOperationsTable {
-  operation_id: string;
-  request_fingerprint: string;
-  /** Fence identifying the attempt that currently owns this row. */
-  attempt_id: Generated<string>;
-  status: string;
-  result_json: string | null;
-  /** Latest durable lifecycle snapshot for deadline-safe status queries. */
-  lifecycle_json: string | null;
-  error_code: string | null;
-  error_message: string | null;
-  creation_started: number;
-  expires_at_ms: number;
-  created_at: Generated<string>;
-  updated_at: Generated<string>;
 }
 
 export interface ProvisionedDeviceTransportTombstonesTable {
@@ -839,8 +835,8 @@ export interface Database {
   layout_events: LayoutEventsTable;
   device_sessions: DeviceSessionsTable;
   device_locks: DeviceLocksTable;
+  device_resource_applications: DeviceResourceApplicationsTable;
   emulator_loss_incidents: EmulatorLossIncidentsTable;
-  provision_device_operations: ProvisionDeviceOperationsTable;
   provisioned_device_transport_tombstones: ProvisionedDeviceTransportTombstonesTable;
   device_teardown_operations: DeviceTeardownOperationsTable;
   tool_selection_profile_provenance: ToolSelectionProfileProvenanceTable;

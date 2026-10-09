@@ -1,3 +1,5 @@
+import { DevicePool } from "../../src/daemon/devicePool";
+import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
   handleDaemonRequest,
@@ -11,9 +13,13 @@ import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
 } from "../../src/daemon/sessionLivenessWindows";
+import { errorMessage } from "../../src/utils/describeUnknownError";
 import type { Random } from "../../src/utils/Random";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { createDevicePoolDependencies } from "./devicePoolDependencies";
 import { SeededRandom } from "../fakes/SeededRandom";
 import { drainMicrotasks } from "./fakeTimerStepping";
 
@@ -21,12 +27,16 @@ import { drainMicrotasks } from "./fakeTimerStepping";
 // virtual instants; each instant delivers one or more producer events (owner heartbeat, tool
 // call, heartbeat-monitor tick, cleanup sweep). The runner shuffles same-instant events with
 // its own seeded Random, so one schedule can be replayed under different timer orders.
-// Everything runs against the real SessionManager, SessionHeartbeatMonitor and daemon heartbeat
-// handler on a FakeTimer. The clock only moves by setCurrentTime, so no interval fires on its
+// Everything runs against the real SessionManager, SessionHeartbeatMonitor, daemon heartbeat
+// handler and DevicePool (with releaseSessionAndDevice, as daemon.ts wires the reaper) on a
+// FakeTimer. A 60 s window acquires through the pool's autolock path and a 120 s window through
+// bindOrReuseDeviceSession, so both paths see the release-frees-the-device invariant (#10705). The clock only moves by setCurrentTime, so no interval fires on its
 // own and the schedule alone decides which timer runs first.
 
-export const SESSION = "expiry-property-session";
 const DEVICE = "emulator-5554";
+const DEVICE_INFO = { deviceId: DEVICE, name: "Pixel_8_API_35", platform: "android" as const };
+/** The idle window that selects the autolock acquisition path (AUTOMOBILE_DEVICE_POOL_TIMEOUT). */
+export const AUTOLOCK_IDLE_WINDOW_MS = 60_000;
 const OWNER = "expiry-property-owner";
 
 export const LEASE_MS = SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
@@ -38,14 +48,27 @@ export const MONITOR_INTERVAL_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 /** SessionManager's periodic expired-session sweep. */
 export const CLEANUP_INTERVAL_MS = 5 * 60 * 1_000;
 /** Idle windows a schedule may pick: the autolock 60 s window and the default idle window. */
-export const IDLE_WINDOWS_MS = [60_000, DEFAULT_SESSION_IDLE_TIMEOUT_MS] as const;
+export const IDLE_WINDOWS_MS = [AUTOLOCK_IDLE_WINDOW_MS, DEFAULT_SESSION_IDLE_TIMEOUT_MS] as const;
+/** The default (non-autolock) idle window alone. */
+export const DEFAULT_IDLE_WINDOWS_MS = [DEFAULT_SESSION_IDLE_TIMEOUT_MS] as const;
 
 export type ProducerEvent = "heartbeat" | "toolCall" | "monitorTick" | "cleanupSweep";
 
 export type DiscontinuityKind =
-  /** The whole host slept: no producer ran, and every overdue one fires on wake. */
+  /**
+   * The daemon process restarts: sessions are persisted for recovery and rehydrated awaiting
+   * their owners, and the owner's next heartbeat claims ownership again (#10705).
+   */
+  | "restart"
+  /**
+   * The whole host slept: no producer ran, and every overdue one fires on wake. The wall clock
+   * jumps while the monotonic clock stands still (`FakeTimer.simulateHostSleep`, #10699).
+   */
   | "sleep"
-  /** The daemon's event loop blocked: the owner kept sending, and its messages queue to resume. */
+  /**
+   * The daemon's event loop blocked: the owner kept sending, and its messages queue to resume.
+   * Both clocks run, so the daemon can tell it from sleep (#10699).
+   */
   | "stall"
   /** Only the monitor's timer fired late (timer coalescing); everything else ran on time. */
   | "lateTick";
@@ -75,6 +98,8 @@ export interface ScheduleProfile {
   ownerExitChance: number;
   /** Allow tool-call gaps longer than the idle window. */
   allowIdleGaps: boolean;
+  /** Idle windows a schedule may pick; defaults to {@link IDLE_WINDOWS_MS}. */
+  idleWindowsMs?: readonly number[];
 }
 
 const PRODUCERS: readonly ProducerEvent[] = [
@@ -153,6 +178,14 @@ function nextInstant(
     const at = Math.min(...liveProducers(ownerAlive).map((event) => clocks[event]));
     return { at, events: dueBy(clocks, at, ownerAlive) };
   }
+  if (kind === "restart") {
+    // The daemon restarts between two producer events; nothing is lost but its memory.
+    return {
+      at: earliest,
+      events: dueBy(clocks, earliest, ownerAlive),
+      discontinuity: { kind, ms: 0 },
+    };
+  }
   // A sleep or stall starts just before the earliest producer, so that producer waits too.
   const ms = gapLength(context);
   const at = earliest + ms;
@@ -162,7 +195,7 @@ function nextInstant(
 /** Generate a schedule from a seed. Pure: the same seed and profile give the same schedule. */
 export function generateSchedule(seed: number, profile: ScheduleProfile): Schedule {
   const random = new SeededRandom(seed);
-  const windowMs = random.pick(IDLE_WINDOWS_MS);
+  const windowMs = random.pick(profile.idleWindowsMs ?? IDLE_WINDOWS_MS);
   const context: GenerationContext = { random, windowMs, profile };
   const clocks: ProducerClocks = {
     heartbeat: nextFiring("heartbeat", 0, context),
@@ -210,6 +243,10 @@ export interface RunResult {
   toolCalls: ToolCallOutcome[];
   /** The idle deadline (`expiresAt`) after each instant that left the session in place. */
   deadlines: { at: number; expiresAt: number }[];
+  /** Virtual times the daemon restarted at. */
+  restarts: number[];
+  /** The device's pool entry when the run ended: busy with the session, or freed. */
+  device: DeviceSnapshot;
 }
 
 function shuffled<T>(items: readonly T[], random: Random): T[] {
@@ -221,61 +258,155 @@ function shuffled<T>(items: readonly T[], random: Random): T[] {
   return copy;
 }
 
-const DEVICE_POOL = {
-  refreshDevices: async () => 0,
-  getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
-};
+/** Pool state at the end of a run: what the release must leave behind (invariant 4, #10705). */
+export interface DeviceSnapshot {
+  status: string;
+  sessionId: string | null;
+  autolockSessionId: string | undefined;
+}
+
+/** Autolock acquisition reads the pool timeout from the process env, in seconds. */
+const AUTOLOCK_ENV_KEYS = [
+  "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
+  "AUTO_MOBILE_DEVICE_POOL_AUTOLOCK",
+  "AUTOMOBILE_DEVICE_POOL_TIMEOUT",
+  "AUTO_MOBILE_DEVICE_POOL_TIMEOUT",
+] as const;
+
+/** One daemon process: session manager, pool and heartbeat monitor, as daemon.ts wires them. */
+interface DaemonProcess {
+  manager: SessionManager;
+  pool: DevicePool;
+  monitor: SessionHeartbeatMonitor;
+  state: DaemonStateAccess;
+}
 
 /** The reduced daemon core one schedule runs against. */
 class ScheduleWorld {
   readonly timer = new FakeTimer();
-  readonly manager = new SessionManager(this.timer, new FakeDeviceSessionPersistence());
+  readonly persistence = new FakeDeviceSessionPersistence();
   readonly releases: Release[] = [];
   readonly toolCalls: ToolCallOutcome[] = [];
-  readonly monitor = new SessionHeartbeatMonitor(
-    this.manager,
-    () => false,
-    async (sessionId, reason) => {
-      await this.manager.releaseSession(sessionId, reason);
-    },
-    this.timer,
-  );
-  private readonly state: DaemonStateAccess = {
-    isInitialized: () => true,
-    getSessionManager: () => this.manager,
-    getDevicePool: () => DEVICE_POOL,
-    getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
-  };
+  readonly restarts: number[] = [];
+  sessionId = "";
+  private daemon!: DaemonProcess;
+  private readonly discovery = new FakeDeviceUtils();
+  private readonly savedEnv = new Map<string, string | undefined>();
+  /** The owner's next heartbeat claims ownership, as a proxy's keeper does until acked. */
+  private needsClaim = true;
 
-  constructor() {
-    this.manager.onSessionRelease((_sessionId, _deviceId, reason) => {
+  get manager(): SessionManager {
+    return this.daemon.manager;
+  }
+
+  private async createDaemon(): Promise<DaemonProcess> {
+    const manager = new SessionManager(this.timer, this.persistence);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(manager, "expiry-property-daemon", {
+        timer: this.timer,
+        deviceManager: this.discovery,
+        idGenerator: new FakeIdGenerator(),
+        env: { ...process.env },
+      }),
+    );
+    await pool.initializeWithDevices([DEVICE_INFO]);
+    const monitor = new SessionHeartbeatMonitor(
+      manager,
+      () => false,
+      async (sessionId, reason) => {
+        const deviceId = manager.getSession(sessionId)?.assignedDevice ?? null;
+        await releaseSessionAndDevice(manager, pool, deviceId, sessionId, reason);
+      },
+      this.timer,
+    );
+    manager.onSessionRelease((_sessionId, _deviceId, reason) => {
       this.releases.push({ at: this.timer.now(), reason });
     });
+    const registry = new DeviceSessionRegistry();
+    const state: DaemonStateAccess = {
+      isInitialized: () => true,
+      getSessionManager: () => manager,
+      getDevicePool: () => pool,
+      getDeviceSessionRegistry: () => registry,
+    };
+    monitor.start();
+    return { manager, pool, monitor, state };
   }
 
   async start(windowMs: number): Promise<void> {
-    await this.manager.createSession(SESSION, DEVICE, "android", windowMs);
-    const claim = await this.heartbeat(true);
+    this.discovery.setBootedDevices("android", [DEVICE_INFO]);
+    for (const key of AUTOLOCK_ENV_KEYS) {
+      this.savedEnv.set(key, process.env[key]);
+      delete process.env[key];
+    }
+    const autolock = windowMs === AUTOLOCK_IDLE_WINDOW_MS;
+    if (autolock) {
+      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+      process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT = String(windowMs / 1_000);
+    }
+    this.daemon = await this.createDaemon();
+    const { pool } = this.daemon;
+    const sessionId = autolock
+      ? await pool.autolockDevice(DEVICE, "android")
+      : await pool.bindOrReuseDeviceSession("expiry-property-session", DEVICE, "android");
+    if (!sessionId) {
+      throw new Error("the pool did not acquire the device");
+    }
+    this.sessionId = sessionId;
+    const claim = await this.heartbeat();
     if (!claim.success) {
       throw new Error(`owner claim failed: ${JSON.stringify(claim)}`);
     }
-    this.monitor.start();
   }
 
-  heartbeat(claim = false) {
-    return handleDaemonRequest(
+  async heartbeat() {
+    const claim = this.needsClaim;
+    const response = await handleDaemonRequest(
       {
         id: "heartbeat",
         type: "daemon_request",
         method: "daemon/heartbeat",
         params: {
-          sessionId: SESSION,
+          sessionId: this.sessionId,
           livenessOwnerToken: OWNER,
           ...(claim ? { claimLivenessOwnership: true } : {}),
         },
       },
-      this.state,
+      this.daemon.state,
     );
+    if (response.success) {
+      this.needsClaim = false;
+    }
+    return response;
+  }
+
+  /**
+   * The daemon process restarts: live sessions are persisted for recovery, the old process's
+   * state is dropped, and the new one rehydrates them awaiting their owners.
+   */
+  async restart(): Promise<void> {
+    const old = this.daemon;
+    for (const session of old.manager.getAllSessions()) {
+      await this.persistence.markReleased(
+        session.sessionId,
+        "expired",
+        this.timer.now(),
+        "daemon-restart",
+      );
+    }
+    await old.monitor.stop();
+    old.manager.stopCleanupTimer();
+    this.restarts.push(this.timer.now());
+    this.daemon = await this.createDaemon();
+    await this.daemon.manager.rehydratePersistedSessions(this.daemon.pool);
+    if (!this.daemon.manager.hasSession(this.sessionId)) {
+      // A session already past its idle deadline is not recoverable: the restart ends it, and
+      // the fresh pool has the device free. No release callback runs for a session that was
+      // never loaded, so record the restart as the release.
+      this.releases.push({ at: this.timer.now(), reason: "expired-before-restart" });
+    }
+    this.daemon.manager.startRehydratedOwnerWindows();
+    this.needsClaim = true;
   }
 
   /**
@@ -285,7 +416,7 @@ class ScheduleWorld {
   async toolCall(retry = false): Promise<boolean> {
     const at = this.timer.now();
     try {
-      await this.manager.getOrCreateSession(SESSION);
+      await this.manager.getOrCreateSession(this.sessionId);
       this.toolCalls.push({ at, ok: true });
       return false;
     } catch (error) {
@@ -308,7 +439,7 @@ class ScheduleWorld {
       case "toolCall":
         return await this.toolCall();
       case "monitorTick":
-        await this.monitor.tick();
+        await this.daemon.monitor.tick();
         return false;
       case "cleanupSweep":
         this.manager.cleanupExpiredSessions();
@@ -329,12 +460,31 @@ class ScheduleWorld {
 
   /** A lookup or sweep began releasing the session; its callback lands a few turns later. */
   releaseStarted(): boolean {
-    return this.manager.getReleasingSession(SESSION) !== null || !this.manager.hasSession(SESSION);
+    return (
+      this.manager.getReleasingSession(this.sessionId) !== null ||
+      !this.manager.hasSession(this.sessionId)
+    );
+  }
+
+  device(): DeviceSnapshot {
+    const device = this.daemon.pool.getDevice(DEVICE);
+    return {
+      status: device?.status ?? "missing",
+      sessionId: device?.sessionId ?? null,
+      autolockSessionId: device?.autolockSessionId,
+    };
   }
 
   async stop(): Promise<void> {
-    await this.monitor.stop();
+    await this.daemon.monitor.stop();
     this.manager.stopCleanupTimer();
+    for (const [key, value] of this.savedEnv) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
   }
 }
 
@@ -356,7 +506,14 @@ export async function runSchedule(
   try {
     await world.start(schedule.idleWindowMs);
     for (const instant of instants) {
+      if (instant.discontinuity?.kind === "sleep") {
+        // The gap ends with the host asleep for `ms`; the rest of it the host was awake.
+        world.timer.simulateHostSleep(instant.discontinuity.ms);
+      }
       world.timer.setCurrentTime(instant.at);
+      if (instant.discontinuity?.kind === "restart") {
+        await world.restart();
+      }
       await world.deliverInstant(shuffled(instant.events, order));
       if (world.releaseStarted()) {
         await drainMicrotasks(RELEASE_SETTLE_TURNS);
@@ -364,15 +521,23 @@ export async function runSchedule(
       if (world.releases.length > 0) {
         break;
       }
-      const session = world.manager.getAllSessions().find((s) => s.sessionId === SESSION);
+      const session = world.manager.getAllSessions().find((s) => s.sessionId === world.sessionId);
       if (session) {
         deadlines.push({ at: instant.at, expiresAt: session.expiresAt });
       }
     }
+    // Let a release that started in the final instant reach the pool before it is read.
+    await drainMicrotasks(RELEASE_SETTLE_TURNS);
+    return {
+      release: world.releases[0],
+      toolCalls: world.toolCalls,
+      deadlines,
+      restarts: world.restarts,
+      device: world.device(),
+    };
   } finally {
     await world.stop();
   }
-  return { release: world.releases[0], toolCalls: world.toolCalls, deadlines };
 }
 
 /** The policy that released a session, independent of which path (lookup or sweep) ran it. */
@@ -380,7 +545,9 @@ export function reasonClass(release: Release | undefined): string {
   if (release === undefined) {
     return "kept";
   }
-  return release.reason === "lazy-expiry" || release.reason === "cleanup-expired"
+  return release.reason === "lazy-expiry" ||
+    release.reason === "cleanup-expired" ||
+    release.reason === "expired-before-restart"
     ? "idle"
     : release.reason;
 }
@@ -390,6 +557,19 @@ export function lastToolAt(result: RunResult, at: number): number {
   return result.toolCalls
     .filter((call) => call.ok && call.at <= at)
     .reduce((latest, call) => Math.max(latest, call.at), 0);
+}
+
+/**
+ * Last instant at or before `at` that restarted the session's idle window: an accepted tool
+ * call, or a daemon restart (the rehydrated session's window starts at the restart).
+ */
+export function lastActivityAt(result: RunResult, at: number): number {
+  return (
+    result.restarts
+      // A restart that ends an expired session at `at` is not activity for that same release.
+      .filter((restartAt) => restartAt < at)
+      .reduce((latest, restartAt) => Math.max(latest, restartAt), lastToolAt(result, at))
+  );
 }
 
 export type PropertyCheck = (schedule: Schedule) => Promise<string | undefined>;
@@ -483,4 +663,32 @@ export async function assertProperty(
       );
     }
   }
+}
+
+/**
+ * A property a tracked bug still violates. It runs, and passes only while some seed in `seeds`
+ * still produces a counterexample, so the known failure is visible in every run instead of
+ * skipped (`test.todo` never runs in CI). When the fix lands the seeds stop failing, this
+ * throws, and the fix PR flips the property to enforced. `issue` names the bug.
+ */
+export async function expectKnownFailure(
+  seeds: readonly number[],
+  profile: ScheduleProfile,
+  check: PropertyCheck,
+  issue: string,
+): Promise<void> {
+  try {
+    await assertProperty(seeds, profile, check);
+  } catch (counterexample) {
+    // A counterexample is the expected state: the bug is still present. Printed on request so
+    // the report for the bug can quote it.
+    if (process.env.AUTOMOBILE_EXPIRY_PROPERTY_SHOW_KNOWN === "1") {
+      console.log(`Known failure ${issue}:\n${errorMessage(counterexample)}`);
+    }
+    return;
+  }
+  throw new Error(
+    `Known failure (${issue}) no longer fails for seeds ${seeds[0]}-${seeds.at(-1)}. ` +
+      `Flip the property to enforced in the PR that fixed ${issue}.`,
+  );
 }

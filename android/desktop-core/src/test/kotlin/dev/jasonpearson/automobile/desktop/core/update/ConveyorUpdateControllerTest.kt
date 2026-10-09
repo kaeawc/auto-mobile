@@ -73,10 +73,10 @@ class ConveyorUpdateControllerTest {
   @Test
   fun `canApplyUpdate delegates to the gateway`() = runTest {
     assertTrue(
-      ConveyorUpdateController(FakeSoftwareUpdateGateway(canApply = true)).canApplyUpdate()
+      ConveyorUpdateController(FakeSoftwareUpdateGateway(canApply = true)).canApplyUpdate(),
     )
     assertFalse(
-      ConveyorUpdateController(FakeSoftwareUpdateGateway(canApply = false)).canApplyUpdate()
+      ConveyorUpdateController(FakeSoftwareUpdateGateway(canApply = false)).canApplyUpdate(),
     )
   }
 

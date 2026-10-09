@@ -26,6 +26,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -189,9 +190,28 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
         // tool activity that, unlike a heartbeat, moves the idle deadline.
         if (typeof params.sessionUuid === "string") {
           await manager.getOrCreateSession(params.sessionUuid);
+        } else if (params.platform === DEVICE.platform || params.deviceId === DEVICE.deviceId) {
+          // A selector-routed call (#10692) resolves to the session holding the selected device.
+          const sessionId = pool.getDevice(DEVICE.deviceId)?.sessionId;
+          if (sessionId) {
+            await manager.getOrCreateSession(sessionId);
+          }
         }
       },
-      toolResultFor: (tool) => (tool === "getAndroid" ? deviceStartResult(SESSION) : undefined),
+      toolResultFor: (tool, params) => {
+        if (tool === "getAndroid") {
+          return deviceStartResult(SESSION);
+        }
+        // The daemon echoes the session it routed an admitted control call to (#10974); a read
+        // (observe) is watching and carries no echo.
+        const routed =
+          tool === "observe"
+            ? undefined
+            : typeof params.sessionUuid === "string"
+              ? params.sessionUuid
+              : (pool.getDevice(DEVICE.deviceId)?.sessionId ?? undefined);
+        return withRoutedSessionMeta({ content: [{ type: "text", text: "ok" }] }, routed);
+      },
       onCallDaemonMethod: async (method, params) => {
         if (method !== "daemon/heartbeat") {
           return;
@@ -326,6 +346,27 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
     expect(releasedAt!).toBeLessThanOrEqual(usedAt + SESSION_IDLE_TIMEOUT_MS + RELEASE_SLACK_MS);
     expect(reaped).toEqual([]);
     expect(pool.getDevice(DEVICE.deviceId)).toMatchObject({ status: "idle", sessionId: null });
+  });
+
+  test("#10692: an agent driving the device through a platform selector keeps it, and it is released one window after its last call", async () => {
+    const until = timer.now() + SESSION_IDLE_TIMEOUT_MS * 3;
+    while (timer.now() < until) {
+      await idleFor(SESSION_IDLE_TIMEOUT_MS / 2);
+      await proxy.callTool("pressButton", { platform: "android", button: "back" });
+    }
+    const lastCallAt = timer.now();
+    expect(forwarded.at(-1)).toMatchObject({ tool: "pressButton", sessionUuid: undefined });
+    expect(isReleased()).toBe(false);
+    expect(manager.getSession(SESSION)!.lastUsedAt).toBe(lastCallAt);
+
+    const releasedAt = await idleUntilReleased(SESSION_IDLE_TIMEOUT_MS + RELEASE_SLACK_MS * 2);
+    expect(releasedAt).toBeDefined();
+    expect(releasedAt!).toBeGreaterThan(lastCallAt + SESSION_IDLE_TIMEOUT_MS);
+    expect(releasedAt!).toBeLessThanOrEqual(
+      lastCallAt + SESSION_IDLE_TIMEOUT_MS + RELEASE_SLACK_MS,
+    );
+    // Released as idle, never as an owner that stopped heartbeating.
+    expect(reaped).toEqual([]);
   });
 
   test("past the replay TTL the proxy no longer replays the idle binding: heartbeat acks do not refresh it", async () => {

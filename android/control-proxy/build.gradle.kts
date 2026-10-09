@@ -92,6 +92,8 @@ dependencies {
   testImplementation(libs.bundles.unit.test)
   testImplementation(projects.junitRunner)
   testImplementation(libs.robolectric)
+  // createComposeRule's mainClock drives overlay motion frame by frame (#10442).
+  testImplementation(libs.compose.ui.junit)
   testImplementation(libs.ktor.client.core)
   testImplementation(libs.ktor.client.cio)
   testImplementation(libs.ktor.client.websockets)
@@ -101,19 +103,32 @@ dependencies {
   debugImplementation(libs.bundles.compose.ui.debug)
 }
 
-// Forward the overlay renderer screenshot switches from the Gradle invocation to the forked test
-// JVM so `-Dscreenshot.record=true` (and friends) reach the tests. See
-// src/test/kotlin/.../overlay/screenshot/OverlayScreenshotEnvironment.kt for the supported flags.
+// Forward the overlay renderer screenshot and preview switches from the Gradle invocation to the
+// forked test JVM so `-Dscreenshot.record=true` (and friends) reach the tests. See
+// src/test/kotlin/.../overlay/screenshot/OverlayScreenshotEnvironment.kt and OverlayPreview.kt for
+// the supported flags.
 val screenshotProperties =
   listOf(
     "screenshot.record",
     "screenshot.reference.os",
     "screenshot.golden.dir",
     "screenshot.report.dir",
+    "overlay.preview.spec",
+    "overlay.preview.out",
+    "overlay.preview.width",
+    "overlay.preview.height",
+    "overlay.preview.density",
+    "overlay.preview.theme",
   )
 
 tasks.withType<Test>().configureEach {
   screenshotProperties.forEach { key ->
     System.getProperty(key)?.let { value -> systemProperty(key, value) }
+  }
+  // A preview reads spec files Gradle does not track, so never reuse an up-to-date or cached
+  // result.
+  if (System.getProperty("overlay.preview.spec") != null) {
+    outputs.upToDateWhen { false }
+    outputs.doNotCacheIf("overlay preview reads untracked spec files") { true }
   }
 }

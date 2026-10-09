@@ -42,7 +42,7 @@ fun allShortcutCategories(vimModeEnabled: Boolean): List<ShortcutCategory> = bui
         ShortcutEntry("Tab", "Focus next pane"),
         ShortcutEntry("Shift+Tab", "Focus previous pane"),
       ),
-    )
+    ),
   )
   add(
     ShortcutCategory(
@@ -53,7 +53,7 @@ fun allShortcutCategories(vimModeEnabled: Boolean): List<ShortcutCategory> = bui
         ShortcutEntry("Enter", "Select/inspect event"),
         ShortcutEntry("Escape", "Deselect/close inspector"),
       ),
-    )
+    ),
   )
   add(
     ShortcutCategory(
@@ -62,7 +62,7 @@ fun allShortcutCategories(vimModeEnabled: Boolean): List<ShortcutCategory> = bui
         ShortcutEntry("Cmd+K", "Quick jump to timestamp"),
         ShortcutEntry("Cmd+/", "Show shortcut cheat sheet"),
       ),
-    )
+    ),
   )
   if (vimModeEnabled) {
     add(
@@ -75,7 +75,7 @@ fun allShortcutCategories(vimModeEnabled: Boolean): List<ShortcutCategory> = bui
           ShortcutEntry("G (Shift+g)", "Jump to bottom"),
           ShortcutEntry("/", "Focus search"),
         ),
-      )
+      ),
     )
   }
 }
@@ -103,7 +103,7 @@ fun ShortcutCheatSheet(
             indication = null,
             onClick = {},
           )
-          .padding(24.dp)
+          .padding(24.dp),
     ) {
       Text(
         text = "Keyboard Shortcuts",

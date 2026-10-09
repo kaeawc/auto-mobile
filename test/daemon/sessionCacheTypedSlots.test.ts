@@ -90,7 +90,7 @@ describe("SessionCacheData typed slots (issue #2973)", () => {
       expect(sessionManager.getKeepScreenAwake("s1")).toBeUndefined();
     });
 
-    test("EC4: getKeepScreenAwake records NO session activity, unlike getSessionCache", async () => {
+    test("EC4: getKeepScreenAwake records NO session activity", async () => {
       const { repo, activity } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
       const mgr = new SessionManager(fakeTimer, repo, () => barrier);
@@ -104,10 +104,10 @@ describe("SessionCacheData typed slots (issue #2973)", () => {
         await Promise.resolve();
         expect(activity.length).toBe(activityAfterSet);
 
-        // Contrast: getSessionCache DOES record activity (the behavior we avoid).
+        // getSessionCache is a plain read too (#10703).
         mgr.getSessionCache("s1");
         await Promise.resolve();
-        expect(activity.length).toBe(activityAfterSet + 1);
+        expect(activity.length).toBe(activityAfterSet);
       } finally {
         mgr.stopCleanupTimer();
       }

@@ -139,7 +139,7 @@ class MediaPlayerViewModel : ViewModel() {
                         //                      }
                       }
                     }
-                  }
+                  },
                 )
               } else {
                 Log.e("MediaPlayerVM", "MediaItem is null")

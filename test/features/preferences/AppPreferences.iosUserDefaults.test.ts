@@ -115,6 +115,8 @@ class FakeContainerSimctl {
   containerPath = container;
   containerError?: string;
   writeError?: string;
+  processList = "PID\tStatus\tLabel\n";
+  processListError?: string;
   onCommand?: () => void;
   async executeCommand(): Promise<{ stdout: string; stderr: string }> {
     throw new Error("Unexpected string command");
@@ -125,6 +127,12 @@ class FakeContainerSimctl {
   ): Promise<{ stdout: string; stderr: string }> {
     this.calls.push({ args, timeoutMs });
     this.onCommand?.();
+    if (args[2] === "launchctl") {
+      if (this.processListError) {
+        throw new Error(this.processListError);
+      }
+      return { stdout: this.processList, stderr: "" };
+    }
     if (args[0] === "get_app_container") {
       if (this.containerError) {
         throw new Error(this.containerError);
@@ -329,7 +337,6 @@ describe("runner SDK refusals before dispatch", () => {
     "Command execution failed: iOS key-value storage failed: connection lost after dispatch",
     "iOS key-value storage requires the target app to embed the AutoMobile SDK, initialize it, and call UserDefaultsInspector.shared.setEnabled(true): The network connection was lost.",
     "iOS key-value storage requires the target app to embed or upgrade the AutoMobile SDK: not_found",
-    `Command execution failed: iOS key-value storage requires ${input.appId} to be the foreground app`,
     "iOS key-value storage app id mismatch",
     "app_not_active",
     "unknown SDK error",
@@ -345,6 +352,49 @@ describe("runner SDK refusals before dispatch", () => {
       expect(plist.paths).toEqual([]);
     });
   }
+  describe("foreground refusal (#10794)", () => {
+    const foregroundRefusal = `Command execution failed: iOS key-value storage requires ${input.appId} to be the foreground app`;
+    const launchctlRunning = `PID\tStatus\tLabel\n4242\t0\tUIKitApplication:${input.appId}[0x1a2b][rb-legacy]\n`;
+    test("seeds the container plist when the app has no process", async () => {
+      const { preferences, sdk, simctl, plist } = harness();
+      sdk.writeError = foregroundRefusal;
+      simctl.onCommand = () => {
+        if (simctl.calls.at(-1)?.args[3] === "write") {
+          plist.setValue(7, "int");
+        }
+      };
+      const result = await preferences.setPreference({ ...input, value: 7, type: "int" });
+      expect(result).toMatchObject({
+        success: true,
+        verified: true,
+        storeRoute: "container-plist",
+      });
+      expect(simctl.calls.map((call) => call.args[0] + ":" + call.args[3])).toEqual([
+        "spawn:list",
+        "get_app_container:data",
+        "spawn:write",
+      ]);
+    });
+    test("keeps refusing when the app is running in the background", async () => {
+      const { preferences, sdk, simctl, plist } = harness();
+      sdk.writeError = foregroundRefusal;
+      simctl.processList = launchctlRunning;
+      await expect(preferences.setPreference({ ...input, value: 7, type: "int" })).rejects.toThrow(
+        "no container write was attempted",
+      );
+      expect(simctl.calls.map((call) => call.args[3])).toEqual(["list"]);
+      expect(plist.paths).toEqual([]);
+    });
+    test("fails closed when the process probe errors", async () => {
+      const { preferences, sdk, simctl } = harness();
+      sdk.writeError = foregroundRefusal;
+      simctl.processListError = "launchctl unavailable";
+      await expect(preferences.setPreference({ ...input, value: 7, type: "int" })).rejects.toThrow(
+        "no container write was attempted",
+      );
+      expect(simctl.calls.map((call) => call.args[3])).toEqual(["list"]);
+    });
+  });
   test("mutation authorization takes precedence over the fallback token", async () => {
     const { preferences, sdk, simctl } = harness();
     sdk.writeError = "mutation_not_authorized: sdk_unavailable_not_dispatched";

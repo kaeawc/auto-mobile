@@ -33,11 +33,11 @@ private class BroadcastReceiverReply(private val receiver: BroadcastReceiver) :
 
 /** Registers a control callback protected by the CtrlProxy-owned signature permission. */
 internal class NetworkControlReceiverRegistrar(
-  private val onControlBroadcast: (Context?, Intent?, ControlBroadcastReply) -> Unit
+  private val onControlBroadcast: (Context?, Intent?, ControlBroadcastReply) -> Unit,
 ) {
   /** For callbacks that never answer the sender. */
   constructor(
-    onControlBroadcast: (Context?, Intent?) -> Unit
+    onControlBroadcast: (Context?, Intent?) -> Unit,
   ) : this({ context, intent, _ -> onControlBroadcast(context, intent) })
 
   private var receiver: BroadcastReceiver? = null

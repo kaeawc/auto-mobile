@@ -59,6 +59,11 @@ import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { runWithSelectedDisplayPin } from "../../../src/features/observe/SessionDisplayContext";
+import {
+  resetObserveCacheStore,
+  setObserveCacheStore,
+} from "../../../src/features/observe/cache/ObserveCacheRegistry";
+import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 
 const android = {
   deviceId: "target-display-android",
@@ -167,6 +172,11 @@ function adb(): FakeAdbExecutor {
   });
   return result;
 }
+
+// The default observe cache store persists every cached observation to the temp directory;
+// keep these unit tests in memory so file IO is not charged to them.
+beforeEach(() => setObserveCacheStore(new FakeObserveCacheStore()));
+afterEach(() => resetObserveCacheStore());
 
 describe("explicit action display", () => {
   let capabilitySpy: ReturnType<typeof spyOn>;

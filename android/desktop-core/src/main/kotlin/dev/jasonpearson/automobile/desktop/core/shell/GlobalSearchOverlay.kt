@@ -131,7 +131,7 @@ fun GlobalSearchOverlay(
               }
               else -> false
             }
-          }
+          },
     ) {
       TextField(
         value = query,

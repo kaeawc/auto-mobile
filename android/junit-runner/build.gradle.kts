@@ -71,7 +71,9 @@ dependencies {
 tasks.withType<KotlinCompile>().configureEach {
   compilerOptions {
     languageVersion.set(
-      KotlinVersion.valueOf("KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}")
+      KotlinVersion.valueOf(
+        "KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}",
+      ),
     )
     apiVersion.set(KotlinVersion.fromVersion(libs.versions.build.kotlin.consumer.api.get()))
   }
@@ -125,6 +127,13 @@ tasks.withType<Test> {
   // classes are silently skipped. The junit-vintage-engine dependency keeps the existing
   // JUnit 4 suites (e.g. RecoveryLoopTest) running on the same platform.
   useJUnitPlatform()
+
+  // DaemonStatePathsTest reads the daemon state-path vectors shared with the TypeScript daemon,
+  // the desktop app and XCTestRunner (#10906).
+  inputs
+    .file(layout.projectDirectory.file("../../test/fixtures/daemon-isolation-paths.json"))
+    .withPropertyName("daemonIsolationPathVectors")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
 
   // Enable parallel test execution across multiple devices
   maxParallelForks = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)

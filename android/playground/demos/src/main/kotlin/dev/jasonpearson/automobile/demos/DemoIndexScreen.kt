@@ -47,6 +47,7 @@ fun DemoIndexScreen(
   onNavigateToTapTargets: () -> Unit,
   onNavigateToXmlSemanticLinks: () -> Unit,
   onNavigateToComposeSemanticLinks: () -> Unit,
+  onNavigateToNestedSelection: () -> Unit,
   onNavigateToBugRepro: () -> Unit,
   onNavigateToHandledException: () -> Unit = {},
   onNavigateToNetworkTest: () -> Unit = {},
@@ -106,6 +107,13 @@ fun DemoIndexScreen(
           onClick = onNavigateToComposeSemanticLinks,
         ),
         DemoEntry(
+          id = "demo_nested_selection",
+          title = "Nested Selection",
+          description = "Two carts with duplicate item ids, quantity fields and remove buttons.",
+          buttonLabel = "Open Nested Selection",
+          onClick = onNavigateToNestedSelection,
+        ),
+        DemoEntry(
           id = "demo_bug_repro",
           title = "Bug Reproduction",
           description = "Toggleable bug to reproduce reliably.",
@@ -152,7 +160,7 @@ fun DemoIndexScreen(
           },
           colors = TopAppBarDefaults.topAppBarColors(),
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =

@@ -1,0 +1,9 @@
+{
+  "spec": {
+    "id": "a",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": { "on": true },
+    "root": { "type": "chip", "label": "Snooze", "variant": "suggestion", "stateKey": "on" }
+  },
+  "expectedPath": "root.stateKey"
+}

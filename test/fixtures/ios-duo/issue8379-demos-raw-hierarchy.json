@@ -1,0 +1,1305 @@
+{
+  "frameContext": "582E2F5B-29F6-41B4-A889-A71D21890F3B:3:3e68a7832b647316",
+  "fresh": true,
+  "hierarchy": {
+    "bounds": {
+      "bottom": 951,
+      "left": 0,
+      "right": 669,
+      "top": 0
+    },
+    "className": "XCUIApplication",
+    "node": [
+      {
+        "bounds": {
+          "bottom": 82,
+          "left": 0,
+          "right": 951,
+          "top": 24
+        },
+        "className": "UINavigationBar",
+        "extras": {
+          "sdk.gestureRecognizers": "_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionPressGestureRecognizer(enabled)"
+        },
+        "node": [
+          {
+            "bounds": {
+              "bottom": 65,
+              "left": 20,
+              "right": 112,
+              "top": 31
+            },
+            "className": "UILabel",
+            "extras": {
+              "sdk.accessibilityTraits": "staticText",
+              "sdk.isAccessibilityElement": "true",
+              "sdk.isUserInteractionEnabled": "false"
+            },
+            "role": "text",
+            "text": "Demos",
+            "view-id": "s2-fafc234ea82e7120"
+          },
+          {
+            "bounds": {
+              "bottom": 82,
+              "left": 0,
+              "right": 951,
+              "top": 0
+            },
+            "className": "_UIBarBackground",
+            "extras": {
+              "sdk.accessibilityElementsHidden": "true",
+              "sdk.isUserInteractionEnabled": "false",
+              "sdk.source": "sdkWalker"
+            }
+          }
+        ],
+        "resource-id": "Demos",
+        "view-id": "Demos"
+      },
+      {
+        "bounds": {
+          "bottom": 669,
+          "left": 0,
+          "right": 951,
+          "top": 0
+        },
+        "className": "UICollectionView",
+        "extras": {
+          "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled)",
+          "sdk.hasTapTarget": "true"
+        },
+        "node": [
+          {
+            "bounds": {
+              "bottom": 123,
+              "left": 20,
+              "right": 867,
+              "top": 82
+            },
+            "className": "UITableViewCell",
+            "clickable": "true",
+            "extras": {
+              "sdk.accessibilityTraits": "header"
+            },
+            "node": {
+              "bounds": {
+                "bottom": 123,
+                "left": 20,
+                "right": 867,
+                "top": 82
+              },
+              "className": "UILabel",
+              "extras": {
+                "sdk.accessibilityTraits": "header"
+              },
+              "role": "heading",
+              "text": "SDK Features",
+              "view-id": "s2-3ecc5650410f2b78"
+            },
+            "role": "heading",
+            "view-id": "s2-0484af598c3b4b96~37ca7adc"
+          },
+          {
+            "bounds": {
+              "bottom": 201,
+              "left": 20,
+              "right": 867,
+              "top": 123
+            },
+            "className": "UITableViewCell",
+            "clickable": "true",
+            "node": {
+              "bounds": {
+                "bottom": 201,
+                "left": 20,
+                "right": 867,
+                "top": 123
+              },
+              "className": "UIButton",
+              "clickable": "true",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 175,
+                    "left": 44,
+                    "right": 75,
+                    "top": 149
+                  },
+                  "className": "UIImageView",
+                  "clickable": "true",
+                  "resource-id": "antenna.radiowaves.left.and.right",
+                  "role": "image",
+                  "text": "Cellular Data",
+                  "view-id": "antenna.radiowaves.left.and.right"
+                },
+                {
+                  "bounds": {
+                    "bottom": 164,
+                    "left": 92,
+                    "right": 178,
+                    "top": 142
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "SDK Status",
+                  "view-id": "s2-004ade6bc09ef60f"
+                },
+                {
+                  "bounds": {
+                    "bottom": 182,
+                    "left": 92,
+                    "right": 302,
+                    "top": 166
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "AutoMobile SDK state and controls",
+                  "view-id": "s2-52d1f198c49750bc"
+                },
+                {
+                  "bounds": {
+                    "bottom": 202,
+                    "left": 20,
+                    "right": 867,
+                    "top": 124
+                  },
+                  "className": "_UISystemBackgroundView",
+                  "extras": {
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": {
+                    "bounds": {
+                      "bottom": 202,
+                      "left": 20,
+                      "right": 867,
+                      "top": 124
+                    },
+                    "className": "UIView",
+                    "extras": {
+                      "sdk.backgroundColor": "#FFFFFFFF",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  }
+                }
+              ],
+              "role": "button",
+              "text": "SDK Status, AutoMobile SDK state and controls",
+              "view-id": "s2-802b5676c0c0c290"
+            },
+            "role": "listitem",
+            "view-id": "s2-0ededf3cc29e00ad"
+          },
+          {
+            "bounds": {
+              "bottom": 279,
+              "left": 20,
+              "right": 867,
+              "top": 201
+            },
+            "className": "UITableViewCell",
+            "clickable": "true",
+            "node": {
+              "bounds": {
+                "bottom": 279,
+                "left": 20,
+                "right": 867,
+                "top": 201
+              },
+              "className": "UIButton",
+              "clickable": "true",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 254,
+                    "left": 45,
+                    "right": 74,
+                    "top": 226
+                  },
+                  "className": "UIImageView",
+                  "clickable": "true",
+                  "resource-id": "exclamationmark.octagon.fill",
+                  "role": "image",
+                  "text": "Exclamation Mark In A Filled Octagon",
+                  "view-id": "exclamationmark.octagon.fill"
+                },
+                {
+                  "bounds": {
+                    "bottom": 242,
+                    "left": 92,
+                    "right": 207,
+                    "top": 220
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "Error Tracking",
+                  "view-id": "s2-b3625bcb6ba03804"
+                },
+                {
+                  "bounds": {
+                    "bottom": 260,
+                    "left": 92,
+                    "right": 291,
+                    "top": 244
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "Test handled exception recording",
+                  "view-id": "s2-6e743399b25846d3"
+                },
+                {
+                  "bounds": {
+                    "bottom": 280,
+                    "left": 20,
+                    "right": 867,
+                    "top": 202
+                  },
+                  "className": "_UISystemBackgroundView",
+                  "extras": {
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": {
+                    "bounds": {
+                      "bottom": 280,
+                      "left": 20,
+                      "right": 867,
+                      "top": 202
+                    },
+                    "className": "UIView",
+                    "extras": {
+                      "sdk.backgroundColor": "#FFFFFFFF",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  }
+                }
+              ],
+              "role": "button",
+              "text": "Error Tracking, Test handled exception recording",
+              "view-id": "s2-eab9b03afbe7185c"
+            },
+            "role": "listitem",
+            "view-id": "s2-0b564b09668e1bde"
+          },
+          {
+            "bounds": {
+              "bottom": 357,
+              "left": 20,
+              "right": 867,
+              "top": 279
+            },
+            "className": "UITableViewCell",
+            "clickable": "true",
+            "node": {
+              "bounds": {
+                "bottom": 357,
+                "left": 20,
+                "right": 867,
+                "top": 279
+              },
+              "className": "UIButton",
+              "clickable": "true",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 332,
+                    "left": 46,
+                    "right": 73,
+                    "top": 305
+                  },
+                  "className": "UIImageView",
+                  "clickable": "true",
+                  "resource-id": "faceid",
+                  "role": "image",
+                  "text": "Face Id",
+                  "view-id": "faceid"
+                },
+                {
+                  "bounds": {
+                    "bottom": 320,
+                    "left": 92,
+                    "right": 174,
+                    "top": 298
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "Biometrics",
+                  "view-id": "s2-febb7ed0cee15f04"
+                },
+                {
+                  "bounds": {
+                    "bottom": 338,
+                    "left": 92,
+                    "right": 284,
+                    "top": 322
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "Test biometric override injection",
+                  "view-id": "s2-cabe7607b92e2245"
+                },
+                {
+                  "bounds": {
+                    "bottom": 358,
+                    "left": 20,
+                    "right": 867,
+                    "top": 280
+                  },
+                  "className": "_UISystemBackgroundView",
+                  "extras": {
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": {
+                    "bounds": {
+                      "bottom": 358,
+                      "left": 20,
+                      "right": 867,
+                      "top": 280
+                    },
+                    "className": "UIView",
+                    "extras": {
+                      "sdk.backgroundColor": "#FFFFFFFF",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  }
+                }
+              ],
+              "role": "button",
+              "text": "Biometrics, Test biometric override injection",
+              "view-id": "s2-fcab09ec47310adc"
+            },
+            "role": "listitem",
+            "view-id": "s2-15b5262107ca97a2"
+          },
+          {
+            "bounds": {
+              "bottom": 435,
+              "left": 20,
+              "right": 867,
+              "top": 357
+            },
+            "className": "UITableViewCell",
+            "clickable": "true",
+            "node": {
+              "bounds": {
+                "bottom": 435,
+                "left": 20,
+                "right": 867,
+                "top": 357
+              },
+              "className": "UIButton",
+              "clickable": "true",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 411,
+                    "left": 45,
+                    "right": 74,
+                    "top": 382
+                  },
+                  "className": "UIImageView",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.isLayerNode": "true",
+                    "sdk.isUserInteractionEnabled": "false"
+                  },
+                  "resource-id": "network",
+                  "role": "image",
+                  "text": "Network Nodes Connected By Lines",
+                  "view-id": "network"
+                },
+                {
+                  "bounds": {
+                    "bottom": 398,
+                    "left": 92,
+                    "right": 234,
+                    "top": 376
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "Network Tracking",
+                  "view-id": "s2-60a907f702584148"
+                },
+                {
+                  "bounds": {
+                    "bottom": 416,
+                    "left": 92,
+                    "right": 289,
+                    "top": 400
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "Test network request monitoring",
+                  "view-id": "s2-7a93e185814e63c6"
+                },
+                {
+                  "bounds": {
+                    "bottom": 436,
+                    "left": 20,
+                    "right": 867,
+                    "top": 358
+                  },
+                  "className": "_UISystemBackgroundView",
+                  "extras": {
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": {
+                    "bounds": {
+                      "bottom": 436,
+                      "left": 20,
+                      "right": 867,
+                      "top": 358
+                    },
+                    "className": "UIView",
+                    "extras": {
+                      "sdk.backgroundColor": "#FFFFFFFF",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  }
+                },
+                {
+                  "bounds": {
+                    "bottom": 436,
+                    "left": 20,
+                    "right": 867,
+                    "top": 358
+                  },
+                  "className": "_UICollectionViewListCellContentView",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UILongPressGestureRecognizer(enabled)",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": {
+                    "bounds": {
+                      "bottom": 436,
+                      "left": 20,
+                      "right": 867,
+                      "top": 358
+                    },
+                    "className": "CellHostingView<ModifiedContent<_ViewList_View, CollectionViewCellModifier>>",
+                    "extras": {
+                      "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": {
+                        "bottom": 411,
+                        "left": 46,
+                        "right": 75,
+                        "top": 382
+                      },
+                      "className": "ColorShapeLayer",
+                      "extras": {
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    }
+                  }
+                }
+              ],
+              "role": "button",
+              "text": "Network Tracking, Test network request monitoring",
+              "view-id": "s2-8b43e6fb48577daa"
+            },
+            "role": "listitem",
+            "view-id": "s2-e95a9abd5770b3c9"
+          },
+          {
+            "bounds": {
+              "bottom": 495,
+              "left": 20,
+              "right": 867,
+              "top": 453
+            },
+            "className": "UITableViewCell",
+            "clickable": "true",
+            "extras": {
+              "sdk.accessibilityTraits": "header"
+            },
+            "node": {
+              "bounds": {
+                "bottom": 495,
+                "left": 20,
+                "right": 867,
+                "top": 453
+              },
+              "className": "UILabel",
+              "extras": {
+                "sdk.accessibilityTraits": "header"
+              },
+              "role": "heading",
+              "text": "Performance",
+              "view-id": "s2-b2c75c4c518145e2"
+            },
+            "role": "heading",
+            "view-id": "s2-0484af598c3b4b96~177e04f1"
+          },
+          {
+            "bounds": {
+              "bottom": 573,
+              "left": 20,
+              "right": 867,
+              "top": 495
+            },
+            "className": "UITableViewCell",
+            "clickable": "true",
+            "node": {
+              "bounds": {
+                "bottom": 573,
+                "left": 20,
+                "right": 867,
+                "top": 495
+              },
+              "className": "UIButton",
+              "clickable": "true",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 549,
+                    "left": 45,
+                    "right": 75,
+                    "top": 519
+                  },
+                  "className": "UIImageView",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.isLayerNode": "true",
+                    "sdk.isUserInteractionEnabled": "false"
+                  },
+                  "resource-id": "scroll.fill",
+                  "role": "image",
+                  "text": "Scroll Document, Filled",
+                  "view-id": "scroll.fill"
+                },
+                {
+                  "bounds": {
+                    "bottom": 535,
+                    "left": 92,
+                    "right": 241,
+                    "top": 514
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "Scroll Performance",
+                  "view-id": "s2-cba45693c8cf79df"
+                },
+                {
+                  "bounds": {
+                    "bottom": 554,
+                    "left": 92,
+                    "right": 274,
+                    "top": 537
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "Test scrolling with many items",
+                  "view-id": "s2-5c7b27114fca591e"
+                },
+                {
+                  "bounds": {
+                    "bottom": 573,
+                    "left": 20,
+                    "right": 867,
+                    "top": 495
+                  },
+                  "className": "_UISystemBackgroundView",
+                  "extras": {
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": {
+                    "bounds": {
+                      "bottom": 573,
+                      "left": 20,
+                      "right": 867,
+                      "top": 495
+                    },
+                    "className": "UIView",
+                    "extras": {
+                      "sdk.backgroundColor": "#FFFFFFFF",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  }
+                },
+                {
+                  "bounds": {
+                    "bottom": 573,
+                    "left": 20,
+                    "right": 867,
+                    "top": 495
+                  },
+                  "className": "_UICollectionViewListCellContentView",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UILongPressGestureRecognizer(enabled)",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": {
+                    "bounds": {
+                      "bottom": 573,
+                      "left": 20,
+                      "right": 867,
+                      "top": 495
+                    },
+                    "className": "CellHostingView<ModifiedContent<_ViewList_View, CollectionViewCellModifier>>",
+                    "extras": {
+                      "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": {
+                        "bottom": 549,
+                        "left": 45,
+                        "right": 75,
+                        "top": 519
+                      },
+                      "className": "ColorShapeLayer",
+                      "extras": {
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    }
+                  }
+                }
+              ],
+              "role": "button",
+              "text": "Scroll Performance, Test scrolling with many items",
+              "view-id": "s2-d5bdab3ee199a54e"
+            },
+            "role": "listitem",
+            "view-id": "s2-b060395acb2837f9"
+          },
+          {
+            "bounds": {
+              "bottom": 651,
+              "left": 20,
+              "right": 867,
+              "top": 573
+            },
+            "className": "UITableViewCell",
+            "clickable": "true",
+            "node": {
+              "bounds": {
+                "bottom": 651,
+                "left": 20,
+                "right": 867,
+                "top": 573
+              },
+              "className": "UIButton",
+              "clickable": "true",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 626,
+                    "left": 45,
+                    "right": 73,
+                    "top": 598
+                  },
+                  "className": "UIImageView",
+                  "clickable": "true",
+                  "resource-id": "wand.and.stars",
+                  "role": "image",
+                  "text": "Magic Wand With Stars",
+                  "view-id": "wand.and.stars"
+                },
+                {
+                  "bounds": {
+                    "bottom": 613,
+                    "left": 92,
+                    "right": 182,
+                    "top": 592
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "Animations",
+                  "view-id": "s2-3936ede5fe7459a2"
+                },
+                {
+                  "bounds": {
+                    "bottom": 632,
+                    "left": 92,
+                    "right": 311,
+                    "top": 615
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "Various animation types and timings",
+                  "view-id": "s2-1f46d052866ed444"
+                },
+                {
+                  "bounds": {
+                    "bottom": 651,
+                    "left": 20,
+                    "right": 867,
+                    "top": 573
+                  },
+                  "className": "_UISystemBackgroundView",
+                  "extras": {
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": {
+                    "bounds": {
+                      "bottom": 651,
+                      "left": 20,
+                      "right": 867,
+                      "top": 573
+                    },
+                    "className": "UIView",
+                    "extras": {
+                      "sdk.backgroundColor": "#FFFFFFFF",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  }
+                }
+              ],
+              "role": "button",
+              "text": "Animations, Various animation types and timings",
+              "view-id": "s2-278a0d2f60095e5d"
+            },
+            "role": "listitem",
+            "view-id": "s2-2ffae0af22eb1bb1"
+          },
+          {
+            "bounds": {
+              "bottom": 729,
+              "left": 20,
+              "right": 867,
+              "top": 651
+            },
+            "className": "UITableViewCell",
+            "clickable": "true",
+            "node": {
+              "bounds": {
+                "bottom": 729,
+                "left": 20,
+                "right": 867,
+                "top": 651
+              },
+              "className": "UIButton",
+              "clickable": "true",
+              "node": [
+                {
+                  "bounds": {
+                    "bottom": 704,
+                    "left": 46,
+                    "right": 74,
+                    "top": 676
+                  },
+                  "className": "UIImageView",
+                  "clickable": "true",
+                  "resource-id": "cpu.fill",
+                  "role": "image",
+                  "text": "Cpu Chip, Filled",
+                  "view-id": "cpu.fill"
+                },
+                {
+                  "bounds": {
+                    "bottom": 691,
+                    "left": 92,
+                    "right": 247,
+                    "top": 670
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "Heavy Computation",
+                  "view-id": "s2-447ef5dbe4f28635"
+                },
+                {
+                  "bounds": {
+                    "bottom": 710,
+                    "left": 92,
+                    "right": 319,
+                    "top": 693
+                  },
+                  "className": "UILabel",
+                  "role": "text",
+                  "text": "Stress test with intensive calculations",
+                  "view-id": "s2-b5930b2d8dec3822"
+                },
+                {
+                  "bounds": {
+                    "bottom": 729,
+                    "left": 20,
+                    "right": 867,
+                    "top": 651
+                  },
+                  "className": "_UISystemBackgroundView",
+                  "extras": {
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": {
+                    "bounds": {
+                      "bottom": 729,
+                      "left": 20,
+                      "right": 867,
+                      "top": 651
+                    },
+                    "className": "UIView",
+                    "extras": {
+                      "sdk.backgroundColor": "#FFFFFFFF",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  }
+                }
+              ],
+              "role": "button",
+              "text": "Heavy Computation, Stress test with intensive calculations",
+              "view-id": "s2-d43cb6da147b587a"
+            },
+            "role": "listitem",
+            "view-id": "s2-5231d0cab84b0ffd"
+          },
+          {
+            "bounds": {
+              "bottom": 669,
+              "left": 0,
+              "right": 951,
+              "top": 0
+            },
+            "className": "UITransitionView",
+            "extras": {
+              "sdk.source": "sdkWalker"
+            },
+            "node": {
+              "bounds": {
+                "bottom": 669,
+                "left": 0,
+                "right": 951,
+                "top": 0
+              },
+              "className": "UIDropShadowView",
+              "extras": {
+                "sdk.source": "sdkWalker"
+              },
+              "node": {
+                "bounds": {
+                  "bottom": 669,
+                  "left": 0,
+                  "right": 951,
+                  "top": 0
+                },
+                "className": "_UIHostingView<ModifiedContent<LazyView<ModifiedContent<ContentView, AutoMobileThemeModifier>>, RootModifier>>",
+                "extras": {
+                  "sdk.backgroundColor": "#FFFFFFFF",
+                  "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                  "sdk.source": "sdkWalker"
+                },
+                "node": {
+                  "bounds": {
+                    "bottom": 669,
+                    "left": 0,
+                    "right": 951,
+                    "top": 0
+                  },
+                  "className": "UIKitPlatformViewHost<PlatformViewControllerRepresentableAdaptor<UIKitAdaptableTabView>>",
+                  "extras": {
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": {
+                    "bounds": {
+                      "bottom": 669,
+                      "left": 0,
+                      "right": 951,
+                      "top": 0
+                    },
+                    "className": "UILayoutContainerView",
+                    "extras": {
+                      "sdk.backgroundColor": "#FFFFFFFF",
+                      "sdk.gestureRecognizers": "UITapGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": [
+                      {
+                        "bounds": {
+                          "bottom": 669,
+                          "left": 0,
+                          "right": 951,
+                          "top": 0
+                        },
+                        "className": "UITransitionView",
+                        "extras": {
+                          "sdk.source": "sdkWalker"
+                        },
+                        "node": {
+                          "bounds": {
+                            "bottom": 669,
+                            "left": 0,
+                            "right": 951,
+                            "top": 0
+                          },
+                          "className": "UIViewControllerWrapperView",
+                          "extras": {
+                            "sdk.source": "sdkWalker"
+                          },
+                          "node": {
+                            "bounds": {
+                              "bottom": 669,
+                              "left": 0,
+                              "right": 951,
+                              "top": 0
+                            },
+                            "className": "_UIHostingView<RootView>",
+                            "extras": {
+                              "sdk.backgroundColor": "#FFFFFFFF",
+                              "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                              "sdk.source": "sdkWalker"
+                            },
+                            "node": {
+                              "bounds": {
+                                "bottom": 669,
+                                "left": 0,
+                                "right": 951,
+                                "top": 0
+                              },
+                              "className": "UIKitPlatformViewHost<PlatformViewControllerRepresentableAdaptor<NavigationStackRepresentable>>",
+                              "extras": {
+                                "sdk.source": "sdkWalker"
+                              },
+                              "node": {
+                                "bounds": {
+                                  "bottom": 669,
+                                  "left": 0,
+                                  "right": 951,
+                                  "top": 0
+                                },
+                                "className": "UILayoutContainerView",
+                                "extras": {
+                                  "sdk.gestureRecognizers": "_UIParallaxTransitionPanGestureRecognizer(enabled),_UIParallaxTransitionPanGestureRecognizer(enabled)",
+                                  "sdk.source": "sdkWalker"
+                                },
+                                "node": [
+                                  {
+                                    "bounds": {
+                                      "bottom": 669,
+                                      "left": 0,
+                                      "right": 951,
+                                      "top": 0
+                                    },
+                                    "className": "UINavigationTransitionView",
+                                    "extras": {
+                                      "sdk.source": "sdkWalker"
+                                    },
+                                    "node": {
+                                      "bounds": {
+                                        "bottom": 669,
+                                        "left": 0,
+                                        "right": 951,
+                                        "top": 0
+                                      },
+                                      "className": "UIViewControllerWrapperView",
+                                      "extras": {
+                                        "sdk.source": "sdkWalker"
+                                      },
+                                      "node": {
+                                        "bounds": {
+                                          "bottom": 669,
+                                          "left": 0,
+                                          "right": 951,
+                                          "top": 0
+                                        },
+                                        "className": "HostingView",
+                                        "extras": {
+                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                          "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                                          "sdk.source": "sdkWalker"
+                                        },
+                                        "node": {
+                                          "bounds": {
+                                            "bottom": 669,
+                                            "left": 0,
+                                            "right": 951,
+                                            "top": 0
+                                          },
+                                          "className": "UIKitPlatformViewHost<ListRepresentable<CollectionViewListDataSource<Never>, SelectionManagerBox<Never>>>",
+                                          "extras": {
+                                            "sdk.source": "sdkWalker"
+                                          },
+                                          "node": {
+                                            "bounds": {
+                                              "bottom": 669,
+                                              "left": 0,
+                                              "right": 951,
+                                              "top": 0
+                                            },
+                                            "className": "UpdateCoalescingCollectionView",
+                                            "extras": {
+                                              "sdk.backgroundColor": "#F2F2F7FF",
+                                              "sdk.gestureRecognizers": "UIScrollViewDelayedTouchesBeganGestureRecognizer(enabled),UIScrollViewPanGestureRecognizer(enabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIHoverGestureRecognizer(enabled),_UIDragAutoScrollGestureRecognizer(enabled),_UIPressGestureRecognizer(enabled),_UIMultiSelectOneFingerPanGesture(disabled),UITapGestureRecognizer(disabled),UIPanGestureRecognizer(disabled),_UISingleFingerTapExtensionGesture(disabled),UIHoverGestureRecognizer(disabled),UILongPressGestureRecognizer(disabled),UITapGestureRecognizer(disabled),_UIFocusSelectObserverGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),UIPinchGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerWithEarlyStartGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UISwipeActionPanGestureRecognizer(enabled),_UISwipeDismissalGestureRecognizer(disabled)",
+                                              "sdk.source": "sdkWalker"
+                                            },
+                                            "node": [
+                                              {
+                                                "bounds": {
+                                                  "bottom": 453,
+                                                  "left": -20,
+                                                  "right": 1035,
+                                                  "top": -1256
+                                                },
+                                                "className": "_UICollectionViewListLayoutSectionBackgroundColorDecorationView",
+                                                "extras": {
+                                                  "sdk.backgroundColor": "#F2F2F7FF",
+                                                  "sdk.isUserInteractionEnabled": "false",
+                                                  "sdk.source": "sdkWalker"
+                                                }
+                                              },
+                                              {
+                                                "bounds": {
+                                                  "bottom": 746,
+                                                  "left": -20,
+                                                  "right": 1035,
+                                                  "top": 453
+                                                },
+                                                "className": "_UICollectionViewListLayoutSectionBackgroundColorDecorationView",
+                                                "extras": {
+                                                  "sdk.backgroundColor": "#F2F2F7FF",
+                                                  "sdk.isUserInteractionEnabled": "false",
+                                                  "sdk.source": "sdkWalker"
+                                                }
+                                              },
+                                              {
+                                                "bounds": {
+                                                  "bottom": 202,
+                                                  "left": 92,
+                                                  "right": 847,
+                                                  "top": 201
+                                                },
+                                                "className": "_UICollectionViewListSeparatorView",
+                                                "extras": {
+                                                  "sdk.backgroundColor": "#3C3C431E",
+                                                  "sdk.source": "sdkWalker"
+                                                }
+                                              },
+                                              {
+                                                "bounds": {
+                                                  "bottom": 280,
+                                                  "left": 92,
+                                                  "right": 847,
+                                                  "top": 279
+                                                },
+                                                "className": "_UICollectionViewListSeparatorView",
+                                                "extras": {
+                                                  "sdk.backgroundColor": "#3C3C431E",
+                                                  "sdk.source": "sdkWalker"
+                                                }
+                                              },
+                                              {
+                                                "bounds": {
+                                                  "bottom": 358,
+                                                  "left": 92,
+                                                  "right": 847,
+                                                  "top": 357
+                                                },
+                                                "className": "_UICollectionViewListSeparatorView",
+                                                "extras": {
+                                                  "sdk.backgroundColor": "#3C3C431E",
+                                                  "sdk.source": "sdkWalker"
+                                                }
+                                              },
+                                              {
+                                                "bounds": {
+                                                  "bottom": 573,
+                                                  "left": 92,
+                                                  "right": 847,
+                                                  "top": 572
+                                                },
+                                                "className": "_UICollectionViewListSeparatorView",
+                                                "extras": {
+                                                  "sdk.backgroundColor": "#3C3C431E",
+                                                  "sdk.source": "sdkWalker"
+                                                }
+                                              },
+                                              {
+                                                "bounds": {
+                                                  "bottom": 651,
+                                                  "left": 92,
+                                                  "right": 847,
+                                                  "top": 650
+                                                },
+                                                "className": "_UICollectionViewListSeparatorView",
+                                                "extras": {
+                                                  "sdk.backgroundColor": "#3C3C431E",
+                                                  "sdk.source": "sdkWalker"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "bounds": {
+                                      "bottom": 82,
+                                      "left": 0,
+                                      "right": 951,
+                                      "top": 24
+                                    },
+                                    "className": "UIKitNavigationBar",
+                                    "extras": {
+                                      "sdk.gestureRecognizers": "_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionPressGestureRecognizer(enabled)",
+                                      "sdk.source": "sdkWalker"
+                                    },
+                                    "resource-id": "Demos"
+                                  },
+                                  {
+                                    "bounds": {
+                                      "bottom": 669,
+                                      "left": 0,
+                                      "right": 951,
+                                      "top": 0
+                                    },
+                                    "className": "_UIFloatingBarContainerView",
+                                    "extras": {
+                                      "sdk.source": "sdkWalker"
+                                    },
+                                    "resource-id": "Toolbar",
+                                    "text": "Toolbar"
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "bounds": {
+                          "bottom": 669,
+                          "left": 0,
+                          "right": 951,
+                          "top": 0
+                        },
+                        "className": "_UITabContainerView",
+                        "extras": {
+                          "sdk.gestureRecognizers": "UITapGestureRecognizer(enabled),UIPanGestureRecognizer(enabled),UIPanGestureRecognizer(enabled),UILongPressGestureRecognizer(disabled)",
+                          "sdk.hasTapTarget": "true",
+                          "sdk.source": "sdkWalker"
+                        },
+                        "node": {
+                          "bounds": {
+                            "bottom": 669,
+                            "left": 0,
+                            "right": 951,
+                            "top": 0
+                          },
+                          "className": "_UIFloatingBarContainerView",
+                          "extras": {
+                            "sdk.source": "sdkWalker"
+                          },
+                          "resource-id": "Toolbar",
+                          "text": "Toolbar"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "role": "list",
+        "scrollable": "true",
+        "view-id": "s2-4719ea2d5bf1f478"
+      },
+      {
+        "bounds": {
+          "bottom": 669,
+          "left": 0,
+          "right": 951,
+          "top": 0
+        },
+        "className": "UIToolbar",
+        "extras": {
+          "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled)",
+          "sdk.hasTapTarget": "true"
+        },
+        "resource-id": "Toolbar",
+        "text": "Toolbar",
+        "view-id": "Toolbar"
+      },
+      {
+        "bounds": {
+          "bottom": 669,
+          "left": 0,
+          "right": 951,
+          "top": 0
+        },
+        "className": "UIToolbar",
+        "extras": {
+          "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled)",
+          "sdk.hasTapTarget": "true"
+        },
+        "resource-id": "Toolbar",
+        "text": "Toolbar",
+        "view-id": "Toolbar"
+      }
+    ],
+    "text": "Playground",
+    "view-id": "s2-7068b77d5de21821"
+  },
+  "insets": {
+    "available": true,
+    "displayCutoutInfo": {
+      "classification": "unknown"
+    },
+    "safeArea": {
+      "bottom": 34,
+      "left": 0,
+      "right": 84,
+      "top": 0
+    },
+    "source": "ios-sdk-safe-area",
+    "systemChrome": {
+      "homeIndicatorAutoHideRequested": false,
+      "source": "ios-status-bar-manager",
+      "statusBar": "visible",
+      "visibility": "visible"
+    },
+    "units": "points"
+  },
+  "nativeScale": 3,
+  "packageName": "dev.jasonpearson.automobile.Playground",
+  "pixelHeight": 2853,
+  "pixelWidth": 2007,
+  "screenHeight": 951,
+  "screenScale": 3,
+  "screenWidth": 669,
+  "systemInsets": {
+    "bottom": 34,
+    "left": 0,
+    "right": 84,
+    "top": 0
+  },
+  "updatedAt": 1791502986146,
+  "windowInfo": {
+    "bounds": {
+      "bottom": 951,
+      "left": 0,
+      "right": 669,
+      "top": 0
+    },
+    "id": 0,
+    "isActive": true,
+    "isFocused": true,
+    "type": 1
+  },
+  "windows": [
+    {
+      "bounds": {
+        "bottom": 951,
+        "left": 0,
+        "right": 669,
+        "top": 0
+      },
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    }
+  ]
+}

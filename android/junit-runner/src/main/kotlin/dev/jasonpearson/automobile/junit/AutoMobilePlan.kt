@@ -39,7 +39,7 @@ class AutoMobilePlan(
    * @return ExecutionResult containing the outcome of the plan execution
    */
   fun execute(
-    options: AutoMobilePlanExecutionOptions = AutoMobilePlanExecutionOptions()
+    options: AutoMobilePlanExecutionOptions = AutoMobilePlanExecutionOptions(),
   ): AutoMobilePlanExecutionResult {
     // Validate plan file exists first, throw exception if not found
     val classLoader = Thread.currentThread().contextClassLoader

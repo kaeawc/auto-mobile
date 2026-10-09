@@ -75,6 +75,7 @@ interface Internals {
     targetDevice: BootedDevice,
     operation: (signal?: AbortSignal) => Promise<T>,
     ownerSignal?: AbortSignal,
+    requester?: () => string | undefined,
   ): Promise<T>;
 }
 
@@ -355,7 +356,13 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
     });
     try {
       await expect(
-        internals.runTrackedDeviceInput("input/tap", device, operation, abortedSignal()),
+        internals.runTrackedDeviceInput(
+          "input/tap",
+          device,
+          operation,
+          abortedSignal(),
+          () => "session-c",
+        ),
       ).rejects.toBe(refusal);
     } finally {
       bind.mockRestore();
@@ -369,7 +376,7 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
     const signal = abortedSignal();
 
     await expect(
-      internals.runTrackedDeviceInput("input/tap", device, operation, signal),
+      internals.runTrackedDeviceInput("input/tap", device, operation, signal, () => "session-c"),
     ).rejects.toBe(signal.reason);
     expect(operationRuns).toBe(0);
   });
@@ -389,6 +396,7 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
           return "unreachable";
         },
         controller.signal,
+        () => "session-c",
       ),
     ).rejects.toThrow("owner went away");
   });
@@ -398,8 +406,31 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
     internals.captureInputTargetOwner(device);
 
     await expect(
-      internals.runTrackedDeviceInput("input/tap", device, operation, new AbortController().signal),
+      internals.runTrackedDeviceInput(
+        "input/tap",
+        device,
+        operation,
+        new AbortController().signal,
+        () => "session-c",
+      ),
     ).resolves.toBe("ran");
     expect(operationRuns).toBe(1);
+  });
+
+  test("a sessionless or foreign-session frame on a held device is refused before any execution (#10698)", async () => {
+    useSessionState(device.deviceId);
+
+    for (const requester of [undefined, "someone-else"]) {
+      await expect(
+        internals.runTrackedDeviceInput(
+          "input/tap",
+          device,
+          operation,
+          new AbortController().signal,
+          () => requester,
+        ),
+      ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+    }
+    expect(operationRuns).toBe(0);
   });
 });

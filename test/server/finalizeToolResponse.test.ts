@@ -1736,6 +1736,8 @@ describe("finalizeToolResponse", () => {
         screenshotFormat: "png",
         screenshotMimeType: "image/png",
         settled: true,
+        settleMs: 550,
+        settlePolls: 2,
         accessibilityAuditSkipped: "settled_capture_adopted",
       });
 
@@ -3442,7 +3444,7 @@ describe("finalizeToolResponse", () => {
           createStructuredToolResponse({
             success: true,
             sessionId: sessionUuid,
-            operationId: "o".repeat(DEFAULT_OBSERVATION_INLINE_MAX_BYTES + 1),
+            resolvedSpec: "o".repeat(DEFAULT_OBSERVATION_INLINE_MAX_BYTES + 1),
           }),
           { name: "provisionDevice", artifactMode: "oversized", artifactWriter: writer },
         );

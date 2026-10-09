@@ -34,6 +34,15 @@ export interface GrantAndroidPermissionsInput {
   userId?: number;
 }
 
+/**
+ * Expands a bare platform permission constant (`CAMERA`, `POST_NOTIFICATIONS`)
+ * to its `android.permission.` form; dotted names pass through unchanged (#10791).
+ */
+export function normalizeAndroidPermissionName(permission: string): string {
+  const trimmed = permission.trim();
+  return /^[A-Z][A-Z0-9_]*$/.test(trimmed) ? `android.permission.${trimmed}` : trimmed;
+}
+
 export class GrantAndroidPermissions {
   private device: BootedDevice;
 
@@ -179,7 +188,7 @@ export class GrantAndroidPermissions {
     before: AndroidPackagePermissionState,
     context: { packageName: string; action: "grant" | "revoke" },
   ): GrantAndroidPermissionItemResult {
-    const trimmed = permission.trim();
+    const trimmed = normalizeAndroidPermissionName(permission);
     const { packageName, action } = context;
     const item: GrantAndroidPermissionItemResult = {
       operationId: `pm_${action}:${trimmed || "(empty)"}`,

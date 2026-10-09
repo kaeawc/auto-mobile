@@ -27,7 +27,16 @@ class DevicePickerUiTest {
     selected: Set<String> = emptySet(),
     bootingIds: Set<String> = emptySet(),
     bootErrors: Map<String, String> = emptyMap(),
-  ) = DevicePickerUiState.Content(devices, PickerFilters(), selected, bootingIds, bootErrors)
+    finishing: Set<String> = emptySet(),
+  ) =
+    DevicePickerUiState.Content(
+      devices,
+      PickerFilters(),
+      selected,
+      bootingIds,
+      bootErrors,
+      finishing,
+    )
 
   // Stub the hoisted thumbnail so composing the grid never opens a video/observation socket.
   private fun ComposeUiTest.picker(
@@ -55,8 +64,8 @@ class DevicePickerUiTest {
           PickerDevice("sim-A", "iPhone", Platform.Ios, DeviceState.Shutdown),
           PickerDevice("sim-B", "iPhone", Platform.Ios, DeviceState.Shutdown),
           PickerDevice("pixel-1", "Pixel", Platform.Android, DeviceState.Booted),
-        )
-      )
+        ),
+      ),
     )
     onNodeWithText("iPhone (A)").assertIsDisplayed()
     onNodeWithText("iPhone (B)").assertIsDisplayed()
@@ -74,7 +83,7 @@ class DevicePickerUiTest {
         listOf(
           PickerDevice("shared", "Android twin", Platform.Android, DeviceState.Booted),
           PickerDevice("shared", "iOS twin", Platform.Ios, DeviceState.Booted),
-        )
+        ),
       ),
       onAction = { action = it },
     )
@@ -90,8 +99,8 @@ class DevicePickerUiTest {
         listOf(
           PickerDevice("shared", "Twin", Platform.Android, DeviceState.Booted),
           PickerDevice("shared", "Twin", Platform.Ios, DeviceState.Booted),
-        )
-      )
+        ),
+      ),
     )
     onNodeWithContentDescription("Observe Twin (android:shared)").assertIsDisplayed()
     onNodeWithContentDescription("Observe Twin (ios:shared)").assertIsDisplayed()
@@ -132,6 +141,13 @@ class DevicePickerUiTest {
     onNodeWithText("Click to boot").assertDoesNotExist()
     onNodeWithContentDescription("Boot iPhone 15").assertDoesNotExist()
     onNodeWithContentDescription("Retry boot iPhone 15").assertDoesNotExist()
+  }
+
+  @Test
+  fun `a card waiting on the previous session's cleanup says so`() = runComposeUiTest {
+    picker(content(bootingIds = setOf("ios:i15"), finishing = setOf("ios:i15")))
+    onNodeWithText("Finishing previous session…").assertIsDisplayed()
+    onNodeWithText("Booting…").assertDoesNotExist()
   }
 
   @Test

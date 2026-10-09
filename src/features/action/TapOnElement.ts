@@ -194,6 +194,7 @@ import {
   tapPointOutsideIme,
 } from "../observe/output/SkeletonProjection";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
+import { isSdkInjectedNode } from "../observe/android/StableNodeIdentity";
 import { compareSelectionRank } from "../utility/selectionRank";
 import { clipIosChromeBounds, isIosTapPointCoveredByChrome } from "./swipeon/iosChromeInsets";
 
@@ -208,6 +209,30 @@ function pointInTapBounds(point: { x: number; y: number }, bounds: ElementBounds
 
 function hasTapArea(bounds: ElementBounds | undefined): bounds is ElementBounds {
   return !!bounds && bounds.left < bounds.right && bounds.top < bounds.bottom;
+}
+
+/**
+ * Identifiers of a node's ancestors, outermost first (e.g. `["cart_A", "item_42"]`).
+ * A container captured twice under one identifier (iOS XCUITest + SDK nodes, #10266)
+ * counts once.
+ */
+function identifiedAncestorChain(
+  node: SearchableEntry,
+  nodes: readonly SearchableEntry[],
+): string[] {
+  const chain: string[] = [];
+  for (let parent = node.parentIndex; parent !== undefined; parent = nodes[parent].parentIndex) {
+    const properties = nodes[parent].properties;
+    const id = properties["resource-id"] || properties["test-tag"];
+    if (id && chain[0] !== id) {
+      chain.unshift(id);
+    }
+  }
+  return chain;
+}
+
+function sameChain(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
 }
 
 const IOS_STATUS_BAR_CLASSES = new Set([
@@ -326,6 +351,8 @@ const ENSURE_CHECKED_POLL_TIMEOUT_MS = ENSURE_CHECKED_POLL_BACKOFF_MS.reduce(
   0,
 );
 const POST_TAP_EFFECT_POLL_MS = 150;
+/** How long an iOS focus tap re-reads the screen for the field to report focus (#10266). */
+const IOS_FOCUS_SETTLE_TIMEOUT_MS = 1500;
 
 /**
  * Minimum wall-clock time a hierarchy-only post-tap frame must hold UNCHANGED
@@ -409,6 +436,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     "checkIdentity" | "record"
   >;
   private readonly lastRenderedObservation?: RenderedObservationReader;
+  private readonly preTapProjections = new WeakMap<
+    ViewHierarchyResult,
+    readonly SearchableEntry[]
+  >();
   private geometry: ElementGeometry;
   private elementParser: ElementParser;
   private accessibilityService: AndroidCtrlProxyClient;
@@ -871,7 +902,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!viewHierarchy) {
       return false;
     }
-    // The owner is resolved (ElementFinder) and natively activated across every
+    // The owner is resolved (ElementResolver) and natively activated across every
     // window subtree, so the uniqueness count must span the same node set. Flatten
     // with includeWindows to match — otherwise an owner in a dialog/popup/overlay is
     // miscounted: an ambiguous owner reads as unique, a valid one as absent. See #5618.
@@ -883,7 +914,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return (
         typeof ownerResourceId === "string" &&
         ownerResourceId.length > 0 &&
-        elements.filter((element) => element["resource-id"] === ownerResourceId).length === 1
+        preferCapturedOwners(
+          elements.filter((element) => element["resource-id"] === ownerResourceId),
+        ).length === 1
       );
     }
     const selector = stableNodeSelectorForElement(owner);
@@ -2230,17 +2263,28 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return consistent ? delta : undefined;
   }
 
+  /** Shared so each captured hierarchy is projected once across the focus-confirmation reads. */
+  private readonly focusProjection = new SearchableHierarchy();
+
+  /** Labels depend only on the (immutable) captured node, so each node is projected once. */
+  private readonly attachedFocusLabels = new WeakMap<object, string | undefined>();
+
   private attachedFocusLabel(element: Element): string | undefined {
     const source = getHierarchyNodeSource(element);
     if (!source) {
       return undefined;
     }
-    const labels = new SearchableHierarchy()
+    if (this.attachedFocusLabels.has(source)) {
+      return this.attachedFocusLabels.get(source);
+    }
+    const labels = this.focusProjection
       .project({ hierarchy: { node: source } })
       .filter((node) => node.parentIndex === 0 && !isFocusEditableElement(node.properties))
       .map((node) => node.textSources.text)
       .filter((text) => typeof text === "string" && text.trim().length > 0);
-    return labels.length ? labels.join("\n") : undefined;
+    const label = labels.length ? labels.join("\n") : undefined;
+    this.attachedFocusLabels.set(source, label);
+    return label;
   }
 
   private focusIdentitySignals(target: Element, candidate: Element, labelText?: string) {
@@ -2301,7 +2345,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return false;
     }
     const preNodes = preTapHierarchy
-      ? new SearchableHierarchy().project(resolveViewHierarchyForSearch(preTapHierarchy)!)
+      ? this.focusProjection.project(resolveViewHierarchyForSearch(preTapHierarchy)!)
       : [];
     const preFields = this.distinctFocusFields(
       preNodes.filter((node) => node.element && isFocusEditableElement(node.properties)),
@@ -2368,6 +2412,48 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return shared;
   }
 
+  /**
+   * Confirm a focus tap against the post-tap observation. On iOS that first capture
+   * can predate the field taking focus (#10266): the field is focused moments later,
+   * but the first read shows no focused field that matches the target. Re-read fresh
+   * captures for a bounded window before reporting the focus unconfirmed, and return
+   * the capture that confirmed it as the result's observation.
+   */
+  private async verifyFocusAfterTap(
+    result: TapOnElementResult,
+    verify: (observation: ObserveResult | undefined) => boolean,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (verify(result.observation)) {
+      return true;
+    }
+    const initial = result.observation;
+    if (this.device.platform !== "ios" || !initial) {
+      return false;
+    }
+    const deadline = this.timer.now() + IOS_FOCUS_SETTLE_TIMEOUT_MS;
+    while (this.timer.now() < deadline) {
+      await this.timer.sleep(POST_TAP_EFFECT_POLL_MS);
+      throwIfAborted(signal);
+      const hierarchy = await this.refreshViewHierarchy(
+        deadline - this.timer.now(),
+        initial.screenSize,
+        signal,
+        true,
+      );
+      if (!hierarchy) {
+        continue;
+      }
+      const observation: ObserveResult = { ...initial };
+      this.replaceObservationHierarchy(observation, hierarchy, true);
+      if (verify(observation)) {
+        result.observation = observation;
+        return true;
+      }
+    }
+    return false;
+  }
+
   private verifyIndexedFocusTarget(
     options: TapOnElementOptions,
     target: Element,
@@ -2375,7 +2461,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     identifier: { key: FocusIdentifierKey; value: string },
     selectedIndex?: number,
   ): boolean {
-    const nodes = new SearchableHierarchy().project(hierarchy);
+    const nodes = this.focusProjection.project(hierarchy);
     const selected = this.findIndexedFocusSelection(
       options,
       hierarchy,
@@ -2474,10 +2560,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       candidate &&
       isFocusEditableElement(candidate) &&
       isElementKeyboardFocused(candidate) &&
-      this.isSameFocusTarget(target, candidate, new SearchableHierarchy().project(hierarchy)),
+      this.isSameFocusTarget(target, candidate, this.focusProjection.project(hierarchy)),
     );
   }
 
+  /**
+   * Whether the post-tap capture shows the target focused. A capture that cannot
+   * re-resolve the selector scope (a container now ambiguous or missing, #10266) leaves
+   * the focus unconfirmed so the caller can re-read; it never fails the tap itself.
+   */
   private verifyFocusedInputTarget(
     options: TapOnElementOptions,
     target: Element,
@@ -2491,13 +2582,115 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
     const searchHierarchy =
       resolveViewHierarchyForSearch(observation.viewHierarchy) ?? observation.viewHierarchy;
-    const nodes = new SearchableHierarchy().project(searchHierarchy);
-    const identifier = this.findFocusIdentifier(target, nodes);
-    if (identifier?.shared) {
-      return this.verifyIndexedFocusTarget(
+    const nodes = this.focusProjection.project(searchHierarchy);
+    if (this.isFocusedInPreTapScope(target, nodes, labelText, preTapHierarchy)) {
+      return true;
+    }
+    try {
+      return this.matchFocusedInputTarget(
+        options,
         this.withObservationScreenSize(options, observation),
         target,
         observation.viewHierarchy,
+        nodes,
+        { labelText, selectedIndex, preTapHierarchy },
+      );
+    } catch (error) {
+      // The selector is re-resolved against a capture taken while the layout may still be
+      // moving (keyboard avoidance, a lagging SDK snapshot); a scope it cannot resolve
+      // there means "not confirmed yet", which the caller reports or re-reads.
+      logger.debug(
+        `[TapOnElement] focus check could not resolve the target: ${errorMessage(error)}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Confirm focus by the identity the target had before the tap (#10266): the chain of
+   * identified ancestors (e.g. `cart_A > item_42`) that singled the field out pre-tap.
+   * The focused field must sit under the same chain and carry the target's identity.
+   * This survives a layout shift after the tap and duplicate container nodes in the
+   * post-tap capture, neither of which changes which field holds focus.
+   */
+  private isFocusedInPreTapScope(
+    target: Element,
+    nodes: readonly SearchableEntry[],
+    labelText?: string,
+    preTapHierarchy?: ViewHierarchyResult,
+  ): boolean {
+    const targetSource = getHierarchyNodeSource(target);
+    if (!preTapHierarchy || !targetSource) {
+      return false;
+    }
+    const preNodes = this.projectPreTapHierarchy(preTapHierarchy);
+    const preTarget = preNodes.find((node) => node.source === targetSource);
+    const scope = preTarget ? identifiedAncestorChain(preTarget, preNodes) : [];
+    if (scope.length === 0) {
+      return false;
+    }
+    const inScopeWithIdentity = (node: SearchableEntry, all: readonly SearchableEntry[]) =>
+      Boolean(
+        node.element &&
+        isFocusEditableElement(node.properties) &&
+        !this.focusIdentitySignals(target, node.element, labelText).conflict &&
+        sameChain(identifiedAncestorChain(node, all), scope),
+      );
+    // The scope must single the field out before the tap, or it identifies nothing.
+    if (
+      this.distinctFocusFields(preNodes.filter((node) => inScopeWithIdentity(node, preNodes)))
+        .length !== 1
+    ) {
+      return false;
+    }
+    // After the tap that field must be the only focused one, and every copy of it (a
+    // capture can serialize one field under several roots) must agree on its identity
+    // and its focus.
+    const inScope = nodes.filter((node) => inScopeWithIdentity(node, nodes));
+    const focused = nodes.filter(
+      (node) =>
+        node.element &&
+        isFocusEditableElement(node.properties) &&
+        isElementKeyboardFocused(node.element),
+    );
+    return (
+      this.distinctFocusFields(inScope).length === 1 &&
+      inScope.every((node) => isElementKeyboardFocused(node.element!)) &&
+      focused.every((node) => inScope.includes(node))
+    );
+  }
+
+  /** The pre-tap capture is fixed across post-tap re-reads; project it once. */
+  private projectPreTapHierarchy(hierarchy: ViewHierarchyResult): readonly SearchableEntry[] {
+    const cached = this.preTapProjections.get(hierarchy);
+    if (cached) {
+      return cached;
+    }
+    const projected = this.focusProjection.project(
+      resolveViewHierarchyForSearch(hierarchy) ?? hierarchy,
+    );
+    this.preTapProjections.set(hierarchy, projected);
+    return projected;
+  }
+
+  private matchFocusedInputTarget(
+    options: TapOnElementOptions,
+    scopedOptions: TapVerificationOptions,
+    target: Element,
+    viewHierarchy: ViewHierarchyResult,
+    nodes: readonly SearchableEntry[],
+    {
+      labelText,
+      selectedIndex,
+      preTapHierarchy,
+    }: { labelText?: string; selectedIndex?: number; preTapHierarchy?: ViewHierarchyResult },
+  ): boolean {
+    const identifier = this.findFocusIdentifier(target, nodes);
+    if (identifier?.shared) {
+      return this.verifyIndexedFocusTarget(
+        scopedOptions,
+        target,
+        viewHierarchy,
         identifier,
         selectedIndex,
       );
@@ -2522,11 +2715,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!options.testTag && !(options.elementId && target["resource-id"])) {
       return false;
     }
-    return this.isRefoundFocusTarget(
-      this.withObservationScreenSize(options, observation),
-      target,
-      observation.viewHierarchy,
-    );
+    return this.isRefoundFocusTarget(scopedOptions, target, viewHierarchy);
   }
 
   private requireTestTag(options: TapOnElementOptions): string {
@@ -4659,13 +4848,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
       if (requestedAction === "focus" && result.success && !result.wasAlreadyFocused) {
         const target = focusTarget ?? result.element;
-        result.focusVerified = this.verifyFocusedInputTarget(
-          { ...options, action: "focus" },
-          target,
-          result.observation,
-          focusLabelText,
-          result.selectedElement?.indexInMatches,
-          preTapHierarchy,
+        result.focusVerified = await this.verifyFocusAfterTap(
+          result,
+          (observation) =>
+            this.verifyFocusedInputTarget(
+              { ...options, action: "focus" },
+              target,
+              observation,
+              focusLabelText,
+              result.selectedElement?.indexInMatches,
+              preTapHierarchy,
+            ),
+          signal,
         );
         if (!result.focusVerified) {
           result.success = false;
@@ -5710,4 +5904,21 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   ): LongPressMetadata {
     return this.longPressMetadataDetector.detect(previousObservation, currentObservation);
   }
+}
+
+/**
+ * An iOS capture merges the in-app SDK snapshot into the XCUITest tree, and SDK views
+ * no XCUITest node matched are injected beside it (`sdk.source=sdkWalker`). After an
+ * interaction that snapshot can carry the owner's view again (the UITextView behind a
+ * UILink owner), so the resource-id shows up on SDK copies too (#10843). The runner
+ * resolves the owner among XCUITest elements, so when XCUITest captured the identifier,
+ * the SDK copies are duplicates of it and must not make the owner ambiguous. With no
+ * captured node, keep every candidate so an SDK-only identifier is still counted.
+ */
+function preferCapturedOwners(candidates: Element[]): Element[] {
+  const captured = candidates.filter((element) => {
+    const source = getHierarchyNodeSource(element);
+    return !source || !isSdkInjectedNode(source);
+  });
+  return captured.length > 0 ? captured : candidates;
 }

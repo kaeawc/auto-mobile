@@ -17,7 +17,7 @@ class NavigationGraphContractReceiver : BroadcastReceiver() {
       NavigationEvent(
         destination = destination,
         source = NavigationSource.CUSTOM,
-      )
+      ),
     )
   }
 

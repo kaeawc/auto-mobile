@@ -16,7 +16,7 @@ class ObservationStreamDeviceSessionTest {
     try {
       client.deviceEvents.test {
         client.handleMessage(
-          """{"type":"device_session_ended","deviceId":"emulator-5554","deviceSessionUuid":"retired","successorSessionUuid":"successor","platform":"android","timestamp":123}"""
+          """{"type":"device_session_ended","deviceId":"emulator-5554","deviceSessionUuid":"retired","successorSessionUuid":"successor","platform":"android","timestamp":123}""",
         )
 
         assertEquals(
@@ -36,7 +36,7 @@ class ObservationStreamDeviceSessionTest {
     try {
       client.deviceEvents.test {
         client.handleMessage(
-          """{"type":"device_session_ended","deviceId":"emulator-5554","deviceSessionUuid":"retired","platform":"android","timestamp":123}"""
+          """{"type":"device_session_ended","deviceId":"emulator-5554","deviceSessionUuid":"retired","platform":"android","timestamp":123}""",
         )
         expectNoEvents()
       }
@@ -51,7 +51,7 @@ class ObservationStreamDeviceSessionTest {
     try {
       client.deviceEvents.test {
         client.handleMessage(
-          """{"type":"device_session_started","deviceId":"emulator-5554","deviceSessionUuid":"successor","platform":"android","timestamp":123}"""
+          """{"type":"device_session_started","deviceId":"emulator-5554","deviceSessionUuid":"successor","platform":"android","timestamp":123}""",
         )
         expectNoEvents()
       }
@@ -88,7 +88,7 @@ class ObservationStreamDeviceSessionTest {
     try {
       client.deviceEvents.test {
         client.handleMessage(
-          """{"type":"device_session_ended","deviceId":"emulator-5554","deviceSessionUuid":"retired","successorSessionUuid":"successor","timestamp":123,"futureField":{"nested":true}}"""
+          """{"type":"device_session_ended","deviceId":"emulator-5554","deviceSessionUuid":"retired","successorSessionUuid":"successor","timestamp":123,"futureField":{"nested":true}}""",
         )
         assertEquals(
           DeviceStreamEvent.DeviceSessionSuperseded("emulator-5554", "retired", "successor", 123L),
@@ -107,7 +107,7 @@ class ObservationStreamDeviceSessionTest {
     try {
       client.deviceEvents.test {
         client.handleMessage(
-          """{"type":"error","deviceId":"emulator-5554","error":"device connection lost","timestamp":123}"""
+          """{"type":"error","deviceId":"emulator-5554","error":"device connection lost","timestamp":123}""",
         )
         assertEquals(
           DeviceStreamEvent.DeviceConnectionLost("emulator-5554", 123L, "device connection lost"),

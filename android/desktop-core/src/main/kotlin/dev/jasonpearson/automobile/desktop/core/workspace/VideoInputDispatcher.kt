@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.desktop.core.control.GestureStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.GestureInputStream
 import dev.jasonpearson.automobile.desktop.core.daemon.InputActionResult
+import dev.jasonpearson.automobile.desktop.core.daemon.isDeviceOwnedRefusal
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceDragGesturePolicy
@@ -71,6 +72,9 @@ private val LOG = LoggerFactory.getLogger("VideoInputDispatcher")
  *   and [InteractionLatencyTracer.acked] when the daemon call returns.
  * @param ioDispatcher test seam: inject a deterministic dispatcher. Null (production) owns a
  *   dedicated single-thread executor, shut down when [scope] completes so panes don't leak threads.
+ * @param onDeviceHeldElsewhere called (on the dispatch thread) when the daemon refuses an input
+ *   because another session holds [deviceId] (#10743), so the host can show the pane's
+ *   held-elsewhere notice instead of the refusal only reaching the log.
  */
 class VideoInputDispatcher(
   private val scope: CoroutineScope,
@@ -86,6 +90,7 @@ class VideoInputDispatcher(
    * the same atomic swipe, so the pane behaves identically either way.
    */
   private val streamingEnabled: Boolean = false,
+  private val onDeviceHeldElsewhere: () -> Unit = {},
 ) {
   private val injectedDispatcher: CoroutineDispatcher? = ioDispatcher
 
@@ -286,13 +291,18 @@ class VideoInputDispatcher(
     // cannot stream at all (issue: streaming gesture input). The GestureInputStream contract makes
     // a failed ack terminal: stop, do not keep sending frames, and do not report the gesture acked.
     var startRejected = false
+    var refused = false
     var acked = false
     try {
       val started = stream.start(gestureId, start.x.toDouble(), start.y.toDouble())
-      if (!started.success) {
+      if (started.isDeviceOwnedRefusal) {
+        // Another session holds the device: an atomic swipe would be refused the same way.
+        reportRejected(started)
+        refused = true
+      } else if (!started.success) {
         LOG.warn(
           "gesture stream start rejected for $deviceId: ${started.error ?: started.action}; " +
-            "falling back to atomic swipe"
+            "falling back to atomic swipe",
         )
         startRejected = true
       } else {
@@ -300,6 +310,10 @@ class VideoInputDispatcher(
       }
     } finally {
       stream.close()
+    }
+    if (refused) {
+      drainGestureEvents(events)
+      return
     }
     if (startRejected) {
       // The stream is closed; drain the remaining moves/release from the same events channel into
@@ -328,6 +342,7 @@ class VideoInputDispatcher(
           val result = stream.move(gestureId, event.point.x.toDouble(), event.point.y.toDouble())
           if (!result.success) {
             LOG.warn("gesture stream move rejected for $deviceId: ${result.error ?: result.action}")
+            reportRejected(result)
             return false
           }
         }
@@ -336,6 +351,7 @@ class VideoInputDispatcher(
             stream.end(gestureId, event.point.x.toDouble(), event.point.y.toDouble(), event.cancel)
           if (!result.success) {
             LOG.warn("gesture stream end rejected for $deviceId: ${result.error ?: result.action}")
+            reportRejected(result)
             return false
           }
           return true
@@ -366,20 +382,30 @@ class VideoInputDispatcher(
             nativeScale = snapshot.nativeScale,
           )
         if (decision is DeviceDragDecision.Swipe) {
-          client.inputSwipe(
-            startX = decision.start.x.toDouble(),
-            startY = decision.start.y.toDouble(),
-            endX = decision.end.x.toDouble(),
-            endY = decision.end.y.toDouble(),
-            platform = platformName,
-            deviceId = deviceId,
-            durationMs = decision.durationMs,
-            frameContext = null,
-          )
+          val result =
+            client.inputSwipe(
+              startX = decision.start.x.toDouble(),
+              startY = decision.start.y.toDouble(),
+              endX = decision.end.x.toDouble(),
+              endY = decision.end.y.toDouble(),
+              platform = platformName,
+              deviceId = deviceId,
+              durationMs = decision.durationMs,
+              frameContext = null,
+            )
+          if (!result.success) {
+            LOG.warn("video swipe rejected for $deviceId: ${result.error ?: result.action}")
+            reportRejected(result)
+          }
         }
         return
       }
     }
+  }
+
+  /** A held-device refusal goes to the host (#10743); any other rejection is only logged. */
+  private fun reportRejected(result: InputActionResult) {
+    if (result.isDeviceOwnedRefusal) onDeviceHeldElsewhere()
   }
 
   private suspend fun drainGestureEvents(events: Channel<GestureStreamEvent>) {
@@ -508,7 +534,7 @@ class VideoInputDispatcher(
    * daemon-rejection is logged, not reflected in the return.
    */
   private inline fun dispatch(
-    crossinline send: (AutoMobileClient, String) -> InputActionResult
+    crossinline send: (AutoMobileClient, String) -> InputActionResult,
   ): Boolean {
     val platformName = platform()
     // Capture the deactivation generation at enqueue; the coroutine drops if [reset] bumped it
@@ -519,7 +545,7 @@ class VideoInputDispatcher(
     if (pendingDispatches.incrementAndGet() > MAX_PENDING_DISPATCHES) {
       pendingDispatches.decrementAndGet()
       LOG.warn(
-        "dropping video input for $deviceId: dispatch backlog full ($MAX_PENDING_DISPATCHES)"
+        "dropping video input for $deviceId: dispatch backlog full ($MAX_PENDING_DISPATCHES)",
       )
       return false
     }
@@ -549,6 +575,7 @@ class VideoInputDispatcher(
               // that does not support direct input helpers). Surface it instead of silently
               // treating it as delivered.
               LOG.warn("video input rejected for $deviceId: ${result.error ?: result.action}")
+              reportRejected(result)
             }
           } catch (error: Exception) {
             // Best-effort input: a failed tap must never crash the pane. Log and drop — the video

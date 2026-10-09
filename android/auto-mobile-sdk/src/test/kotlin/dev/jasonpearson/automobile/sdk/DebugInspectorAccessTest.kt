@@ -28,7 +28,7 @@ class DebugInspectorAccessTest {
         callingUid = 10_211,
         ownUid = 10_210,
         callingPackages = setOf(SdkConstants.CTRL_PROXY_PACKAGE),
-      )
+      ),
     )
   }
 
@@ -39,7 +39,7 @@ class DebugInspectorAccessTest {
         callingUid = 10_212,
         ownUid = 10_210,
         callingPackages = setOf("com.example.untrusted"),
-      )
+      ),
     )
   }
 

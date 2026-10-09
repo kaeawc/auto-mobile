@@ -47,6 +47,11 @@ sealed interface DevicePickerUiState {
     val bootingIds: Set<String> = emptySet(),
     /** Per-device boot failure message; presence marks a card as retryable. */
     val bootErrors: Map<String, String> = emptyMap(),
+    /**
+     * Ids of booting devices waiting for the previous session's cleanup to finish (#10960); their
+     * card reads "Finishing previous session…" until the start is retried.
+     */
+    val finishingPreviousSessionIds: Set<String> = emptySet(),
     /** Nonblocking discovery warning: devices may be missing or retained from an older snapshot. */
     val inventoryError: String? = null,
   ) : DevicePickerUiState
@@ -124,6 +129,7 @@ class DevicePickerViewModel(
   // only the device LIST, never these.
   private var bootingIds: Set<String> = emptySet()
   private var bootErrors: Map<String, String> = emptyMap()
+  private var finishingPreviousSessionIds: Set<String> = emptySet()
   private var selectedIds: Set<String> = emptySet()
   private var filters: PickerFilters = PickerFilters()
 
@@ -132,6 +138,13 @@ class DevicePickerViewModel(
   // guess). Pruned to devices still booted; devices booted outside this session fall back to the
   // name heuristic in buildPickerDevices.
   private var bootedImageRuntimeIds: Map<Platform, Map<String, String>> = emptyMap()
+
+  // Boot-epoch identity (deviceSessionUuid) per uiKey, recorded when a selected or attributed
+  // device is seen booted. A reused serial keeps the same uiKey, so membership alone cannot tell
+  // the
+  // new device from the old one; a changed epoch at the same key drops that key's selection and
+  // attribution (#4881). Devices without an epoch (older daemons) keep the bare-key behavior.
+  private var trackedEpochs: Map<String, String> = emptyMap()
 
   // Source ids whose boot coroutine is still running (bootController.boot has not returned). The
   // serialization guard in bootingIds must survive against THIS set, not only the live device list:
@@ -257,7 +270,7 @@ class DevicePickerViewModel(
               it.platform.equals(image.platform, ignoreCase = true) &&
                 (it.runtime.deviceId ?: it.identity.stableId) == image.identity.stableId
             }
-        }
+        },
       ) {
         "Device inventory changed during discovery; refresh to get its current state"
       }
@@ -272,7 +285,7 @@ class DevicePickerViewModel(
           }
           .map {
             it.copy(
-              inventoryUncertain = discoverySource(it.platform, it.isVirtual) !in completeSources
+              inventoryUncertain = discoverySource(it.platform, it.isVirtual) !in completeSources,
             )
           }
       // A runtime whose AVD name probe failed may be one of these saved images. Neither
@@ -287,7 +300,7 @@ class DevicePickerViewModel(
               it.knownSourceImageId() == null &&
               (it.name == deviceId || it.name == "Unknown ($deviceId)") &&
               deviceId !in bootedImageRuntimeIds[Platform.Android].orEmpty().values
-          }
+          },
       ) {
         "Android emulator identity is unavailable; refresh after its AVD name can be discovered"
       }
@@ -327,7 +340,7 @@ class DevicePickerViewModel(
             check(
               it.observationComplete ||
                 it.platformObservations.isNotEmpty() ||
-                it.sourceObservations.isNotEmpty()
+                it.sourceObservations.isNotEmpty(),
             ) {
               "Device discovery is incomplete; retaining the previous inventory"
             }
@@ -386,6 +399,7 @@ class DevicePickerViewModel(
         selectedIds = selectedIds,
         bootingIds = bootingIds,
         bootErrors = bootErrors,
+        finishingPreviousSessionIds = finishingPreviousSessionIds,
         inventoryError =
           inventoryError
             ?: if (devices.any { it.inventoryUncertain })
@@ -407,12 +421,38 @@ class DevicePickerViewModel(
     // same-named card hides the source image, so the guard must not be dropped mid-boot (#4881).
     bootingIds = bootingIds.filter { it in shutdownIds || it in inFlightBootIds }.toSet()
     bootErrors = bootErrors.filterKeys { it in shutdownIds }
-    selectedIds = selectedIds intersect bootedIds
+    val reusedKeys = reusedSerialKeys(devices)
+    selectedIds = (selectedIds intersect bootedIds) - reusedKeys
     // Keep only attributions whose runtime device is still booted (drop killed/replaced ids).
     bootedImageRuntimeIds = bootedImageRuntimeIds.mapValues { (platform, mappings) ->
-      mappings.filterValues { "${platform.name.lowercase()}:$it" in bootedIds }
+      mappings.filterValues {
+        val key = "${platform.name.lowercase()}:$it"
+        key in bootedIds && key !in reusedKeys
+      }
     }
+    val attributedKeys = bootedImageRuntimeIds.flatMap { (platform, m) ->
+      m.values.map { "${platform.name.lowercase()}:$it" }
+    }
+    val tracked = selectedIds + attributedKeys
+    trackedEpochs =
+      devices
+        .filter { it.state == DeviceState.Booted && it.uiKey in tracked }
+        .mapNotNull { d -> d.deviceSessionUuid?.let { d.uiKey to it } }
+        .toMap()
   }
+
+  /**
+   * Keys of booted devices whose boot epoch differs from the one recorded for the same key: the
+   * serial was reused by a different device, so its old selection/attribution must not carry over.
+   */
+  private fun reusedSerialKeys(devices: List<PickerDevice>): Set<String> =
+    devices
+      .filter { d ->
+        val recorded = trackedEpochs[d.uiKey]
+        d.state == DeviceState.Booted && recorded != null && d.deviceSessionUuid != recorded
+      }
+      .map { it.uiKey }
+      .toSet()
 
   /** Reflect the persistent state onto the live Content (no device reload). */
   private fun syncState() {
@@ -422,6 +462,7 @@ class DevicePickerViewModel(
         selectedIds = selectedIds,
         bootingIds = bootingIds,
         bootErrors = bootErrors,
+        finishingPreviousSessionIds = finishingPreviousSessionIds,
       )
     }
   }
@@ -447,7 +488,13 @@ class DevicePickerViewModel(
     syncState()
     scope.launch {
       try {
-        val result = bootController.boot(device)
+        val result =
+          bootController.boot(device) { finishing ->
+            finishingPreviousSessionIds =
+              if (finishing) finishingPreviousSessionIds + deviceId
+              else finishingPreviousSessionIds - deviceId
+            syncState()
+          }
         val runtimeDeviceId = result.getOrNull()
         if (runtimeDeviceId != null) {
           reloadAfterBoot(device, runtimeDeviceId)
@@ -459,6 +506,7 @@ class DevicePickerViewModel(
         }
       } finally {
         inFlightBootIds = inFlightBootIds - deviceId
+        finishingPreviousSessionIds = finishingPreviousSessionIds - deviceId
       }
     }
   }
@@ -546,6 +594,7 @@ class DevicePickerViewModel(
     val deviceId = device.uiKey
     if (device.state != DeviceState.Booted) return
     selectedIds = selectedIds.toggle(deviceId)
+    device.deviceSessionUuid?.let { trackedEpochs = trackedEpochs + (deviceId to it) }
     syncState()
   }
 
@@ -622,7 +671,7 @@ class DevicePickerViewModel(
   }
 
   private fun updateContent(
-    transform: (DevicePickerUiState.Content) -> DevicePickerUiState.Content
+    transform: (DevicePickerUiState.Content) -> DevicePickerUiState.Content,
   ) {
     _state.update { current ->
       (current as? DevicePickerUiState.Content)?.let(transform) ?: current

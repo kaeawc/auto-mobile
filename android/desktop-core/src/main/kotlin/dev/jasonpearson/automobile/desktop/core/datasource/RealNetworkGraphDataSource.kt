@@ -56,7 +56,7 @@ class RealNetworkGraphDataSource(
     val provider =
       clientProvider
         ?: return Result.Error(
-          IllegalStateException("Not connected to MCP server. Please select a device first.")
+          IllegalStateException("Not connected to MCP server. Please select a device first."),
         )
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
 
@@ -96,7 +96,7 @@ class RealNetworkGraphDataSource(
         val path =
           graph["artifact"]?.jsonObject?.get("path")?.jsonPrimitive?.content
             ?: throw McpConnectionException(
-              "getNetworkGraph returned neither an inline graph nor an artifact path"
+              "getNetworkGraph returned neither an inline graph nor an artifact path",
             )
         json.decodeFromString(hostListSerializer, readArtifactFile(path))
       }

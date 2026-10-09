@@ -144,7 +144,7 @@ internal class FileEventPersistence(
       ?.sortedWith(
         compareBy<BatchFile> { it.sequence != null }
           .thenBy { it.sequence ?: it.timestamp }
-          .thenBy { it.identity }
+          .thenBy { it.identity },
       ) ?: emptyList()
 
   private fun initializeSequence() {

@@ -17,6 +17,8 @@ import { logger } from "./logger";
 import { iosDeviceResourceCatalog } from "./iosDeviceResourceCatalog";
 import { AndroidDeviceResourceController } from "./androidDeviceResourceController";
 import type { AndroidResourceRestoration } from "../models/AndroidResourceRestoration";
+import type { DeviceResourceApplicationStore } from "./deviceResourceApplicationStore";
+import { deviceResourceProfileFingerprint, nextOwnedOverrides } from "./deviceResourceDrift";
 
 export interface DeviceResourceRequest {
   device: BootedDevice;
@@ -43,6 +45,8 @@ export class DefaultDeviceResourceController implements DeviceResourceController
     private readonly timer: Pick<Timer, "now" | "sleep"> = defaultTimer,
     readDirectory: (path: string) => Promise<string[]> = readdir,
     private readonly android: DeviceResourceController = new AndroidDeviceResourceController(),
+    /** Records AutoMobile-applied simulator overrides; omitted means no ownership metadata. */
+    private readonly applications: DeviceResourceApplicationStore | null = null,
   ) {
     this.reader = new IosDeviceResourceReader({ simctl, plist, timer, readDirectory });
   }
@@ -83,7 +87,36 @@ export class DefaultDeviceResourceController implements DeviceResourceController
         result.success = false;
       }
     }
+    await this.recordApplied(run);
     return result;
+  }
+
+  /** Best effort: ownership metadata never changes the verified mutation result. */
+  private async recordApplied({ request, result }: ResourceRun): Promise<void> {
+    if (!this.applications || !result.changed.length) {
+      return;
+    }
+    try {
+      const identity = await this.reader.readIdentity(request);
+      if (!identity) {
+        return;
+      }
+      const prior = (await this.applications.get(identity))?.resources ?? {};
+      const owned = nextOwnedOverrides(prior, request.resources, result.changed, result.resources);
+      if (!Object.keys(owned).length) {
+        await this.applications.delete(identity);
+        return;
+      }
+      await this.applications.put({
+        identity,
+        resources: owned,
+        profileFingerprint: deviceResourceProfileFingerprint({ resources: request.resources }),
+        updatedAtMs: this.timer.now(),
+      });
+    } catch (error) {
+      request.signal?.throwIfAborted();
+      logger.warn(`Recording applied simulator overrides failed: ${errorMessage(error)}`, error);
+    }
   }
 
   private async setResource(

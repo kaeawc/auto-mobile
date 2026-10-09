@@ -254,7 +254,8 @@ export function registerNotificationTools() {
     "Read app notification/DND policy state",
     getNotificationPolicySchema,
     getNotificationPolicyHandler,
-    { defaultEnabled: false },
+    // Reads only; read-only access never requires a session (#10965).
+    { defaultEnabled: false, deviceReadOnly: true },
   );
 
   ToolRegistry.registerDeviceAware(

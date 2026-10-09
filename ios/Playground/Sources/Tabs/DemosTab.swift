@@ -148,6 +148,26 @@ struct DemosTab: View {
                     }
 
                     NavigationLink {
+                        SwiftUISemanticLinksCrossOwnerDemo()
+                    } label: {
+                        DemoRow(
+                            title: "Semantic Links (Cross-Owner)",
+                            description: "Same link text under two owning elements",
+                            icon: "link.badge.plus"
+                        )
+                    }
+
+                    NavigationLink {
+                        PasteTargetsDemo()
+                    } label: {
+                        DemoRow(
+                            title: "Paste Targets",
+                            description: "Fields that reject or hide pasted text",
+                            icon: "doc.on.clipboard"
+                        )
+                    }
+
+                    NavigationLink {
                         UIKitSemanticLinksDemo()
                     } label: {
                         DemoRow(
@@ -159,6 +179,16 @@ struct DemosTab: View {
                 }
 
                 Section("View Hierarchy") {
+                    NavigationLink {
+                        NestedSelectionDemo()
+                    } label: {
+                        DemoRow(
+                            title: "Nested Selection",
+                            description: "Two carts with duplicate item ids",
+                            icon: "cart.fill"
+                        )
+                    }
+
                     NavigationLink {
                         ViewHierarchyDebugDemo()
                     } label: {
@@ -1384,4 +1414,136 @@ struct SegmentedControlView: UIViewRepresentable {
 #Preview {
     DemosTab()
         .autoMobileTheme()
+}
+
+// MARK: - Nested Selection Demo
+
+/// Two carts holding rows with the same accessibility identifiers (item_40...item_47), each with a
+/// `quantity` field and a `remove` button, so nested container selection can be verified against
+/// duplicate leaf identifiers. The status line records which cart/item last received an action.
+struct NestedSelectionDemo: View {
+    private static let cartNames = ["cart_A", "cart_B"]
+    private static let itemIds = (40 ... 47).map { "item_\($0)" }
+
+    @State private var rows: [String: [String]] = Dictionary(
+        uniqueKeysWithValues: cartNames.map { ($0, itemIds) }
+    )
+    @State private var quantities: [String: String] = [:]
+    @State private var status = "status: idle"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(status)
+                .accessibilityIdentifier("selection_status")
+            HStack {
+                Button("Reverse A") {
+                    rows["cart_A"]?.reverse()
+                    status = "status: reversed cart_A"
+                }
+                .accessibilityIdentifier("reverse_cart_A")
+                Button("Drop A/42") {
+                    rows["cart_A"]?.removeAll { $0 == "item_42" }
+                    status = "status: dropped cart_A/item_42"
+                }
+                .accessibilityIdentifier("drop_cart_A_item_42")
+            }
+            .buttonStyle(.borderedProminent)
+            ForEach(Self.cartNames, id: \.self) { cart in
+                Text(cart)
+                // Each cart is its own ScrollView carrying the container identifier, so the
+                // hierarchy holds two scroll containers whose rows share item ids.
+                ScrollView {
+                    VStack(spacing: 4) {
+                        ForEach(rows[cart] ?? [], id: \.self) { item in
+                            HStack {
+                                TextField(
+                                    "\(item) qty",
+                                    text: Binding(
+                                        get: { quantities["\(cart)/\(item)"] ?? "" },
+                                        set: { quantities["\(cart)/\(item)"] = $0 }
+                                    )
+                                )
+                                .textFieldStyle(.roundedBorder)
+                                .accessibilityIdentifier("quantity")
+                                Button("Remove") {
+                                    rows[cart]?.removeAll { $0 == item }
+                                    status = "status: removed \(cart)/\(item)"
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .accessibilityIdentifier("remove")
+                            }
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier(item)
+                        }
+                    }
+                }
+                .frame(height: 200)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(cart)
+            }
+        }
+        .padding(.horizontal, 12)
+        .navigationTitle("Nested Selection")
+    }
+}
+
+/// Fixture for verifying clipboard paste outcome reporting: a text field that
+/// rejects paste (Cmd+V is dropped), a secure field that accepts it but never
+/// exposes its value, and an ordinary field that accepts it.
+struct PasteTargetsDemo: View {
+    @State private var plain = ""
+    @State private var secure = ""
+    @Environment(\.autoMobileTheme) private var theme
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Paste targets")
+                    .font(theme.typography.titleMedium)
+                    .foregroundStyle(theme.textPrimary)
+
+                PasteRejectingField(placeholder: "Rejects paste", identifier: "paste_rejecting_field")
+                    .frame(height: 40)
+
+                SecureField("Secure field", text: $secure)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("paste_secure_field")
+
+                TextField("Plain field", text: $plain)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("paste_plain_field")
+            }
+            .padding()
+        }
+        .playgroundContent()
+        .navigationTitle("Paste Targets")
+        .navigationBarTitleDisplayMode(.inline)
+        .trackNavigation(destination: "PasteTargetsDemo")
+    }
+}
+
+private final class PasteRejectingTextField: UITextField {
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(UIResponderStandardEditActions.paste(_:)) {
+            return false
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func paste(_: Any?) {}
+}
+
+private struct PasteRejectingField: UIViewRepresentable {
+    let placeholder: String
+    let identifier: String
+
+    func makeUIView(context _: Context) -> UITextField {
+        let field = PasteRejectingTextField()
+        field.borderStyle = .roundedRect
+        field.placeholder = placeholder
+        field.accessibilityIdentifier = identifier
+        return field
+    }
+
+    func updateUIView(_: UITextField, context _: Context) {}
 }

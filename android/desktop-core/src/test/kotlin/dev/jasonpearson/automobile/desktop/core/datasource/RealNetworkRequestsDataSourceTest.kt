@@ -91,7 +91,7 @@ class RealNetworkRequestsDataSourceTest {
         override fun readResource(uri: String): List<McpResourceContent> {
           capturedUri = uri
           return listOf(
-            McpResourceContent(uri = uri, mimeType = "application/json", text = trafficJson)
+            McpResourceContent(uri = uri, mimeType = "application/json", text = trafficJson),
           )
         }
       }
@@ -191,7 +191,7 @@ class RealNetworkRequestsDataSourceTest {
         override fun readResource(uri: String): List<McpResourceContent> {
           capturedUri = uri
           return listOf(
-            McpResourceContent(uri = uri, mimeType = "application/json", text = detailJson)
+            McpResourceContent(uri = uri, mimeType = "application/json", text = detailJson),
           )
         }
       }

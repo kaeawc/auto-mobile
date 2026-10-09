@@ -34,7 +34,7 @@ class LogcatReaderTest {
   }
 
   private class CountingParser(
-    private val delegate: LogLineParser = ThreadtimeLogLineParser(FakeTime())
+    private val delegate: LogLineParser = ThreadtimeLogLineParser(FakeTime()),
   ) : LogLineParser {
     var count = 0
 

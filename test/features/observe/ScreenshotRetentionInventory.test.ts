@@ -2,7 +2,6 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import {
   BoundedScreenshotPathProtection,
   SCREENSHOT_PATH_MIN_LIFETIME_MS,
-  ScreenshotRetentionCapacityError,
 } from "../../../src/features/observe/ScreenshotRetention";
 import { SCREENSHOT_CACHE_MAX_SIZE_BYTES } from "../../../src/features/observe/screenshotCacheEviction";
 import {
@@ -132,7 +131,7 @@ test("independent authorities capture concurrently and preserve each other's mti
   expect(files.entries.size).toBe(2);
 });
 
-test("external live files appear at the next sweep and make admission more conservative", async () => {
+test("external live files appear at the next sweep and are evicted to admit a capture", async () => {
   await write("crop-local.png");
   const external = files.add(
     "snapshot-of-external.png",
@@ -142,11 +141,9 @@ test("external live files appear at the next sweep and make admission more conse
   await write("crop-before-sweep.png");
   expect(files.calls.readdir).toBe(1);
   await protection.sweep("/screenshots", files);
-  await expect(write("crop-after-sweep.png")).rejects.toBeInstanceOf(
-    ScreenshotRetentionCapacityError,
-  );
-  expect(files.existsSync(external)).toBe(true);
-  expect(files.calls.unlink).toBe(0);
+  await write("crop-after-sweep.png");
+  expect(files.existsSync(external)).toBe(false);
+  expect(files.entries.has("/screenshots/crop-after-sweep.png")).toBe(true);
 });
 
 test("projected bytes at the 90 percent margin trigger exactly one reconcile", async () => {
@@ -193,10 +190,9 @@ test.each(["ENOENT", "EEXIST"])(
     await expect(write("crop-failed.png")).rejects.toThrow("write failed");
     expect(files.calls.readdir - before).toBe(1);
     files.writeError = undefined;
-    await expect(write("crop-after-failure.png")).rejects.toBeInstanceOf(
-      ScreenshotRetentionCapacityError,
-    );
-    expect(files.calls.unlink).toBe(0);
+    await write("crop-after-failure.png");
+    expect(files.entries.has("/screenshots/snapshot-of-external.png")).toBe(false);
+    expect(files.entries.has("/screenshots/crop-after-failure.png")).toBe(true);
   },
 );
 
@@ -236,16 +232,11 @@ test.each(["readdir", "lstat"])(
   },
 );
 
-test("failed rollback remains inventoried and consumes capacity until a successful sweep", async () => {
+test("a failed eviction unlink still admits the capture and the file is swept later", async () => {
   await write("crop-live.png", SCREENSHOT_CACHE_MAX_SIZE_BYTES - 1);
-  const failure = spyOn(files, "unlink").mockRejectedValue(new Error("rollback denied"));
+  const failure = spyOn(files, "unlink").mockRejectedValue(new Error("unlink denied"));
   try {
-    await expect(write("crop-oversized.png", 2)).rejects.toBeInstanceOf(
-      ScreenshotRetentionCapacityError,
-    );
-    await expect(write("crop-refused.png")).rejects.toBeInstanceOf(
-      ScreenshotRetentionCapacityError,
-    );
+    await expect(write("crop-over.png", 2)).resolves.toBeUndefined();
     expect(files.entries.size).toBe(2);
   } finally {
     failure.mockRestore();

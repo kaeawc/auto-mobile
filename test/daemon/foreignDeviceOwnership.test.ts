@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   adbServerScope,
   deviceAllocationClaimPath,
@@ -327,9 +327,10 @@ describe("deviceAllocationClaimPath", () => {
       "/h",
     );
     expect(a).toBe(b);
-    expect(a.startsWith(join("/h", ".auto-mobile", "adb-servers", "tcp-localhost-5037"))).toBe(
-      true,
-    );
+    // The home directory is resolved to an absolute path, which on Windows adds a drive letter.
+    expect(
+      a.startsWith(join(resolve("/h"), ".auto-mobile", "adb-servers", "tcp-localhost-5037")),
+    ).toBe(true);
     expect(
       deviceAllocationClaimPath("emulator-5554", { ANDROID_ADB_SERVER_PORT: "5038" }, "/h"),
     ).not.toBe(a);

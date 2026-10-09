@@ -134,6 +134,7 @@ describe("LaunchApp", () => {
     });
     const invalidator = new FakeDeviceWindowCacheInvalidator();
     launchApp.windowCacheInvalidator = invalidator;
+    launchApp["cacheInvalidator"] = invalidator;
     fakeObserveScreen.setObserveResult(() => {
       expect(invalidator.calls).toEqual([device]);
       return {
@@ -144,6 +145,31 @@ describe("LaunchApp", () => {
     const result = await launchApp.execute(packageName, false, false);
     expect(result.success).toBe(true);
     expect(invalidator.calls).toEqual([device]);
+    // The app was not running, so this launch starts a new process.
+    expect(invalidator.retiredProcesses).toEqual([{ device, packageName }]);
+  });
+
+  test("resuming a running app keeps the process state its SDK reported", async () => {
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell am start --user 0", {
+      stdout: "Starting: Intent",
+      stderr: "",
+    });
+    const invalidator = new FakeDeviceWindowCacheInvalidator();
+    launchApp.windowCacheInvalidator = invalidator;
+    launchApp["cacheInvalidator"] = invalidator;
+    fakeObserveScreen.setObserveResult({
+      ...createObserveResult(),
+      activeWindow: { appId: packageName, activityName: "MainActivity", layoutSeqSum: 1 },
+    });
+    const result = await launchApp.execute(packageName, false, false);
+    expect(result.success).toBe(true);
+    expect(invalidator.retiredProcesses).toEqual([]);
   });
 
   test("install-aware targeting launches a personal-only app with a running work profile", async () => {
@@ -2941,6 +2967,7 @@ describe("LaunchApp", () => {
         invalidate: (invalidatedDevice) => {
           invalidated.push(invalidatedDevice);
         },
+        retireAppProcess: () => {},
       },
     });
     (staleLaunchApp as any).awaitIdle = fakeAwaitIdle;

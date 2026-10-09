@@ -71,6 +71,9 @@ class FakeAutoMobileClient : AutoMobileClient {
   var executePlanResult: ExecutePlanResult =
     ExecutePlanResult(success = true, executedSteps = 0, totalSteps = 0)
   var startDeviceResult: StartDeviceResult = StartDeviceResult(success = true)
+
+  /** Results returned (in order) before falling back to [startDeviceResult]. */
+  val queuedStartDeviceResults: ArrayDeque<StartDeviceResult> = ArrayDeque()
   var setActiveDeviceResult: SetActiveDeviceResult = SetActiveDeviceResult(success = true)
   var observeResult: ObserveResult = ObserveResult()
   var observeError: Throwable? = null
@@ -125,6 +128,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     val value: String?,
     val type: String,
     val platform: String = "android",
+    val sessionUuid: String? = null,
   )
 
   data class RemoveKeyValueCall(
@@ -133,6 +137,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     val fileName: String,
     val key: String,
     val platform: String = "android",
+    val sessionUuid: String? = null,
   )
 
   data class ClearKeyValueFileCall(
@@ -140,6 +145,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     val appId: String,
     val fileName: String,
     val platform: String = "android",
+    val sessionUuid: String? = null,
   )
 
   data class InputTapCall(
@@ -346,7 +352,7 @@ class FakeAutoMobileClient : AutoMobileClient {
 
   override fun startDevice(name: String, platform: String, deviceId: String?): StartDeviceResult {
     calls.add("startDevice")
-    return startDeviceResult
+    return queuedStartDeviceResults.removeFirstOrNull() ?: startDeviceResult
   }
 
   override fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult {
@@ -407,7 +413,7 @@ class FakeAutoMobileClient : AutoMobileClient {
   ): InputActionResult {
     calls.add("inputSwipe")
     inputSwipeCalls.add(
-      InputSwipeCall(startX, startY, endX, endY, platform, deviceId, durationMs, frameContext)
+      InputSwipeCall(startX, startY, endX, endY, platform, deviceId, durationMs, frameContext),
     )
     return inputSwipeResult
   }
@@ -433,7 +439,7 @@ class FakeAutoMobileClient : AutoMobileClient {
   ): InputActionResult {
     calls.add("inputTypeText")
     inputTypeTextCalls.add(
-      InputTypeTextCall(text, platform, deviceId, submit, append, frameContext)
+      InputTypeTextCall(text, platform, deviceId, submit, append, frameContext),
     )
     return inputTypeTextResult
   }
@@ -463,9 +469,12 @@ class FakeAutoMobileClient : AutoMobileClient {
     value: String?,
     type: String,
     platform: String,
+    sessionUuid: String?,
   ): SetKeyValueResult {
     calls.add("setKeyValue")
-    setKeyValueCalls.add(SetKeyValueCall(deviceId, appId, fileName, key, value, type, platform))
+    setKeyValueCalls.add(
+      SetKeyValueCall(deviceId, appId, fileName, key, value, type, platform, sessionUuid),
+    )
     onKeyValueMutation?.invoke()
     return setKeyValueResult
   }
@@ -476,9 +485,12 @@ class FakeAutoMobileClient : AutoMobileClient {
     fileName: String,
     key: String,
     platform: String,
+    sessionUuid: String?,
   ): RemoveKeyValueResult {
     calls.add("removeKeyValue")
-    removeKeyValueCalls.add(RemoveKeyValueCall(deviceId, appId, fileName, key, platform))
+    removeKeyValueCalls.add(
+      RemoveKeyValueCall(deviceId, appId, fileName, key, platform, sessionUuid),
+    )
     onKeyValueMutation?.invoke()
     return removeKeyValueResult
   }
@@ -488,9 +500,12 @@ class FakeAutoMobileClient : AutoMobileClient {
     appId: String,
     fileName: String,
     platform: String,
+    sessionUuid: String?,
   ): ClearKeyValueResult {
     calls.add("clearKeyValueFile")
-    clearKeyValueFileCalls.add(ClearKeyValueFileCall(deviceId, appId, fileName, platform))
+    clearKeyValueFileCalls.add(
+      ClearKeyValueFileCall(deviceId, appId, fileName, platform, sessionUuid),
+    )
     onKeyValueMutation?.invoke()
     return clearKeyValueFileResult
   }

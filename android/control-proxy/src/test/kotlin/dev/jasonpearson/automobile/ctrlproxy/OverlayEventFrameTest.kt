@@ -23,7 +23,7 @@ class OverlayEventFrameTest {
       )
     assertEquals(literal, overlayEventFrame(event))
     assertFalse(
-      Json.parseToJsonElement(overlayEventFrame(event)).jsonObject.containsKey("requestId")
+      Json.parseToJsonElement(overlayEventFrame(event)).jsonObject.containsKey("requestId"),
     )
   }
 

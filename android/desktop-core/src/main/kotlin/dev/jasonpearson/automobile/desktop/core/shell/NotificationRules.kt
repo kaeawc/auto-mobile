@@ -166,7 +166,7 @@ private fun ToastItem(
         .background(bgColor, RoundedCornerShape(6.dp))
         .padding(1.dp)
         .background(bgColor, RoundedCornerShape(5.dp))
-        .padding(10.dp)
+        .padding(10.dp),
   ) {
     Column {
       Row(
@@ -285,7 +285,7 @@ private fun NotificationRuleRow(
           )
           .clickable { onToggle(!rule.enabled) }
           .pointerHoverIcon(PointerIcon.Hand)
-          .padding(horizontal = 6.dp, vertical = 2.dp)
+          .padding(horizontal = 6.dp, vertical = 2.dp),
     ) {
       Text(
         if (rule.enabled) "ON" else "OFF",

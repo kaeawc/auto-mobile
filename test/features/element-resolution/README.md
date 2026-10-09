@@ -1,19 +1,15 @@
-# Observe resolution migration contract (S0)
+# Observe resolution contract (S0)
 
 `observeContract.test.ts` discovers every JSON fixture under `test/fixtures/observe`,
 including nested diff captures and both raw notification states. It collects and
 projects each capture through production observe code, then resolves every emitted
-ID, label and test tag through the legacy finder/selector and real S2 resolver.
-Assertions compare chosen bounds to the displayed row. Duplicate labels receive
-an explicit index in display order; S2 uses each row's advertised action. The
-legacy text reference uses the public tap path's partial-match and tap-intent
-options, including normalized whitespace labels. `publicTextCases` separately
-preserves unique unindexed text queries; a focused behavior probe pins actual
-legacy outcomes for the five duplicate-label groups, including the two Settings
-child targets. S2 tests the corrected unindexed displayed-parent policy. These
-probes are not additional roundtrip exemptions and do not expand the frozen
-seed. The trim-only fixture has no actionable rows; its zero selector
-count is pinned. The synthetic `<ime>` keyboard mode summary is not a selector.
+ID, label and test tag through the real S2 resolver. Assertions compare chosen
+bounds to the displayed row. Duplicate labels receive an explicit index in display
+order; S2 uses each row's advertised action. `publicTextCases` separately preserves
+unique unindexed text queries. The trim-only fixture has no actionable rows; its
+zero selector count is pinned. The synthetic `<ime>` keyboard mode summary is not
+a selector. The legacy finder reference side was retired with `ElementFinder`
+(#10271).
 
 `observeContractCaseKeys.json` pins every generated selector query and observed
 bounds. The lint/Fast Validation ratchet compares it with the merge-base version:
@@ -33,19 +29,19 @@ the base predates this contract, and missing merge history fails closed. An
 improvement fails until its stale exemption is removed; an unknown failure also fails. Fixture coverage counts prevent silent
 loss of selectors. Deliberate fixture replacements require reviewing this contract.
 
-`resolverContract.test.ts` runs all 174 queries against both the legacy
-finder/selector and the real S2 resolver. The independent candidate oracle is
-the ordered identities actually projected by observe. Both Settings text-input
-captures additionally pin the keyboard Settings button's captured ID and bounds;
-these two B1 roundtrip exceptions remain because the smaller keyboard control
-is still selected. The list shrank from 103 cases to two.
+`observeContractGapSignatures.json` records the wrong target each remaining gap
+resolves to, so a gap cannot drift to a different wrong target; the contract test
+reads only the entries for surviving gaps. Its other entries are the retired legacy
+finder's targets (#10271), kept because `test/scripts/elementResolutionRatchet.test.ts`
+reads this file as ratchet input.
 
-Every new ordered candidate list must equal that oracle, including known-gap
-cases. Strict legacy equality is required when the differential reports no
-change. A changed result must correct a legacy candidate-list mismatch against
-the oracle; a chosen-only match cannot hide added, missing, reordered or wrong
-identity candidates. The chosen target separately round-trips in the companion
-contract test. The adapter preserves each explicit index rather than compensating
-for resolver filtering.
+`resolverContract.test.ts` runs every query against the real S2 resolver. The
+independent candidate oracle is the ordered identities actually projected by
+observe. Both Settings text-input captures additionally pin the keyboard Settings
+button's captured ID and bounds; these two B1 roundtrip exceptions remain because
+the smaller keyboard control is still selected. Every ordered candidate list must
+equal that oracle, including known-gap cases. The chosen target separately
+round-trips in the companion contract test. The adapter preserves each explicit
+index rather than compensating for resolver filtering.
 
 Run: `bun test test/features/element-resolution/`.

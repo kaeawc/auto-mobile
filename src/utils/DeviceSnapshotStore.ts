@@ -5,6 +5,7 @@ import { getTempDir, TEMP_SUBDIRS } from "./tempDir";
 import { logger } from "./logger";
 import { assertSafePathSegment } from "./snapshotNameValidation";
 import { toActionableError, type Platform } from "../models";
+import { sortedReaddir, sortedReaddirEntries } from "./io";
 
 /**
  * Suffix of the sibling directory that {@link DeviceSnapshotStore.replaceSnapshotData}
@@ -231,7 +232,7 @@ export class DeviceSnapshotStore {
     const tempPath = this.getTempJournalPath(journalPath);
     const parentPath = path.dirname(snapshotPath);
     await fs.mkdir(parentPath, { recursive: true });
-    const entries = await fs.readdir(parentPath);
+    const entries = await sortedReaddir(parentPath);
     if (entries.includes(path.basename(tempPath))) {
       await fs.rm(tempPath);
     }
@@ -332,7 +333,7 @@ export class DeviceSnapshotStore {
 
   private async readJournalDirectory(directoryPath: string): Promise<Dirent[]> {
     try {
-      const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+      const entries = await sortedReaddirEntries(directoryPath);
       return entries.sort((left, right) =>
         left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
       );
@@ -442,7 +443,7 @@ export class DeviceSnapshotStore {
   }
 
   private async pathExists(filePath: string): Promise<boolean> {
-    const entries = await fs.readdir(path.dirname(filePath));
+    const entries = await sortedReaddir(path.dirname(filePath));
     return entries.includes(path.basename(filePath));
   }
 
@@ -474,7 +475,7 @@ export class DeviceSnapshotStore {
     const snapshotPath = this.getSnapshotPathWithOptions(snapshotName, options);
     let entries: Dirent[];
     try {
-      entries = await fs.readdir(snapshotPath, { withFileTypes: true });
+      entries = await sortedReaddirEntries(snapshotPath);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
@@ -499,7 +500,7 @@ export class DeviceSnapshotStore {
   async getDirectorySize(dirPath: string): Promise<number | null> {
     let entries: Dirent[];
     try {
-      entries = await fs.readdir(dirPath, { withFileTypes: true });
+      entries = await sortedReaddirEntries(dirPath);
     } catch (error) {
       // A missing/unreadable directory is "unknown size", not "0 bytes"; the
       // caller decides how to record that.
@@ -541,7 +542,7 @@ export class DeviceSnapshotStore {
    */
   async listSubdirectoryNames(dirPath: string): Promise<string[] | null> {
     try {
-      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      const entries = await sortedReaddirEntries(dirPath);
       return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
     } catch (error) {
       // Same "unknown, not empty" distinction as getDirectorySize.
@@ -558,7 +559,7 @@ export class DeviceSnapshotStore {
    */
   async listFileNames(dirPath: string): Promise<string[] | null> {
     try {
-      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      const entries = await sortedReaddirEntries(dirPath);
       return entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
     } catch (error) {
       // Same "unknown, not empty" distinction as getDirectorySize.

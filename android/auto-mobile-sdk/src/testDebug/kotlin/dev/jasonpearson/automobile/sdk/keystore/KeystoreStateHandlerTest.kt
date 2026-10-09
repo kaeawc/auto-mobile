@@ -103,7 +103,7 @@ class KeystoreStateHandlerTest {
         "private" to EntryCategory.PRIVATE_KEY,
         "cert" to EntryCategory.CERTIFICATE,
         "unknown" to EntryCategory.UNKNOWN,
-      )
+      ),
     )
     val json = handler.handle("metadata", "fixture")
     val entries = json.getJSONArray("entries")
@@ -244,7 +244,7 @@ class KeystoreStateHandlerTest {
         AutoMobileSDK.capabilities.capabilities.single { it.id == "storage.keystore" }.state,
       )
       assertTrue(
-        AutoMobileSDK.capabilities.capabilities.none { it.id.startsWith("storage.keystore.") }
+        AutoMobileSDK.capabilities.capabilities.none { it.id.startsWith("storage.keystore.") },
       )
       AutoMobileSDK.shutdown()
       ShadowLooper.runUiThreadTasksIncludingDelayedTasks()

@@ -51,6 +51,14 @@ platform, otherwise the single booted device of that platform. With multiple
 booted devices and no autolock, you must supply `deviceId`; with none, the
 request fails. All coordinates are finite numbers in **canonical device pixels**.
 
+Every command also accepts an optional `sessionUuid` string naming the daemon
+session that sends it. A device that a session holds takes input only from that
+session: a command for it without `sessionUuid`, or naming a different session,
+fails with `code` `device_owned_by_other_session`. A device no session holds
+takes input from any client.
+
+The same rule applies to tool calls; see [Device ownership](device-ownership.md).
+
 In the table, `?` marks optional parameters.
 
 | `method`             | `params`                                                                                                                                      |

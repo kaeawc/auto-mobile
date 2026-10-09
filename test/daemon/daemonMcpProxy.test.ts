@@ -47,6 +47,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
 const OLDER_VERSION = "0.0.1";
 const NEWER_VERSION = "9999.0.0";
@@ -402,6 +403,8 @@ describe("DaemonMcpProxy", () => {
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
               claimLivenessOwnership: true,
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           { method: "tools/list", params: { sessionUuid: "device-session-a" } },
@@ -411,6 +414,8 @@ describe("DaemonMcpProxy", () => {
               sessionId: "device-session-a",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
         ]);
@@ -422,6 +427,8 @@ describe("DaemonMcpProxy", () => {
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
               claimLivenessOwnership: true,
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           { method: "tools/list", params: { sessionUuid: "device-session-b" } },
@@ -431,6 +438,8 @@ describe("DaemonMcpProxy", () => {
               sessionId: "device-session-b",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
         ]);
@@ -491,6 +500,8 @@ describe("DaemonMcpProxy", () => {
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
               claimLivenessOwnership: true,
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           {
@@ -499,6 +510,8 @@ describe("DaemonMcpProxy", () => {
               sessionId: "device-session-a",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           {
@@ -507,6 +520,8 @@ describe("DaemonMcpProxy", () => {
               sessionId: "device-session-a",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           {
@@ -515,6 +530,8 @@ describe("DaemonMcpProxy", () => {
               sessionId: "device-session-a",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
         ]);
@@ -528,6 +545,8 @@ describe("DaemonMcpProxy", () => {
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
               claimLivenessOwnership: true,
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           {
@@ -536,6 +555,8 @@ describe("DaemonMcpProxy", () => {
               sessionId: "device-session-b",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           {
@@ -544,6 +565,8 @@ describe("DaemonMcpProxy", () => {
               sessionId: "device-session-b",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           {
@@ -552,6 +575,8 @@ describe("DaemonMcpProxy", () => {
               sessionId: "device-session-b",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
         ]);
@@ -594,10 +619,18 @@ describe("DaemonMcpProxy", () => {
             livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
             livenessOwnerToken: expect.any(String),
             claimLivenessOwnership: true,
+            reportIdleRelease: true,
+            reportDaemonInstance: true,
           },
         };
         // The best-effort establishment claim, then the keeper tick that finds the socket lost.
-        expect(staleClient.callDaemonMethodCalls).toEqual([claim, claim]);
+        expect(staleClient.callDaemonMethodCalls).toEqual([
+          claim,
+          {
+            ...claim,
+            params: { ...claim.params, reportIdleRelease: true, reportDaemonInstance: true },
+          },
+        ]);
         expect(staleClient.closeCallCount).toBe(1);
         expect(freshClient.callDaemonMethodCalls).toEqual([
           {
@@ -607,6 +640,8 @@ describe("DaemonMcpProxy", () => {
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
               claimLivenessOwnership: true,
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
         ]);
@@ -3910,6 +3945,8 @@ describe("DaemonMcpProxy", () => {
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
               claimLivenessOwnership: true,
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           { method: "tools/list", params: { sessionUuid: "session-a" } },
@@ -3921,6 +3958,8 @@ describe("DaemonMcpProxy", () => {
               sessionId: "session-a",
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           { method: "tools/list", params: { sessionUuid: "session-a" } },
@@ -4477,12 +4516,16 @@ describe("DaemonMcpProxy", () => {
       });
 
       try {
+        // Settle each keeper round trip on microtasks: the default real event-loop turn per
+        // tick made these two 2-minute advances the slowest part of the file (#10705).
+        const advance = (ms: number): Promise<void> =>
+          timer.advanceTimeAsync(ms, () => drainMicrotasks(32));
         await proxy.callTool("getAndroid", {});
-        await timer.advanceTimeAsync(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await advance(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await expect(proxy.callTool("tapOn", {})).rejects.toBeInstanceOf(
           DaemonToolOutcomeUnknownError,
         );
-        await timer.advanceTimeAsync(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await advance(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         // The binding was minted from a result, so an unscoped call gets the connection state
         // rather than the stale UUID (#5689).
         const retired = proxy.callTool("observe", {});
@@ -5580,7 +5623,7 @@ describe("DaemonMcpProxy", () => {
         );
         await expect(
           proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" }),
-        ).rejects.toThrow(/session-a.*(?:expired|released)/i);
+        ).rejects.toThrow(/session-b.*(?:expired|released)/i);
         expect(replacementClient.callToolCalls).toEqual([]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -5737,6 +5780,8 @@ describe("DaemonMcpProxy", () => {
                 livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
                 livenessOwnerToken: expect.any(String),
                 claimLivenessOwnership: true,
+                reportIdleRelease: true,
+                reportDaemonInstance: true,
               },
             },
             {
@@ -5746,6 +5791,8 @@ describe("DaemonMcpProxy", () => {
                 livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
                 livenessOwnerToken: expect.any(String),
                 claimLivenessOwnership: true,
+                reportIdleRelease: true,
+                reportDaemonInstance: true,
               },
             },
           ]);

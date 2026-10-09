@@ -790,6 +790,9 @@
                 "required": ["clock"]
               },
               {
+                "required": ["cameraPoster"]
+              },
+              {
                 "required": ["params"]
               }
             ],
@@ -1608,6 +1611,40 @@
         "clock": {
           "$ref": "#/$defs/deviceClockStateInput"
         },
+        "cameraPoster": {
+          "description": "Set (mode image or qr) or clear a virtual-scene back-camera poster on a running Android emulator via the emulator console. The default camera pose may not face the poster.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "mode": { "type": "string", "const": "image" },
+                "path": { "type": "string", "minLength": 1 },
+                "surface": { "type": "string", "enum": ["wall", "table"] }
+              },
+              "required": ["mode", "path"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": { "type": "string", "const": "qr" },
+                "text": { "type": "string", "minLength": 1 },
+                "surface": { "type": "string", "enum": ["wall", "table"] }
+              },
+              "required": ["mode", "text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": { "type": "string", "const": "clear" },
+                "surface": { "type": "string", "enum": ["wall", "table"] }
+              },
+              "required": ["mode"],
+              "additionalProperties": false
+            }
+          ]
+        },
         "connectivity": {
           "description": "Android connectivity toggles to apply.",
           "type": "object",
@@ -1782,6 +1819,9 @@
         },
         {
           "required": ["location"]
+        },
+        {
+          "required": ["cameraPoster"]
         }
       ],
       "description": "Parameters for setDeviceState"

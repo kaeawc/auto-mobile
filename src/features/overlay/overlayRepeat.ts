@@ -1,54 +1,52 @@
 import contract from "../../../schemas/overlay-spec-contract.json";
+import {
+  bindCheckedKeys,
+  checkedKeyValues,
+  bindText,
+  mapBindableFields,
+  record,
+  STATE_KEY,
+  templateFieldReferences,
+  templateSegments,
+  type Binding,
+  type FieldKind,
+  type Raw,
+} from "./overlayTemplate";
 
 /**
  * Static checks for the `repeat` list template on an already structurally valid spec.
  *
  * A container with `repeat: {items, as}` instantiates its children once per item, so these checks
- * run over the raw tree after the contract walk: placeholders must name a field every item has, a
- * template may not nest another `repeat` or declare a pager, and the expanded tree must still fit
- * the node and image limits. Depth is unaffected because instances are siblings, never deeper.
+ * run over the raw tree after the contract walk: placeholders must name a field every item has,
+ * state keys must bind to a literal key for every item, a template may not nest another `repeat`
+ * or declare a pager, and the expanded tree must still fit the node and image limits. Depth is
+ * unaffected because instances are siblings, never deeper.
  */
 export interface RepeatError {
   path: string;
   message: string;
 }
 
-type Raw = Record<string, unknown>;
 interface Scope {
-  alias: string;
+  /** The repeat container's path; instance errors are reported at its `repeat.items[i]`. */
+  path: string;
+  binding: Binding;
   items: Raw[];
 }
 
-const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 const fail = (path: string, message: string): RepeatError => ({ path, message });
-
-function record(value: unknown): Raw | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Raw)
-    : undefined;
-}
 
 /** Field names referenced as `{alias.field}`; `{index}` needs no field. Other braces stay literal. */
 export function repeatFieldReferences(text: string, alias: string): string[] {
-  const names: string[] = [];
-  const prefix = `${alias}.`;
-  let cursor = text.indexOf("{");
-  while (cursor >= 0) {
-    const close = text.indexOf("}", cursor + 1);
-    const inner = close < 0 ? "" : text.slice(cursor + 1, close);
-    if (inner.startsWith(prefix) && FIELD_NAME.test(inner.slice(prefix.length))) {
-      names.push(inner.slice(prefix.length));
-    }
-    cursor = close < 0 ? -1 : text.indexOf("{", cursor + 1);
-  }
-  return names;
+  return templateFieldReferences(text, { alias, index: true });
 }
 
-function checkString(text: unknown, path: string, scope: Scope): RepeatError | undefined {
-  if (typeof text !== "string") {
-    return undefined;
-  }
-  for (const name of repeatFieldReferences(text, scope.alias)) {
+function hasPlaceholder(text: string, binding: Binding): boolean {
+  return templateSegments(text, binding).some((segment) => segment.kind !== "literal");
+}
+
+function unknownField(text: string, path: string, scope: Scope): RepeatError | undefined {
+  for (const name of templateFieldReferences(text, scope.binding)) {
     if (!scope.items.every((item) => Object.hasOwn(item, name))) {
       return fail(path, `Unknown repeat field ${JSON.stringify(name)}`);
     }
@@ -56,89 +54,76 @@ function checkString(text: unknown, path: string, scope: Scope): RepeatError | u
   return undefined;
 }
 
-/** The text with `{index}` and `{alias.field}` bound to one item; unknown fields stay literal. */
-function renderForItem(text: string, scope: Scope, item: Raw, index: number): string {
-  return text.replace(/\{([^{}]*)\}/g, (token, inner: string) => {
-    if (inner === "index") {
-      return String(index);
-    }
-    const name = inner.startsWith(`${scope.alias}.`) ? inner.slice(scope.alias.length + 1) : "";
-    return FIELD_NAME.test(name) && Object.hasOwn(item, name) ? String(item[name]) : token;
-  });
-}
+const instance = (scope: Scope, item: Raw, index: number) => ({
+  binding: scope.binding,
+  values: item,
+  index,
+});
 
 /** An emit name must stay non-empty for every item once its placeholders are bound. */
-function checkEmitName(name: unknown, path: string, scope: Scope): RepeatError | undefined {
-  if (typeof name !== "string") {
-    return undefined;
-  }
+function emptyEmitName(name: string, path: string, scope: Scope): RepeatError | undefined {
   const empty = scope.items.findIndex(
-    (item, index) => renderForItem(name, scope, item, index) === "",
+    (item, index) => bindText(name, instance(scope, item, index)) === "",
   );
   return empty < 0 ? undefined : fail(path, `Expanded emit name is empty for item ${empty}`);
 }
 
-function checkCondition(value: unknown, path: string, scope: Scope): RepeatError | undefined {
-  const condition = record(value);
-  if (!condition) {
-    return undefined;
+/** A state key must bind to a literal key for every item; the failing item is reported. */
+function invalidBoundKey(key: string, path: string, scope: Scope): RepeatError | undefined {
+  if (!hasPlaceholder(key, scope.binding)) {
+    return STATE_KEY.test(key) ? undefined : fail(path, "Invalid key value");
   }
-  const own =
-    checkString(condition.equals, `${path}.equals`, scope) ??
-    checkString(condition.notEquals, `${path}.notEquals`, scope) ??
-    checkCondition(condition.not, `${path}.not`, scope);
-  if (own) {
-    return own;
-  }
-  for (const form of ["all", "any"] as const) {
-    const members = Array.isArray(condition[form]) ? (condition[form] as unknown[]) : [];
-    for (let index = 0; index < members.length; index++) {
-      const error = checkCondition(members[index], `${path}.${form}[${index}]`, scope);
-      if (error) {
-        return error;
-      }
+  for (let index = 0; index < scope.items.length; index++) {
+    const bound = bindText(key, instance(scope, scope.items[index], index));
+    if (!STATE_KEY.test(bound)) {
+      return fail(
+        `${scope.path}.repeat.items[${index}]`,
+        `Bound state key ${JSON.stringify(bound)} is invalid`,
+      );
     }
   }
   return undefined;
 }
 
-function checkAction(value: unknown, path: string, scope: Scope): RepeatError | undefined {
-  const action = record(value);
-  if (action?.type === "setState") {
-    return checkString(action.value, `${path}.value`, scope);
-  }
-  return action?.type === "emit"
-    ? (checkString(action.name, `${path}.name`, scope) ??
-        checkEmitName(action.name, `${path}.name`, scope))
-    : undefined;
-}
-
-function checkList(
+function fieldError(
   value: unknown,
   path: string,
-  check: (entry: unknown, entryPath: string) => RepeatError | undefined,
+  kind: FieldKind,
+  scope: Scope,
 ): RepeatError | undefined {
-  const entries = Array.isArray(value) ? (value as unknown[]) : [];
-  for (let index = 0; index < entries.length; index++) {
-    const error = check(entries[index], `${path}[${index}]`);
-    if (error) {
-      return error;
-    }
+  if (typeof value !== "string") {
+    return undefined;
   }
-  return undefined;
+  const unknown = unknownField(value, path, scope);
+  if (unknown) {
+    return unknown;
+  }
+  if (kind === "emitName") {
+    return emptyEmitName(value, path, scope);
+  }
+  return kind === "key" ? invalidBoundKey(value, path, scope) : undefined;
 }
 
+/** The first error among a template node's own bindable fields, in visiting order. */
 function checkOwnFields(node: Raw, path: string, scope: Scope): RepeatError | undefined {
-  return (
-    (node.type === "text" ? checkString(node.text, `${path}.text`, scope) : undefined) ??
-    checkCondition(node.visibleWhen, `${path}.visibleWhen`, scope) ??
-    checkList(node.styleWhen, `${path}.styleWhen`, (entry, entryPath) =>
-      checkCondition(record(entry)?.when, `${entryPath}.when`, scope),
-    ) ??
-    checkList(node.onTap, `${path}.onTap`, (entry, entryPath) =>
-      checkAction(entry, entryPath, scope),
-    )
-  );
+  let first: RepeatError | undefined;
+  mapBindableFields(node, path, (value, fieldPath, kind) => {
+    first ??= fieldError(value, fieldPath, kind, scope);
+    return value;
+  });
+  return first;
+}
+
+/** Outside every template a state key is literal, so a placeholder there is an invalid key. */
+function checkLiteralKeys(node: Raw, path: string): RepeatError | undefined {
+  let first: RepeatError | undefined;
+  mapBindableFields(node, path, (value, fieldPath, kind) => {
+    if (kind === "key" && typeof value === "string" && !STATE_KEY.test(value)) {
+      first ??= fail(fieldPath, "State key placeholder outside a repeat template");
+    }
+    return value;
+  });
+  return first;
 }
 
 interface Child {
@@ -158,11 +143,15 @@ function childrenOf(node: Raw, path: string): Child[] {
   });
 }
 
-function scopeOf(node: Raw): Scope | undefined {
+function scopeOf(node: Raw, path: string): Scope | undefined {
   const repeat = record(node.repeat);
   const items = Array.isArray(repeat?.items) ? (repeat.items as unknown[]) : [];
   return repeat && typeof repeat.as === "string"
-    ? { alias: repeat.as, items: items.filter((item): item is Raw => record(item) !== undefined) }
+    ? {
+        path,
+        binding: { alias: repeat.as, index: true },
+        items: items.filter((item): item is Raw => record(item) !== undefined),
+      }
     : undefined;
 }
 
@@ -174,12 +163,12 @@ function templateErrors(node: Raw, path: string, scope?: Scope): RepeatError | u
     if (node.type === "pager") {
       return fail(path, "Pager cannot appear inside a repeat template");
     }
-    const own = checkOwnFields(node, path, scope);
-    if (own) {
-      return own;
-    }
   }
-  const childScope = scopeOf(node) ?? scope;
+  const own = scope ? checkOwnFields(node, path, scope) : checkLiteralKeys(node, path);
+  if (own) {
+    return own;
+  }
+  const childScope = scopeOf(node, path) ?? scope;
   for (const child of childrenOf(node, path)) {
     const error = templateErrors(child.node, child.path, childScope);
     if (error) {
@@ -218,7 +207,7 @@ function expandedErrors(
   if (budget.images > contract.limits.MAX_OVERLAY_IMAGES) {
     return fail(at, "Expanded image limit exceeded");
   }
-  const scope = scopeOf(node);
+  const scope = scopeOf(node, path);
   const instances = scope ? scope.items.length : 1;
   const nestedPath = scope ? `${path}.repeat` : repeatPath;
   for (let instance = 0; instance < instances; instance++) {
@@ -241,4 +230,54 @@ export function repeatErrors(spec: unknown): RepeatError | undefined {
   return (
     templateErrors(root, "root") ?? expandedErrors(root, "root", { nodes: 0, images: 0 }, undefined)
   );
+}
+
+function collectScopes(node: Raw, path: string, scopes: Scope[]): void {
+  const scope = scopeOf(node, path);
+  if (scope) {
+    scopes.push(scope);
+  }
+  for (const child of childrenOf(node, path)) {
+    collectScopes(child.node, child.path, scopes);
+  }
+}
+
+/** A located node or action, and the repeat item its keys were bound to, if any. */
+export interface KeyInstance<T> {
+  located: T;
+  value: Raw;
+  item?: number;
+}
+
+/**
+ * The per-item views the state-type checks run over: a node or action inside a template whose
+ * state keys hold placeholders appears once per item with those keys bound (a bound key missing
+ * from `state` then fails exactly like a literal one); everything else appears once, unchanged.
+ * Call only after `repeatErrors` passed, so every bound key is a literal key.
+ */
+export function repeatKeyInstances<T extends { value: Raw; path: string }>(
+  spec: unknown,
+  located: T[],
+): KeyInstance<T>[] {
+  const root = record(record(spec)?.root);
+  const scopes: Scope[] = [];
+  if (root) {
+    collectScopes(root, "root", scopes);
+  }
+  return located.flatMap((entry) => {
+    const scope = scopes.find((candidate) => entry.path.startsWith(`${candidate.path}.children[`));
+    const templated =
+      scope &&
+      checkedKeyValues(entry.value).some(
+        (key) => typeof key === "string" && hasPlaceholder(key, scope.binding),
+      );
+    if (!scope || !templated) {
+      return [{ located: entry, value: entry.value }];
+    }
+    return scope.items.map((item, index) => ({
+      located: entry,
+      value: bindCheckedKeys(entry.value, instance(scope, item, index)),
+      item: index,
+    }));
+  });
 }

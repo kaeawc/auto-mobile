@@ -69,6 +69,7 @@ import {
   androidRollbackScript,
   androidSaveBackupScript,
 } from "./androidFileBackup";
+import { sortedReaddirEntries } from "../utils/io";
 
 export { APP_FILE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
 const APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS = 5000;
@@ -238,7 +239,7 @@ export interface AppFileServiceDependencies {
 export const nodeAppFileFileSystem: AppFileFileSystem = {
   stat: async (path) => nodeFs.stat(path),
   lstat: async (path) => nodeFs.lstat(path),
-  readdir: async (path) => nodeFs.readdir(path, { withFileTypes: true }),
+  readdir: async (path) => sortedReaddirEntries(path),
   mkdir: async (path) => {
     await nodeFs.mkdir(path, { recursive: true });
   },

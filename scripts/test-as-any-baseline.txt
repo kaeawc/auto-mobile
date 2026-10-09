@@ -163,7 +163,6 @@
 3	test/features/telemetry/TelemetryRecorder.test.ts
 95	test/features/utility/DeepLinkManager.chooser.test.ts
 11	test/features/utility/DeepLinkManager.test.ts
-4	test/features/utility/ElementFinder.test.ts
 5	test/features/utility/ElementParser.test.ts
 2	test/features/utility/GetDeepLinks.test.ts
 33	test/features/utility/PostNotification.test.ts
@@ -191,7 +190,7 @@
 21	test/server/deviceSnapshotVmReclaim.test.ts
 1	test/server/deviceTools.createIfMissing.test.ts
 1	test/server/deviceTools.platformPreparation.test.ts
-135	test/server/deviceTools.provisionDevice.test.ts
+91	test/server/deviceTools.provisionDevice.test.ts
 4	test/server/deviceTools.startDevice.test.ts
 2	test/server/deviceTools.teardownDevice.test.ts
 8	test/server/downloadsFixtureTools.test.ts

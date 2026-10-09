@@ -86,7 +86,7 @@ internal class HighlightAnimator(
             onAnimationComplete(highlightId)
           }
         }
-      }
+      },
     )
 
     activeAnimations[highlightId] = animator

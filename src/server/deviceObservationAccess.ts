@@ -42,3 +42,19 @@ export function assertObservationReadAccess(
     throw new ActionableError("Observation access denied.");
   }
 }
+
+/**
+ * The read-only device path for a device-aware tool (#10830): resolve the target from the booted
+ * list and authorize it, without acquiring, readying or pinning a device.
+ */
+export function sessionlessDeviceReadFor(
+  access: DeviceObservationAccess = defaultDeviceObservationAccess,
+): {
+  resolve(deviceId: string, signal?: AbortSignal): Promise<BootedDevice>;
+  assertAuthorized(device: BootedDevice): void;
+} {
+  return {
+    resolve: (deviceId, signal) => resolveDeviceForObservationRead(deviceId, signal, access),
+    assertAuthorized: (device) => assertObservationReadAccess(device, access),
+  };
+}

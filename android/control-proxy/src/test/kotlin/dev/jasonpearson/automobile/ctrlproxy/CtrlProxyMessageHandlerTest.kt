@@ -107,6 +107,12 @@ class CtrlProxyMessageHandlerTest {
     assertEquals("requestScreenshot" to listOf<Any?>("s1"), lastCall)
   }
 
+  @Test
+  fun `dispatches request_screenshot hideOverlays to the hide-capture-restore action`() = runTest {
+    dispatch("""{"type":"request_screenshot","requestId":"s2","displayId":3,"hideOverlays":true}""")
+    assertEquals("requestScreenshot" to listOf<Any?>("s2", 3, true), lastCall)
+  }
+
   // ---------------------------------------------------------------------------
   // Gestures
   // ---------------------------------------------------------------------------
@@ -114,7 +120,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_swipe`() = runTest {
     dispatch(
-      """{"type":"request_swipe","requestId":"sw1","x1":0,"y1":100,"x2":0,"y2":500,"duration":400}"""
+      """{"type":"request_swipe","requestId":"sw1","x1":0,"y1":100,"x2":0,"y2":500,"duration":400}""",
     )
     // Coordinates dispatch as Double (#2927); integer JSON decodes to identical .0 values.
     assertEquals("requestSwipe" to listOf<Any?>("sw1", 0.0, 100.0, 0.0, 500.0, 400L), lastCall)
@@ -130,7 +136,7 @@ class CtrlProxyMessageHandlerTest {
   fun `dispatches atomic double tap with frame and display routing`() = runTest {
     val request =
       json.decodeFromString<WebSocketRequest>(
-        """{"type":"request_tap_coordinates","requestId":"d1","x":100,"y":200,"doubleTap":true,"frameContext":"frame","displayId":2}"""
+        """{"type":"request_tap_coordinates","requestId":"d1","x":100,"y":200,"doubleTap":true,"frameContext":"frame","displayId":2}""",
       )
     CtrlProxyMessageHandler(actions, sdkInt = { 30 }).handleMessage(request)
     assertEquals(
@@ -142,7 +148,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_two_finger_swipe`() = runTest {
     dispatch(
-      """{"type":"request_two_finger_swipe","requestId":"tf1","x1":0,"y1":0,"x2":10,"y2":20,"duration":300,"offset":50}"""
+      """{"type":"request_two_finger_swipe","requestId":"tf1","x1":0,"y1":0,"x2":10,"y2":20,"duration":300,"offset":50}""",
     )
     // offset stays Int (pixel offset, not a coordinate).
     assertEquals(
@@ -154,7 +160,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_drag resolving legacy holdTime and duration`() = runTest {
     dispatch(
-      """{"type":"request_drag","requestId":"d1","x1":50,"y1":50,"x2":150,"y2":150,"holdTime":800,"duration":500}"""
+      """{"type":"request_drag","requestId":"d1","x1":50,"y1":50,"x2":150,"y2":150,"holdTime":800,"duration":500}""",
     )
     // holdTime resolves press duration, duration resolves drag duration, hold defaults to 100.
     assertEquals(
@@ -166,7 +172,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_pinch`() = runTest {
     dispatch(
-      """{"type":"request_pinch","requestId":"pi1","centerX":540,"centerY":960,"distanceStart":100,"distanceEnd":300,"rotationDegrees":45.0,"duration":500}"""
+      """{"type":"request_pinch","requestId":"pi1","centerX":540,"centerY":960,"distanceStart":100,"distanceEnd":300,"rotationDegrees":45.0,"duration":500}""",
     )
     assertEquals(
       "requestPinch" to listOf<Any?>("pi1", 540.0, 960.0, 100.0, 300.0, 45.0f, 500L),
@@ -179,7 +185,7 @@ class CtrlProxyMessageHandlerTest {
     // #2927: a fractional center/distance survives decode and reaches the action as Double,
     // not truncated to Int.
     dispatch(
-      """{"type":"request_pinch","requestId":"pi-frac","centerX":100.5,"centerY":200.25,"distanceStart":80.5,"distanceEnd":120.75,"rotationDegrees":45.0,"duration":500}"""
+      """{"type":"request_pinch","requestId":"pi-frac","centerX":100.5,"centerY":200.25,"distanceStart":80.5,"distanceEnd":120.75,"rotationDegrees":45.0,"duration":500}""",
     )
     assertEquals(
       "requestPinch" to listOf<Any?>("pi-frac", 100.5, 200.25, 80.5, 120.75, 45.0f, 500L),
@@ -190,7 +196,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_swipe preserving fractional coordinates`() = runTest {
     dispatch(
-      """{"type":"request_swipe","requestId":"sw-frac","x1":0.5,"y1":100.25,"x2":10.75,"y2":500.125,"duration":400}"""
+      """{"type":"request_swipe","requestId":"sw-frac","x1":0.5,"y1":100.25,"x2":10.75,"y2":500.125,"duration":400}""",
     )
     assertEquals(
       "requestSwipe" to listOf<Any?>("sw-frac", 0.5, 100.25, 10.75, 500.125, 400L),
@@ -257,7 +263,13 @@ class CtrlProxyMessageHandlerTest {
   fun `rejects swipe with positive-infinity coordinate`() = runTest {
     val response =
       handler.handleMessage(
-        RequestSwipe(requestId = "s", x1 = 0.0, y1 = 0.0, x2 = Double.POSITIVE_INFINITY, y2 = 500.0)
+        RequestSwipe(
+          requestId = "s",
+          x1 = 0.0,
+          y1 = 0.0,
+          x2 = Double.POSITIVE_INFINITY,
+          y2 = 500.0,
+        ),
       )
     assertGuarded(response, "x2")
     assertTrue(response is SwipeResult)
@@ -275,7 +287,7 @@ class CtrlProxyMessageHandlerTest {
           y1 = Double.NEGATIVE_INFINITY,
           x2 = 10.0,
           y2 = 20.0,
-        )
+        ),
       )
     assertGuarded(response, "y1")
     assertTrue(response is SwipeResult)
@@ -286,7 +298,7 @@ class CtrlProxyMessageHandlerTest {
   fun `rejects drag with NaN coordinate`() = runTest {
     val response =
       handler.handleMessage(
-        RequestDrag(requestId = "d", x1 = 50.0, y1 = 50.0, x2 = 150.0, y2 = Double.NaN)
+        RequestDrag(requestId = "d", x1 = 50.0, y1 = 50.0, x2 = 150.0, y2 = Double.NaN),
       )
     assertGuarded(response, "y2")
     assertTrue(response is DragResult)
@@ -303,7 +315,7 @@ class CtrlProxyMessageHandlerTest {
           centerY = 960.0,
           distanceStart = 100.0,
           distanceEnd = 300.0,
-        )
+        ),
       )
     assertGuarded(response, "centerX")
     assertTrue(response is PinchResult)
@@ -324,7 +336,7 @@ class CtrlProxyMessageHandlerTest {
           distanceStart = 100.0,
           distanceEnd = 300.0,
           rotationDegrees = Float.POSITIVE_INFINITY,
-        )
+        ),
       )
     assertGuarded(response, "rotationDegrees")
     assertTrue(response is PinchResult)
@@ -381,7 +393,7 @@ class CtrlProxyMessageHandlerTest {
     val ex =
       assertThrows(SerializationException::class.java) {
         json.decodeFromString<WebSocketRequest>(
-          """{"type":"request_tap_coordinates","requestId":"t","x":1e309,"y":200}"""
+          """{"type":"request_tap_coordinates","requestId":"t","x":1e309,"y":200}""",
         )
       }
     assertTrue(
@@ -396,7 +408,7 @@ class CtrlProxyMessageHandlerTest {
   fun `finite fractional and negative coordinates still dispatch`() = runTest {
     val response =
       dispatchForResponse(
-        """{"type":"request_swipe","requestId":"ok","x1":-0.5,"y1":100.25,"x2":10.75,"y2":500.125,"duration":400}"""
+        """{"type":"request_swipe","requestId":"ok","x1":-0.5,"y1":100.25,"x2":10.75,"y2":500.125,"duration":400}""",
       )
     assertNull("finite coordinates must not be guarded", response)
     assertEquals(
@@ -409,7 +421,7 @@ class CtrlProxyMessageHandlerTest {
   fun `finite pinch with rotationDegrees still dispatches`() = runTest {
     val response =
       dispatchForResponse(
-        """{"type":"request_pinch","requestId":"okp","centerX":540,"centerY":960,"distanceStart":100,"distanceEnd":300,"rotationDegrees":45.0,"duration":500}"""
+        """{"type":"request_pinch","requestId":"okp","centerX":540,"centerY":960,"distanceStart":100,"distanceEnd":300,"rotationDegrees":45.0,"duration":500}""",
       )
     assertNull(response)
     assertEquals(
@@ -423,7 +435,7 @@ class CtrlProxyMessageHandlerTest {
   fun `large finite two-finger offset still dispatches`() = runTest {
     val response =
       dispatchForResponse(
-        """{"type":"request_two_finger_swipe","requestId":"tfo","x1":0,"y1":0,"x2":10,"y2":20,"duration":300,"offset":100000}"""
+        """{"type":"request_two_finger_swipe","requestId":"tfo","x1":0,"y1":0,"x2":10,"y2":20,"duration":300,"offset":100000}""",
       )
     assertNull(response)
     assertEquals(
@@ -439,7 +451,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_set_text`() = runTest {
     dispatch(
-      """{"type":"request_set_text","requestId":"txt1","text":"Hello","resourceId":"field","dismissKeyboard":true}"""
+      """{"type":"request_set_text","requestId":"txt1","text":"Hello","resourceId":"field","dismissKeyboard":true}""",
     )
     assertEquals("requestSetText" to listOf<Any?>("txt1", "Hello", "field", true), lastCall)
   }
@@ -447,7 +459,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `forwards frame context with request_set_text`() = runTest {
     dispatch(
-      """{"type":"request_set_text","requestId":"txt1","text":"Hello","frameContext":"frame-1"}"""
+      """{"type":"request_set_text","requestId":"txt1","text":"Hello","frameContext":"frame-1"}""",
     )
     assertEquals(
       "requestSetText" to listOf<Any?>("txt1", "Hello", null, false, "frame-1"),
@@ -464,7 +476,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches opted in request_insert_text`() = runTest {
     dispatch(
-      """{"type":"request_insert_text","requestId":"id","text":"t","acceptsCaretNotPlaced":true}"""
+      """{"type":"request_insert_text","requestId":"id","text":"t","acceptsCaretNotPlaced":true}""",
     )
     assertEquals("requestInsertText" to listOf<Any?>("id", "t", null, true, null), lastCall)
   }
@@ -484,7 +496,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches optional pre-dispatch baseline`() = runTest {
     dispatch(
-      """{"type":"request_insert_text","text":"😀","expectedSuffix":"x","precedingState":{"text":"éx","selectionStart":2,"selectionEnd":2}}"""
+      """{"type":"request_insert_text","text":"😀","expectedSuffix":"x","precedingState":{"text":"éx","selectionStart":2,"selectionEnd":2}}""",
     )
     assertEquals(
       dev.jasonpearson.automobile.protocol.InsertTextState("éx", false, 2, 2),
@@ -495,7 +507,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches the optional IME commit budget`() = runTest {
     dispatch(
-      """{"type":"request_commit_text","requestId":"commit-1","text":"long text","timeoutMs":14500}"""
+      """{"type":"request_commit_text","requestId":"commit-1","text":"long text","timeoutMs":14500}""",
     )
     assertEquals(
       "requestCommitText" to
@@ -508,7 +520,7 @@ class CtrlProxyMessageHandlerTest {
       lastCall,
     )
     dispatch(
-      """{"type":"request_commit_text","requestId":"commit-3","text":"abc","delivery":"keyEvents","timeoutMs":9000}"""
+      """{"type":"request_commit_text","requestId":"commit-3","text":"abc","delivery":"keyEvents","timeoutMs":9000}""",
     )
     assertEquals(
       "requestCommitText" to
@@ -520,7 +532,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches correlated IME cancellation`() = runTest {
     dispatch(
-      """{"type":"request_cancel_ime_commit","requestId":"cancel-1","targetRequestId":"commit-1"}"""
+      """{"type":"request_cancel_ime_commit","requestId":"cancel-1","targetRequestId":"commit-1"}""",
     )
     assertEquals("requestCancelImeCommit" to listOf<Any?>("cancel-1", "commit-1"), lastCall)
   }
@@ -528,7 +540,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_set_keyboard_profile`() = runTest {
     dispatch(
-      """{"type":"request_set_keyboard_profile","requestId":"profile-1","profileId":"gboard"}"""
+      """{"type":"request_set_keyboard_profile","requestId":"profile-1","profileId":"gboard"}""",
     )
     assertEquals("requestSetKeyboardProfile" to listOf<Any?>("profile-1", "gboard"), lastCall)
   }
@@ -536,7 +548,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_list_keyboard_profiles with supported versions`() = runTest {
     dispatch(
-      """{"type":"request_list_keyboard_profiles","requestId":"profiles-1","supportedCatalogVersions":[1]}"""
+      """{"type":"request_list_keyboard_profiles","requestId":"profiles-1","supportedCatalogVersions":[1]}""",
     )
     assertEquals("requestListKeyboardProfiles" to listOf<Any?>("profiles-1", listOf(1)), lastCall)
   }
@@ -550,7 +562,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `forwards frame context with request_ime_action`() = runTest {
     dispatch(
-      """{"type":"request_ime_action","requestId":"i1","action":"search","frameContext":"frame-1"}"""
+      """{"type":"request_ime_action","requestId":"i1","action":"search","frameContext":"frame-1"}""",
     )
     assertEquals("requestImeAction" to listOf<Any?>("i1", "search", "frame-1"), lastCall)
   }
@@ -570,7 +582,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_action`() = runTest {
     dispatch(
-      """{"type":"request_action","requestId":"a1","action":"long_click","resourceId":"com.app:id/x"}"""
+      """{"type":"request_action","requestId":"a1","action":"long_click","resourceId":"com.app:id/x"}""",
     )
     assertEquals(
       "requestAction" to listOf<Any?>("a1", "long_click", "com.app:id/x", null),
@@ -581,7 +593,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_action selector`() = runTest {
     dispatch(
-      """{"type":"request_action","requestId":"a2","action":"long_click","selector":{"testTag":"message_row_42","collectionRow":4,"collectionColumn":0}}"""
+      """{"type":"request_action","requestId":"a2","action":"long_click","selector":{"testTag":"message_row_42","collectionRow":4,"collectionColumn":0}}""",
     )
     assertEquals(
       "requestAction" to
@@ -626,7 +638,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches install_ca_cert_from_path`() = runTest {
     dispatch(
-      """{"type":"install_ca_cert_from_path","requestId":"cp1","devicePath":"/sdcard/cert.pem"}"""
+      """{"type":"install_ca_cert_from_path","requestId":"cp1","devicePath":"/sdcard/cert.pem"}""",
     )
     assertEquals("installCaCertFromPath" to listOf<Any?>("cp1", "/sdcard/cert.pem"), lastCall)
   }
@@ -654,7 +666,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches remove_ca_cert with both alias and certificate`() = runTest {
     dispatch(
-      """{"type":"remove_ca_cert","requestId":"rc4","alias":"myalias","certificate":"cert-pem"}"""
+      """{"type":"remove_ca_cert","requestId":"rc4","alias":"myalias","certificate":"cert-pem"}""",
     )
     assertEquals("removeCaCert" to listOf<Any?>("rc4", "myalias", "cert-pem"), lastCall)
   }
@@ -676,7 +688,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches validate_frame_context`() = runTest {
     dispatch(
-      """{"type":"validate_frame_context","requestId":"context-1","frameContext":"epoch:4"}"""
+      """{"type":"validate_frame_context","requestId":"context-1","frameContext":"epoch:4"}""",
     )
     assertEquals("validateFrameContext" to listOf<Any?>("context-1", "epoch:4"), lastCall)
   }
@@ -684,7 +696,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `forwards frame context with request_global_action`() = runTest {
     dispatch(
-      """{"type":"request_global_action","requestId":"g1","action":"back","frameContext":"frame-1"}"""
+      """{"type":"request_global_action","requestId":"g1","action":"back","frameContext":"frame-1"}""",
     )
     assertEquals("requestGlobalAction" to listOf<Any?>("g1", "back", "frame-1"), lastCall)
   }
@@ -704,7 +716,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches get_permission`() = runTest {
     dispatch(
-      """{"type":"get_permission","requestId":"p1","permission":"android.permission.CAMERA","requestPermission":true}"""
+      """{"type":"get_permission","requestId":"p1","permission":"android.permission.CAMERA","requestPermission":true}""",
     )
     assertEquals(
       "getPermission" to listOf<Any?>("p1", "android.permission.CAMERA", true),
@@ -725,7 +737,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches set_accessibility_flags`() = runTest {
     dispatch(
-      """{"type":"set_accessibility_flags","includeNotImportantViews":false,"reportViewIds":true,"retrieveInteractiveWindows":false,"occlusionEnabled":false}"""
+      """{"type":"set_accessibility_flags","includeNotImportantViews":false,"reportViewIds":true,"retrieveInteractiveWindows":false,"occlusionEnabled":false}""",
     )
     assertEquals("setAccessibilityFlags" to listOf<Any?>(false, true, false, false), lastCall)
   }
@@ -739,7 +751,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches set_network_mock_rules re-encoding rules to JSON`() = runTest {
     dispatch(
-      """{"type":"set_network_mock_rules","rules":[{"mockId":"m1","host":"example.com","path":"/api","method":"GET","statusCode":200}]}"""
+      """{"type":"set_network_mock_rules","rules":[{"mockId":"m1","host":"example.com","path":"/api","method":"GET","statusCode":200}]}""",
     )
     assertEquals("setNetworkMockRules", lastCall.first)
     val rulesJson = lastCall.second[0] as String
@@ -764,7 +776,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches set_network_error_simulation`() = runTest {
     dispatch(
-      """{"type":"set_network_error_simulation","enabled":true,"errorType":"timeout","limit":5,"expiresAtEpochMs":99999}"""
+      """{"type":"set_network_error_simulation","enabled":true,"errorType":"timeout","limit":5,"expiresAtEpochMs":99999}""",
     )
     assertEquals(
       "setNetworkErrorSimulation" to listOf<Any?>(true, "timeout", 5, 99999L, null),
@@ -775,7 +787,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches set_network_error_simulation remainingMs`() = runTest {
     dispatch(
-      """{"type":"set_network_error_simulation","enabled":true,"errorType":"timeout","expiresAtEpochMs":99999,"remainingMs":30000}"""
+      """{"type":"set_network_error_simulation","enabled":true,"errorType":"timeout","expiresAtEpochMs":99999,"remainingMs":30000}""",
     )
     assertEquals(
       "setNetworkErrorSimulation" to listOf<Any?>(true, "timeout", null, 99999L, 30000L),
@@ -802,7 +814,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches add_highlight converting the protocol shape to the render model`() = runTest {
     dispatch(
-      """{"type":"add_highlight","requestId":"hl1","id":"highlight-1","shape":{"type":"circle","bounds":{"x":10,"y":20,"width":100,"height":50}}}"""
+      """{"type":"add_highlight","requestId":"hl1","id":"highlight-1","shape":{"type":"circle","bounds":{"x":10,"y":20,"width":100,"height":50}}}""",
     )
     assertEquals("addHighlight", lastCall.first)
     assertEquals("hl1", lastCall.second[0])
@@ -826,7 +838,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches get_preferences`() = runTest {
     dispatch(
-      """{"type":"get_preferences","requestId":"gp1","packageName":"com.example","fileName":"settings.xml"}"""
+      """{"type":"get_preferences","requestId":"gp1","packageName":"com.example","fileName":"settings.xml"}""",
     )
     assertEquals("getPreferences" to listOf<Any?>("gp1", "com.example", "settings.xml"), lastCall)
   }
@@ -846,7 +858,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches get_sdk_capabilities with a target user`() = runTest {
     dispatch(
-      """{"type":"get_sdk_capabilities","requestId":"sc2","packageName":"com.example","userId":10}"""
+      """{"type":"get_sdk_capabilities","requestId":"sc2","packageName":"com.example","userId":10}""",
     )
     assertEquals("getSdkCapabilities" to listOf<Any?>("sc2", "com.example", 10), lastCall)
   }
@@ -854,7 +866,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches list_data_stores`() = runTest {
     dispatch(
-      """{"type":"list_data_stores","requestId":"lds1","packageName":"com.example","adapterName":"settings"}"""
+      """{"type":"list_data_stores","requestId":"lds1","packageName":"com.example","adapterName":"settings"}""",
     )
     assertEquals("listDataStores" to listOf<Any?>("lds1", "com.example", "settings"), lastCall)
   }
@@ -862,7 +874,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches get_data_store`() = runTest {
     dispatch(
-      """{"type":"get_data_store","requestId":"gds1","packageName":"com.example","adapterName":"settings","storeName":"user_prefs"}"""
+      """{"type":"get_data_store","requestId":"gds1","packageName":"com.example","adapterName":"settings","storeName":"user_prefs"}""",
     )
     assertEquals(
       "getDataStore" to listOf<Any?>("gds1", "com.example", "settings", "user_prefs"),
@@ -873,7 +885,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches subscribe_storage`() = runTest {
     dispatch(
-      """{"type":"subscribe_storage","requestId":"sub1","packageName":"com.example","fileName":"settings.xml"}"""
+      """{"type":"subscribe_storage","requestId":"sub1","packageName":"com.example","fileName":"settings.xml"}""",
     )
     assertEquals(
       "subscribeStorage" to listOf<Any?>("sub1", "com.example", "settings.xml"),
@@ -887,7 +899,7 @@ class CtrlProxyMessageHandlerTest {
     // split
     // it and dispatch the unsubscribe so the device actually tears down the subscription.
     dispatch(
-      """{"type":"unsubscribe_storage","requestId":"unsub1","subscriptionId":"com.example:settings.xml"}"""
+      """{"type":"unsubscribe_storage","requestId":"unsub1","subscriptionId":"com.example:settings.xml"}""",
     )
     assertEquals(
       "unsubscribeStorage" to listOf<Any?>("unsub1", "com.example", "settings.xml"),
@@ -902,7 +914,7 @@ class CtrlProxyMessageHandlerTest {
     // first
     // ':' delimits packageName from fileName.
     dispatch(
-      """{"type":"unsubscribe_storage","requestId":"unsub3","subscriptionId":"com.example:weird:name.xml"}"""
+      """{"type":"unsubscribe_storage","requestId":"unsub3","subscriptionId":"com.example:weird:name.xml"}""",
     )
     assertEquals(
       "unsubscribeStorage" to listOf<Any?>("unsub3", "com.example", "weird:name.xml"),
@@ -922,10 +934,10 @@ class CtrlProxyMessageHandlerTest {
   fun `unsubscribe_storage rejects an empty package or file segment as malformed`() = runTest {
     // A real subscription can never have an empty package or file, so these are unsplittable.
     dispatch(
-      """{"type":"unsubscribe_storage","requestId":"unsub5","subscriptionId":":settings.xml"}"""
+      """{"type":"unsubscribe_storage","requestId":"unsub5","subscriptionId":":settings.xml"}""",
     )
     dispatch(
-      """{"type":"unsubscribe_storage","requestId":"unsub6","subscriptionId":"com.example:"}"""
+      """{"type":"unsubscribe_storage","requestId":"unsub6","subscriptionId":"com.example:"}""",
     )
     assertTrue("no action should fire for an empty-segment subscriptionId", calls.isEmpty())
     assertEquals(2, logs.size)
@@ -938,7 +950,7 @@ class CtrlProxyMessageHandlerTest {
     runTest {
       // If a client ever sends both, the explicit fields are authoritative over the parsed id.
       dispatch(
-        """{"type":"unsubscribe_storage","requestId":"unsub7","subscriptionId":"other.pkg:other.xml","packageName":"com.example","fileName":"settings.xml"}"""
+        """{"type":"unsubscribe_storage","requestId":"unsub7","subscriptionId":"other.pkg:other.xml","packageName":"com.example","fileName":"settings.xml"}""",
       )
       assertEquals(
         "unsubscribeStorage" to listOf<Any?>("unsub7", "com.example", "settings.xml"),
@@ -957,7 +969,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `unsubscribe_storage with packageName and fileName invokes the action`() = runTest {
     dispatch(
-      """{"type":"unsubscribe_storage","requestId":"unsub2","packageName":"com.example","fileName":"settings.xml"}"""
+      """{"type":"unsubscribe_storage","requestId":"unsub2","packageName":"com.example","fileName":"settings.xml"}""",
     )
     assertEquals(
       "unsubscribeStorage" to listOf<Any?>("unsub2", "com.example", "settings.xml"),
@@ -968,7 +980,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches get_preference`() = runTest {
     dispatch(
-      """{"type":"get_preference","requestId":"gpr1","packageName":"com.example","fileName":"settings.xml","key":"theme"}"""
+      """{"type":"get_preference","requestId":"gpr1","packageName":"com.example","fileName":"settings.xml","key":"theme"}""",
     )
     assertEquals(
       "getPreference" to listOf<Any?>("gpr1", "com.example", "settings.xml", "theme"),
@@ -979,7 +991,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches set_preference`() = runTest {
     dispatch(
-      """{"type":"set_preference","requestId":"spr1","packageName":"com.example","fileName":"settings.xml","key":"theme","value":"dark","valueType":"string"}"""
+      """{"type":"set_preference","requestId":"spr1","packageName":"com.example","fileName":"settings.xml","key":"theme","value":"dark","valueType":"string"}""",
     )
     assertEquals(
       "setPreference" to
@@ -991,7 +1003,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches remove_preference`() = runTest {
     dispatch(
-      """{"type":"remove_preference","requestId":"rp1","packageName":"com.example","fileName":"settings.xml","key":"theme"}"""
+      """{"type":"remove_preference","requestId":"rp1","packageName":"com.example","fileName":"settings.xml","key":"theme"}""",
     )
     assertEquals(
       "removePreference" to listOf<Any?>("rp1", "com.example", "settings.xml", "theme"),
@@ -1002,7 +1014,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches clear_preferences`() = runTest {
     dispatch(
-      """{"type":"clear_preferences","requestId":"clp1","packageName":"com.example","fileName":"settings.xml"}"""
+      """{"type":"clear_preferences","requestId":"clp1","packageName":"com.example","fileName":"settings.xml"}""",
     )
     assertEquals(
       "clearPreferences" to listOf<Any?>("clp1", "com.example", "settings.xml"),
@@ -1017,7 +1029,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_settings_get`() = runTest {
     dispatch(
-      """{"type":"request_settings_get","requestId":"sg1","namespace":"system","key":"user_rotation"}"""
+      """{"type":"request_settings_get","requestId":"sg1","namespace":"system","key":"user_rotation"}""",
     )
     assertEquals("requestSettingsGet" to listOf<Any?>("sg1", "system", "user_rotation"), lastCall)
   }
@@ -1025,7 +1037,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_settings_put`() = runTest {
     dispatch(
-      """{"type":"request_settings_put","requestId":"sp1","namespace":"system","key":"user_rotation","value":"1","valueType":"int"}"""
+      """{"type":"request_settings_put","requestId":"sp1","namespace":"system","key":"user_rotation","value":"1","valueType":"int"}""",
     )
     assertEquals(
       "requestSettingsPut" to listOf<Any?>("sp1", "system", "user_rotation", "1", "int"),
@@ -1062,7 +1074,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_installed_packages`() = runTest {
     dispatch(
-      """{"type":"request_installed_packages","requestId":"ip1","includeSystem":false,"userId":10}"""
+      """{"type":"request_installed_packages","requestId":"ip1","includeSystem":false,"userId":10}""",
     )
     assertEquals("requestInstalledPackages" to listOf<Any?>("ip1", false, 10), lastCall)
   }
@@ -1070,7 +1082,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_package_info`() = runTest {
     dispatch(
-      """{"type":"request_package_info","requestId":"pin1","packageName":"com.example","includePermissions":true}"""
+      """{"type":"request_package_info","requestId":"pin1","packageName":"com.example","includePermissions":true}""",
     )
     assertEquals("requestPackageInfo" to listOf<Any?>("pin1", "com.example", true), lastCall)
   }
@@ -1170,8 +1182,8 @@ class CtrlProxyMessageHandlerTest {
     val api30 = CtrlProxyMessageHandler(actions, sdkInt = { 30 })
     api30.handleMessage(
       json.decodeFromString<WebSocketRequest>(
-        """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":2}"""
-      )
+        """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":2}""",
+      ),
     )
     assertEquals("showOverlay", lastCall.first)
     assertEquals(2, lastCall.second[2])
@@ -1188,8 +1200,8 @@ class CtrlProxyMessageHandlerTest {
           CtrlProxyMessageHandler(actions, sdkInt = { sdk })
             .handleMessage(
               json.decodeFromString<WebSocketRequest>(
-                """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":$displayId}"""
-              )
+                """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":$displayId}""",
+              ),
             )
         assertTrue(response is OverlayResult)
         response as OverlayResult
@@ -1202,8 +1214,8 @@ class CtrlProxyMessageHandlerTest {
       CtrlProxyMessageHandler(actions, sdkInt = { 29 })
         .handleMessage(
           json.decodeFromString<WebSocketRequest>(
-            """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":0}"""
-          )
+            """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":0}""",
+          ),
         )
       assertEquals("showOverlay", lastCall.first)
       assertEquals(0, lastCall.second[2])
@@ -1219,7 +1231,7 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatch typed overlay asset requests`() = runTest {
     dispatch(
-      """{"type":"put_overlay_asset","requestId":"p","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}"""
+      """{"type":"put_overlay_asset","requestId":"p","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}""",
     )
     assertEquals("putOverlayAsset", lastCall.first)
     assertEquals(listOf("p", "hero", "image/png", "iVBORw0KGgo="), lastCall.second)
@@ -1257,7 +1269,7 @@ class CtrlProxyMessageHandlerTest {
     val requestId = "quoted" + '"'
     val result =
       json.decodeFromString<WebSocketResponse>(
-        overlayResultFrame(requestId, false, "render failed")
+        overlayResultFrame(requestId, false, "render failed"),
       ) as OverlayResult
     assertEquals(requestId, result.requestId)
     assertFalse(result.success)

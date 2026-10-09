@@ -1,4 +1,5 @@
 import { iosWireDeadlineParams, type IOSDispatchResult } from "./CtrlProxyDispatch";
+import { withCtrlProxyRecordingFromEnv } from "./CtrlProxyExchangeRecorder";
 import type { CtrlProxyMagicTapResult, CtrlProxySdkTriggerResult } from "./types";
 import { requestSdkTrigger, type SdkTriggerRequest } from "./CtrlProxySdkTrigger";
 /**
@@ -76,6 +77,7 @@ import {
   HierarchyNavigationUpdateMetrics,
 } from "../../navigation/HierarchyNavigationDetector";
 import { AccessibilityHierarchy } from "../../navigation/ScreenFingerprint";
+import { appWindowsOnly } from "../hierarchyLayer";
 import {
   DeviceServiceClient,
   ObserverPendingRequestTimeoutError,
@@ -915,7 +917,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   ) {
     super(
       options.timer ?? defaultTimer,
-      options.wsFactory ?? defaultWebSocketFactory,
+      withCtrlProxyRecordingFromEnv(options.wsFactory ?? defaultWebSocketFactory),
       { connectionResetMs: IOSCtrlProxyClient.CONNECTION_RESET_MS },
       options.retryExecutor ?? defaultRetryExecutor,
     );
@@ -4354,16 +4356,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     databasePath: string,
     query: string,
     timeoutMs?: number,
+    readOnly?: boolean,
   ): Promise<import("../../database/DatabaseInspector").SQLResult> {
     await this.requireSdkCapability("database", appId);
-    return this.database.executeSQL(
-      appId,
-      databasePath,
-      query,
-      timeoutMs,
-      this.boundSessionId ?? undefined,
-      iosMutationTokens.get(this.device.deviceId, appId),
-    );
+    return this.database.executeSQL(appId, databasePath, query, timeoutMs, {
+      sessionId: this.boundSessionId ?? undefined,
+      mutationToken: iosMutationTokens.get(this.device.deviceId, appId),
+      readOnly,
+    });
   }
 
   async listDatabasesForIos(
@@ -4874,7 +4874,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     const conversionStart = this.timer.now();
-    const convertedHierarchy = this.convertHierarchyForNavigation(hierarchy);
+    // Screen identity follows the app's windows only (#9305): the overlay agent's UIWindow is
+    // removed, so showing, paging or dismissing a prototype records no navigation.
+    const convertedHierarchy = this.convertHierarchyForNavigation(appWindowsOnly(hierarchy));
     const conversionMs = this.timer.now() - conversionStart;
 
     const metrics: HierarchyNavigationUpdateMetrics = {

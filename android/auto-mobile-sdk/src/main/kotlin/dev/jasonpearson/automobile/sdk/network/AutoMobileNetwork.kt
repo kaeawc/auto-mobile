@@ -260,7 +260,7 @@ object AutoMobileNetwork {
           requestBody = if (bodiesEnabled) record.requestBody else null,
           responseBody = if (bodiesEnabled) record.responseBody else null,
           contentType = record.contentType,
-        )
+        ),
       )
     } catch (error: Exception) {
       // Custom loggers are user supplied, so logging must not break host transport behavior either.

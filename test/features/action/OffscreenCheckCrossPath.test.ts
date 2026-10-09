@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { projectActionableHierarchy } from "../../../src/features/observe/HierarchyNormalization";
-import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
+import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { screenSizeForOffscreenCheck } from "../../../src/features/utility/ElementGeometry";
@@ -180,8 +180,11 @@ test.each(rows)("cross-path off-screen agreement: $name", (row) => {
     platform,
     iosMultiPanel: false,
   };
-  const finder = new DefaultElementFinder();
-  expect(finder.findElementsByText(hierarchy, target.text!)).toEqual([target]);
+  expect(
+    new SearchableHierarchy()
+      .project(hierarchy)
+      .filter((entry) => entry.properties.text === target.text),
+  ).toHaveLength(1);
   const device = selectionFixtureDevice(platform, 1);
   // The fake deliberately returns the target unfiltered, so tapAny's own check
   // must reject off-screen rows independently of the selector's filtering.

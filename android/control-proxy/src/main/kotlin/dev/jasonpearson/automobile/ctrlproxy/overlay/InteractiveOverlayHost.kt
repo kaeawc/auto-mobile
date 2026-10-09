@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import android.view.Display
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
@@ -25,10 +26,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
@@ -37,15 +40,34 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
 const val MIN_TOUCH_THROUGH_SETTLE_MILLIS = 100L
 const val DEFAULT_TOUCH_THROUGH_SETTLE_MILLIS = MIN_TOUCH_THROUGH_SETTLE_MILLIS
+
+/** How long a hide waits for the frames that confirm the window is gone before capturing anyway. */
+const val DEFAULT_HIDE_FRAME_TIMEOUT_MILLIS = 500L
+
+/** The longest a capture may keep the overlay hidden; the window is restored when it expires. */
+const val DEFAULT_MAX_HIDDEN_MILLIS = 5_000L
+
+/** Frames awaited after hiding: the one that applies the hide, then one drawn without it. */
+internal const val HIDE_CONFIRM_FRAMES = 2
+
+/**
+ * A capture taken by [InteractiveOverlayHost.withHiddenForCapture]. [overlayExcluded] is true when
+ * no overlay window was showing, or when one was hidden and the confirming frames rendered before
+ * the capture; false when the hide could not be confirmed in time (the capture still ran).
+ */
+data class OverlayHiddenCapture<T>(val value: T, val overlayExcluded: Boolean)
 
 /**
  * Opacity is a whole-view integer percentage; invalid values throw IllegalArgumentException.
@@ -132,6 +154,20 @@ interface InteractiveOverlayHost {
     settleMillis: Long = DEFAULT_TOUCH_THROUGH_SETTLE_MILLIS,
     block: suspend () -> T,
   ): T
+
+  /**
+   * Hides the window for one capture (#9305): makes it invisible, waits up to [frameTimeoutMillis]
+   * for the frames that confirm it is gone, runs [block], then restores visibility in a
+   * NonCancellable finally, also when [block] throws or the caller is cancelled. [block] may keep
+   * the window hidden for at most [maxHiddenMillis]; past that it is cancelled, the window is
+   * restored and IllegalStateException is thrown. Captures are serialized; without a window,
+   * [block] runs as is.
+   */
+  suspend fun <T> withHiddenForCapture(
+    frameTimeoutMillis: Long = DEFAULT_HIDE_FRAME_TIMEOUT_MILLIS,
+    maxHiddenMillis: Long = DEFAULT_MAX_HIDDEN_MILLIS,
+    block: suspend () -> T,
+  ): OverlayHiddenCapture<T>
 }
 
 /**
@@ -170,6 +206,7 @@ class DefaultInteractiveOverlayHost(
   private val onWindowAttached: () -> Unit = {},
   private val onWindowLost: () -> Unit = {},
   private val isBlocked: () -> Boolean = { false },
+  private val imeInset: OverlayImeInset = NoOverlayImeInset,
   private val displayWindows: OverlayDisplayWindows = OverlayDisplayWindows { _, _ -> null },
   private val backScope: CoroutineScope =
     CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
@@ -177,6 +214,7 @@ class DefaultInteractiveOverlayHost(
     if (sdkInt >= OVERLAY_BACK_CALLBACK_MIN_SDK) AndroidOverlayBackRegistrar(view)
     else NoOverlayBackCallbackRegistrar
   },
+  private val frames: OverlayFrameWaiter = ChoreographerOverlayFrameWaiter,
 ) : InteractiveOverlayHost {
   private class Window(
     val view: OverlayComposeView,
@@ -186,13 +224,17 @@ class DefaultInteractiveOverlayHost(
     val displayId: Int,
     var params: WindowManager.LayoutParams,
     var request: InteractiveOverlayRequest,
-  )
+  ) {
+    /** A floating window's screen position as its anchored root last placed it (#9316). */
+    var anchoredOrigin: IntOffset? = null
+  }
 
   @Volatile private var window: Window? = null
   @Volatile private var placement: OverlayPlacement? = null
   @Volatile private var touchThroughToken: Any? = null
   private var destroyed = false
   private val gestureMutex = Mutex()
+  private val captureMutex = Mutex()
 
   override val isShowing: Boolean
     get() = window != null
@@ -248,13 +290,28 @@ class DefaultInteractiveOverlayHost(
         target.density(),
         sdkInt,
         request.layer,
+        imeLift(request),
       )
     if (touchThroughToken != null) {
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
     }
+    // New content places its own anchored root again, so a replaced spec starts from its placement.
+    inPlace?.anchoredOrigin = null
     return if (inPlace != null) updateInPlace(inPlace, request, params)
     else addWindow(target, request, params, replacing = current)
   }
+
+  /** The keyboard's reach for a bottom sheet; other placements never read it. */
+  private fun imeLift(request: InteractiveOverlayRequest): Int =
+    if (overlayImeShiftPx(request.placement, 1) == 0) 0
+    else
+      try {
+        imeInset.liftPx(request.displayId)
+      } catch (error: Exception) {
+        // Best-effort: an unreadable keyboard leaves the sheet at the screen edge, as before.
+        Log.w(TAG, "Keyboard bounds unavailable; sheet stays at the screen edge", error)
+        0
+      }
 
   private fun updateInPlace(
     current: Window,
@@ -333,10 +390,46 @@ class DefaultInteractiveOverlayHost(
     // Fullscreen chrome never inherits spec opacity, styles, clipping or modal sheets.
     current.view.alpha = overlayHostChrome(request).windowAlpha
     val target = current.target
+    val geometry = windowGeometry(current)
     current.view.setContent {
-      InteractiveOverlayWindowContent(request) {
-        overlayInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
+      CompositionLocalProvider(LocalOverlayWindowGeometry provides geometry) {
+        InteractiveOverlayWindowContent(request) {
+          overlayInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
+        }
       }
+    }
+  }
+
+  /**
+   * Anchors are screen coordinates: nodes subtract the window's screen origin. A floating window
+   * follows its anchored root instead, so it covers the anchor and nothing else (#9316).
+   */
+  private fun windowGeometry(current: Window): OverlayWindowGeometry =
+    OverlayWindowGeometry(
+      originOnScreen = { overlayViewWindowOrigin(current.view) },
+      moveTo =
+        if (current.request.placement is OverlayPlacement.Floating)
+          { origin ->
+            moveAnchored(current, origin)
+          }
+        else null,
+    )
+
+  /** The current window's geometry, as its content sees it; null without a window. */
+  internal fun currentWindowGeometry(): OverlayWindowGeometry? = window?.let(::windowGeometry)
+
+  /**
+   * Called from layout, so the window update is posted rather than re-entering a traversal. An
+   * unchanged origin is ignored, which also ends the relayout the move itself causes.
+   */
+  private fun moveAnchored(current: Window, origin: IntOffset) {
+    if (current.anchoredOrigin == origin) return
+    current.anchoredOrigin = origin
+    mainThread.post {
+      if (window !== current || current.anchoredOrigin != origin) return@post
+      val params = copyParams(current.params)
+      applyAnchoredOrigin(params, origin)
+      update(current, params)
     }
   }
 
@@ -354,7 +447,9 @@ class DefaultInteractiveOverlayHost(
         current.target.density(),
         sdkInt,
         current.request.layer,
+        imeLift(current.request),
       )
+    current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     if (touchThroughToken != null)
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
     return update(current, params)
@@ -475,6 +570,58 @@ class DefaultInteractiveOverlayHost(
       }
     }
 
+  override suspend fun <T> withHiddenForCapture(
+    frameTimeoutMillis: Long,
+    maxHiddenMillis: Long,
+    block: suspend () -> T,
+  ): OverlayHiddenCapture<T> = captureMutex.withLock {
+    val hidden = withContext(NonCancellable) { mainThread.onMain(::hideForCaptureOnMain) }
+    if (hidden == null) return@withLock OverlayHiddenCapture(block(), overlayExcluded = true)
+    try {
+      val confirmed =
+        withTimeoutOrNull(frameTimeoutMillis) { frames.awaitFrames(HIDE_CONFIRM_FRAMES) } != null
+      if (!confirmed) Log.w(TAG, "Overlay hide unconfirmed after ${frameTimeoutMillis}ms")
+      OverlayHiddenCapture(captureWhileHidden(maxHiddenMillis, block), confirmed)
+    } finally {
+      withContext(NonCancellable) { restoreAfterCapture(hidden) }
+    }
+  }
+
+  /** The view hidden for a capture, or null when no window is showing. */
+  private fun hideForCaptureOnMain(): View? {
+    val current = window ?: return null
+    current.view.visibility = View.INVISIBLE
+    return current.view
+  }
+
+  private suspend fun <T> captureWhileHidden(maxHiddenMillis: Long, block: suspend () -> T): T =
+    try {
+      withTimeout(maxHiddenMillis) { block() }
+    } catch (error: TimeoutCancellationException) {
+      throw IllegalStateException(
+        "Capture kept the overlay hidden over ${maxHiddenMillis}ms",
+        error,
+      )
+    }
+
+  /**
+   * Restores the hidden view itself: an in-place update kept it, and a window that replaced or
+   * removed it in the meantime is unaffected (a detached view is harmless to touch). A capture hide
+   * never re-shows a blocked overlay (lock screen, or suspended because its app left the
+   * front, #10261): a window still attached then is removed as relayout would, and the controller's
+   * own restore path shows it again once unblocked.
+   */
+  private suspend fun restoreAfterCapture(view: View) {
+    try {
+      mainThread.onMain {
+        if (!isBlocked()) view.visibility = View.VISIBLE
+        else if (window?.view === view) dismissOnMain()
+      }
+    } catch (error: Exception) {
+      Log.e(TAG, "Failed to restore overlay after capture", error)
+    }
+  }
+
   private fun update(current: Window, params: WindowManager.LayoutParams): Boolean {
     try {
       current.target.windowManager.updateViewLayout(current.view, params)
@@ -498,6 +645,13 @@ class DefaultInteractiveOverlayHost(
   companion object {
     private const val TAG = "InteractiveOverlayHost"
   }
+}
+
+/** Places a floating window's top-start corner at [origin], in screen px. */
+private fun applyAnchoredOrigin(params: WindowManager.LayoutParams, origin: IntOffset) {
+  params.gravity = Gravity.TOP or Gravity.START
+  params.x = origin.x
+  params.y = origin.y
 }
 
 enum class OverlayBackDecision {
@@ -600,7 +754,7 @@ fun overlayHostChrome(request: InteractiveOverlayRequest): OverlayHostChrome {
 }
 
 @Composable
-private fun InteractiveOverlayWindowContent(
+internal fun InteractiveOverlayWindowContent(
   request: InteractiveOverlayRequest,
   insetFloor: () -> OverlayInsetFloor,
 ) {
@@ -621,8 +775,8 @@ private fun InteractiveOverlayWindowContent(
           .windowInsetsPadding(
             WindowInsets.systemBars
               .union(WindowInsets.displayCutout)
-              .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
-          )
+              .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+          ),
       ) {
         TextButton(
           onClick = { scope.launch { request.onHostDismiss() } },
@@ -638,14 +792,20 @@ private fun InteractiveOverlayWindowContent(
           .fillMaxWidth()
           .clipToBounds()
           .alpha(chrome.contentAlpha)
-          .background(fullscreen?.scrim ?: Color.Transparent)
+          .background(fullscreen?.scrim ?: Color.Transparent),
       ) {
-        CompositionLocalProvider(LocalOverlayInsetFloor provides floor) { request.content() }
+        CompositionLocalProvider(
+          LocalOverlayInsetFloor provides floor,
+          LocalOverlayFillsWindow provides true,
+        ) {
+          request.content()
+        }
       }
     }
   } else if (chrome.closeVisible) {
     Box {
-      Box(Modifier.alpha(chrome.contentAlpha)) {
+      // Not `alpha`, which clips to this wrap-content box: anchored nodes are drawn outside it.
+      Box(Modifier.graphicsLayer { alpha = chrome.contentAlpha }) {
         CompositionLocalProvider(LocalOverlayInsetFloor provides floor) { request.content() }
       }
       // Drawn after the content so authored nodes cannot cover it.

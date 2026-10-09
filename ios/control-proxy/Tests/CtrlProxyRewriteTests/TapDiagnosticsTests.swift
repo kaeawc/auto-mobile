@@ -345,4 +345,12 @@ final class TapDiagnosticsTests: XCTestCase {
         XCTAssertTrue(result.sampleErrors[1].hasPrefix("orientation.device: "))
         XCTAssertTrue(result.sampleErrors[2].hasPrefix("baseScreenPoint: "))
     }
+
+    func testMovingGestureRequestNamesItsModeInsteadOfTap() {
+        let swipe = TapDiagnostics(requested: .init(x: 292, y: 833, durationMs: 300, mode: "swipe"))
+        XCTAssertEqual(swipe.requested.mode, "swipe")
+        XCTAssertTrue(swipe.logLine(gesture: "swipe").contains("durationMs=300 mode=swipe"))
+        XCTAssertEqual(TapDiagnostics.Requested(x: 1, y: 2, durationMs: 0).mode, "tap")
+        XCTAssertEqual(TapDiagnostics.Requested(x: 1, y: 2, durationMs: 50).mode, "press")
+    }
 }

@@ -81,7 +81,7 @@ class DaemonVersionHandshakeTest {
         versionSkew = false,
         buildSkew = false,
         forceRestart = false,
-      )
+      ),
     )
     assertFalse(
       DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
@@ -89,7 +89,7 @@ class DaemonVersionHandshakeTest {
         versionSkew = true,
         buildSkew = false,
         forceRestart = false,
-      )
+      ),
     )
     assertFalse(
       DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
@@ -97,7 +97,7 @@ class DaemonVersionHandshakeTest {
         versionSkew = false,
         buildSkew = true,
         forceRestart = false,
-      )
+      ),
     )
     assertFalse(
       DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
@@ -105,7 +105,7 @@ class DaemonVersionHandshakeTest {
         versionSkew = false,
         buildSkew = false,
         forceRestart = true,
-      )
+      ),
     )
     assertFalse(
       DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
@@ -113,7 +113,7 @@ class DaemonVersionHandshakeTest {
         versionSkew = false,
         buildSkew = false,
         forceRestart = false,
-      )
+      ),
     )
   }
 
@@ -291,7 +291,7 @@ class DaemonVersionHandshakeTest {
     // Both hashes known -> compare hashes (entry scripts irrelevant).
     assertTrue(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", "bbbb2222", "/c.js"))
     assertFalse(
-      DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", "aaaa1111", "/c.js")
+      DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", "aaaa1111", "/c.js"),
     )
     assertFalse(DaemonSocketPaths.requiresBuildSkewRestart(null, null, "aaaa1111", "/c.js"))
     assertFalse(DaemonSocketPaths.requiresBuildSkewRestart("aaaa1111", "/d.js", null, null))
@@ -307,7 +307,7 @@ class DaemonVersionHandshakeTest {
         "/other/dist/src/index.js",
         "aaaa1111",
         "/local/dist/src/index.js",
-      )
+      ),
     )
     assertFalse(
       DaemonSocketPaths.requiresBuildSkewRestart(
@@ -315,14 +315,14 @@ class DaemonVersionHandshakeTest {
         "/local/dist/src/index.js",
         "aaaa1111",
         "/local/dist/src/index.js",
-      )
+      ),
     )
     // Neither hash nor both entry scripts available -> cannot prove skew, no restart.
     assertFalse(
-      DaemonSocketPaths.requiresBuildSkewRestart("unknown", null, "aaaa1111", "/local.js")
+      DaemonSocketPaths.requiresBuildSkewRestart("unknown", null, "aaaa1111", "/local.js"),
     )
     assertFalse(
-      DaemonSocketPaths.requiresBuildSkewRestart("unknown", "/other.js", "aaaa1111", null)
+      DaemonSocketPaths.requiresBuildSkewRestart("unknown", "/other.js", "aaaa1111", null),
     )
   }
 
@@ -331,7 +331,7 @@ class DaemonVersionHandshakeTest {
     val pidFile = File.createTempFile("automobile-pid-build", ".pid")
     try {
       pidFile.writeText(
-        """{"pid":123,"version":"0.0.40","buildId":"abcdef0123456789","entryScript":"/x/dist/src/index.js"}"""
+        """{"pid":123,"version":"0.0.40","buildId":"abcdef0123456789","entryScript":"/x/dist/src/index.js"}""",
       )
       assertEquals(
         "abcdef0123456789",

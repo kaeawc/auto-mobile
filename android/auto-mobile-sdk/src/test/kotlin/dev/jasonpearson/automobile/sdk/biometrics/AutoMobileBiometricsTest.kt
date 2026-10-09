@@ -64,7 +64,7 @@ class AutoMobileBiometricsTest {
   @Test
   fun `consumeOverride returns Error with errorCode and errorMessage`() {
     AutoMobileBiometrics.overrideResult(
-      BiometricResult.Error(errorCode = 5, errorMessage = "Lockout")
+      BiometricResult.Error(errorCode = 5, errorMessage = "Lockout"),
     )
     val consumed = AutoMobileBiometrics.consumeOverride()
     assertNotNull(consumed)

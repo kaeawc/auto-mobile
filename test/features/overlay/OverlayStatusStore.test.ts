@@ -107,6 +107,20 @@ describe("InMemoryOverlayStatusStore scope bound", () => {
   });
 });
 
+describe("InMemoryOverlayStatusStore suspended", () => {
+  test("adopt records suspended only when true, and a fresh show clears it", () => {
+    const store = new InMemoryOverlayStatusStore(new FakeTimer());
+    const scope = { deviceId: "dev" };
+    store.adopt(scope, { id: "panel", suspended: true, pages: {}, state: {} });
+    expect(store.status(scope).overlays[0]?.suspended).toBe(true);
+    store.adopt(scope, { id: "panel", suspended: false, pages: {}, state: {} });
+    expect(store.status(scope).overlays[0]).not.toHaveProperty("suspended");
+    store.adopt(scope, { id: "panel", suspended: true, pages: {}, state: {} });
+    store.record(scope, "show", { id: "panel" }, ok);
+    expect(store.status(scope).overlays[0]).not.toHaveProperty("suspended");
+  });
+});
+
 describe("InMemoryOverlayStatusStore.shownOnDevice", () => {
   test("finds a shown overlay from any session on that device only, as a copy", () => {
     const store = new InMemoryOverlayStatusStore(new FakeTimer());

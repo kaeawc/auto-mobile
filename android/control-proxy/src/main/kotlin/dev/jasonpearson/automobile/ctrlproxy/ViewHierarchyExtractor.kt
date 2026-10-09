@@ -42,6 +42,8 @@ internal constructor(
     { _, _ ->
       null
     },
+  /** Whether an overlay is hidden because its app left the foreground (#10261). */
+  private val overlaySuspended: () -> Boolean = { false },
 ) {
 
   internal data class DisplayWindows(val displayId: Int, val windows: List<AccessibilityWindowInfo>)
@@ -239,7 +241,7 @@ internal constructor(
 
       val unifiedHierarchy = processedElement?.let {
         UIElementInfo(
-          children = listOf(it.copy(displayId = displayId, panelUniqueId = panelUniqueId))
+          children = listOf(it.copy(displayId = displayId, panelUniqueId = panelUniqueId)),
         )
       }
 
@@ -258,6 +260,7 @@ internal constructor(
           accessibilityFocusedElement?.let { WireNodeCodec.materialize(it) },
         contentHiddenRegions = contentHiddenRegions?.takeIf { it.isNotEmpty() },
         truncationReasons = budget.truncationReasons().ifEmpty { null },
+        overlaySuspended = overlaySuspended().takeIf { it },
       )
     } catch (e: Exception) {
       Log.e(TAG, "Error extracting view hierarchy", e)
@@ -413,7 +416,7 @@ internal constructor(
               displayId,
               panelUniqueId,
               rootNode.packageName?.toString(),
-            )
+            ),
           )
           val element =
             extractNodeInfo(
@@ -482,7 +485,7 @@ internal constructor(
                 hierarchy = processedElement,
                 windowBounds = ElementBounds(windowBounds),
                 isOwnInteractiveOverlay = hasInteractiveOverlayTitle(window.type, window.title),
-              )
+              ),
             )
           }
         } catch (e: Exception) {
@@ -688,6 +691,7 @@ internal constructor(
         contentHiddenRegions =
           detectContentHiddenRegions(contentHiddenRegionRoots, screenDimensions),
         truncationReasons = budget.truncationReasons().ifEmpty { null },
+        overlaySuspended = overlaySuspended().takeIf { it },
       )
     } finally {
       accessibilityFocusedNode?.recycle()
@@ -797,7 +801,7 @@ internal constructor(
             bounds = bounds,
             reason = CONTENT_HIDDEN_REASON_COMPOSE_INTEROP,
             areaPercent = areaPercent,
-          )
+          ),
         )
         return
       }
@@ -1002,7 +1006,7 @@ internal constructor(
           isFocused = it.isFocused,
           isActive = it.isActive,
         )
-      }
+      },
     )
 
   /**
@@ -2002,7 +2006,7 @@ internal constructor(
           windowKey = windowKey,
           order = start,
           subtreeEnd = end,
-        )
+        ),
       )
     }
 

@@ -158,7 +158,7 @@ fun SlidesScreen(
                       pagerState.scrollToPage(pagerState.currentPage - 1)
                     }
                   }
-                }
+                },
           )
 
           // Right tap area for next slide
@@ -177,7 +177,7 @@ fun SlidesScreen(
                       pagerState.scrollToPage(pagerState.currentPage + 1)
                     }
                   }
-                }
+                },
           )
 
           // Day/Night mode toggle - floating in bottom right corner

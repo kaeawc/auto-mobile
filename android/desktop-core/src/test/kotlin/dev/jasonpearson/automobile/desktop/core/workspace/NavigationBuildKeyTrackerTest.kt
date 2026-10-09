@@ -41,7 +41,7 @@ class NavigationBuildKeyTrackerTest {
     assertEquals(other.packageId, tracker.activeContext(other.packageId).buildKey?.packageId)
     assertNull(tracker.activeContext("com.unknown").buildKey)
     assertNull(
-      tracker.updated(update(buildKey = key.copy(packageId = "wrong"))).activeContext(app).buildKey
+      tracker.updated(update(buildKey = key.copy(packageId = "wrong"))).activeContext(app).buildKey,
     )
   }
 

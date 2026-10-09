@@ -121,7 +121,7 @@ private fun groupEvents(
           categoryKey = key,
           events = events.subList(runStart, runEnd),
           isExpanded = expanded,
-        )
+        ),
       )
     } else {
       for (i in runStart until runEnd) {
@@ -189,7 +189,7 @@ private fun buildRenderedRows(groupedItems: List<EventListItem>): List<RenderedT
               event = listItem.event,
               startTimestamp = listItem.event.timestamp,
               endTimestamp = listItem.event.timestamp + dur,
-            )
+            ),
           )
         }
         is EventListItem.Group -> {
@@ -203,7 +203,7 @@ private fun buildRenderedRows(groupedItems: List<EventListItem>): List<RenderedT
               event = firstEvent,
               startTimestamp = firstEvent.timestamp,
               endTimestamp = headerEnd,
-            )
+            ),
           )
           if (listItem.isExpanded) {
             listItem.events.forEach { event ->
@@ -213,7 +213,7 @@ private fun buildRenderedRows(groupedItems: List<EventListItem>): List<RenderedT
                   event = event,
                   startTimestamp = event.timestamp,
                   endTimestamp = event.timestamp + dur,
-                )
+                ),
               )
             }
           }
@@ -476,7 +476,7 @@ fun TelemetryDashboard(
                   if (isEnabled) enabledSeverities - sev else enabledSeverities + sev
               }
               .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 6.dp, vertical = 4.dp)
+              .padding(horizontal = 6.dp, vertical = 4.dp),
         ) {
           Icon(
             sev.icon,
@@ -506,7 +506,7 @@ fun TelemetryDashboard(
               categoryCounts.clear()
               lastSeenCounts.clear()
             }
-            .then(buttonModifier)
+            .then(buttonModifier),
       ) {
         Icon(
           AppIcons.Delete,
@@ -543,8 +543,8 @@ fun TelemetryDashboard(
                   Color(0xFFFFA94D).copy(alpha = 0.15f),
                   RoundedCornerShape(4.dp),
                 )
-              else Modifier
-            )
+              else Modifier,
+            ),
       ) {
         Icon(
           if (isPaused) AppIcons.Play else AppIcons.Pause,
@@ -565,7 +565,7 @@ fun TelemetryDashboard(
               categoryCounts.clear()
               lastSeenCounts.clear()
             }
-            .then(buttonModifier)
+            .then(buttonModifier),
       ) {
         Icon(
           AppIcons.Refresh,
@@ -597,8 +597,8 @@ fun TelemetryDashboard(
                   Color(0xFF74C0FC).copy(alpha = 0.15f),
                   RoundedCornerShape(4.dp),
                 )
-              else Modifier
-            )
+              else Modifier,
+            ),
       ) {
         Icon(
           AppIcons.ScrollDown,
@@ -619,8 +619,8 @@ fun TelemetryDashboard(
                   Color(0xFFFFD43B).copy(alpha = 0.15f),
                   RoundedCornerShape(4.dp),
                 )
-              else Modifier
-            )
+              else Modifier,
+            ),
       ) {
         Text(
           if (showBookmarksOnly) "\u2605" else "\u2606", // ★ filled / ☆ outline
@@ -640,7 +640,7 @@ fun TelemetryDashboard(
               )
               .clickable { showMaxEventsDropdown = !showMaxEventsDropdown }
               .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 6.dp, vertical = 4.dp)
+              .padding(horizontal = 6.dp, vertical = 4.dp),
         ) {
           Text(
             "${events.size}/$maxEvents",
@@ -655,7 +655,7 @@ fun TelemetryDashboard(
             modifier =
               Modifier.padding(top = 28.dp)
                 .background(colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
-                .padding(2.dp)
+                .padding(2.dp),
           ) {
             MAX_EVENTS_OPTIONS.forEach { option ->
               val isCurrentOption = option == maxEvents
@@ -672,7 +672,7 @@ fun TelemetryDashboard(
                       trimEvents(events, option, categoryCounts)
                     }
                     .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
               ) {
                 Text(
                   "$option",
@@ -691,7 +691,7 @@ fun TelemetryDashboard(
 
     // Responsive category filter tabs
     BoxWithConstraints(
-      modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
     ) {
       val tabCount = CategoryFilter.entries.size
       val tabsWithText =
@@ -726,7 +726,7 @@ fun TelemetryDashboard(
                   lastSeenCounts[filter] = categoryCounts[filter] ?: 0
                 }
                 .pointerHoverIcon(PointerIcon.Hand)
-                .padding(horizontal = if (showText) 8.dp else 6.dp, vertical = 4.dp)
+                .padding(horizontal = if (showText) 8.dp else 6.dp, vertical = 4.dp),
           ) {
             Row(
               horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -759,7 +759,7 @@ fun TelemetryDashboard(
                   modifier =
                     Modifier.width(6.dp)
                       .height(6.dp)
-                      .background(Color(0xFFFF6B6B), RoundedCornerShape(3.dp))
+                      .background(Color(0xFFFF6B6B), RoundedCornerShape(3.dp)),
                 )
               }
             }
@@ -1035,7 +1035,7 @@ private fun EventRowWithBookmark(
       modifier =
         Modifier.clickable(onClick = onToggleBookmark)
           .pointerHoverIcon(PointerIcon.Hand)
-          .padding(start = 4.dp, end = 2.dp, top = 2.dp, bottom = 2.dp)
+          .padding(start = 4.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
     ) {
       Text(
         if (isBookmarked) "\u2605" else "\u2606",
@@ -1167,7 +1167,7 @@ private fun NetworkTable(
         Modifier.fillMaxWidth()
           .background(textColor.copy(alpha = 0.05f))
           .horizontalScroll(scrollState)
-          .padding(vertical = 6.dp)
+          .padding(vertical = 6.dp),
     ) {
       networkColumns.forEach { col ->
         Box(modifier = Modifier.width(col.width.dp).padding(horizontal = 6.dp)) {
@@ -1196,12 +1196,12 @@ private fun NetworkTable(
           modifier =
             Modifier.fillMaxWidth()
               .then(
-                if (isSelected) Modifier.background(textColor.copy(alpha = 0.08f)) else Modifier
+                if (isSelected) Modifier.background(textColor.copy(alpha = 0.08f)) else Modifier,
               )
               .clickable { onEventSelected(event) }
               .pointerHoverIcon(PointerIcon.Hand)
               .horizontalScroll(scrollState)
-              .padding(vertical = 3.dp)
+              .padding(vertical = 3.dp),
         ) {
           // Time
           Box(modifier = Modifier.width(networkColumns[0].width.dp).padding(horizontal = 6.dp)) {

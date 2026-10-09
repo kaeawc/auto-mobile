@@ -48,7 +48,7 @@ class InputConnectionDriverTest {
 
     assertFalse(
       InputConnectionDriver(connection)
-        .execute(listOf(ImeOp.CommitText("a"), ImeOp.SetComposingText("b"), ImeOp.CommitText("c")))
+        .execute(listOf(ImeOp.CommitText("a"), ImeOp.SetComposingText("b"), ImeOp.CommitText("c"))),
     )
     assertEquals(listOf("commit:a", "compose:b:1"), connection.calls)
   }
@@ -65,8 +65,8 @@ class InputConnectionDriverTest {
             ImeOp.SetComposingText("b", 2),
             ImeOp.CommitText("c"),
             ImeOp.EndBatchEdit,
-          )
-        )
+          ),
+        ),
     )
     assertEquals(listOf("begin", "compose:b:2", "end"), connection.calls)
   }
@@ -83,8 +83,8 @@ class InputConnectionDriverTest {
             ImeOp.CommitText("hello"),
             ImeOp.CommitText(" "),
             ImeOp.EndBatchEdit,
-          )
-        )
+          ),
+        ),
     )
     assertEquals(listOf("begin", "commit:hello", "commit: "), connection.calls)
   }

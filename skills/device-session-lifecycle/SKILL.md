@@ -365,6 +365,35 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
     failure surfaces as an error and must never be read as "not running"
     (#6407, child of #6371).
 
+16. **Liveness proves the owner is alive; only control calls prove the device
+    is in use.** No read counts as activity, not even the owner's own
+    (#10964): a `deviceReadOnly` call is admitted read-only and its end is not
+    use; the matrix's default "tool call" is a control call. A heartbeat renews the owner lease and never the idle deadline
+    (#10656). Every change to a liveness path ships a two-sided test: each
+    "kept while X" assertion is paired with "released when Y", driven by the
+    real producers (the proxy's own keeper, tool calls, tokenless desktop
+    heartbeats) on a `FakeTimer`. Add the row to
+    `test/daemon/livenessScenarioMatrix.test.ts` (harness:
+    `test/helpers/livenessScenarioHarness.ts`); a seeded property in
+    `test/daemon/sessionExpiryProperties.test.ts` covers the clock
+    discontinuities (#10667, #10705). Desktop input is tool usage and
+    watching is not: a viewer allocates nothing, and the first `input/*`
+    allocates the device (#10730). The in-flight hold is bounded (request
+    deadline plus 10 s, 30 minutes without a deadline): a call that never
+    settles must not pin a device (#10663, #10712).
+
+17. **Ownership is cooperative; reads are free, control is owned** (owner
+    decisions 2026-10-09, #10982). Do not add requester checks or tokens to
+    `daemon/releaseSession`, `daemon/activeSessions` or
+    `ide/setSessionToolEnabled`. A read never needs a session and never counts
+    as activity (#10964); on a held device it is connect-only, on its own lane
+    (#10969). Streams need only an observer registration, which is not a session.
+    A recording stops and finalizes on its session's release, about 120 s at most
+    (#10957), owner-less ones on acquisition (#10961), artifacts stay fetchable
+    by id (#10958). Retryable acquisition refusals are typed:
+    `device_cleanup_in_progress` (#10960), `device_owned_by_other_daemon`. The CLI
+    idle default stays 2 minutes. Details: `docs/using/device-ownership.md`.
+
 ## 3. Recurring bug classes → where to look first
 
 1. **Release/teardown asymmetry** — acquire is centralized, release is bolted
@@ -397,6 +426,21 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
 8. **Daemon process identity** — clients holding state about a replaced
    daemon: stale tool caches, "Unknown tool", wedged transports, orphaned
    cross-namespace daemons blocking replacement. (#2599, #2732, #2444, #5419)
+
+9. **Liveness clock conflated with activity clock** — a keep-alive signal
+   (heartbeat, ack, replay-lease refresh) also moves the idle deadline, or the
+   idle clock also proves the owner is alive. Smell: one timestamp written by
+   both a heartbeat path and a tool-call path, or a test that stops the keeper
+   (or hand-calls `recordHeartbeat`) to force an expiry no production client
+   can reach. A fix without a "released when idle despite heartbeats" test
+   regresses silently to "never released". (#10655 H1/H3, #10656, #10658, #10657,
+   #10667). Later instances: a selector-routed call that did not count as use
+   (#10692), a client rebind that undid the idle release (#10693), and the
+   deadline stamped at call start rather than call end (#10694). The proxy
+   never infers which session a selector call used: the daemon echoes the
+   session it routed an admitted control call to in result
+   `_meta["automobile/routedSessionUuid"]` (omitted for reads and refused
+   calls), and the proxy credits exactly that one (#10974)
 
 ## 4. Hunting procedure
 
@@ -514,6 +558,29 @@ comments. **A refactor that drops a comment silently drops an invariant.**
   `FakeTimer` auto-fires scheduled intervals when advanced a full period
   (don't also fire manually); `initializeWithDevices` is deliberately a
   silent pre-populate (no ready listeners).
+- Liveness and ownership scenarios: the two-sided matrix
+  (`test/daemon/livenessScenarioMatrix.test.ts`, harness
+  `test/helpers/livenessScenarioHarness.ts`) and the desktop wire contract
+  (`test/daemon/desktopWireContract.test.ts`, fixtures under
+  `test/fixtures/desktop-wire/`). Both run tool calls through
+  `test/helpers/realToolCallPath.ts` (real registrations, `ToolRegistry`,
+  admission and execution tracker; fakes only at the device boundary) and the
+  daemon's own `subscribeToolCallEndActivity` / `hasActiveSessionExecution`
+  (`src/daemon/toolCallActivity.ts`). Start new liveness tests there: pair every
+  "held" assertion with a "released when" one on the same scenario.
+- **Known blind spot**: harness-reimplemented production wiring. A harness that
+  hand-calls `recordToolCallEnded`, the ownership assert or a tracker
+  subscription stays green when the production copy regresses (#10839). Call
+  the production function; if it is private, export it first. The harness now builds a real
+  `Daemon` (#10975), so the lifecycle callbacks its constructor wires (expiry canceller,
+  recording cleanup, release broadcast, in-flight vetoes) are production code, and it runs the
+  daemon's own `subscribeToolCallEndActivity` / `startHeartbeatMonitor`. What it still does not
+  drive is `Daemon.start()` itself (pinned by `test/daemon/daemonStartWiring.test.ts`), the IDE's
+  Kotlin provider construction, and the read-only (watcher) observe path. Heartbeat acks reach the
+  proxy as the real client delivers them (`result`, or `daemonResponseError`). Mutation-test any
+  wiring change: apply the regression to `src/` and confirm a matrix, wire-contract or wiring test
+  fails. When you change glue outside that, run
+  `scripts/live-idle-release-check.sh` (or the `Live Idle Release` workflow).
 - **Known blind spot**: unit fakes can't represent live adb reconnect timing —
   #5369 shipped green through unit tests. Anything touching pool runtime
   identity (incarnation boundaries, name matching on real reconnects, the

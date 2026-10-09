@@ -67,10 +67,17 @@ import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayBase64Decoder
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayController
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayEventSink
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayFontCache
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayForegroundTracker
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayForegroundWindow
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayHiddenCapture
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImageCache
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImeInset
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImeWindow
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
+import dev.jasonpearson.automobile.ctrlproxy.overlay.imeLiftPx
 import dev.jasonpearson.automobile.ctrlproxy.overlay.isInteractiveOverlayWindow
+import dev.jasonpearson.automobile.ctrlproxy.overlay.overlayForegroundFromWindows
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
@@ -1006,6 +1013,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ViewHierarchyExtractor(
       recompositionStore,
       workStats,
+      overlaySuspended = {
+        ::overlayController.isInitialized && overlayController.isSuspendedByForeground
+      },
       ownOverlayMetadata = { windowPackage, title ->
         // The overlay-type check already ran in the extractor; this confirms the window is ours.
         if (
@@ -1044,7 +1054,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         if (perfTiming != null) {
           put("perfTiming", perfTiming)
         }
-      }
+      },
     )
 
   private val perfProvider = PerfProvider.instance
@@ -1076,6 +1086,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
   private lateinit var overlayController: OverlayController
+  // Hides the interactive overlay while another app is in front, restores it on return (#10261).
+  private val overlayForeground by lazy {
+    OverlayForegroundTracker(
+      CoroutineOverlayScheduler(serviceScope),
+      ownPackage = packageName,
+      foregroundNow = ::currentForegroundApp,
+      onChanged = { refreshOverlayWindowNow() },
+    )
+  }
   private val overlayResultSink =
     object : OverlayResultSink {
       override suspend fun send(requestId: String?, success: Boolean, error: String?) =
@@ -1636,7 +1655,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     SdkAnrBroadcastHandler(
       enqueue = { event ->
         sdkEventBatchProcessor.enqueue(
-          SdkEventBatch(timestamp = event.timestamp, events = listOf(event))
+          SdkEventBatch(timestamp = event.timestamp, events = listOf(event)),
         )
       },
       log =
@@ -1781,6 +1800,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               onWindowAttached = { overlayManager.setInteractiveOverlayAttached(true) },
               onWindowLost = ::refreshOverlayWindow,
               isBlocked = ::isOverlayBlocked,
+              imeInset = OverlayImeInset { displayId -> overlayImeLiftPx(displayId) },
               backScope = serviceScope,
             ),
             overlayResultSink,
@@ -1821,6 +1841,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             },
             packageName = packageName,
             fonts = overlayFonts,
+            foreground = overlayForeground,
           )
         // Service start: drop anything a previous process left in the cache directory.
         overlayAssets.purgeLeftovers()
@@ -2361,6 +2382,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun requestScreenshot(requestId: String?, displayId: Int?) =
     broadcastScreenshot(requestId, displayId)
 
+  override fun requestScreenshot(requestId: String?, displayId: Int?, hideOverlays: Boolean) =
+    broadcastScreenshot(requestId, displayId, hideOverlays)
+
   override fun requestDoubleTapCoordinates(
     requestId: String?,
     x: Double,
@@ -2739,7 +2763,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             action = action.wireName,
             totalTimeMs = 0,
             error = error,
-          )
+          ),
         )
     }
 
@@ -3131,7 +3155,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             } else {
               "Stale frame context for input/key; observe a fresh frame before retrying"
             },
-        )
+        ),
       )
     }
   }
@@ -3222,7 +3246,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             timestamp = timeProvider.currentTimeMillis(),
             requestId = requestId,
             state = state,
-          )
+          ),
         )
       }
     }
@@ -3242,7 +3266,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             timestamp = timeProvider.currentTimeMillis(),
             requestId = requestId,
             state = state,
-          )
+          ),
         )
       }
     }
@@ -3425,7 +3449,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       Log.e(TAG, "Failed to broadcast network mock rules", e)
       if (requestId != null) {
         replyNetworkMockRules(
-          networkMockRulesFailure(requestId, "Failed to broadcast network mock rules: ${e.message}")
+          networkMockRulesFailure(
+            requestId,
+            "Failed to broadcast network mock rules: ${e.message}",
+          ),
         )
       }
     }
@@ -3465,7 +3492,49 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val power = getSystemService(Context.POWER_SERVICE) as? PowerManager
     // Missing safety services fail closed rather than allowing an overlay over an unknown lock
     // state.
-    return keyguard?.isKeyguardLocked != false || power?.isInteractive != true
+    return keyguard?.isKeyguardLocked != false ||
+      power?.isInteractive != true ||
+      // Another app is in front: hidden like a lock, but tracked separately (#10261).
+      overlayForeground.suspended
+  }
+
+  /** The application in front, from the accessibility windows; null when none qualifies. */
+  private fun currentForegroundApp(): String? =
+    try {
+      overlayForegroundFromWindows(
+        windows.map {
+          OverlayForegroundWindow(it.type, it.isActive, it.root?.packageName?.toString())
+        },
+        packageName,
+      )
+    } catch (error: Exception) {
+      // Unreadable windows leave the overlay unscoped (shown everywhere) rather than hiding it.
+      Log.w(TAG, "Foreground app unavailable for overlay scoping", error)
+      null
+    }
+
+  /** Feeds a window-state event to overlay foreground scoping, only while an overlay exists. */
+  private fun trackOverlayForeground(event: AccessibilityEvent, eventPackage: String?) {
+    if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+    if (!::overlayController.isInitialized) return
+    if (!overlayController.isShowing && !overlayController.isSuspendedByForeground) return
+    overlayForeground.onWindowEvent(eventPackage, ownEventWindowType(event))
+  }
+
+  /** The keyboard's reach up from [displayId]'s bottom edge, from its accessibility window. */
+  private fun overlayImeLiftPx(displayId: Int): Int {
+    val screen = getScreenDimensions(displayId) ?: return 0
+    val windows =
+      viewHierarchyExtractor.windowsForDisplay(this, displayId).map {
+        val bounds = Rect()
+        it.getBoundsInScreen(bounds)
+        OverlayImeWindow(it.type, bounds.top, bounds.bottom)
+      }
+    return imeLiftPx(windows, screen.height)
+  }
+
+  private suspend fun refreshOverlayWindowNow() {
+    if (::overlayController.isInitialized) overlayController.onConfigurationChanged()
   }
 
   private fun refreshOverlayWindow() {
@@ -3505,6 +3574,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ) {
       storageSubscriptionManager.onPackageActivity(eventPackage)
     }
+    trackOverlayForeground(event, eventPackage)
     if (
       event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
         event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
@@ -3775,7 +3845,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     webSocketServer.broadcast(
       webSocketFrameJson("interaction_event", timestamp = interaction.timestamp) {
         put("event", jsonCompact.encodeToJsonElement(interaction))
-      }
+      },
     )
   }
 
@@ -3870,7 +3940,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           val metrics = windowManager.currentWindowMetrics
           val insets =
             metrics.windowInsets.getInsetsIgnoringVisibility(
-              android.view.WindowInsets.Type.systemBars()
+              android.view.WindowInsets.Type.systemBars(),
             )
           insets.top
         } else {
@@ -4088,7 +4158,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val success = executeGlobalAction(action)
     val totalTimeMs = System.currentTimeMillis() - startTime
     asyncActionRunner.launch(requestId, "request_global_action") {
-      webSocketServer?.broadcast(
+      webSocketServer.broadcast(
         dev.jasonpearson.automobile.protocol.GlobalActionResult(
           timestamp = System.currentTimeMillis(),
           requestId = requestId,
@@ -4096,7 +4166,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           action = action,
           totalTimeMs = totalTimeMs,
           error = if (!success) "Unsupported or failed action: $action" else null,
-        )
+        ),
       )
     }
   }
@@ -4108,7 +4178,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val foreground = getForegroundActivity()
     val totalTimeMs = System.currentTimeMillis() - startTime
     asyncActionRunner.launch(requestId, "request_device_info") {
-      webSocketServer?.broadcast(
+      webSocketServer.broadcast(
         dev.jasonpearson.automobile.protocol.DeviceInfoResult(
           timestamp = System.currentTimeMillis(),
           requestId = requestId,
@@ -4123,7 +4193,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           wakefulness = getWakefulness(),
           foregroundActivity = foreground,
           totalTimeMs = totalTimeMs,
-        )
+        ),
       )
     }
   }
@@ -4282,7 +4352,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           snapshotOptions.isCancelled() ||
             commandJob?.isActive == false ||
             serviceScope.coroutineContext[Job]?.isActive == false
-        }
+        },
       )
     try {
       val hierarchy =
@@ -4590,7 +4660,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val messageBuilder: (kotlinx.serialization.json.JsonElement?) -> String = { perfTiming ->
         buildString {
           append(
-            """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$jsonString"""
+            """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$jsonString""",
           )
           if (requestId != null) {
             append(""","requestId":${jsonCompact.encodeToString(requestId)}""")
@@ -4765,7 +4835,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             encodeDurationMs = encodeTime,
             byteLength = jpegBytes.size,
             base64Length = base64String.length,
-          )
+          ),
         )
       } catch (e: CancellationException) {
         // The awaiting caller is being cancelled — rethrow instead of converting the cancellation
@@ -5417,7 +5487,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       if (success && dismissKeyboard) {
         try {
           softKeyboardController.setShowMode(
-            android.accessibilityservice.AccessibilityService.SHOW_MODE_HIDDEN
+            android.accessibilityservice.AccessibilityService.SHOW_MODE_HIDDEN,
           )
           Log.d(TAG, "[KeyboardDismiss] Set SHOW_MODE_HIDDEN after text injection")
         } catch (e: CancellationException) {
@@ -5604,7 +5674,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         if (!matched) {
           rememberedInsert = null
           warnings.add(
-            "The field changed since the previous insert; its text did not match within 300ms, so the reported selection was used"
+            "The field changed since the previous insert; its text did not match within 300ms, so the reported selection was used",
           )
         }
       }
@@ -5619,7 +5689,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           )
         if (!observed) {
           warnings.add(
-            "Preceding key-event input was not observed in the field within 300ms; the inserted text was planned against the latest observed value, so earlier input may have been overwritten"
+            "Preceding key-event input was not observed in the field within 300ms; the inserted text was planned against the latest observed value, so earlier input may have been overwritten",
           )
         }
       }
@@ -5685,7 +5755,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val requiredActions =
         if (plan.usedFallbackCaret || plan.usedRememberedCaret) {
           mapOf(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT to "ACTION_SET_TEXT"
+            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT to "ACTION_SET_TEXT",
           )
         } else {
           mapOf(
@@ -5954,7 +6024,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             if (nextNode != null) {
               val focusSuccess =
                 nextNode.performAction(
-                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS
+                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS,
                 )
               nextNode.recycle()
               focusSuccess
@@ -5969,7 +6039,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             if (prevNode != null) {
               val focusSuccess =
                 prevNode.performAction(
-                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS
+                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS,
                 )
               prevNode.recycle()
               focusSuccess
@@ -6465,7 +6535,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 perfProvider.startOperation("performPaste")
                 val pasteSuccess =
                   focusedNode.performAction(
-                    android.view.accessibility.AccessibilityNodeInfo.ACTION_PASTE
+                    android.view.accessibility.AccessibilityNodeInfo.ACTION_PASTE,
                   )
                 focusedNode.recycle()
                 perfProvider.endOperation("performPaste")
@@ -6757,7 +6827,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val infos =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
           packageManager.getInstalledPackages(
-            android.content.pm.PackageManager.PackageInfoFlags.of(0L)
+            android.content.pm.PackageManager.PackageInfoFlags.of(0L),
           )
         } else {
           @Suppress("DEPRECATION") packageManager.getInstalledPackages(0)
@@ -6792,7 +6862,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             versionCode = versionCode,
             label = label,
             launchable = launchablePackages?.packageNames?.contains(info.packageName),
-          )
+          ),
         )
       }
       val totalTime = System.currentTimeMillis() - startTime
@@ -7358,7 +7428,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // Approximate traversal must only include editors the user can reach.
     if (
       isImeFocusCandidate(
-        ImeFocusCandidate(node.isEditable, node.isFocusable, node.isVisibleToUser, node.isEnabled)
+        ImeFocusCandidate(node.isEditable, node.isFocusable, node.isVisibleToUser, node.isEnabled),
       )
     ) {
       // Create a copy to add to our list (we'll recycle the originals as we traverse)
@@ -7395,7 +7465,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * `observe`; the active window goes first so a bare id prefers the app over an IME/system window.
    */
   private fun findNodeInDisplayWindows(
-    find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?
+    find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
   ): AccessibilityNodeInfo? =
     findNodeAcrossWindows(displayWindowsOrEmpty(), { rootInActiveWindow }, find)
 
@@ -7474,7 +7544,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /** Find the currently focused editable node. */
   private fun findFocusedEditableNode(
-    root: android.view.accessibility.AccessibilityNodeInfo?
+    root: android.view.accessibility.AccessibilityNodeInfo?,
   ): android.view.accessibility.AccessibilityNodeInfo? {
     if (root == null) return null
 
@@ -7491,7 +7561,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /** Recursively search for a focused editable node in the hierarchy. */
   private fun findFocusedEditableInHierarchy(
-    node: android.view.accessibility.AccessibilityNodeInfo?
+    node: android.view.accessibility.AccessibilityNodeInfo?,
   ): android.view.accessibility.AccessibilityNodeInfo? {
     if (node == null) return null
 
@@ -7817,7 +7887,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           found = found,
           totalTimeMs = totalTimeMs,
           error = error,
-        )
+        ),
       )
     }
   }
@@ -7841,7 +7911,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           key = key,
           totalTimeMs = totalTimeMs,
           error = error,
-        )
+        ),
       )
     }
   }
@@ -7865,7 +7935,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           entries = entries,
           totalTimeMs = totalTimeMs,
           error = error,
-        )
+        ),
       )
     }
   }
@@ -7889,7 +7959,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           packages = packages,
           totalTimeMs = totalTimeMs,
           error = error,
-        )
+        ),
       )
     }
   }
@@ -7933,7 +8003,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           mainActivity = mainActivity,
           totalTimeMs = totalTimeMs,
           error = error,
-        )
+        ),
       )
     }
   }
@@ -7957,7 +8027,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           componentName = componentName,
           totalTimeMs = totalTimeMs,
           error = error,
-        )
+        ),
       )
     }
   }
@@ -8156,7 +8226,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /** Broadcast screenshot to WebSocket clients */
-  private fun broadcastScreenshot(requestId: String?, displayId: Int? = null) {
+  private fun broadcastScreenshot(
+    requestId: String?,
+    displayId: Int? = null,
+    hideOverlays: Boolean = false,
+  ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping screenshot broadcast")
       return
@@ -8168,7 +8242,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     asyncActionRunner.launch(requestId, "screenshot") {
       val contextBeforeCapture = currentFrameContext()
       val targetDisplayId = displayId ?: activeDisplayId()
-      val outcome = takeScreenshotAsync(targetDisplayId)
+      val overlaysHidden: Boolean?
+      val outcome =
+        if (hideOverlays) {
+          val capture = captureWithOverlayHidden(targetDisplayId)
+          overlaysHidden = capture.overlayExcluded
+          capture.value
+        } else {
+          overlaysHidden = null
+          takeScreenshotAsync(targetDisplayId)
+        }
       val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
       when (outcome) {
         is ScreenshotCaptureOutcome.Success -> {
@@ -8187,7 +8270,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               screenshotByteLength = screenshot.byteLength,
               screenshotBase64Length = screenshot.base64Length,
               frameContext = stableContext?.toString(),
-            )
+              overlaysHidden = overlaysHidden,
+            ),
           )
           Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")
         }
@@ -8196,12 +8280,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           // rather than a generic capture failure (issue #4927).
           val error = CtrlProxyScreenshotWire.errorMessageForCode(outcome.errorCode)
           webSocketServer.broadcast(
-            screenshotErrorFrame(requestId, error, targetDisplayId, panelUniqueId(targetDisplayId))
+            screenshotErrorFrame(requestId, error, targetDisplayId, panelUniqueId(targetDisplayId)),
           )
         }
       }
     }
   }
+
+  /**
+   * Hide-capture-restore in one device-side step (#9305), so a host that gives up mid-request can
+   * never leave the overlay hidden: the host restores in its own finally.
+   */
+  private suspend fun captureWithOverlayHidden(
+    targetDisplayId: Int,
+  ): OverlayHiddenCapture<ScreenshotCaptureOutcome> =
+    if (::overlayController.isInitialized)
+      overlayController.withHiddenForCapture { takeScreenshotAsync(targetDisplayId) }
+    else OverlayHiddenCapture(takeScreenshotAsync(targetDisplayId), overlayExcluded = true)
 
   /** Broadcast navigation event to WebSocket clients using typed protocol */
   private suspend fun broadcastNavigationEvent(
@@ -8936,7 +9031,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           append(""","success":true,"files":${jsonCompact.encodeToString(files)}""")
         } else {
           append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}"""
+            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
           )
         }
         append("}")
@@ -8970,7 +9065,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           append(""","success":true,"entries":${jsonCompact.encodeToString(entries)}""")
         } else {
           append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}"""
+            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
           )
         }
         append("}")
@@ -9002,11 +9097,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
         if (subscriptionId != null) {
           append(
-            ""","success":true,"subscriptionId":${jsonCompact.encodeToString(subscriptionId)}"""
+            ""","success":true,"subscriptionId":${jsonCompact.encodeToString(subscriptionId)}""",
           )
         } else {
           append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}"""
+            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
           )
         }
         append("}")
@@ -9201,7 +9296,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   private suspend fun broadcastStorageChange(
-    event: dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceChangeEvent
+    event: dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceChangeEvent,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping storage change broadcast")

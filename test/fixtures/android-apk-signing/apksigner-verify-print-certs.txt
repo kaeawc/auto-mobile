@@ -1,0 +1,111 @@
+== single-a
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer #1 certificate DN: CN=Fixture a
+Signer #1 certificate SHA-256 digest: f83432a182b5d5d77f32da4e17b9a9fa8d4f344ea6e31476603ba4fd08c1e8ad
+Signer #1 certificate SHA-1 digest: 839aa96b2bd978a3aa421ed79e44c5bd01892841
+Signer #1 certificate MD5 digest: 2d5cfcda11b27f19108fede438bd2a7d
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 2048
+Signer #1 public key SHA-256 digest: b5099b927ebc03348976326759462e92bcb137c754d1af4a5326fec32506b970
+Signer #1 public key SHA-1 digest: 26c4a416c960c7694280f8ff9469570cc2eabd93
+Signer #1 public key MD5 digest: a339df2279d561fd1524d988263ced83
+== single-b
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer #1 certificate DN: CN=Fixture b
+Signer #1 certificate SHA-256 digest: 2dc8cc04e4dbbe4b149277de6d616b22d9ec0cfa19971fbfa2f1dcebec21660e
+Signer #1 certificate SHA-1 digest: 391bd1c32a628b82ae4a8ae434029f7d38f446a9
+Signer #1 certificate MD5 digest: 82bbe20906df9351cf12acd86f02bfdc
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 2048
+Signer #1 public key SHA-256 digest: a9b72bb23fed6e7b86831763c73bd11f9a8674b870da051c9ad1047a87667a22
+Signer #1 public key SHA-1 digest: 6eb71ac4024f9b904fc6a714e38f48f61b9a38d5
+Signer #1 public key MD5 digest: 0358350d3da1b15fef5dbbfcb6d52658
+== multi-ab
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 2
+Signer #1 certificate DN: CN=Fixture a
+Signer #1 certificate SHA-256 digest: f83432a182b5d5d77f32da4e17b9a9fa8d4f344ea6e31476603ba4fd08c1e8ad
+Signer #1 certificate SHA-1 digest: 839aa96b2bd978a3aa421ed79e44c5bd01892841
+Signer #1 certificate MD5 digest: 2d5cfcda11b27f19108fede438bd2a7d
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 2048
+Signer #1 public key SHA-256 digest: b5099b927ebc03348976326759462e92bcb137c754d1af4a5326fec32506b970
+Signer #1 public key SHA-1 digest: 26c4a416c960c7694280f8ff9469570cc2eabd93
+Signer #1 public key MD5 digest: a339df2279d561fd1524d988263ced83
+Signer #2 certificate DN: CN=Fixture b
+Signer #2 certificate SHA-256 digest: 2dc8cc04e4dbbe4b149277de6d616b22d9ec0cfa19971fbfa2f1dcebec21660e
+Signer #2 certificate SHA-1 digest: 391bd1c32a628b82ae4a8ae434029f7d38f446a9
+Signer #2 certificate MD5 digest: 82bbe20906df9351cf12acd86f02bfdc
+Signer #2 key algorithm: RSA
+Signer #2 key size (bits): 2048
+Signer #2 public key SHA-256 digest: a9b72bb23fed6e7b86831763c73bd11f9a8674b870da051c9ad1047a87667a22
+Signer #2 public key SHA-1 digest: 6eb71ac4024f9b904fc6a714e38f48f61b9a38d5
+Signer #2 public key MD5 digest: 0358350d3da1b15fef5dbbfcb6d52658
+== v3-only-a
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer #1 certificate DN: CN=Fixture a
+Signer #1 certificate SHA-256 digest: f83432a182b5d5d77f32da4e17b9a9fa8d4f344ea6e31476603ba4fd08c1e8ad
+Signer #1 certificate SHA-1 digest: 839aa96b2bd978a3aa421ed79e44c5bd01892841
+Signer #1 certificate MD5 digest: 2d5cfcda11b27f19108fede438bd2a7d
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 2048
+Signer #1 public key SHA-256 digest: b5099b927ebc03348976326759462e92bcb137c754d1af4a5326fec32506b970
+Signer #1 public key SHA-1 digest: 26c4a416c960c7694280f8ff9469570cc2eabd93
+Signer #1 public key MD5 digest: a339df2279d561fd1524d988263ced83
+== rotated-b-from-a
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): true
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) certificate DN: CN=Fixture b
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) certificate SHA-256 digest: 2dc8cc04e4dbbe4b149277de6d616b22d9ec0cfa19971fbfa2f1dcebec21660e
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) certificate SHA-1 digest: 391bd1c32a628b82ae4a8ae434029f7d38f446a9
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) certificate MD5 digest: 82bbe20906df9351cf12acd86f02bfdc
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) key algorithm: RSA
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) key size (bits): 2048
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) public key SHA-256 digest: a9b72bb23fed6e7b86831763c73bd11f9a8674b870da051c9ad1047a87667a22
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) public key SHA-1 digest: 6eb71ac4024f9b904fc6a714e38f48f61b9a38d5
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) public key MD5 digest: 0358350d3da1b15fef5dbbfcb6d52658
+Signer (minSdkVersion=24, maxSdkVersion=32) certificate DN: CN=Fixture a
+Signer (minSdkVersion=24, maxSdkVersion=32) certificate SHA-256 digest: f83432a182b5d5d77f32da4e17b9a9fa8d4f344ea6e31476603ba4fd08c1e8ad
+Signer (minSdkVersion=24, maxSdkVersion=32) certificate SHA-1 digest: 839aa96b2bd978a3aa421ed79e44c5bd01892841
+Signer (minSdkVersion=24, maxSdkVersion=32) certificate MD5 digest: 2d5cfcda11b27f19108fede438bd2a7d
+Signer (minSdkVersion=24, maxSdkVersion=32) key algorithm: RSA
+Signer (minSdkVersion=24, maxSdkVersion=32) key size (bits): 2048
+Signer (minSdkVersion=24, maxSdkVersion=32) public key SHA-256 digest: b5099b927ebc03348976326759462e92bcb137c754d1af4a5326fec32506b970
+Signer (minSdkVersion=24, maxSdkVersion=32) public key SHA-1 digest: 26c4a416c960c7694280f8ff9469570cc2eabd93
+Signer (minSdkVersion=24, maxSdkVersion=32) public key MD5 digest: a339df2279d561fd1524d988263ced83
+== v1-only-a
+DOES NOT VERIFY
+ERROR: Target SDK version 36 requires a minimum of signature scheme v2; the APK is not signed with this or a later signature scheme

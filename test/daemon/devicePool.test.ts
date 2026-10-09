@@ -11,7 +11,11 @@ import {
   type SessionPreservingRecoveryResult,
 } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import {
+  ANONYMOUS_ACQUISITION_SESSION_SOURCE,
+  SessionManager,
+} from "../../src/daemon/sessionManager";
+import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -849,7 +853,11 @@ describe("DevicePool", () => {
       devicePool.reserveDeviceForReadiness(device.deviceId, device, device.name, undefined, {
         mcpSessionId: "other-mcp-session",
       }),
-    ).rejects.toThrow("already assigned to another session");
+    ).rejects.toMatchObject({
+      // Typed so the JUnit held-device wait and the CLI hint recognize it (#11071).
+      code: DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+      message: expect.stringContaining("already assigned to another session"),
+    });
 
     const release = await devicePool.reserveDeviceForReadiness(
       device.deviceId,
@@ -3789,9 +3797,10 @@ describe("DevicePool", () => {
 
       const replacementPublished = Promise.withResolvers<void>();
       const finishPoolIdentityUpdate = Promise.withResolvers<void>();
-      sessionManager.waitForSessionRelease = async () => {
+      sessionManager.waitForSessionReleaseWithin = async () => {
         replacementPublished.resolve();
         await finishPoolIdentityUpdate.promise;
+        return true;
       };
 
       const replacementBinding = devicePool.bindOrReuseDeviceSession(
@@ -5159,7 +5168,7 @@ describe("DevicePool", () => {
         });
         expect(devicePool.getDevice("emulator-new")?.autolockSessionId).toBe(sessionId);
         expect(() => devicePool.assertAutolockAccess("emulator-new", "next-owner")).toThrow(
-          "locked to another session",
+          "held by another session",
         );
       });
 
@@ -5415,6 +5424,82 @@ describe("DevicePool", () => {
       expect(sessionId).toBe("session-1");
       expect(devicePool.getDevice("sim-1")?.sessionId).toBe("session-1");
       expect(sessionManager.getSession("session-2")).toBeNull();
+      // The creator kind is recorded on the session and persisted with it (#11071).
+      expect(sessionManager.getSession("session-1")?.persistenceMetadata?.source).toBe(
+        ANONYMOUS_ACQUISITION_SESSION_SOURCE,
+      );
+    });
+
+    const bindAs = (sessionId: string, mcpSessionId?: string, allowSessionRebind = false) =>
+      devicePool.bindOrReuseDeviceSession(
+        sessionId,
+        "sim-1",
+        "ios",
+        undefined,
+        undefined,
+        undefined,
+        allowSessionRebind,
+        undefined,
+        undefined,
+        undefined,
+        mcpSessionId,
+      );
+    const refusalOf = (promise: Promise<unknown>) =>
+      promise.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    test("should reuse a live session when its acquiring connection binds the device again", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
+      await bindAs("session-1", "connection-1");
+
+      const sessionId = await bindAs("session-2", "connection-1");
+
+      expect(sessionId).toBe("session-1");
+      expect(sessionManager.getSession("session-2")).toBeNull();
+    });
+
+    // #11071: without an MCP identity the pool handed an anonymous caller the holder's UUID.
+    test("refuses an anonymous bind of a device a connection acquired, typed", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
+      await bindAs("session-1", "connection-1");
+
+      const refusal = await refusalOf(bindAs("session-2"));
+
+      expect(refusal).toMatchObject({
+        code: DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+        message: "Device 'sim-1' is already assigned to session session-1",
+      });
+      expect(devicePool.getDevice("sim-1")?.sessionId).toBe("session-1");
+      expect(sessionManager.getSession("session-2")).toBeNull();
+    });
+
+    test("refuses an anonymous bind of a device a caller-chosen session holds, typed", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
+      // setActiveDevice binds the caller's own session (desktop, explicit UUID): not anonymous.
+      await bindAs("desktop-session", undefined, true);
+
+      const refusal = await refusalOf(bindAs("session-2"));
+
+      expect(refusal).toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
+      expect(devicePool.getDevice("sim-1")?.sessionId).toBe("desktop-session");
+    });
+
+    // #11071: a connection that never acquired the device got an untyped refusal.
+    test("refuses another connection's bind of a held device, typed", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
+      await bindAs("session-1", "connection-1");
+
+      const refusal = await refusalOf(bindAs("session-2", "connection-2"));
+
+      expect(refusal).toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
+      expect((refusal as Error).message).toContain("already assigned to another session");
+      expect(devicePool.getDevice("sim-1")?.sessionId).toBe("session-1");
     });
 
     test("rejects binding a stale idle iOS simulator that is no longer booted", async () => {
@@ -5893,6 +5978,12 @@ describe("DevicePool", () => {
         }),
       );
 
+      // A rolled-back create leaves the device free: it cancels no sessionless call (#10905).
+      const acquisitionCancellations: string[] = [];
+      sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
+        acquisitionCancellations.push(deviceId);
+      });
+
       const assignment = devicePool.assignMultipleDevices(["session-1"], 1000, "android");
       await persistence.waitForUpsert();
       manager.childProcess.emit("exit", 0, null);
@@ -5905,6 +5996,7 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("emulator-5554")).toBeNull();
       expect(sessionManager.getSession("session-1")).toBeNull();
       expect(sessionManager.getSessionForDevice("emulator-5554")).toBeNull();
+      expect(acquisitionCancellations).toEqual([]);
     });
 
     test("keeps criteria auto-start available after a process exit when recovery is disabled", async () => {

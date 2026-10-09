@@ -44,6 +44,8 @@ data class HomeDestination(
 
 @Serializable data object DemoComposeSemanticLinksDestination : AppDestination
 
+@Serializable data object DemoNestedSelectionDestination : AppDestination
+
 @Serializable data object DemoBugReproDestination : AppDestination
 
 @Serializable data object DemoHandledExceptionDestination : AppDestination

@@ -1,3 +1,4 @@
+import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
 import { freshSwipeHierarchy, withSwipeObservationReadScope } from "./freshSwipeHierarchy";
 import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../accessibility/interfaces/AccessibilityDetector";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
@@ -31,6 +32,9 @@ import {
   type ElementResolution,
 } from "../../utility/ElementResolver";
 import { SearchableHierarchy } from "../../utility/SearchableNode";
+import { DefaultElementParser } from "../../utility/ElementParser";
+import { AutoTargetSelector } from "./AutoTargetSelector";
+import { resolveScrollableSwipeTarget } from "./scrollableAncestor";
 import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
@@ -172,10 +176,40 @@ export class ScrollUntilVisible {
   private static readonly MAX_ATTEMPTS = 5;
 
   private readonly searchable = new SearchableHierarchy();
+  private readonly parser = new DefaultElementParser();
+  private readonly autoTarget = new AutoTargetSelector();
   private readonly resolver: Pick<ElementResolver, "resolve">;
 
   constructor(private readonly deps: ScrollUntilVisibleDependencies) {
     this.resolver = deps.resolver ?? new ElementResolver();
+  }
+
+  /**
+   * A single-level named swipe container that does not itself scroll in the swipe direction (a
+   * pager page, a wrapper) resolves to its nearest scrollable ancestor (#10752); see
+   * `resolveScrollableSwipeTarget`. A scoped container chain names its innermost scope on purpose
+   * and is never promoted.
+   */
+  resolveSwipeTarget(
+    hierarchy: ViewHierarchyResult,
+    element: Element,
+    direction: SwipeDirection,
+  ): Element {
+    return resolveScrollableSwipeTarget({
+      hierarchy,
+      element,
+      direction,
+      parser: this.parser,
+      scrollsInDirection: (candidate, dir) => this.autoTarget.scrollsInDirection(candidate, dir),
+    });
+  }
+
+  private resolveNamedSwipeContainer(
+    hierarchy: ViewHierarchyResult,
+    options: SwipeOnOptions,
+  ): Element | null {
+    const element = this.resolveElement(hierarchy, options.container!);
+    return element && this.resolveSwipeTarget(hierarchy, element, options.direction);
   }
 
   resolveElement(
@@ -367,6 +401,7 @@ export class ScrollUntilVisible {
         lastObservation.viewHierarchy!,
         options.container,
         containerElement,
+        options.layer,
       ),
     );
 
@@ -848,6 +883,7 @@ export class ScrollUntilVisible {
       observation.viewHierarchy!,
       options.container,
       container,
+      options.layer,
     );
     return element && this.isElementWithinContainer(element, container.bounds, observation)
       ? element
@@ -970,6 +1006,13 @@ export class ScrollUntilVisible {
     swipes,
   }: SearchSwipeDispatchOptions): Promise<SwipeResult> {
     const { startX, startY, endX, endY } = coordinates;
+    // The window under the start point receives the whole swipe (issue #9305).
+    assertGestureOnLayer(
+      observation.viewHierarchy,
+      options.layer,
+      [{ x: Math.floor(startX), y: Math.floor(startY) }],
+      "swipe",
+    );
     const activeDuration = duration;
     const activeDirection = direction;
     const lastObservation = observation;
@@ -1083,6 +1126,7 @@ export class ScrollUntilVisible {
       observation.viewHierarchy!,
       options.container,
       container,
+      options.layer,
     );
     if (element && this.isElementWithinContainer(element, container.bounds, observation)) {
       return element;
@@ -1102,6 +1146,7 @@ export class ScrollUntilVisible {
     if (!options.container) {
       throw new ActionableError("Container must be specified for element swipe");
     }
+    viewHierarchy = scopeHierarchyForSelector(viewHierarchy, options.layer);
 
     if (!options.container.text && !options.container.elementId) {
       throw new ActionableError("Container must specify either text or elementId");
@@ -1145,7 +1190,7 @@ export class ScrollUntilVisible {
       }
     }
 
-    return element;
+    return this.resolveSwipeTarget(viewHierarchy, element, options.direction);
   }
 
   private async refreshContainerHierarchy(
@@ -1188,14 +1233,14 @@ export class ScrollUntilVisible {
     fallbackElement: Element = this.screenBoundsContainer({ observation: observeResult }),
   ): Promise<Element> {
     let element: Element | null = null;
-    const viewHierarchy = observeResult.viewHierarchy!;
+    const viewHierarchy = scopeHierarchyForSelector(observeResult.viewHierarchy!, options.layer);
 
     if (options.container) {
       if (usesScopedSwipeContainer(options.container)) {
         return this.resolveSwipeContainer(viewHierarchy, options.container);
       }
       if (options.container.elementId || options.container.text) {
-        element = this.resolveElement(viewHierarchy, options.container);
+        element = this.resolveNamedSwipeContainer(viewHierarchy, options);
       }
     }
     if (!element) {
@@ -1249,10 +1294,12 @@ export class ScrollUntilVisible {
     viewHierarchy: ViewHierarchyResult,
     container?: SwipeOnOptions["container"],
     containerElement?: Element,
+    layer?: SwipeOnOptions["layer"],
   ): Promise<Element | null> {
     if (!lookFor.text && !lookFor.elementId) {
       return null;
     }
+    viewHierarchy = scopeHierarchyForSelector(viewHierarchy, layer);
     if (!usesScopedSwipeContainer(container) && !usesScopedSwipeLookFor(lookFor)) {
       return this.resolveElement(viewHierarchy, { ...lookFor, container }, "inspect", true);
     }

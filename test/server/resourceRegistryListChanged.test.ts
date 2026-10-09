@@ -93,6 +93,37 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
     }
   });
 
+  test("a failed booted-device scan keeps registered devices and their installed-apps cache", async () => {
+    const device = {
+      platform: "ios" as const,
+      name: "Scan Failure Simulator",
+      deviceId: "SCAN-FAILURE-SIMULATOR",
+    };
+    const manager = new FakeDeviceUtils();
+    manager.setBootedDevices("ios", [device]);
+    PlatformDeviceManagerFactory.setInstance(manager);
+    const clearSession = spyOn(
+      InstalledAppsRepository.prototype,
+      "clearDeviceSession",
+    ).mockResolvedValue(undefined as never);
+    try {
+      expect(await syncInstalledAppResourceRegistry()).toBe(true);
+      manager.getBootedDevices = async () => {
+        throw new Error("request cancelled");
+      };
+
+      expect(await syncInstalledAppResourceRegistry()).toBe(false);
+
+      expect(
+        ResourceRegistry.getResource(`automobile:devices/${device.deviceId}/apps`),
+      ).toBeDefined();
+      expect(clearSession).not.toHaveBeenCalled();
+    } finally {
+      clearSession.mockRestore();
+      PlatformDeviceManagerFactory.setInstance(null);
+    }
+  });
+
   test("does not apply or announce a stale boot snapshot after a newer inventory refresh", async () => {
     const oldDevice = {
       platform: "android" as const,

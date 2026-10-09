@@ -56,8 +56,8 @@ describe("ToolRegistry autolock session enforcement", () => {
     sessionUuid: z.string().optional(),
   });
 
-  function registerTool(name: string) {
-    ToolRegistry.registerDeviceAware(name, name, schema, async () => ({ success: true }));
+  function registerTool(name: string, options: { deviceReadOnly?: boolean } = {}) {
+    ToolRegistry.registerDeviceAware(name, name, schema, async () => ({ success: true }), options);
     const tool = ToolRegistry.getTool(name);
     expect(tool).toBeDefined();
     return tool!;
@@ -71,6 +71,8 @@ describe("ToolRegistry autolock session enforcement", () => {
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       env,
       displayInventory: new FakeDisplayInventoryProvider(),
+      // A watcher reads a held device through the read-only device path (#10830).
+      deviceReadAccess: { listBooted: async () => [androidA], isAuthorized: () => true },
     });
   });
 
@@ -82,6 +84,51 @@ describe("ToolRegistry autolock session enforcement", () => {
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();
     setAutolock(false);
+  });
+
+  describe("held-device refusal under autolock (#10833)", () => {
+    async function lockedPool() {
+      const timer = new FakeTimer();
+      daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const pool = new DevicePool(
+        createDevicePoolDependencies(daemonSessionManager, "daemon", {
+          env,
+          timer,
+          deviceManager: new FakeDeviceUtils(),
+        }),
+      );
+      await pool.initializeWithDevices([androidA]);
+      pool.getDevice(androidA.deviceId)!.autolockSessionId = "other-owner";
+      DaemonState.getInstance().initialize(daemonSessionManager, pool);
+      fakeDeviceSessionManager.setConnectedDevices([androidA]);
+    }
+
+    test("a non-owner mutating call is refused with the typed ownership code", async () => {
+      setAutolock(true);
+      await lockedPool();
+      const tool = registerTool("mutateHeld");
+      const error = await tool.handler({ deviceId: androidA.deviceId }).catch((e: unknown) => e);
+      expect(error).toMatchObject({ code: "device_owned_by_other_session" });
+      // Refused before readiness acts on the holder's device.
+      expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    });
+
+    test("a non-owner call with no deviceId that would land on the held device does no readiness", async () => {
+      setAutolock(true);
+      await lockedPool();
+      const tool = registerTool("mutateHeldImplicit");
+      const error = await tool.handler({ platform: "android" }).catch((e: unknown) => e);
+      expect(error).toMatchObject({ code: "device_owned_by_other_session" });
+      expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    });
+
+    test("a deviceReadOnly (watching) call on the held device is allowed", async () => {
+      setAutolock(true);
+      await lockedPool();
+      const tool = registerTool("watchHeld", { deviceReadOnly: true });
+      await expect(tool.handler({ deviceId: androidA.deviceId })).resolves.toBeDefined();
+      expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    });
   });
 
   for (const initiallyEnabled of [true, false]) {
@@ -116,13 +163,16 @@ describe("ToolRegistry autolock session enforcement", () => {
         () => undefined,
         (error: unknown) => error,
       );
-      await entered.promise;
+      // Enabled, the held device is refused before readiness (#10833); the flip then lands between
+      // calls. Disabled, it lands mid-call, inside readiness.
+      await Promise.race([entered.promise, first]);
       setAutolock(!initiallyEnabled);
       release.resolve();
       const outcome = await first;
       if (initiallyEnabled) {
+        expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
         expect(outcome).toBeInstanceOf(ActionableError);
-        expect(String(outcome)).toContain("locked to another session");
+        expect(String(outcome)).toContain("held by another session");
       } else {
         expect(outcome).toBeUndefined();
       }
@@ -131,7 +181,7 @@ describe("ToolRegistry autolock session enforcement", () => {
       if (initiallyEnabled) {
         await expect(next).resolves.toBeDefined();
       } else {
-        await expect(next).rejects.toThrow("locked to another session");
+        await expect(next).rejects.toThrow("held by another session");
       }
       expect(policyReads).toBe(2);
     });
@@ -432,7 +482,11 @@ describe("ToolRegistry autolock session enforcement", () => {
           deviceId: androidA.deviceId,
           sessionUuid,
         }),
-      ).rejects.toThrow("not an active daemon session");
+      ).rejects.toMatchObject({
+        // The owned device refuses a non-holder before admission (#10698).
+        code: "device_owned_by_other_session",
+        message: expect.stringContaining(`Session ${sessionUuid} does not hold it`),
+      });
       expect(daemonSessionManager.getSession(sessionUuid)).toBeNull();
     }
     expect(handlerCalls).toBe(0);
@@ -512,6 +566,6 @@ describe("ToolRegistry autolock session enforcement", () => {
         deviceId: androidB.deviceId,
         __mcpSessionId: "mcp-session-1",
       }),
-    ).rejects.toThrow("Device 'emulator-5556' is locked to another session.");
+    ).rejects.toThrow("device 'emulator-5556' is held by another session");
   });
 });

@@ -341,16 +341,22 @@ describe("Clipboard iOS", () => {
       expect(timer.now()).toBe(1500);
     });
 
-    test.each([
-      ["no hierarchy before the paste", null],
-      ["no readable focused value before the paste", focusedIOSForm(undefined)],
-    ] as const)("%s never claims success", async (_name, value) => {
+    test("no hierarchy before the paste never claims success", async () => {
       unreadableClipboard();
-      hierarchy.setDefaultResult(value);
+      hierarchy.setDefaultResult(null);
       const result = await clipboard.execute("paste");
       expect(result.success).toBe(false);
       expect(result.error).toContain("Paste outcome is indeterminate");
       expect(result.error).toContain("could not be compared");
+      expect(phases()).toEqual(["get", "paste"]);
+    });
+
+    test("a valueless focused field is an empty baseline, so an unchanged one fails", async () => {
+      unreadableClipboard();
+      hierarchy.setDefaultResult(focusedIOSForm(undefined));
+      const result = await clipboard.execute("paste");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("nothing appears to have been pasted");
       expect(phases()).toEqual(["get", "paste"]);
     });
 
@@ -359,7 +365,8 @@ describe("Clipboard iOS", () => {
       hierarchy.setResults([focusedIOSForm("AB"), null]);
       const result = await clipboard.execute("paste");
       expect(result.success).toBe(false);
-      expect(result.error).toContain("Paste outcome is indeterminate");
+      expect(result.error).toContain("could not be read after the paste");
+      expect(result.error).toContain("unconfirmed");
     });
 
     test("a secure field is not read or echoed, and success is not claimed", async () => {
@@ -394,7 +401,6 @@ describe("Clipboard iOS", () => {
   test.each([
     ["unavailable", null],
     ["no focused field", iosFormsEmptyFields],
-    ["synthetic no readable value", focusedIOSForm(undefined)],
     ["hierarchy error", { hierarchy: { error: "read failed" } }],
   ] as const)(
     "%s hierarchy keeps success because verification is impossible",
@@ -406,10 +412,20 @@ describe("Clipboard iOS", () => {
     },
   );
 
-  test("synthetic hierarchy disappearing after paste keeps an indeterminate success", async () => {
+  test("synthetic hierarchy disappearing after paste reports an unconfirmed paste (#9078)", async () => {
     readableClipboard();
     hierarchy.setResults([focusedIOSForm("AB"), null]);
+    const result = await clipboard.execute("paste");
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("could not be read after the paste");
+    expect(timer.now()).toBe(1500);
+  });
+
+  test("synthetic transiently unreadable field that then changes is a success", async () => {
+    readableClipboard();
+    hierarchy.setResults([focusedIOSForm("AB"), null, focusedIOSForm("AB Z1")]);
     expect((await clipboard.execute("paste")).success).toBe(true);
+    expect(hierarchy.getCallCount()).toBe(3);
   });
 
   test("throwing hierarchy logs a warning and preserves paste success", async () => {
@@ -435,7 +451,7 @@ describe("Clipboard iOS", () => {
     }
   });
 
-  test("synthetic hanging post-paste hierarchy is bounded and cannot prove a dropped paste", async () => {
+  test("synthetic hanging post-paste hierarchy is bounded and reports an unconfirmed paste", async () => {
     readableClipboard();
     let reads = 0;
     const reader = {
@@ -453,7 +469,9 @@ describe("Clipboard iOS", () => {
       reader,
       timer,
     );
-    expect((await action.execute("paste")).success).toBe(true);
+    const result = await action.execute("paste");
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("could not be read after the paste");
     expect(timer.now()).toBe(1500);
   });
 

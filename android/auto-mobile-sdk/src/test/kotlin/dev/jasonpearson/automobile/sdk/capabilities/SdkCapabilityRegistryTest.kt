@@ -161,7 +161,7 @@ class SdkCapabilityRegistryTest {
         "network.control",
         SdkCapabilityState.PERMISSION_DENIED,
         "Host did not grant control permission",
-      )
+      ),
     )
 
     val descriptor = registry.snapshot().capabilities.first { it.id == "network.control" }

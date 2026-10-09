@@ -77,14 +77,14 @@ class AutoMobileContentDeviceEventTest {
   @Test
   fun `stream frame matches active device`() {
     assertTrue(
-      isActiveDeviceStreamFrame(deviceId = "emulator-5554", activeDeviceId = "emulator-5554")
+      isActiveDeviceStreamFrame(deviceId = "emulator-5554", activeDeviceId = "emulator-5554"),
     )
   }
 
   @Test
   fun `stream frame ignores inactive device`() {
     assertFalse(
-      isActiveDeviceStreamFrame(deviceId = "emulator-5554", activeDeviceId = "emulator-5556")
+      isActiveDeviceStreamFrame(deviceId = "emulator-5554", activeDeviceId = "emulator-5556"),
     )
   }
 

@@ -34,7 +34,7 @@ interface NetworkGraphDataSource {
 
 /** Test double: returns a canned result (default: an empty graph). */
 class FakeNetworkGraphDataSource(
-  private val result: Result<List<NetworkEndpointRow>> = Result.Success(emptyList())
+  private val result: Result<List<NetworkEndpointRow>> = Result.Success(emptyList()),
 ) : NetworkGraphDataSource {
   override suspend fun getNetworkGraph(): Result<List<NetworkEndpointRow>> = result
 }
@@ -105,7 +105,7 @@ private fun walkPaths(
           errors = node.intField("errors"),
           p50 = node.intField("p50"),
           p95 = node.intField("p95"),
-        )
+        ),
       )
     }
     if (nested != null) {

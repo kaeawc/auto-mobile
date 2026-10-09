@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy.overlay
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.Choreographer
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -11,6 +12,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 
 /** Narrow main queue seam; post must enqueue on main and report whether it accepted the work. */
 interface OverlayMainThread {
@@ -62,7 +65,7 @@ internal suspend fun <T> OverlayMainThread.onMain(work: () -> T): T {
 
 /** The service supplies its own scope; the standalone host uses main for window-safe delivery. */
 class CoroutineOverlayScheduler(
-  private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
+  private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob()),
 ) : OverlayScheduler {
   override fun schedule(millis: Long, action: suspend () -> Unit): OverlayScheduledTask {
     val job = scope.launch {
@@ -70,5 +73,29 @@ class CoroutineOverlayScheduler(
       action()
     }
     return OverlayScheduledTask { job.cancel() }
+  }
+}
+
+/** Waits for frames the main thread renders; the hide-for-capture seam (#9305). */
+fun interface OverlayFrameWaiter {
+  suspend fun awaitFrames(count: Int)
+}
+
+/**
+ * Each frame callback runs before that frame's traversal, so the first callback can precede the
+ * relayout that hides a window; the second follows a frame in which the hide was applied.
+ */
+object ChoreographerOverlayFrameWaiter : OverlayFrameWaiter {
+  override suspend fun awaitFrames(count: Int) {
+    repeat(count) {
+      withContext(Dispatchers.Main) {
+        val choreographer = Choreographer.getInstance()
+        suspendCancellableCoroutine { continuation ->
+          val callback = Choreographer.FrameCallback { continuation.resume(Unit) }
+          choreographer.postFrameCallback(callback)
+          continuation.invokeOnCancellation { choreographer.removeFrameCallback(callback) }
+        }
+      }
+    }
   }
 }

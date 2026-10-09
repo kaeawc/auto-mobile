@@ -1,11 +1,11 @@
-import Ajv2020 from "ajv/dist/2020";
+import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { stageSessionDownloadsSchema } from "../../src/server/downloadsFixtureContract";
 
 describe("stageSessionDownloads contract (#7007)", () => {
   beforeAll(() => {
     // Absorb Ajv's one-time JIT cold start in setup, off the per-test budget.
-    new Ajv2020({ strict: false }).compile({
+    compileAjv2020({
       type: "object",
       properties: { warmup: { type: "string" } },
     });

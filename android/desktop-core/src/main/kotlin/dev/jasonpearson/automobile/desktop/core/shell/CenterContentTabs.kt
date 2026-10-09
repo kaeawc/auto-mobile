@@ -60,7 +60,7 @@ fun CenterTabStrip(
         modifier =
           Modifier.clip(RoundedCornerShape(4.dp))
             .background(
-              if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent
+              if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent,
             )
             .clickable { onSelectTab(tab) }
             .pointerHoverIcon(PointerIcon.Hand)
@@ -134,7 +134,7 @@ private fun AddTabMenu(
     modifier =
       Modifier.padding(top = 24.dp)
         .background(colors.panelBackground, RoundedCornerShape(4.dp))
-        .padding(4.dp)
+        .padding(4.dp),
   ) {
     androidx.compose.foundation.layout.Column {
       available.forEach { tab ->

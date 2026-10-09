@@ -91,7 +91,7 @@ internal constructor(
   private val options: FailuresPushSocketOptions = FailuresPushSocketOptions(),
 ) {
   constructor(
-    sessionUuidProvider: (() -> String?)? = null
+    sessionUuidProvider: (() -> String?)? = null,
   ) : this(
     ::ChannelFailuresSocket,
     FailuresRetryDelay { delay(it) },
@@ -189,7 +189,7 @@ internal constructor(
             }
           }
           log.info(
-            "Subscribed to failures push (type: ${type ?: "all"}, severity: ${severity ?: "all"})"
+            "Subscribed to failures push (type: ${type ?: "all"}, severity: ${severity ?: "all"})",
           )
         }
         readMessages(openedSocket, generation) {

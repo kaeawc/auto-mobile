@@ -88,6 +88,7 @@ object ValidTools {
         "listDataStores",
         "prototype",
         "phoneCall",
+        "reconcileDeviceResources",
         "resetAppLogs",
         "resetKeychain",
         "sendSms",

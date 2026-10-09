@@ -96,8 +96,8 @@ class HierarchyDebouncerSuspendTest {
     cancelDuringWalk = true
     assertNull(
       debouncer.extractImmediately(
-        snapshotOptions = HierarchySnapshotOptions(isCancelled = { cancelled })
-      )
+        snapshotOptions = HierarchySnapshotOptions(isCancelled = { cancelled }),
+      ),
     )
     assertEquals(listOf(truncated), discarded)
     assertSame(complete, debouncer.getLastHierarchy())

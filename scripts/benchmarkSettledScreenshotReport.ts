@@ -278,6 +278,27 @@ export function envelopeState(envelope: unknown): EnvelopeState {
   };
 }
 
+/**
+ * Platform of `deviceId` in a `listDevices` payload, matched by runtime id, stable id or an
+ * Android transport alias. Observe results carry no platform, so `--device` runs need this to
+ * avoid reporting "unknown" (#8758).
+ */
+export function platformFromDeviceList(
+  payload: Record<string, unknown> | undefined,
+  deviceId: string,
+): string | undefined {
+  const devices = Array.isArray(payload?.devices) ? payload.devices : [];
+  const match = devices.map(record).find((device) => {
+    const aliases = Array.isArray(device?.transportAliases) ? device.transportAliases : [];
+    return (
+      record(device?.runtime)?.deviceId === deviceId ||
+      record(device?.identity)?.stableId === deviceId ||
+      aliases.includes(deviceId)
+    );
+  });
+  return typeof match?.platform === "string" ? match.platform : undefined;
+}
+
 export function describeFailure(envelope: unknown): string {
   const state = envelopeState(envelope);
   const payload = state.payload;

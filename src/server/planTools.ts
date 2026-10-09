@@ -8,6 +8,7 @@ import { Platform } from "../models";
 import { addSessionUuidToSchema, DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHelpers";
 import {
   startTestRecording,
+  getStoppedTestRecording,
   stopTestRecording,
   getTestRecordingStatus,
 } from "./testRecordingManager";
@@ -54,6 +55,10 @@ const executePlanSchema = z
     testMetadata: testMetadataSchema.optional().describe("Test metadata"),
     cleanupAppId: z.string().optional().describe("Cleanup app ID"),
     cleanupClearAppData: z.boolean().optional().describe("Clear app data"),
+    holdSessionOnFailure: z
+      .boolean()
+      .optional()
+      .describe("Keep session and device after a failed run (caller recovers, then releases)"),
     captureObserveSteps: z
       .enum(["summary", "full"])
       .optional()
@@ -207,6 +212,7 @@ const executePlanTool = async (
     testMetadata?: PlanExecutionRequest["testMetadata"];
     cleanupAppId?: string;
     cleanupClearAppData?: boolean;
+    holdSessionOnFailure?: boolean;
     captureObserveSteps?: "summary" | "full";
   },
   progress?: ProgressCallback,
@@ -249,9 +255,20 @@ const startTestRecordingResultSchema = z.object({
 });
 
 // Start test recording tool handler
-const startTestRecordingTool = async (device: BootedDevice): Promise<any> => {
+const startTestRecordingTool = async (
+  device: BootedDevice,
+  params?: { sessionUuid?: string },
+): Promise<any> => {
   try {
-    const result = await startTestRecording(device);
+    // The owning session is recorded so releasing it stops the recording instead of leaving it
+    // to capture the device's next owner.
+    const result = await startTestRecording(
+      device,
+      undefined,
+      undefined,
+      undefined,
+      params?.sessionUuid,
+    );
 
     return createStructuredToolResponse({
       success: true,
@@ -293,10 +310,27 @@ const exportPlanResultSchema = z.object({
 const exportPlanTool = async (params: {
   recordingId?: string;
   planName?: string;
+  sessionUuid?: string;
 }): Promise<any> => {
   try {
     // Check if there's an active recording
     const status = getTestRecordingStatus();
+    // After a release-time stop the owner fetches the retained plan by id (#10958).
+    const retained =
+      !status && params.recordingId
+        ? getStoppedTestRecording(params.recordingId, params.sessionUuid)
+        : undefined;
+    if (retained) {
+      return createStructuredToolResponse({
+        success: true,
+        recordingId: retained.recordingId,
+        planName: retained.planName,
+        planContent: retained.planContent,
+        stepCount: retained.stepCount,
+        durationMs: retained.durationMs,
+        ...(retained.error ? { error: retained.error } : {}),
+      });
+    }
     if (!status) {
       return withIsErrorOnFailure(
         createStructuredToolResponse({

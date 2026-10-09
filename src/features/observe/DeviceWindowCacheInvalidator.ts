@@ -8,6 +8,11 @@ import { RealObserveScreen } from "./ObserveScreen";
 export interface DeviceWindowCacheInvalidator {
   /** Foreground-only changes preserve the iOS SDK identity; termination uses the full clear. */
   invalidate(device: BootedDevice, preserveAppIdentity?: boolean): void;
+  /**
+   * An app's process was (or is about to be) replaced: terminated, relaunched cold, data cleared.
+   * Drops what the old process reported that names its screen, such as the Android SDK route.
+   */
+  retireAppProcess(device: BootedDevice, packageName: string): void;
 }
 
 /**
@@ -30,6 +35,15 @@ export class DefaultDeviceWindowCacheInvalidator implements DeviceWindowCacheInv
     RealObserveScreen.clearCache(device.deviceId);
     if (device.platform === "android") {
       markWindowResolutionRequired(device.deviceId);
+    }
+  }
+
+  retireAppProcess(device: BootedDevice, packageName: string): void {
+    // iOS clears its SDK identity at install time (InstallApp); only Android needs this seam.
+    if (device.platform === "android") {
+      AndroidCtrlProxyClient.getExistingInstance(device.deviceId)?.clearSdkScreenIdentity(
+        packageName,
+      );
     }
   }
 }

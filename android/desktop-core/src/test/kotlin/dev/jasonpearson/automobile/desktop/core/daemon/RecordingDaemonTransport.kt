@@ -7,6 +7,11 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * In-memory daemon that records `method` and the `setActiveDevice` device ids it receives and
  * answers every call successfully, with per-call failure injection.
+ *
+ * Its daemon answers (bind success, ownership refusal, non-ownership error, terminal session,
+ * registration, not-found heartbeat) are the REAL daemon's, taken from the desktop wire fixtures
+ * `test/daemon/desktopWireContract.test.ts` generates (#10669), so they cannot drift from what the
+ * handlers send.
  */
 internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int = 0) :
   DaemonRequestTransport {
@@ -37,6 +42,15 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
    */
   val releasedSessions: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
+  /**
+   * Overrides the `releaseReason` a [releasedSessions] heartbeat answer carries (#10730); "" omits
+   * it.
+   */
+  val releaseReasons: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
+
+  /** Methods that fail like an unreachable daemon on every call until removed (#11072). */
+  val unavailable: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
   fun failNext(key: String) {
     failures.add(key)
   }
@@ -62,7 +76,15 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
     calls.add(request.method to device)
     val sessionId = request.params["sessionId"]?.jsonPrimitive?.content
     sessionCalls.add(request.method to sessionId)
-    if (failures.remove(key) || (key == "daemon/heartbeat" && sessionId in releasedSessions)) {
+    if (key == "daemon/heartbeat" && sessionId in releasedSessions) {
+      val answer = WireAnswers.sessionNotFound.response(request.id)
+      return if (sessionId in releaseReasons) {
+        answer.copy(releaseReason = releaseReasons[sessionId]?.ifEmpty { null })
+      } else {
+        answer
+      }
+    }
+    if (failures.remove(key) || key in unavailable) {
       return DaemonResponse(
         id = request.id,
         type = "mcp_response",
@@ -81,8 +103,7 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
   private fun resultFor(key: String, request: DaemonRequest, device: String?): String =
     when (key) {
       "tools/call:setActiveDevice" -> bindResult(request, device)
-      "daemon/registerSession" ->
-        """{"accepted":true,"heartbeatTimeoutMs":10000,"expiresAtMs":12345}"""
+      "daemon/registerSession" -> WireAnswers.registered.result.toString()
       else -> "{}"
     }
 
@@ -90,33 +111,46 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
     val session =
       request.params["arguments"]?.jsonObject?.get("sessionUuid")?.jsonPrimitive?.content
     return when {
-      session in releasedSessions -> OWNERSHIP_LOST
-      heldByAnotherSession || device in heldDeviceIds -> heldRefusal(device)
+      session in releasedSessions -> WireAnswers.sessionReleased.result.toString()
+      heldByAnotherSession || device in heldDeviceIds -> WireAnswers.heldRefusal(device)
       unrelatedBindFailures > 0 -> {
         unrelatedBindFailures--
-        DEVICE_NOT_FOUND
+        WireAnswers.deviceNotFound.result.toString()
       }
       else -> {
         bindAttempts++
-        val success = bindAttempts >= rejectBindsUntilAttempt
-        """{"content":[{"type":"text","text":"{\"success\":$success}"}]}"""
+        if (bindAttempts >= rejectBindsUntilAttempt) {
+          WireAnswers.bound.result.toString()
+        } else {
+          // Not a daemon answer: a decodable result reporting failure, for the client's retry path.
+          """{"content":[{"type":"text","text":"{\"success\":false}"}]}"""
+        }
       }
     }
   }
 }
 
-// Shapes from src/server/setActiveDevice.ts (assertDeviceOwner, requestedPoolDevice) via
-// shapeToolCallError's `Error: <message>` text, and src/server/index.ts's TerminalSessionError
-// branch (sessionOwnershipLostPayload).
-private fun heldRefusal(device: String?) =
-  """{"isError":true,"content":[{"type":"text","text":""" +
-    """"Error: Device '$device' is already assigned to session agent-session"}]}"""
+/** The real daemon answers, from the desktop wire fixtures (#10669). */
+private object WireAnswers {
+  val bound = DesktopWireFixture.load("first-tap-binds-device").exchange("bind")
+  val registered = DesktopWireFixture.load("no-click-start").exchange("register")
+  val sessionNotFound = DesktopWireFixture.load("heartbeat-expiry").exchange("heartbeat-lapse")
+  val sessionReleased =
+    DesktopWireFixture.load("released-session-tap").exchange("bind-refused-released")
+  val deviceNotFound = DesktopWireFixture.load("bind-error-not-ownership").exchange("bind-error-1")
 
-private const val DEVICE_NOT_FOUND =
-  """{"isError":true,"content":[{"type":"text","text":""" +
-    """"Error: Device 'emulator-5554' not found in device pool"}]}"""
+  /** `assertDeviceOwner`'s refusal, recorded for both devices these tests pick. */
+  private val refusals =
+    listOf(
+        DesktopWireFixture.load("held-by-another-session").exchange("bind-refused"),
+        DesktopWireFixture.load("tap-held-device-releases-previous").exchange("bind-held-refused"),
+      )
+      .associateBy {
+        it.params.getValue("arguments").jsonObject.getValue("deviceId").jsonPrimitive.content
+      }
 
-private const val OWNERSHIP_LOST =
-  """{"isError":true,"content":[{"type":"text","text":""" +
-    """"{\"error\":{\"code\":\"session_ownership_lost\",\"message\":\"Session s is """ +
-    """terminal after idle-timeout and cannot be reused.\",\"retryable\":true}}"}]}"""
+  fun heldRefusal(device: String?): String =
+    requireNotNull(refusals[device]) { "No recorded ownership refusal for $device" }
+      .result
+      .toString()
+}

@@ -102,7 +102,7 @@ class ImeCommitDriverTest {
   @Test
   fun `visible text password field commits and prior IME is restored`() {
     assertPasswordCommits(
-      InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+      InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
     )
   }
 
@@ -495,6 +495,98 @@ class ImeCommitDriverTest {
   }
 
   @Test
+  fun `persistent sync loss after full dispatch retries a bounded number of times`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT, failSync = true)
+
+    val result = commit(sink, "ab", PRIOR_IME_ID)
+
+    assertFalse(result.success)
+    assertEquals(ImeCommitDriver.SYNC_LOST_ERROR, result.error)
+    assertTrue(result.partialApplication)
+    assertEquals(2, result.committedUnits)
+    // One barrier, the bounded retries, then complete()'s pre-restore barrier.
+    assertEquals(1 + ImeCommitDriver.SYNC_RETRY_ATTEMPTS + 1, sink.syncCalls)
+    assertEquals(
+      List(ImeCommitDriver.SYNC_RETRY_ATTEMPTS) { ImeCommitDriver.SYNC_RETRY_DELAY_MS },
+      sink.delays,
+    )
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+  }
+
+  @Test
+  fun `transient sync loss after every key event reports success once the barrier re-syncs`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT, failSyncCalls = 1)
+    var result: ImeCommitResult? = null
+    driver(sink).commit("ab", PRIOR_IME_ID, delivery = ImeTextDelivery.KEY_EVENTS) {
+      result = it
+    }
+    assertNull(result)
+    assertTrue(sink.switchedImeIds.isEmpty())
+
+    sink.drain()
+
+    val outcome = requireNotNull(result)
+    assertTrue(outcome.success)
+    assertNull(outcome.error)
+    assertFalse(outcome.partialApplication)
+    assertEquals(listOf("a", "b"), sink.sentKeyUnits)
+    assertEquals(2, sink.syncCalls)
+    assertEquals(listOf(ImeCommitDriver.SYNC_RETRY_DELAY_MS), sink.delays)
+    assertEquals(listOf("sync", "switch"), sink.events)
+  }
+
+  @Test
+  fun `transient sync loss after a full text commit reports success`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT, failSyncCalls = 2)
+
+    val result = commit(sink, "ab", PRIOR_IME_ID)
+
+    assertTrue(result.success)
+    assertEquals(listOf("a", "b"), sink.committedChars)
+    assertEquals(3, sink.syncCalls)
+    assertEquals(listOf("char", "char", "finish", "sync", "switch"), sink.events)
+  }
+
+  @Test
+  fun `sync retry is skipped when a round-trip no longer fits before the deadline`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT, failSyncCalls = 1)
+    var result: ImeCommitResult? = null
+    driver(sink).commit(
+      "ab",
+      PRIOR_IME_ID,
+      deadlineMs = ImeCommitDriver.SYNC_RETRY_RESERVE_MS,
+      delivery = ImeTextDelivery.KEY_EVENTS,
+    ) {
+      result = it
+    }
+
+    val outcome = requireNotNull(result)
+    assertFalse(outcome.success)
+    assertEquals(ImeCommitDriver.SYNC_LOST_ERROR, outcome.error)
+    assertTrue(outcome.partialApplication)
+    assertTrue(sink.delays.isEmpty())
+  }
+
+  @Test
+  fun `sync retry is skipped after cancellation`() {
+    val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT, failSync = true)
+    var cancelled = false
+    sink.afterKeyUnit = { if (sink.sentKeyUnits.size == 2) cancelled = true }
+    var result: ImeCommitResult? = null
+    driver(sink).commit(
+      "ab",
+      PRIOR_IME_ID,
+      isCancelled = { cancelled },
+      delivery = ImeTextDelivery.KEY_EVENTS,
+    ) {
+      result = it
+    }
+
+    assertEquals(ImeCommitDriver.SYNC_LOST_ERROR, requireNotNull(result).error)
+    assertTrue(sink.delays.isEmpty())
+  }
+
+  @Test
   fun `cancelled conversion poll cannot resume typing or report twice`() {
     val sink = FakeImeCommitSink(inputType = InputType.TYPE_CLASS_TEXT)
     sink.readText = { _, _ -> "`a`" }
@@ -728,6 +820,8 @@ class ImeCommitDriverTest {
     private val inputType: Int?,
     private val failAtCommitIndex: Int? = null,
     private val failSync: Boolean = false,
+    // Fail only the first N barriers, as a connection re-bound after the last unit does.
+    private val failSyncCalls: Int = 0,
   ) : ImeCommitSink {
     val committedChars = mutableListOf<String>()
     val sentKeyUnits = mutableListOf<String>()
@@ -801,7 +895,7 @@ class ImeCommitDriverTest {
 
     override fun syncEditorState(): Boolean {
       syncCalls++
-      if (failSync) return false
+      if (failSync || syncCalls <= failSyncCalls) return false
       events.add("sync")
       return true
     }

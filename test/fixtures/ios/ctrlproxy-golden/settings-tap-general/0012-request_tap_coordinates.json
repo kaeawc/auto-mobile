@@ -1,0 +1,93 @@
+{
+  "request": {
+    "type": "request_tap_coordinates",
+    "requestId": "tap_31b1ba5a-f2cc-4834-a2ac-b5585b58ee6a",
+    "timeoutMs": 5000,
+    "x": 201,
+    "y": 406,
+    "duration": 0
+  },
+  "response": {
+    "perfTiming": {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "durationMs": 0,
+                  "name": "checkState"
+                }
+              ],
+              "durationMs": 0,
+              "name": "ensureForegroundApp"
+            },
+            {
+              "durationMs": 75,
+              "name": "snapshot"
+            },
+            {
+              "durationMs": 3,
+              "name": "buildHierarchy"
+            },
+            {
+              "durationMs": 1,
+              "name": "mergeTypedTextInputs"
+            },
+            {
+              "durationMs": 0,
+              "name": "optimize"
+            },
+            {
+              "durationMs": 41,
+              "name": "systemAlerts"
+            }
+          ],
+          "durationMs": 122,
+          "name": "getViewHierarchy"
+        },
+        {
+          "durationMs": 1580,
+          "name": "handleRequest:request_tap_coordinates"
+        },
+        {
+          "children": [
+            {
+              "durationMs": 1,
+              "name": "queueWait"
+            },
+            {
+              "durationMs": 0,
+              "name": "executionPreparation"
+            },
+            {
+              "durationMs": 0,
+              "name": "targetResolution"
+            },
+            {
+              "durationMs": 0,
+              "name": "coordinateResolution"
+            },
+            {
+              "durationMs": 1456,
+              "name": "xcuitestGesture"
+            },
+            {
+              "durationMs": 123,
+              "name": "postGesture"
+            }
+          ],
+          "durationMs": 1580,
+          "name": "gesturePhases"
+        }
+      ],
+      "durationMs": 1702,
+      "name": "total"
+    },
+    "requestId": "tap_31b1ba5a-f2cc-4834-a2ac-b5585b58ee6a",
+    "success": true,
+    "timestamp": 1791506445796,
+    "totalTimeMs": 1579,
+    "type": "tap_coordinates_result"
+  }
+}

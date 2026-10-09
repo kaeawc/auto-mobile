@@ -12,7 +12,7 @@ sealed class SharedPreferencesError(message: String) : Exception(message) {
   /** SharedPreferencesInspector was not initialized with a context. */
   class NotInitialized :
     SharedPreferencesError(
-      "SharedPreferencesInspector not initialized. Call AutoMobileSDK.initialize(context) first."
+      "SharedPreferencesInspector not initialized. Call AutoMobileSDK.initialize(context) first.",
     )
 
   /** A named application-provided driver was not registered. */

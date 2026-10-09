@@ -36,7 +36,7 @@ class RealNetworkRequestsDataSource(
     val provider =
       clientProvider
         ?: return Result.Error(
-          IllegalStateException("Not connected to MCP server. Please select a device first.")
+          IllegalStateException("Not connected to MCP server. Please select a device first."),
         )
     val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
 
@@ -75,7 +75,7 @@ class RealNetworkRequestsDataSource(
         val text =
           client.readResource(uri).firstOrNull()?.text
             ?: return@withContext Result.Error(
-              RuntimeException("No detail returned for request $id")
+              RuntimeException("No detail returned for request $id"),
             )
         val response = json.decodeFromString(serializer<RequestDetailResponse>(), text)
         // The true not-found/invalid envelope is `{ error }` with no `id` (getNetworkEventById
@@ -84,7 +84,7 @@ class RealNetworkRequestsDataSource(
         // id — NOT the presence of `error` — and surface that error inside the detail.
         if (response.id == 0L) {
           return@withContext Result.Error(
-            RuntimeException(response.error ?: "Network request $id not found")
+            RuntimeException(response.error ?: "Network request $id not found"),
           )
         }
         Result.Success(response.toDetail())

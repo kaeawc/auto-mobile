@@ -217,7 +217,7 @@ class McpStdioClient(
     return try {
       decodeToolResponse(json, response, serializer<StartDeviceResult>())
     } catch (e: Exception) {
-      StartDeviceResult(success = false, message = e.message ?: "Failed to start device")
+      startDeviceFailure(e)
     }
   }
 
@@ -255,11 +255,7 @@ class McpStdioClient(
     force: Boolean,
   ): KillDeviceResult {
     val response = callTool("killDevice", killDeviceArguments(name, deviceId, platform, force))
-    return try {
-      decodeToolResponse(json, response, serializer<KillDeviceResult>())
-    } catch (e: Exception) {
-      KillDeviceResult(success = false, message = e.message ?: "Failed to kill device")
-    }
+    return decodeKillDeviceResponse(json, response)
   }
 
   override fun getDaemonStatus():
@@ -306,6 +302,7 @@ class McpStdioClient(
     value: String?,
     type: String,
     platform: String,
+    sessionUuid: String?,
   ): SetKeyValueResult {
     val response =
       callTool(
@@ -321,6 +318,7 @@ class McpStdioClient(
             if (value != null) JsonPrimitive(value) else kotlinx.serialization.json.JsonNull,
           )
           put("type", JsonPrimitive(type))
+          sessionUuid?.takeIf { it.isNotBlank() }?.let { put("sessionUuid", JsonPrimitive(it)) }
         },
       )
     return try {
@@ -336,6 +334,7 @@ class McpStdioClient(
     fileName: String,
     key: String,
     platform: String,
+    sessionUuid: String?,
   ): RemoveKeyValueResult {
     val response =
       callTool(
@@ -346,6 +345,7 @@ class McpStdioClient(
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
           put("key", JsonPrimitive(key))
+          sessionUuid?.takeIf { it.isNotBlank() }?.let { put("sessionUuid", JsonPrimitive(it)) }
         },
       )
     return try {
@@ -360,6 +360,7 @@ class McpStdioClient(
     appId: String,
     fileName: String,
     platform: String,
+    sessionUuid: String?,
   ): ClearKeyValueResult {
     val response =
       callTool(
@@ -369,6 +370,7 @@ class McpStdioClient(
           put("platform", JsonPrimitive(platform))
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
+          sessionUuid?.takeIf { it.isNotBlank() }?.let { put("sessionUuid", JsonPrimitive(it)) }
         },
       )
     return try {
@@ -599,7 +601,7 @@ class McpStdioClient(
     if (reapIfExited()) {
       throw McpConnectionException(
         "MCP stdio server '$command' exited before '${request.method}' was sent; " +
-          "the next request starts a new server"
+          "the next request starts a new server",
       )
     }
     if (request.method != "initialize" && !initialized) {
@@ -644,7 +646,7 @@ class McpStdioClient(
       // starts a fresh process. The old pump stays blocked on the old pipe until it is destroyed.
       discardProcess(currentProcess)
       throw McpConnectionException(
-        "MCP stdio request '${request.method}' timed out after ${timeoutMs}ms"
+        "MCP stdio request '${request.method}' timed out after ${timeoutMs}ms",
       )
     } catch (e: ExecutionException) {
       pending.abandon()
@@ -675,7 +677,7 @@ class McpStdioClient(
       else pending.future.get(timeoutMs, TimeUnit.MILLISECONDS)
     if (response.error != null) {
       throw McpConnectionException(
-        "MCP stdio error ${response.error.code}: ${response.error.message}"
+        "MCP stdio error ${response.error.code}: ${response.error.message}",
       )
     }
     response.resultFor(method)
@@ -724,7 +726,7 @@ class McpStdioClient(
       throw McpConnectionException(
         "MCP stdio server '$command' exited ${restartGuard.consecutiveQuickExits} times in a row " +
           "right after starting, so it is not being restarted for another " +
-          "${(waitMs + 999) / 1000}s. Run the command in a terminal to see why it fails."
+          "${(waitMs + 999) / 1000}s. Run the command in a terminal to see why it fails.",
       )
     }
   }
@@ -732,7 +734,7 @@ class McpStdioClient(
   private fun serverNotRunning(method: String) =
     McpConnectionException(
       "MCP stdio server '$command' is not running, so '$method' was not sent; " +
-        "the next request starts a new server"
+        "the next request starts a new server",
     )
 
   private fun serverExited(method: String, cause: Throwable) =

@@ -1,10 +1,14 @@
 # Agent-authored overlay specification
 
-This is the current, unversioned contract for #9296, child of #9295. It defines
-models and validation only. Compose rendering (#9299, #9300), asset transport
-(#9301), wire messages (#9298), and the MCP tool (#9302) implement this contract
-later. No code, expressions, URLs, image bytes, or migration instructions are
-accepted in a spec.
+This is the current, unversioned contract for #9296, child of #9295. Compose
+rendering on Android (#9299, #9300), asset transport (#9301), wire messages
+(#9298), the `prototype` MCP tool (#9302) and the
+[iOS simulator agent](../ios/overlay-agent.md) implement it; the iOS agent's
+[feature support table](../ios/overlay-agent.md#feature-support) lists what is Android only
+(`display`, `window.layer: "app"`, `window.persistence: "device"`, `inspect`, idle TTL).
+No code,
+expressions, URLs, image bytes, or migration instructions are accepted in a
+spec.
 
 ## Owner decisions
 
@@ -44,13 +48,13 @@ keys) match `[A-Za-z_][A-Za-z0-9_]{0,63}`. No nested state, arrays, or nulls.
 Overlay IDs, pager IDs, tags, event names, and asset IDs are opaque nonempty
 strings; they do not share the state-key restriction.
 
-| Constant                         | Value            | Counting rule                                                                                      |
-| -------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------- |
-| `MAX_OVERLAY_NODES`              | 500              | Includes root and every child/page/sheet child; `repeat` templates count once per instance.        |
-| `MAX_OVERLAY_DEPTH`              | 24               | Root has depth 1; only node nesting counts.                                                        |
-| `MAX_OVERLAY_IMAGES`             | 32               | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again. |
-| `MAX_OVERLAY_SPEC_BYTES`         | 262144 (256 KiB) | UTF-8 bytes of raw JSON, including whitespace.                                                     |
-| `MAX_OVERLAY_EMIT_PAYLOAD_BYTES` | 4096 (4 KiB)     | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.             |
+| Constant                         | Value           | Counting rule                                                                                      |
+| -------------------------------- | --------------- | -------------------------------------------------------------------------------------------------- |
+| `MAX_OVERLAY_NODES`              | 2000            | Includes root and every child/page/sheet child; `repeat` templates count once per instance.        |
+| `MAX_OVERLAY_DEPTH`              | 24              | Root has depth 1; only node nesting counts.                                                        |
+| `MAX_OVERLAY_IMAGES`             | 32              | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again. |
+| `MAX_OVERLAY_SPEC_BYTES`         | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                     |
+| `MAX_OVERLAY_EMIT_PAYLOAD_BYTES` | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.             |
 
 Navigation item `image` uses also count toward `MAX_OVERLAY_IMAGES`. Assets have
 separate transport and decoded-memory limits in #9301. These spec limits keep
@@ -83,18 +87,25 @@ plugin or API-check task; its published artifact includes the contract resource.
 Optional top-level `theme` sets the Material scheme every built-in component draws
 from. At least one of its fields is required:
 
-| Field           | Meaning                                                                                                                                                   |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mode`          | `light`, `dark` or `system` (follow the device). Omitted: inferred from the first opaque background on the root's leading chain, else the device setting. |
-| `colors.seed`   | Hex color a full light or dark scheme is generated from.                                                                                                  |
-| `colors.source` | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                      |
+| Field                   | Meaning                                                                                                                                                                           |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`                  | `light`, `dark` or `system` (follow the device). Omitted: inferred from the first opaque background on the root's leading chain, else the device setting.                         |
+| `colors.seed`           | Hex color a full light or dark scheme is generated from.                                                                                                                          |
+| `colors.source`         | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                                              |
+| `colors.<role>`         | Hex override for one Material 3 role (`primary`, `onPrimary`, `surface`, `surfaceContainer` … the 36 roles style colors accept), applied over the seed, device or default scheme. |
+| `typography.scale`      | Number 0.75–1.5 multiplying the size and line height of every Material type role. Default 1.                                                                                      |
+| `typography.fontFamily` | `sans`, `serif` or `mono`: the family of every Material type role.                                                                                                                |
+| `shapes.corner`         | `none`, `small`, `medium` (the stock Material 3 scale), `large` or `full` (pill). Shifts every corner family built-in components use.                                             |
 
-| `typography.scale` | Number 0.75–1.5 multiplying the size and line height of every Material type role. Default 1. |
-| `typography.fontFamily` | `sans`, `serif` or `mono`: the family of every Material type role. |
-| `shapes.corner` | `none`, `small`, `medium` (the stock Material 3 scale), `large` or `full` (pill). Shifts every corner family built-in components use. |
-
-`typography` and `shapes` each need at least one field. An explicit theme wins over the scheme
+`colors`, `typography` and `shapes` each need at least one field. An explicit theme wins over the scheme
 inferred from backgrounds.
+
+Role overrides are literal colors, so they apply unchanged in light and dark: pair them with a
+fixed `mode`, or rely on `seed`/`source` for a mode-aware scheme and override only the roles that
+must match a brand. With no `mode`, a `colors.background` (else `colors.surface`) override decides
+light or dark from its luminance, ahead of the authored-background inference, for both the content
+scheme and the host dismiss control. A spec that names only roles in its styles and no hex
+literals renders in light and dark from one source.
 
 A text node's `style.textStyle` names a Material 3 type role (`displayLarge` … `labelSmall`, 15
 in all) and so follows the theme's scale and family. It supplies size, weight and family; an
@@ -146,20 +157,30 @@ the host refuses them for an older device instead of sending them.
 
 Every node has required `type`. All other common properties are optional:
 
-| Property          | Shape / meaning                                                                                    |
-| ----------------- | -------------------------------------------------------------------------------------------------- |
-| `id`              | Nonempty node ID; required and unique among pagers for `pager`. Other node IDs need not be unique. |
-| `testTag`         | Nonempty accessibility/test selector tag.                                                          |
-| `onTap`           | Nonempty ordered array of actions, run in order. See "Tap targets" below.                          |
-| `style`           | Strict style object below.                                                                         |
-| `styleWhen`       | Conditional style overrides (see Conditional style below). One to 8 entries.                       |
-| `visibleWhen`     | Condition (see Conditions below). A false condition, or a missing key, means hidden.               |
-| `transition`      | Optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.            |
-| `anchor`          | Bounds or app-element anchor below.                                                                |
-| `safeAreaPadding` | Explicit inset selection below.                                                                    |
+| Property             | Shape / meaning                                                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                 | Nonempty node ID; required and unique among pagers for `pager`. Other node IDs need not be unique.                                           |
+| `testTag`            | Nonempty accessibility/test selector tag.                                                                                                    |
+| `contentDescription` | Nonempty accessible label read by `observe` and screen readers in place of the derived one. `{key}` state placeholders resolve as in `text`. |
+| `onTap`              | Nonempty ordered array of actions, run in order. See "Tap targets" below.                                                                    |
+| `style`              | Strict style object below.                                                                                                                   |
+| `styleWhen`          | Conditional style overrides (see Conditional style below). One to 8 entries.                                                                 |
+| `visibleWhen`        | Condition (see Conditions below). A false condition, or a missing key, means hidden.                                                         |
+| `transition`         | Optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.                                                      |
+| `anchor`             | Bounds or app-element anchor below.                                                                                                          |
+| `safeAreaPadding`    | Explicit inset selection below.                                                                                                              |
 
 Hidden and closed sheet content still counts toward all limits and references.
 No arbitrary extra metadata is allowed.
+
+Accessible labels: an authored `contentDescription` wins; otherwise a node is
+labelled by its text, and an icon-only tappable node (or a tappable container
+whose only content is one icon, such as a FAB) by its icon name. Layout
+containers (`box`, `row`, `column`, `scroll`, `pager`, `spacer`, `card`) and
+navigation bars are never labelled by their kind while they have content. A
+layout container with no label, text, `onTap`, `testTag` or state adds no
+accessibility node of its own, so its children join the nearest reporting
+ancestor, as with Compose's own layouts.
 
 Tap targets: a node with `onTap` responds across its whole drawn area, including
 its own `padding`, and its accessibility bounds are that drawn area. It also
@@ -169,29 +190,40 @@ layout room.
 
 ## Nodes
 
-| `type`        | Node-specific properties                                                                                                                                                                                                                    |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `box`         | Required `children` array, possibly empty; children stack. Optional `repeat` (see List templates below).                                                                                                                                    |
-| `row`         | Required `children` array, possibly empty; horizontal layout. Optional `repeat` (see List templates below).                                                                                                                                 |
-| `column`      | Required `children` array, possibly empty; vertical layout. Optional `repeat` (see List templates below).                                                                                                                                   |
-| `text`        | Required `text` string, possibly empty.                                                                                                                                                                                                     |
-| `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                                                                                   |
-| `icon`        | Required built-in `name` below; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                                                                                                                   |
-| `spacer`      | No node-specific properties; size comes from style.                                                                                                                                                                                         |
-| `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.                                                                                                                                 |
-| `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
-| `checkbox`    | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
-| `button`      | Required nonempty `label`; optional `variant`: `filled` (default), `tonal`, `elevated`, `outlined`, `text`; optional leading `icon` (built-in name). Taps run `onTap`.                                                                      |
-| `radioGroup`  | Required `stateKey` naming an initialized string state value; required `options`, 2 to 16 `{value, label}` entries with nonempty, unique `value`s.                                                                                          |
-| `listItem`    | Required nonempty `headline`; optional nonempty `supporting`, optional `leadingIcon` (built-in name), optional `trailing`: `{type: switch\|checkbox, stateKey}` bound to an initialized boolean, or `{type: icon, name}`. Taps run `onTap`. |
-| `slider`      | Required `stateKey` naming an initialized number within `min`..`max`; required finite `min` < `max`; optional `step`, optional nonempty `label`.                                                                                            |
-| `chip`        | Required nonempty `label`; optional `variant`: `assist`, `filter`; optional `stateKey` naming a boolean (a filter chip).                                                                                                                    |
-| `card`        | Required `children` array; optional `variant`: `filled` (default), `elevated`, `outlined`.                                                                                                                                                  |
-| `scroll`      | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                                                                                                                        |
-| `pager`       | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                                                                                                                                       |
-| `tabBar`      | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                                                                                                                          |
-| `bottomNav`   | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                                                                                                                   |
-| `bottomSheet` | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                                                                                                                       |
+| `type`            | Node-specific properties                                                                                                                                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `box`             | Required `children` array, possibly empty; children stack. Optional `repeat` (see List templates below).                                                                                                                                    |
+| `row`             | Required `children` array, possibly empty; horizontal layout. Optional `repeat` (see List templates below).                                                                                                                                 |
+| `column`          | Required `children` array, possibly empty; vertical layout. Optional `repeat` (see List templates below).                                                                                                                                   |
+| `text`            | Required `text` string, possibly empty.                                                                                                                                                                                                     |
+| `image`           | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                                                                                   |
+| `icon`            | Required built-in `name` below; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                                                                                                                   |
+| `spacer`          | No node-specific properties; size comes from style.                                                                                                                                                                                         |
+| `textField`       | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.                                                                                                                                 |
+| `switch`          | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
+| `checkbox`        | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
+| `button`          | Required nonempty `label`; optional `variant`: `filled` (default), `tonal`, `elevated`, `outlined`, `text`; optional leading `icon` (built-in name). Taps run `onTap`.                                                                      |
+| `radioGroup`      | Required `stateKey` naming an initialized string state value; required `options`, 2 to 16 `{value, label}` entries with nonempty, unique `value`s.                                                                                          |
+| `listItem`        | Required nonempty `headline`; optional nonempty `supporting`, optional `leadingIcon` (built-in name), optional `trailing`: `{type: switch\|checkbox, stateKey}` bound to an initialized boolean, or `{type: icon, name}`. Taps run `onTap`. |
+| `slider`          | Required `stateKey` naming an initialized number within `min`..`max`; required finite `min` < `max`; optional `step`, optional nonempty `label`.                                                                                            |
+| `chip`            | Required nonempty `label`; optional `variant`: `assist`, `filter`, `input`, `suggestion`; optional `stateKey` naming a boolean (a filter chip only).                                                                                        |
+| `card`            | Required `children` array; optional `variant`: `filled` (default), `elevated`, `outlined`.                                                                                                                                                  |
+| `iconButton`      | Required built-in `icon`; optional `variant`: `standard` (default), `filled`, `tonal`, `outlined`. Taps run `onTap`.                                                                                                                        |
+| `fab`             | Required built-in `icon`; optional nonempty `label` (an extended FAB); optional `size`: `small`, `regular` (default), `large`, only without a `label`. Taps run `onTap`.                                                                    |
+| `segmentedButton` | Required `stateKey` naming an initialized string state value; required `options`, 2 to 5 `{value, label}` entries with nonempty, unique `value`s. Single select.                                                                            |
+| `topAppBar`       | Required nonempty `title`; optional `variant`: `small` (default), `centerAligned`, `medium`, `large`; optional `navigationIcon` and 1 to 3 `actions`, each `{icon, label, onTap?}`.                                                         |
+| `divider`         | Optional `orientation`: `horizontal` (default), `vertical`.                                                                                                                                                                                 |
+| `badge`           | Optional nonempty `text` (a count or short label); without it a small dot.                                                                                                                                                                  |
+| `progress`        | Optional `variant`: `linear` (default), `circular`; optional `stateKey` naming an initialized number within 0..`max` (determinate); optional `max` > 0, default 1, only with `stateKey`. Unbound is indeterminate.                          |
+| `dialog`          | Required `openWhen` and `confirm`; optional nonempty `title` and `text`, optional `icon`, optional `dismiss`, optional single `child`. Buttons are `{label, onTap?}`.                                                                       |
+| `snackbar`        | Required `openWhen` and nonempty `text`; optional `action` button `{label, onTap?}` and `durationMs` (1 to 600000, self-closing).                                                                                                           |
+| `timePicker`      | Required distinct `hourKey` and `minuteKey` naming initialized integers 0..23 and 0..59; optional `is24Hour` boolean, default the device setting.                                                                                           |
+| `datePicker`      | Required `stateKey` naming an initialized `YYYY-MM-DD` string, a real date in years 1900..2100.                                                                                                                                             |
+| `scroll`          | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                                                                                                                        |
+| `pager`           | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                                                                                                                                       |
+| `tabBar`          | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                                                                                                                          |
+| `bottomNav`       | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                                                                                                                   |
+| `bottomSheet`     | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                                                                                                                       |
 
 Each nav item is `{label, icon?, image?}`. Label is nonempty; icon uses the same
 closed list as icon nodes; image is an opaque asset ID. Both icon and image may
@@ -260,6 +292,51 @@ anywhere on the row flips the bound boolean, emits `change`, then runs `onTap`.
 Otherwise a row with `onTap` is a `Button` that runs it, and a row without is
 inert. A trailing `icon` is decorative.
 
+`iconButton`, `fab`, `segmentedButton`, `topAppBar`, `divider`, `badge`,
+`progress`, `dialog`, `snackbar`, `timePicker`, `datePicker` and the `input` and
+`suggestion` chips are the last slice of #10439. Icon buttons and FABs are
+`Button` nodes that run `onTap`, labelled by `contentDescription`, else an
+extended FAB's `label`, else their icon name. A segmented button behaves like a
+radio group: each segment is its own selectable node tagged `<testTag>.<value>`,
+and a tap binds the string key to its value, emits `change` if it moved, then
+runs `onTap`; multi-select segments are not offered (use filter chips). Input and
+suggestion chips, like assist chips, only run `onTap` and cannot bind a key.
+A top app bar's text is its title (state placeholders are resolved); its
+navigation icon and actions are icon `Button` nodes labelled by their `label` and
+tagged `<testTag>.navigation` and `<testTag>.actions.<index>`, each running its
+own `onTap`. It draws no system-bar inset of its own; add `safeAreaPadding`. A
+divider has no accessibility node unless tagged. A badge reads as its `text`. A
+bound progress indicator is determinate and reports `value / max` as progress
+range info over 0..1; an unbound one reports indeterminate progress.
+
+`dialog` and `snackbar` open while `openWhen` holds, like `bottomSheet` (an
+existing key must be boolean), and are drawn above the whole author tree inside
+the overlay window, never as a separate window. A dialog is modal: a scrim tap
+closes it, and so does either button. While it is open the page behind it is
+removed from the accessibility tree (`clearAndSetSemantics` on the page), so
+`observe` and screen readers see only the dialog, as on iOS and as touches
+already behave; a closed dialog leaves the page as it was. Closing writes `!equals` to the key and
+emits `change`; a button then runs its own `onTap`. Its title is its text, its
+`text` is a separate text node, `child` sits between the text and the buttons,
+and the buttons are tagged `<testTag>.confirm` and `<testTag>.dismiss`. A snackbar
+sits at the bottom of the window and is not modal: the page stays in the
+accessibility tree. It stays until closed unless it
+sets `durationMs` (an integer, 1 to 600000): it then closes itself that long after it
+opens, by writing `!equals` to its `openWhen` key like any other close. The timer is
+wall-clock time, not scaled by the animator duration. Its `action`
+(tagged `<testTag>.action`) closes it, then runs `onTap`. Title, text and
+snackbar text resolve state placeholders, so `Alarm set for {hour}:{minute}`
+reads the bound time.
+
+A time picker is Material's dial picker bound to two integer keys. A change
+stores both keys together and emits one `change` event (`{keys, values}`, or
+`{key, value}` when only one moved), then runs `onTap`. A date picker is
+Material's calendar bound to a `YYYY-MM-DD` string; picking a day binds the key,
+emits `change`, then runs `onTap`. Both report their value as the accessibility
+state (`07:30` in 24-hour form, `2026-10-08`), and a new bound value from a
+re-show or `setState` moves the picker. A `setState` that would put an out of
+range hour, minute or date into a bound key is rejected.
+
 Text interpolation is a renderer concern: `{page}`, `{pageCount}`, and state
 keys may appear in text. No expressions or interpolation parsing occurs during
 validation. Pager context is the nearest enclosing pager; outside a pager those
@@ -280,12 +357,15 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `minWidth`, `maxWidth`, `minHeight`, `maxHeight` | Nonnegative dp bounds applied after `width`/`height`, so `fill` and `{dp}` are clamped by them.                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `background`, `color`                            | Strict hex color, or a Material 3 color role name (see below).                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `cornerRadius`                                   | Nonnegative dp, or a Shapes token: `none`, `extraSmall`, `small`, `medium`, `large`, `extraLarge`, `full`.                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `cornerRadius`                                   | Nonnegative dp, a Shapes token (`none`, `extraSmall`, `small`, `medium`, `large`, `extraLarge`, `full`), or strict per-corner `{topStart?, topEnd?, bottomEnd?, bottomStart?}` of nonnegative dp where an omitted corner is square. Start and end follow the layout direction.                                                                                                                                                                                                                                     |
 | `border`                                         | `{width, color}`; nonnegative dp width; `color` takes hex or a color role name.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `elevation`                                      | Nonnegative dp. Draws a shadow in the node's corner shape, behind its clip, background and border.                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `shadowColor`                                    | Hex color or color role name tinting the `elevation` shadow (ambient and spot). Without `elevation` it draws nothing; absent, the platform shadow color applies.                                                                                                                                                                                                                                                                                                                                                   |
 | `gradient`                                       | `{type: "linear", angle, stops}` or `{type: "radial", stops}`. `angle` is a finite number of degrees clockwise from left-to-right (0 = left to right, 90 = top to bottom). `stops` is 2–4 `{color, position?}` with a hex color and an optional 0–1 `position`; positions apply only when every stop has one (a position below the previous stop's is raised to it), otherwise stops are evenly spaced. Radial gradients are centered and reach the corners. Painted over `background` in the node's corner shape. |
 | `aspectRatio`                                    | Positive number (width / height) applied after the size bounds.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `offset`                                         | Strict `{x, y}` dp, negative allowed. Shifts the drawn node, its shadow, touch target and accessibility bounds without moving siblings: the node keeps its layout slot.                                                                                                                                                                                                                                                                                                                                            |
 | `alpha`                                          | Finite number 0–1; default 1. Multiplies window opacity.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `pressScale`                                     | Finite number 0.5–1. A node with a plain `onTap` (box, row, column, text, image, icon, spacer) scales to this while pressed and back on release; absent leaves it unscaled. Instant, not animated, when `motion` is `none` or the system animator duration scale is 0; iOS also snaps under Reduce Motion. Component nodes (button, chip, switch, ...) keep their own press feedback and ignore it.                                                                                                                |
 | `alignment`                                      | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`.                                                                                                                                                                                                                                                                                                                                                                                               |
 | `arrangement`                                    | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `spacing`                                        | Nonnegative dp between row/column children; arrangement remains authoritative for distributed free space.                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -293,7 +373,18 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `fontWeight`                                     | Integer 100–900.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `textAlign`                                      | `start`, `center`, `end`, `justify`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `maxLines`                                       | Integer 1–2147483647.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `overflow`                                       | Text past `maxLines` or its width: `clip` (default), `ellipsis` or `visible`.                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `lineHeight`                                     | Positive sp between baselines; scaled by the system font scale.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `letterSpacing`                                  | Finite sp added between letters; negative tightens.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `textDecoration`                                 | `none`, `underline`, `lineThrough` or `underlineLineThrough`.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `fontStyle`                                      | `normal` or `italic`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `fontFamily`                                     | A system name (`default`, `sansSerif`, `serif`, `monospace`) or `{asset: "<id>"}` naming an uploaded TTF/OTF font (#10443).                                                                                                                                                                                                                                                                                                                                                                                        |
+
+The text properties (`textSize`, `fontWeight`, `textAlign`, `maxLines`,
+`overflow`, `lineHeight`, `letterSpacing`, `textDecoration`, `fontStyle`,
+`fontFamily`, `textStyle`) style `text` nodes. An unset `fontStyle`,
+`textDecoration`, `lineHeight` or `letterSpacing` keeps what the `textStyle` role
+or the theme supplies.
 
 Colors accept `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits, or one
 of the Material 3 `ColorScheme` role names (`primary`, `onPrimary`,
@@ -301,7 +392,7 @@ of the Material 3 `ColorScheme` role names (`primary`, `onPrimary`,
 `surfaceVariant`, `surfaceContainer` and its `Low`/`High`/`Highest`/`Lowest`
 steps, `surfaceBright`, `surfaceDim`, `error`, `outline`, `scrim`, and the rest
 of the scheme, 36 in all). A role resolves against the overlay's active theme
-(`theme.mode`, `colors.seed`, device colour), so it follows light/dark and the
+(`theme.mode`, `colors.seed`, device colour, `colors.<role>` overrides), so it follows light/dark and the
 seed. No short hex, other named colors, CSS functions, or separate color opacity. Style
 properties that do not apply to a node have no rendering effect; their shape is
 still validated. Omitted layout/text properties use Compose/system defaults.
@@ -316,8 +407,9 @@ and JVM validators. The renderer already ships that library, so the full set add
 size beyond the list itself (about 10 KB measured). An icon node may set `variant`:
 `filled` (default), `outlined`, `rounded`, `sharp` or `twoTone`; nav items are always
 filled. Material Symbols names with no `material-icons-extended` counterpart are not
-available, and neither are symbol `weight` or `fill` axes or custom `fontFamily`
-assets, which would need a bundled variable font or an asset-transport extension.
+available, and neither are symbol `weight` or `fill` axes, which would need a bundled
+variable font. Custom text fonts do ship, as host-uploaded assets (see "Custom fonts"
+below).
 
 Unknown names reject the spec. #9301 pins ID-based assets, but no nested reference
 shape, so image nodes use `{type: "image", asset: "opaque-id"}` and nav items
@@ -417,8 +509,10 @@ opts out and keeps every change instant. Motion is also off when the system
 animator duration scale is 0 (`adb shell settings put global
 animator_duration_scale 0`), so `observe` screenshots are settled with no
 extra waits; other scales are honored by Compose's animation clock. The scale is
-read when the spec changes. Only nodes with `visibleWhen` get an animation
-wrapper.
+observed while the overlay is shown, so setting it to 0 after the overlay is up
+makes the next visibility or page change instant, and turning motion off
+mid-scroll snaps the pager to its target page. Only nodes with `visibleWhen` get
+an animation wrapper.
 
 `box`, `row` and `column` containers animate their size when their children
 appear, disappear or change (`animateContentSize`), gated by the same
@@ -428,7 +522,11 @@ jumping.
 A node's optional `transition` picks the `visibleWhen` enter/exit: `none`
 (instant), `fade`, `expand` (grow/shrink) or `slide` (vertical slide with a
 fade). Absent keeps the default fade + expand. It has no effect on nodes
-without `visibleWhen`, or when motion is off. `pressScale` is a follow-up.
+without `visibleWhen`, or when motion is off.
+
+A style `pressScale` (0.5–1) shrinks a tappable node while it is pressed. With
+motion on it animates with a short spring; with `motion: "none"` or animator
+scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
 ## Actions and state
 
@@ -483,8 +581,9 @@ any condition form above; `style` is the same strict style object as `style`, so
 an unknown key fails at `root.styleWhen[0].style.colour`. At render, every entry
 whose condition holds is merged over the node's base `style` in authored order:
 a property set by a later matching entry wins, and properties no entry sets keep
-the base value. Merging is per top-level property, so `padding` and `border`
-replace the base object whole rather than merging edge by edge. Conditions read the
+the base value. Merging is per top-level property, so `padding`, `border`, `offset` and a
+per-corner `cornerRadius` replace the base object whole rather than merging field
+by field. Conditions read the
 node's local state, so pager `{page}`/`{pageCount}` keys work inside a pager.
 
 ### List templates: repeat
@@ -494,6 +593,8 @@ per item without writing every row out. The container's `children` are the
 template: they are instantiated once per entry of `items`, in item order, as
 siblings inside the same container (the container itself is not repeated, so a
 list is a `column` with `repeat` whose single child is the row template).
+`items` holds 1–128 entries, and the expanded tree still counts against
+`MAX_OVERLAY_NODES`.
 
 ```json
 {
@@ -524,9 +625,17 @@ list is a `column` with `repeat` whose single child is the row template).
   values are scalar, so a state key cannot hold a list; per-state-key lists are not
   supported.
 - Placeholders are `{index}` (the zero-based position) and `{<as>.<field>}`. They
-  are bound in a template child's `text`, in condition operands (`equals` and
+  are bound in a template child's `text`; in the component fields `button.label`,
+  `fab.label`, `segmentedButton.options[].label`, `topAppBar.title`,
+  `topAppBar.navigationIcon`/`actions[]` (`label` and their `onTap`), `dialog.title`,
+  `dialog.text`, `dialog.confirm`/`dismiss` (`label` and `onTap`), `snackbar.text` and
+  `snackbar.action` (`label` and `onTap`); in condition operands (`equals` and
   `notEquals` strings in `visibleWhen`, `styleWhen[].when` and nested `all`/`any`/
-  `not`), in `setState.value` and in `emit.name`. Anything else, including a
+  `not`), in `setState.value` and in `emit.name`; and in every state key (#11051):
+  `stateKey`, `timePicker` `hourKey`/`minuteKey`, a `listItem` trailing `stateKey`,
+  `openWhen.key`, condition `key`s and the `key` of `setState`, `toggle`, `increment`
+  and `decrement`, so `"key": "liked_{item.id}"` gives every row its own state.
+  Anything else, including a
   `{key}` state placeholder, other braces, and the container's own fields, is not a
   repeat placeholder and is untouched. Inside a template `{index}` shadows a state
   key named `index`. A string that is exactly one placeholder keeps the item's own
@@ -541,6 +650,13 @@ list is a `column` with `repeat` whose single child is the row template).
   contain another `repeat` (`root.children[0].repeat`) or a `pager`
   (`root.children[0]`); `repeat` on a leaf node is an unknown property; an `emit.name`
   that binds to an empty string for any item fails at the name (`root.children[0].onTap[0].name`).
+  A bound state key must be a literal key (`^[A-Za-z_][A-Za-z0-9_]{0,63}$`) for every
+  item; one that is not fails at that item (`root.repeat.items[1]`, message
+  `Bound state key "liked_b-c" is invalid`). A state-key
+  placeholder outside every template fails at the key (`State key placeholder outside a
+  repeat template`). A bound key missing from `state` behaves exactly like a literal
+  missing key: the type checks run once per item and fail at the key, naming the item
+  (`Toggle requires a boolean state key (repeat item 1)`).
 - Limits count the expanded tree. `MAX_OVERLAY_NODES` and `MAX_OVERLAY_IMAGES` are
   checked against every instance, and an overflow fails at the container's
   `repeat` (for example `root.children[2].repeat`, `Expanded node limit exceeded`).
@@ -551,6 +667,70 @@ list is a `column` with `repeat` whose single child is the row template).
 - Rendering expands the template before layout. Each instance node renders under
   the path `container.repeat[item].children[template]`, which is also its Compose
   key, so a row keeps its identity for as long as it keeps its index.
+
+### Reusable components: components and use
+
+A spec may declare a top-level `components` map of named node templates and place
+them with `use` nodes (#11053), so a card, row or header used in several places is
+written once.
+
+```json
+{
+  "components": {
+    "postCard": {
+      "root": {
+        "type": "card",
+        "children": [
+          { "type": "text", "text": "{props.name}" },
+          {
+            "type": "button",
+            "label": "Like",
+            "onTap": [{ "type": "toggle", "key": "{props.likeKey}" }]
+          }
+        ]
+      }
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "use",
+        "component": "postCard",
+        "props": { "name": "Alexey", "likeKey": "liked_a" }
+      },
+      { "type": "use", "component": "postCard", "props": { "name": "Bea", "likeKey": "liked_b" } }
+    ]
+  }
+}
+```
+
+- Components are expanded on the host (`src/features/overlay/overlayComponents.ts`)
+  before validation and transport: each `use` is replaced by a copy of the
+  component's `root` and `components` is dropped. Devices never see either, so the
+  Kotlin and Swift renderers and the device validator are unchanged.
+- Component names and prop names are state-key-shaped. A `use` node has only
+  `type`, `component` and optional `props`; props are scalars (string, finite
+  number, boolean).
+- `{props.<field>}` binds in exactly the fields a `repeat` placeholder binds (see
+  List templates above), state keys included, plus the `props` of a nested `use`.
+  A string that is exactly one placeholder keeps the prop's type. `{index}` and
+  other aliases are left for a `repeat` to bind, so a `use` inside a repeat template
+  can pass `"likeKey": "liked_{item.id}"`, and a component may contain `repeat`
+  and further `use` nodes.
+- Rejected, with the path of the `use`: an unknown component
+  (`root.children[0].component`), a missing prop (`.props`), an unused or
+  non-scalar prop (`.props.<name>`), a cycle including self-reference
+  (`.component`, message `Component cycle: a → b → a`), and `use` nesting deeper
+  than 8. Unused components are allowed.
+- Limits apply to the expanded tree: nodes, depth and images as usual (expansion
+  itself stops at `MAX_OVERLAY_NODES`), and the byte limit applies to both the
+  authored and the expanded spec (`Expanded spec byte limit exceeded`), because the
+  device re-validates bytes.
+- An error inside an expansion names each `use` it went through, for example
+  `root.children[2] (use postCard) → components.postCard.root.children[1].label`.
+  Nodes outside every component keep their authored paths, because a `use` expands
+  to exactly one node.
 
 ### Re-showing an overlay
 
@@ -617,15 +797,41 @@ edge alignment aligns the same node edge to the target edge, centered along the
 other axis, preserving authored node dimensions, then applies the offset.
 
 The host resolves selectors against the app hierarchy with the overlay excluded,
-converts pixels to dp once using the target display density, and accounts for
-the overlay origin and cutout. Resolution happens at show, not live.
-Missing or ambiguous elements fail the tool call before showing content, with
-candidates and hierarchy timestamp handled by #9316/#9302. Anchors can be authored
-in any placement: the host subtracts the window's screen origin; a floating
-window is recommended when pass-through outside anchored content matters. Window
-size is determined by placement/content, not by implicitly resizing to an anchor.
-The renderer receives resolved dp bounds; the wire's resolved representation is
-left to #9298/#9316.
+using tap's resolution (a text match is promoted to its clickable owner) with
+`unique` selection, and converts the element's px bounds to dp once with the
+display density the capture reports (`px * 160 / densityDpi`). Resolution happens at
+show, not live. A missing, ambiguous (candidates listed), empty or off-screen element
+fails the call before anything is shown. The result reports `anchors` (each anchored
+node's path with the element's px and dp bounds) and `hierarchyUpdatedAt`; show again
+to re-anchor after the app scrolls or re-lays out.
+
+On the wire the device only receives bounds anchors: the host replaces each element
+anchor with `{ "type": "bounds", "bounds", "alignment", "offset"? }`, keeping its
+alignment and offset. A bounds anchor may also be authored with `alignment` (default
+`cover`) and `offset`. The renderer refuses an element anchor that reaches it
+unresolved. A host only sends anchors to a CtrlProxy advertising `overlay_anchor_v1`;
+older APKs decode and ignore them, so the host refuses the show there. Element anchors
+resolve against the default display (another `display` is refused). On an iOS simulator
+the injected overlay agent positions anchors too, advertising the same
+`overlay_anchor_v1` capability in its handshake; there, hierarchy bounds and spec sizes
+are both points, so nothing is converted (see the
+[iOS overlay agent](../ios/overlay-agent.md#anchors)).
+
+The renderer lays an anchored node at its screen rectangle by subtracting the window's
+screen origin and the node's own position inside the window (cutout, system bars, the
+fullscreen host row, safe-area and authored padding). An anchored node below the root
+is drawn in a window-level layer above the author tree (modal content: above its modal),
+so its parent neither reserves a slot for it nor clips it, and its touch target and
+accessibility bounds are where it is drawn (#10803). It is shown while all its
+ancestors are; it does not inherit their opacity. Cover sizes the
+node to the bounds, ignoring authored width/height. Window size is determined by
+placement/content, not by implicitly resizing to an anchor:
+
+- fullscreen and sheet windows take anchors on any node; content outside the window
+  (above a bottom sheet, or under the fullscreen host row) is clipped;
+- a floating window moves onto its anchored root (top-start gravity, x/y in screen px)
+  and stays content-sized, so the rest of the app remains touchable. Only the root of a
+  floating window may be anchored; the host refuses an anchor below it.
 
 ## Safe area and IME
 
@@ -709,14 +915,84 @@ window while locked or noninteractive and restore the same runtime on unlock;
 no dismissal event is emitted for temporary hiding. Own-package accessibility
 events are dropped before hierarchy debouncing and navigation tracking.
 
-Deferred: foreground-package scoping needs a reliable application-window policy;
-`package_event` reports package installation/removal, while window-state events
-also include IME, dialogs and System UI. Secure app-window detection has no trusted
-existing signal. Automatic bottom-sheet IME movement/yield is also deferred:
-node-level inset selection exists, but smaller edge-to-edge sheet windows do not
-yet have verified keyboard geometry. Existing explicit `safeAreaPadding` behavior
-is preserved. Device checks must cover keyguard timing, daemon death, pager page 3
+### Foreground scoping (#10261, owner decision 2026-10-09)
+
+A session overlay is tied to the app (package) it was shown over, matching the iOS
+agent, which lives inside the app. When that app leaves the foreground the window is
+hidden (state, pages and the idle TTL are kept; no `dismissed` event, no sequence
+allocation) and when the app returns the same runtime is shown again. A
+`window.persistence: "device"` overlay is a standalone mock and is not tied to an app.
+
+- **Anchor.** Each `show` (including an in-place replace) reads the application
+  window in front (the active application-type accessibility window, else the topmost)
+  and clears any suspension. If no application window qualifies, the overlay is
+  unscoped and stays up everywhere.
+- **Signal.** `TYPE_WINDOW_STATE_CHANGED` events already delivered to CtrlProxy; no new
+  poller. An event moves the foreground only when its window is `TYPE_APPLICATION`
+  and its package is not CtrlProxy's own and not in the ignore set. IME, dialogs of
+  type system, accessibility overlays (this overlay's own windows) and the shade
+  are therefore never candidates. Ignore set: `com.android.systemui`,
+  `com.google.android.permissioncontroller`, `com.android.permissioncontroller`,
+  `com.google.android.packageinstaller`, `com.android.packageinstaller`, `android`
+  (resolver, ANR and crash dialogs). A dialog of the same app is the same package.
+  An event whose window type cannot be read is ignored (fails open: nothing hides).
+- **Debounce.** A flip, either way, applies only after the new state holds for 400 ms
+  (`OVERLAY_FOREGROUND_DEBOUNCE_MILLIS`), so a transient window does not flicker it.
+- **Hidden means gone.** The window is removed, so it takes no touches and is absent
+  from `observe`. `inspect` reports `suspended: true` on the overlay entry, and the
+  hierarchy capture carries top-level `overlaySuspended: true`, so `layer: "overlay"`
+  calls fail with "hidden because the app it was shown over is not in front" instead
+  of "no overlay is showing".
+  The host stores `suspended` from `inspect` and surfaces it on `overlay` status
+  entries (host-local, so it is as fresh as the last `inspect`; a new `show` or an
+  `inspect` after the app returns clears it), and an `awaitEvent` that times out on
+  a suspended overlay carries the same explanation as a `warning`. Absent on iOS.
+- **Separate from other hides.** Suspension is its own state
+  (`OverlayForegroundTracker.suspended`). The host's `isBlocked` is the lock-screen
+  check OR suspension, so any restore path (unlock, relayout, or a future capture-time
+  hide from #9305) that calls `show` while suspended is refused; a capture restore
+  can never re-show a suspended overlay, and ending suspension does not undo a
+  capture hide held by another component.
+- Dismissal, TTL expiry and teardown release the anchor. A hidden overlay still
+  expires on its idle TTL.
+
+Deferred: secure-window detection has no trusted existing signal.
+
+### Bottom sheet and the keyboard (#10262)
+
+Owner decision 2026-10-09: a bottom sheet moves above the keyboard whenever the keyboard
+is shown and returns to the screen edge when it hides.
+
+- **Scope.** Only a `sheet` window with `edge: "bottom"`. Fullscreen, floating, dialog,
+  top and side sheet windows never move. A `bottomSheet` node lives inside its window
+  and rides with it; it needs no separate handling.
+- **Source.** The input-method window's bounds from the accessibility window list
+  (`TYPE_INPUT_METHOD`), not the overlay window's `WindowInsets.Type.ime()`. Overlay
+  windows are `TYPE_ACCESSIBILITY_OVERLAY` windows that are not the IME target, and the
+  platform dispatches the IME inset only to the IME target, so a sheet over another app's
+  field would read 0. The service sees the keyboard window whichever app owns the field.
+  The lift is `screenBottom - ime.top` (0 when no input-method window has bounds).
+  This follows from platform behaviour and is unit-tested with fake bounds; the API
+  30/34/36 device check in the issue is still open.
+- **Mechanism.** The host relayouts on the window events it already receives
+  (`TYPE_WINDOWS_CHANGED`), setting the bottom-gravity window's `y` to the lift (a positive
+  `y` raises a bottom-gravity window). Moving the window moves its touch region with it;
+  touch-through and the foreground-suspension and capture hides are unchanged because
+  they act on the same params and `isBlocked`.
+- **No system panning.** A bottom sheet sets `SOFT_INPUT_ADJUST_NOTHING`, so a sheet that
+  owns the focused text field is not also resized or panned by the platform.
+- **Motion.** The position jumps. The accessibility source reports no per-frame values,
+  so it cannot follow the keyboard's slide (`WindowInsetsAnimation` only reaches the IME
+  target). `motion: "none"` therefore has nothing to disable here.
+- **Explicit padding.** `safeAreaPadding` with `ime` still applies inside the window;
+  on a lifted sheet it reads 0 for a non-IME-target window, so it does not double-count.
+
+Device checks must cover keyguard timing, daemon death, pager page 3
 across rotation, fold/display removal, and API 30/34/36 keyboard/cutout geometry.
+
+This is Android only. The iOS agent does not lift a sheet above the keyboard, and whether to
+rely on UIKit keyboard avoidance or match this behaviour is an open decision (see
+[iOS overlay agent](../ios/overlay-agent.md#open-decisions)).
 
 ## Rejection paths and deterministic first error
 
@@ -870,6 +1146,10 @@ JSON decoders retain the last value. They are not unknown fields.
   }
 }
 ```
+
+The committed `doc-example-3` fixture is this example verbatim. The renderer refuses an unresolved
+element anchor, so the screenshot gallery substitutes a fixed resolved `bounds` anchor (same
+alignment) before rendering; only the host resolves selectors.
 
 ## Shared verification and sibling updates
 

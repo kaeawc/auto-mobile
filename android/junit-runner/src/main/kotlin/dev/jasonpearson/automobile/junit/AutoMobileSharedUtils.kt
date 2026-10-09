@@ -279,7 +279,7 @@ constructor(
         println("ADB server issue detected (attempt $attempt/$MAX_RETRIES)")
         if (attempt == MAX_RETRIES) {
           println(
-            "ADB server failed to start after $MAX_RETRIES attempts. This may be a CI environment issue."
+            "ADB server failed to start after $MAX_RETRIES attempts. This may be a CI environment issue.",
           )
         }
       }

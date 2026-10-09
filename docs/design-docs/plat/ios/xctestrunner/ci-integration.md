@@ -254,7 +254,9 @@ and `testDebugUnitTest --tests '*.automobiletest.*'` runs the AutoMobile tests.
 
 ## Caching strategy
 
-The `ios-xctest-runner-simulator-tests` job restores two cache layers before its
+The `ios-xctest-runner-simulator-tests` job (`.github/workflows/xctestrunner-simulator-tests.yml`,
+run on PRs labelled `run-ios-sim`; its nightly run is the CircleCI `xctestrunner-simulator-tests`
+job in `.circleci/continue_config.yml`, #11010) restores two cache layers before its
 `build-for-testing` invocation. It resolves the CtrlProxy package after restore, so a manifest
 change still fetches any newly introduced dependency before the cached DerivedData is reused:
 
@@ -268,8 +270,8 @@ restores compiled artifacts from this lane. Source changes fall back to the prio
 entry for incremental compilation.
 
 Because [`actions/cache` never updates an existing key](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#cache-key-matching),
-every DerivedData `hashFiles(...)` call — here and in the analogous Xcode-build, Playground, and
-nightly/merge sweep jobs — must cover every compiled, configuration, and resource input for the
+every DerivedData `hashFiles(...)` call — here and in the analogous Xcode-build and Playground
+jobs — must cover every compiled, configuration, and resource input for the
 scoped project directory, not just `*.swift` sources and the project descriptor. Restricting the
 hash to Swift files means an Objective-C shim, an `.xcconfig`, `Info.plist`, an asset catalog, a
 font, or a storyboard/xib can change while the key still hits exactly, so the freshly rebuilt

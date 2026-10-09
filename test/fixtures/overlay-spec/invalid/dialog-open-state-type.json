@@ -1,0 +1,13 @@
+{
+  "spec": {
+    "id": "a",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": { "open": "yes" },
+    "root": {
+      "type": "dialog",
+      "openWhen": { "key": "open", "equals": true },
+      "confirm": { "label": "OK" }
+    }
+  },
+  "expectedPath": "root.openWhen.key"
+}

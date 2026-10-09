@@ -77,8 +77,8 @@ class TestFacetTest {
                 listOf(
                   run("1", "testLoginFlow", startTime = 100),
                   run("2", "testSignupValidation", status = TestStatus.Failed, startTime = 200),
-                )
-              )
+                ),
+              ),
             ),
         )
       }

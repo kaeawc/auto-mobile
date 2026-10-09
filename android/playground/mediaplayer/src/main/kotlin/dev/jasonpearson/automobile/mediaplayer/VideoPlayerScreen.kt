@@ -325,7 +325,7 @@ fun ExoPlayerView(
         setControllerVisibilityListener(
           PlayerView.ControllerVisibilityListener { visibility ->
             onControlsVisibilityChanged(visibility == View.VISIBLE)
-          }
+          },
         )
       }
     },
@@ -388,7 +388,7 @@ enum class VideoData(
     // Use a publicly available MP4 for better codec compatibility
     VideoResource.RawVideo(R.raw.automobile_portrait, R.raw.automobile_landscape),
     "00:32",
-  )
+  ),
 }
 
 private fun formatTime(timeMs: Long): String {

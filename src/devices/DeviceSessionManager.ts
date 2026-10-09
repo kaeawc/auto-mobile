@@ -24,6 +24,12 @@ import {
   defaultAdbClientFactory,
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import {
+  getSharedDevicectlDeviceLister,
+  type IosPhysicalDeviceLister,
+} from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
+import { type DiscoverySource, discoverySourceFor } from "../utils/discoverySource";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { Window as WindowImpl } from "../features/observe/Window";
 import type { Window } from "../features/observe/interfaces/Window";
@@ -50,10 +56,12 @@ import {
   applyAppearanceOnConnect,
   type AppearanceOnConnectDependencies,
 } from "../server/applyAppearanceOnConnect";
+import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { disableStylusHandwriting } from "../utils/disableStylusHandwriting";
 import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
 import { RunnerReadinessError, RunnerReadinessService } from "../ctrlProxy/RunnerReadinessService";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { serverConfig } from "../utils/ServerConfig";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../utils/runnerReadinessConfig";
 import { trackProcess, waitForExit } from "../utils/ChildProcessTracker";
@@ -122,6 +130,11 @@ export interface DeviceClientProvider {
   getSimctl(): SimCtlClient | undefined;
   getAndroidEmulator(): AndroidEmulatorClient | undefined;
   getDeviceUtils(): PlatformDeviceManager;
+  /**
+   * Connected physical iOS device discovery for readiness scans (#11063).
+   * Optional: a provider without one leaves the `ios-physical` source unscanned.
+   */
+  getIosPhysicalDeviceLister?(): IosPhysicalDeviceLister | undefined;
   getAndroidCtrlProxyManager(device: BootedDevice): CtrlProxyManager;
   getAndroidCtrlProxyClient(device: BootedDevice): AndroidCtrlProxy;
   getIOSCtrlProxyManager(device: BootedDevice): CtrlProxyIosManager;
@@ -179,6 +192,12 @@ export class DefaultDeviceClientProvider implements DeviceClientProvider {
       );
     }
     return this._deviceUtils;
+  }
+
+  getIosPhysicalDeviceLister(): IosPhysicalDeviceLister {
+    // Shared with every MultiPlatformDeviceManager so readiness scans reuse the
+    // devicectl cache and last-good retention instead of spawning their own.
+    return getSharedDevicectlDeviceLister();
   }
 
   getAndroidCtrlProxyManager(device: BootedDevice): CtrlProxyManager {
@@ -279,7 +298,10 @@ export interface DeviceSessionManager {
    * Detect the platform of connected devices
    */
   detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]>;
-  detectConnectedPlatformsWithStatus(signal?: AbortSignal): Promise<ConnectedPlatformScan>;
+  detectConnectedPlatformsWithStatus(
+    signal?: AbortSignal,
+    options?: ConnectedPlatformScanOptions,
+  ): Promise<ConnectedPlatformScan>;
 
   /**
    * Verify a specific device is connected and ready for the given platform.
@@ -321,7 +343,25 @@ export interface DeviceSessionManager {
 
 export interface ConnectedPlatformScan {
   devices: BootedDevice[];
+  /** A platform is scanned when at least one of its discovery sources completed. */
   scanned: Record<Platform, boolean>;
+  /**
+   * Per-source completeness (#11063). iOS has two independent sources, so a
+   * pinned device's absence is authoritative only when its own source
+   * completed. Absent for producers that report platforms only.
+   */
+  scannedSources?: Partial<Record<DiscoverySource, boolean>>;
+}
+
+/**
+ * True when `scan` completed the discovery source that would have observed
+ * `device`, so the device's absence from `scan.devices` proves it is gone.
+ */
+export function isScanAuthoritativeFor(scan: ConnectedPlatformScan, device: BootedDevice): boolean {
+  if (!scan.scannedSources) {
+    return scan.scanned[device.platform];
+  }
+  return scan.scannedSources[discoverySourceFor(device.platform, device.deviceId)] === true;
 }
 
 export type DeviceReadinessLevel = "booted" | "automationReady";
@@ -367,7 +407,17 @@ export interface DeviceReadyOptions {
   skipAccessibilitySetup?: boolean;
 }
 
+export interface ConnectedPlatformScanOptions {
+  /** An Android-only caller never waits on (or scans) the physical iOS lister (#11077). */
+  platform?: SomePlatform;
+}
+
+/** Readiness budget for the shared devicectl sweep; a wedged CoreDevice must not stall callers (#11077). */
+export const PHYSICAL_IOS_SCAN_BUDGET_MS = 3_000;
+
 export interface DeviceSessionManagerOptions {
+  /** Overrides {@link PHYSICAL_IOS_SCAN_BUDGET_MS}. */
+  physicalIosScanBudgetMs?: number;
   appearanceOnConnectDependencies?: Partial<AppearanceOnConnectDependencies>;
   admissionGate?: DeviceAdmissionGate;
   executionBinding?: DeviceExecutionBinding;
@@ -402,6 +452,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
   private readonly adbFactory: AdbClientFactory;
   private readonly runnerReadinessService: RunnerReadinessService;
   private readonly runnerReadinessTimer: Timer;
+  private readonly physicalIosScanBudgetMs: number;
   private readonly runnerReadinessTimeoutMs: number | undefined;
   private readonly runnerProvisionTimeoutMs: number | undefined;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
@@ -424,6 +475,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     this.provider = provider;
     this.adbFactory = adbFactory;
     this.runnerReadinessTimer = options.runnerReadinessTimer ?? defaultTimer;
+    this.physicalIosScanBudgetMs = options.physicalIosScanBudgetMs ?? PHYSICAL_IOS_SCAN_BUDGET_MS;
     this.idGenerator = options.idGenerator ?? defaultIdGenerator;
     this.appearanceOnConnectDependencies = options.appearanceOnConnectDependencies;
     this.runnerReadinessTimeoutMs = options.runnerReadinessTimeoutMs;
@@ -537,9 +589,14 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
   public async detectConnectedPlatformsWithStatus(
     signal?: AbortSignal,
+    options?: ConnectedPlatformScanOptions,
   ): Promise<ConnectedPlatformScan> {
     const devices: BootedDevice[] = [];
-    const scanned = { android: false, ios: false };
+    const scannedSources: Record<DiscoverySource, boolean> = {
+      android: false,
+      "ios-simulator": false,
+      "ios-physical": false,
+    };
     const perf = createGlobalPerformanceTracker();
 
     try {
@@ -548,29 +605,89 @@ export class DeviceSessionManager implements DeviceSessionManager {
       const androidDevices = await this.adb.getBootedAndroidDevices({ signal });
       perf.endOperation("androidDeviceScan");
       devices.push(...androidDevices);
-      scanned.android = true;
+      scannedSources.android = true;
     } catch (error) {
       perf.endOperation("androidDeviceScan");
       signal?.throwIfAborted();
       logger.warn(`Failed to detect Android devices: ${error}`);
     }
 
-    try {
-      // Check for iOS devices/simulators via xcrun simctl
-      if (this.simctl) {
-        perf.startOperation("iosSimulatorScan");
-        const iosDevices = await this.simctl.getBootedSimulators(undefined, signal);
-        perf.endOperation("iosSimulatorScan");
-        devices.push(...iosDevices);
-        scanned.ios = true;
-      }
-    } catch (error) {
-      perf.endOperation("iosSimulatorScan");
-      signal?.throwIfAborted();
-      logger.warn(`Failed to detect iOS devices: ${error}`);
-    }
+    const [simulators, physical] = await Promise.all([
+      this.scanBootedSimulators(perf, signal),
+      this.scanPhysicalIosDevices(options?.platform, signal),
+    ]);
+    signal?.throwIfAborted();
+    // Simulator entries win on overlap: they carry richer runtime metadata.
+    const seen = new Set(simulators.devices.map((device) => device.deviceId));
+    devices.push(
+      ...simulators.devices,
+      ...physical.devices.filter((device) => !seen.has(device.deviceId)),
+    );
+    scannedSources["ios-simulator"] = simulators.complete;
+    scannedSources["ios-physical"] = physical.complete;
 
-    return { devices, scanned };
+    return {
+      devices,
+      scanned: {
+        android: scannedSources.android,
+        ios: scannedSources["ios-simulator"] || scannedSources["ios-physical"],
+      },
+      scannedSources,
+    };
+  }
+
+  /**
+   * Booted simulators via the checked listing: a failed `simctl` call leaves
+   * the source unscanned rather than reading as "no simulators" (#11063).
+   */
+  private async scanBootedSimulators(
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
+    signal?: AbortSignal,
+  ): Promise<{ devices: BootedDevice[]; complete: boolean }> {
+    if (!this.simctl) {
+      return { devices: [], complete: false };
+    }
+    perf.startOperation("iosSimulatorScan");
+    try {
+      const devices = await this.simctl.getBootedSimulatorsChecked(undefined, signal);
+      return { devices, complete: true };
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(`Failed to detect iOS simulators: ${error}`);
+      return { devices: [], complete: false };
+    } finally {
+      perf.endOperation("iosSimulatorScan");
+    }
+  }
+
+  /**
+   * Connected physical iOS devices via the shared devicectl lister. Retained
+   * devices from an incomplete listing still resolve, but the source counts as
+   * scanned only when devicectl reported a complete listing (#11063).
+   */
+  private async scanPhysicalIosDevices(
+    platform?: SomePlatform,
+    signal?: AbortSignal,
+  ): Promise<{ devices: BootedDevice[]; complete: boolean }> {
+    const lister = this.provider.getIosPhysicalDeviceLister?.();
+    if (!lister || platform === "android") {
+      return { devices: [], complete: false };
+    }
+    try {
+      // The lister run is shared and uncancellable; losing the race leaves it running.
+      const discovery = await raceWithDeadline(() => lister.listConnectedDevices(), {
+        timer: this.runnerReadinessTimer,
+        timeoutMs: this.physicalIosScanBudgetMs,
+        signal,
+        label: "Physical iOS device scan",
+      });
+      return { devices: discovery.devices, complete: discovery.complete };
+    } catch (error) {
+      signal?.throwIfAborted();
+      // The lister contract is non-throwing; a misbehaving one must not fail the scan.
+      logger.warn(`Failed to detect physical iOS devices: ${errorMessage(error)}`);
+      return { devices: [], complete: false };
+    }
   }
 
   /**
@@ -590,9 +707,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
 
     // Detect all connected devices
-    const result = await this.getReadinessScan(options);
-    const { devices: connectedPlatforms, scanned } = this.normalizeReadinessScan(result);
-    this.reconcileReadinessPin(connectedPlatforms, scanned);
+    const result = await this.getReadinessScan(platform, options);
+    const scan = this.normalizeReadinessScan(result);
+    const connectedPlatforms = scan.devices;
+    this.reconcileReadinessPin(scan);
     logger.info(`Found ${connectedPlatforms.length} connectedPlatform devices`);
     const androidDevices = connectedPlatforms.filter((device) => device.platform === "android");
     logger.info(`Found ${androidDevices.length} android devices`);
@@ -705,9 +823,17 @@ export class DeviceSessionManager implements DeviceSessionManager {
       selectedDevice = await this.findOrStartDevice(resolvedPlatform, options);
     }
 
+    // A cancelled call (e.g. another session acquired the device, #10905) stops before each
+    // device-mutating step: the current-device pin and the settings writes.
+    options?.signal?.throwIfAborted();
     this.setCurrentDevice(selectedDevice, resolvedPlatform);
     if (deviceSource !== "current") {
-      await applyAppearanceOnConnect(selectedDevice, this.appearanceOnConnectDependencies);
+      await applyAppearanceOnConnect(
+        selectedDevice,
+        this.appearanceOnConnectDependencies,
+        resolveAppearanceSessionKey(options?.sessionId),
+      );
+      options?.signal?.throwIfAborted();
       await disableStylusHandwriting(selectedDevice, this.adbFactory);
     }
     logger.info(`[DeviceSessionManager] Using ${deviceSource} device: ${selectedDevice.deviceId}`);
@@ -753,22 +879,20 @@ export class DeviceSessionManager implements DeviceSessionManager {
   }
 
   private getReadinessScan(
+    platform: SomePlatform,
     options?: DeviceReadyOptions,
   ): Promise<BootedDevice[] | ConnectedPlatformScan> {
     return options?.getConnectedPlatforms
       ? options.getConnectedPlatforms()
-      : this.detectConnectedPlatformsWithStatus(options?.signal);
+      : this.detectConnectedPlatformsWithStatus(options?.signal, { platform });
   }
 
-  private reconcileReadinessPin(
-    connectedPlatforms: BootedDevice[],
-    scanned: ConnectedPlatformScan["scanned"],
-  ): void {
+  private reconcileReadinessPin(scan: ConnectedPlatformScan): void {
     const pinnedDevice = this.explicitDevicePin;
     if (
       pinnedDevice &&
-      scanned[pinnedDevice.platform] &&
-      !connectedPlatforms.some(
+      isScanAuthoritativeFor(scan, pinnedDevice) &&
+      !scan.devices.some(
         (device) =>
           device.deviceId === pinnedDevice.deviceId && device.platform === pinnedDevice.platform,
       )
@@ -1067,6 +1191,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
       const [isInstalled, isEnabled] = await perf.track("checkStatus", () =>
         Promise.all([manager.isInstalled(), manager.isEnabled()]),
       );
+      // Enabling or installing CtrlProxy mutates the device; a cancelled call stops here (#10905).
+      options?.signal?.throwIfAborted();
 
       state.needsSetup = false;
 
@@ -1121,13 +1247,15 @@ export class DeviceSessionManager implements DeviceSessionManager {
       }
 
       if (state.needsSetup || !isInstalled) {
+        options?.signal?.throwIfAborted();
         await this.setupAndroidService(deviceId, manager, accessibilityClient, perf, state);
       }
     } catch (error) {
       const errorMsg = errorMessage(error);
       logger.error(`[DeviceSessionManager] Failed to setup accessibility service: ${errorMsg}`);
-      // Rethrow ActionableErrors to preserve their specific error messages
-      if (error instanceof ActionableError) {
+      // Rethrow ActionableErrors to preserve their specific error messages, and cancellation so
+      // readiness does not go on to pin and configure the device (#10905).
+      if (error instanceof ActionableError || options?.signal?.aborted) {
         throw error;
       }
     } finally {
@@ -1352,6 +1480,20 @@ export class DeviceSessionManager implements DeviceSessionManager {
    */
   public async verifyIosDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void> {
     options?.signal?.throwIfAborted();
+    if (isIosPhysicalUdid(deviceId)) {
+      return await this.verifyPhysicalIosDevice(
+        deviceId,
+        options?.readiness ?? "automationReady",
+        options,
+      );
+    }
+    return await this.verifySimulatorIosDevice(deviceId, options);
+  }
+
+  private async verifySimulatorIosDevice(
+    deviceId: string,
+    options?: DeviceReadyOptions,
+  ): Promise<void> {
     const readiness = options?.readiness ?? "automationReady";
     // An explicit runner override that cannot be used must fail closed before any
     // other path, whatever the simulator/runner state. Every downstream branch
@@ -1392,6 +1534,49 @@ export class DeviceSessionManager implements DeviceSessionManager {
     };
 
     await this.ensureIosRunnerReady(deviceId, device, options);
+  }
+
+  /**
+   * Readiness for a physical iPhone UDID (#11075). The simulator checks do not
+   * apply: connection is proven by the shared devicectl listing, and automation
+   * readiness needs the signed on-device runner, whose setup belongs to a session
+   * acquired through getApple.
+   */
+  private async verifyPhysicalIosDevice(
+    deviceId: string,
+    readiness: DeviceReadinessLevel,
+    options?: DeviceReadyOptions,
+  ): Promise<void> {
+    const device = await this.findConnectedPhysicalIosDevice(deviceId, options?.signal);
+    if (readiness === "automationReady" && !options?.sessionId) {
+      throw new ActionableError(
+        `Physical iPhone ${deviceId} is connected but has no prepared CtrlProxy runner. ` +
+          "Acquire the iPhone with getApple first; signed-runner setup cannot run on a sessionless call.",
+      );
+    }
+    if (readiness === "booted") {
+      return;
+    }
+    this.assertUsableIosOverride(await checkIosCtrlProxyOverride());
+    await this.ensureIosRunnerReady(deviceId, device, options);
+  }
+
+  private async findConnectedPhysicalIosDevice(
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<BootedDevice> {
+    const discovery = await this.provider.getIosPhysicalDeviceLister?.()?.listConnectedDevices();
+    signal?.throwIfAborted();
+    const device = discovery?.devices.find((candidate) => candidate.deviceId === deviceId);
+    if (device) {
+      return device;
+    }
+    const incomplete =
+      discovery && !discovery.complete ? ` (devicectl: ${discovery.error.message})` : "";
+    throw new ActionableError(
+      `Physical iPhone ${deviceId} is not connected or not reachable through devicectl${incomplete}. ` +
+        "Connect, unlock, and trust the device, then acquire it with getApple.",
+    );
   }
 
   private assertIosDeviceAvailable(

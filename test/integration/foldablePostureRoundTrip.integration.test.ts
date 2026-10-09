@@ -4,17 +4,18 @@ import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import type { ObserveResult, SkeletonElement } from "../../src/models/ObserveResult";
+import type { ObserveResult } from "../../src/models/ObserveResult";
 import type { VideoRecordingMetadata } from "../../src/models/VideoRecording";
 import { readImageHeaderDimensions } from "../../src/utils/screenshot/imageHeaderDimensions";
 import {
-  assertContainerDurationSpans,
+  assertContainerDurationReachesReopen,
   assertRecordingSpansObservation,
   awaitScreenSizeChange,
   probeContainerDurationMs,
   runCleanupSteps,
   selectErrorToThrow,
 } from "./foldableRecordingSpan";
+import { freshTapTarget, type TapTarget } from "./foldableTapTarget";
 
 const runLane = process.env.AUTOMOBILE_FOLDABLE_LANE === "1";
 const describeLane = runLane ? describe : describe.skip;
@@ -36,6 +37,11 @@ interface SessionResult {
 interface ActionResult {
   success?: boolean;
   error?: string;
+}
+
+interface PostureResult {
+  locked?: boolean;
+  keyguardDismissed?: boolean;
 }
 
 interface RecordingResult {
@@ -162,8 +168,8 @@ async function setPosture(
   sessionUuid: string,
   posture: "opened" | "closed" | "rear_display",
   displayPreset?: "phone" | "unfolded",
-): Promise<void> {
-  await tool(sessionUuid, "setPosture", [
+): Promise<PostureResult> {
+  return tool<PostureResult>(sessionUuid, "setPosture", [
     "--posture",
     posture,
     ...(displayPreset ? ["--displayPreset", displayPreset] : []),
@@ -198,19 +204,8 @@ async function tapAt(sessionUuid: string, x: number, y: number): Promise<ActionR
   return tool<ActionResult>(sessionUuid, "tapAt", ["--x", String(x), "--y", String(y)]);
 }
 
-function tapPoint(observation: ObserveResult): { x: number; y: number; target: SkeletonElement } {
-  const target = observation.skeleton?.find(
-    (item) =>
-      item.affordances.includes("tap") &&
-      item.bounds[2] > item.bounds[0] &&
-      item.bounds[3] > item.bounds[1] &&
-      item.label,
-  );
-  if (!target) {
-    throw new Error("No labeled tappable element on the active panel");
-  }
-  const [left, top, right, bottom] = target.bounds;
-  return { x: Math.floor((left + right) / 2), y: Math.floor((top + bottom) / 2), target };
+function tapPoint(observation: ObserveResult): TapTarget {
+  return freshTapTarget(observation.skeleton);
 }
 
 async function assertStaleTap(sessionUuid: string, previous: ObserveResult): Promise<void> {
@@ -227,7 +222,10 @@ async function assertFreshTap(sessionUuid: string, current: ObserveResult): Prom
   expect(fresh.x).toBeLessThan(fresh.target.bounds[2]);
   expect(fresh.y).toBeGreaterThanOrEqual(fresh.target.bounds[1]);
   expect(fresh.y).toBeLessThan(fresh.target.bounds[3]);
-  expect((await tapAt(sessionUuid, fresh.x, fresh.y)).success).toBe(true);
+  const result = await tapAt(sessionUuid, fresh.x, fresh.y);
+  // Assert the error first so a failed tap reports why (the nightly lane only printed success).
+  expect(result.error).toBeUndefined();
+  expect(result.success).toBe(true);
 }
 
 describeLane("foldable posture round trips through the daemon", () => {
@@ -239,25 +237,29 @@ describeLane("foldable posture round trips through the daemon", () => {
     try {
       await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
       const opened = await expectPanel(sessionUuid, inner, isFold ? "inner" : undefined, "opened");
-      await setPosture(sessionUuid, "closed", isFold ? undefined : "phone");
-      await assertStaleTap(sessionUuid, opened);
-      const closed = await expectPanel(sessionUuid, cover, isFold ? "cover" : undefined, "closed");
-      if (!isFold) {
-        expect(closed.screenSize).not.toEqual(opened.screenSize);
+      const fold = await setPosture(sessionUuid, "closed", isFold ? undefined : "phone");
+      // Folding raises the "Swipe up to continue" keyguard on a device with no lock credential, and
+      // reopening keeps it up. setPosture dismisses it because the device was unlocked before.
+      if (isFold) {
+        expect(fold.keyguardDismissed).toBe(true);
       }
-      expect(closed.deviceLock?.locked).toBe(true);
-      const wake = await tool<ActionResult>(sessionUuid, "wakeAndUnlock");
-      expect(wake.success).toBe(true);
+      expect(fold.locked).toBe(false);
+      await assertStaleTap(sessionUuid, opened);
       const unlocked = await expectPanel(
         sessionUuid,
         cover,
         isFold ? "cover" : undefined,
         "closed",
       );
+      if (!isFold) {
+        expect(unlocked.screenSize).not.toEqual(opened.screenSize);
+      }
       expect(unlocked.deviceLock?.locked).toBe(false);
       await assertFreshTap(sessionUuid, unlocked);
 
-      await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
+      expect(
+        (await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded")).locked,
+      ).toBe(false);
       await assertStaleTap(sessionUuid, unlocked);
       const reopened = await expectPanel(
         sessionUuid,
@@ -265,6 +267,7 @@ describeLane("foldable posture round trips through the daemon", () => {
         isFold ? "inner" : undefined,
         "opened",
       );
+      expect(reopened.deviceLock?.locked).toBe(false);
       await assertFreshTap(sessionUuid, reopened);
 
       if (isFold) {
@@ -292,6 +295,7 @@ describeLane("foldable posture round trips through the daemon", () => {
     let opened: ObserveResult | undefined;
     let closed: ObserveResult | undefined;
     let reopened: ObserveResult | undefined;
+    let reopenRequestedAtMs: number | undefined;
     let primary: { error: unknown } | undefined;
     try {
       await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
@@ -328,6 +332,8 @@ describeLane("foldable posture round trips through the daemon", () => {
         expect(changed.screenSize).not.toEqual(opened.screenSize);
         closed = await expectPanel(sessionUuid, changed.screenSize, undefined, "closed");
       }
+      // Host clock, like the daemon's recording startedAt.
+      reopenRequestedAtMs = Date.now();
       await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
       reopened = await expectPanel(
         sessionUuid,
@@ -335,6 +341,8 @@ describeLane("foldable posture round trips through the daemon", () => {
         isFold ? "inner" : undefined,
         "opened",
       );
+      // The fold's swipe keyguard must not survive the round trip onto the inner panel.
+      expect(reopened.deviceLock?.locked).toBe(false);
     } catch (error) {
       primary = { error };
     } finally {
@@ -397,10 +405,10 @@ describeLane("foldable posture round trips through the daemon", () => {
     const containerPath = stopped.recordings[0].outputPath ?? metadata.filePath;
     const containerDurationMs = await probeContainerDurationMs(ffprobeRunner, containerPath);
     if (containerDurationMs !== undefined) {
-      assertContainerDurationSpans(
+      assertContainerDurationReachesReopen(
         containerDurationMs,
         Date.parse(metadata.startedAt),
-        Date.parse(reopened.screenshotCapturedAt ?? ""),
+        reopenRequestedAtMs ?? Number.NaN,
       );
     }
     // config.resolution is a requested size, not measured output dimensions;

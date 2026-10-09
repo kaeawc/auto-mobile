@@ -8,7 +8,8 @@ enum SdkHierarchyProbeDecision: Equatable {
     static func decide(
         foregroundBundleId: String,
         cachedBundleId: String?,
-        appState: ObservedAppState?
+        appState: ObservedAppState?,
+        cacheIsFresh: Bool = true
     )
         -> Self
     {
@@ -21,7 +22,16 @@ enum SdkHierarchyProbeDecision: Equatable {
         if appState != .runningForeground {
             return cachedBundleId == nil ? .skip : .clear
         }
-        return cachedBundleId == nil ? .probe : .skip
+        // A same-app snapshot taken before the XCUITest capture can describe the previous
+        // screen (in-app navigation delivers no SDK event to this runner), so re-fetch it.
+        return cachedBundleId == nil || !cacheIsFresh ? .probe : .skip
+    }
+
+    /// Whether `cached` was taken at or after the XCUITest capture it will be merged into.
+    /// Both stamps are epoch milliseconds (the merger compares them the same way).
+    static func isFresh(cachedTimestamp: Int64?, captureTimestamp: Int64) -> Bool {
+        guard let cachedTimestamp else { return true }
+        return cachedTimestamp >= captureTimestamp
     }
 }
 
@@ -82,6 +92,7 @@ final class CommandHandler: CommandHandling {
     let hingeAngleSetter: any HingeAngleSetting
     let frameContext: FrameContext
     let rotationTimer: any ProxyTimer
+    let hierarchyPairRecorder: (any HierarchyPairRecording)?
 
     init(
         elementLocator: any ElementLocating,
@@ -97,7 +108,8 @@ final class CommandHandler: CommandHandling {
         voiceOverToggle: any VoiceOverToggling = DefaultVoiceOverToggle(),
         hingeAngleSetter: any HingeAngleSetting = DefaultHingeAngleSetter(),
         frameContext: FrameContext = FrameContext(),
-        rotationTimer: any ProxyTimer = SystemTimer()
+        rotationTimer: any ProxyTimer = SystemTimer(),
+        hierarchyPairRecorder: (any HierarchyPairRecording)? = nil
     ) {
         self.elementLocator = elementLocator
         self.gesturePerformer = gesturePerformer
@@ -113,6 +125,7 @@ final class CommandHandler: CommandHandling {
         self.hingeAngleSetter = hingeAngleSetter
         self.frameContext = frameContext
         self.rotationTimer = rotationTimer
+        self.hierarchyPairRecorder = hierarchyPairRecorder
     }
 
     /// Handle an incoming request and return a response.

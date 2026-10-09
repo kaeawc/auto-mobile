@@ -103,13 +103,19 @@ data class OverlayStyle(
   val maxHeight: Double? = null,
   val padding: OverlayPadding? = null,
   val background: String? = null,
-  /** A dp number or a Material Shapes token. */
+  /** A dp number, a Material Shapes token, or per-corner dp radii. */
   val cornerRadius: OverlayCornerRadius? = null,
   val border: OverlayBorder? = null,
   val elevation: Double? = null,
+  /** Hex or colour role tinting the `elevation` shadow; absent keeps the platform shadow colour. */
+  val shadowColor: String? = null,
   val gradient: OverlayGradient? = null,
   val aspectRatio: Double? = null,
+  /** A dp draw offset; it moves the drawn and touchable node without changing its layout slot. */
+  val offset: OverlayOffset? = null,
   val alpha: Double? = null,
+  /** Scale (0.5-1) a tappable node shrinks to while pressed; absent leaves it unscaled. */
+  val pressScale: Double? = null,
   val alignment: String? = null,
   val arrangement: String? = null,
   val spacing: Double? = null,
@@ -118,6 +124,16 @@ data class OverlayStyle(
   val color: String? = null,
   val textAlign: String? = null,
   val maxLines: Int? = null,
+  /** Positive sp between baselines. */
+  val lineHeight: Double? = null,
+  /** sp added between letters; negative tightens. */
+  val letterSpacing: Double? = null,
+  /** `none`, `underline`, `lineThrough` or `underlineLineThrough`. */
+  val textDecoration: String? = null,
+  /** `normal` or `italic`. */
+  val fontStyle: String? = null,
+  /** How text past `maxLines` or its width ends: `clip` (default), `ellipsis` or `visible`. */
+  val overflow: String? = null,
   val fontFamily: OverlayFontFamily? = null,
   /** A Material 3 type role (`titleLarge`, ...); explicit size, weight and family still win. */
   val textStyle: String? = null,
@@ -141,9 +157,18 @@ data class OverlayItem(
 
 @Serializable sealed class OverlayAnchor
 
+/**
+ * Screen-space dp [bounds]. [alignment] (`cover` when absent) lays the node over them or along one
+ * of their edges, then [offset] shifts it. The host resolves an element anchor into this shape, so
+ * it is the only anchor the renderer lays out (#9316).
+ */
 @SerialName("bounds")
 @Serializable
-data class OverlayBoundsAnchor(val bounds: OverlayBounds) : OverlayAnchor()
+data class OverlayBoundsAnchor(
+  val bounds: OverlayBounds,
+  val alignment: String? = null,
+  val offset: OverlayOffset? = null,
+) : OverlayAnchor()
 
 @SerialName("element")
 @Serializable
@@ -214,6 +239,8 @@ data class OverlayDecrementAction(val key: String, val by: Double? = null) : Ove
 sealed class OverlayNode {
   abstract val id: String?
   abstract val testTag: String?
+  /** The node's accessible label; replaces the label derived from its text, icon or kind. */
+  abstract val contentDescription: String?
   abstract val onTap: List<OverlayAction>?
   abstract val style: OverlayStyle?
   abstract val styleWhen: List<OverlayStyleWhen>?
@@ -229,6 +256,7 @@ sealed class OverlayNode {
 data class OverlayBoxNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -245,6 +273,7 @@ data class OverlayBoxNode(
 data class OverlayRowNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -261,6 +290,7 @@ data class OverlayRowNode(
 data class OverlayColumnNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -277,6 +307,7 @@ data class OverlayColumnNode(
 data class OverlayTextNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -292,6 +323,7 @@ data class OverlayTextNode(
 data class OverlayImageNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -308,6 +340,7 @@ data class OverlayImageNode(
 data class OverlayIconNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -325,6 +358,7 @@ data class OverlayIconNode(
 data class OverlaySpacerNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -339,6 +373,7 @@ data class OverlaySpacerNode(
 data class OverlayTextFieldNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -355,6 +390,7 @@ data class OverlayTextFieldNode(
 data class OverlaySwitchNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -371,6 +407,7 @@ data class OverlaySwitchNode(
 data class OverlayCheckboxNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -387,6 +424,7 @@ data class OverlayCheckboxNode(
 data class OverlayButtonNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -406,6 +444,7 @@ data class OverlayButtonNode(
 data class OverlayRadioGroupNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -437,6 +476,7 @@ data class OverlayListItemIcon(val name: String) : OverlayListItemTrailing()
 data class OverlayListItemNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -455,6 +495,7 @@ data class OverlayListItemNode(
 data class OverlaySliderNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -474,6 +515,7 @@ data class OverlaySliderNode(
 data class OverlayChipNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -491,6 +533,7 @@ data class OverlayChipNode(
 data class OverlayCardNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -502,11 +545,241 @@ data class OverlayCardNode(
   val children: List<OverlayNode>,
 ) : OverlayNode()
 
+/** An icon-only control in a `topAppBar`: the icon, its accessible label and its tap. */
+@Serializable
+data class OverlayAppBarAction(
+  val icon: String,
+  val label: String,
+  val onTap: List<OverlayAction>? = null,
+)
+
+/** A `dialog` or `snackbar` button: a tap closes its container, then runs [onTap]. */
+@Serializable
+data class OverlayDialogButton(val label: String, val onTap: List<OverlayAction>? = null)
+
+/** An icon-only Material button; `variant` is standard (default), filled, tonal or outlined. */
+@SerialName("iconButton")
+@Serializable
+data class OverlayIconButtonNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val icon: String,
+  val variant: String = "standard",
+) : OverlayNode()
+
+/** A floating action button; a `label` makes it an extended FAB, which has no `size`. */
+@SerialName("fab")
+@Serializable
+data class OverlayFabNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val icon: String,
+  val label: String? = null,
+  val size: String = "regular",
+) : OverlayNode()
+
+/** A single-select Material segmented button bound to a string state key, like a `radioGroup`. */
+@SerialName("segmentedButton")
+@Serializable
+data class OverlaySegmentedButtonNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val stateKey: String,
+  val options: List<OverlayRadioOption>,
+) : OverlayNode()
+
+/** A Material top app bar with a title, an optional navigation icon and up to three actions. */
+@SerialName("topAppBar")
+@Serializable
+data class OverlayTopAppBarNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val title: String,
+  val variant: String = "small",
+  val navigationIcon: OverlayAppBarAction? = null,
+  val actions: List<OverlayAppBarAction>? = null,
+) : OverlayNode()
+
+/** A Material divider line, horizontal (default) or vertical. */
+@SerialName("divider")
+@Serializable
+data class OverlayDividerNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val orientation: String = "horizontal",
+) : OverlayNode()
+
+/** A Material badge: a small dot, or a short `text` such as a count. */
+@SerialName("badge")
+@Serializable
+data class OverlayBadgeNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val text: String? = null,
+) : OverlayNode()
+
+/**
+ * A Material progress indicator, linear (default) or circular: determinate over 0..[max] when bound
+ * to a number, indeterminate otherwise.
+ */
+@SerialName("progress")
+@Serializable
+data class OverlayProgressNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val variant: String = "linear",
+  val stateKey: String? = null,
+  val max: Double? = null,
+) : OverlayNode()
+
+/**
+ * A Material alert dialog, open while [openWhen] holds. Its buttons and scrim close it by writing
+ * the opposite boolean; [child] is optional custom content between the text and the buttons.
+ */
+@SerialName("dialog")
+@Serializable
+data class OverlayDialogNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val openWhen: OverlaySheetCondition,
+  val title: String? = null,
+  val text: String? = null,
+  val icon: String? = null,
+  val confirm: OverlayDialogButton,
+  val dismiss: OverlayDialogButton? = null,
+  val child: OverlayNode? = null,
+) : OverlayNode()
+
+/**
+ * A Material snackbar at the bottom of the window, shown while [openWhen] holds. Without
+ * [durationMs] it stays until its action closes it or the state changes; with it, it closes itself
+ * by writing the opposite boolean once it has been open that long (a wall-clock timer).
+ */
+@SerialName("snackbar")
+@Serializable
+data class OverlaySnackbarNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val openWhen: OverlaySheetCondition,
+  val text: String,
+  val action: OverlayDialogButton? = null,
+  val durationMs: Int? = null,
+) : OverlayNode()
+
+/** A Material time picker bound to integer hour (0..23) and minute (0..59) state keys. */
+@SerialName("timePicker")
+@Serializable
+data class OverlayTimePickerNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val hourKey: String,
+  val minuteKey: String,
+  val is24Hour: Boolean? = null,
+) : OverlayNode()
+
+/** A Material date picker bound to a `YYYY-MM-DD` string state key. */
+@SerialName("datePicker")
+@Serializable
+data class OverlayDatePickerNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val stateKey: String,
+) : OverlayNode()
+
 @SerialName("scroll")
 @Serializable
 data class OverlayScrollNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -523,6 +796,7 @@ data class OverlayScrollNode(
 data class OverlayPagerNode(
   override val id: String,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -538,6 +812,7 @@ data class OverlayPagerNode(
 data class OverlayTabBarNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -556,6 +831,7 @@ data class OverlayTabBarNode(
 data class OverlayBottomNavNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -573,6 +849,7 @@ data class OverlayBottomNavNode(
 data class OverlayBottomSheetNode(
   override val id: String? = null,
   override val testTag: String? = null,
+  override val contentDescription: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
@@ -607,12 +884,49 @@ data class OverlayWindow(
 
 /**
  * `source = "device"` asks for Android 12+ dynamic colour; `seed` generates a scheme from one
- * colour.
+ * colour. Each Material 3 role field is an explicit hex override applied over that scheme (or the
+ * baseline one) in both light and dark.
  */
 @Serializable
 data class OverlaySpecThemeColors(
   val seed: String? = null,
   val source: String? = null,
+  val primary: String? = null,
+  val onPrimary: String? = null,
+  val primaryContainer: String? = null,
+  val onPrimaryContainer: String? = null,
+  val inversePrimary: String? = null,
+  val secondary: String? = null,
+  val onSecondary: String? = null,
+  val secondaryContainer: String? = null,
+  val onSecondaryContainer: String? = null,
+  val tertiary: String? = null,
+  val onTertiary: String? = null,
+  val tertiaryContainer: String? = null,
+  val onTertiaryContainer: String? = null,
+  val background: String? = null,
+  val onBackground: String? = null,
+  val surface: String? = null,
+  val onSurface: String? = null,
+  val surfaceVariant: String? = null,
+  val onSurfaceVariant: String? = null,
+  val surfaceTint: String? = null,
+  val inverseSurface: String? = null,
+  val inverseOnSurface: String? = null,
+  val error: String? = null,
+  val onError: String? = null,
+  val errorContainer: String? = null,
+  val onErrorContainer: String? = null,
+  val outline: String? = null,
+  val outlineVariant: String? = null,
+  val scrim: String? = null,
+  val surfaceBright: String? = null,
+  val surfaceDim: String? = null,
+  val surfaceContainer: String? = null,
+  val surfaceContainerHigh: String? = null,
+  val surfaceContainerHighest: String? = null,
+  val surfaceContainerLow: String? = null,
+  val surfaceContainerLowest: String? = null,
 )
 
 /** `scale` multiplies every Material type role; `fontFamily` is sans, serif or mono. */

@@ -51,7 +51,7 @@ class RealStorageDataSource(
         ?: run {
           LOG.warn("getDatabases: No clientProvider")
           return Result.Error(
-            IllegalStateException("Not connected to MCP server. Please select a device first.")
+            IllegalStateException("Not connected to MCP server. Please select a device first."),
           )
         }
     val device =
@@ -193,7 +193,7 @@ class RealStorageDataSource(
           rows = rows,
           rowCount = response.total,
           executionTimeMs = 0,
-        )
+        ),
       )
     } catch (e: McpConnectionException) {
       LOG.warn("getTableData: MCP connection error: ${e.message}", e)
@@ -260,7 +260,7 @@ class RealStorageDataSource(
 
   override suspend fun getKeyValueFiles(): Result<List<KeyValueFile>> {
     LOG.info(
-      "getKeyValueFiles: clientProvider=${if (clientProvider != null) "present" else "null"}, deviceId=$deviceId, packageName=$packageName"
+      "getKeyValueFiles: clientProvider=${if (clientProvider != null) "present" else "null"}, deviceId=$deviceId, packageName=$packageName",
     )
 
     val provider =
@@ -268,7 +268,7 @@ class RealStorageDataSource(
         ?: run {
           LOG.warn("getKeyValueFiles: No clientProvider")
           return Result.Error(
-            IllegalStateException("Not connected to MCP server. Please select a device first.")
+            IllegalStateException("Not connected to MCP server. Please select a device first."),
           )
         }
     val device =
@@ -302,7 +302,7 @@ class RealStorageDataSource(
 
       val filesResponse = json.decodeFromString(serializer<McpStorageFilesResponse>(), filesText)
       LOG.info(
-        "getKeyValueFiles: Parsed response, files count=${filesResponse.files.size}, error=${filesResponse.error}"
+        "getKeyValueFiles: Parsed response, files count=${filesResponse.files.size}, error=${filesResponse.error}",
       )
 
       // Check for error in response
@@ -332,7 +332,7 @@ class RealStorageDataSource(
                   entriesText,
                 )
               LOG.info(
-                "getKeyValueFiles: File ${file.name} has ${entriesResponse.entries.size} entries"
+                "getKeyValueFiles: File ${file.name} has ${entriesResponse.entries.size} entries",
               )
               if (entriesResponse.error != null) {
                 return Result.Error(

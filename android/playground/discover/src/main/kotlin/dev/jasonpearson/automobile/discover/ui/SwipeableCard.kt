@@ -78,7 +78,7 @@ fun SwipeableCard(card: SwipeCard, onSwipeAway: () -> Unit) {
                   scale.snapTo(1f)
                 }
               }
-            }
+            },
           ) { change, dragAmount ->
             change.consume()
             coroutineScope.launch {

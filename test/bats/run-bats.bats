@@ -261,6 +261,31 @@ run_runner() {
   [[ "$output" != *"Within-file"* ]]
 }
 
+@test "by default tagged slow files lead the single cross-file pass (#10478)" {
+  local name
+  for name in a-plain b-plain c-plain; do
+    printf '@test "%s" { true; }\n' "$name" > "$FIXTURES/${name}.bats"
+  done
+  printf '# bats file_tags=parallel-within-file\n@test "slow" { true; }\n' \
+    > "$FIXTURES/z-slow.bats"
+  run env \
+    HOME="$FAKE_HOME" \
+    PATH="$STUB_BIN:$PATH" \
+    AUTOMOBILE_BATS_JOBS=4 \
+    AUTOMOBILE_BATS_JOBLOG="$FIXTURES/joblog.tsv" \
+    bash "$SCRIPT" unit "$FIXTURES"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Within-file"* ]]
+  # One GNU Parallel invocation for the parallel pass, no `bats --jobs`.
+  [ "$(grep -c '^parallel:' "$ARGS_FILE")" -eq 1 ]
+  ! grep -q -- '--jobs 4 2>&1' "$ARGS_FILE"
+  # The tagged file is dispatched first despite sorting last by name.
+  [ "$(grep -m1 '^bats:' "$ARGS_FILE")" = "bats:$FIXTURES/z-slow.bats" ]
+  for name in a-plain b-plain c-plain z-slow; do
+    [ "$(grep -c "^bats:$FIXTURES/${name}.bats$" "$ARGS_FILE")" -eq 1 ]
+  done
+}
+
 @test "rejects an invalid within-file jobs override" {
   run env \
     HOME="$FAKE_HOME" \
@@ -294,6 +319,27 @@ run_runner() {
   run_runner nope
   [ "$status" -eq 2 ]
   [[ "$output" == *"Usage:"* ]]
+}
+
+@test "AUTOMOBILE_BATS_SERIAL=1 runs every file serially without invoking parallel" {
+  AUTOMOBILE_BATS_SERIAL=1 run_runner unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"running every BATS file serially"* ]]
+  [ "$(grep -c "^bats:$FIXTURES/unit.bats$" "$ARGS_FILE")" -eq 1 ]
+  [ "$(grep -c "^bats:$FIXTURES/serial.bats$" "$ARGS_FILE")" -eq 1 ]
+  ! grep -q "^parallel:" "$ARGS_FILE"
+}
+
+@test "falls back to serial with a notice when GNU parallel cannot be installed" {
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$STUB_BIN/parallel"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$STUB_BIN/brew"
+  chmod +x "$STUB_BIN/parallel" "$STUB_BIN/brew"
+  run_runner unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"falling back to serial BATS execution"* ]]
+  [ "$(grep -c "^bats:$FIXTURES/unit.bats$" "$ARGS_FILE")" -eq 1 ]
+  [ "$(grep -c "^bats:$FIXTURES/serial.bats$" "$ARGS_FILE")" -eq 1 ]
+  ! grep -q "^parallel:" "$ARGS_FILE"
 }
 
 @test "is_gnu_parallel accepts GNU parallel" {

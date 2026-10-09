@@ -1,4 +1,5 @@
 import { Element } from "../../models/Element";
+import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import { ObserveResult } from "../../models/ObserveResult";
 import { ElementBounds } from "../../models/ElementBounds";
 import {
@@ -24,6 +25,8 @@ export interface IdentifyInteractionsOptions {
   // observeTools.ts); genuinely present on `args` at runtime even though it was
   // missing from this hand-written interface (issue #6252).
   sessionUuid?: string;
+  /** Restrict to the app or the AutoMobile overlay (issue #9305); omit for both. */
+  layer?: HierarchyLayer;
   filter?: {
     types?: InteractionType[];
     minConfidence?: number;

@@ -366,6 +366,11 @@ describe("navigation recorder caller arguments", () => {
     registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => ({ success: true }));
   });
 
+  // Each test counts its own calls; under --randomize either test may run second.
+  beforeEach(() => {
+    record.mockClear();
+  });
+
   afterAll(async () => {
     record?.mockRestore();
     restorePipelineOverrides?.();
@@ -393,7 +398,6 @@ describe("navigation recorder caller arguments", () => {
   });
 
   test("recordToolCall carries the device the tool call runs on", async () => {
-    record.mockClear();
     await registry.getTool("tapOn")!.handler({ text: "Continue" });
     expect(record.mock.calls[0][3]).toBe("fake");
   });

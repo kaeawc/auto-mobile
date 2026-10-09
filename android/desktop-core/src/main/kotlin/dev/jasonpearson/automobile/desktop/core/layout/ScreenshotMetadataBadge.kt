@@ -84,7 +84,7 @@ private fun ScreenshotFallbackBadge(reason: String?, modifier: Modifier = Modifi
     modifier =
       modifier
         .background(Color(0xFFFF9800).copy(alpha = 0.85f), RoundedCornerShape(4.dp))
-        .padding(horizontal = 6.dp, vertical = 3.dp)
+        .padding(horizontal = 6.dp, vertical = 3.dp),
   ) {
     Text(
       text = "Fallback capture",
@@ -114,7 +114,7 @@ private fun ScreenshotSourceLabel(
     modifier =
       modifier
         .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
-        .padding(horizontal = 6.dp, vertical = 3.dp)
+        .padding(horizontal = 6.dp, vertical = 3.dp),
   ) {
     Text(
       text = label,

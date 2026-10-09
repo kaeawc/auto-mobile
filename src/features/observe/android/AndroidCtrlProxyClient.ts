@@ -25,6 +25,8 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 import { logger, type Logger } from "../../../utils/logger";
 import { displayTransitions } from "../DisplayTransition";
 import { linkWindowRoots } from "../linkWindowRoots";
+import { deriveSdkNavigationScreenIdentity } from "../sdkScreenIdentity";
+import type { ScreenIdentity } from "../../../models/ObserveResult";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import { CtrlProxyForwardingLeaseConflictError } from "../shared/CtrlProxyForwardingLeaseConflictError";
 import {
@@ -66,11 +68,13 @@ import {
 } from "../../../utils/ContentHashProvider";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
+import { appWindowsOnly } from "../hierarchyLayer";
 import { isDeepStrictEqual } from "node:util";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../../db/installedAppsCacheWriteCoordinator";
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
+import { isCtrlProxyHostPortFree } from "./ctrlProxyHostPortProbe";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import { combineWithAmbientAbort } from "../../../utils/AbortContext";
@@ -139,6 +143,7 @@ import {
   ANDROID_REQUEST_ID_ECHO_CAPABILITY,
   ANDROID_REQUEST_ID_RESPONSE_TYPES,
   OVERLAY_DISPLAY_CAPABILITY,
+  SCREENSHOT_HIDE_OVERLAY_CAPABILITY,
   OVERLAY_WINDOW_OPTIONS_CAPABILITY,
   OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
   ctrlProxyMissingRequestIdError,
@@ -343,6 +348,7 @@ interface WsScreenshotMessage extends WsMessageBase, ScreenshotPerformanceMetada
   rotation?: number;
   displayId?: number | null;
   panelUniqueId?: string | null;
+  overlaysHidden?: boolean | null;
 }
 
 export interface AndroidDisplayTransition {
@@ -743,6 +749,11 @@ interface WsLaunchIntentResultMessage extends WsMessageBase {
   packageName?: string;
   componentName?: string;
   totalTimeMs?: number;
+}
+
+interface SdkRouteWaiter {
+  sinceMs: number;
+  settle(identity: ScreenIdentity | undefined): void;
 }
 
 interface WsNavigationEventMessage extends WsMessageBase {
@@ -1516,6 +1527,9 @@ const defaultAndroidServiceManagerFactory: AndroidServiceManagerFactory = (devic
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
 const CTRL_PROXY_CLIENT_PURPOSE = "to drive the device through CtrlProxy";
 
+/** adb's bind failure for `forward`: "cannot bind listener: Address already in use". */
+const ADB_FORWARD_ADDRESS_IN_USE_PATTERN = /address already in use|EADDRINUSE/i;
+
 export class AndroidCtrlProxyClient extends DeviceServiceClient implements AndroidCtrlProxy {
   /** Optional observer for display and posture changes. */
   onDisplayTransition?: (event: AndroidDisplayTransition) => void;
@@ -1561,6 +1575,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   forwardClientProbe: ForwardClientConnectionProbe = new HostForwardClientConnectionProbe();
   private static readonly FORWARD_CLIENT_PROBES = 2;
+  private static readonly FORWARD_PORT_ATTEMPTS = 4;
   private static readonly FORWARD_CLIENT_REPROBE_INTERVAL_MS = 1_000;
   private ctrlProxyForwardLeaseReleaseScheduled: boolean = false;
   /** Set when shutdown released this client's lease before its close finished. */
@@ -1633,6 +1648,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Hierarchy navigation detector
   private sdkNavigationAppIds: Set<string> = new Set();
+  /** Newest AutoMobile SDK navigation route per reporting package, as a screen identity. */
+  private sdkScreenIdentities = new Map<
+    string,
+    { identity: ScreenIdentity; receivedAtMs: number }
+  >();
+  /** Callers waiting for a route newer than a given host time, keyed by reporting package. */
+  private sdkScreenIdentityWaiters = new Map<string, Set<SdkRouteWaiter>>();
   private navigationWriteTail: Promise<void> = Promise.resolve();
 
   // Screenshot backoff scheduler
@@ -2078,6 +2100,76 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   public getBootedDeviceIdentity(): BootedDevice {
     return { ...this.device };
+  }
+
+  /**
+   * The newest AutoMobile SDK navigation route the app reported, when the app embeds the SDK.
+   * Single-activity Compose apps name their screens only this way.
+   */
+  public getSdkScreenIdentity(applicationId?: string): ScreenIdentity | undefined {
+    return applicationId ? this.sdkScreenIdentities.get(applicationId)?.identity : undefined;
+  }
+
+  /** Host time (this client's timer) at which the app's newest SDK route arrived. */
+  public getSdkScreenIdentityReceivedAtMs(applicationId: string): number | undefined {
+    return this.sdkScreenIdentities.get(applicationId)?.receivedAtMs;
+  }
+
+  /**
+   * Resolve with the app's SDK route once one newer than `sinceMs` has arrived, or undefined after
+   * `timeoutMs` (or when the app's route is cleared first). Returns at once for a route that
+   * already postdates `sinceMs`.
+   */
+  public awaitSdkScreenIdentityAfter(
+    applicationId: string,
+    sinceMs: number,
+    timeoutMs: number,
+  ): Promise<ScreenIdentity | undefined> {
+    const current = this.sdkScreenIdentities.get(applicationId);
+    if (current && current.receivedAtMs > sinceMs) {
+      return Promise.resolve(current.identity);
+    }
+    return new Promise((resolve) => {
+      const waiters = this.sdkScreenIdentityWaiters.get(applicationId) ?? new Set();
+      this.sdkScreenIdentityWaiters.set(applicationId, waiters);
+      const waiter: SdkRouteWaiter = {
+        sinceMs,
+        settle: (identity) => {
+          this.timer.clearTimeout(handle);
+          waiters.delete(waiter);
+          resolve(identity);
+        },
+      };
+      const handle = this.timer.setTimeout(() => waiter.settle(undefined), timeoutMs);
+      waiters.add(waiter);
+    });
+  }
+
+  /**
+   * Forget the SDK navigation route of an app whose process was replaced (terminated, relaunched
+   * cold, data cleared, crashed), or of every app when none is named (the SDK link was lost). The
+   * next route event the new process reports is the only thing that names its screen again.
+   */
+  public clearSdkScreenIdentity(applicationId?: string): void {
+    const applicationIds = applicationId
+      ? [applicationId]
+      : [...new Set([...this.sdkScreenIdentities.keys(), ...this.sdkScreenIdentityWaiters.keys()])];
+    for (const id of applicationIds) {
+      this.sdkScreenIdentities.delete(id);
+      for (const waiter of [...(this.sdkScreenIdentityWaiters.get(id) ?? [])]) {
+        waiter.settle(undefined);
+      }
+    }
+  }
+
+  private recordSdkScreenIdentity(applicationId: string, identity: ScreenIdentity): void {
+    const receivedAtMs = this.timer.now();
+    this.sdkScreenIdentities.set(applicationId, { identity, receivedAtMs });
+    for (const waiter of [...(this.sdkScreenIdentityWaiters.get(applicationId) ?? [])]) {
+      if (receivedAtMs > waiter.sinceMs) {
+        waiter.settle(identity);
+      }
+    }
   }
 
   /**
@@ -2702,6 +2794,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // Mirrors IOSCtrlProxyClient.onConnectionClosed() clearing `cachedHierarchy`.
     this.cachedHierarchy = null;
     this._hierarchy?.resetConnectionScopedState();
+    // The SDK reports through this link: after a reconnect the app process may be a new one, and a
+    // route from before the gap cannot be told apart from the new process's.
+    this.clearSdkScreenIdentity();
     if (this.transientObserver) {
       return;
     }
@@ -4665,6 +4760,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     sentRequestId: string,
     signal?: AbortSignal,
     displayId?: number,
+    hideOverlays = false,
   ): Promise<void> {
     if (signal?.aborted) {
       // Settle the registration we just made so it neither waits out its
@@ -4676,7 +4772,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       throw new Error("WebSocket not connected");
     }
     const message = serializeCtrlProxyRequest(
-      ctrlProxyRequests.requestScreenshot({ requestId: sentRequestId, displayId }),
+      ctrlProxyRequests.requestScreenshot({
+        requestId: sentRequestId,
+        displayId,
+        // A capability flag, never a request type: the legacy "assume supported" path must not
+        // apply, or an older APK would silently capture with the overlay showing.
+        hideOverlays:
+          hideOverlays && this.supportedCommands?.has(SCREENSHOT_HIDE_OVERLAY_CAPABILITY) === true,
+      }),
     );
     // Shared rate-limit floor accounting (issue #4927): a one-shot screenshot (observe /
     // junit-runner) and the observation-stream scheduler both hit the same rate-limited
@@ -4721,12 +4824,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  /**
+   * `hideOverlays` asks the device to hide its overlay for this capture (#9305); it is sent only
+   * to a CtrlProxy advertising `screenshot_hide_overlay_v1`, and the result's `overlaysHidden`
+   * reports the outcome.
+   */
   async requestScreenshot(
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     suppressObservationStreamPush: boolean = false,
     signal?: AbortSignal,
     displayId?: number,
+    hideOverlays: boolean = false,
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     let suppressedRequestId: string | undefined;
@@ -4763,7 +4872,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       );
 
       await perf.track("sendRequest", () =>
-        this.dispatchScreenshotRequest(sentRequestId, signal, displayId),
+        this.dispatchScreenshotRequest(sentRequestId, signal, displayId, hideOverlays),
       );
 
       removeAbortListener = this.registerPostDispatchAbort(sentRequestId, signal);
@@ -5114,6 +5223,48 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
+   * Run `adb forward` on a host port that was bind-probed just now, moving to the
+   * next free port when the probe fails or adb still reports the port in use
+   * (another forward or process claimed it after allocation, #10795).
+   */
+  private async forwardOnFreeLocalPort(signal?: AbortSignal): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+      const isLastAttempt = attempt >= AndroidCtrlProxyClient.FORWARD_PORT_ATTEMPTS;
+      if (!isLastAttempt && !(await isCtrlProxyHostPortFree(this.localPort))) {
+        logger.info(`[CTRL_PROXY] Local port ${this.localPort} is busy; selecting another port`);
+        await this.moveToNextFreeLocalPort(signal);
+        continue;
+      }
+      try {
+        await this.adb.execute(
+          ["forward", `tcp:${this.localPort}`, `tcp:${PortManager.DEVICE_PORT}`],
+          { signal },
+        );
+        return;
+      } catch (error) {
+        if (isLastAttempt || !ADB_FORWARD_ADDRESS_IN_USE_PATTERN.test(errorMessage(error))) {
+          throw error;
+        }
+        logger.warn(
+          `[CTRL_PROXY] adb forward on tcp:${this.localPort} reported the port in use; retrying on the next port`,
+        );
+        await this.moveToNextFreeLocalPort(signal);
+      }
+    }
+  }
+
+  private async moveToNextFreeLocalPort(signal?: AbortSignal): Promise<void> {
+    const busyPort = this.localPort;
+    PortManager.release(this.portAllocationId);
+    this.localPort = PortManager.allocate(this.portAllocationId, {
+      reservedPorts: [...IOS_CTRL_PROXY_RESERVED_PORTS, busyPort],
+    });
+    if (!(await this.removeCtrlProxyPortForward(this.localPort, signal))) {
+      throw new Error(`Failed to remove existing CtrlProxy forward on tcp:${this.localPort}`);
+    }
+  }
+
+  /**
    * Acquire this device's cross-process forwarding lease, taking it over from a
    * live owner that reports it no longer uses the device (issue #10497).
    */
@@ -5187,11 +5338,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         }
       }
 
-      await perf.track("setupPortForward", () =>
-        this.adb.execute(["forward", `tcp:${this.localPort}`, `tcp:${PortManager.DEVICE_PORT}`], {
-          signal,
-        }),
-      );
+      await perf.track("setupPortForward", () => this.forwardOnFreeLocalPort(signal));
       this.ctrlProxyForwardLease.recordOwnedForward?.(this.localPort);
 
       if (this.closed) {
@@ -5732,6 +5879,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           displayId: message.displayId,
           panelUniqueId: message.panelUniqueId,
           ...screenshotPerformanceMetadataFrom(message),
+          ...(typeof message.overlaysHidden === "boolean"
+            ? { overlaysHidden: message.overlaysHidden }
+            : {}),
         });
       }
     },
@@ -6230,6 +6380,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         }
         if (event.applicationId) {
           this.sdkNavigationAppIds.add(event.applicationId);
+          const identity = deriveSdkNavigationScreenIdentity("android", event.applicationId, event);
+          if (identity) {
+            this.recordSdkScreenIdentity(event.applicationId, identity);
+          }
           // Eagerly resolve build/device provenance for this app (#4984).
           // Non-blocking: later events pick up the resolved build key; this
           // event may still record under the default key.
@@ -6327,6 +6481,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     crash_event: async (message) => {
       const event = message.event;
       if (event) {
+        // A crash ends the app's process; its last route no longer names anything on screen.
+        if (event.packageName) {
+          this.clearSdkScreenIdentity(event.packageName);
+        }
         await this.handleCrashEvent(
           withResolvedTimestamp(event, message.timestamp, this.timer.now()),
         );
@@ -6611,9 +6769,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         });
     }
 
-    // Notify hierarchy navigation detector
-    const navigationPackage = this.resolveHierarchyPackage(data);
-    if (!data.hierarchy) {
+    // Notify hierarchy navigation detector. Screen identity follows the app windows only
+    // (#9305): AutoMobile's own overlay is removed and the capture attributed to the app behind it,
+    // so showing, paging or dismissing a prototype records no navigation.
+    const appCapture = appWindowsOnly(data);
+    const navigationPackage = this.resolveHierarchyPackage(appCapture);
+    if (!appCapture.hierarchy) {
       logger.warn("[CTRL_PROXY] Skipping navigation detection: hierarchy missing");
     } else if (data.error) {
       logger.warn(`[CTRL_PROXY] Skipping navigation detection due to error: ${data.error}`);
@@ -6636,7 +6797,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.ensureBuildContext(navigationPackage);
       }
       this.getHierarchyNavigationDetector().onHierarchyUpdate({
-        ...data,
+        ...appCapture,
         packageName: navigationPackage,
       });
     }

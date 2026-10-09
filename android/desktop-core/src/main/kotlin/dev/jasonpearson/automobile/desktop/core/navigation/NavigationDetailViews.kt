@@ -154,7 +154,7 @@ fun TransitionRow(
         .then(
           if (onScreenClick == null)
             Modifier.clickable(onClick = onClick).pointerHoverIcon(PointerIcon.Hand)
-          else Modifier
+          else Modifier,
         )
         .padding(horizontal = 12.dp, vertical = 8.dp),
     horizontalArrangement = Arrangement.SpaceBetween,

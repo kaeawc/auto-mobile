@@ -92,7 +92,7 @@ enum class VideoStreamSubscriptionKind(val wire: String) {
 
 /** Recoverable permission state decoded from the local relay protocol. */
 enum class VideoStreamPermission {
-  ScreenRecordingNeedsApproval
+  ScreenRecordingNeedsApproval,
 }
 
 /**
@@ -385,7 +385,7 @@ class VideoStreamClient(
         val input = Channels.newInputStream(socket)
         val writer =
           BufferedWriter(
-            OutputStreamWriter(Channels.newOutputStream(socket), StandardCharsets.UTF_8)
+            OutputStreamWriter(Channels.newOutputStream(socket), StandardCharsets.UTF_8),
           )
 
         synchronized(sessionLock) {
@@ -394,7 +394,7 @@ class VideoStreamClient(
             json.encodeToString(
               serializer<VideoStreamRequest>(),
               subscribeRequest(deviceId),
-            )
+            ),
           )
           writer.newLine()
           writer.flush()
@@ -408,7 +408,7 @@ class VideoStreamClient(
               ?: VideoStreamState.Unavailable(
                 ack.error ?: "Live mirroring was refused",
                 subscribeFailureCause(ack.error),
-              )
+              ),
           )
           return
         }
@@ -426,7 +426,7 @@ class VideoStreamClient(
         val endReason = pumpFrames(input, decoder, sessionId)
         publish(
           endReason?.let { VideoStreamState.Ended(it) }
-            ?: VideoStreamState.Unavailable("Live mirroring stopped")
+            ?: VideoStreamState.Unavailable("Live mirroring stopped"),
         )
       }
     } catch (e: Exception) {
@@ -544,7 +544,7 @@ class VideoStreamClient(
                 // lets DeviceControlSession re-prove orientation from the live frame alone
                 // (issue #4786).
                 rotation = currentRotation,
-              )
+              ),
             )
             _emittedFrameSequence.value = sequence
           }
@@ -803,7 +803,7 @@ class FakeVideoStreamSource(
         sequence = sequence,
         receivedAtMs = nowMs(),
         rotation = rotation,
-      )
+      ),
     )
     _emittedFrameSequence.value = sequence
   }

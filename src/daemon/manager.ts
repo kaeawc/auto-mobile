@@ -5,6 +5,7 @@ import {
   type IdentityRecoveryIO,
 } from "./identityRecovery";
 import { errorMessage } from "../utils/describeUnknownError";
+import { consumePrivateDaemonOrphanExitRecord } from "./privateDaemonOrphanExitRecord";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { open, readFile, rm } from "node:fs/promises";
 import {
@@ -1225,6 +1226,20 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   /**
+   * A harness private daemon stopped by its orphan watchdog leaves its port behind (#11074). A
+   * start that names no port is the next client auto-starting a replacement: bind the same port,
+   * strictly, instead of silently moving to the default one.
+   */
+  private inheritOrphanExitSettings(options: DaemonOptions): DaemonOptions {
+    const record = consumePrivateDaemonOrphanExitRecord(this.socketPath);
+    if (!record || options.port !== undefined) {
+      return options;
+    }
+    stderrLog(`Restarting private daemon on its previous port ${record.port} (stopped when idle)`);
+    return { ...options, port: record.port, strictPort: true };
+  }
+
+  /**
    * Internal start implementation (caller must hold lock).
    */
   private async startUnlocked(
@@ -1232,6 +1247,7 @@ export class DaemonManager implements DaemonManagerLike {
     recoverySignal?: AbortSignal,
   ): Promise<DaemonStartResult> {
     options = daemonProcessOptions(options);
+    options = this.inheritOrphanExitSettings(options);
     // The overall start budget, captured before any work so the post-exit peer
     // rejoin (issue #6103) can only ever spend time the caller still has. The
     // client times its `tools/list` out at DAEMON_STARTUP_TIMEOUT_MS; launchAndWait

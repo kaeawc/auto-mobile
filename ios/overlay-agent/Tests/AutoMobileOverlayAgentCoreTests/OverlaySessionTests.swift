@@ -29,6 +29,19 @@ final class OverlaySessionTests: XCTestCase {
         XCTAssertEqual(session.run([emit]).map(\.sequence), [3])
     }
 
+    func testLastSequenceIsTheShownIdsLedgerEntryForInspect() throws {
+        var session = OverlaySession()
+        let emit = try action(#"{"type":"emit","name":"tap"}"#)
+        XCTAssertEqual(session.lastSequence, 0)
+        try session.show(textSpec(id: "a"))
+        XCTAssertEqual(session.lastSequence, 0)
+        _ = session.run([emit])
+        _ = session.run([emit])
+        XCTAssertEqual(session.lastSequence, 2)
+        try session.show(textSpec(id: "b"))
+        XCTAssertEqual(session.lastSequence, 0)
+    }
+
     func testSequencesSurviveShowingAnotherIdInBetween() throws {
         var session = OverlaySession()
         let emit = try action(#"{"type":"emit","name":"tap"}"#)
@@ -38,6 +51,17 @@ final class OverlaySessionTests: XCTestCase {
         XCTAssertEqual(session.run([emit]).map(\.sequence), [1])
         try session.show(textSpec(id: "a"))
         XCTAssertEqual(session.run([emit]).map(\.sequence), [2])
+    }
+
+    func testTabSelectionRunsTheNodesOnTapAfterTheSelectionChange() throws {
+        var session = OverlaySession()
+        try session.show(textSpec(id: "a", state: #"{"tab":0}"#))
+        let events = try session.select(
+            index: 1, pager: nil, key: "tab", then: [action(#"{"type":"emit","name":"picked"}"#)]
+        )
+        XCTAssertEqual(events.map(\.name), ["change", "picked"])
+        XCTAssertEqual(events.last?.state["tab"], .number(1))
+        XCTAssertEqual(session.select(index: 1, pager: nil, key: nil, then: []), [])
     }
 
     // MARK: Dismissal
@@ -79,11 +103,18 @@ final class OverlaySessionTests: XCTestCase {
         XCTAssertEqual(session.change(key: "name", value: .string("Al")), [])
     }
 
-    func testSetStateStaysSilent() throws {
+    func testSetStateEmitsOneChangeAfterTheActions() throws {
         var session = OverlaySession()
         try session.show(textSpec(id: "a", state: #"{"n":1}"#))
-        XCTAssertEqual(try session.run([action(#"{"type":"setState","key":"n","value":2}"#)]), [])
+        let events = try session.run([action(#"{"type":"setState","key":"n","value":2}"#)])
+        XCTAssertEqual(events.map(\.name), ["change"])
+        XCTAssertEqual(events.first?.payload, .object(["key": .string("n"), "value": .number(2)]))
         XCTAssertEqual(session.state["n"], .number(2))
+        XCTAssertEqual(
+            try session.run([action(#"{"type":"setState","key":"n","value":2}"#)]),
+            [],
+            "a setState that changes nothing emits nothing"
+        )
     }
 
     func testToggleControlFlipsTheBoundBooleanThenRunsItsActions() throws {
@@ -109,18 +140,70 @@ final class OverlaySessionTests: XCTestCase {
 
     // MARK: Actions
 
-    func testToggleAndIncrementActionsMutateStateSilently() throws {
+    func testStateActionsStepAndSkipMismatchedTypes() throws {
         var session = OverlaySession()
         try session.show(textSpec(id: "a", state: #"{"on":true,"n":1,"s":"x"}"#))
-        let events = try session.run([
+        _ = try session.run([
             action(#"{"type":"toggle","key":"on"}"#),
             action(#"{"type":"increment","key":"n"}"#),
             action(#"{"type":"increment","key":"n","by":2.5}"#),
+            action(#"{"type":"decrement","key":"n"}"#),
+            action(#"{"type":"decrement","key":"n","by":0.5}"#),
             action(#"{"type":"increment","key":"s"}"#),
+            action(#"{"type":"decrement","key":"s"}"#),
             action(#"{"type":"toggle","key":"s"}"#),
+            action(#"{"type":"toggle","key":"missing"}"#),
         ])
-        XCTAssertEqual(events, [])
-        XCTAssertEqual(session.state, ["on": .bool(false), "n": .number(4.5), "s": .string("x")])
+        XCTAssertEqual(session.state, ["on": .bool(false), "n": .number(3), "s": .string("x")])
+    }
+
+    func testDecrementToANonFiniteValueIsANoOp() throws {
+        var session = OverlaySession()
+        try session.show(textSpec(id: "a", state: #"{"n":-1.7976931348623157e308}"#))
+        XCTAssertEqual(try session.run([action(#"{"type":"decrement","key":"n","by":1.7976931348623157e308}"#)]), [])
+        XCTAssertEqual(session.state["n"], .number(-1.7976931348623157e308))
+    }
+
+    /// Android's `OverlayRuntime.tap` (#10622): emits fire in order with the state at that point,
+    /// then one `change` carries every key that ended different, in first-touched order.
+    func testSeveralChangedKeysEmitOneChangeAfterTheEmits() throws {
+        var session = OverlaySession()
+        try session.show(textSpec(id: "a", state: #"{"on":false,"n":1,"same":0}"#))
+        let events = try session.run([
+            action(#"{"type":"increment","key":"n"}"#),
+            action(#"{"type":"emit","name":"mid"}"#),
+            action(#"{"type":"toggle","key":"on"}"#),
+            action(#"{"type":"increment","key":"same"}"#),
+            action(#"{"type":"decrement","key":"same"}"#),
+        ])
+        XCTAssertEqual(events.map(\.name), ["mid", "change"])
+        XCTAssertEqual(events.map(\.sequence), [1, 2])
+        XCTAssertEqual(events[0].state["n"], .number(2))
+        XCTAssertEqual(events[0].state["on"], .bool(false))
+        XCTAssertEqual(events[1].payload, .object([
+            "keys": .array([.string("n"), .string("on")]),
+            "values": .object(["n": .number(2), "on": .bool(true)]),
+        ]))
+        XCTAssertEqual(events[1].state, ["on": .bool(true), "n": .number(2), "same": .number(0)])
+    }
+
+    func testActionsThatNetNoChangeEmitNothing() throws {
+        var session = OverlaySession()
+        try session.show(textSpec(id: "a", state: #"{"on":false}"#))
+        XCTAssertEqual(try session.run([
+            action(#"{"type":"toggle","key":"on"}"#),
+            action(#"{"type":"toggle","key":"on"}"#),
+        ]), [])
+    }
+
+    func testDismissInTheListSuppressesTheChange() throws {
+        var session = OverlaySession()
+        try session.show(textSpec(id: "a", state: #"{"n":1}"#))
+        let events = try session.run([
+            action(#"{"type":"increment","key":"n"}"#),
+            action(#"{"type":"dismiss"}"#),
+        ])
+        XCTAssertEqual(events.map(\.kind), ["dismissed"])
     }
 
     func testSetPageClampsAndEmitsOnlyOnChange() throws {
@@ -244,9 +327,10 @@ final class OverlaySessionTests: XCTestCase {
         """))
         let first = try session.simulateTap(identifier: "like").get()
         let second = try session.simulateTap(identifier: "like").get()
-        XCTAssertEqual(first.map(\.name), ["liked"])
-        XCTAssertEqual(first.map(\.sequence), [1])
-        XCTAssertEqual(second.map(\.sequence), [2])
+        XCTAssertEqual(first.map(\.name), ["liked", "change"])
+        XCTAssertEqual(first.map(\.sequence), [1, 2])
+        XCTAssertEqual(second.map(\.name), ["liked"], "the second tap changes no state")
+        XCTAssertEqual(second.map(\.sequence), [3])
         XCTAssertEqual(session.state["liked"], .bool(true))
     }
 

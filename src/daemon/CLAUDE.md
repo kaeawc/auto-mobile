@@ -124,8 +124,9 @@ asking the client to retry registration; unrelated UUIDs do not wait for that re
 `ObserverSessionRegistry` is a separate in-memory registry, never a `Session`
 and never persisted. Defaults pending owner confirmation: cap 32
 (`MAX_OBSERVER_SESSIONS`), the default heartbeat timeout plus the suspect grace
-(8 seconds; the timeout keeps its environment override), and unowned-device-only scope via
-`observerMaySeeDeviceOwner`. Every registry operation lazily purges expiry using
+(8 seconds; the timeout keeps its environment override). `canObserveDevice`
+(`observerMaySeeDeviceOwner`, unowned devices only) is not consulted by any socket
+path; watching follows the read-only viewer grant below. Every registry operation lazily purges expiry using
 the injected Timer; there are no background timers. `dispose()` closes and clears
 it. Registration is idempotent and refreshes TTL; expired entries free quota.
 Heartbeat and release consult it only when no device session exists, without
@@ -134,11 +135,107 @@ observer entry synchronously before publishing, including rehydration. Releasing
 that device session does not restore an observer entry. Device-tool admission
 continues to consult SessionManager alone.
 
-Open owner questions:
+Read-only viewer grant (#10698): a registered observer, like any live device
+session, may watch any device through video relay subscribe and WebRTC start, as
+a read-only viewer. The grant does not depend on holding an unrelated device.
+The observation socket's on-demand reads (`request_observation`,
+`request_navigation_graph`, `subscribe_storage`/`unsubscribe_storage`) take the
+same grant (#10830), matching its passive `subscribe`, which is not device-scoped
+at all; they still require a live identity. `input/*` follows ownership instead: a held device
+takes input only from a frame whose `sessionUuid` names its holder (typed code
+`device_owned_by_other_session`); an unowned device takes input from anyone.
+Device-aware `tools/call` follows the same rule (`assertToolCallerHoldsDevice` in
+`src/server/toolRegistry.ts`): on a held device, a call from another session or
+with no session is refused with the same code before admission or device work,
+unless the tool is registered `deviceReadOnly` (watching). A call
+without a deviceId is checked against the device readiness would select (the
+`setActiveDevice` pin, the current device, or the only candidate) before
+`ensureDeviceReady` runs, so a refused call never readies, pins or configures the
+holder's device (#10828). A sessionless `deviceReadOnly` call whose target (its
+deviceId, or that predicted device) is held runs on the read-only device path
+instead (#10830): the device is resolved from the booted list
+(`sessionlessDeviceReadFor`), with no readiness, current-device pin, settings,
+navigation recording or audit, and handlers see `isSessionlessDeviceRead()`
+(observe and snapshotOf then use the observer capture, connect-only on a held
+device). The observation socket's `request_observation` follows the same rule: a requester
+whose session does not hold a held device gets that connect-only observer read, never the
+session observe pipeline's service rebind or CtrlProxy setup (#10967). Socket-forwarded
+tools/calls serialize per `device:<id>`; a `deviceReadOnly` call from a caller that does not
+hold a held device runs on that device's read lane (`device:<id>:read`) instead, so a watcher
+never waits behind the holder's in-flight control call (#10969). Reads serialize among
+themselves; control calls, the holder's own reads and reads of a free device (which may run
+readiness) stay on the control lane.
+A `deviceReadOnly` call whose `sessionUuid` names no device session this
+daemon issued (the IDE injects its observer session UUID into every call) is
+handled as sessionless rather than refused as unissued (#10968). Read-only tools
+(owner decisions 2026-10-09, #10965: anything that changes visible UI or starts a
+device-side process is control; read-only access never requires a session):
+`observe`, `snapshotOf`, `hitTest`, `identifyInteractions`, `listApps`,
+`getDeviceState`, `getNetworkGraph`, `getPreference`, `listDataStores`,
+`getDataStore`, `getAppPermissions`, `getNotificationPolicy`, `getDeepLinks`,
+`getNavigationGraph`; per call, `keyboard` detect/listImes/listProfiles,
+`clipboard` get, `displayConfig` with no set field, `accessibility` with no
+toggle, `prototype` status/inspect, and `sqlQuery` when `isReadOnlySqlQuery`
+accepts the statement (a write, or anything the classifier cannot prove
+read-only, needs the holder). The classifier lexes the query first
+(`src/features/database/sqlLexer.ts`), so a `)` or `;` inside a string literal,
+quoted identifier or comment cannot end a CTE or a statement (#10966).
+`systemTray`, `videoRecording` and `deviceSnapshot` stay control. On the
+read-only device path `hitTest` and `identifyInteractions` read through the
+observer capture (`executeDeviceRead`), not the holder's session pipeline or
+cache. `test/lint/toolReadControlClassification.test.ts` enumerates every
+registered device-aware tool against its declared classification. An autolocked device keeps autolock's
+own refusal. Plain lifecycle tools that stop a running device (`killDevice`, and
+`deleteDevice` on a booted target) never reach that resolver, so they apply the
+same code through `assertLifecycleCallerHoldsDevice`
+(`src/server/lifecycleDeviceOwnership.ts`); the autolocking MCP connection counts
+as the holder, and the user's `force: true` overrides with a logged warning.
+Acquisition (`getAndroid`, `getApple`, `startDevice` on a running device) is
+guarded by the pool's own owner check instead.
 
-1. May the desktop watch a device owned by another session while an agent drives
-   it? That requires a read-only observer grant, not designed here.
-2. Is non-persistence acceptable? Clients must register again after daemon restart.
+Owner decisions 2026-10-08 (#10730) settle the viewing question: watching is
+allowed on any device, whichever session owns it, and watching is not use.
+Owner decision 2026-10-09 (#10964) extends that to the owner: no read counts as
+activity. A `deviceReadOnly` call naming a live session is admitted with
+`access: "read-only"` (no refresh, no `markSessionAdmitted`), so only control
+calls move `lastUsedAt`/`expiresAt`.
+Desktop input is use. The desktop and IDE clients register an observer session
+that allocates nothing, allocate a device with `setActiveDevice` on the first
+`input/*` to it, and send input under that session, so each input restarts the
+idle window. After an idle release, a daemon restart, or an expiry, the client
+rotates to a fresh observer session and does not re-send the bind; the next
+input allocates the device again. `test/fixtures/desktop-wire/` records these
+exchanges against the real handlers.
+
+Viewer stream rule (owner decision 2026-10-09, #8902): a video-relay or WebRTC/WHEP
+subscription keeps streaming when device ownership changes (another session acquires,
+releases, or idle-releases the device). An owner subscription whose session lost the
+device is downgraded to a read-only viewer; viewers are never revoked by an ownership
+change. Only input requires ownership. A stream ends only when its own subscribing
+identity ends (`session_ended`), the viewer disconnects, or the device goes away
+(`device_removed`, `device_restored`, `identity_quarantined`, `daemon_shutdown`), each
+delivered as a typed reason, and the shared capture (including the shared iOS capture)
+keeps running for the remaining subscribers. Recordings are a separate concern and stop
+on release. Policy lives in `src/daemon/streamSubscriptionPolicy.ts`; tests in
+`test/daemon/*StreamSocketServer.viewerSubscription.test.ts`.
+
+Observer scope and cooperative ownership (owner decisions 2026-10-09, #10982):
+streams (`subscribe`, `request_observation`, video and WebRTC viewing) keep
+requiring the lightweight observer registration above, which is never a session;
+tools need nothing for read-only work. Ownership is a cooperative guard, not a
+local security boundary: `daemon/activeSessions` (`includeSessions`),
+`daemon/releaseSession` and `ide/setSessionToolEnabled` take no requester check on
+purpose, and no token gating is to be added. Reads are not activity, not even the
+owner's (#10964); a read on a held device is connect-only, on its own lane (#10969).
+A recording stops and finalizes on its session's release, capped near 120 s (#10957),
+and an owner-less one stops on acquisition (#10961). Acquisition refusals that can
+clear on their own are typed and retryable: `device_cleanup_in_progress` (#10960)
+and `device_owned_by_other_daemon`. See `docs/using/device-ownership.md`.
+
+Open owner question: is non-persistence acceptable? Clients must register again
+after daemon restart. (Resolved question: watching is allowed on any device and
+control stays with the owner, per the 2026-10-08 decision above; the viewer grant
+and the `input/*` ownership check above implement it.)
 
 The follow-up enforcement lane must make stream authentication consult
 `resolveObserverScope`, enforce it on observation-stream/push sockets, rebase on

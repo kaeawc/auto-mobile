@@ -8,7 +8,8 @@ export interface ScreenshotResult {
   path?: string;
   screenshotImageSize?: { width: number; height: number };
   error?: string;
-  actionableError?: import("./ActionableError").ActionableError;
   screenshotFormat?: ScreenshotFormat;
   screenshotMimeType?: ScreenshotMimeType;
+  /** True when the capture was taken with the device's own overlay hidden (#9305). */
+  overlaysHidden?: boolean;
 }

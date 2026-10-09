@@ -55,7 +55,6 @@
 1	src/features/storage/AndroidSharedPreferencesKeyValueFile.ts	eslint(max-params)
 1	src/features/utility/DeepLinkManager.ts	eslint(max-params)
 1	src/features/utility/DeviceState.ts	eslint(max-params)
-1	src/features/utility/ElementFinder.ts	eslint(max-params)
 1	src/features/video/FfmpegVideoProcessingBackend.ts	eslint(max-params)
 1	src/index.ts	eslint(complexity)
 1	src/index.ts	eslint(max-depth)

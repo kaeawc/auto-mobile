@@ -149,6 +149,11 @@ export interface ViewHierarchyResult {
   accessibilityTool?: boolean;
   /** Structured reasons why this Android snapshot is partial or unavailable. */
   truncationReasons?: string[];
+  /**
+   * True only while an AutoMobile overlay exists but is hidden because the app it was shown over
+   * is not in front (Android, #10261). Absent otherwise and from older APKs.
+   */
+  overlaySuspended?: boolean;
   /** Present when CtrlProxy is reconnecting and the hierarchy is temporarily unavailable. */
   ctrlProxyReconnect?: CtrlProxyReconnectStatus;
 }
@@ -216,7 +221,9 @@ export interface ViewHierarchyWindowInfo {
   packageName?: string;
   /**
    * Placement of CtrlProxy's own interactive overlay window, only on that window and only from an
-   * APK advertising `overlay_window_metadata_v1`. See `ownOverlayHidesApp`.
+   * APK advertising `overlay_window_metadata_v1`. It identifies the window (`ownOverlayWindows`);
+   * placement and opacity do not change tappability, since the overlay is touchable within its
+   * bounds whatever it paints (#10715).
    */
   overlayPlacement?: OwnOverlayPlacement;
   /**

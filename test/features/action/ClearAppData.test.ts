@@ -8,6 +8,7 @@ import { BootedDevice } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
 import { FakeRecordingPerformanceTracker } from "../../fakes/FakeRecordingPerformanceTracker";
 
 const device: BootedDevice = {
@@ -48,6 +49,29 @@ describe("ClearAppData", () => {
       expect(
         adb.getExecutedCommands().filter((command) => command.startsWith("shell pm clear ")),
       ).toEqual(["shell pm clear --user 0 'com.example.app'"]);
+    });
+
+    test("retires the app's process state only when pm clear succeeds", async () => {
+      for (const [stdout, retired] of [
+        ["Success\n", 1],
+        ["Failed\n", 0],
+      ] as const) {
+        const adb = new FakeAdbExecutor();
+        adb.setForegroundApp({ packageName: "com.example.other", userId: 0 });
+        adb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
+        adb.setCommandResponse("shell pm list packages --user 0", {
+          stdout: "package:com.example.app",
+          stderr: "",
+        });
+        adb.setCommandResponse("shell pm clear", { stdout, stderr: "" });
+        const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
+        await new ClearAppData(device, adbFactoryFor(adb), { cacheInvalidator }).execute(
+          "com.example.app",
+        );
+        expect(cacheInvalidator.retiredProcesses.map((entry) => entry.packageName)).toEqual(
+          retired === 1 ? ["com.example.app"] : [],
+        );
+      }
     });
 
     test("rejects an app installed for no user before clearing data", async () => {

@@ -178,8 +178,8 @@ class DeviceControlPolicyTest {
               hierarchy = hierarchyOf(1080, 2340),
               rootWidth = 1080,
               rootHeight = 2340,
-            )
-        )
+            ),
+        ),
       ),
     )
   }
@@ -255,8 +255,8 @@ class DeviceControlPolicyTest {
               rootHeight = 1560,
               frameContext = "epoch:7",
               rotation = 0,
-            )
-        )
+            ),
+        ),
       ),
     )
   }
@@ -277,7 +277,7 @@ class DeviceControlPolicyTest {
         inputs(
           screenshot = inputs().screenshot?.copy(frameContext = "epoch:7"),
           hierarchy = inputs().hierarchy?.copy(frameContext = "epoch:8"),
-        )
+        ),
       ),
     )
   }
@@ -315,7 +315,7 @@ class DeviceControlPolicyTest {
               frameContext = "epoch:7",
               rotation = 0,
             ),
-        )
+        ),
       ),
     )
   }
@@ -350,7 +350,7 @@ class DeviceControlPolicyTest {
               frameContext = "epoch:7",
               rotation = 4,
             ),
-        )
+        ),
       ),
     )
   }
@@ -390,7 +390,7 @@ class DeviceControlPolicyTest {
           ),
           now,
         )
-        .snapshotOrNull
+        .snapshotOrNull,
     )
   }
 
@@ -413,7 +413,7 @@ class DeviceControlPolicyTest {
               width = 720,
               height = 1560,
               data = null,
-            )
+            ),
         ),
         now,
       )
@@ -441,8 +441,8 @@ class DeviceControlPolicyTest {
               width = 1080,
               height = 2340,
               data = null,
-            )
-        )
+            ),
+        ),
       ),
     )
   }
@@ -553,7 +553,7 @@ class DeviceControlPolicyTest {
         frameHeight = 1080,
         deviceWidth = 360,
         deviceHeight = 780,
-      )
+      ),
     )
   }
 
@@ -565,7 +565,7 @@ class DeviceControlPolicyTest {
         frameHeight = 1080,
         deviceWidth = 1024,
         deviceHeight = 768,
-      )
+      ),
     )
   }
 
@@ -649,11 +649,11 @@ class DeviceControlPolicyTest {
                   rootHeight = 0,
                   frameContext = "epoch:7",
                   rotation = 0,
-                )
+                ),
             ),
             now,
           )
-          .snapshotOrNull
+          .snapshotOrNull,
       )
     assertEquals(1080, snapshot.deviceWidth)
     assertEquals(2340, snapshot.deviceHeight)
@@ -718,7 +718,7 @@ class DeviceControlPolicyTest {
         inputs(
           screenshot = screenshotFacts(720, 1560, CoordinateSpace.Pixels),
           hierarchy = hierarchyFacts(1080, 2340, CoordinateSpace.Pixels),
-        )
+        ),
       ),
     )
 
@@ -749,7 +749,7 @@ class DeviceControlPolicyTest {
             ),
             now,
           )
-          .snapshotOrNull
+          .snapshotOrNull,
       )
     assertEquals(1170, snapshot.deviceWidth)
     assertEquals(2532, snapshot.deviceHeight)
@@ -787,7 +787,7 @@ class DeviceControlPolicyTest {
             ),
             now,
           )
-          .snapshotOrNull
+          .snapshotOrNull,
       )
     assertNull(snapshot.coordinateSpace)
   }
@@ -805,7 +805,7 @@ class DeviceControlPolicyTest {
             ),
             now,
           )
-          .snapshotOrNull
+          .snapshotOrNull,
       )
     assertNull(snapshot.coordinateSpace)
   }
@@ -823,7 +823,7 @@ class DeviceControlPolicyTest {
           ),
           now,
         )
-        .snapshotOrNull
+        .snapshotOrNull,
     )
   }
 
@@ -837,7 +837,7 @@ class DeviceControlPolicyTest {
         inputs(
           screenshot = screenshotFacts(1170, 2532, CoordinateSpace.Pixels),
           hierarchy = hierarchyFacts(2534, 1172, CoordinateSpace.Pixels),
-        )
+        ),
       ),
     )
   }
@@ -895,7 +895,7 @@ class DeviceControlPolicyTest {
             ),
             now,
           )
-          .snapshotOrNull
+          .snapshotOrNull,
       )
     assertEquals(DeviceFrameSource.LiveVideo, snapshot.source)
   }
@@ -912,7 +912,7 @@ class DeviceControlPolicyTest {
           ),
           now,
         )
-        .snapshotOrNull
+        .snapshotOrNull,
     )
   }
 
@@ -926,7 +926,7 @@ class DeviceControlPolicyTest {
         deviceWidth = 1080,
         deviceHeight = 2340,
         coordinateSpace = null,
-      )
+      ),
     )
     assert(
       !DeviceControlPolicy.isGeometryConsistent(
@@ -935,7 +935,7 @@ class DeviceControlPolicyTest {
         deviceWidth = 1080,
         deviceHeight = 2340,
         coordinateSpace = CoordinateSpace.Pixels,
-      )
+      ),
     )
     // allowRotation still gates the transpose in exact mode.
     assert(
@@ -946,7 +946,7 @@ class DeviceControlPolicyTest {
         deviceHeight = 2340,
         allowRotation = false,
         coordinateSpace = CoordinateSpace.Pixels,
-      )
+      ),
     )
     // Neither mode can judge a frame with no reported device bounds; the renderer falls back to the
     // frame itself, so the two are consistent by construction.
@@ -957,7 +957,7 @@ class DeviceControlPolicyTest {
         deviceWidth = 0,
         deviceHeight = 0,
         coordinateSpace = CoordinateSpace.Pixels,
-      )
+      ),
     )
   }
 
@@ -987,7 +987,7 @@ class DeviceControlPolicyTest {
         inputs(
           screenshot = screenshotFacts(1080, 2340, unknown),
           hierarchy = hierarchyFacts(1080, 2340, unknown),
-        )
+        ),
       ),
     )
     // Either message alone is enough to block — there is no "mostly readable" frame.
@@ -997,7 +997,7 @@ class DeviceControlPolicyTest {
         inputs(
           screenshot = screenshotFacts(1080, 2340, unknown),
           hierarchy = hierarchyFacts(1080, 2340, coordinateSpace = null),
-        )
+        ),
       ),
       "screenshot declared an unknown space",
     )
@@ -1007,7 +1007,7 @@ class DeviceControlPolicyTest {
         inputs(
           screenshot = screenshotFacts(1080, 2340, CoordinateSpace.Pixels),
           hierarchy = hierarchyFacts(1080, 2340, unknown),
-        )
+        ),
       ),
       "hierarchy declared an unknown space",
     )
@@ -1025,7 +1025,7 @@ class DeviceControlPolicyTest {
           ),
           now,
         )
-        .snapshotOrNull
+        .snapshotOrNull,
     )
   }
 
@@ -1043,7 +1043,7 @@ class DeviceControlPolicyTest {
             ),
             now,
           )
-          .snapshotOrNull
+          .snapshotOrNull,
       )
 
     val legacy = snapshotIn(null)

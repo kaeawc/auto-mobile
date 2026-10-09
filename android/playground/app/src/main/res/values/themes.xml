@@ -12,4 +12,7 @@
     <!-- Set the theme of the Activity that directly follows your splash screen. -->
     <item name="postSplashScreenTheme">@style/Theme.Android</item>
   </style>
+
+  <!-- AppCompatActivity probe screen; AppCompat requires an AppCompat-derived theme. -->
+  <style name="Theme.AutoMobile.AppCompatProbe" parent="Theme.AppCompat.Light.NoActionBar" />
 </resources>

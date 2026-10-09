@@ -3,6 +3,9 @@
 # launch_app_perf_test.sh - Test and debug UI stability criteria during cold boot app launches
 # Usage: ./scripts/launch_app_perf_test.sh [num_launches=10] [device_id] [package_name=com.google.android.deskclock] [--options]
 #
+# Environment:
+#   AUTOMOBILE_SESSION_UUID       session holding the device; passed to the CLI as --session-uuid
+#
 # Options:
 #   --p50-threshold <ms>         p50 percentile threshold (default: 100)
 #   --p90-threshold <ms>         p90 percentile threshold (default: 100)
@@ -102,6 +105,18 @@ if [[ -n "$DEVICE_ID" && "$DEVICE_ID" != "default" ]]; then
     ADB_CMD="adb -s $DEVICE_ID"
 fi
 
+# CLI targeting for launchApp. The daemon refuses a call without the holder's session on a device
+# another session holds (device_owned_by_other_session), so name the same device adb measures and
+# pass AUTOMOBILE_SESSION_UUID (the sessionUuid getAndroid/startDevice returned) when one holds it.
+CLI_TARGET_ARGS=()
+if [[ -n "$DEVICE_ID" && "$DEVICE_ID" != "default" ]]; then
+    CLI_TARGET_ARGS+=(--deviceId "$DEVICE_ID")
+fi
+CLI_SESSION_ARGS=()
+if [[ -n "${AUTOMOBILE_SESSION_UUID:-}" ]]; then
+    CLI_SESSION_ARGS+=(--session-uuid "$AUTOMOBILE_SESSION_UUID")
+fi
+
 # Create scratch directory if needed
 mkdir -p "$SCRATCH_DIR"
 
@@ -183,7 +198,10 @@ launch_and_collect_metrics() {
 
     # Run the launch command and capture output
     local launch_output
-    launch_output=$(bun src/index.ts --cli launchApp --appId "$PACKAGE_NAME" --coldBoot true 2>&1 || echo "LAUNCH_FAILED")
+    launch_output=$(bun src/index.ts --cli ${CLI_SESSION_ARGS[@]+"${CLI_SESSION_ARGS[@]}"} launchApp --appId "$PACKAGE_NAME" --coldBoot true ${CLI_TARGET_ARGS[@]+"${CLI_TARGET_ARGS[@]}"} 2>&1 || echo "LAUNCH_FAILED")
+    if [[ "$launch_output" == *LAUNCH_FAILED* ]]; then
+        log_error "launchApp failed: $launch_output"
+    fi
 
     local launch_end
     launch_end=$(get_time_ms)

@@ -209,7 +209,7 @@ internal object AutoMobilePlanExecutor {
         // otherwise
         // debugMode leaks them to logcat even though the LLM path is masked.
         println(
-          "Processed plan content:\n${SecretRedactor.redact(processedPlanContent, secretValues)}"
+          "Processed plan content:\n${SecretRedactor.redact(processedPlanContent, secretValues)}",
         )
       }
 
@@ -275,7 +275,7 @@ internal object AutoMobilePlanExecutor {
       throw IllegalArgumentException(
         "Plan YAML validation failed:\n$errorMessages\n\n" +
           "The plan does not conform to the AutoMobile test plan schema. " +
-          "Check schemas/test-plan.schema.json for details."
+          "Check schemas/test-plan.schema.json for details.",
       )
     }
 
@@ -341,6 +341,9 @@ internal object AutoMobilePlanExecutor {
   /**
    * @param deviceIdOverride When non-null, pins execution to this device. Used after recovery to
    *   ensure the resumed plan runs on the same device the agent just recovered.
+   * @param sessionUuidOverride When non-null, the first attempt reuses this session instead of a
+   *   fresh one: the failed attempt's session, which recovery also used, so the resumed plan is the
+   *   device holder's own session rather than a stranger the daemon would refuse (#10783).
    */
   private fun executePlanFromStep(
     planContent: String,
@@ -349,11 +352,19 @@ internal object AutoMobilePlanExecutor {
     recoveryAlreadyAttempted: Boolean,
     secretValues: List<String>,
     deviceIdOverride: String? = null,
+    sessionUuidOverride: String? = null,
   ): InternalExecutionResult {
 
     val json = Json { ignoreUnknownKeys = true }
     val maxRetries = options.maxRetries.coerceAtLeast(0)
     var attempt = 0
+    var deviceOwnedWaitMs = 0L
+    var deviceOwnedWaits = 0
+    var attemptSessionUuid = sessionUuidOverride ?: UUID.randomUUID().toString()
+    // When AI recovery may follow a failure, the daemon keeps the failed attempt's session and
+    // device (#10834) so no other session can take the device between the attempt and recovery.
+    // Every path that does not go on to recovery releases the held session itself.
+    val holdForRecovery = recoveryMayFollow(options, recoveryAlreadyAttempted)
 
     var response: DaemonResponse
     var outputPayload: String
@@ -363,13 +374,15 @@ internal object AutoMobilePlanExecutor {
     // Retry loop for transient failures (timeouts, daemon busy)
     while (true) {
       attempt++
-      val sessionUuid = UUID.randomUUID().toString()
+      // Only the first attempt may reuse the failed attempt's session; a retry is a fresh one.
+      val sessionUuid = if (attempt == 1) attemptSessionUuid else UUID.randomUUID().toString()
+      attemptSessionUuid = sessionUuid
 
       val args =
         mutableMapOf<String, JsonElement>(
           "planContent" to
             JsonPrimitive(
-              "base64:" + java.util.Base64.getEncoder().encodeToString(planContent.toByteArray())
+              "base64:" + java.util.Base64.getEncoder().encodeToString(planContent.toByteArray()),
             ),
           "platform" to JsonPrimitive("android"),
           "startStep" to JsonPrimitive(startStep),
@@ -390,6 +403,9 @@ internal object AutoMobilePlanExecutor {
 
       appendExecutePlanCleanupArgs(args)
       appendCaptureObserveStepsArgs(args)
+      if (holdForRecovery) {
+        args["holdSessionOnFailure"] = JsonPrimitive(true)
+      }
 
       // Opt this generated device session into executePlan before invoking it.
       response =
@@ -399,7 +415,7 @@ internal object AutoMobilePlanExecutor {
             mapOf(
               "toolName" to JsonPrimitive("executePlan"),
               "sessionUuid" to JsonPrimitive(sessionUuid),
-            )
+            ),
           ),
           options.effectiveExecutePlanTimeoutMs(),
         )
@@ -418,7 +434,7 @@ internal object AutoMobilePlanExecutor {
       } else {
         if (options.debugMode) {
           println(
-            "Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)"
+            "Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)",
           )
         }
 
@@ -457,10 +473,34 @@ internal object AutoMobilePlanExecutor {
       }
 
       val errorMessage = response.error ?: parsed.errorMessage
+      if (parsed.code in DEVICE_WAIT_CODES) {
+        // Another session holds the device (typically a concurrent test attempt in this runner),
+        // or its previous session is still finishing cleanup (#10960). Wait for it to free up,
+        // within its own bounded budget, without spending maxRetries.
+        val delayMs = deviceOwnedBackoffDelayMs(deviceOwnedWaits, deviceOwnedWaitMs)
+        if (delayMs == null) {
+          parsed = parsed.copy(errorMessage = deviceOwnedGiveUpMessage(parsed, deviceOwnedWaitMs))
+          break
+        }
+        println(
+          "Device is held by another session; waiting ${delayMs}ms before retrying " +
+            "(wait ${deviceOwnedWaits + 1}): $errorMessage",
+        )
+        if (holdForRecovery) releaseHeldSession(sessionUuid)
+        deviceOwnedSleeper(delayMs)
+        deviceOwnedWaits++
+        deviceOwnedWaitMs += delayMs
+        // A refusal consumes no executePlan retry; the next pass is the same attempt number.
+        attempt--
+        attemptSessionUuid = UUID.randomUUID().toString()
+        continue
+      }
       if (attempt > maxRetries || !(parsed.retryable || isTransientError(errorMessage))) {
         break
       }
 
+      // The retry is a fresh session; the held one would otherwise keep the device from it.
+      if (holdForRecovery) releaseHeldSession(sessionUuid)
       println("Retrying plan execution after transient error (attempt $attempt): $errorMessage")
       Thread.sleep(retryBackoffMs)
     }
@@ -468,6 +508,7 @@ internal object AutoMobilePlanExecutor {
     // Non-transient failure or retries exhausted — attempt recovery if allowed
     val failedStepContext =
       buildFailedStepContext(response, json, planContent, options.device, secretValues)
+        ?.copy(sessionUuid = attemptSessionUuid)
     return handleFailure(
       result = CommandResult(1, outputPayload, response.error ?: parsed.errorMessage),
       options = options,
@@ -476,10 +517,71 @@ internal object AutoMobilePlanExecutor {
       planContent = planContent,
       recoveryAlreadyAttempted = recoveryAlreadyAttempted,
       secretValues = secretValues,
+      heldSessionUuid = attemptSessionUuid.takeIf { holdForRecovery },
     )
   }
 
+  /** Whether a failure of this plan run would go on to AI recovery (see [handleFailure]). */
+  private fun recoveryMayFollow(
+    options: AutoMobilePlanExecutionOptions,
+    recoveryAlreadyAttempted: Boolean,
+  ): Boolean =
+    options.aiAssistance &&
+      !recoveryAlreadyAttempted &&
+      !resolveCiMode() &&
+      agent.recoveryConfigProvider.isRecoveryEnabled()
+
+  /**
+   * Release a session the daemon kept after a failed executePlan (`holdSessionOnFailure`, #10834)
+   * once recovery will not resume it. Best-effort: if the release does not reach the daemon, the
+   * session lapses at its heartbeat timeout because nothing heartbeats it any more.
+   */
+  private fun releaseHeldSession(sessionUuid: String) {
+    val response =
+      try {
+        DaemonSocketClientManager.callDaemonMethod(
+          RELEASE_SESSION_METHOD,
+          JsonObject(mapOf("sessionId" to JsonPrimitive(sessionUuid))),
+          RELEASE_SESSION_TIMEOUT_MS,
+        )
+      } catch (error: DaemonUnavailableException) {
+        DaemonResponse(id = "", type = "daemon_response", success = false, error = error.message)
+      }
+    if (!response.success) {
+      println(
+        "Warning: could not release held session $sessionUuid (${response.error}); it lapses " +
+          "at its heartbeat timeout",
+      )
+    }
+  }
+
   // ── Failure handling & recovery ───────────────────────────────────────────
+
+  /**
+   * The failure to report when the daemon released [sessionUuid] while the runner heartbeated it
+   * (#11072), or null while the session is still held. The daemon already freed the session, so
+   * there is nothing to release.
+   */
+  private fun sessionLossFailure(
+    sessionUuid: String?,
+    result: CommandResult,
+    errorMessage: String,
+    toolResults: List<ToolResultEntry>,
+    recoveryAttempted: Boolean,
+  ): InternalExecutionResult? {
+    val loss = sessionUuid?.let { DaemonHeartbeat.sessionLoss(it) } ?: return null
+    val reason = "AI recovery cannot continue: ${loss.describe()}"
+    System.err.println(reason)
+    return InternalExecutionResult(
+      success = false,
+      exitCode = result.exitCode,
+      output = result.output,
+      errorMessage = "$errorMessage\n$reason",
+      aiRecoveryAttempted = recoveryAttempted,
+      aiRecoverySuccessful = false,
+      toolResults = toolResults,
+    )
+  }
 
   private fun handleFailure(
     result: CommandResult,
@@ -489,7 +591,11 @@ internal object AutoMobilePlanExecutor {
     planContent: String,
     recoveryAlreadyAttempted: Boolean,
     secretValues: List<String>,
+    heldSessionUuid: String? = null,
   ): InternalExecutionResult {
+    // The daemon kept the failed attempt's session and device for recovery (#10834). Only the
+    // resumed plan takes it over (and releases it); every other outcome releases it here.
+    val releaseHeld = { if (heldSessionUuid != null) releaseHeldSession(heldSessionUuid) }
 
     val errorMessage =
       "AutoMobile plan execution failed with exit code ${result.exitCode}" +
@@ -512,6 +618,7 @@ internal object AutoMobilePlanExecutor {
       if (!recoveryFlagEnabled) {
         println("AI recovery disabled via ai-recovery feature flag")
       }
+      releaseHeld()
       return InternalExecutionResult(
         success = false,
         exitCode = result.exitCode,
@@ -523,16 +630,47 @@ internal object AutoMobilePlanExecutor {
 
     // Attempt Koog-powered recovery
     println(
-      "Attempting AI-assisted recovery for failed step ${failedStepContext.failedStepIndex + 1} (${failedStepContext.failedTool})"
+      "Attempting AI-assisted recovery for failed step ${failedStepContext.failedStepIndex + 1} (${failedStepContext.failedTool})",
     )
 
     // Pass the resolved secret VALUES into the recovery agent so its loop can scrub the DYNAMIC
     // tool/observe results it feeds back to the LLM (issue #6094). The initial recovery prompt is
     // already redacted on FailedStepContext (#6092); this covers the second-order loop channel.
-    val recoveryOutcome = agent.attemptAiRecovery(failedStepContext, secretValues)
+    // The failed attempt unregistered its session when executePlan returned; keep it heartbeating
+    // while recovery's calls (which carry it) hold the device, or the daemon idle-releases it.
+    val recoverySession = failedStepContext.sessionUuid
+    // The daemon already released the failed attempt's session (#11072): recovery would drive a
+    // device the runner no longer holds, so fail now with the daemon's reason.
+    sessionLossFailure(
+        recoverySession,
+        result,
+        errorMessage,
+        toolResults,
+        recoveryAttempted = false,
+      )
+      ?.let {
+        return it
+      }
+    if (recoverySession != null) DaemonHeartbeat.registerSession(recoverySession)
+    val recoveryOutcome =
+      try {
+        agent.attemptAiRecovery(failedStepContext, secretValues)
+      } catch (error: Throwable) {
+        releaseHeld()
+        throw error
+      } finally {
+        if (recoverySession != null) DaemonHeartbeat.unregisterSession(recoverySession)
+      }
+
+    // Released while recovery ran: never resume on it, whatever recovery reported.
+    sessionLossFailure(recoverySession, result, errorMessage, toolResults, recoveryAttempted = true)
+      ?.let {
+        return it
+      }
 
     if (!recoveryOutcome.success) {
       println("AI recovery failed")
+      releaseHeld()
       return InternalExecutionResult(
         success = false,
         exitCode = result.exitCode,
@@ -565,6 +703,7 @@ internal object AutoMobilePlanExecutor {
         recoveryAlreadyAttempted = true, // prevent recursive recovery
         secretValues = secretValues,
         deviceIdOverride = failedStepContext.deviceId,
+        sessionUuidOverride = failedStepContext.sessionUuid,
       )
 
     return InternalExecutionResult(
@@ -632,7 +771,7 @@ internal object AutoMobilePlanExecutor {
             SucceededStepSummary(
               stepIndex = index,
               tool = SecretRedactor.redact(tool, secretValues),
-            )
+            ),
           )
         }
       }
@@ -716,7 +855,19 @@ internal object AutoMobilePlanExecutor {
       errorObject?.get("retryable") == JsonPrimitive(true) ||
         parsed["retryable"] == JsonPrimitive(true)
     if (isError || parsed.containsKey("error") || !success) {
-      return ParsedToolResult(false, planFailureMessage(parsed, isError), retryable)
+      // The typed `code` (never the message) is what clients match on.
+      val code =
+        ((errorObject?.get("code") ?: parsed["code"]) as? JsonPrimitive)
+          ?.takeIf { it.isString }
+          ?.content
+      val daemonMessage = (parsed["error"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+      return ParsedToolResult(
+        false,
+        planFailureMessage(parsed, isError),
+        retryable,
+        code,
+        daemonMessage,
+      )
     }
     return ParsedToolResult(true, "")
   }
@@ -790,7 +941,7 @@ internal object AutoMobilePlanExecutor {
           stepIndex = -1,
           toolName = null,
           errorMessage = e.message ?: "Failed to parse tool results",
-        )
+        ),
       )
     }
   }
@@ -1007,6 +1158,62 @@ internal object AutoMobilePlanExecutor {
       )
     }
 
+  /** Typed code for a device-mutating call refused because another session holds it (#10783). */
+  internal const val DEVICE_OWNED_BY_OTHER_SESSION_CODE = "device_owned_by_other_session"
+
+  /**
+   * Typed code for a bind refused while the device's previous session finishes cleanup (#10960).
+   */
+  internal const val DEVICE_CLEANUP_IN_PROGRESS_CODE = "device_cleanup_in_progress"
+
+  /** Typed code for a bind refused because another AutoMobile daemon claims the device (#10980). */
+  internal const val DEVICE_OWNED_BY_OTHER_DAEMON_CODE = "device_owned_by_other_daemon"
+
+  /** Refusals the runner waits out with the bounded held-device wait. */
+  private val DEVICE_WAIT_CODES =
+    setOf(
+      DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+      DEVICE_CLEANUP_IN_PROGRESS_CODE,
+      DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+    )
+
+  private const val DEVICE_OWNED_INITIAL_DELAY_MS = 500L
+  private const val DEVICE_OWNED_MAX_DELAY_MS = 4_000L
+  private const val DEVICE_OWNED_DEFAULT_BUDGET_MS = 30_000L
+
+  /** Total time to wait for another session to release the device before giving up. */
+  @JvmStatic internal var deviceOwnedWaitBudgetMs: Long = DEVICE_OWNED_DEFAULT_BUDGET_MS
+
+  /** Seam over [Thread.sleep] so the device-held wait is instant in tests. */
+  @JvmStatic internal var deviceOwnedSleeper: (Long) -> Unit = { Thread.sleep(it) }
+
+  /**
+   * Exponential delay (500ms doubling, capped at 4s) for the next wait on a held device, clamped to
+   * the remaining [deviceOwnedWaitBudgetMs]; null once the budget is spent.
+   */
+  internal fun deviceOwnedBackoffDelayMs(waitsSoFar: Int, waitedMs: Long): Long? {
+    val remaining = deviceOwnedWaitBudgetMs - waitedMs
+    if (remaining <= 0) return null
+    val doubled = DEVICE_OWNED_INITIAL_DELAY_MS shl waitsSoFar.coerceAtMost(8)
+    return minOf(doubled, DEVICE_OWNED_MAX_DELAY_MS, remaining)
+  }
+
+  private const val RELEASE_SESSION_METHOD = "daemon/releaseSession"
+  private const val RELEASE_SESSION_TIMEOUT_MS = 10_000L
+
+  private fun deviceOwnedGiveUpMessage(parsed: ParsedToolResult, waitedMs: Long): String =
+    (when (parsed.code) {
+      DEVICE_CLEANUP_IN_PROGRESS_CODE ->
+        "Device is still finishing its previous session's cleanup ($DEVICE_CLEANUP_IN_PROGRESS_CODE)"
+      DEVICE_OWNED_BY_OTHER_DAEMON_CODE ->
+        "Device is claimed by another AutoMobile daemon ($DEVICE_OWNED_BY_OTHER_DAEMON_CODE)"
+      else -> "Device is held by another session ($DEVICE_OWNED_BY_OTHER_SESSION_CODE)"
+    }) +
+      (parsed.daemonMessage?.let { ": $it" } ?: "") +
+      "\nThe runner waited ${waitedMs}ms for it to be released. Another test attempt or tool " +
+      "session is using this device; give each concurrent test its own device, or run them " +
+      "serially."
+
   private fun isTransientError(errorMessage: String?): Boolean {
     if (errorMessage.isNullOrBlank()) return false
     val normalized = errorMessage.lowercase()
@@ -1031,5 +1238,9 @@ internal object AutoMobilePlanExecutor {
     val success: Boolean,
     val errorMessage: String,
     val retryable: Boolean = false,
+    /** The daemon's typed error `code`, when it sent one. */
+    val code: String? = null,
+    /** The daemon's human-readable `error` string, when it sent one. */
+    val daemonMessage: String? = null,
   )
 }

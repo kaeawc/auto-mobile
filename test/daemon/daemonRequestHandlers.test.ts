@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { idleReleaseAt } from "../../src/daemon/sessionHoldDiagnostics";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { logger } from "../../src/utils/logger";
 import {
@@ -312,6 +313,104 @@ describe("handleDaemonRequest", () => {
     expect(sessionManager.getSession(sessionId)?.lastHeartbeat).toBeGreaterThan(initialHeartbeat);
   });
 
+  test("#10823: a heartbeat that asks reports the daemon's idle release instant without extending it", async () => {
+    const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+    const state = new FakeDaemonState(sessionManager, devicePool);
+    const sessionId = "idle-report-session";
+    const session = await sessionManager.createSession(sessionId, "emulator-5554", "android");
+    const expiresAt = session.expiresAt;
+    fakeTimer.advanceTime(30_000);
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/heartbeat", { sessionId, reportIdleRelease: true }),
+      state,
+    );
+
+    const live = sessionManager.getSession(sessionId)!;
+    // The heartbeat extended nothing; it reports the instant the idle sweep releases on.
+    expect(live.expiresAt).toBe(expiresAt);
+    expect(response).toEqual({
+      success: true,
+      result: { sessionId, idleReleaseAt: idleReleaseAt(live) },
+    });
+    expect(idleReleaseAt(live)).toBeGreaterThanOrEqual(expiresAt);
+  });
+
+  test("#10972: a CLI-policy heartbeat that asks reports the idle release instant too", async () => {
+    const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+    const state = new FakeDaemonState(sessionManager, devicePool);
+    const sessionId = "cli-idle-report-session";
+    await sessionManager.createSession(sessionId, "emulator-5554", "android");
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        livenessPolicy: "cli",
+        idleTimeoutMs: 600_000,
+        reportIdleRelease: true,
+      }),
+      state,
+    );
+
+    const live = sessionManager.getSession(sessionId)!;
+    expect(response).toEqual({
+      success: true,
+      result: {
+        sessionId,
+        livenessPolicy: "cli-idle",
+        idleTimeoutMs: live.heartbeatTimeoutMs,
+        idleReleaseAt: idleReleaseAt(live),
+      },
+    });
+  });
+
+  test("#10989: a heartbeat that asks reports which daemon process acknowledged it", async () => {
+    const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+    const state = Object.assign(new FakeDaemonState(sessionManager, devicePool), {
+      getDaemonInstance: () => "daemon-1",
+    });
+    const sessionId = "instance-report-session";
+    await sessionManager.createSession(sessionId, "emulator-5554", "android");
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        reportDaemonInstance: true,
+        expectedDaemonInstance: "daemon-1",
+      }),
+      state,
+    );
+
+    expect(response).toEqual({
+      success: true,
+      result: { sessionId, daemonInstance: "daemon-1" },
+    });
+  });
+
+  test("#10989: a heartbeat pinned to another daemon process is refused and changes nothing", async () => {
+    const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+    const state = Object.assign(new FakeDaemonState(sessionManager, devicePool), {
+      getDaemonInstance: () => "daemon-2",
+    });
+    const sessionId = "instance-pinned-session";
+    const session = await sessionManager.createSession(sessionId, "emulator-5554", "android");
+    const initialHeartbeat = session.lastHeartbeat;
+    fakeTimer.advanceTime(1_000);
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        livenessOwnerToken: "proxy-token",
+        expectedDaemonInstance: "daemon-1",
+      }),
+      state,
+    );
+
+    expect(response).toMatchObject({ success: false, code: "daemon_instance_changed" });
+    expect(sessionManager.getSession(sessionId)?.lastHeartbeat).toBe(initialHeartbeat);
+    expect(sessionManager.getSession(sessionId)?.livenessOwnerToken).toBeUndefined();
+  });
+
   test.each([
     { first: "keeper", second: "proxy", firstPolicy: "cli", secondPolicy: "heartbeat" },
     { first: "proxy", second: "keeper", firstPolicy: "heartbeat", secondPolicy: "cli" },
@@ -482,6 +581,8 @@ describe("handleDaemonRequest", () => {
             success: false,
             code: "liveness_owner_conflict",
             error: expect.stringContaining(sessionId),
+            // The owner's hold, so the challenger waits out the daemon's lease (#10701).
+            result: { liveness: { state: "live", remainingMs: 0, holdRemainingMs: 4_000 } },
           });
           expect(snapshotOf(sessionId)).toEqual(before);
         }
@@ -868,6 +969,27 @@ describe("handleDaemonRequest", () => {
         success: false,
         error: "Session not found: missing",
         code: DAEMON_SESSION_NOT_FOUND_CODE,
+      });
+    },
+  );
+
+  test.each(["daemon/sessionInfo", "daemon/heartbeat"])(
+    "%s names the release reason of a session the daemon released (#10730)",
+    async (method) => {
+      const sessionId = "released-session";
+      await sessionManager.createSession(sessionId, "device", "android");
+      await sessionManager.releaseSession(sessionId, "heartbeat-timeout");
+      const state = new FakeDaemonState(
+        sessionManager,
+        new FakeDevicePool({ total: 1, idle: 1, assigned: 0, error: 0 }),
+      );
+      await expect(
+        handleDaemonRequest(buildRequest(method, { sessionId }), state),
+      ).resolves.toEqual({
+        success: false,
+        error: `Session not found: ${sessionId}`,
+        code: DAEMON_SESSION_NOT_FOUND_CODE,
+        releaseReason: "heartbeat-timeout",
       });
     },
   );

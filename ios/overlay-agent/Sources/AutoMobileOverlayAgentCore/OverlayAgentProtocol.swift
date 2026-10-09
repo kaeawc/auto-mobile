@@ -11,14 +11,43 @@ enum OverlayAgentProtocol {
     static let protocolVersion = 1
     /// Agent build version, reported for diagnostics.
     static let agentVersion = "0.1.0"
-    /// Request types this agent handles. Same-id `show_overlay` replaces the shown overlay.
+    /// Request types this agent handles, then the spec features it renders. Same-id `show_overlay`
+    /// replaces the shown overlay.
     static let capabilities = [
         "show_overlay",
         "dismiss_overlay",
         "put_overlay_asset",
         "remove_overlay_asset",
         "get_overlay_status",
+        showInPlaceCapability,
+        anchorCapability,
+        hideForCaptureRequest,
+        restoreAfterCaptureRequest,
+        screenshotHideCapability,
+        inspectCapability,
     ]
+    /// A same-id `show_overlay` replaces the overlay in place keeping pager pages, and
+    /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
+    /// `reset` on an agent that does not advertise it.
+    static let showInPlaceCapability = "overlay_show_in_place_v1"
+    /// Positions `{type: "bounds"}` node anchors (#9316). The host refuses anchors on an agent that
+    /// does not advertise it, which would draw the node at its normal position. Same name as the
+    /// CtrlProxy capability.
+    static let anchorCapability = "overlay_anchor_v1"
+    /// Hides the overlay window so the host's simulator screenshot shows the app alone (#9305).
+    /// The agent restores on its own after `deadlineMs`, so a cancelled host cannot leave the
+    /// overlay hidden.
+    static let hideForCaptureRequest = "hide_for_capture"
+    /// Releases one `hide_for_capture` hold by the `token` its reply carried (no token releases
+    /// every hold); the overlay returns with the last hold. `restored: false` means that hold was
+    /// no longer live (it expired), so the capture may have shown the overlay.
+    static let restoreAfterCaptureRequest = "restore_after_capture"
+    /// Advertised when both capture requests are handled; same name as the CtrlProxy capability.
+    static let screenshotHideCapability = "screenshot_hide_overlay_v1"
+    /// `get_overlay_status` replies with `status.lastSequence` and `status.visible` besides the
+    /// state, which is what the host's `inspect` adopts. An older agent answers status without
+    /// them, so the host refuses `inspect` unless this is advertised.
+    static let inspectCapability = "overlay_inspect_v1"
     static let portEnvironmentKey = "AUTOMOBILE_OVERLAY_PORT"
     static let tokenEnvironmentKey = "AUTOMOBILE_OVERLAY_TOKEN"
     /// Shortest token the agent accepts, so a stray or empty value cannot open the server.

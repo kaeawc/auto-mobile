@@ -23,6 +23,7 @@ import dev.jasonpearson.automobile.demos.ComposeSemanticLinksDemoScreen
 import dev.jasonpearson.automobile.demos.ContrastDemoScreen
 import dev.jasonpearson.automobile.demos.DemoIndexScreen
 import dev.jasonpearson.automobile.demos.HandledExceptionDemoScreen
+import dev.jasonpearson.automobile.demos.NestedSelectionDemoScreen
 import dev.jasonpearson.automobile.demos.NetworkTestScreen
 import dev.jasonpearson.automobile.demos.PerformanceDetailScreen
 import dev.jasonpearson.automobile.demos.PerformanceListScreen
@@ -72,7 +73,7 @@ inline fun <reified T : AppDestination> Modifier.destinationSemanticModifier(): 
  * "navigation.VideoPlayerDestination.video_abc123"
  */
 inline fun <reified T : NavKey> Modifier.destinationSemanticModifier(
-  customTag: String? = null
+  customTag: String? = null,
 ): Modifier {
   val destinationClass = T::class.java
   val packageName = destinationClass.`package`?.name?.split(".")?.lastOrNull() ?: "unknown"
@@ -153,6 +154,7 @@ fun determineStartDestinationWithDeepLink(
           is DemoTapTargetsDestination,
           is DemoXmlSemanticLinksDestination,
           is DemoComposeSemanticLinksDestination,
+          is DemoNestedSelectionDestination,
           is DemoBugReproDestination,
           is DemoHandledExceptionDestination,
           is DemoNetworkTestDestination,
@@ -291,6 +293,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             is DemoTapTargetsDestination,
             is DemoXmlSemanticLinksDestination,
             is DemoComposeSemanticLinksDestination,
+            is DemoNestedSelectionDestination,
             is DemoBugReproDestination,
             is DemoHandledExceptionDestination,
             is DemoNetworkTestDestination,
@@ -364,7 +367,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
                 )
                 backStack.clear()
                 backStack.add(LoginDestination)
-              }
+              },
             )
           }
         }
@@ -487,8 +490,8 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           Box(
             modifier =
               Modifier.destinationSemanticModifier<SlidesDestination>(
-                "slide_${slidesDestination.slideIndex}"
-              )
+                "slide_${slidesDestination.slideIndex}",
+              ),
           ) {
             SlidesScreen(
               initialSlideIndex = slidesDestination.slideIndex,
@@ -522,8 +525,8 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           Box(
             modifier =
               Modifier.destinationSemanticModifier<VideoPlayerDestination>(
-                "video_${videoPlayerDestination.videoId}"
-              )
+                "video_${videoPlayerDestination.videoId}",
+              ),
           ) {
             VideoPlayerScreen(
               videoId = videoPlayerDestination.videoId,
@@ -593,6 +596,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
               onNavigateToComposeSemanticLinks = {
                 backStack.add(DemoComposeSemanticLinksDestination)
               },
+              onNavigateToNestedSelection = { backStack.add(DemoNestedSelectionDestination) },
               onNavigateToBugRepro = { backStack.add(DemoBugReproDestination) },
               onNavigateToHandledException = {
                 backStack.add(DemoHandledExceptionDestination)
@@ -700,8 +704,8 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           Box(
             modifier =
               Modifier.destinationSemanticModifier<DemoPerformanceDetailDestination>(
-                "item_${destination.itemId}"
-              )
+                "item_${destination.itemId}",
+              ),
           ) {
             PerformanceDetailScreen(
               itemId = destination.itemId,
@@ -732,6 +736,15 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           }
         }
 
+        entry<DemoNestedSelectionDestination> { destination ->
+          Navigation3Adapter.TrackNavigation(destination)
+          Box(modifier = Modifier.destinationSemanticModifier<DemoNestedSelectionDestination>()) {
+            NestedSelectionDemoScreen(
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
+            )
+          }
+        }
+
         entry<DemoXmlSemanticLinksDestination> { destination ->
           Navigation3Adapter.TrackNavigation(destination)
           LaunchedEffect(Unit) {
@@ -740,7 +753,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           }
           Box(modifier = Modifier.destinationSemanticModifier<DemoXmlSemanticLinksDestination>()) {
             XmlSemanticLinksDemoScreen(
-              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) }
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
             )
           }
         }
@@ -752,10 +765,10 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             analyticsTracker.trackScreenView("ComposeSemanticLinksDemoScreen")
           }
           Box(
-            modifier = Modifier.destinationSemanticModifier<DemoComposeSemanticLinksDestination>()
+            modifier = Modifier.destinationSemanticModifier<DemoComposeSemanticLinksDestination>(),
           ) {
             ComposeSemanticLinksDemoScreen(
-              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) }
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
             )
           }
         }
@@ -779,7 +792,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           }
           Box(modifier = Modifier.destinationSemanticModifier<DemoHandledExceptionDestination>()) {
             HandledExceptionDemoScreen(
-              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) }
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
             )
           }
         }

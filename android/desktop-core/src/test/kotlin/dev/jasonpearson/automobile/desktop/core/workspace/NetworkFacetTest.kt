@@ -87,7 +87,7 @@ class NetworkFacetTest {
           column = column(),
           dataSource =
             FakeNetworkRequestsDataSource(
-              requests = Result.Success(listOf(row(1, "api.example.com", "/users/{id}")))
+              requests = Result.Success(listOf(row(1, "api.example.com", "/users/{id}"))),
             ),
         )
       }

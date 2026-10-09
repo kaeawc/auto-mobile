@@ -340,10 +340,21 @@ class WebSocketServer(
     // A device-persistent overlay buffers its events while no host is connected and replays them,
     // and inspect_overlays reports what it is showing. Older hosts never send inspect_overlays.
     add("overlay_persistence_replay_v1")
+    // show_overlay replaces a same-id overlay in place (display and pager pages kept) unless reset
+    // is set. Older APKs ignore reset and re-show fresh; hosts warn that pages restarted (#10642).
+    add("overlay_show_in_place_v1")
+    // Overlay nodes with a bounds anchor are laid out at those screen dp bounds, relative to the
+    // window's own origin. Older APKs decode anchors and ignore them, so hosts refuse anchors
+    // there.
+    add("overlay_anchor_v1")
     // Window entries for CtrlProxy's own interactive overlay carry overlayPlacement and
     // overlayOpaque, so the host can tell how much of the app the overlay hides. Older APKs never
     // send them and the host falls back to bounds.
     add("overlay_window_metadata_v1")
+    // request_screenshot honours hideOverlays: the interactive overlay is hidden, a frame confirms
+    // it, the capture runs and the overlay is restored, all in that one request (#9305). Older APKs
+    // ignore the field, so hosts keep reporting that an app-layer screenshot includes the overlay.
+    add("screenshot_hide_overlay_v1")
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for
     // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.
@@ -593,8 +604,8 @@ class WebSocketServer(
                             id = connectionId,
                             supportedCommands = supportedCommands(),
                           ),
-                        )
-                      )
+                        ),
+                      ),
                     )
                   }
                   if (!greetingSent) {

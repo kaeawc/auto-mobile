@@ -280,7 +280,7 @@ object LayoutInspectorMockData {
                         isChecked = false,
                         depth = 3,
                         children = emptyList(),
-                      )
+                      ),
                     ),
                 ),
                 UIElementInfo(
@@ -316,7 +316,7 @@ object LayoutInspectorMockData {
                         isChecked = false,
                         depth = 3,
                         children = emptyList(),
-                      )
+                      ),
                     ),
                 ),
                 UIElementInfo(
@@ -352,7 +352,7 @@ object LayoutInspectorMockData {
                         isChecked = false,
                         depth = 3,
                         children = emptyList(),
-                      )
+                      ),
                     ),
                 ),
               ),

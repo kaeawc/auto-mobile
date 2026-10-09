@@ -4,10 +4,14 @@ import type { VideoRecordingMetadata } from "../../src/models/VideoRecording";
 // granularity; this is deliberately much smaller than the fold/unfold sequence.
 export const RECORDING_SPAN_TOLERANCE_MS = 100;
 
-// The container timeline starts at the first encoded frame and screenrecord only
-// emits frames on screen change, so allow encoder start latency and trailing
-// static frames. A stream frozen right after start (about 1s) must still fail
-// over the multi-second fold/unfold sequence.
+// The container timeline starts at the first encoded frame, and screenrecord only
+// emits frames on screen change: a display that stays static after the reopen adds
+// no frames, so the container ends at the last change, not at stop or at any later
+// host timestamp. The reopen itself changes the recorded panel, so the container must
+// reach the host time the reopen was requested, less the encoder start latency
+// (startedAt is taken before the display is resolved and `adb shell screenrecord`
+// spawns). A stream frozen right after start (about 1s) must still fail over the
+// multi-second fold/unfold sequence.
 export const CONTAINER_DURATION_TOLERANCE_MS = 5000;
 
 export interface CleanupFailure {
@@ -76,23 +80,38 @@ export function parseFfprobeDurationMs(stdout: string): number {
   return Math.round(seconds * 1000);
 }
 
-export function assertContainerDurationSpans(
+/**
+ * Asserts the encoded container reaches the reopen of the recorded panel.
+ *
+ * Anchor on the host time the reopen was requested, not on a later observation
+ * timestamp: screenrecord encodes nothing while the reopened panel is static, and
+ * an observe screenshot's capturedAt is its host-file mtime, written only after a
+ * multi-second full-resolution capture transfer. Both put such a timestamp seconds
+ * past the last encoded frame even when no footage was lost (run 37722361918).
+ */
+export function assertContainerDurationReachesReopen(
   containerDurationMs: number,
   recordingStartedAtMs: number,
-  observationEpochMs: number,
+  reopenRequestedAtMs: number,
 ): void {
-  const inputs = `containerDurationMs=${containerDurationMs}, recordingStartedAtMs=${recordingStartedAtMs}, observationEpochMs=${observationEpochMs}`;
+  const inputs = `containerDurationMs=${containerDurationMs}, recordingStartedAtMs=${recordingStartedAtMs}, reopenRequestedAtMs=${reopenRequestedAtMs}`;
   if (
     !Number.isFinite(containerDurationMs) ||
     !Number.isFinite(recordingStartedAtMs) ||
-    !Number.isFinite(observationEpochMs)
+    !Number.isFinite(reopenRequestedAtMs)
   ) {
     throw new Error(`Container duration assertion requires finite inputs: ${inputs}`);
   }
-  const requiredSpanMs = observationEpochMs - recordingStartedAtMs;
+  const requiredSpanMs = reopenRequestedAtMs - recordingStartedAtMs;
+  // Within the tolerance even an empty container would pass, so the check would be vacuous.
+  if (requiredSpanMs <= CONTAINER_DURATION_TOLERANCE_MS) {
+    throw new Error(
+      `Reopen came too soon after the recording started to detect a frozen stream: requiredSpanMs=${requiredSpanMs}, toleranceMs=${CONTAINER_DURATION_TOLERANCE_MS}, ${inputs}`,
+    );
+  }
   if (containerDurationMs + CONTAINER_DURATION_TOLERANCE_MS < requiredSpanMs) {
     throw new Error(
-      `Container duration does not span the observation: requiredSpanMs=${requiredSpanMs}, toleranceMs=${CONTAINER_DURATION_TOLERANCE_MS}, ${inputs}`,
+      `Container duration does not reach the reopen: requiredSpanMs=${requiredSpanMs}, toleranceMs=${CONTAINER_DURATION_TOLERANCE_MS}, ${inputs}`,
     );
   }
 }

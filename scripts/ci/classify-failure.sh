@@ -129,7 +129,9 @@ ambiguous_terminal_attempt() {
 }
 
 # Gate outcomes are emitted only when every failed upstream job in this run is
-# advisory. This tells a reader to inspect this report's real upstream rows
+# advisory. pull_request.yml no longer has the non-required iOS/Android/Node
+# Tests/WebRTC roll-ups; these cases still classify runs recorded before their
+# removal. This tells a reader to inspect this report's real upstream rows
 # rather than treating a roll-up context as the failing test.
 advisory_only_gate() {
   local gate="$1"

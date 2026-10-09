@@ -96,6 +96,14 @@ function observedAppId(observation: ObserveResult): string | undefined {
 const wasForegroundField = (value: boolean | undefined): { wasForeground?: boolean } =>
   value === undefined ? {} : { wasForeground: value };
 
+/** The fulfilled value of a settled read, rethrowing its rejection reason otherwise. */
+function settledValue<T>(result: PromiseSettledResult<T>): T {
+  if (result.status === "rejected") {
+    throw result.reason;
+  }
+  return result.value;
+}
+
 export interface TerminateAppOptions {
   simctl?: SimCtlClient;
   timer?: Timer;
@@ -153,65 +161,40 @@ export class TerminateApp extends BaseVisualChange {
     return runWithNestedPerfTracker(perf, async () => {
       const terminateLogic = async (): Promise<TerminateAppResult> => {
         // Auto-detect target user if not specified
-        const targetUserId = await perf.track("detectTargetUser", async () => {
-          return (
-            await new AndroidUserTargetResolver(this.adb).resolve({
-              packageName,
-              explicitUserId: options?.userId,
-              installedOnly: true,
-              signal,
-            })
-          ).userId;
-        });
+        const target = await perf.track("detectTargetUser", () =>
+          new AndroidUserTargetResolver(this.adb).resolve({
+            packageName,
+            explicitUserId: options?.userId,
+            installedOnly: true,
+            includeForegroundApp: true,
+            signal,
+          }),
+        );
+        const targetUserId = target.userId;
 
         throwIfAborted(signal);
 
-        // Check if app is installed
-        const isInstalled = await perf.track("checkInstalled", async () => {
-          try {
-            const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-            const result = await a11y.requestInstalledPackages(true, targetUserId, 3000);
-            throwIfAborted(signal);
-            if (result.success && result.userId === targetUserId) {
-              return result.packages.some((p) => p.packageName === packageName);
-            }
-          } catch (error) {
-            throwIfAborted(signal);
-            if (
-              error instanceof Error &&
-              (error.name === "AbortError" || error.message === OPERATION_CANCELLED_MESSAGE)
-            ) {
-              throw error;
-            }
-            // CtrlProxy is optional; a successful shell listing can still establish install state.
-            logger.debug("[TerminateApp] CtrlProxy install check failed", error);
-          }
-          try {
-            const isInstalledCmd = `shell pm list packages --user ${targetUserId}`;
-            const isInstalledOutput = await this.adb.executeCommand(
-              isInstalledCmd,
-              undefined,
-              undefined,
-              true,
-              signal,
+        // The install, process and foreground reads are independent and read-only, so run
+        // them concurrently (each adb dumpsys costs 100+ ms, far more under load) instead of
+        // one after another. Results are consumed in the original priority order below.
+        const [installedRead, runningRead, foregroundRead] = await Promise.allSettled([
+          perf
+            .fork()
+            .track("checkInstalled", () => this.checkInstalled(packageName, targetUserId, signal)),
+          perf.fork().track("checkRunning", () => this.readRunningPids(packageName, targetUserId)),
+          perf.fork().track("checkForeground", async () => {
+            // The resolver already ran this dumpsys when it chose the user; reuse it.
+            const foregroundApp =
+              target.foregroundApp !== undefined
+                ? target.foregroundApp
+                : await this.adb.getForegroundApp();
+            return (
+              foregroundApp?.packageName === packageName && foregroundApp.userId === targetUserId
             );
-            throwIfAborted(signal);
-            return packageListingContains(isInstalledOutput.stdout, packageName);
-          } catch (error) {
-            throwIfAborted(signal);
-            if (
-              error instanceof Error &&
-              (error.name === "AbortError" || error.message === OPERATION_CANCELLED_MESSAGE)
-            ) {
-              throw error;
-            }
-            logger.warn("[TerminateApp] Android install check failed", error);
-            throw toActionableError(
-              error,
-              `Could not determine whether ${packageName} is installed for Android user ${targetUserId}`,
-            );
-          }
-        });
+          }),
+        ]);
+        throwIfAborted(signal);
+        const isInstalled = settledValue(installedRead);
 
         if (!isInstalled) {
           return {
@@ -224,27 +207,7 @@ export class TerminateApp extends BaseVisualChange {
           };
         }
 
-        // `force-stop` is destructive, so determine the selected user's process
-        // state before changing it. A package running in another profile must not
-        // make this operation report that the selected profile was running.
-        const runningPids = await perf.track("checkRunning", async () => {
-          try {
-            const result = await readAndroidPackageProcesses(this.adb, packageName, {
-              userId: targetUserId,
-              timer: this.timer,
-            });
-            const processes = result.processes.filter((p) => p.userId === targetUserId);
-            return new Set(processes.map((p) => p.pid));
-          } catch (error) {
-            logger.warn(
-              `[TerminateApp] Running-state check failed for user ${targetUserId}`,
-              error,
-            );
-            throw new ActionableError(
-              `Could not determine whether ${packageName} is running for Android user ${targetUserId}: ${errorMessage(error)}`,
-            );
-          }
-        });
+        const runningPids = settledValue(runningRead);
 
         if (runningPids.size === 0) {
           // The process is already gone — the exact dead-process state that
@@ -252,6 +215,7 @@ export class TerminateApp extends BaseVisualChange {
           // cached window/hierarchy record for it is stale, so invalidate here too,
           // not only on the force-stop path below.
           this.cacheInvalidator.invalidate(this.device);
+          this.cacheInvalidator.retireAppProcess(this.device, packageName);
           return {
             success: true,
             packageName,
@@ -262,13 +226,7 @@ export class TerminateApp extends BaseVisualChange {
           };
         }
 
-        // Check if app is in foreground using getForegroundApp (which returns user context)
-        const isForeground = await perf.track("checkForeground", async () => {
-          const foregroundApp = await this.adb.getForegroundApp();
-          return (
-            foregroundApp?.packageName === packageName && foregroundApp.userId === targetUserId
-          );
-        });
+        const isForeground = settledValue(foregroundRead);
 
         const forceStopCommand = `shell am force-stop --user ${targetUserId} ${shellQuote(packageName)}`;
         await perf.track("forceStop", () => this.adb.executeCommand(forceStopCommand));
@@ -277,6 +235,7 @@ export class TerminateApp extends BaseVisualChange {
         // stale. Invalidate it so a client re-observing to recover gets a fresh
         // sync instead of the same phantom window (issue #5867).
         this.cacheInvalidator.invalidate(this.device);
+        this.cacheInvalidator.retireAppProcess(this.device, packageName);
 
         if (!options?.skipObservation) {
           await perf.track("awaitTerminated", () =>
@@ -310,6 +269,78 @@ export class TerminateApp extends BaseVisualChange {
         perf,
       });
     });
+  }
+
+  /** Whether the package is installed for `targetUserId` (CtrlProxy first, then `pm list`). */
+  private async checkInstalled(
+    packageName: string,
+    targetUserId: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const result = await a11y.requestInstalledPackages(true, targetUserId, 3000);
+      throwIfAborted(signal);
+      if (result.success && result.userId === targetUserId) {
+        return result.packages.some((p) => p.packageName === packageName);
+      }
+    } catch (error) {
+      throwIfAborted(signal);
+      if (
+        error instanceof Error &&
+        (error.name === "AbortError" || error.message === OPERATION_CANCELLED_MESSAGE)
+      ) {
+        throw error;
+      }
+      // CtrlProxy is optional; a successful shell listing can still establish install state.
+      logger.debug("[TerminateApp] CtrlProxy install check failed", error);
+    }
+    try {
+      const isInstalledCmd = `shell pm list packages --user ${targetUserId}`;
+      const isInstalledOutput = await this.adb.executeCommand(
+        isInstalledCmd,
+        undefined,
+        undefined,
+        true,
+        signal,
+      );
+      throwIfAborted(signal);
+      return packageListingContains(isInstalledOutput.stdout, packageName);
+    } catch (error) {
+      throwIfAborted(signal);
+      if (
+        error instanceof Error &&
+        (error.name === "AbortError" || error.message === OPERATION_CANCELLED_MESSAGE)
+      ) {
+        throw error;
+      }
+      logger.warn("[TerminateApp] Android install check failed", error);
+      throw toActionableError(
+        error,
+        `Could not determine whether ${packageName} is installed for Android user ${targetUserId}`,
+      );
+    }
+  }
+
+  /**
+   * Pids of the package's processes for `targetUserId`. `force-stop` is destructive, so the
+   * selected user's process state is read before changing it. A package running in another
+   * profile must not make this operation report that the selected profile was running.
+   */
+  private async readRunningPids(packageName: string, targetUserId: number): Promise<Set<number>> {
+    try {
+      const result = await readAndroidPackageProcesses(this.adb, packageName, {
+        userId: targetUserId,
+        timer: this.timer,
+      });
+      const processes = result.processes.filter((p) => p.userId === targetUserId);
+      return new Set(processes.map((p) => p.pid));
+    } catch (error) {
+      logger.warn(`[TerminateApp] Running-state check failed for user ${targetUserId}`, error);
+      throw new ActionableError(
+        `Could not determine whether ${packageName} is running for Android user ${targetUserId}: ${errorMessage(error)}`,
+      );
+    }
   }
 
   private async awaitTerminated(

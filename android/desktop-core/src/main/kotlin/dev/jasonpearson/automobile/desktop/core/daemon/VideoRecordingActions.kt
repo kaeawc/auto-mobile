@@ -48,8 +48,18 @@ data class VideoRecordingStopResult(
 interface VideoRecordingActions {
   fun startRecording(deviceId: String): List<VideoRecordingArtifact>
 
-  /** Stops [recordingId], or every active recording when null. */
-  fun stopRecording(deviceId: String, recordingId: String? = null): VideoRecordingStopResult
+  /**
+   * Stops [recordingId], or every active recording on [deviceId] when null.
+   *
+   * A stop by id needs no device, so [deviceId] is not sent with it and the daemon never allocates
+   * one (#10978). After a release-time stop the same call returns the finalized artifact, scoped to
+   * [ownerSessionUuid], the session that started the recording (#10958).
+   */
+  fun stopRecording(
+    deviceId: String,
+    recordingId: String? = null,
+    ownerSessionUuid: String? = null,
+  ): VideoRecordingStopResult
 }
 
 /** [VideoRecordingActions] backed by the `videoRecording` MCP tool. */
@@ -62,18 +72,26 @@ class McpVideoRecordingActions(private val clientProvider: () -> AutoMobileClien
         buildJsonObject {
           put("action", JsonPrimitive("start"))
           put("deviceId", JsonPrimitive(deviceId))
-        }
+        },
       )
       .recordings
 
-  override fun stopRecording(deviceId: String, recordingId: String?): VideoRecordingStopResult {
+  override fun stopRecording(
+    deviceId: String,
+    recordingId: String?,
+    ownerSessionUuid: String?,
+  ): VideoRecordingStopResult {
     val response =
       call(
         buildJsonObject {
           put("action", JsonPrimitive("stop"))
-          put("deviceId", JsonPrimitive(deviceId))
-          if (recordingId != null) put("recordingId", JsonPrimitive(recordingId))
-        }
+          if (recordingId != null) {
+            put("recordingId", JsonPrimitive(recordingId))
+            if (ownerSessionUuid != null) put("sessionUuid", JsonPrimitive(ownerSessionUuid))
+          } else {
+            put("deviceId", JsonPrimitive(deviceId))
+          }
+        },
       )
     return VideoRecordingStopResult(
       recordings = response.recordings,
@@ -106,12 +124,23 @@ internal data class VideoRecordingToolResponse(
 /** In-memory [VideoRecordingActions] for previews and tests. */
 class FakeVideoRecordingActions(
   /** Segments produced by the next stop; more than one mimics a long, split recording. */
-  private val segmentsPerStop: Int = 1
+  private val segmentsPerStop: Int = 1,
 ) : VideoRecordingActions {
   private var active: String? = null
 
   val isRecording: Boolean
     get() = active != null
+
+  /** Every stop received, in order: the device it named (null when by id) and the id. */
+  val stopCalls = mutableListOf<Pair<String?, String?>>()
+
+  /** Like the daemon: a stop with no id and nothing active is an error, not a no-op. */
+  var failsDeviceStopWhenIdle = false
+
+  /** The daemon released the session: it stops and finalizes the recording on its own. */
+  fun simulateRelease() {
+    active = null
+  }
 
   override fun startRecording(deviceId: String): List<VideoRecordingArtifact> {
     val recordingId = "rec-${deviceId}-1"
@@ -119,7 +148,15 @@ class FakeVideoRecordingActions(
     return listOf(VideoRecordingArtifact(recordingId, "/tmp/$recordingId.mp4", 0, recordingId))
   }
 
-  override fun stopRecording(deviceId: String, recordingId: String?): VideoRecordingStopResult {
+  override fun stopRecording(
+    deviceId: String,
+    recordingId: String?,
+    ownerSessionUuid: String?,
+  ): VideoRecordingStopResult {
+    stopCalls += (if (recordingId == null) deviceId else null) to recordingId
+    if (recordingId == null && active == null && failsDeviceStopWhenIdle) {
+      error("No active video recording found for device.")
+    }
     val sessionId = recordingId ?: active ?: "rec-${deviceId}-1"
     active = null
     val segments =

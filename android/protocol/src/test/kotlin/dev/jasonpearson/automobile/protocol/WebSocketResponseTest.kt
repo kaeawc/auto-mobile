@@ -230,7 +230,9 @@ class WebSocketResponseTest {
     assertTrue(encoded.contains(""""type":"connected""""))
     assertTrue(encoded.contains(""""id":1"""))
     assertTrue(
-      encoded.contains(""""supportedCommands":["set_hierarchy_interval","node_selector_actions"]""")
+      encoded.contains(
+        """"supportedCommands":["set_hierarchy_interval","node_selector_actions"]""",
+      ),
     )
   }
 
@@ -262,7 +264,7 @@ class WebSocketResponseTest {
                   recomposeOnBackspaceIntoWord = true,
                   batchEdits = true,
                 ),
-            )
+            ),
           ),
       )
 

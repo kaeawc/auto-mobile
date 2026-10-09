@@ -2,6 +2,7 @@
  * Fake implementation of FileSystem for testing
  * Stores files in memory instead of interacting with the real file system
  */
+import { compareCodeUnits } from "../../src/utils/io";
 import { FileSystem } from "../../src/utils/filesystem/DefaultFileSystem";
 
 export class FakeFileSystem implements FileSystem {
@@ -150,7 +151,7 @@ export class FakeFileSystem implements FileSystem {
     this.files.forEach((_, filePath) => collect(filePath));
     this.binaryFiles.forEach((_, filePath) => collect(filePath));
     this.directories.forEach((directory) => collect(directory));
-    return [...names];
+    return [...names].sort(compareCodeUnits);
   }
 
   existsSync(filePath: string): boolean {

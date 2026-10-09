@@ -96,6 +96,8 @@ fun rememberWorkspaceDeviceControl(
   streamFactory: () -> ObservationStream = {
     createWorkspaceControlObservationClient(sessionUuidProvider = sessionUuidProvider)
   },
+  /** The daemon refused this pane's input because another session holds the device (#10743). */
+  onDeviceHeldElsewhere: (deviceId: String) -> Unit = {},
 ): WorkspaceDeviceControlState {
   val scope = rememberCoroutineScope()
   val layoutState = remember(column.deviceId) { LayoutInspectorState() }
@@ -105,6 +107,7 @@ fun rememberWorkspaceDeviceControl(
   // The provider swaps behind the long-lived holder (a daemon reconnect must not strand a queued
   // input on a superseded client); it is read at dispatch time so the newest client is always used.
   val controlClientProvider by rememberUpdatedState(clientProvider)
+  val heldElsewhereSink by rememberUpdatedState(onDeviceHeldElsewhere)
 
   // The decoupled input path: a click on the video pane maps through the retained geometry snapshot
   // and dispatches straight here, frame-identity-free (see [VideoInputDispatcher]). This is what
@@ -118,6 +121,7 @@ fun rememberWorkspaceDeviceControl(
         deviceId = column.deviceId,
         tracer = tracer,
         streamingEnabled = GestureStreamingConfig.enabled,
+        onDeviceHeldElsewhere = { heldElsewhereSink(column.deviceId) },
       )
     }
 
@@ -260,7 +264,7 @@ fun rememberWorkspaceDeviceControl(
       hierarchy = layoutState.hierarchyFacts,
       // WebRTC/video has no capture identity; control maps and renders the paired screenshot.
       liveFrame = null,
-    )
+    ),
   )
 
   // Geometry retention — the crux of the decoupling. Keep the last snapshot INDEFINITELY: device

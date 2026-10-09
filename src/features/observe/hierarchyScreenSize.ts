@@ -61,19 +61,39 @@ function isFullLandscapeFrame(
   );
 }
 
+/** A child that is exactly the root's frame with width and height exchanged. */
+function isExactSwappedFrame(
+  child: NonNullable<ReturnType<typeof parseBounds>>,
+  bounds: NonNullable<ReturnType<typeof parseBounds>>,
+): boolean {
+  return (
+    child.left === bounds.left &&
+    child.top === bounds.top &&
+    child.right === bounds.left + (bounds.bottom - bounds.top) &&
+    child.bottom === bounds.top + (bounds.right - bounds.left)
+  );
+}
+
+interface SwappedRootEvidence {
+  maxRight: number;
+  maxBottom: number;
+  fullLandscapeFrame: boolean;
+  exactSwappedFrame: boolean;
+}
+
 function fitsSwappedBounds(
   bounds: NonNullable<ReturnType<typeof parseBounds>>,
-  maxRight: number,
-  maxBottom: number,
-  fullLandscapeFrame: boolean,
+  { maxRight, maxBottom, fullLandscapeFrame, exactSwappedFrame }: SwappedRootEvidence,
   iosMultiPanel: boolean,
 ): boolean {
   const width = bounds.right - bounds.left;
   const height = bounds.bottom - bounds.top;
+  // A container exactly the swapped frame proves landscape; rows below it are
+  // scroll content past the panel's bottom edge, not portrait evidence (#8379).
   return (
     (fullLandscapeFrame || (iosMultiPanel && width < height && maxRight > bounds.right)) &&
     maxRight <= bounds.left + height &&
-    maxBottom <= bounds.top + width
+    (exactSwappedFrame || maxBottom <= bounds.top + width)
   );
 }
 
@@ -82,13 +102,31 @@ function landscapeExtentFitsSwappedRoot(
   bounds: NonNullable<ReturnType<typeof parseBounds>>,
   iosMultiPanel: boolean,
 ): boolean {
+  // Cleanup can collapse the application node into an array of its children
+  // (#8379); walk those siblings rather than stopping at the array itself.
+  if (Array.isArray(rootNode)) {
+    return swappedExtentFits(rootNode, bounds, iosMultiPanel);
+  }
   const root = rootNode ? parseBounds(nodeBounds(rootNode)) : null;
   const rootIsApplicationFrame = sameBounds(root, bounds);
   const rootChildren = Array.isArray(rootNode?.node) ? rootNode.node : [];
-  const stack = rootIsApplicationFrame ? [...rootChildren] : rootNode ? [rootNode] : [];
+  return swappedExtentFits(
+    rootIsApplicationFrame ? rootChildren : rootNode ? [rootNode] : [],
+    bounds,
+    iosMultiPanel,
+  );
+}
+
+function swappedExtentFits(
+  nodes: ViewHierarchyNode[],
+  bounds: NonNullable<ReturnType<typeof parseBounds>>,
+  iosMultiPanel: boolean,
+): boolean {
+  const stack = [...nodes];
   let maxRight = bounds.left;
   let maxBottom = bounds.top;
   let fullLandscapeFrame = false;
+  let exactSwappedFrame = false;
   while (stack.length > 0) {
     const node = stack.pop()!;
     const child = parseBounds(nodeBounds(node));
@@ -96,12 +134,17 @@ function landscapeExtentFitsSwappedRoot(
       maxRight = Math.max(maxRight, child.right);
       maxBottom = Math.max(maxBottom, child.bottom);
       fullLandscapeFrame ||= isFullLandscapeFrame(child, bounds);
+      exactSwappedFrame ||= isExactSwappedFrame(child, bounds);
     }
     if (Array.isArray(node.node)) {
       stack.push(...node.node);
     }
   }
-  return fitsSwappedBounds(bounds, maxRight, maxBottom, fullLandscapeFrame, iosMultiPanel);
+  return fitsSwappedBounds(
+    bounds,
+    { maxRight, maxBottom, fullLandscapeFrame, exactSwappedFrame },
+    iosMultiPanel,
+  );
 }
 
 /** Runner pixels determine orientation; root bounds take precedence over legacy point metadata. */

@@ -11,6 +11,7 @@ import type { Window } from "../../src/features/observe/interfaces/Window";
 import type { ObserveScreenCache } from "../../src/features/observe/interfaces/ObserveScreenCache";
 import { FakeObserveScreenCache } from "./FakeObserveScreenCache";
 import { BootedDevice } from "../../src/models";
+import type { IosPhysicalDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 
 export interface FakeDeviceClientProviderOptions {
   ctrlProxyManager?: CtrlProxyManager;
@@ -19,6 +20,7 @@ export interface FakeDeviceClientProviderOptions {
   iosCtrlProxyClient?: IOSCtrlProxy;
   window?: Window;
   observeScreenCache?: ObserveScreenCache;
+  iosPhysicalDeviceLister?: IosPhysicalDeviceLister;
 }
 
 /**
@@ -60,6 +62,10 @@ export class FakeDeviceClientProvider implements DeviceClientProvider {
 
   getDeviceUtils(): PlatformDeviceManager {
     return this.fakeDeviceUtils;
+  }
+
+  getIosPhysicalDeviceLister(): IosPhysicalDeviceLister | undefined {
+    return this.options.iosPhysicalDeviceLister;
   }
 
   getAndroidCtrlProxyManager(_device: BootedDevice): CtrlProxyManager {

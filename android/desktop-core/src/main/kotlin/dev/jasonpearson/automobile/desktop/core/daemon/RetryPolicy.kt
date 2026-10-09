@@ -14,6 +14,16 @@ data class RetryPolicy(
 )
 
 /**
+ * The delay before retry number [retry] (0-based): exponential from [RetryPolicy.initialDelayMs],
+ * plus up to [RetryPolicy.jitterFraction] of jitter, never above [RetryPolicy.maxDelayMs].
+ */
+fun RetryPolicy.delayBeforeRetryMs(retry: Int, random: Random = Random.Default): Long {
+  val baseDelay = initialDelayMs * backoffMultiplier.pow(retry.toDouble())
+  val jitter = baseDelay * jitterFraction * random.nextDouble()
+  return min(baseDelay.toLong() + jitter.toLong(), maxDelayMs)
+}
+
+/**
  * Retry with exponential backoff (blocking). Suitable for use from non-suspend contexts such as the
  * synchronous McpHttpClient methods.
  */
@@ -31,9 +41,7 @@ fun <T> retryWithBackoffBlocking(
       throw e
     } catch (e: Exception) {
       if (!isRetryable(e) || attempt == attempts - 1) throw e
-      val baseDelay = policy.initialDelayMs * policy.backoffMultiplier.pow(attempt.toDouble())
-      val jitter = baseDelay * policy.jitterFraction * Random.nextDouble()
-      Thread.sleep(min(baseDelay.toLong() + jitter.toLong(), policy.maxDelayMs))
+      Thread.sleep(policy.delayBeforeRetryMs(attempt))
       attempt++
     }
   }

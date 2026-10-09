@@ -296,7 +296,7 @@ internal object DaemonLauncher {
         "AutoMobile daemon AUTOMOBILE_VERSION mismatch: the shared daemon was started with " +
           "${record.assetVersion ?: "unknown"}, but this runner requested " +
           "${identity.assetVersionPin}. Restart the daemon from this runner's environment " +
-          "before reusing it."
+          "before reusing it.",
       )
     }
     val skew = versionSkew || buildSkew || assetVersionSkew
@@ -310,7 +310,7 @@ internal object DaemonLauncher {
     if (forceRestartRequested && !forcedRestart && daemonAvailable) {
       env.debugLog(
         "Reusing AutoMobile daemon started after this runner (another runner of this run " +
-          "already restarted it)"
+          "already restarted it)",
       )
     }
 
@@ -350,7 +350,7 @@ internal object DaemonLauncher {
       throw DaemonUnavailableException(
         "AutoMobile daemon still differs from this runner after (re)start; the shared socket is " +
           "served by a different build. Ensure the same @kaeawc/auto-mobile version starts the " +
-          "daemon and runs the tests (e.g. set automobile.daemon.package.version)."
+          "daemon and runs the tests (e.g. set automobile.daemon.package.version).",
       )
     }
 
@@ -362,7 +362,7 @@ internal object DaemonLauncher {
 
 /** Production wiring for [DaemonLauncher]: real socket, PID file, launcher command and lock. */
 internal class DefaultDaemonLaunchEnvironment(
-  private val environmentOverrides: Map<String, String>
+  private val environmentOverrides: Map<String, String>,
 ) : DaemonLaunchEnvironment {
   private val socketPath = DaemonSocketPaths.socketPath()
   private val pidFilePath = DaemonSocketPaths.pidFilePath()

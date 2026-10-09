@@ -145,10 +145,19 @@ export interface FocusedTextField {
   secure: boolean;
 }
 
+export interface FocusedTextFieldOptions {
+  /**
+   * iOS runners omit an empty field's value and XCUI can report the placeholder as the value, so a
+   * focused editable with no value, or a value equal to its placeholder, reads as "" (#9078).
+   */
+  iosEmptyAsBlank?: boolean;
+}
+
 /** Preserve security metadata even when a focused field's value is unreadable. */
 export function getFocusedTextField(
   viewHierarchy: ViewHierarchyResult,
   parser: ElementParser = new DefaultElementParser(),
+  options: FocusedTextFieldOptions = {},
 ): FocusedTextField | undefined {
   for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
     for (const root of rootGroup) {
@@ -158,20 +167,7 @@ export function getFocusedTextField(
         if (field !== undefined || !isFocusedTextInputProperties(properties)) {
           return;
         }
-        const searchable = toSearchable(properties);
-        // Text sources preserve editable values; captured length distinguishes empty text from absence.
-        const value =
-          searchable.textSources.value ??
-          searchable.textSources.text ??
-          (searchable.capturedTextLength === 0 ? "" : undefined);
-        const nodeClass = properties.class ?? properties.className;
-        const secure =
-          properties.password === true ||
-          properties.password === "true" ||
-          (typeof nodeClass === "string" && nodeClass.includes("SecureTextField"));
-        if (value !== undefined || secure) {
-          field = { value, secure };
-        }
+        field = readFocusedTextField(properties, options);
       });
       if (field !== undefined) {
         return field;
@@ -179,6 +175,31 @@ export function getFocusedTextField(
     }
   }
   return undefined;
+}
+
+function readFocusedTextField(
+  properties: Record<string, unknown>,
+  options: FocusedTextFieldOptions,
+): FocusedTextField | undefined {
+  const searchable = toSearchable(properties);
+  const nodeClass = properties.class ?? properties.className;
+  const secure =
+    properties.password === true ||
+    properties.password === "true" ||
+    (typeof nodeClass === "string" && nodeClass.includes("SecureTextField"));
+  // Text sources preserve editable values; captured length distinguishes empty text from absence.
+  const value =
+    options.iosEmptyAsBlank && !secure
+      ? iosFieldValueOrBlank(searchable.textSources)
+      : (searchable.textSources.value ??
+        searchable.textSources.text ??
+        (searchable.capturedTextLength === 0 ? "" : undefined));
+  return value !== undefined || secure ? { value, secure } : undefined;
+}
+
+function iosFieldValueOrBlank(textSources: Readonly<Record<string, string>>): string {
+  const value = textSources.value;
+  return value === undefined || value === textSources["hint-text"] ? "" : value;
 }
 
 function isFocusedTextInputProperties(nodeProperties: Record<string, unknown>): boolean {

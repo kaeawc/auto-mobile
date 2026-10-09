@@ -136,7 +136,7 @@ class VideoEncoder(
   fun requestKeyFrame() {
     try {
       codec?.setParameters(
-        Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) }
+        Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) },
       )
     } catch (_: IllegalStateException) {
       // Codec released concurrently with the request; the next frame recovers.

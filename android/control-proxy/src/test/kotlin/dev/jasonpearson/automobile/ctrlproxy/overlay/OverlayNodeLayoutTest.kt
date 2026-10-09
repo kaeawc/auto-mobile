@@ -53,7 +53,7 @@ class OverlayNodeLayoutTest {
       find {
         it.config.contains(SemanticsProperties.TestTag) &&
           it.config[SemanticsProperties.TestTag] == tag
-      }
+      },
     ) {
       "no node tagged $tag"
     }
@@ -63,7 +63,7 @@ class OverlayNodeLayoutTest {
       find {
         it.config.contains(SemanticsProperties.ContentDescription) &&
           it.config[SemanticsProperties.ContentDescription] == listOf(label)
-      }
+      },
     ) {
       "no node labelled $label"
     }
@@ -83,13 +83,13 @@ class OverlayNodeLayoutTest {
                 onTap = tap,
                 style =
                   OverlayStyle(
-                    padding = OverlayPadding(start = 24.0, end = 24.0, top = 10.0, bottom = 10.0)
+                    padding = OverlayPadding(start = 24.0, end = 24.0, top = 10.0, bottom = 10.0),
                   ),
                 children =
                   listOf(OverlayTextNode(text = "Done", style = OverlayStyle(textSize = 30.0))),
-              )
-            )
-        )
+              ),
+            ),
+        ),
       )
     val button = root.tagged("done").boundsInRoot
     val label = root.labelled("Done").boundsInRoot
@@ -117,8 +117,8 @@ class OverlayNodeLayoutTest {
               OverlayBoxNode(testTag = "small", onTap = tap, style = small, children = emptyList()),
               OverlayBoxNode(testTag = "plain", style = small, children = emptyList()),
               OverlayBoxNode(testTag = "after", style = small, children = emptyList()),
-            )
-        )
+            ),
+        ),
       )
     val tappable = root.tagged("small").boundsInRoot
     assertEquals(dp(20f), tappable.width, 0.5f)
@@ -137,7 +137,7 @@ class OverlayNodeLayoutTest {
     val root = render(OverlayTextNode(text = "Scaled", style = OverlayStyle(textSize = 20.0)))
     val layouts = mutableListOf<TextLayoutResult>()
     checkNotNull(root.labelled("Scaled").config[SemanticsActions.GetTextLayoutResult].action)(
-      layouts
+      layouts,
     )
     val input = layouts.single().layoutInput
     assertEquals(20.sp, input.style.fontSize)
@@ -166,7 +166,7 @@ class OverlayNodeLayoutTest {
               OverlayBoxNode(testTag = "a", style = weighted, children = emptyList()),
               OverlayBoxNode(testTag = "b", style = weighted, children = emptyList()),
             ),
-        )
+        ),
       )
     assertEquals(dp(100f), root.tagged("a").boundsInRoot.width, 0.5f)
     assertEquals(dp(100f), root.tagged("b").boundsInRoot.width, 0.5f)
@@ -189,7 +189,7 @@ class OverlayNodeLayoutTest {
                 children = emptyList(),
               ),
             ),
-        )
+        ),
       )
     assertEquals(dp(40f), root.tagged("a").boundsInRoot.height, 0.5f)
     assertEquals(dp(80f), root.tagged("b").boundsInRoot.height, 0.5f)
@@ -232,8 +232,8 @@ class OverlayNodeLayoutTest {
                   ),
                 children = emptyList(),
               ),
-            )
-        )
+            ),
+        ),
       )
     assertEquals(dp(50f), root.tagged("maxFill").boundsInRoot.width, 0.5f)
     assertEquals(dp(80f), root.tagged("minDp").boundsInRoot.width, 0.5f)
@@ -262,8 +262,8 @@ class OverlayNodeLayoutTest {
                 onTap = tap,
                 children = listOf(OverlayIconNode(name = "save"), OverlayTextNode(text = "Save")),
               ),
-            )
-        )
+            ),
+        ),
       )
     fun label(tag: String) =
       root.tagged(tag).config.getOrElseNullable(SemanticsProperties.ContentDescription) { null }
@@ -285,7 +285,7 @@ class OverlayNodeLayoutTest {
                 text = "Mono",
                 style = OverlayStyle(fontFamily = OverlayFontFamily.Named("monospace")),
               ),
-            )
+            ),
         ),
         OverlaySpecTheme(typography = OverlaySpecThemeTypography(fontFamily = "serif")),
       )

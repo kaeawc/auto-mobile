@@ -1,0 +1,3179 @@
+{
+  "observationId": "2f6bccf7-c7ec-4f39-b3d5-6506dd1a03fe",
+  "deviceId": "C7328376-95B2-4306-968C-7A3C04AFBB37",
+  "display": { "key": "0", "role": "unknown", "posture": "unknown", "generation": 0 },
+  "updatedAt": 1791502439726,
+  "screenSize": { "width": 402, "height": 874, "units": "points" },
+  "systemInsets": { "bottom": 34, "left": 0, "right": 0, "top": 62 },
+  "insets": {
+    "available": true,
+    "displayCutoutInfo": { "classification": "unknown" },
+    "safeArea": { "bottom": 34, "left": 0, "right": 0, "top": 62 },
+    "source": "ios-sdk-safe-area",
+    "systemChrome": {
+      "homeIndicatorAutoHideRequested": false,
+      "source": "ios-status-bar-manager",
+      "statusBar": "visible",
+      "visibility": "visible"
+    },
+    "units": "points"
+  },
+  "viewHierarchy": {
+    "hierarchy": {
+      "bounds": [0, 0, 402, 874],
+      "className": "XCUIApplication",
+      "extras": {
+        "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled)",
+        "sdk.hasTapTarget": "true"
+      },
+      "node": [
+        {
+          "bounds": [0, 62, 402, 168],
+          "className": "UINavigationBar",
+          "node": [
+            {
+              "bounds": [16, 62, 60, 106],
+              "className": "UIButton",
+              "clickable": "true",
+              "node": {
+                "bounds": [16, 62, 60, 106],
+                "className": "AnimationView",
+                "extras": { "sdk.source": "sdkWalker" },
+                "node": {
+                  "bounds": [16, 62, 60, 106],
+                  "className": "AnimationView",
+                  "extras": { "sdk.source": "sdkWalker" },
+                  "node": {
+                    "bounds": [14, 60, 62, 108],
+                    "className": "AnimationView",
+                    "extras": { "sdk.source": "sdkWalker" },
+                    "node": {
+                      "bounds": [16, 62, 60, 106],
+                      "className": "AnimationView",
+                      "extras": { "sdk.source": "sdkWalker" },
+                      "node": {
+                        "bounds": [16, 62, 60, 106],
+                        "className": "PlatterContentView",
+                        "extras": { "sdk.source": "sdkWalker" },
+                        "node": {
+                          "bounds": [16, 62, 60, 106],
+                          "className": "PlatterGlassView",
+                          "extras": { "sdk.cornerRadius": "22.0", "sdk.source": "sdkWalker" },
+                          "node": {
+                            "bounds": [16, 62, 60, 106],
+                            "className": "SubviewContainerView",
+                            "extras": { "sdk.source": "sdkWalker" },
+                            "node": {
+                              "bounds": [16, 62, 60, 106],
+                              "className": "PlatterItemView",
+                              "extras": { "sdk.source": "sdkWalker" },
+                              "node": {
+                                "bounds": [16, 62, 60, 106],
+                                "className": "_UIButtonBarButton",
+                                "extras": {
+                                  "sdk.gestureRecognizers": "UITapGestureRecognizer(enabled),_UIFocusSelectObserverGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                                  "sdk.hasTapTarget": "true",
+                                  "sdk.isAccessibilityElement": "true",
+                                  "sdk.source": "sdkWalker"
+                                },
+                                "node": {
+                                  "bounds": [16, 73, 60, 96],
+                                  "className": "Button",
+                                  "extras": {
+                                    "sdk.accessibilityTraits": "button,notEnabled",
+                                    "sdk.gestureRecognizers": "UITapGestureRecognizer(enabled),_UIFocusSelectObserverGestureRecognizer(enabled)",
+                                    "sdk.hasTapTarget": "true",
+                                    "sdk.isAccessibilityElement": "true",
+                                    "sdk.isUserInteractionEnabled": "false",
+                                    "sdk.source": "sdkWalker"
+                                  },
+                                  "node": {
+                                    "bounds": [30, 73, 46, 96],
+                                    "className": "UIImageView",
+                                    "extras": {
+                                      "sdk.accessibilityTraits": "image",
+                                      "sdk.isUserInteractionEnabled": "false",
+                                      "sdk.source": "sdkWalker"
+                                    },
+                                    "resource-id": "chevron.backward",
+                                    "text": "Back"
+                                  },
+                                  "text": "Back"
+                                },
+                                "resource-id": "BackButton"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "resource-id": "BackButton",
+              "role": "button",
+              "text": "Demos"
+            },
+            {
+              "bounds": [16, 119, 286, 160],
+              "className": "UILabel",
+              "extras": {
+                "sdk.accessibilityTraits": "header,staticText",
+                "sdk.isAccessibilityElement": "true",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "role": "heading",
+              "text": "Nested Selection",
+              "view-id": "s2-b0b867a30339757e"
+            },
+            {
+              "bounds": [0, 0, 402, 168],
+              "className": "_UIBarBackground",
+              "extras": {
+                "sdk.accessibilityElementsHidden": "true",
+                "sdk.isUserInteractionEnabled": "false",
+                "sdk.source": "sdkWalker"
+              }
+            },
+            {
+              "bounds": [0, 116, 402, 168],
+              "className": "NavigationBarLargeTitleView",
+              "extras": { "sdk.source": "sdkWalker" },
+              "node": {
+                "bounds": [0, 116, 402, 168],
+                "className": "_UINavigationBarLargeTitleView",
+                "extras": { "sdk.accessibilityElementsHidden": "true", "sdk.source": "sdkWalker" }
+              }
+            },
+            {
+              "bounds": [0, 62, 402, 116],
+              "className": "NavigationBarContentView",
+              "extras": {
+                "sdk.gestureRecognizers": "_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                "sdk.source": "sdkWalker"
+              },
+              "node": {
+                "bounds": [0, 62, 402, 116],
+                "className": "NavigationBarTransitionContainer",
+                "extras": { "sdk.source": "sdkWalker" },
+                "node": {
+                  "bounds": [0, 62, 402, 116],
+                  "className": "_UIMultiLayer",
+                  "extras": {
+                    "sdk.isLayerNode": "true",
+                    "sdk.isUserInteractionEnabled": "false",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": [
+                    {
+                      "bounds": [0, 62, 402, 116],
+                      "className": "CALayer",
+                      "extras": {
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": {
+                        "bounds": [16, 62, 60, 106],
+                        "className": "CALayer",
+                        "extras": {
+                          "sdk.isLayerNode": "true",
+                          "sdk.isUserInteractionEnabled": "false",
+                          "sdk.source": "sdkWalker"
+                        },
+                        "node": {
+                          "bounds": [16, 62, 60, 106],
+                          "className": "CALayer",
+                          "extras": {
+                            "sdk.isLayerNode": "true",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "node": {
+                            "bounds": [16, 62, 60, 106],
+                            "className": "CALayer",
+                            "extras": {
+                              "sdk.isLayerNode": "true",
+                              "sdk.isUserInteractionEnabled": "false",
+                              "sdk.source": "sdkWalker"
+                            },
+                            "node": {
+                              "bounds": [14, 60, 62, 108],
+                              "className": "CALayer",
+                              "extras": {
+                                "sdk.isLayerNode": "true",
+                                "sdk.isUserInteractionEnabled": "false",
+                                "sdk.source": "sdkWalker"
+                              },
+                              "node": {
+                                "bounds": [16, 62, 60, 106],
+                                "className": "CALayer",
+                                "extras": {
+                                  "sdk.isLayerNode": "true",
+                                  "sdk.isUserInteractionEnabled": "false",
+                                  "sdk.source": "sdkWalker"
+                                },
+                                "node": {
+                                  "bounds": [16, 62, 60, 106],
+                                  "className": "CALayer",
+                                  "extras": {
+                                    "sdk.isLayerNode": "true",
+                                    "sdk.isUserInteractionEnabled": "false",
+                                    "sdk.source": "sdkWalker"
+                                  },
+                                  "node": {
+                                    "bounds": [16, 62, 60, 106],
+                                    "className": "CALayer",
+                                    "extras": {
+                                      "sdk.cornerRadius": "22.0",
+                                      "sdk.isLayerNode": "true",
+                                      "sdk.isUserInteractionEnabled": "false",
+                                      "sdk.source": "sdkWalker"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "bounds": [0, 62, 402, 116],
+                      "className": "CALayer",
+                      "extras": {
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": {
+                        "bounds": [0, 62, 402, 116],
+                        "className": "CALayer",
+                        "extras": {
+                          "sdk.isLayerNode": "true",
+                          "sdk.isUserInteractionEnabled": "false",
+                          "sdk.source": "sdkWalker"
+                        },
+                        "node": {
+                          "bounds": [0, 62, 402, 116],
+                          "className": "CALayer",
+                          "extras": {
+                            "sdk.isLayerNode": "true",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "node": [
+                            {
+                              "bounds": [0, 62, 402, 116],
+                              "className": "CABackdropLayer",
+                              "extras": {
+                                "sdk.isLayerNode": "true",
+                                "sdk.isUserInteractionEnabled": "false",
+                                "sdk.source": "sdkWalker"
+                              },
+                              "node": {
+                                "bounds": [0, 62, 402, 116],
+                                "className": "CASDFLayer",
+                                "extras": {
+                                  "sdk.isLayerNode": "true",
+                                  "sdk.isUserInteractionEnabled": "false",
+                                  "sdk.source": "sdkWalker"
+                                },
+                                "resource-id": "@0"
+                              }
+                            },
+                            {
+                              "bounds": [0, 62, 402, 116],
+                              "className": "CASDFLayer",
+                              "extras": {
+                                "sdk.isLayerNode": "true",
+                                "sdk.isUserInteractionEnabled": "false",
+                                "sdk.source": "sdkWalker"
+                              },
+                              "resource-id": "SDF"
+                            }
+                          ],
+                          "resource-id": "MaterialProvider"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "resource-id": "Nested Selection"
+        },
+        {
+          "bounds": [12, 211, 95, 232],
+          "className": "UILabel",
+          "extras": {
+            "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled)",
+            "sdk.hasTapTarget": "true"
+          },
+          "resource-id": "selection_status",
+          "role": "text",
+          "text": "status: idle"
+        },
+        {
+          "bounds": [12, 240, 112, 274],
+          "className": "UIButton",
+          "clickable": "true",
+          "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" },
+          "node": {
+            "bounds": [12, 240, 112, 274],
+            "className": "CALayer",
+            "extras": {
+              "sdk.backgroundColor": "#D62A21FF",
+              "sdk.cornerRadius": "17.166666",
+              "sdk.isLayerNode": "true",
+              "sdk.isUserInteractionEnabled": "false",
+              "sdk.source": "sdkWalker"
+            }
+          },
+          "resource-id": "reverse_cart_A",
+          "role": "button",
+          "text": "Reverse A"
+        },
+        {
+          "bounds": [120, 240, 222, 274],
+          "className": "UIButton",
+          "clickable": "true",
+          "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" },
+          "node": {
+            "bounds": [120, 240, 222, 274],
+            "className": "CALayer",
+            "extras": {
+              "sdk.backgroundColor": "#D62A21FF",
+              "sdk.cornerRadius": "17.166666",
+              "sdk.isLayerNode": "true",
+              "sdk.isUserInteractionEnabled": "false",
+              "sdk.source": "sdkWalker"
+            }
+          },
+          "resource-id": "drop_cart_A_item_42",
+          "role": "button",
+          "text": "Drop A/42"
+        },
+        {
+          "bounds": [12, 282, 62, 302],
+          "className": "UILabel",
+          "extras": {
+            "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled)",
+            "sdk.hasTapTarget": "true"
+          },
+          "role": "text",
+          "text": "cart_A",
+          "view-id": "s2-a8c6b4c0b0ad2fa8"
+        },
+        {
+          "bounds": [12, 311, 390, 511],
+          "className": "UIScrollView",
+          "node": [
+            {
+              "bounds": [12, 311, 390, 345],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 311, 296, 345],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_40 qty",
+                  "node": [
+                    {
+                      "bounds": [12, 311, 297, 345],
+                      "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                      "extras": {
+                        "sdk.backgroundColor": "#FFFFFFFF",
+                        "sdk.borderColor": "#00000033",
+                        "sdk.borderWidth": "0.33333334",
+                        "sdk.cornerRadius": "5.0",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    },
+                    {
+                      "bounds": [19, 318, 290, 338],
+                      "className": "UITextFieldLabel",
+                      "extras": {
+                        "sdk.accessibilityTraits": "staticText",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "text": "item_40 qty"
+                    }
+                  ],
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 311, 389, 345],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" },
+                  "node": {
+                    "bounds": [305, 311, 390, 345],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.backgroundColor": "#D62A21FF",
+                      "sdk.cornerRadius": "17.166666",
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_40"
+            },
+            {
+              "bounds": [12, 349, 390, 383],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 349, 296, 383],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_41 qty",
+                  "node": [
+                    {
+                      "bounds": [12, 349, 297, 383],
+                      "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                      "extras": {
+                        "sdk.backgroundColor": "#FFFFFFFF",
+                        "sdk.borderColor": "#00000033",
+                        "sdk.borderWidth": "0.33333334",
+                        "sdk.cornerRadius": "5.0",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    },
+                    {
+                      "bounds": [19, 356, 290, 376],
+                      "className": "UITextFieldLabel",
+                      "extras": {
+                        "sdk.accessibilityTraits": "staticText",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "text": "item_41 qty"
+                    }
+                  ],
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 349, 389, 383],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" },
+                  "node": {
+                    "bounds": [305, 349, 390, 383],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.backgroundColor": "#D62A21FF",
+                      "sdk.cornerRadius": "17.166666",
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_41"
+            },
+            {
+              "bounds": [12, 387, 390, 422],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 387, 296, 422],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_42 qty",
+                  "node": [
+                    {
+                      "bounds": [12, 388, 297, 422],
+                      "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                      "extras": {
+                        "sdk.backgroundColor": "#FFFFFFFF",
+                        "sdk.borderColor": "#00000033",
+                        "sdk.borderWidth": "0.33333334",
+                        "sdk.cornerRadius": "5.0",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    },
+                    {
+                      "bounds": [19, 395, 290, 415],
+                      "className": "UITextFieldLabel",
+                      "extras": {
+                        "sdk.accessibilityTraits": "staticText",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "text": "item_42 qty"
+                    }
+                  ],
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 387, 389, 422],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" },
+                  "node": {
+                    "bounds": [305, 388, 390, 422],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.backgroundColor": "#D62A21FF",
+                      "sdk.cornerRadius": "17.166666",
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_42"
+            },
+            {
+              "bounds": [12, 426, 390, 460],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 426, 296, 460],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_43 qty",
+                  "node": [
+                    {
+                      "bounds": [12, 426, 297, 460],
+                      "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                      "extras": {
+                        "sdk.backgroundColor": "#FFFFFFFF",
+                        "sdk.borderColor": "#00000033",
+                        "sdk.borderWidth": "0.33333334",
+                        "sdk.cornerRadius": "5.0",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    },
+                    {
+                      "bounds": [19, 433, 290, 453],
+                      "className": "UITextFieldLabel",
+                      "extras": {
+                        "sdk.accessibilityTraits": "staticText",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "text": "item_43 qty"
+                    }
+                  ],
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 426, 389, 460],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" },
+                  "node": {
+                    "bounds": [305, 426, 390, 460],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.backgroundColor": "#D62A21FF",
+                      "sdk.cornerRadius": "17.166666",
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_43"
+            },
+            {
+              "bounds": [12, 464, 390, 498],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 464, 296, 498],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_44 qty",
+                  "node": [
+                    {
+                      "bounds": [12, 464, 297, 498],
+                      "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                      "extras": {
+                        "sdk.backgroundColor": "#FFFFFFFF",
+                        "sdk.borderColor": "#00000033",
+                        "sdk.borderWidth": "0.33333334",
+                        "sdk.cornerRadius": "5.0",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    },
+                    {
+                      "bounds": [19, 471, 290, 491],
+                      "className": "UITextFieldLabel",
+                      "extras": {
+                        "sdk.accessibilityTraits": "staticText",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "text": "item_44 qty"
+                    }
+                  ],
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 464, 389, 498],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" },
+                  "node": {
+                    "bounds": [305, 464, 390, 498],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.backgroundColor": "#D62A21FF",
+                      "sdk.cornerRadius": "17.166666",
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_44"
+            },
+            {
+              "bounds": [12, 502, 390, 537],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 502, 296, 536],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_45 qty",
+                  "node": [
+                    {
+                      "bounds": [12, 503, 297, 537],
+                      "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                      "extras": {
+                        "sdk.backgroundColor": "#FFFFFFFF",
+                        "sdk.borderColor": "#00000033",
+                        "sdk.borderWidth": "0.33333334",
+                        "sdk.cornerRadius": "5.0",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    },
+                    {
+                      "bounds": [19, 510, 290, 530],
+                      "className": "UITextFieldLabel",
+                      "extras": {
+                        "sdk.accessibilityTraits": "staticText",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "text": "item_45 qty"
+                    }
+                  ],
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 502, 389, 537],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" },
+                  "node": {
+                    "bounds": [305, 503, 390, 537],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.backgroundColor": "#D62A21FF",
+                      "sdk.cornerRadius": "17.166666",
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_45"
+            },
+            {
+              "bounds": [12, 541, 390, 575],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 541, 296, 575],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_46 qty",
+                  "node": {
+                    "bounds": [12, 541, 297, 575],
+                    "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                    "extras": {
+                      "sdk.backgroundColor": "#FFFFFFFF",
+                      "sdk.borderColor": "#00000033",
+                      "sdk.borderWidth": "0.33333334",
+                      "sdk.cornerRadius": "5.0",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 541, 389, 575],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" },
+                  "node": {
+                    "bounds": [305, 541, 390, 575],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.backgroundColor": "#D62A21FF",
+                      "sdk.cornerRadius": "17.166666",
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_46"
+            },
+            {
+              "bounds": [12, 579, 390, 613],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 579, 296, 613],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_47 qty",
+                  "node": {
+                    "bounds": [12, 579, 297, 613],
+                    "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                    "extras": {
+                      "sdk.backgroundColor": "#FFFFFFFF",
+                      "sdk.borderColor": "#00000033",
+                      "sdk.borderWidth": "0.33333334",
+                      "sdk.cornerRadius": "5.0",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 579, 389, 613],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "extras": { "sdk.isLayerNode": "true", "sdk.isUserInteractionEnabled": "false" },
+                  "node": {
+                    "bounds": [305, 579, 390, 613],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.backgroundColor": "#D62A21FF",
+                      "sdk.cornerRadius": "17.166666",
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_47"
+            },
+            {
+              "bounds": [357, 311, 387, 511],
+              "className": "UIView",
+              "text": "Vertical scroll bar, 2 pages",
+              "view-id": "s2-3b9b6552ae2ad908-1"
+            },
+            {
+              "bounds": [12, 311, 390, 511],
+              "className": "HostingScrollView",
+              "extras": {
+                "sdk.gestureRecognizers": "UIScrollViewDelayedTouchesBeganGestureRecognizer(enabled),UIScrollViewPanGestureRecognizer(enabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIHoverGestureRecognizer(enabled),_UIDragAutoScrollGestureRecognizer(enabled),_UIPressGestureRecognizer(enabled)",
+                "sdk.source": "sdkWalker"
+              },
+              "node": {
+                "bounds": [12, 311, 390, 614],
+                "className": "PlatformGroupContainer",
+                "extras": { "sdk.source": "sdkWalker" },
+                "node": [
+                  {
+                    "bounds": [305, 311, 390, 345],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  {
+                    "bounds": [305, 349, 390, 383],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  {
+                    "bounds": [305, 388, 390, 422],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  {
+                    "bounds": [305, 426, 390, 460],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  {
+                    "bounds": [305, 464, 390, 498],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  {
+                    "bounds": [305, 503, 390, 537],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  {
+                    "bounds": [305, 541, 390, 575],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  },
+                  {
+                    "bounds": [305, 579, 390, 613],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    }
+                  }
+                ]
+              },
+              "resource-id": "cart_A"
+            }
+          ],
+          "resource-id": "cart_A",
+          "scrollable": "true"
+        },
+        {
+          "bounds": [12, 518, 62, 539],
+          "className": "UILabel",
+          "role": "text",
+          "text": "cart_B",
+          "view-id": "s2-1f2707da4bf9ce5a"
+        },
+        {
+          "bounds": [12, 547, 390, 747],
+          "className": "UIScrollView",
+          "node": [
+            {
+              "bounds": [12, 456, 390, 490],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 456, 296, 490],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_40 qty",
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 456, 389, 490],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_40"
+            },
+            {
+              "bounds": [12, 494, 390, 529],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 494, 296, 528],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_41 qty",
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 494, 389, 528],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_41"
+            },
+            {
+              "bounds": [12, 533, 390, 567],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 532, 296, 567],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_42 qty",
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 532, 389, 567],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_42"
+            },
+            {
+              "bounds": [12, 571, 390, 605],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 571, 296, 605],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_43 qty",
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 571, 389, 605],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_43"
+            },
+            {
+              "bounds": [12, 609, 390, 644],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 609, 296, 643],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_44 qty",
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 609, 389, 643],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_44"
+            },
+            {
+              "bounds": [12, 648, 390, 682],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 647, 296, 681],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_45 qty",
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 647, 389, 682],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_45"
+            },
+            {
+              "bounds": [12, 686, 390, 720],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 686, 296, 720],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_46 qty",
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 686, 389, 720],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_46"
+            },
+            {
+              "bounds": [12, 724, 390, 759],
+              "className": "UIView",
+              "node": [
+                {
+                  "actions": ["set_text", "clear_text"],
+                  "bounds": [12, 724, 296, 758],
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                    "sdk.hasTapTarget": "true",
+                    "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "item_47 qty",
+                  "resource-id": "quantity",
+                  "role": "textfield"
+                },
+                {
+                  "bounds": [304, 724, 389, 758],
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "resource-id": "remove",
+                  "role": "button",
+                  "text": "Remove"
+                }
+              ],
+              "resource-id": "item_47"
+            },
+            {
+              "bounds": [357, 547, 387, 747],
+              "className": "UIView",
+              "text": "Vertical scroll bar, 2 pages",
+              "view-id": "s2-3b9b6552ae2ad908-2"
+            },
+            {
+              "bounds": [12, 547, 390, 747],
+              "className": "HostingScrollView",
+              "extras": {
+                "sdk.gestureRecognizers": "UIScrollViewDelayedTouchesBeganGestureRecognizer(enabled),UIScrollViewPanGestureRecognizer(enabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIHoverGestureRecognizer(enabled),_UIDragAutoScrollGestureRecognizer(enabled),_UIPressGestureRecognizer(enabled)",
+                "sdk.source": "sdkWalker"
+              },
+              "node": {
+                "bounds": [12, 547, 390, 850],
+                "className": "PlatformGroupContainer",
+                "extras": { "sdk.source": "sdkWalker" },
+                "node": [
+                  {
+                    "bounds": [12, 547, 297, 581],
+                    "className": "UIKitPlatformViewHost<PlatformViewRepresentableAdaptor<PlatformTextFieldAdaptor>>",
+                    "extras": { "sdk.source": "sdkWalker" },
+                    "node": {
+                      "bounds": [12, 547, 297, 581],
+                      "className": "UITextField",
+                      "extras": {
+                        "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                        "sdk.hasTapTarget": "true",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": [
+                        {
+                          "bounds": [12, 547, 297, 581],
+                          "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                          "extras": {
+                            "sdk.backgroundColor": "#FFFFFFFF",
+                            "sdk.borderColor": "#00000033",
+                            "sdk.borderWidth": "0.33333334",
+                            "sdk.cornerRadius": "5.0",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          }
+                        },
+                        {
+                          "bounds": [19, 554, 290, 574],
+                          "className": "UITextFieldLabel",
+                          "extras": {
+                            "sdk.accessibilityTraits": "staticText",
+                            "sdk.isAccessibilityElement": "true",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "text": "item_40 qty"
+                        }
+                      ],
+                      "resource-id": "quantity"
+                    }
+                  },
+                  {
+                    "bounds": [12, 586, 297, 620],
+                    "className": "UIKitPlatformViewHost<PlatformViewRepresentableAdaptor<PlatformTextFieldAdaptor>>",
+                    "extras": { "sdk.source": "sdkWalker" },
+                    "node": {
+                      "bounds": [12, 586, 297, 620],
+                      "className": "UITextField",
+                      "extras": {
+                        "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                        "sdk.hasTapTarget": "true",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": [
+                        {
+                          "bounds": [12, 586, 297, 620],
+                          "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                          "extras": {
+                            "sdk.backgroundColor": "#FFFFFFFF",
+                            "sdk.borderColor": "#00000033",
+                            "sdk.borderWidth": "0.33333334",
+                            "sdk.cornerRadius": "5.0",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          }
+                        },
+                        {
+                          "bounds": [19, 593, 290, 613],
+                          "className": "UITextFieldLabel",
+                          "extras": {
+                            "sdk.accessibilityTraits": "staticText",
+                            "sdk.isAccessibilityElement": "true",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "text": "item_41 qty"
+                        }
+                      ],
+                      "resource-id": "quantity"
+                    }
+                  },
+                  {
+                    "bounds": [12, 624, 297, 658],
+                    "className": "UIKitPlatformViewHost<PlatformViewRepresentableAdaptor<PlatformTextFieldAdaptor>>",
+                    "extras": { "sdk.source": "sdkWalker" },
+                    "node": {
+                      "bounds": [12, 624, 297, 658],
+                      "className": "UITextField",
+                      "extras": {
+                        "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                        "sdk.hasTapTarget": "true",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": [
+                        {
+                          "bounds": [12, 624, 297, 658],
+                          "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                          "extras": {
+                            "sdk.backgroundColor": "#FFFFFFFF",
+                            "sdk.borderColor": "#00000033",
+                            "sdk.borderWidth": "0.33333334",
+                            "sdk.cornerRadius": "5.0",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          }
+                        },
+                        {
+                          "bounds": [19, 631, 290, 651],
+                          "className": "UITextFieldLabel",
+                          "extras": {
+                            "sdk.accessibilityTraits": "staticText",
+                            "sdk.isAccessibilityElement": "true",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "text": "item_42 qty"
+                        }
+                      ],
+                      "resource-id": "quantity"
+                    }
+                  },
+                  {
+                    "bounds": [12, 663, 297, 697],
+                    "className": "UIKitPlatformViewHost<PlatformViewRepresentableAdaptor<PlatformTextFieldAdaptor>>",
+                    "extras": { "sdk.source": "sdkWalker" },
+                    "node": {
+                      "bounds": [12, 663, 297, 697],
+                      "className": "UITextField",
+                      "extras": {
+                        "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                        "sdk.hasTapTarget": "true",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": [
+                        {
+                          "bounds": [12, 663, 297, 697],
+                          "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                          "extras": {
+                            "sdk.backgroundColor": "#FFFFFFFF",
+                            "sdk.borderColor": "#00000033",
+                            "sdk.borderWidth": "0.33333334",
+                            "sdk.cornerRadius": "5.0",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          }
+                        },
+                        {
+                          "bounds": [19, 669, 290, 689],
+                          "className": "UITextFieldLabel",
+                          "extras": {
+                            "sdk.accessibilityTraits": "staticText",
+                            "sdk.isAccessibilityElement": "true",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "text": "item_43 qty"
+                        }
+                      ],
+                      "resource-id": "quantity"
+                    }
+                  },
+                  {
+                    "bounds": [12, 701, 297, 735],
+                    "className": "UIKitPlatformViewHost<PlatformViewRepresentableAdaptor<PlatformTextFieldAdaptor>>",
+                    "extras": { "sdk.source": "sdkWalker" },
+                    "node": {
+                      "bounds": [12, 701, 297, 735],
+                      "className": "UITextField",
+                      "extras": {
+                        "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                        "sdk.hasTapTarget": "true",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": [
+                        {
+                          "bounds": [12, 701, 297, 735],
+                          "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                          "extras": {
+                            "sdk.backgroundColor": "#FFFFFFFF",
+                            "sdk.borderColor": "#00000033",
+                            "sdk.borderWidth": "0.33333334",
+                            "sdk.cornerRadius": "5.0",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          }
+                        },
+                        {
+                          "bounds": [19, 708, 290, 728],
+                          "className": "UITextFieldLabel",
+                          "extras": {
+                            "sdk.accessibilityTraits": "staticText",
+                            "sdk.isAccessibilityElement": "true",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "text": "item_44 qty"
+                        }
+                      ],
+                      "resource-id": "quantity"
+                    }
+                  },
+                  {
+                    "bounds": [12, 739, 297, 773],
+                    "className": "UIKitPlatformViewHost<PlatformViewRepresentableAdaptor<PlatformTextFieldAdaptor>>",
+                    "extras": { "sdk.source": "sdkWalker" },
+                    "node": {
+                      "bounds": [12, 739, 297, 773],
+                      "className": "UITextField",
+                      "extras": {
+                        "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                        "sdk.hasTapTarget": "true",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": [
+                        {
+                          "bounds": [12, 739, 297, 773],
+                          "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                          "extras": {
+                            "sdk.backgroundColor": "#FFFFFFFF",
+                            "sdk.borderColor": "#00000033",
+                            "sdk.borderWidth": "0.33333334",
+                            "sdk.cornerRadius": "5.0",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          }
+                        },
+                        {
+                          "bounds": [19, 746, 290, 766],
+                          "className": "UITextFieldLabel",
+                          "extras": {
+                            "sdk.accessibilityTraits": "staticText",
+                            "sdk.isAccessibilityElement": "true",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "text": "item_45 qty"
+                        }
+                      ],
+                      "resource-id": "quantity"
+                    }
+                  },
+                  {
+                    "bounds": [12, 777, 297, 811],
+                    "className": "UIKitPlatformViewHost<PlatformViewRepresentableAdaptor<PlatformTextFieldAdaptor>>",
+                    "extras": { "sdk.source": "sdkWalker" },
+                    "node": {
+                      "bounds": [12, 777, 297, 811],
+                      "className": "UITextField",
+                      "extras": {
+                        "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                        "sdk.hasTapTarget": "true",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": [
+                        {
+                          "bounds": [12, 777, 297, 811],
+                          "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                          "extras": {
+                            "sdk.backgroundColor": "#FFFFFFFF",
+                            "sdk.borderColor": "#00000033",
+                            "sdk.borderWidth": "0.33333334",
+                            "sdk.cornerRadius": "5.0",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          }
+                        },
+                        {
+                          "bounds": [19, 784, 290, 804],
+                          "className": "UITextFieldLabel",
+                          "extras": {
+                            "sdk.accessibilityTraits": "staticText",
+                            "sdk.isAccessibilityElement": "true",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "text": "item_46 qty"
+                        }
+                      ],
+                      "resource-id": "quantity"
+                    }
+                  },
+                  {
+                    "bounds": [12, 816, 297, 850],
+                    "className": "UIKitPlatformViewHost<PlatformViewRepresentableAdaptor<PlatformTextFieldAdaptor>>",
+                    "extras": { "sdk.source": "sdkWalker" },
+                    "node": {
+                      "bounds": [12, 816, 297, 850],
+                      "className": "UITextField",
+                      "extras": {
+                        "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                        "sdk.hasTapTarget": "true",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": [
+                        {
+                          "bounds": [12, 816, 297, 850],
+                          "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                          "extras": {
+                            "sdk.backgroundColor": "#FFFFFFFF",
+                            "sdk.borderColor": "#00000033",
+                            "sdk.borderWidth": "0.33333334",
+                            "sdk.cornerRadius": "5.0",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          }
+                        },
+                        {
+                          "bounds": [19, 823, 290, 843],
+                          "className": "UITextFieldLabel",
+                          "extras": {
+                            "sdk.accessibilityTraits": "staticText",
+                            "sdk.isAccessibilityElement": "true",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "text": "item_47 qty"
+                        }
+                      ],
+                      "resource-id": "quantity"
+                    }
+                  },
+                  {
+                    "bounds": [305, 547, 390, 581],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [305, 547, 390, 581],
+                      "className": "CALayer",
+                      "extras": {
+                        "sdk.backgroundColor": "#D62A21FF",
+                        "sdk.cornerRadius": "17.166666",
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    }
+                  },
+                  {
+                    "bounds": [305, 586, 390, 620],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [305, 586, 390, 620],
+                      "className": "CALayer",
+                      "extras": {
+                        "sdk.backgroundColor": "#D62A21FF",
+                        "sdk.cornerRadius": "17.166666",
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    }
+                  },
+                  {
+                    "bounds": [305, 624, 390, 658],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [305, 624, 390, 658],
+                      "className": "CALayer",
+                      "extras": {
+                        "sdk.backgroundColor": "#D62A21FF",
+                        "sdk.cornerRadius": "17.166666",
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    }
+                  },
+                  {
+                    "bounds": [305, 662, 390, 696],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [305, 662, 390, 696],
+                      "className": "CALayer",
+                      "extras": {
+                        "sdk.backgroundColor": "#D62A21FF",
+                        "sdk.cornerRadius": "17.166666",
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    }
+                  },
+                  {
+                    "bounds": [305, 701, 390, 735],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [305, 701, 390, 735],
+                      "className": "CALayer",
+                      "extras": {
+                        "sdk.backgroundColor": "#D62A21FF",
+                        "sdk.cornerRadius": "17.166666",
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    }
+                  },
+                  {
+                    "bounds": [305, 739, 390, 773],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [305, 739, 390, 773],
+                      "className": "CALayer",
+                      "extras": {
+                        "sdk.backgroundColor": "#D62A21FF",
+                        "sdk.cornerRadius": "17.166666",
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    }
+                  },
+                  {
+                    "bounds": [305, 777, 390, 811],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [305, 777, 390, 811],
+                      "className": "CALayer",
+                      "extras": {
+                        "sdk.backgroundColor": "#D62A21FF",
+                        "sdk.cornerRadius": "17.166666",
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    }
+                  },
+                  {
+                    "bounds": [305, 816, 390, 850],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [305, 816, 390, 850],
+                      "className": "CALayer",
+                      "extras": {
+                        "sdk.backgroundColor": "#D62A21FF",
+                        "sdk.cornerRadius": "17.166666",
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      }
+                    }
+                  }
+                ]
+              },
+              "resource-id": "cart_B"
+            }
+          ],
+          "resource-id": "cart_B",
+          "scrollable": "true"
+        },
+        {
+          "bounds": [0, 791, 402, 874],
+          "className": "UITabBar",
+          "clickable": "true",
+          "extras": {
+            "sdk.gestureRecognizers": "_UIContinuousSelectionGestureRecognizer(enabled),UILongPressGestureRecognizer(disabled)"
+          },
+          "node": [
+            {
+              "bounds": [25, 795, 120, 849],
+              "className": "UIButton",
+              "clickable": "true",
+              "extras": {
+                "sdk.accessibilityTraits": "button",
+                "sdk.isAccessibilityElement": "true"
+              },
+              "node": {
+                "bounds": [59, 801, 86, 828],
+                "className": "UIImageView",
+                "clickable": "true",
+                "extras": {
+                  "sdk.accessibilityTraits": "button",
+                  "sdk.isAccessibilityElement": "true"
+                },
+                "resource-id": "magnifyingglass",
+                "role": "image",
+                "text": "Search"
+              },
+              "resource-id": "magnifyingglass",
+              "role": "button",
+              "text": "Discover"
+            },
+            {
+              "bounds": [110, 795, 205, 849],
+              "className": "UIButton",
+              "clickable": "true",
+              "extras": {
+                "sdk.accessibilityTraits": "button,selected",
+                "sdk.isAccessibilityElement": "true"
+              },
+              "node": [
+                {
+                  "bounds": [147, 803, 168, 826],
+                  "className": "UIImageView",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.accessibilityTraits": "image",
+                    "sdk.isUserInteractionEnabled": "false"
+                  },
+                  "resource-id": "play.fill",
+                  "role": "image",
+                  "text": "play"
+                },
+                {
+                  "bounds": [141, 830, 176, 842],
+                  "className": "Label",
+                  "extras": {
+                    "sdk.accessibilityTraits": "staticText",
+                    "sdk.isAccessibilityElement": "true",
+                    "sdk.isUserInteractionEnabled": "false",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "text": "Demos"
+                }
+              ],
+              "resource-id": "play.fill",
+              "role": "button",
+              "selected": "true",
+              "text": "Demos"
+            },
+            {
+              "bounds": [196, 795, 291, 849],
+              "className": "UIButton",
+              "clickable": "true",
+              "extras": {
+                "sdk.accessibilityTraits": "button",
+                "sdk.isAccessibilityElement": "true"
+              },
+              "node": [
+                {
+                  "bounds": [228, 802, 260, 827],
+                  "className": "UIImageView",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.accessibilityTraits": "image",
+                    "sdk.isUserInteractionEnabled": "false"
+                  },
+                  "resource-id": "folder.fill",
+                  "role": "image",
+                  "text": "move"
+                },
+                {
+                  "bounds": [232, 830, 256, 842],
+                  "className": "Label",
+                  "extras": {
+                    "sdk.accessibilityTraits": "staticText",
+                    "sdk.isAccessibilityElement": "true",
+                    "sdk.isUserInteractionEnabled": "false",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "text": "Files"
+                }
+              ],
+              "resource-id": "folder",
+              "role": "button",
+              "text": "Files"
+            },
+            {
+              "bounds": [282, 795, 377, 849],
+              "className": "UIButton",
+              "clickable": "true",
+              "extras": {
+                "sdk.accessibilityTraits": "button",
+                "sdk.isAccessibilityElement": "true"
+              },
+              "node": [
+                {
+                  "bounds": [316, 801, 344, 829],
+                  "className": "UIImageView",
+                  "clickable": "true",
+                  "extras": {
+                    "sdk.accessibilityTraits": "image",
+                    "sdk.isUserInteractionEnabled": "false"
+                  },
+                  "resource-id": "gearshape.fill",
+                  "role": "image",
+                  "text": "gearshape.fill"
+                },
+                {
+                  "bounds": [308, 830, 350, 842],
+                  "className": "Label",
+                  "extras": {
+                    "sdk.accessibilityTraits": "staticText",
+                    "sdk.isAccessibilityElement": "true",
+                    "sdk.isUserInteractionEnabled": "false",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "text": "Settings"
+                }
+              ],
+              "resource-id": "gearshape.fill",
+              "role": "button",
+              "text": "Settings"
+            },
+            {
+              "bounds": [21, 791, 381, 853],
+              "className": "_UITabBarPlatterView",
+              "extras": { "sdk.source": "sdkWalker" },
+              "node": [
+                {
+                  "bounds": [21, 791, 381, 853],
+                  "className": "SelectedContentView",
+                  "extras": {
+                    "sdk.accessibilityElementsHidden": "true",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": [
+                    {
+                      "bounds": [25, 795, 120, 849],
+                      "className": "_UITabButton",
+                      "extras": {
+                        "sdk.accessibilityTraits": "button",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "text": "Discover"
+                    },
+                    {
+                      "bounds": [111, 795, 206, 849],
+                      "className": "_UITabButton",
+                      "extras": {
+                        "sdk.accessibilityTraits": "button,selected",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "text": "Demos"
+                    },
+                    {
+                      "bounds": [196, 795, 291, 849],
+                      "className": "_UITabButton",
+                      "extras": {
+                        "sdk.accessibilityTraits": "button",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "text": "Files"
+                    },
+                    {
+                      "bounds": [282, 795, 377, 849],
+                      "className": "_UITabButton",
+                      "extras": {
+                        "sdk.accessibilityTraits": "button",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "text": "Settings"
+                    }
+                  ]
+                },
+                {
+                  "bounds": [111, 795, 206, 849],
+                  "className": "_UILiquidLensView",
+                  "extras": { "sdk.source": "sdkWalker" },
+                  "node": {
+                    "bounds": [111, 795, 206, 849],
+                    "className": "UIView",
+                    "extras": {
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [111, 795, 206, 849],
+                      "className": "_UITabSelectionView",
+                      "extras": { "sdk.source": "sdkWalker" },
+                      "node": {
+                        "bounds": [111, 795, 206, 849],
+                        "className": "CABackdropLayer",
+                        "extras": {
+                          "sdk.cornerRadius": "27.0",
+                          "sdk.isLayerNode": "true",
+                          "sdk.isUserInteractionEnabled": "false",
+                          "sdk.source": "sdkWalker"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "bounds": [21, 791, 381, 853],
+                  "className": "ContentView",
+                  "extras": { "sdk.source": "sdkWalker" },
+                  "node": [
+                    {
+                      "bounds": [25, 795, 120, 849],
+                      "className": "_UITabButton",
+                      "extras": {
+                        "sdk.accessibilityTraits": "button",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "resource-id": "magnifyingglass",
+                      "text": "Discover"
+                    },
+                    {
+                      "bounds": [111, 795, 206, 849],
+                      "className": "_UITabButton",
+                      "extras": {
+                        "sdk.accessibilityTraits": "button,selected",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": {
+                        "bounds": [141, 830, 175, 842],
+                        "className": "Label",
+                        "extras": {
+                          "sdk.accessibilityTraits": "staticText",
+                          "sdk.isAccessibilityElement": "true",
+                          "sdk.isUserInteractionEnabled": "false",
+                          "sdk.source": "sdkWalker"
+                        },
+                        "text": "Demos"
+                      },
+                      "resource-id": "play.fill",
+                      "text": "Demos"
+                    },
+                    {
+                      "bounds": [196, 795, 291, 849],
+                      "className": "_UITabButton",
+                      "extras": {
+                        "sdk.accessibilityTraits": "button",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": {
+                        "bounds": [232, 830, 255, 842],
+                        "className": "Label",
+                        "extras": {
+                          "sdk.accessibilityTraits": "staticText",
+                          "sdk.isAccessibilityElement": "true",
+                          "sdk.isUserInteractionEnabled": "false",
+                          "sdk.source": "sdkWalker"
+                        },
+                        "text": "Files"
+                      },
+                      "resource-id": "folder",
+                      "text": "Files"
+                    },
+                    {
+                      "bounds": [282, 795, 377, 849],
+                      "className": "_UITabButton",
+                      "extras": {
+                        "sdk.accessibilityTraits": "button",
+                        "sdk.isAccessibilityElement": "true",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": {
+                        "bounds": [309, 830, 350, 842],
+                        "className": "Label",
+                        "extras": {
+                          "sdk.accessibilityTraits": "staticText",
+                          "sdk.isAccessibilityElement": "true",
+                          "sdk.isUserInteractionEnabled": "false",
+                          "sdk.source": "sdkWalker"
+                        },
+                        "text": "Settings"
+                      },
+                      "resource-id": "gearshape.fill",
+                      "text": "Settings"
+                    }
+                  ]
+                },
+                {
+                  "bounds": [21, 791, 116, 845],
+                  "className": "DestOutView",
+                  "extras": {
+                    "sdk.backgroundColor": "#000000FF",
+                    "sdk.isUserInteractionEnabled": "false",
+                    "sdk.source": "sdkWalker"
+                  }
+                }
+              ]
+            }
+          ],
+          "text": "Tab Bar",
+          "view-id": "s2-73cac3b5235bb505"
+        },
+        {
+          "bounds": [0, 0, 402, 874],
+          "className": "UITransitionView",
+          "extras": { "sdk.source": "sdkWalker" },
+          "node": [
+            {
+              "bounds": [0, 0, 402, 874],
+              "className": "UIDropShadowView",
+              "extras": { "sdk.source": "sdkWalker" },
+              "node": {
+                "bounds": [0, 0, 402, 874],
+                "className": "_UIHostingView<ModifiedContent<AnyView, RootModifier>>",
+                "extras": {
+                  "sdk.backgroundColor": "#FFFFFFFF",
+                  "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                  "sdk.source": "sdkWalker"
+                },
+                "node": {
+                  "bounds": [0, 0, 402, 874],
+                  "className": "UIKitPlatformViewHost<PlatformViewControllerRepresentableAdaptor<UIKitAdaptableTabView>>",
+                  "extras": { "sdk.source": "sdkWalker" },
+                  "node": {
+                    "bounds": [0, 0, 402, 874],
+                    "className": "UILayoutContainerView",
+                    "extras": {
+                      "sdk.backgroundColor": "#FFFFFFFF",
+                      "sdk.gestureRecognizers": "UITapGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": [
+                      {
+                        "bounds": [0, 0, 402, 874],
+                        "className": "UITransitionView",
+                        "extras": { "sdk.source": "sdkWalker" },
+                        "node": {
+                          "bounds": [0, 0, 402, 874],
+                          "className": "UIViewControllerWrapperView",
+                          "extras": { "sdk.source": "sdkWalker" },
+                          "node": {
+                            "bounds": [0, 0, 402, 874],
+                            "className": "HostingView",
+                            "extras": {
+                              "sdk.backgroundColor": "#FFFFFFFF",
+                              "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                              "sdk.source": "sdkWalker"
+                            },
+                            "node": {
+                              "bounds": [0, 0, 402, 874],
+                              "className": "UIKitPlatformViewHost<PlatformViewControllerRepresentableAdaptor<NavigationStackRepresentable>>",
+                              "extras": { "sdk.source": "sdkWalker" },
+                              "node": {
+                                "bounds": [0, 0, 402, 874],
+                                "className": "UILayoutContainerView",
+                                "extras": {
+                                  "sdk.gestureRecognizers": "_UIParallaxTransitionPanGestureRecognizer(enabled),_UIParallaxTransitionPanGestureRecognizer(enabled)",
+                                  "sdk.source": "sdkWalker"
+                                },
+                                "node": [
+                                  {
+                                    "bounds": [0, 0, 402, 874],
+                                    "className": "UINavigationTransitionView",
+                                    "extras": { "sdk.source": "sdkWalker" },
+                                    "node": {
+                                      "bounds": [0, 0, 402, 874],
+                                      "className": "UIViewControllerWrapperView",
+                                      "extras": { "sdk.source": "sdkWalker" },
+                                      "node": {
+                                        "bounds": [0, 0, 402, 874],
+                                        "className": "HostingView",
+                                        "extras": {
+                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                          "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                                          "sdk.source": "sdkWalker"
+                                        },
+                                        "node": [
+                                          {
+                                            "bounds": [12, 240, 112, 274],
+                                            "className": "CALayer",
+                                            "extras": {
+                                              "sdk.isLayerNode": "true",
+                                              "sdk.isUserInteractionEnabled": "false",
+                                              "sdk.source": "sdkWalker"
+                                            }
+                                          },
+                                          {
+                                            "bounds": [120, 240, 222, 274],
+                                            "className": "CALayer",
+                                            "extras": {
+                                              "sdk.isLayerNode": "true",
+                                              "sdk.isUserInteractionEnabled": "false",
+                                              "sdk.source": "sdkWalker"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "bounds": [0, 62, 402, 168],
+                                    "className": "UIKitNavigationBar",
+                                    "extras": { "sdk.source": "sdkWalker" },
+                                    "resource-id": "Nested Selection"
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "bounds": [0, 791, 402, 874],
+                        "className": "_UIMultiLayer",
+                        "extras": {
+                          "sdk.isLayerNode": "true",
+                          "sdk.isUserInteractionEnabled": "false",
+                          "sdk.source": "sdkWalker"
+                        },
+                        "node": [
+                          {
+                            "bounds": [0, 791, 402, 874],
+                            "className": "CALayer",
+                            "extras": {
+                              "sdk.isLayerNode": "true",
+                              "sdk.isUserInteractionEnabled": "false",
+                              "sdk.source": "sdkWalker"
+                            },
+                            "node": {
+                              "bounds": [0, 0, 402, 874],
+                              "className": "CALayer",
+                              "extras": {
+                                "sdk.isLayerNode": "true",
+                                "sdk.isUserInteractionEnabled": "false",
+                                "sdk.source": "sdkWalker"
+                              },
+                              "node": {
+                                "bounds": [0, 791, 402, 874],
+                                "className": "CALayer",
+                                "extras": {
+                                  "sdk.isLayerNode": "true",
+                                  "sdk.isUserInteractionEnabled": "false",
+                                  "sdk.source": "sdkWalker"
+                                },
+                                "node": {
+                                  "bounds": [21, 791, 381, 853],
+                                  "className": "CALayer",
+                                  "extras": {
+                                    "sdk.isLayerNode": "true",
+                                    "sdk.isUserInteractionEnabled": "false",
+                                    "sdk.source": "sdkWalker"
+                                  },
+                                  "node": [
+                                    {
+                                      "bounds": [111, 795, 206, 849],
+                                      "className": "CALayer",
+                                      "extras": {
+                                        "sdk.isLayerNode": "true",
+                                        "sdk.isUserInteractionEnabled": "false",
+                                        "sdk.source": "sdkWalker"
+                                      },
+                                      "node": {
+                                        "bounds": [111, 795, 206, 849],
+                                        "className": "CALayer",
+                                        "extras": {
+                                          "sdk.isLayerNode": "true",
+                                          "sdk.isUserInteractionEnabled": "false",
+                                          "sdk.source": "sdkWalker"
+                                        },
+                                        "node": {
+                                          "bounds": [111, 795, 206, 849],
+                                          "className": "CALayer",
+                                          "extras": {
+                                            "sdk.isLayerNode": "true",
+                                            "sdk.isUserInteractionEnabled": "false",
+                                            "sdk.source": "sdkWalker"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "bounds": [21, 791, 116, 845],
+                                      "className": "CALayer",
+                                      "extras": {
+                                        "sdk.backgroundColor": "#000000FF",
+                                        "sdk.isLayerNode": "true",
+                                        "sdk.isUserInteractionEnabled": "false",
+                                        "sdk.source": "sdkWalker"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "bounds": [0, 791, 402, 874],
+                            "className": "CALayer",
+                            "extras": {
+                              "sdk.isLayerNode": "true",
+                              "sdk.isUserInteractionEnabled": "false",
+                              "sdk.source": "sdkWalker"
+                            },
+                            "node": {
+                              "bounds": [0, 791, 402, 874],
+                              "className": "CALayer",
+                              "extras": {
+                                "sdk.isLayerNode": "true",
+                                "sdk.isUserInteractionEnabled": "false",
+                                "sdk.source": "sdkWalker"
+                              },
+                              "node": {
+                                "bounds": [0, 791, 402, 874],
+                                "className": "CALayer",
+                                "extras": {
+                                  "sdk.isLayerNode": "true",
+                                  "sdk.isUserInteractionEnabled": "false",
+                                  "sdk.source": "sdkWalker"
+                                },
+                                "node": [
+                                  {
+                                    "bounds": [0, 791, 402, 874],
+                                    "className": "CABackdropLayer",
+                                    "extras": {
+                                      "sdk.isLayerNode": "true",
+                                      "sdk.isUserInteractionEnabled": "false",
+                                      "sdk.source": "sdkWalker"
+                                    },
+                                    "node": {
+                                      "bounds": [0, 791, 402, 874],
+                                      "className": "CASDFLayer",
+                                      "extras": {
+                                        "sdk.isLayerNode": "true",
+                                        "sdk.isUserInteractionEnabled": "false",
+                                        "sdk.source": "sdkWalker"
+                                      },
+                                      "resource-id": "@0"
+                                    }
+                                  },
+                                  {
+                                    "bounds": [0, 791, 402, 874],
+                                    "className": "CASDFLayer",
+                                    "extras": {
+                                      "sdk.isLayerNode": "true",
+                                      "sdk.isUserInteractionEnabled": "false",
+                                      "sdk.source": "sdkWalker"
+                                    },
+                                    "resource-id": "SDF"
+                                  }
+                                ],
+                                "resource-id": "MaterialProvider"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "bounds": [0, 0, 402, 874],
+              "className": "_UIMultiLayer",
+              "extras": {
+                "sdk.isLayerNode": "true",
+                "sdk.isUserInteractionEnabled": "false",
+                "sdk.source": "sdkWalker"
+              },
+              "node": {
+                "bounds": [0, 0, 402, 874],
+                "className": "CALayer",
+                "extras": {
+                  "sdk.isLayerNode": "true",
+                  "sdk.isUserInteractionEnabled": "false",
+                  "sdk.source": "sdkWalker"
+                },
+                "node": {
+                  "bounds": [0, 0, 402, 874],
+                  "className": "CALayer",
+                  "extras": {
+                    "sdk.backgroundColor": "#FFFFFFFF",
+                    "sdk.isLayerNode": "true",
+                    "sdk.isUserInteractionEnabled": "false",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": {
+                    "bounds": [0, 0, 402, 874],
+                    "className": "CALayer",
+                    "extras": {
+                      "sdk.isLayerNode": "true",
+                      "sdk.isUserInteractionEnabled": "false",
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [0, 0, 402, 874],
+                      "className": "CALayer",
+                      "extras": {
+                        "sdk.backgroundColor": "#FFFFFFFF",
+                        "sdk.isLayerNode": "true",
+                        "sdk.isUserInteractionEnabled": "false",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": {
+                        "bounds": [0, 0, 402, 874],
+                        "className": "CALayer",
+                        "extras": {
+                          "sdk.isLayerNode": "true",
+                          "sdk.isUserInteractionEnabled": "false",
+                          "sdk.source": "sdkWalker"
+                        },
+                        "node": {
+                          "bounds": [0, 0, 402, 874],
+                          "className": "CALayer",
+                          "extras": {
+                            "sdk.isLayerNode": "true",
+                            "sdk.isUserInteractionEnabled": "false",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "node": {
+                            "bounds": [0, 0, 402, 874],
+                            "className": "CALayer",
+                            "extras": {
+                              "sdk.backgroundColor": "#FFFFFFFF",
+                              "sdk.isLayerNode": "true",
+                              "sdk.isUserInteractionEnabled": "false",
+                              "sdk.source": "sdkWalker"
+                            },
+                            "node": {
+                              "bounds": [0, 0, 402, 874],
+                              "className": "CALayer",
+                              "extras": {
+                                "sdk.isLayerNode": "true",
+                                "sdk.isUserInteractionEnabled": "false",
+                                "sdk.source": "sdkWalker"
+                              },
+                              "node": {
+                                "bounds": [0, 0, 402, 874],
+                                "className": "CALayer",
+                                "extras": {
+                                  "sdk.isLayerNode": "true",
+                                  "sdk.isUserInteractionEnabled": "false",
+                                  "sdk.source": "sdkWalker"
+                                },
+                                "node": [
+                                  {
+                                    "bounds": [0, 0, 402, 874],
+                                    "className": "CALayer",
+                                    "extras": {
+                                      "sdk.isLayerNode": "true",
+                                      "sdk.isUserInteractionEnabled": "false",
+                                      "sdk.source": "sdkWalker"
+                                    },
+                                    "node": {
+                                      "bounds": [0, 0, 402, 874],
+                                      "className": "CALayer",
+                                      "extras": {
+                                        "sdk.isLayerNode": "true",
+                                        "sdk.isUserInteractionEnabled": "false",
+                                        "sdk.source": "sdkWalker"
+                                      },
+                                      "node": {
+                                        "bounds": [0, 0, 402, 874],
+                                        "className": "CALayer",
+                                        "extras": {
+                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                          "sdk.isLayerNode": "true",
+                                          "sdk.isUserInteractionEnabled": "false",
+                                          "sdk.source": "sdkWalker"
+                                        },
+                                        "node": [
+                                          {
+                                            "bounds": [12, 311, 390, 511],
+                                            "className": "CALayer",
+                                            "extras": {
+                                              "sdk.isLayerNode": "true",
+                                              "sdk.isUserInteractionEnabled": "false",
+                                              "sdk.source": "sdkWalker"
+                                            },
+                                            "node": {
+                                              "bounds": [12, 311, 390, 511],
+                                              "className": "CALayer",
+                                              "extras": {
+                                                "sdk.isLayerNode": "true",
+                                                "sdk.isUserInteractionEnabled": "false",
+                                                "sdk.source": "sdkWalker"
+                                              },
+                                              "node": {
+                                                "bounds": [12, 311, 390, 614],
+                                                "className": "CALayer",
+                                                "extras": {
+                                                  "sdk.isLayerNode": "true",
+                                                  "sdk.isUserInteractionEnabled": "false",
+                                                  "sdk.source": "sdkWalker"
+                                                },
+                                                "node": [
+                                                  {
+                                                    "bounds": [12, 311, 297, 345],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 311, 297, 345],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 311, 297, 345],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 349, 297, 383],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 349, 297, 383],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 349, 297, 383],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 388, 297, 422],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 388, 297, 422],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 388, 297, 422],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 426, 297, 460],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 426, 297, 460],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 426, 297, 460],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 464, 297, 498],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 464, 297, 498],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 464, 297, 498],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 503, 297, 537],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 503, 297, 537],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 503, 297, 537],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 541, 297, 575],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 541, 297, 575],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 541, 297, 575],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 579, 297, 613],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 579, 297, 613],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 579, 297, 613],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "bounds": [12, 547, 390, 747],
+                                            "className": "CALayer",
+                                            "extras": {
+                                              "sdk.isLayerNode": "true",
+                                              "sdk.isUserInteractionEnabled": "false",
+                                              "sdk.source": "sdkWalker"
+                                            },
+                                            "node": {
+                                              "bounds": [12, 547, 390, 747],
+                                              "className": "CALayer",
+                                              "extras": {
+                                                "sdk.isLayerNode": "true",
+                                                "sdk.isUserInteractionEnabled": "false",
+                                                "sdk.source": "sdkWalker"
+                                              },
+                                              "node": {
+                                                "bounds": [12, 547, 390, 850],
+                                                "className": "CALayer",
+                                                "extras": {
+                                                  "sdk.isLayerNode": "true",
+                                                  "sdk.isUserInteractionEnabled": "false",
+                                                  "sdk.source": "sdkWalker"
+                                                },
+                                                "node": [
+                                                  {
+                                                    "bounds": [12, 547, 297, 581],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 547, 297, 581],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 547, 297, 581],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 586, 297, 620],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 586, 297, 620],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 586, 297, 620],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 624, 297, 658],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 624, 297, 658],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 624, 297, 658],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 663, 297, 697],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 663, 297, 697],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 663, 297, 697],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 701, 297, 735],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 701, 297, 735],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 701, 297, 735],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 739, 297, 773],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 739, 297, 773],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 739, 297, 773],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 777, 297, 811],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 777, 297, 811],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 777, 297, 811],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "bounds": [12, 816, 297, 850],
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                      "sdk.isLayerNode": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [12, 816, 297, 850],
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                        "sdk.isLayerNode": "true",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [12, 816, 297, 850],
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.borderColor": "#00000033",
+                                                          "sdk.borderWidth": "0.33333334",
+                                                          "sdk.cornerRadius": "5.0",
+                                                          "sdk.isLayerNode": "true",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "resource-id": "_TtCGC7SwiftUI32NavigationStackHostingControllerVS_7AnyView_P10$1d374148c11HostingView (_TtGC7SwiftUI32NavigationStackHostingControllerVS_7AnyView_)"
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "bounds": [0, 62, 402, 168],
+                                    "className": "CALayer",
+                                    "extras": {
+                                      "sdk.isLayerNode": "true",
+                                      "sdk.isUserInteractionEnabled": "false",
+                                      "sdk.source": "sdkWalker"
+                                    },
+                                    "node": {
+                                      "bounds": [0, 62, 402, 116],
+                                      "className": "CALayer",
+                                      "extras": {
+                                        "sdk.isLayerNode": "true",
+                                        "sdk.isUserInteractionEnabled": "false",
+                                        "sdk.source": "sdkWalker"
+                                      },
+                                      "node": {
+                                        "bounds": [0, 62, 402, 116],
+                                        "className": "CALayer",
+                                        "extras": {
+                                          "sdk.isLayerNode": "true",
+                                          "sdk.isUserInteractionEnabled": "false",
+                                          "sdk.source": "sdkWalker"
+                                        }
+                                      }
+                                    }
+                                  }
+                                ],
+                                "resource-id": "UILayoutContainerView (SwiftUI.UIKitNavigationController)"
+                              }
+                            },
+                            "resource-id": "_TtCC7SwiftUI20TabHostingControllerP33_E387C3C47C0D2A0931533D8490A5A8B711HostingView (SwiftUI.TabHostingController)"
+                          }
+                        }
+                      },
+                      "resource-id": "UILayoutContainerView (SwiftUI.UIKitTabBarController)"
+                    }
+                  },
+                  "resource-id": "_TtGC7SwiftUI14_UIHostingViewGVS_15ModifiedContentVS_7AnyViewVS_12RootModifier__ (_TtGC7SwiftUI19UIHostingControllerGVS_15ModifiedContentVS_7AnyViewVS_12RootModifier__)"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "text": "Playground",
+      "view-id": "s2-4c2b94fd528fa6af"
+    },
+    "insets": {
+      "available": true,
+      "displayCutoutInfo": { "classification": "unknown" },
+      "safeArea": { "bottom": 34, "left": 0, "right": 0, "top": 62 },
+      "source": "ios-sdk-safe-area",
+      "systemChrome": {
+        "homeIndicatorAutoHideRequested": false,
+        "source": "ios-status-bar-manager",
+        "statusBar": "visible",
+        "visibility": "visible"
+      },
+      "units": "points"
+    },
+    "nativeScale": 3,
+    "packageName": "dev.jasonpearson.automobile.Playground",
+    "pixelHeight": 2622,
+    "pixelWidth": 1206,
+    "screenHeight": 874,
+    "screenScale": 3,
+    "screenWidth": 402,
+    "systemInsets": { "bottom": 34, "left": 0, "right": 0, "top": 62 },
+    "updatedAt": 1791502439726,
+    "windowInfo": {
+      "bounds": [0, 0, 402, 874],
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    },
+    "windows": [
+      { "bounds": [0, 0, 402, 874], "id": 0, "isActive": true, "isFocused": true, "type": 1 }
+    ],
+    "frameContext": "BE1911A1-E4B7-47D0-B8EE-85ED542F1F75:35:45fd36643e2b214a",
+    "fresh": true
+  },
+  "rotation": 0,
+  "activeWindow": {
+    "appId": "dev.jasonpearson.automobile.Playground",
+    "activityName": "",
+    "layoutSeqSum": 0
+  },
+  "screenIdentity": {
+    "platform": "ios",
+    "source": "sdk",
+    "confidence": "high",
+    "key": "[[\"bundle\",\"dev.jasonpearson.automobile.Playground\"],[\"route\",\"demos\"],[\"tab\",\"demos\"]]",
+    "components": {
+      "bundleId": "dev.jasonpearson.automobile.Playground",
+      "navigationRoute": "demos",
+      "selectedTab": "demos"
+    }
+  },
+  "layoutWarnings": {
+    "scope": "full",
+    "warnings": [
+      {
+        "type": "important-content-under-inset",
+        "severity": "info",
+        "element": { "text": "item_47 qty", "bounds": [19, 823, 290, 843] },
+        "categories": ["text"],
+        "insetTypes": ["safeArea"],
+        "sides": ["bottom"],
+        "overflowPx": { "bottom": 3 },
+        "insetPx": { "bottom": 34 },
+        "overlapPercent": 15,
+        "confidence": "medium"
+      },
+      {
+        "type": "important-content-under-inset",
+        "severity": "info",
+        "element": {
+          "viewId": "magnifyingglass",
+          "resourceId": "magnifyingglass",
+          "text": "Discover",
+          "bounds": [25, 795, 120, 849]
+        },
+        "categories": ["text", "interaction"],
+        "insetTypes": ["safeArea"],
+        "sides": ["bottom"],
+        "overflowPx": { "bottom": 9 },
+        "insetPx": { "bottom": 34 },
+        "overlapPercent": 17,
+        "confidence": "medium"
+      },
+      {
+        "type": "important-content-under-inset",
+        "severity": "info",
+        "element": { "text": "Demos", "bounds": [141, 830, 176, 842] },
+        "categories": ["text"],
+        "insetTypes": ["safeArea"],
+        "sides": ["bottom"],
+        "overflowPx": { "bottom": 2 },
+        "insetPx": { "bottom": 34 },
+        "overlapPercent": 17,
+        "confidence": "medium"
+      },
+      {
+        "type": "important-content-under-inset",
+        "severity": "info",
+        "element": { "text": "Files", "bounds": [232, 830, 256, 842] },
+        "categories": ["text"],
+        "insetTypes": ["safeArea"],
+        "sides": ["bottom"],
+        "overflowPx": { "bottom": 2 },
+        "insetPx": { "bottom": 34 },
+        "overlapPercent": 17,
+        "confidence": "medium"
+      },
+      {
+        "type": "important-content-under-inset",
+        "severity": "info",
+        "element": { "text": "Settings", "bounds": [308, 830, 350, 842] },
+        "categories": ["text"],
+        "insetTypes": ["safeArea"],
+        "sides": ["bottom"],
+        "overflowPx": { "bottom": 2 },
+        "insetPx": { "bottom": 34 },
+        "overlapPercent": 17,
+        "confidence": "medium"
+      },
+      {
+        "type": "important-content-under-inset",
+        "severity": "info",
+        "element": { "text": "Discover", "bounds": [25, 795, 120, 849] },
+        "categories": ["text"],
+        "insetTypes": ["safeArea"],
+        "sides": ["bottom"],
+        "overflowPx": { "bottom": 9 },
+        "insetPx": { "bottom": 34 },
+        "overlapPercent": 17,
+        "confidence": "medium"
+      }
+    ]
+  },
+  "accessibilityState": { "enabled": false, "service": "unknown" },
+  "freshness": {
+    "actualTimestamp": 1791502439726,
+    "ageMs": 1465,
+    "verified": true,
+    "isFresh": true
+  },
+  "deviceLock": { "locked": false, "keyguardShowing": false },
+  "snapshotReference": {
+    "snapshotId": "4b490717-d346-4ce0-ae50-bb1b3ed03a17",
+    "expiresAt": 1791502741522
+  },
+  "observationScreenshotResourceUri": "automobile:observation/C7328376-95B2-4306-968C-7A3C04AFBB37/2f6bccf7-c7ec-4f39-b3d5-6506dd1a03fe/screenshot"
+}

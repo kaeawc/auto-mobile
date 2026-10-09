@@ -1,10 +1,6 @@
 import { recordObservationRead, wasIosHierarchyAcquiredFromDevice } from "./observationReadScope";
 import { displayPinFailure } from "./SessionDisplayContext";
-import {
-  publishScreenshotPaths,
-  requireScreenshotSuccess,
-  ScreenshotRetentionCapacityError,
-} from "./ScreenshotRetention";
+import { publishScreenshotPaths } from "./ScreenshotRetention";
 import { resolveIosObserveRotation } from "./iosObserveRotation";
 import {
   screenshotPathProtection,
@@ -43,7 +39,10 @@ import {
 import { ViewHierarchy } from "./ViewHierarchy";
 import { Window } from "./Window";
 import { TakeScreenshot } from "./TakeScreenshot";
-import type { ScreenshotEncodingOptions } from "./screenshot/screenshotOptions";
+import type {
+  ObserveScreenshotOptions,
+  ScreenshotEncodingOptions,
+} from "./screenshot/screenshotOptions";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
 import { GetBackStack } from "./GetBackStack";
 import {
@@ -111,6 +110,7 @@ import {
   RealHierarchyPlatformValidator,
 } from "./HierarchyPlatformValidator";
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
+import { deriveAndroidScreenIdentity } from "./android/AndroidScreenIdentity";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { NotifyutilIosLockStateProbe, type IosLockStateProbe } from "./ios/IosLockStateProbe";
 import {
@@ -1008,7 +1008,6 @@ export class RealObserveScreen implements ObserveScreen {
   ): boolean {
     if (
       error instanceof StrictSettledScreenshotCaptureError ||
-      error instanceof ScreenshotRetentionCapacityError ||
       error instanceof DisplaySelectionError
     ) {
       return true;
@@ -1085,7 +1084,6 @@ export class RealObserveScreen implements ObserveScreen {
       result.screenshotSettled = true;
       return;
     }
-    requireScreenshotSuccess(capture, requireFreshScreenshot);
     await this.handleDeviceReadScreenshotFailure(
       result,
       capture.error ?? "Screenshot capture failed",
@@ -1889,7 +1887,9 @@ export class RealObserveScreen implements ObserveScreen {
       // The hierarchy has completed before any capture starts.
       if (screenshotMode !== "none") {
         const screenshotDisplayId = requestedDisplayId;
+        const capture = overlayCaptureOptions(options?.screenshotOptions);
         result.screenshotCaptureAttempted = true;
+        stampOverlayHidden(result, capture);
         if (screenshotMode === "settled") {
           result.screenshotOrientation = this.device.platform === "ios" ? "native" : "display";
           await this.captureSettledScreenshot(
@@ -1906,9 +1906,16 @@ export class RealObserveScreen implements ObserveScreen {
             perf,
             signal,
             screenshotDisplayId,
+            capture,
           );
         } else {
-          this.screenshotRecorder.start(result.observationId, perf, signal, screenshotDisplayId);
+          this.screenshotRecorder.start(
+            result.observationId,
+            perf,
+            signal,
+            screenshotDisplayId,
+            capture,
+          );
         }
       } else {
         result.screenshotCaptureAttempted = false;
@@ -2474,13 +2481,15 @@ export class RealObserveScreen implements ObserveScreen {
     signal?: AbortSignal,
     observation?: ObserveResult,
     screenshot?: ScreenshotMode,
-    screenshotOptions?: ScreenshotEncodingOptions,
+    screenshotOptions?: ObserveScreenshotOptions,
   ): Promise<void> {
     const screenshotObservation = observation ?? this.createBaseResult();
     const displayId = await this.screenshotDisplayId(signal, observation);
     const screenshotMode = resolveScreenshotMode(screenshot);
+    const capture = overlayCaptureOptions(screenshotOptions);
     if (observation) {
       observation.screenshotCaptureAttempted = true;
+      stampOverlayHidden(observation, capture);
       if (screenshotMode === "settled") {
         observation.screenshotOrientation = this.device.platform === "ios" ? "native" : "display";
       }
@@ -2500,6 +2509,7 @@ export class RealObserveScreen implements ObserveScreen {
         perf,
         signal,
         displayId,
+        capture,
       );
     }
     if (observation) {
@@ -2513,7 +2523,7 @@ export class RealObserveScreen implements ObserveScreen {
     signal: AbortSignal | undefined,
     strict: boolean,
     displayId?: number,
-    screenshotOptions?: ScreenshotEncodingOptions,
+    screenshotOptions?: ObserveScreenshotOptions,
   ): Promise<void> {
     try {
       if (!this.screenshotRecorder.captureSettled) {
@@ -2542,9 +2552,6 @@ export class RealObserveScreen implements ObserveScreen {
       observation.screenshotSettled = true;
     } catch (error) {
       signal?.throwIfAborted();
-      if (strict && error instanceof ScreenshotRetentionCapacityError) {
-        throw error;
-      }
       if (strict) {
         throw new StrictSettledScreenshotCaptureError(error, this.device.deviceId);
       }
@@ -2952,6 +2959,7 @@ export class RealObserveScreen implements ObserveScreen {
         // display mapped from `result.display.key`. Only use it when
         // the activity belongs to the captured hierarchy's app.
         this.scopeActiveWindowToBackStack(result);
+        await this.applyAndroidScreenIdentity(result);
 
         if (result.notificationPermissionDetected && result.activeWindow) {
           result.activeWindow.type = "notification_permission_dialog";
@@ -2999,6 +3007,31 @@ export class RealObserveScreen implements ObserveScreen {
         perf.end();
         break;
       }
+    }
+  }
+
+  /**
+   * Name the Android screen when the activity does not (single-activity Compose apps): the SDK's
+   * navigation route for the captured app, else the foreground app window's pane title. Left unset
+   * when neither exists, so consumers fall back to the activity.
+   */
+  private async applyAndroidScreenIdentity(result: ObserveResult): Promise<void> {
+    const packageName = result.viewHierarchy?.packageName;
+    if (!packageName) {
+      return;
+    }
+    let sdkScreenIdentity: ScreenIdentity | undefined;
+    try {
+      sdkScreenIdentity = await this.viewHierarchy.getScreenIdentity?.(packageName);
+    } catch (error) {
+      // The SDK route is optional; the pane-title fallback still applies without it.
+      logger.debug(
+        `[Android] SDK screen identity read failed; using hierarchy identity: ${describeError(error)}`,
+      );
+    }
+    const identity = deriveAndroidScreenIdentity(result.viewHierarchy, sdkScreenIdentity);
+    if (identity) {
+      result.screenIdentity = identity;
     }
   }
 
@@ -4017,5 +4050,28 @@ export class RealObserveScreen implements ObserveScreen {
       return candidate;
     }
     return undefined;
+  }
+}
+
+/** The overlay-hiding part of an observe's screenshot options, for the non-settled captures. */
+function overlayCaptureOptions(
+  options: ObserveScreenshotOptions | undefined,
+): { hideOverlays: true } | undefined {
+  return options?.hideOverlays === true ? { hideOverlays: true } : undefined;
+}
+
+/**
+ * A capture requested with the overlay hidden either excludes it or produces no image (#9305), so
+ * the observation is marked when the capture is requested; observe reports it for `layer: "app"`.
+ */
+function stampOverlayHidden(
+  observation: ObserveResult,
+  capture: { hideOverlays: true } | undefined,
+): void {
+  if (capture) {
+    observation.screenshotIncludesOverlay = false;
+  } else {
+    // A new capture without hiding replaces whatever an earlier capture of this object recorded.
+    delete observation.screenshotIncludesOverlay;
   }
 }

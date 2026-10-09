@@ -294,7 +294,7 @@ class OverlayImageCacheTest {
           OverlayWindow(OverlayFullscreenPlacement()),
           root =
             OverlayColumnNode(
-              children = listOf(OverlayImageNode(asset = "a"), OverlayImageNode(asset = "b"))
+              children = listOf(OverlayImageNode(asset = "a"), OverlayImageNode(asset = "b")),
             ),
         )
       sessionStore.put("a", "image/png", OverlayAssetBytes.png())
@@ -340,5 +340,14 @@ class OverlayImageCacheTest {
     assertEquals(128, powerOfTwoAtLeast(96))
     assertEquals(1024, powerOfTwoAtLeast(1024))
     assertEquals(2048, powerOfTwoAtLeast(1025))
+  }
+
+  @Test
+  fun `an absurd header size stays over budget at the capped sample size`() {
+    val target = OverlayImageTarget(1080, 2400)
+    val sample = overlayImageSampleSize(1_000_000, 1_000_000, target, 4L * 1024 * 1024)
+    assertEquals(64, sample)
+    assertTrue(!overlayImageFitsBudget(1_000_000, 1_000_000, sample, 4L * 1024 * 1024))
+    assertTrue(overlayImageFitsBudget(4320, 9600, 4, 4L * 1024 * 1024))
   }
 }

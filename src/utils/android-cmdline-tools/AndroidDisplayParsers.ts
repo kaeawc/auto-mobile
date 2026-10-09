@@ -75,3 +75,9 @@ export function physicalDisplayIdForLogicalId(
   const info = infos.find((entry) => entry.logicalId === String(logicalId));
   return /^local:(\d+)$/.exec(info?.uniqueId ?? "")?.[1];
 }
+
+/** Logical id of the display holding input focus, from `dumpsys window` `mTopFocusedDisplayId=<n>`. */
+export function parseTopFocusedDisplayId(output: string): number | undefined {
+  const match = /\bmTopFocusedDisplayId=(\d+)\b/.exec(output);
+  return match ? Number(match[1]) : undefined;
+}

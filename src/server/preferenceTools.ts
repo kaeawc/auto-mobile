@@ -93,7 +93,11 @@ export function registerPreferenceTools(): void {
         .getPreference(args);
       return createJSONToolResponse(result);
     },
-    { defaultEnabled: false },
+    {
+      defaultEnabled: false,
+      // Reads only; a non-holder watches a held device through the read-only path (#10830).
+      deviceReadOnly: true,
+    },
   );
 
   ToolRegistry.registerDeviceAware(

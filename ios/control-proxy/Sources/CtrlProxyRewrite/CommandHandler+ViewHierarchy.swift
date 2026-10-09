@@ -99,6 +99,9 @@ extension CommandHandler {
 
     func enrichWithMatchingSdkHierarchy(_ hierarchy: ViewHierarchy) async -> ViewHierarchy {
         let sdk = await matchingSdkHierarchy(for: hierarchy)
+        if let sdk {
+            hierarchyPairRecorder?.record(xcuitest: hierarchy, sdk: sdk)
+        }
         return HierarchyMerger.merge(xcuitest: hierarchy, sdk: sdk)
     }
 
@@ -140,7 +143,11 @@ extension CommandHandler {
         switch SdkHierarchyProbeDecision.decide(
             foregroundBundleId: foregroundBundleId,
             cachedBundleId: cachedBundleId,
-            appState: appState
+            appState: appState,
+            cacheIsFresh: SdkHierarchyProbeDecision.isFresh(
+                cachedTimestamp: cached?.timestamp,
+                captureTimestamp: hierarchy.updatedAt
+            )
         ) {
         case .clear:
             sdkHierarchyCache?.clear()

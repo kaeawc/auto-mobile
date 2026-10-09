@@ -33,15 +33,15 @@ export function optimizeSourceMap(
   options: SourceMapOptions = {},
 ): { map: SourceMap; trimmedCount: number } {
   if (options.stripSources) {
-    if (!Object.hasOwn(map, "sourcesContent")) {
+    // Bun's decoder rejects a map whose sourcesContent is absent or whose length
+    // differs from sources (InvalidSourceMap, #10849), so keep one null per source.
+    if (!Array.isArray(map.sources)) {
       return { map, trimmedCount: 0 };
     }
-    const optimized = { ...map };
-    delete optimized.sourcesContent;
     const trimmedCount = Array.isArray(map.sourcesContent)
       ? map.sourcesContent.filter((content) => Boolean(content)).length
       : 0;
-    return { map: optimized, trimmedCount };
+    return { map: { ...map, sourcesContent: map.sources.map(() => null) }, trimmedCount };
   }
 
   if (

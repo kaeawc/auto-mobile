@@ -13,7 +13,7 @@ class FakeNavigationDataSource : NavigationDataSource {
       NavigationGraph(
         screens = NavigationMockData.screens,
         transitions = NavigationMockData.transitions,
-      )
+      ),
     )
   }
 
@@ -33,7 +33,7 @@ class FakeNavigationDataSource : NavigationDataSource {
           displayName = null,
           lastUpdated = "2026-01-01T09:30:00.000Z",
         ),
-      )
+      ),
     )
   }
 }

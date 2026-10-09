@@ -37,6 +37,20 @@ describe("SessionReleaseBroadcaster", () => {
     }
   });
 
+  test("emit forwards additive extras to listeners", () => {
+    const seen: Array<string[] | undefined> = [];
+    const unsubscribe = SessionReleaseBroadcaster.subscribe((_id, _reason, _snapshot, extras) => {
+      seen.push(extras?.recordingIds);
+    });
+    try {
+      SessionReleaseBroadcaster.emit("a", "idle-timeout", undefined, { recordingIds: ["rec-1"] });
+      SessionReleaseBroadcaster.emit("b", "idle-timeout");
+      expect(seen).toEqual([["rec-1"], undefined]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   test("a throwing listener does not block sibling listeners", () => {
     const received: string[] = [];
     const unsubscribeThrowing = SessionReleaseBroadcaster.subscribe(() => {

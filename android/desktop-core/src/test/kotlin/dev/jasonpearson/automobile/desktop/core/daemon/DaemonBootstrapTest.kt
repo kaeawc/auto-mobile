@@ -45,7 +45,7 @@ class DaemonBootstrapTest {
           DaemonLifecyclePhase.Probing,
           DaemonLifecyclePhase.InstallingRuntime,
           DaemonLifecyclePhase.Completed(restarted = true),
-        )
+        ),
       )
     val bootstrap = bootstrapOf(lifecycle)
 
@@ -63,7 +63,7 @@ class DaemonBootstrapTest {
     // not the plain preflight that short-circuits to Ready.
     val lifecycle =
       ScriptedLifecycle(
-        listOf(DaemonLifecyclePhase.Probing, DaemonLifecyclePhase.Completed(restarted = true))
+        listOf(DaemonLifecyclePhase.Probing, DaemonLifecyclePhase.Completed(restarted = true)),
       )
     val bootstrap = bootstrapOf(lifecycle)
 
@@ -78,8 +78,8 @@ class DaemonBootstrapTest {
     val bootstrap =
       bootstrapOf(
         ScriptedLifecycle(
-          listOf(DaemonLifecyclePhase.Probing, DaemonLifecyclePhase.Failed("no daemon"))
-        )
+          listOf(DaemonLifecyclePhase.Probing, DaemonLifecyclePhase.Failed("no daemon")),
+        ),
       )
 
     bootstrap.ensureReady()
@@ -96,7 +96,7 @@ class DaemonBootstrapTest {
 
     assertEquals(
       DaemonBootstrapState.Working(
-        DaemonLifecyclePhase.LaunchingDaemon(action = "start", version = "0.0.40")
+        DaemonLifecyclePhase.LaunchingDaemon(action = "start", version = "0.0.40"),
       ),
       bootstrap.state.value,
     )
@@ -106,7 +106,7 @@ class DaemonBootstrapTest {
   fun `a retried pass reports again after a failure`() {
     val lifecycle =
       ScriptedLifecycle(
-        listOf(DaemonLifecyclePhase.Probing, DaemonLifecyclePhase.Completed(restarted = false))
+        listOf(DaemonLifecyclePhase.Probing, DaemonLifecyclePhase.Completed(restarted = false)),
       )
     val bootstrap = bootstrapOf(lifecycle)
 
@@ -125,7 +125,7 @@ class DaemonBootstrapTest {
     // overwritten by phases.
     val lifecycle =
       ScriptedLifecycle(
-        listOf(DaemonLifecyclePhase.Probing, DaemonLifecyclePhase.Completed(restarted = false))
+        listOf(DaemonLifecyclePhase.Probing, DaemonLifecyclePhase.Completed(restarted = false)),
       )
     val bootstrap = bootstrapOf(lifecycle)
 

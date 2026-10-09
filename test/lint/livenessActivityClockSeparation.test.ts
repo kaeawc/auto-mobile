@@ -2,6 +2,11 @@ import ts from "typescript";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
+import {
+  PROXY_ACTIVITY_CLOCKS,
+  SESSION_ACTIVITY_CLOCKS,
+  SESSION_LIVENESS_CLOCKS,
+} from "../../src/daemon/sessionClocks";
 
 /**
  * Liveness never counts as use (issues #10656 and #10668).
@@ -24,13 +29,16 @@ import { join, relative, sep } from "node:path";
  *
  * The rule, checked on the TypeScript AST (not line regexes):
  *
- * 1. No liveness-only function writes an activity clock, directly or through a
- *    same-file helper it calls (`this.m()` or a module function), transitively.
- *    A write is an assignment (`=`, compound, `++`/`--`), an `Object.assign`
- *    whose source object literal (inline or a local `const`) carries the clock,
- *    or a `map.set(key, value)` whose value object literal carries it.
- *    Retiring a clock (`= undefined`, `delete`) is not a write: it can only end
- *    a lease, never extend one.
+ * 1. No liveness-only or cache-only function writes an activity clock, directly
+ *    or through a same-file helper it calls (`this.m()` or a module function),
+ *    transitively. A write is an assignment (`=`, compound, `++`/`--`), an
+ *    object-literal property that computes a clock (anything but a copy of the
+ *    same clock from another object, such as `{ lastUsedAt: now }` or
+ *    `{ expiresAt }`), or an `Object.assign` / `map.set(key, value)` that stores
+ *    a copied clock (a restoration). Retiring a clock (`= undefined`, `delete`)
+ *    is not a write: it can only end a lease, never extend one. Cache-only paths
+ *    are included because they are reached by callers that are not the owner's
+ *    tool usage (a device incarnation change, an observe by device id, #10703).
  * 2. The one sanctioned exception: a policy change (CLI adoption/restoration)
  *    may re-derive the idle deadline through a named helper whose body never
  *    reads the current time, so the deadline stays anchored on the last tool
@@ -41,20 +49,29 @@ import { join, relative, sep } from "node:path";
  * 4. The persistence mirror: the persisted `lastUsedAtMs`/`expiresAtMs` are
  *    copied from the session object, never computed from the clock, so a
  *    liveness path that persists the session cannot write fresh activity.
+ * 5. The read side (#10700, #10703): an idle-expiry judgement reads only
+ *    activity clocks, and a lease judgement reads only liveness clocks.
+ * 6. Reads are not use (#10964): in the device-tool registry, every
+ *    `markSessionAdmitted` call (which makes the call's end session activity) is
+ *    in the then-branch of an `if` that negates the call's read classification,
+ *    so a `deviceReadOnly` call can never be credited.
+ *
+ * The clock names come from `src/daemon/sessionClocks.ts`, which checks them
+ * against the `Session` fields, so a rename cannot silently escape this guard.
  */
 
 const ROOT = join(import.meta.dir, "..", "..");
 
-/** The daemon session's idle clocks. */
-const DAEMON_ACTIVITY_CLOCKS = ["lastUsedAt", "expiresAt"] as const;
-/**
- * The stdio proxy's replay-lease clock. A held session's `lastUsedAt` (#10677) is covered by the
- * daemon clock name above: only a tool call naming the session may stamp it.
- */
-const PROXY_ACTIVITY_CLOCKS = ["boundSessionUuidAt"] as const;
 const ACTIVITY_CLOCKS: ReadonlySet<string> = new Set([
-  ...DAEMON_ACTIVITY_CLOCKS,
+  ...SESSION_ACTIVITY_CLOCKS,
   ...PROXY_ACTIVITY_CLOCKS,
+]);
+/** Liveness clocks, and the lease helpers that read them, for the read-side rule. */
+const LIVENESS_READS: ReadonlySet<string> = new Set([
+  ...SESSION_LIVENESS_CLOCKS,
+  "effectiveLastHeartbeat",
+  "ownerLeaseHeartbeat",
+  "livenessLeaseState",
 ]);
 
 /** Liveness-only entry points, per file. Keys are `Class.method` or a module function name. */
@@ -82,6 +99,58 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
 };
 
 /**
+ * Cache-only entry points (#10703): they store session cache data and are reached by callers
+ * that are not the owner's tool usage, so like liveness paths they never write activity clocks.
+ */
+const CACHE_ONLY: Readonly<Record<string, readonly string[]>> = {
+  "src/daemon/sessionManager.ts": [
+    "SessionManager.updateSessionCache",
+    "SessionManager.getSessionCache",
+    "SessionManager.setLastHierarchy",
+    "SessionManager.resetDeviceReadinessForDevice",
+    "SessionManager.invalidateAutomationReadinessForDevice",
+  ],
+};
+
+/** Every path that is not tool usage: liveness-only and cache-only roots, per file. */
+const NON_ACTIVITY_PATHS: Readonly<Record<string, readonly string[]>> = Object.fromEntries(
+  [...new Set([...Object.keys(LIVENESS_ONLY), ...Object.keys(CACHE_ONLY)])].map((path) => [
+    path,
+    [...(LIVENESS_ONLY[path] ?? []), ...(CACHE_ONLY[path] ?? [])],
+  ]),
+);
+
+/** Rule 5: idle-expiry judgements read only activity clocks. */
+const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
+  "src/daemon/sessionManager.ts": [
+    "SessionManager.isSessionExpired",
+    "SessionManager.isSessionExpiredForNewExecution",
+  ],
+  "src/daemon/sessionHoldDiagnostics.ts": ["idleReleaseAt", "vetoedIdleReleaseAt"],
+  "src/daemon/daemonMcpProxy.ts": [
+    "DaemonMcpProxy.evictAbandonedHeldSessions",
+    // The replay-lease TTL (#10656): a heartbeat ack must not keep a dead binding replayable.
+    "DaemonMcpProxy.isBoundSessionReplayExpired",
+  ],
+};
+
+/** Rule 5: lease judgements read only liveness clocks. */
+const LEASE_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
+  "src/daemon/livenessOwnerLease.ts": [
+    "livenessLeaseState",
+    "isLivenessOwnerLeaseLive",
+    "effectiveLastHeartbeat",
+    "ownerLeaseHeartbeat",
+    // #11080: whether an owner was live when a daemon stall began, for narrow forgiveness.
+    "ownerLeaseLiveAt",
+  ],
+  "src/daemon/SessionHeartbeatMonitor.ts": [
+    "SessionHeartbeatMonitor.heartbeatLeaseStaleReason",
+    "SessionHeartbeatMonitor.rehydrationOwnerStaleReason",
+  ],
+};
+
+/**
  * Helpers a liveness-only policy change may call to re-derive the idle deadline
  * from the last tool activity. Rule 2 verifies each one never reads the clock.
  */
@@ -105,11 +174,20 @@ interface Classified {
  */
 const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
   "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
-    writes: 1,
+    writes: 2,
     reason:
       "#10662: stall forgiveness compensates for time the daemon itself lost. It shifts " +
       "expiresAt by at most the lost interval (never to a full window from resume), so it grants " +
-      "no hold time a non-stalled session would not have had.",
+      "no hold time a non-stalled session would not have had. #10835: a cli-idle session's " +
+      "idleStallForgivenAt moves by the same bounded lost interval.",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdTokenOwnedSession": {
+    writes: 1,
+    reason:
+      "#10990: any connection, including one a keeper heartbeat re-establishes, resumes the " +
+      "sessions the proxy's stable owner token holds. The held session's lastUsedAt is copied " +
+      "from the daemon's own last-tool-use clock, never the current time, so resuming grants no " +
+      "idle time.",
   },
 };
 
@@ -125,23 +203,18 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "Tool usage: getOrCreateSession resolving a session for a tool call refreshes " +
       "lastUsedAt/expiresAt, and restores both if the durable write fails.",
   },
-  "src/daemon/sessionManager.ts SessionManager.updateSessionCache": {
-    writes: 1,
-    reason: "Tool usage: a tool storing observation/session cache data stamps lastUsedAt.",
-  },
-  "src/daemon/sessionManager.ts SessionManager.getSessionCache": {
-    writes: 1,
-    reason: "Tool usage: a tool reading the session cache stamps lastUsedAt.",
+  "src/daemon/sessionManager.ts SessionManager.createSession": {
+    writes: 2,
+    reason:
+      "Tool usage: a session is created for a device acquisition (a tool call), and its " +
+      "lastUsedAt/expiresAt start the idle window from that moment.",
   },
   "src/daemon/sessionManager.ts SessionManager.recordToolCallEnded": {
     writes: 2,
     reason:
       "Tool usage: the end of a tool call restarts the idle window (owner decision 2026-10-08), " +
-      "so idleness counts from the end of the last call; the execution tracker fires it.",
-  },
-  "src/daemon/sessionManager.ts rollbackSessionActivityIfCurrent": {
-    writes: 2,
-    reason: "Rollback: restores the pre-write activity clocks after a failed cache activity write.",
+      "so idleness counts from the end of the last call; the execution tracker fires it, and " +
+      "only a call admitted under the session writes (#10824).",
   },
   "src/daemon/sessionManager.ts widenIdleDeadlineFromLastActivity": {
     writes: 1,
@@ -152,9 +225,10 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     reason: "Policy: heartbeat restoration re-derives expiresAt from lastUsedAt (rule 2).",
   },
   "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
-    writes: 1,
+    writes: 2,
     reason:
-      "Stall compensation (shift by the lost interval), listed in KNOWN_LIVENESS_WRITES (#10662).",
+      "Stall compensation (shift by the lost interval), listed in KNOWN_LIVENESS_WRITES " +
+      "(#10662, #10835).",
   },
 
   // --- Proxy replay lease (DaemonMcpProxy) ---------------------------------
@@ -166,12 +240,14 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "Tool usage: a device-acquisition result (getAndroid/getApple/startDevice) binds.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.endSessionCall": {
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.creditSessionUse": {
     writes: 2,
     reason:
       "Tool usage: the end of a forwarded call that reached the session restarts the latest " +
       "binding's replay lease and a held session's lastUsedAt, so idleness counts from the end " +
-      "of the last call however long it ran.",
+      "of the last call however long it ran. Called for the session a call named " +
+      "(endOneSessionCall) and for the session the daemon echoed as the one it routed an " +
+      "admitted control call to (#10692, #10974); a read or refused call carries no echo.",
   },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdPreviousBinding": {
     writes: 1,
@@ -179,6 +255,34 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "Tool usage: a newer binding demotes the previous one to a held session whose lastUsedAt " +
       "carries that binding's replay lease (boundSessionUuidAt, itself only stamped by tool " +
       "calls), so held-session idle eviction keys off tool use, never heartbeat acks (#10677).",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdTokenOwnedSession": {
+    writes: 1,
+    reason:
+      "Resume (#10990): a session the stable owner token holds is held with the daemon's own " +
+      "lastUsedAt, listed in KNOWN_LIVENESS_WRITES.",
+  },
+  "src/daemon/daemonMcpProxy.ts <module>": {
+    writes: 1,
+    reason: "The tokenOwnedSessions answer schema (zod) declares lastUsedAt, not a clock value.",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.stallRestoreSnapshot": {
+    writes: 1,
+    reason:
+      "Rollback record: a daemon_stalled handover copies the session's tool-use clock " +
+      "(boundSessionUuidAt or the held lastUsedAt) unchanged, so a resume can put it back (#10989).",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.restoreResumedSession": {
+    writes: 1,
+    reason:
+      "Rollback: a session resumed after a daemon_stalled handover is held again with the " +
+      "lastUsedAt it had before the handover; the heartbeat ack that resumed it renews nothing (#10989).",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.rebindResumedSession": {
+    writes: 1,
+    reason:
+      "Rollback: a latest binding resumed after a daemon_stalled handover gets back the replay " +
+      "lease it had before the handover; the heartbeat ack that resumed it renews nothing (#10989).",
   },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.updateBoundSessionUuid": {
     writes: 1,
@@ -238,6 +342,35 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   "src/server/appResources.ts getAppMetadataResource": {
     writes: 1,
     reason: "App-metadata resource cache TTL, unrelated to device sessions.",
+  },
+  "src/server/appResources.ts fetchAppsForDevice": {
+    writes: 2,
+    reason: "Installed-apps resource cache TTL, unrelated to device sessions.",
+  },
+  "src/server/webrtcStreamManager.ts describeRecord": {
+    writes: 1,
+    reason:
+      "WebRTC stream descriptor reporting its subscription lease expiry, not a session clock.",
+  },
+  "src/server/NetworkState.ts NetworkState.startSimulationUntil": {
+    writes: 1,
+    reason: "Network-error simulation expiry, unrelated to device sessions.",
+  },
+  "src/server/retainedScreenshot.ts readRetainedScreenshot": {
+    writes: 1,
+    reason: "Retained screenshot file-protection expiry, unrelated to device sessions.",
+  },
+  "src/server/snapshotOfTools.ts registerSnapshotOfTools": {
+    writes: 1,
+    reason: "Retained screenshot file-protection expiry in a tool response, not a session clock.",
+  },
+  "src/server/toolOutputSchemas.ts <module>": {
+    writes: 2,
+    reason: "Output-schema field declarations (zod), not clock values.",
+  },
+  "src/daemon/cli/runDaemonCommand.ts parseAcceptanceSessionRestartScope": {
+    writes: 1,
+    reason: "Acceptance-harness restart scope expiry parsed from CLI flags, not a session clock.",
   },
 };
 
@@ -369,17 +502,43 @@ const ASSIGNMENT_OPERATORS: ReadonlySet<ts.SyntaxKind> = new Set([
   ts.SyntaxKind.AmpersandAmpersandEqualsToken,
 ]);
 
+/** The activity clock an object-literal property carries, if any. */
+function literalPropertyClock(property: ts.Node): string | undefined {
+  if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property)) {
+    return undefined;
+  }
+  if (!ts.isObjectLiteralExpression(property.parent)) {
+    return undefined;
+  }
+  const name = propertyNameText(property.name);
+  return name !== undefined && ACTIVITY_CLOCKS.has(name) ? name : undefined;
+}
+
+/**
+ * A literal property that copies the same clock from another object (`{ lastUsedAt:
+ * session.lastUsedAt }`): a projection or a saved value, not a write on its own. Storing it back
+ * (`Object.assign`, `map.set`) is a restoration and counts there.
+ */
+function isCopiedClockProperty(property: ts.Node, clock: string): boolean {
+  if (!ts.isPropertyAssignment(property)) {
+    return false;
+  }
+  const value = unwrap(property.initializer);
+  return ts.isPropertyAccessExpression(value) && value.name.text === clock;
+}
+
+/** Copied activity clocks carried by a literal; computed ones count as writes where they stand. */
 function literalClockKeys(literal: ts.ObjectLiteralExpression): string[] {
   return literal.properties.flatMap((property) => {
-    const name =
-      ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)
-        ? propertyNameText(property.name)
-        : undefined;
-    return name !== undefined && ACTIVITY_CLOCKS.has(name) ? [name] : [];
+    const clock = literalPropertyClock(property);
+    return clock !== undefined && isCopiedClockProperty(property, clock) ? [clock] : [];
   });
 }
 
-/** Activity-clock keys carried by an object literal, or by a `const x = { … }` in `scope` it names. */
+/**
+ * Copied activity-clock keys stored from an object literal, or from a `const x = { … }` in `scope`
+ * it names.
+ */
 function objectClockKeys(expression: ts.Expression, scope: ts.Node): string[] {
   const node = unwrap(expression);
   if (ts.isObjectLiteralExpression(node)) {
@@ -468,6 +627,12 @@ function isUndefinedLiteral(node: ts.Expression): boolean {
  * write). Retiring a clock — `= undefined`/`null`, `delete` — is not a write.
  */
 function clocksWrittenBy(node: ts.Node, source: ts.SourceFile): string[] {
+  const literalClock = literalPropertyClock(node);
+  if (literalClock !== undefined) {
+    // An object literal that computes a clock (#10703): a session or record built with it,
+    // like `createSession`'s `{ lastUsedAt: now }`, stamps the clock as surely as an assignment.
+    return isCopiedClockProperty(node, literalClock) ? [] : [literalClock];
+  }
   if (ts.isBinaryExpression(node) && ASSIGNMENT_OPERATORS.has(node.operatorToken.kind)) {
     if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken && isUndefinedLiteral(node.right)) {
       return [];
@@ -650,8 +815,10 @@ function rederivationProblems(model: FileModel, helper: string): string[] {
     if (ts.isPropertyAccessExpression(node) && node.name.text === "lastUsedAt") {
       readsLastUsedAt = true;
     }
+    // `sessionNow` is the session clock (#11080), a clock read like `now`.
     const readsClock =
-      (ts.isPropertyAccessExpression(node) && node.name.text === "now") ||
+      (ts.isPropertyAccessExpression(node) &&
+        (node.name.text === "now" || node.name.text === "sessionNow")) ||
       (ts.isIdentifier(node) && (node.text === "Date" || node.text === "now"));
     if (readsClock) {
       problems.push(`${helper} reads the current time at line ${lineOf(model.source, node)}`);
@@ -669,7 +836,102 @@ function rederivationProblems(model: FileModel, helper: string): string[] {
   return problems;
 }
 
+/**
+ * Rule 5: names from `forbidden` a judgement reads, directly or through same-file callees, as
+ * `<function>:<line> reads <name>`. A read is a property access (`session.lastHeartbeat`) or an
+ * identifier (`effectiveLastHeartbeat(...)`); type positions do not count.
+ */
+function forbiddenReads(model: FileModel, root: string, forbidden: ReadonlySet<string>): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>([root]);
+  const queue = [root];
+  while (queue.length > 0) {
+    const key = queue.shift()!;
+    const unit = model.functions.get(key);
+    if (!unit) {
+      continue;
+    }
+    const visit = (node: ts.Node): void => {
+      if (ts.isTypeNode(node)) {
+        return;
+      }
+      const name = ts.isPropertyAccessExpression(node)
+        ? node.name.text
+        : ts.isIdentifier(node) && !ts.isPropertyAccessExpression(node.parent)
+          ? node.text
+          : undefined;
+      if (name !== undefined && forbidden.has(name)) {
+        found.push(`${model.path} ${key}:${lineOf(model.source, node)} reads ${name}`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(unit.node, visit);
+    const next = calleesOf(model, unit).filter((callee) => !seen.has(callee));
+    next.forEach((callee) => seen.add(callee));
+    queue.push(...next);
+  }
+  return found;
+}
+
 /** The innermost named function enclosing `node`, or `<module>`. */
+/** The device-tool admission sites, and the read-classification names their guard must negate. */
+const ADMISSION_SITES: Readonly<Record<string, readonly string[]>> = {
+  "src/server/toolRegistry.ts": ["readOnly", "readSession"],
+};
+
+/** Whether `condition` contains `!name` for one of `names`, possibly among `&&` operands. */
+function negatesOneOf(condition: ts.Expression, names: readonly string[]): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isPrefixUnaryExpression(node) &&
+      node.operator === ts.SyntaxKind.ExclamationToken &&
+      ts.isIdentifier(unwrap(node.operand)) &&
+      names.includes((unwrap(node.operand) as ts.Identifier).text)
+    ) {
+      found = true;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(condition);
+  return found;
+}
+
+/** Rule 6: `markSessionAdmitted` calls not guarded by a negated read classification. */
+function unguardedAdmissions(model: FileModel, readNames: readonly string[]): string[] {
+  const problems: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "markSessionAdmitted"
+    ) {
+      let guarded = false;
+      for (let child: ts.Node = node, parent = node.parent; parent;) {
+        if (
+          ts.isIfStatement(parent) &&
+          parent.thenStatement === child &&
+          negatesOneOf(parent.expression, readNames)
+        ) {
+          guarded = true;
+          break;
+        }
+        if (ts.isFunctionLike(parent)) {
+          break;
+        }
+        child = parent;
+        parent = parent.parent;
+      }
+      if (!guarded) {
+        problems.push(`${model.path}:${lineOf(model.source, node)} credits a read`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(model.source);
+  return problems;
+}
+
 function enclosingKey(model: FileModel, node: ts.Node): string {
   for (let current: ts.Node | undefined = node; current; current = current.parent) {
     const key = model.keyByNode.get(current);
@@ -733,8 +995,10 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       }
     }
     for (const path of [
-      ...Object.keys(LIVENESS_ONLY),
+      ...Object.keys(NON_ACTIVITY_PATHS),
       ...Object.keys(DEADLINE_REDERIVATION_HELPERS),
+      ...Object.keys(EXPIRY_JUDGEMENTS),
+      ...Object.keys(LEASE_JUDGEMENTS),
     ]) {
       if (!models.has(path)) {
         models.set(path, parse(path, readFileSync(join(ROOT, path), "utf8")));
@@ -744,8 +1008,10 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
 
   test("every liveness-only entry point and re-derivation helper still exists", () => {
     const missing = [
-      ...Object.entries(LIVENESS_ONLY),
+      ...Object.entries(NON_ACTIVITY_PATHS),
       ...Object.entries(DEADLINE_REDERIVATION_HELPERS),
+      ...Object.entries(EXPIRY_JUDGEMENTS),
+      ...Object.entries(LEASE_JUDGEMENTS),
     ].flatMap(([path, keys]) =>
       keys.filter((key) => !models.get(path)?.functions.has(key)).map((key) => `${path} ${key}`),
     );
@@ -753,9 +1019,9 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     expect(missing).toEqual([]);
   });
 
-  test("no liveness-only path writes lastUsedAt, expiresAt or boundSessionUuidAt", () => {
+  test("no liveness-only or cache-only path writes lastUsedAt, expiresAt or boundSessionUuidAt", () => {
     const found = new Map<string, Violation[]>();
-    for (const [path, roots] of Object.entries(LIVENESS_ONLY)) {
+    for (const [path, roots] of Object.entries(NON_ACTIVITY_PATHS)) {
       const sanctioned = new Set(DEADLINE_REDERIVATION_HELPERS[path] ?? []);
       for (const violation of livenessViolations(models.get(path)!, roots, sanctioned)) {
         const key = `${path} ${violation.via}`;
@@ -788,7 +1054,11 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     );
     // Sanity: the tool-usage paths are detected, so an empty result cannot pass vacuously.
     expect([...writers]).toEqual(
-      expect.arrayContaining(["getOrCreateSession", "getSessionCache", "updateSessionCache"]),
+      expect.arrayContaining(["getOrCreateSession", "recordToolCallEnded", "createSession"]),
+    );
+    // Cache reads and writes are not tool usage (#10703): reachable from any caller.
+    expect([...writers]).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/SessionCache$|^setLastHierarchy$/)]),
     );
     // The baselined stall forgiveness (#10662) is the daemon's own path, not a liveness call.
     writers.delete("forgiveDaemonStall");
@@ -821,18 +1091,26 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     expect({ actual, located }).toEqual({ actual: expected, located });
   });
 
+  test("idle-expiry judgements read only activity clocks, never a liveness clock (#10703)", () => {
+    const reads = Object.entries(EXPIRY_JUDGEMENTS).flatMap(([path, roots]) =>
+      roots.flatMap((root) => forbiddenReads(models.get(path)!, root, LIVENESS_READS)),
+    );
+    expect(reads).toEqual([]);
+  });
+
+  test("lease judgements read only liveness clocks, never an activity clock (#10703)", () => {
+    const reads = Object.entries(LEASE_JUDGEMENTS).flatMap(([path, roots]) =>
+      roots.flatMap((root) => forbiddenReads(models.get(path)!, root, ACTIVITY_CLOCKS)),
+    );
+    expect(reads).toEqual([]);
+  });
+
   test("the CLI idle release is judged on the tool-activity clock, never a heartbeat clock", () => {
     // A `--daemon heartbeat` loop proves the CLI owner is alive, not that it uses the device, so
     // it must never hold a CLI session past the idle window (owner decision 2026-10-08).
     const path = "src/daemon/SessionHeartbeatMonitor.ts";
     const model = parse(path, readFileSync(join(ROOT, path), "utf8"));
-    const heartbeatClocks = new Set([
-      "lastHeartbeat",
-      "lastOwnerHeartbeat",
-      "stallForgivenAt",
-      "effectiveLastHeartbeat",
-      "ownerLeaseHeartbeat",
-    ]);
+    const heartbeatClocks = LIVENESS_READS;
     const judgements: { line: number; readsActivity: boolean; heartbeatReads: string[] }[] = [];
     const visit = (node: ts.Node): void => {
       if (
@@ -844,6 +1122,10 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
         const heartbeatReads: string[] = [];
         const scan = (inner: ts.Node): void => {
           if (ts.isPropertyAccessExpression(inner) && inner.name.text === "lastUsedAt") {
+            readsActivity = true;
+          }
+          // The stall-forgiven tool-activity clock (#10835) reads only activity clocks.
+          if (ts.isIdentifier(inner) && inner.text === "effectiveLastToolActivity") {
             readsActivity = true;
           }
           if (
@@ -886,6 +1168,14 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     };
     visit(model.source);
     expect(problems).toEqual([]);
+  });
+
+  test("a device-tool admission is credited only for a control call, never a read (#10964)", () => {
+    for (const [path, readNames] of Object.entries(ADMISSION_SITES)) {
+      const model = parse(path, readFileSync(join(ROOT, path), "utf8"));
+      expect(model.source.text).toContain("markSessionAdmitted");
+      expect(unguardedAdmissions(model, readNames)).toEqual([]);
+    }
   });
 
   describe("rule coverage on a seeded source", () => {
@@ -962,6 +1252,82 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       expect(rederivationProblems(seeded, "bad")).toEqual(
         expect.arrayContaining([expect.stringContaining("reads the current time")]),
       );
+    });
+
+    test("reports a cache-only path that stamps an activity clock (#10703)", () => {
+      const cache = parse(
+        "cache.ts",
+        [
+          "class Manager {",
+          "  updateCache(session, updates) {",
+          "    session.cacheData = { ...session.cacheData, ...updates };",
+          "    session.lastUsedAt = this.timer.now();",
+          "  }",
+          "}",
+        ].join("\n"),
+      );
+      expect(summary(livenessViolations(cache, ["Manager.updateCache"], new Set()))).toEqual([
+        "Manager.updateCache:lastUsedAt",
+      ]);
+    });
+
+    test("counts an object literal that computes a clock, not one that copies it (#10703)", () => {
+      const literal = parse(
+        "literal.ts",
+        [
+          "class Manager {",
+          "  create(id, now) { const session = { id, lastUsedAt: now }; this.sessions.set(id, session); }",
+          "  info(session) { return { lastUsedAt: session.lastUsedAt, expiresAt: session.expiresAt }; }",
+          "  lease(expiresAt) { return { expiresAt }; }",
+          "}",
+        ].join("\n"),
+      );
+      expect(Object.fromEntries(inventoryOf(literal))).toEqual({
+        "literal.ts Manager.create": [2],
+        "literal.ts Manager.lease": [4],
+      });
+      expect(summary(livenessViolations(literal, ["Manager.create"], new Set()))).toEqual([
+        "Manager.create:lastUsedAt",
+      ]);
+    });
+
+    test("reports an expiry judgement that reads a liveness clock, and a lease that reads activity (#10700, #10703)", () => {
+      const judgements = parse(
+        "judgements.ts",
+        [
+          "class Monitor {",
+          "  isExpired(session, now) { return now > session.lastHeartbeat + this.window(session); }",
+          "  window(session) { return effectiveLastHeartbeat(session) ? 1 : 2; }",
+          "  isIdle(session, now) { return now > session.expiresAt; }",
+          "  leaseLapsed(session, now) { return now - (session.lastHeartbeat ?? session.lastUsedAt) > 1; }",
+          "}",
+        ].join("\n"),
+      );
+      expect(forbiddenReads(judgements, "Monitor.isExpired", LIVENESS_READS)).toEqual([
+        "judgements.ts Monitor.isExpired:2 reads lastHeartbeat",
+        "judgements.ts Monitor.window:3 reads effectiveLastHeartbeat",
+      ]);
+      expect(forbiddenReads(judgements, "Monitor.isIdle", LIVENESS_READS)).toEqual([]);
+      expect(forbiddenReads(judgements, "Monitor.leaseLapsed", ACTIVITY_CLOCKS)).toEqual([
+        "judgements.ts Monitor.leaseLapsed:5 reads lastUsedAt",
+      ]);
+    });
+
+    test("reports an admission credited without negating the read classification (#10964)", () => {
+      const admissions = parse(
+        "admissions.ts",
+        [
+          "async function resolve(readOnly, execution, tracker) {",
+          "  if (execution && !readOnly) { tracker.markSessionAdmitted(execution.id); }",
+          "  if (execution) { tracker.markSessionAdmitted(execution.id); }",
+          "  if (!readOnly) {} else { tracker.markSessionAdmitted(execution.id); }",
+          "}",
+        ].join("\n"),
+      );
+      expect(unguardedAdmissions(admissions, ["readOnly"])).toEqual([
+        "admissions.ts:3 credits a read",
+        "admissions.ts:4 credits a read",
+      ]);
     });
 
     test("inventories every write site by enclosing function", () => {

@@ -46,6 +46,46 @@ final class HierarchyMergerToleranceMatchTests: XCTestCase {
         )
     }
 
+    // The legacy tie-break exists only so the golden replay (#5837) can measure the
+    // reviewed behavior change; these pin it to the pre-#8662 delta-loop picks.
+    func testLegacyTieBreakFollowsDeltaLoopOrder() {
+        let positive = candidate(21, 120, 320, 164, color: "positive")
+        let negative = candidate(19, 120, 320, 164, color: "negative")
+
+        for order in [[positive, negative], [negative, positive]] {
+            XCTAssertEqual(
+                queryNode(in: merge(sdkNodes: order, tieBreak: .legacyDeltaLoopOrder))?
+                    .extras?["sdk.backgroundColor"],
+                "negative"
+            )
+        }
+        let farther = candidate(18, 120, 320, 164, color: "farther")
+        let nearest = candidate(20, 120, 320, 165, color: "nearest")
+        XCTAssertEqual(
+            queryNode(in: merge(sdkNodes: [nearest, farther], tieBreak: .legacyDeltaLoopOrder))?
+                .extras?["sdk.backgroundColor"],
+            "farther"
+        )
+    }
+
+    func testLegacyTieBreakPrefersExactBoundsAndLetsAConflictingFirstNodeShadowItsKey() {
+        let exact = candidate(20, 120, 320, 164, color: "exact")
+        let near = candidate(18, 120, 320, 164, color: "near")
+        XCTAssertEqual(
+            queryNode(in: merge(sdkNodes: [near, exact], tieBreak: .legacyDeltaLoopOrder))?
+                .extras?["sdk.backgroundColor"],
+            "exact"
+        )
+
+        let result = merge(sdkNodes: [
+            candidate(20, 120, 320, 164, color: "conflicting", identifier: "other"),
+            candidate(20, 120, 320, 164, color: "compatible"),
+        ], resourceId: "query", tieBreak: .legacyDeltaLoopOrder)
+        // The old dictionary kept only the first node per key, so the compatible
+        // duplicate was unreachable; the incompatible enclosing node is rejected too.
+        XCTAssertNil(queryNode(in: result)?.extras?["sdk.backgroundColor"])
+    }
+
     func testNearestBeatsEarlierFartherNode() {
         let result = merge(sdkNodes: [
             candidate(18, 120, 320, 164, color: "farther"),
@@ -349,7 +389,8 @@ final class HierarchyMergerToleranceMatchTests: XCTestCase {
     private func merge(
         sdkNodes: [SdkViewNode],
         resourceId: String? = nil,
-        query: UIElementInfo? = nil
+        query: UIElementInfo? = nil,
+        tieBreak: HierarchyMerger.ToleranceTieBreak = .nearestThenDocumentOrder
     )
         -> ViewHierarchy
     {
@@ -369,7 +410,7 @@ final class HierarchyMergerToleranceMatchTests: XCTestCase {
             timestamp: 1000, bundleId: "com.test.app", screenScale: 3,
             screenWidth: 375, screenHeight: 812, root: sdkRoot
         )
-        return HierarchyMerger.merge(xcuitest: xcuitest, sdk: sdk)
+        return HierarchyMerger.merge(xcuitest: xcuitest, sdk: sdk, matchCounter: nil, tieBreak: tieBreak)
     }
 
     private func queryNode(in result: ViewHierarchy) -> UIElementInfo? {

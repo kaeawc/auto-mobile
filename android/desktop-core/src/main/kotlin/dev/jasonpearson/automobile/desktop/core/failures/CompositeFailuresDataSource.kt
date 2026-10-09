@@ -62,7 +62,7 @@ class CompositeFailuresDataSource(
       TimelineData(
         dataPoints = emptyList(),
         previousPeriodTotals = PeriodTotals(0, 0, 0),
-      )
+      ),
     )
   }
 

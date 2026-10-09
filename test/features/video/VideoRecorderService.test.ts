@@ -826,6 +826,19 @@ describe("VideoRecorderService", () => {
       expect(metadata.durationMs).toBe(60000); // 1 minute
     });
 
+    test("keeps wall-clock durationMs and surfaces the container videoDurationMs", async () => {
+      const recording = await service.startRecording();
+      backend.setStopResultOverrides({
+        endedAt: "2024-01-15T10:31:00.000Z",
+        durationMs: undefined,
+        videoDurationMs: 18200,
+      });
+
+      const metadata = await service.stopRecording(recording.recordingId);
+      expect(metadata.durationMs).toBe(60000);
+      expect(metadata.videoDurationMs).toBe(18200);
+    });
+
     test("calls backend.stop with handle", async () => {
       const recording = await service.startRecording();
       await service.stopRecording(recording.recordingId);

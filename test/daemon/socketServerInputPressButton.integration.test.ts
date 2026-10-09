@@ -445,6 +445,8 @@ describe("UnixSocketServer input/pressButton", () => {
       platform: "android",
       deviceId: "emulator-5554",
       button: "home",
+      // The device is held, so only its holder may press (#10698).
+      sessionUuid: "session-uuid-1",
     });
 
     expect(response.success).toBe(true);

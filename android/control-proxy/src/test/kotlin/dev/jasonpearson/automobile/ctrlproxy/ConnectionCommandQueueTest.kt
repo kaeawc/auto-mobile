@@ -98,7 +98,7 @@ class ConnectionCommandQueueTest {
         frame.accepted.complete(
           withContext(CommandOriginContext(origin)) {
             handler.handleMessage(frame.request)
-          }
+          },
         )
       }
     }
@@ -123,7 +123,7 @@ class ConnectionCommandQueueTest {
 
     val scope =
       CoroutineScope(
-        test.backgroundScope.coroutineContext + StandardTestDispatcher(test.testScheduler)
+        test.backgroundScope.coroutineContext + StandardTestDispatcher(test.testScheduler),
       )
     val queue =
       ConnectionCommandQueue(
@@ -190,7 +190,7 @@ class ConnectionCommandQueueTest {
                   commandDispatcher +
                   CoroutineExceptionHandler { _, failure ->
                     finished.completeExceptionally(failure)
-                  }
+                  },
               ),
             dispatcher = commandDispatcher,
             delegate =
@@ -339,7 +339,7 @@ class ConnectionCommandQueueTest {
     val connection = fixture.connection()
     connection.send(RequestHierarchy(requestId = "held"))
     connection.send(
-      RequestGestureEnd(requestId = "end", gestureId = "gesture", x = 0.0, y = 0.0, cancel = true)
+      RequestGestureEnd(requestId = "end", gestureId = "gesture", x = 0.0, y = 0.0, cancel = true),
     )
     runCurrent()
     assertEquals(listOf("held"), delegate.calls)

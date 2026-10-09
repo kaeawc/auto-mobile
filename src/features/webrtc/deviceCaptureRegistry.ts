@@ -1,7 +1,12 @@
 import { isDeepStrictEqual } from "node:util";
 import type { BootedDevice } from "../../models";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
+import type {
+  H264CaptureSource,
+  H264CaptureSourceMetrics,
+  H264CaptureSourceOptions,
+} from "./H264CaptureSource";
 import { H264AnnexBParser, nalUnitType, NAL_TYPE_PPS, NAL_TYPE_SPS } from "./h264";
 
 export interface DeviceCaptureHandle extends H264CaptureSource {
@@ -55,7 +60,7 @@ export function canRetainSharedCapture(
   return (
     source instanceof CaptureHandle &&
     source.entry.handles.size > 1 &&
-    captureHintsCompatible(source.entry.request.options, requested, flexible)
+    source.entry.conflicts(requested, flexible, false).length === 0
   );
 }
 /** Preserve optional source capabilities while letting the relay retire a stale shared entry
@@ -125,7 +130,8 @@ class CaptureHandle implements DeviceCaptureHandle {
       : undefined;
   }
   get setHasConsumers(): DeviceCaptureHandle["setHasConsumers"] {
-    const source = this.entry.source;
+    // A frame-rate restart briefly detaches the source; its successor keeps the capability.
+    const source = this.entry.source ?? this.entry.lastSource;
     if (!source || !("setHasConsumers" in source) || typeof source.setHasConsumers !== "function") {
       return undefined;
     }
@@ -149,7 +155,7 @@ class CaptureHandle implements DeviceCaptureHandle {
 
 class CaptureEntry {
   readonly handles = new Set<CaptureHandle>();
-  readonly parser = new H264AnnexBParser();
+  parser = new H264AnnexBParser();
   source: H264CaptureSource | null = null;
   creation: Promise<H264CaptureSource> | null = null;
   startPromise: Promise<void> | null = null;
@@ -168,17 +174,52 @@ class CaptureEntry {
     | Parameters<NonNullable<H264CaptureSourceOptions["onFrameMetrics"]>>[0]
     | null = null;
   readonly loggedConflicts = new Set<string>();
+  /** Last adopted source; capability probes survive the gap of a frame-rate restart. */
+  lastSource: H264CaptureSource | null = null;
+  /** Actual capture rate: the creator's, raised in place to the highest binding joiner's. */
+  private fps: number | undefined;
+  /** Rate the current source was constructed with; differs from `fps` while a restart is due. */
+  private sourceFps: number | undefined;
+  /** Fences callbacks from a source a frame-rate restart has replaced. */
+  private generation = 0;
+  private restarting: Promise<void> | null = null;
   constructor(
     readonly request: DeviceCaptureRequest,
     private readonly onRetire: (entry: CaptureEntry) => void,
-  ) {}
+  ) {
+    this.fps = request.options.fps;
+  }
 
-  canShare(request: DeviceCaptureRequest): boolean {
+  /**
+   * iOS (#10711, owner option A): a binding frame-rate mismatch does not force a second capture.
+   * One capture runs at max(requested fps); a faster joiner restarts it in place (consumers stay
+   * attached across a brief gap) and slower consumers simply receive the faster H.264 stream
+   * (no temporal layers to subsample). When the fastest consumer leaves the rate is KEPT, not
+   * stepped down: a step-down would interrupt the remaining consumers for a saving they never
+   * asked for, and the capture stops entirely with its last consumer anyway. Android keeps
+   * private captures for fps conflicts; an unknown creator rate is never assumed to satisfy.
+   */
+  private sharesFrameRate(): boolean {
+    return this.request.device.platform === "ios" && this.fps !== undefined;
+  }
+  /** Binding conflicts against the actual settings; `allowRaise` admits a faster joiner. */
+  conflicts(
+    requested: H264CaptureSourceOptions,
+    flexible: readonly CaptureHintField[] = [],
+    allowRaise: boolean,
+  ): string[] {
     const conflicts = conflictingCaptureHints(
-      this.request.options,
-      request.options,
-      request.flexibleHints,
+      { ...this.request.options, fps: this.fps },
+      requested,
+      flexible,
     );
+    const fps = requested.fps;
+    const absorbed =
+      this.sharesFrameRate() && fps !== undefined && (allowRaise || fps <= this.fps!);
+    return absorbed ? conflicts.filter((field) => field !== "fps") : conflicts;
+  }
+  canShare(request: DeviceCaptureRequest): boolean {
+    const conflicts = this.conflicts(request.options, request.flexibleHints, true);
     if (
       request.options.audioEnabled &&
       request.options.onAudioData &&
@@ -198,33 +239,134 @@ class CaptureEntry {
     }
     return false;
   }
-  /**
-   * Only the iOS source computes metric snapshots on demand (when the callback exists), so a
-   * joiner needing them cannot attach to an entry created without. Android sources never
-   * produce frame metrics, so wiring the fan-out costs nothing and every consumer can share.
-   */
+  /** Attach a consumer; on iOS a faster binding rate restarts the capture in place. */
   add(request: DeviceCaptureRequest): CaptureHandle {
     const handle = new CaptureHandle(this, request.options, request.hasConsumers ?? true);
     this.handles.add(handle);
     handle.pendingAlignment = this.emittedData;
     this.updateConsumers();
+    const fps = request.options.fps;
+    const binding = !request.flexibleHints?.includes("fps");
+    if (binding && fps !== undefined && this.sharesFrameRate() && fps > this.fps!) {
+      this.raiseFrameRate(fps);
+    }
     return handle;
   }
   initialize(): void {
     // Construct synchronously to preserve actionable synchronous factory errors at acquire.
     const result = this.request.create(this.sourceOptions());
     if (!(result instanceof Promise)) {
-      this.source = result;
-      this.updateConsumers();
+      this.adopt(result);
       this.creation = Promise.resolve(result);
     } else {
       this.creation = result.then((source) => {
-        this.source = source;
-        this.updateConsumers();
+        this.adopt(source);
         return source;
       });
       void this.creation.then(undefined, () => this.creationFailed());
     }
+  }
+  private adopt(source: H264CaptureSource): void {
+    this.source = source;
+    this.lastSource = source;
+    this.updateConsumers();
+  }
+  private raiseFrameRate(fps: number): void {
+    logger.info(
+      `[DeviceCapture] ${this.request.device.deviceId}: restarting shared capture at ${fps} fps (was ${this.fps})`,
+    );
+    this.fps = fps;
+    // One loop serializes concurrent raises; it re-reads the target after each replacement.
+    this.restarting ??= this.restartAtTargetRate();
+  }
+  private async restartAtTargetRate(): Promise<void> {
+    this.running = false;
+    if (this.startPromise) {
+      // Joiners arriving during the restart wait for the replacement, not the retired source.
+      this.startCompletion = Promise.withResolvers<void>();
+      this.startPromise = this.startCompletion.promise;
+      void this.startPromise.catch((error: unknown) => {
+        // Holders observe the rejection through their own start(); this only marks it handled.
+        logger.debug(`[DeviceCapture] restart start rejected: ${errorMessage(error)}`);
+      });
+    }
+    try {
+      while (!this.retired && this.sourceFps !== this.fps) {
+        await this.replaceSource();
+        // A start() issued during the replacement is honoured here, after the await resumes.
+        if (!this.retired && this.startPromise && this.source && this.sourceFps === this.fps) {
+          await this.source.start();
+        }
+      }
+      this.running = !this.retired && this.startPromise !== null;
+      this.startCompletion?.resolve();
+    } catch (error) {
+      this.restartFailed(error);
+    } finally {
+      // Cleared synchronously so a start() after this point takes the normal path.
+      this.restarting = null;
+    }
+  }
+  private restartFailed(error: unknown): void {
+    const completion = this.startCompletion;
+    if (this.retired) {
+      // An explicit release aborted the restart; its late outcome cannot resurrect ownership.
+      completion?.resolve();
+      return;
+    }
+    logger.warn(
+      `[DeviceCapture] ${this.request.device.deviceId}: frame-rate restart failed`,
+      error,
+    );
+    this.fail(error instanceof Error ? error : new Error(String(error)));
+    const reject = () => completion?.reject(error);
+    void this.stopPromise?.then(reject, reject);
+  }
+  /** Stop the current source, then construct its replacement at the current `fps`. */
+  private async replaceSource(): Promise<void> {
+    if (!this.source) {
+      // Initial (possibly queued) creation is still in flight; its failure retires the entry.
+      await this.creation?.catch(() => null);
+    }
+    const outgoing = this.source;
+    if (this.retired || !outgoing || this.sourceFps === this.fps) {
+      // A queued creation that ran after the raise already captures at the target rate.
+      return;
+    }
+    // Detach synchronously: a concurrent retire waits on `creation` instead of stopping `outgoing`.
+    this.generation++;
+    this.source = null;
+    this.parser = new H264AnnexBParser();
+    this.sps = null;
+    this.pps = null;
+    const created = Promise.withResolvers<H264CaptureSource>();
+    this.creation = created.promise;
+    void created.promise.catch((error: unknown) => {
+      // Retirement settles on either outcome; the failure itself is reported by the restart loop.
+      logger.debug(`[DeviceCapture] restart replacement not adopted: ${errorMessage(error)}`);
+    });
+    try {
+      await outgoing.stop();
+    } catch (error) {
+      // Best effort: the replacement may still attach; a dead successor fails the entry below.
+      logger.warn(
+        `[DeviceCapture] ${this.request.device.deviceId}: stopping capture for restart failed`,
+        error,
+      );
+    }
+    if (this.retired) {
+      created.reject(new Error("Capture released during frame-rate restart"));
+      return;
+    }
+    let source: H264CaptureSource;
+    try {
+      source = await this.request.create(this.sourceOptions());
+    } catch (error) {
+      created.reject(error);
+      throw error;
+    }
+    this.adopt(source);
+    created.resolve(source);
   }
   start(): Promise<void> {
     if (this.startPromise) {
@@ -232,6 +374,10 @@ class CaptureEntry {
     }
     this.startCompletion = Promise.withResolvers<void>();
     this.startPromise = this.startCompletion.promise;
+    if (this.restarting) {
+      // The restart loop starts its replacement once it sees a pending start.
+      return this.startPromise;
+    }
     if (this.source) {
       this.startSource(this.source);
     } else {
@@ -250,13 +396,31 @@ class CaptureEntry {
       this.startCompletion?.resolve();
       return;
     }
+    if (this.restarting) {
+      // A frame-rate restart owns startup now; it starts the replacement it constructs.
+      return;
+    }
+    const generation = this.generation;
+    // A restart that replaced this source owns the completion; its aborted start is not a failure.
+    const superseded = () => generation !== this.generation || this.restarting !== null;
     try {
       void source.start().then(
         () => {
+          if (superseded()) {
+            return;
+          }
           this.running = !this.retired;
           this.startCompletion?.resolve();
         },
-        (error: unknown) => this.startFailed(error),
+        (error: unknown) => {
+          if (superseded()) {
+            logger.debug(
+              `[DeviceCapture] ${this.request.device.deviceId}: replaced source start aborted: ${errorMessage(error)}`,
+            );
+            return;
+          }
+          this.startFailed(error);
+        },
       );
     } catch (error) {
       logger.warn(`[DeviceCapture] ${this.request.device.deviceId}: source start failed`, error);
@@ -472,10 +636,21 @@ class CaptureEntry {
     });
   }
   private sourceOptions(): H264CaptureSourceOptions {
+    const generation = this.generation;
+    this.sourceFps = this.fps;
+    const stale = () => this.retired || generation !== this.generation;
+    const live =
+      <A extends unknown[]>(callback: (...args: A) => void) =>
+      (...args: A): void => {
+        if (!stale()) {
+          callback(...args);
+        }
+      };
     return {
       ...this.request.options,
+      fps: this.fps,
       onData: (chunk) => {
-        if (this.retired) {
+        if (stale()) {
           return;
         }
         try {
@@ -490,33 +665,37 @@ class CaptureEntry {
         this.emittedData ||= chunk.length > 0;
         this.deliverData(chunk);
       },
-      onEncodedAccessUnit: () => {
+      onEncodedAccessUnit: live(() => {
         this.cache(this.parser.flush());
         for (const handle of [...this.handles]) {
           if (handle.active && !handle.pendingAlignment) {
             this.deliver(handle, (options) => options.onEncodedAccessUnit?.());
           }
         }
-      },
-      onSourceFrame: () => this.fanout((options) => options.onSourceFrame?.()),
-      onSourceIdle: () => this.fanout((options) => options.onSourceIdle?.()),
-      onIdleAttestationSupport: (supported) =>
+      }),
+      onSourceFrame: live(() => this.fanout((options) => options.onSourceFrame?.())),
+      onSourceIdle: live(() => this.fanout((options) => options.onSourceIdle?.())),
+      onIdleAttestationSupport: live((supported: boolean) =>
         this.fanout((options) => options.onIdleAttestationSupport?.(supported)),
-      onRotation: (rotation) => this.fanout((options) => options.onRotation?.(rotation)),
-      onDroppedFrames: (drops) => this.fanout((options) => options.onDroppedFrames?.(drops)),
-      // iOS computes snapshots only when this callback exists. Preserve creator-only work there;
-      // elsewhere always wire the fan-out so later consumers share this capture (#9798).
+      ),
+      onRotation: live((rotation: number) =>
+        this.fanout((options) => options.onRotation?.(rotation)),
+      ),
+      onDroppedFrames: live((drops: number) =>
+        this.fanout((options) => options.onDroppedFrames?.(drops)),
+      ),
       onFrameMetrics:
         // Always produce metrics (LatestFrameQueue.metrics() is O(1)) so a late joiner on any
         // platform can share this capture instead of forcing a second one (#10711).
-        (metrics) => {
+        live((metrics: H264CaptureSourceMetrics) => {
           this.frameMetrics = metrics;
           this.fanout((options) => options.onFrameMetrics?.(metrics));
-        },
+        }),
       onAudioData: this.request.options.onAudioData
-        ? (chunk) => this.fanout((options) => options.onAudioData?.(chunk))
+        ? live((chunk: Buffer) => this.fanout((options) => options.onAudioData?.(chunk)))
         : undefined,
-      onError: (error) => this.fail(error),
+      // A replaced source's teardown error is not a failure of the shared capture.
+      onError: live((error: Error) => this.fail(error)),
     };
   }
 }

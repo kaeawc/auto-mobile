@@ -15,7 +15,11 @@ import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 import { logger } from "../../utils/logger";
 import { getRequestContext } from "../../utils/AbortContext";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
-import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordingCodec";
+import {
+  defaultRecordingCodecProbe,
+  probeDurationMs,
+  type RecordingCodecProbe,
+} from "./recordingCodec";
 import { probeScreenrecordDisplayFlag } from "./AndroidRecordingDisplay";
 import {
   DefaultFfmpegClient,
@@ -618,6 +622,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       }
       // Probe the produced codec: the iOS copy path can preserve HEVC.
       const codec = await this.codecProbe.codec(outputPath);
+      const videoDurationMs = await probeDurationMs(this.codecProbe, outputPath);
       if (outputPath !== backendHandle.capturePath) {
         await this.removeRawCapture(backendHandle.capturePath);
       }
@@ -632,6 +637,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         endedAt: backendHandle.captureTracker.exitState.endedAt ?? new Date().toISOString(),
         sizeBytes,
         codec,
+        videoDurationMs,
         ...(warnings.length > 0 && { warnings }),
       };
     } catch (error) {

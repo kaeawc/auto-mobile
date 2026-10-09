@@ -1,7 +1,10 @@
 package dev.jasonpearson.automobile.desktop.core.workspace.picker
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.StartDeviceResult
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import dev.jasonpearson.automobile.desktop.core.time.Delayer
+import dev.jasonpearson.automobile.desktop.core.time.RealDelayer
 import dev.jasonpearson.automobile.desktop.core.workspace.wireName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -20,9 +23,21 @@ interface DeviceBootController {
    * device (e.g. `emulator-5556`) — the authoritative handle for auto-selecting it, which is not
    * the shut-down AVD id and must not be inferred from the display name (ambiguous for
    * identically-named devices). Returns a failure if the boot did not start.
+   *
+   * While the device's previous session is still finishing its cleanup the daemon refuses the start
+   * as retryable (#10960); the real impl waits it out and reports that through
+   * [onFinishingPreviousSession] (`true` when the wait begins, `false` when the start is retried).
    */
-  suspend fun boot(device: PickerDevice): Result<String>
+  suspend fun boot(
+    device: PickerDevice,
+    onFinishingPreviousSession: (Boolean) -> Unit = {},
+  ): Result<String>
 }
+
+/**
+ * Longest the picker waits out a previous session's cleanup: the recording-finalize cap plus slack.
+ */
+const val DEVICE_CLEANUP_WAIT_BUDGET_MS = 150_000L
 
 private val LOG = LoggerFactory.getLogger("DeviceBootController")
 
@@ -34,16 +49,43 @@ private val LOG = LoggerFactory.getLogger("DeviceBootController")
 class RealDeviceBootController(
   private val client: AutoMobileClient,
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+  private val delayer: Delayer = RealDelayer,
+  private val cleanupWaitBudgetMs: Long = DEVICE_CLEANUP_WAIT_BUDGET_MS,
 ) : DeviceBootController {
-  override suspend fun boot(device: PickerDevice): Result<String> =
+  /** Starts [device], waiting out `device_cleanup_in_progress` refusals within the budget. */
+  private suspend fun startWaitingForCleanup(
+    device: PickerDevice,
+    onFinishingPreviousSession: (Boolean) -> Unit,
+  ): StartDeviceResult {
+    var waitedMs = 0L
+    while (true) {
+      val result =
+        client.startDevice(
+          name = device.name,
+          platform = device.platform.wireName(),
+          deviceId = device.id,
+        )
+      val retryAfterMs = result.cleanupRetryAfterMs
+      if (result.success || retryAfterMs == null || waitedMs >= cleanupWaitBudgetMs) return result
+      val waitMs = retryAfterMs.coerceIn(0L, cleanupWaitBudgetMs - waitedMs)
+      LOG.info("${device.name} is finishing its previous session; retrying start in ${waitMs}ms")
+      onFinishingPreviousSession(true)
+      try {
+        delayer.delay(waitMs)
+      } finally {
+        onFinishingPreviousSession(false)
+      }
+      waitedMs += maxOf(waitMs, 1L)
+    }
+  }
+
+  override suspend fun boot(
+    device: PickerDevice,
+    onFinishingPreviousSession: (Boolean) -> Unit,
+  ): Result<String> =
     withContext(ioDispatcher) {
       try {
-        val result =
-          client.startDevice(
-            name = device.name,
-            platform = device.platform.wireName(),
-            deviceId = device.id,
-          )
+        val result = startWaitingForCleanup(device, onFinishingPreviousSession)
         val runtimeId = result.resolvedDeviceId
         when {
           !result.success -> {
@@ -59,8 +101,8 @@ class RealDeviceBootController(
             LOG.warn("startDevice succeeded for ${device.name} but reported no runtime deviceId")
             Result.failure(
               IllegalStateException(
-                "Device booted but the daemon didn't report a runtime id; can't verify it"
-              )
+                "Device booted but the daemon didn't report a runtime id; can't verify it",
+              ),
             )
           }
           else -> Result.success(runtimeId)
@@ -88,8 +130,23 @@ class FakeDeviceBootController : DeviceBootController {
   var onSuccess: (PickerDevice) -> Unit = {}
   private var gate: CompletableDeferred<Unit>? = null
 
-  override suspend fun boot(device: PickerDevice): Result<String> {
+  /** Wait notifications to replay to the caller before the boot proceeds (`true`, then `false`). */
+  var finishingPreviousSessionWaits: Int = 0
+
+  /** Runs after each wait notification, so a test can observe the state it produced. */
+  var onFinishing: () -> Unit = {}
+
+  override suspend fun boot(
+    device: PickerDevice,
+    onFinishingPreviousSession: (Boolean) -> Unit,
+  ): Result<String> {
     bootRequests += device
+    repeat(finishingPreviousSessionWaits) {
+      onFinishingPreviousSession(true)
+      onFinishing()
+      onFinishingPreviousSession(false)
+      onFinishing()
+    }
     if (!autoComplete) {
       val deferred = CompletableDeferred<Unit>()
       gate = deferred

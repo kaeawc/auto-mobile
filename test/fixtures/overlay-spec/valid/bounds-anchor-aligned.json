@@ -1,0 +1,33 @@
+{
+  "id": "bounds-anchor-aligned",
+  "window": { "placement": { "type": "fullscreen" } },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "box",
+        "anchor": {
+          "type": "bounds",
+          "bounds": {
+            "x": 209.52380952380952,
+            "y": 605.3333333333334,
+            "width": 169.9047619047619,
+            "height": 48
+          },
+          "alignment": "cover"
+        },
+        "children": []
+      },
+      {
+        "type": "text",
+        "text": "Below",
+        "anchor": {
+          "type": "bounds",
+          "bounds": { "x": 16, "y": 556, "width": 379, "height": 224 },
+          "alignment": "bottom",
+          "offset": { "x": 0, "y": 8 }
+        }
+      }
+    ]
+  }
+}

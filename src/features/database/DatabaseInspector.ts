@@ -158,10 +158,17 @@ export class DatabaseInspector {
   /**
    * Execute a SQL query
    */
-  async executeSQL(appId: string, databasePath: string, query: string): Promise<SQLResult> {
+  async executeSQL(
+    appId: string,
+    databasePath: string,
+    query: string,
+    readOnly: boolean = false,
+  ): Promise<SQLResult> {
     return this.contentCall<SQLResult>(appId, "executeSQL", {
       databasePath,
       query,
+      // Asks the SDK to refuse anything that is not a read, whatever the host classified (#10966).
+      ...(readOnly ? { readOnly: "true" } : {}),
     });
   }
 

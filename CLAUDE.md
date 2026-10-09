@@ -24,7 +24,7 @@ Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities thr
 - Write terminal output to `scratch/` when not visible
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation
 - Run `scripts/prepush-android.sh` from the repository root before pushing changes under `android/`; its scoped Detekt pass is a smoke check, not a substitute for the full-tree CI Detekt job.
-- For Playground/JUnit-runner emulator CI red, inspect `.github/actions/android-emulator` boot diagnostics first: no runner-health means an infra/runner-health question, while booted tests that fail are a regression.
+- For Playground/JUnit-runner emulator CI red (on PRs both suites run in the one `Run Android Emulator Tests` job, `scripts/android/run-emulator-suites.sh`), inspect `.github/actions/android-emulator` boot diagnostics first: no runner-health means an infra/runner-health question, while booted tests that fail are a regression.
 - Copy `android/local.properties` from a working checkout into each new Android worktree; it is gitignored and required for Gradle SDK resolution.
 - Ktfmt normalizes `runCatching{}.getOrNull()` to `runCatching {}.getOrNull()` once; write the spaced form and do not mistake that first rewrite for a non-idempotent formatter.
 - Before adding a helper, parser, or dependency, search `src/`, `scripts/lib/`, `package.json`, and the runtime standard library. Prefer the standard library, then an existing direct dependency, then an existing repository helper, then a small tested helper. Do not parse JSON, YAML, XML, or TypeScript with line regexes when a structured parser or typed module contract exists. For new packages, state which built-in and installed alternatives were checked. Preserve injected interfaces/FakeTimer seams where tests need deterministic control.
@@ -200,7 +200,7 @@ oxlint failure; the ratchet and both boundary gates run only when both stages
 pass. CI therefore checks the committed tree without rewriting it. Turbo hashes
 and forwards `CI` so local fix results cannot satisfy CI's check cache.
 `bun run format:check` remains `oxfmt --check` in every environment.
-Check mode skips `oxfmt --check` on Windows runners because CRLF checkouts would flag every file; formatting is gated by the Linux `format-check` job and Linux/macOS lint.
+Check mode skips `oxfmt --check` on Windows runners because CRLF checkouts would flag every file; formatting is gated by the `Check formatting` step of the Linux Fast Validation job and Linux/macOS lint.
 `scripts/prepush-node.sh` inherits this mode: local runs fix, and `CI=true`/`1`
 runs check only. `test/bats/lint-format-pipeline.bats` guards this contract.
 
@@ -304,8 +304,10 @@ present in the shade; ignoring this flag keeps those children matchable.
 
 # CI failure triage
 
-The `iOS`, `Android`, `Node Tests`, and `WebRTC` aggregators include advisory
-lanes, so a red aggregator does not itself mean a required check failed. Run
+`pull_request.yml` keeps roll-up gates only for required checks (`IDE Plugin`,
+`iOS Build`, `Shell Tests`); every other job reports directly, and advisory lanes
+never block a merge. Runs from before the `iOS`, `Android`, `Node Tests`, and
+`WebRTC` roll-ups were removed may still show them red. Run
 `bash scripts/ci/classify-failure.sh <run-id>` before retrying or changing code;
 it identifies the specific upstream job and consults
 `scripts/ci/known-flakes.txt`. Do not re-fix documented non-fixes. Before
@@ -344,7 +346,8 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 - Before pushing a Swift change, run `scripts/prepush-ios.sh` (pinned
   SwiftFormat 0.54.6, SwiftLint error rules, XCTestRunner build, and pure unit
   tests).
-- `XCTestRunner Simulator Tests` is advisory, not required. Read the exact job
+- `XCTestRunner Simulator Tests` is advisory, not required, and runs nightly or
+  on a PR labelled `run-ios-sim` (`xctestrunner-simulator-tests.yml`). Read the exact job
   log and classify before rerunning. Known 2026-09-07–13 signatures: five-minute
   CtrlProxy UI-test timeout, CtrlProxy surviving forced teardown, `simctl list`
   timing out during video recording, and a hierarchy UI test exceeding 90s.
@@ -352,8 +355,10 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
   never share a simulator between parallel runners or jobs.
 - Re-run CI on the latest main base before merge; stale-base runs can mask a
   temporary main-red window.
-- The nightly advisory `XCTestRunner Thread Sanitizer` job in `nightly.yml`
-  uses `continue-on-error`, has no dependents and needs no simulator. It catches
+- The nightly advisory `XCTestRunner Thread Sanitizer` job runs on CircleCI's
+  `nightly-macos` workflow (`.circleci/continue_config.yml`, #11010); its
+  `terminal` requirement means no later job depends on its result, and it needs
+  no simulator. It catches
   #6061-style hangs with exit 124 naming the last started test, using the same
   simulator-free filter as `prepush-ios.sh` via
   `scripts/ios/xctestrunner_test_filter.sh`. Run locally with

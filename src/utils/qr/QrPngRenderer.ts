@@ -69,14 +69,26 @@ export function rasterizeQr(matrix: QrMatrix, options: QrRenderOptions = {}): Ra
   );
   const modulesAcross = matrix.length + 2 * quietZone;
   const width = modulesAcross * moduleSize;
-  const data = Buffer.alloc(width * width * 4, LIGHT);
-  for (let y = 0; y < width; y++) {
-    const row = matrix[Math.floor(y / moduleSize) - quietZone] as boolean[] | undefined;
-    for (let x = 0; row !== undefined && x < width; x++) {
-      if (row[Math.floor(x / moduleSize) - quietZone] === true) {
-        // Alpha stays 0xff; only RGB go dark.
-        data.fill(DARK, (y * width + x) * 4, (y * width + x) * 4 + 3);
+  const rowBytes = width * 4;
+  const moduleBytes = moduleSize * 4;
+  const data = Buffer.alloc(rowBytes * width, LIGHT);
+  // One dark module span of one pixel row: RGB go dark, alpha stays 0xff.
+  const darkSpan = Buffer.alloc(moduleBytes, LIGHT);
+  for (let offset = 0; offset < moduleBytes; offset += 4) {
+    darkSpan.fill(DARK, offset, offset + 3);
+  }
+  // Paint the first pixel row of each module row, then copy it down the module's
+  // remaining rows, so the work scales with modules rather than pixels.
+  for (let moduleY = 0; moduleY < matrix.length; moduleY++) {
+    const row = matrix[moduleY];
+    const firstRowStart = (moduleY + quietZone) * moduleSize * rowBytes;
+    for (let moduleX = 0; moduleX < row.length; moduleX++) {
+      if (row[moduleX] === true) {
+        darkSpan.copy(data, firstRowStart + (moduleX + quietZone) * moduleBytes);
       }
+    }
+    for (let y = 1; y < moduleSize; y++) {
+      data.copy(data, firstRowStart + y * rowBytes, firstRowStart, firstRowStart + rowBytes);
     }
   }
   return { width, height: width, data };

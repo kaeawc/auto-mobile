@@ -1,4 +1,5 @@
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
+import { OVERLAY_SUSPENDED_REASON } from "../overlay/overlaySuspended";
 import { ActionableError } from "../../models/ActionableError";
 import type { Element } from "../../models/Element";
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
@@ -11,7 +12,10 @@ import {
 } from "../../models/ViewHierarchyResult";
 import { attachRawViewHierarchy, getRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import { DefaultElementParser } from "../utility/ElementParser";
+import type { AccessibilityHierarchy as AndroidWireHierarchy } from "./android/types";
 import { iosWindowLayer } from "./ios/iosWindowLayer";
+import { linkWindowRoots } from "./linkWindowRoots";
+import type { XCTestHierarchy } from "./ios/types";
 import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
 import { INTERACTIVE_OVERLAY_WINDOW_TYPE, ownOverlayWindows } from "./ownOverlayFocus";
 
@@ -307,6 +311,56 @@ export function scopeHierarchyToLayer(
 }
 
 /**
+ * A device capture as app screen identity sees it (issue #9305 (e)): AutoMobile's own overlay
+ * windows are removed and a capture labelled with the overlay host's package is attributed to the
+ * app behind it. Navigation fingerprints are computed from this, so showing, paging or dismissing
+ * a prototype overlay neither changes the app screen's identity nor records a navigation.
+ *
+ * Takes the captures the hierarchy pushes carry (the Android CtrlProxy wire capture and the iOS
+ * runner's XCTestHierarchy) and returns the same shape. A capture with no overlay is returned
+ * unchanged, as the same object, so screens without an overlay keep their fingerprints.
+ */
+export function appWindowsOnly(capture: AndroidWireHierarchy): AndroidWireHierarchy;
+export function appWindowsOnly(capture: XCTestHierarchy): XCTestHierarchy;
+export function appWindowsOnly(
+  capture: AndroidWireHierarchy | XCTestHierarchy,
+): AndroidWireHierarchy | XCTestHierarchy {
+  // Wire window entries do not carry their roots, and an app-layer overlay (TYPE_SYSTEM) is only
+  // recognized by the nodes it hosts, so link the roots when the overlay host owns a window.
+  const linked = capture.windows?.some(
+    (window) => window.packageName === CTRL_PROXY_PACKAGE && window.hierarchy === undefined,
+  )
+    ? { ...capture, windows: linkWindowRoots(capture.hierarchy, capture.windows) }
+    : capture;
+  // Both wire shapes carry the fields scoping reads (`packageName`, `windows`, the root node with
+  // its `windowId`-stamped window roots); scoping spreads the input, so every other field survives.
+  const scoped = scopeHierarchyToLayer(linked as ViewHierarchyResult, "app");
+  if (scoped === linked) {
+    return capture;
+  }
+  if (linked === capture) {
+    return scoped as typeof capture;
+  }
+  // Hand back the captured window entries, without the roots linked above.
+  const kept = new Set(scoped.windows);
+  const windows = capture.windows?.filter((_, index) => kept.has(linked.windows![index]!));
+  return { ...(scoped as typeof capture), windows };
+}
+
+const NO_OVERLAY_SHOWING =
+  'layer "overlay" was requested, but no AutoMobile overlay is showing. ' +
+  "Show the overlay first, or omit layer to search the whole screen.";
+
+const OVERLAY_SUSPENDED =
+  `layer "overlay" was requested, but ${OVERLAY_SUSPENDED_REASON}. ` +
+  "Bring that app back to the foreground (the overlay returns with its state), or omit layer.";
+
+/** The refusal for `layer: "overlay"` with no overlay window in the capture. */
+function noOverlayMessage(hierarchy: ViewHierarchyResult | undefined): string {
+  return hierarchy?.overlaySuspended === true ? OVERLAY_SUSPENDED : NO_OVERLAY_SHOWING;
+}
+
+/**
  * Scope a capture for selector resolution. `overlay` with no overlay window on
  * screen is an actionable error rather than an ordinary "not found".
  */
@@ -315,10 +369,7 @@ export function scopeHierarchyForSelector(
   layer: HierarchyLayer | undefined,
 ): ViewHierarchyResult {
   if (layer === "overlay" && !hasOwnOverlay(hierarchy)) {
-    throw new ActionableError(
-      'layer "overlay" was requested, but no AutoMobile overlay is showing. ' +
-        "Show the overlay first, or omit layer to search the whole screen.",
-    );
+    throw new ActionableError(noOverlayMessage(hierarchy));
   }
   return scopeHierarchyToLayer(hierarchy, layer);
 }
@@ -375,11 +426,98 @@ export function assertAppGestureNotUnderOverlay(
     return;
   }
   if (ownOverlayCoversPoint(hierarchy, point)) {
-    throw new ActionableError(
-      `Cannot ${action} at (${point.x}, ${point.y}) with layer "app": an AutoMobile overlay window covers that point, ` +
-        "so the touch would reach the overlay instead of the app. Hide or move the overlay, then retry.",
-    );
+    throw new ActionableError(appPointUnderOverlay(point, action));
   }
+}
+
+function appPointUnderOverlay(point: { x: number; y: number }, action: string): string {
+  return (
+    `Cannot ${action} at (${point.x}, ${point.y}) with layer "app": an AutoMobile overlay window covers that point, ` +
+    "so the touch would reach the overlay instead of the app. Hide or move the overlay, then retry."
+  );
+}
+
+/**
+ * Why a coordinate gesture must not be dispatched for `layer` (issue #9305 proposal (c)), or
+ * `undefined` when it may be. Touch routing follows the window under each pointer's down event, so
+ * callers pass the points where fingers go down (a swipe's start, both pinch fingers' starts, a
+ * tap point); the rest of the path follows the window that received the down event.
+ *
+ * - `app`: refused while one of AutoMobile's own overlay windows covers a point, since the touch
+ *   would reach the overlay. No touch-through toggle in v1: the device findings measured it as a
+ *   race (0/20 delivered without a 100 ms settle wait).
+ * - `overlay`: refused when no overlay is showing, or when a point lies outside every overlay
+ *   window, since that touch would reach the app.
+ *
+ * Checked against the unscoped capture, before any dispatch.
+ */
+export function layerGestureRefusal(
+  hierarchy: ViewHierarchyResult | undefined,
+  layer: HierarchyLayer | undefined,
+  points: ReadonlyArray<{ x: number; y: number }>,
+  action: string,
+): string | undefined {
+  if (layer === undefined || !hierarchy) {
+    return undefined;
+  }
+  if (layer === "app") {
+    const covered = points.find((point) => ownOverlayCoversPoint(hierarchy, point));
+    return covered ? appPointUnderOverlay(covered, action) : undefined;
+  }
+  if (!hasOwnOverlay(hierarchy)) {
+    return noOverlayMessage(hierarchy);
+  }
+  const outside = points.find((point) => !ownOverlayCoversPoint(hierarchy, point));
+  return outside
+    ? `Cannot ${action} at (${outside.x}, ${outside.y}) with layer "overlay": no AutoMobile overlay window covers that point, ` +
+        "so the touch would reach the app instead of the overlay. Target a point inside the overlay, or omit layer."
+    : undefined;
+}
+
+/** `layerGestureRefusal` as an `ActionableError`, for gesture paths that fail by throwing. */
+export function assertGestureOnLayer(
+  hierarchy: ViewHierarchyResult | undefined,
+  layer: HierarchyLayer | undefined,
+  points: ReadonlyArray<{ x: number; y: number }>,
+  action: string,
+): void {
+  const refusal = layerGestureRefusal(hierarchy, layer, points, action);
+  if (refusal) {
+    throw new ActionableError(refusal);
+  }
+}
+
+/**
+ * Why an action on the input-focused field (selectAllText) must not run for `layer`, or
+ * `undefined` when it may. The device acts on whichever field holds input focus, so the call is
+ * refused when that field belongs to the other layer. With no focused field in the capture the
+ * device reports its own failure. `overlay` with no overlay showing is refused.
+ */
+export function focusedFieldLayerRefusal(
+  hierarchy: ViewHierarchyResult | undefined,
+  layer: HierarchyLayer | undefined,
+  action: string,
+): string | undefined {
+  if (layer === undefined || !hierarchy) {
+    return undefined;
+  }
+  const overlayShowing = hasOwnOverlay(hierarchy);
+  if (layer === "overlay" && !overlayShowing) {
+    return noOverlayMessage(hierarchy);
+  }
+  if (!overlayShowing || !findFlaggedElement(hierarchy, "focused")) {
+    return undefined;
+  }
+  const focusedInOverlay =
+    findFlaggedElement(scopeHierarchyToLayer(hierarchy, "overlay"), "focused") !== undefined;
+  if (focusedInOverlay === (layer === "overlay")) {
+    return undefined;
+  }
+  return focusedInOverlay
+    ? `Cannot ${action} with layer "app": the focused text field is in the AutoMobile overlay. ` +
+        'Focus the app\'s field first (tapOn with layer "app"), or omit layer.'
+    : `Cannot ${action} with layer "overlay": the focused text field is in the app, not the AutoMobile overlay. ` +
+        'Focus the overlay\'s field first (tapOn with layer "overlay"), or omit layer.';
 }
 
 function findFlaggedElement(

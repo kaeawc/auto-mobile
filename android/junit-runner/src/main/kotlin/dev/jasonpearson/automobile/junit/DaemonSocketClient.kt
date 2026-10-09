@@ -55,6 +55,14 @@ internal object DaemonSocketClientManager {
     return getOrCreateClient().readResource(uri, timeoutMs)
   }
 
+  fun callDaemonMethod(method: String, params: JsonObject, timeoutMs: Long): DaemonResponse {
+    val overrideClient = testClient
+    if (overrideClient != null) {
+      return overrideClient.callDaemonMethod(method, params, timeoutMs)
+    }
+    return getOrCreateClient().callDaemonMethod(method, params, timeoutMs)
+  }
+
   fun sessionUuid(): String {
     return testClient?.sessionUuid ?: getOrCreateClient().sessionUuid
   }
@@ -71,7 +79,7 @@ internal object DaemonSocketClientManager {
       connect = { DaemonSocketClient(DaemonSocketPaths.socketPath()) },
       daemonProcessAlive = {
         DaemonSocketPaths.isProcessAlive(
-          DaemonSocketPaths.readDaemonPidFromPidFile(DaemonSocketPaths.pidFilePath())
+          DaemonSocketPaths.readDaemonPidFromPidFile(DaemonSocketPaths.pidFilePath()),
         )
       },
       nowMs = System::currentTimeMillis,
@@ -91,7 +99,7 @@ internal object DaemonSocketClientManager {
 
   private fun ensureDaemonRunning() {
     DaemonLauncher.ensureRunning(
-      DefaultDaemonLaunchEnvironment(resolveDaemonEnvironmentOverrides())
+      DefaultDaemonLaunchEnvironment(resolveDaemonEnvironmentOverrides()),
     )
   }
 
@@ -190,7 +198,7 @@ internal object DaemonSocketClientManager {
     // Device pool is still empty after timeout - throw error
     throw DaemonUnavailableException(
       "Daemon device pool is empty after ${timeoutMs}ms. " +
-        "Start an emulator or connect a physical device before running tests."
+        "Start an emulator or connect a physical device before running tests.",
     )
   }
 
@@ -242,10 +250,8 @@ internal object DaemonSocketPaths {
   private const val DAEMON_PACKAGE_VERSION_PROPERTY = "automobile.daemon.package.version"
   private val ignoredPackageVersions = setOf("latest", "unknown")
 
-  fun socketPath(): String {
-    val userId = getUserId()
-    return "/tmp/auto-mobile-daemon-$userId.sock"
-  }
+  /** Control socket, honouring overrides and `AUTOMOBILE_AUX_SOCKET_DIR` like the daemon. */
+  fun socketPath(): String = DaemonStatePaths.resolve(DaemonStateFile.SOCKET, ::getUserId)
 
   fun daemonStartTimeoutMs(): Long {
     // Check system property first, then environment variable
@@ -483,11 +489,8 @@ internal object DaemonSocketPaths {
     }
   }
 
-  /** PID file the daemon writes its identity to. Mirrors [socketPath] (per-uid, /tmp). */
-  fun pidFilePath(): String {
-    val userId = getUserId()
-    return "/tmp/auto-mobile-daemon-$userId.pid"
-  }
+  /** PID file the daemon writes its identity to. Resolved like [socketPath]. */
+  fun pidFilePath(): String = DaemonStatePaths.resolve(DaemonStateFile.PID, ::getUserId)
 
   /**
    * The release portion of a version string — everything before the semver `+g<sha>` dev stamp.
@@ -994,6 +997,12 @@ internal class DaemonSocketClient(
     return awaitResponse(requestId, responseFuture, timeoutMs)
   }
 
+  override fun callDaemonMethod(
+    method: String,
+    params: JsonObject,
+    timeoutMs: Long,
+  ): DaemonResponse = callDaemonMethod(method, timeoutMs, params)
+
   fun callDaemonMethod(
     method: String,
     timeoutMs: Long,
@@ -1140,7 +1149,7 @@ internal class DaemonSocketClient(
           if (!containsKey("sessionUuid")) {
             put("sessionUuid", JsonPrimitive(sessionUuid))
           }
-        }
+        },
       )
     return JsonObject(mapOf("name" to JsonPrimitive(toolName), "arguments" to argumentsWithSession))
   }
@@ -1242,6 +1251,18 @@ internal interface DaemonToolClient {
   fun callTool(toolName: String, arguments: JsonObject, timeoutMs: Long): DaemonResponse
 
   fun readResource(uri: String, timeoutMs: Long): DaemonResponse
+
+  /**
+   * Call a `daemon/...` control method. Clients that cannot reach the daemon's control methods
+   * answer with a failed response rather than throwing, so a best-effort caller degrades cleanly.
+   */
+  fun callDaemonMethod(method: String, params: JsonObject, timeoutMs: Long): DaemonResponse =
+    DaemonResponse(
+      id = "",
+      type = "daemon_response",
+      success = false,
+      error = "$method is not supported by this client",
+    )
 
   var sessionUuid: String
 }

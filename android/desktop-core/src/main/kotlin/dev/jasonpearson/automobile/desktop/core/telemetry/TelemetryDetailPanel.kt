@@ -104,7 +104,7 @@ fun TelemetryDetailPanel(
       modifier =
         Modifier.then(if (isLayoutWithHierarchy) Modifier else Modifier.weight(1f))
           .verticalScroll(rememberScrollState())
-          .padding(12.dp)
+          .padding(12.dp),
     ) {
       Row(
         modifier = Modifier.fillMaxWidth(),
@@ -154,7 +154,7 @@ fun TelemetryDetailPanel(
           modifier =
             Modifier.padding(top = 4.dp)
               .background(textColor.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
-              .padding(horizontal = 8.dp, vertical = 2.dp)
+              .padding(horizontal = 8.dp, vertical = 2.dp),
         ) {
           Text(
             "Copied to clipboard",
@@ -247,7 +247,7 @@ private fun DetailRow(label: String, value: String, textColor: Color) {
         modifier =
           Modifier.clickable { clipboard.writeText(value) }
             .pointerHoverIcon(PointerIcon.Hand)
-            .padding(2.dp)
+            .padding(2.dp),
       ) {
         Text("\uD83D\uDCCB", fontSize = 9.sp) // 📋
       }
@@ -268,12 +268,12 @@ private fun HeaderIconButton(
       Modifier.onFocusChanged { isFocused = it.isFocused }
         .then(
           if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
-          else Modifier
+          else Modifier,
         )
         .background(textColor.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
         .clickable { onClick() }
         .pointerHoverIcon(PointerIcon.Hand)
-        .padding(horizontal = 6.dp, vertical = 2.dp)
+        .padding(horizontal = 6.dp, vertical = 2.dp),
   ) {
     Text(icon, fontSize = 11.sp, color = textColor.copy(alpha = 0.6f))
   }
@@ -345,7 +345,7 @@ private fun serializeEventToJson(event: TelemetryDisplayEvent): String {
                     f.fileName?.let { put("fileName", JsonPrimitive(it)) }
                     f.lineNumber?.let { put("lineNumber", JsonPrimitive(it)) }
                     put("isAppCode", JsonPrimitive(f.isAppCode))
-                  }
+                  },
                 )
               }
             },
@@ -422,7 +422,7 @@ private fun serializeEventToJson(event: TelemetryDisplayEvent): String {
                     put("severity", JsonPrimitive(v.severity))
                     put("criterion", JsonPrimitive(v.criterion))
                     put("message", JsonPrimitive(v.message))
-                  }
+                  },
                 )
               }
             },
@@ -576,7 +576,7 @@ private fun NetworkOverviewTab(
           Box(
             Modifier.fillMaxWidth()
               .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-              .padding(8.dp)
+              .padding(8.dp),
           ) {
             Image(
               bitmap = bitmap,
@@ -725,7 +725,7 @@ private fun FailureSummaryTab(event: TelemetryDisplayEvent.Failure, textColor: C
     Box(
       modifier =
         Modifier.background(severityColor.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
-          .padding(horizontal = 6.dp, vertical = 1.dp)
+          .padding(horizontal = 6.dp, vertical = 1.dp),
     ) {
       Text(
         event.severity.uppercase(),
@@ -806,7 +806,7 @@ private fun CollapsibleSection(
         .onFocusChanged { isFocused = it.isFocused }
         .then(
           if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
-          else Modifier
+          else Modifier,
         )
         .clickable { expanded = !expanded }
         .pointerHoverIcon(PointerIcon.Hand)
@@ -833,11 +833,11 @@ private fun CollapsibleSection(
           Modifier.onFocusChanged { copyIsFocused = it.isFocused }
             .then(
               if (copyIsFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
-              else Modifier
+              else Modifier,
             )
             .clickable { clipboard.writeText(copyText) }
             .pointerHoverIcon(PointerIcon.Hand)
-            .padding(4.dp)
+            .padding(4.dp),
       ) {
         Text("\uD83D\uDCCB", fontSize = 10.sp) // clipboard icon
       }
@@ -854,7 +854,7 @@ private fun MonospaceBlock(text: String, textColor: Color) {
     modifier =
       Modifier.fillMaxWidth()
         .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-        .padding(6.dp)
+        .padding(6.dp),
   ) {
     Text(
       text,
@@ -876,7 +876,7 @@ private fun SyntaxHighlightedJson(json: String, textColor: Color) {
     modifier =
       Modifier.fillMaxWidth()
         .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-        .padding(6.dp)
+        .padding(6.dp),
   ) {
     Text(
       annotated,
@@ -970,7 +970,7 @@ private fun ActionButton(
       Modifier.onFocusChanged { isFocused = it.isFocused }
         .then(
           if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
-          else Modifier
+          else Modifier,
         )
         .background(
           if (enabled) textColor.copy(alpha = 0.12f) else textColor.copy(alpha = 0.05f),
@@ -978,9 +978,9 @@ private fun ActionButton(
         )
         .then(
           if (enabled) Modifier.clickable { onClick() }.pointerHoverIcon(PointerIcon.Hand)
-          else Modifier
+          else Modifier,
         )
-        .padding(horizontal = 10.dp, vertical = 4.dp)
+        .padding(horizontal = 10.dp, vertical = 4.dp),
   ) {
     Text(
       label,
@@ -1203,7 +1203,7 @@ private fun LayoutDetailHierarchy(
         val obj = json.parseToJsonElement(details).jsonObject
         obj["hierarchy"]?.let { hierarchyElement ->
           dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson(
-            buildJsonObject { put("hierarchy", hierarchyElement) }
+            buildJsonObject { put("hierarchy", hierarchyElement) },
           )
         }
       } catch (_: Exception) {
@@ -1240,7 +1240,7 @@ private fun PerformanceDetail(event: TelemetryDisplayEvent.Performance, textColo
     Box(
       modifier =
         Modifier.background(healthColor.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
-          .padding(horizontal = 6.dp, vertical = 1.dp)
+          .padding(horizontal = 6.dp, vertical = 1.dp),
     ) {
       Text(
         event.health.uppercase(),
@@ -1275,7 +1275,7 @@ private fun MemoryDetail(event: TelemetryDisplayEvent.Memory, textColor: Color) 
     Box(
       modifier =
         Modifier.background(resultColor.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
-          .padding(horizontal = 6.dp, vertical = 1.dp)
+          .padding(horizontal = 6.dp, vertical = 1.dp),
     ) {
       Text(
         if (event.passed) "PASSED" else "FAILED",

@@ -11,10 +11,12 @@ import { normalizeQuotes } from "../../utility/TextMatcher";
 import { compareSelectionRank, selectableCandidates } from "../../utility/selectionRank";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
 import {
+  applicationWindowCoverIndex,
   isFullyCoveredByApplicationWindow,
-  isFullyCoveredByOwnOverlay,
   ownOverlayNodeSources,
+  type ApplicationWindowCoverIndex,
 } from "../ApplicationWindowCover";
+import { visibleTapBounds } from "../../utility/ElementGeometry";
 import { OVERLAY_LAYOUT_KINDS } from "../ownOverlayFocus";
 import type { Element } from "../../../models/Element";
 import { isFalsy, isTruthy } from "../../../models/Element";
@@ -181,6 +183,25 @@ export function projectSkeletonElement(element: Element): SkeletonElement | unde
   return entry;
 }
 
+/**
+ * Surface `selected` and the state description for AutoMobile's own overlay nodes only (#10446).
+ * Whether app rows should report them is an open owner decision, so app output is unchanged.
+ */
+function copyOverlayState(
+  element: Element,
+  row: Pick<SkeletonAccumulator, "selected" | "stateDescription">,
+  overlaySources: ReadonlySet<object>,
+): void {
+  const source = getHierarchyNodeSource(element);
+  if (!source || !overlaySources.has(source)) {
+    return;
+  }
+  if (isTruthy(element.selected)) {
+    row.selected = true;
+  }
+  row.stateDescription ??= nonEmptyString(element["state-description"]);
+}
+
 /** Working accumulator for one merged skeleton row, keyed by `(elementId, label, bounds)`. */
 interface SkeletonAccumulator {
   elementId?: string;
@@ -197,6 +218,9 @@ interface SkeletonAccumulator {
   bounds: SkeletonElement["bounds"];
   affordances: Set<Affordance>;
   checked?: boolean;
+  /** AutoMobile overlay rows only: the selected tab or option, and the node's state description. */
+  selected?: true;
+  stateDescription?: string;
   enabled?: false;
   /** The Android IME or an application window covers every coordinate action on this app row. */
   occluded?: true;
@@ -269,6 +293,7 @@ function newAccumulator(
 function accumulateByIdentity(
   elements: ObserveElements,
   ime: ImeWindow | undefined,
+  overlaySources: ReadonlySet<object>,
 ): SkeletonAccumulator[] {
   const byIdentity = new Map<string, SkeletonAccumulator>();
   const appElements = allElements(elements).filter((element) => !isImeKeycap(element, ime));
@@ -297,6 +322,7 @@ function accumulateByIdentity(
       acc.checked = isTruthy(el.checked);
     }
     copyDisabledState(el, acc);
+    copyOverlayState(el, acc, overlaySources);
     if (acc.testTag === undefined) {
       acc.testTag = nonEmptyString(el["test-tag"]);
     }
@@ -341,6 +367,9 @@ function shouldKeep(acc: SkeletonAccumulator, clickable: SkeletonAccumulator[]):
     return true;
   }
   if (acc.semanticLinks?.length) {
+    return true;
+  }
+  if (acc.stateDescription !== undefined) {
     return true;
   }
   if (acc.label === undefined) {
@@ -562,6 +591,12 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   }
   if (acc.checked !== undefined) {
     entry.checked = acc.checked;
+  }
+  if (acc.selected !== undefined) {
+    entry.selected = acc.selected;
+  }
+  if (acc.stateDescription !== undefined) {
+    entry.state = acc.stateDescription;
   }
   if (acc.enabled !== undefined) {
     entry.enabled = acc.enabled;
@@ -1430,27 +1465,33 @@ function markAppRowsCoveredByIme(
 
 /**
  * Mark rows that tapOn cannot reach because an application window (dialog, popup) above the
- * row's window covers it, using the same hit test as the tap path (issue #10481). AutoMobile's own
- * overlay windows that hide the app join those covers (#10715), so a row an opaque overlay and a
- * dialog cover between them is refused by tapOn and marked here alike; a translucent or partial
- * overlay keeps the `isFullyCoveredByOwnOverlay` rule.
+ * row's window covers it, using the same hit test as the tap path (issue #10481). Every
+ * node-hosting AutoMobile overlay window above the row joins those covers, opaque, translucent,
+ * sheet or floating alike (owner decision 2026-10-08, #10715): the overlay is touchable within its
+ * bounds, so a tap there lands in the overlay, and default-layer tapOn refuses the row. A row with
+ * an exposed part stays actionable, as tapOn taps that part. Like tapOn, the test runs on the
+ * row's bounds clipped to the screen, so an off-screen remainder never counts as exposed.
  */
 function markAppRowsCoveredByApplicationWindow(
   kept: SkeletonAccumulator[],
   hierarchy: ViewHierarchyResult | undefined,
+  viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
 ): void {
   if (!hierarchy?.windows?.length) {
     return;
   }
+  let coverIndex: ApplicationWindowCoverIndex | undefined;
   for (const acc of kept) {
     if (acc.occluded || !acc.target || acc.affordances.size === 0) {
       continue;
     }
     const [left, top, right, bottom] = acc.bounds;
-    const bounds = { left, top, right, bottom };
+    const bounds = visibleTapBounds({ left, top, right, bottom }, viewport);
+    // Project the capture once for every row, not once per row.
+    coverIndex ??= applicationWindowCoverIndex(hierarchy);
     if (
-      isFullyCoveredByApplicationWindow(hierarchy, acc.target, bounds, "hiding") ||
-      isFullyCoveredByOwnOverlay(hierarchy, acc.target, bounds)
+      bounds &&
+      isFullyCoveredByApplicationWindow(hierarchy, acc.target, bounds, "touch", coverIndex)
     ) {
       acc.affordances.clear();
       acc.occluded = true;
@@ -1472,11 +1513,12 @@ export function projectSkeleton(
   androidHierarchy?: ViewHierarchyResult,
 ): SkeletonProjectionResult {
   const ime = detectImeWindow(elements);
-  const accumulators = accumulateByIdentity(elements, ime);
+  const overlaySources = ownOverlayNodeSources(androidHierarchy);
+  const accumulators = accumulateByIdentity(elements, ime, overlaySources);
   const clickable = accumulators.filter((acc) => acc.affordances.has("tap"));
   // Hoist descendant text onto labelless/underlabelled clickable rows (issue
   // #5869) before the keep filter suppresses the now-folded text accumulators.
-  hoistContainerLabels(accumulators, clickable, ownOverlayNodeSources(androidHierarchy));
+  hoistContainerLabels(accumulators, clickable, overlaySources);
   applyEditableHintFallback(accumulators);
   // …then attribute an owning row's label to the state-carrying containers that
   // hoisting deliberately never folds into (issue #6871).
@@ -1487,7 +1529,7 @@ export function projectSkeleton(
   // A parked iOS keyboard is neither a covering rectangle nor a reportable keyboard.
   const iosIme = resolveIosImeState(ime, occluder, viewport);
   markAppRowsCoveredByIme(kept, coveringImeOccluder(ime, occluder, iosIme));
-  markAppRowsCoveredByApplicationWindow(kept, androidHierarchy);
+  markAppRowsCoveredByApplicationWindow(kept, androidHierarchy, viewport);
   const actionable = kept.filter((acc) => acc.affordances.size > 0);
   const nonActionable = kept.filter((acc) => acc.affordances.size === 0);
 

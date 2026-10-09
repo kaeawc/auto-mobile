@@ -38,6 +38,11 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/working
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { shellQuote } from "../../utils/shellQuote";
+import { InspectPackageSigning } from "../observe/InspectPackageSigning";
+import { checkSigningIdentity, type PackageSigningInspector } from "./SigningIdentityGuard";
+import { SigningGuardError } from "../../models/SigningGuardError";
+import { withAndroidPackageMutationLock } from "../../utils/androidPackageMutationLock";
+import { normalizeSignerSet } from "../../utils/signingIdentity";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
@@ -85,6 +90,19 @@ interface AndroidInstallAttempt {
   error?: unknown;
 }
 
+interface AndroidInstallStepOptions {
+  signal?: AbortSignal;
+  /** False refuses the uninstall-and-reinstall downgrade recovery. Default true. */
+  allowDestructiveRecovery?: boolean;
+}
+
+function installStepOptions(
+  guard: InstallGuardOptions | undefined,
+  signal: AbortSignal | undefined,
+): AndroidInstallStepOptions {
+  return { signal, allowDestructiveRecovery: guard?.allowDestructiveRecovery !== false };
+}
+
 interface AndroidInstallRecovery {
   installAttempt: AndroidInstallAttempt;
   warning?: string;
@@ -120,10 +138,29 @@ export interface InstallAppOptions {
   iosInstallBackendResolver?: typeof resolveIosInstallBackend;
   iosDowngradeRecoveryBackendResolver?: typeof resolveIosDowngradeRecoveryBackend;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
+  signingInspector?: PackageSigningInspector;
+}
+
+/** Opt-in Android guards; omitting them keeps the historical install behavior. */
+export interface InstallGuardOptions {
+  /**
+   * Complete signer set (SHA-256 digests) an already installed copy must have before it is
+   * replaced. An installed copy with any other signers, or one whose signers cannot be read,
+   * refuses the install before it starts. A package that is not installed is not replaced, so
+   * it passes.
+   */
+  expectedSigningSha256?: string[];
+  /**
+   * False refuses the uninstall-and-reinstall recovery after INSTALL_FAILED_VERSION_DOWNGRADE;
+   * the downgrade then fails and the existing package stays installed. Default true.
+   */
+  allowDestructiveRecovery?: boolean;
 }
 
 export class InstallApp {
   private adb: AdbExecutor;
+  private adbFactory: AdbClientFactory;
+  private signingInspectorOverride?: PackageSigningInspector;
   private hostExecutor: HostCommandExecutor;
   private buildToolsLocator: AndroidBuildToolsLocator;
   private createPerformanceTracker: () => PerformanceTracker;
@@ -149,6 +186,8 @@ export class InstallApp {
       options.iosDowngradeRecoveryBackendResolver ?? resolveIosDowngradeRecoveryBackend;
     this.device = device;
     this.adb = adbFactory.create(device);
+    this.adbFactory = adbFactory;
+    this.signingInspectorOverride = options.signingInspector;
     this.hostExecutor = options.hostExecutor ?? new DefaultHostCommandExecutor();
     this.buildToolsLocator = options.buildToolsLocator ?? new DefaultAndroidBuildToolsLocator();
     this.createPerformanceTracker =
@@ -160,6 +199,13 @@ export class InstallApp {
     this.plist = plist;
     this.cacheInvalidatorOverride = options.cacheInvalidator;
     this.setInstalledAppsRepository(options.installedAppsRepository);
+  }
+
+  private get signingInspector(): PackageSigningInspector {
+    return (this.signingInspectorOverride ??= new InspectPackageSigning(
+      this.device,
+      this.adbFactory,
+    ));
   }
 
   private get cacheInvalidator(): DeviceWindowCacheInvalidator {
@@ -181,11 +227,12 @@ export class InstallApp {
     artifactPath: string,
     userId?: number,
     signal?: AbortSignal,
+    guard?: InstallGuardOptions,
   ): Promise<InstallAppResult> {
     const perf = this.createPerformanceTracker();
     const nested = hasAmbientPerfTracker();
     const result = await runWithNestedPerfTracker(perf, () =>
-      this.executeInner(artifactPath, userId, perf, signal),
+      this.executeInner(artifactPath, userId, perf, signal, guard),
     );
     if (!nested && perf.isEnabled()) {
       const timings = perf.getTimings();
@@ -201,6 +248,7 @@ export class InstallApp {
     userId: number | undefined,
     perf: PerformanceTracker,
     signal?: AbortSignal,
+    guard?: InstallGuardOptions,
   ): Promise<InstallAppResult> {
     perf.serial("installApp");
 
@@ -211,6 +259,11 @@ export class InstallApp {
     const ext = path.extname(artifactPath).toLowerCase();
 
     if (this.device.platform === "ios") {
+      if (guard) {
+        throw new ActionableError(
+          "expectedSigningSha256 and allowDestructiveRecovery are only supported for Android devices",
+        );
+      }
       const backend = this.getIosInstallBackend();
       this.validateiOSArtifact(ext, backend);
       if (ext === ".ipa") {
@@ -241,7 +294,9 @@ export class InstallApp {
       );
     }
 
-    return this.executeAndroid(artifactPath, userId, perf, signal);
+    return withAndroidPackageMutationLock(this.device.deviceId, signal, () =>
+      this.executeAndroid(artifactPath, userId, perf, signal, guard),
+    );
   }
 
   private async executeAndroid(
@@ -249,10 +304,18 @@ export class InstallApp {
     userId: number | undefined,
     perf: PerformanceTracker,
     signal?: AbortSignal,
+    guard?: InstallGuardOptions,
   ): Promise<InstallAppResult> {
     const preparation = await this.prepareAndroidInstall(artifactPath, userId, perf, signal);
     let { packageName, isInstalled } = preparation;
     const { targetUserId, beforePackages, warnings, prior } = preparation;
+    const signingGuard = await this.applySigningGuard(
+      guard,
+      packageName,
+      targetUserId,
+      isInstalled,
+      signal,
+    );
 
     const installation = await this.installAndroidWithRecovery(
       packageName,
@@ -260,7 +323,7 @@ export class InstallApp {
       `install --user ${targetUserId} -r "${artifactPath}"`,
       prior,
       perf,
-      signal,
+      installStepOptions(guard, signal),
     );
     const installAttempt = installation.installAttempt;
     isInstalled = this.absorbInstallRecovery(installation, warnings, isInstalled);
@@ -296,7 +359,76 @@ export class InstallApp {
       userId: targetUserId,
       packageName: packageName,
       warning: warning,
+      ...(signingGuard ? { signingGuard } : {}),
     };
+  }
+
+  private async applySigningGuard(
+    guard: InstallGuardOptions | undefined,
+    packageName: string | undefined,
+    targetUserId: number,
+    isInstalled: boolean,
+    signal?: AbortSignal,
+  ): Promise<InstallAppResult["signingGuard"]> {
+    if (!guard?.expectedSigningSha256) {
+      return undefined;
+    }
+    return this.requireExpectedSigningBeforeReplace(
+      packageName,
+      targetUserId,
+      isInstalled,
+      guard.expectedSigningSha256,
+      signal,
+    );
+  }
+
+  /**
+   * Opt-in: refuse before installing over a copy that does not carry exactly the expected
+   * signers. Evidence is gathered fresh for the user that holds the copy, because the package
+   * (and so its signers) is shared by every user.
+   */
+  private async requireExpectedSigningBeforeReplace(
+    packageName: string | undefined,
+    targetUserId: number,
+    installedForTarget: boolean,
+    expectedSha256: string[],
+    signal?: AbortSignal,
+  ): Promise<NonNullable<InstallAppResult["signingGuard"]>> {
+    const expected = normalizeSignerSet(expectedSha256);
+    if (!packageName) {
+      throw new SigningGuardError(
+        "presence-unknown",
+        "The package name could not be read from the APK, so an installed copy cannot be checked " +
+          "against the expected signing identity",
+        { appId: "", userId: targetUserId, expectedSha256: expected },
+      );
+    }
+    let holder: number | undefined = installedForTarget ? targetUserId : undefined;
+    if (holder === undefined) {
+      const inventory = await this.listAndroidPackageUsers(packageName, targetUserId, signal);
+      holder = inventory.installedUserIds[0];
+      if (holder === undefined && inventory.warnings.length > 0) {
+        throw new SigningGuardError(
+          "presence-unknown",
+          `Could not confirm that ${packageName} is not installed for other users: ` +
+            inventory.warnings.join(" "),
+          { appId: packageName, userId: targetUserId, expectedSha256: expected },
+        );
+      }
+    }
+    if (holder === undefined) {
+      return { status: "no-existing-package" };
+    }
+    const inspection = await checkSigningIdentity(
+      this.signingInspector,
+      packageName,
+      holder,
+      expected,
+      signal,
+    );
+    return inspection.presence === "absent"
+      ? { status: "no-existing-package" }
+      : { status: "matched", matchedSha256: expected };
   }
 
   /** Collect the recovery warning; a removed prior copy makes this effectively a fresh install. */
@@ -376,7 +508,7 @@ export class InstallApp {
     installArgs: string,
     prior: AndroidPriorPackageState,
     perf: PerformanceTracker,
-    signal?: AbortSignal,
+    { signal, allowDestructiveRecovery = true }: AndroidInstallStepOptions = {},
   ): Promise<AndroidInstallRecovery> {
     const installAttempt = await perf.track("adbInstall", () =>
       this.runAndroidInstall(installArgs, signal),
@@ -396,6 +528,14 @@ export class InstallApp {
     }
     if (installAttempt.success || !this.isAndroidDowngradeError(installAttempt.diagnostics)) {
       return { installAttempt };
+    }
+    if (!allowDestructiveRecovery) {
+      return {
+        installAttempt,
+        warning:
+          "Downgrade recovery is disabled (allowDestructiveRecovery=false); the existing " +
+          "package was left installed.",
+      };
     }
     // APK versions are package-wide, so a per-user uninstall cannot enable a downgrade.
     if (!packageName) {

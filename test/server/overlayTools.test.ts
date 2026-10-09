@@ -9,6 +9,7 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import { OVERLAY_SHOW_IN_PLACE_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
 import {
   registerOverlayTools,
   overlaySchema,
@@ -23,9 +24,9 @@ import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 import { FakeToolSelectionRepository } from "../fakes/FakeToolSelectionRepository";
 import { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { McpTestFixture, precompileMcpOutputSchemas } from "../fixtures/mcpTestFixture";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
-import { compileJsonSchema } from "../helpers/jsonSchemaCompile";
+import { compileAjv2020, compileJsonSchema } from "../helpers/jsonSchemaCompile";
 import { initializeCliTools } from "../../src/cli/cliToolRegistration";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
@@ -56,6 +57,7 @@ describe("overlay MCP tool", () => {
     restore = preserveToolRegistry();
     timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
+    client.setSupportedCommands([OVERLAY_SHOW_IN_PLACE_CAPABILITY]);
     invalidator = new FakeDeviceWindowCacheInvalidator();
     unsubscribe = registerOverlayTools({
       clientFactory: () => client,
@@ -134,6 +136,38 @@ describe("overlay MCP tool", () => {
     expect(client.getOverlayHistory()).toEqual([]);
   });
 
+  test("a spec with components is expanded on the host before it is sent (#11053)", async () => {
+    const authored = {
+      id: "panel",
+      window: { placement: { type: "fullscreen" as const } },
+      components: { greeting: { root: { type: "text", text: "Hello {props.name}" } } },
+      root: { type: "use", component: "greeting", props: { name: "Ada" } },
+    };
+    const { payload } = await call({ action: "show", spec: authored });
+    expect(payload.success).toBe(true);
+    expect(client.getOverlayHistory()).toEqual([
+      {
+        method: "show",
+        spec: {
+          id: "panel",
+          window: { placement: { type: "fullscreen" } },
+          root: { type: "text", text: "Hello Ada" },
+        },
+        timeoutMs: 5000,
+        perf: undefined,
+      },
+    ]);
+    const missing = await call({
+      action: "show",
+      spec: { ...authored, root: { type: "use", component: "greeting" } },
+    });
+    expect(missing.payload.error).toContain(
+      "Invalid overlay at spec.root.props: Missing component prop",
+    );
+    expect(missing.payload.error).not.toContain("invalid_union_discriminator");
+    expect(client.getOverlayHistory()).toHaveLength(1);
+  });
+
   test("a same-id show is forwarded as a show and keeps one shown entry", async () => {
     await call({ action: "show", spec });
     timer.advanceTime(5);
@@ -150,6 +184,30 @@ describe("overlay MCP tool", () => {
     expect((await call({ action: "status" })).payload.overlays).toEqual([
       { id: "panel", lastAction: "show", success: true, timestamp: 5 },
     ]);
+  });
+
+  test("a same-id show on a CtrlProxy without in-place show warns that pages restarted (#10642)", async () => {
+    client.setSupportedCommands([]);
+    await call({ action: "show", spec });
+    expect((await call({ action: "show", spec: { ...spec, id: "other" } })).payload.warning).toBe(
+      undefined,
+    );
+    const { payload } = await call({ action: "show", spec: { ...spec, id: "other" } });
+    expect(payload.success).toBe(true);
+    expect(payload.warning).toContain(OVERLAY_SHOW_IN_PLACE_CAPABILITY);
+    expect(payload.warning).toContain("pager pages restarted");
+    expect(client.getOverlayHistory()).toHaveLength(3);
+    // reset: true asks for a fresh show, which every CtrlProxy gives, so nothing to warn about.
+    expect((await call({ action: "show", spec, reset: true })).payload.warning).toBeUndefined();
+  });
+
+  test("a refused same-id show on a CtrlProxy without in-place show does not warn", async () => {
+    client.setSupportedCommands([]);
+    await call({ action: "show", spec });
+    client.setOverlayResult({ success: false, error: "rejected" });
+    const { payload } = await call({ action: "show", spec });
+    expect(payload.success).toBe(false);
+    expect(payload.warning).toBeUndefined();
   });
 
   test.each([true, false])("reset %p is forwarded only as the caller wrote it", async (reset) => {
@@ -878,7 +936,7 @@ describe("overlay MCP tool", () => {
     [{ action: "show", spec }, "launchApp with overlay: true"],
     [{ action: "dismiss", all: true }, "launchApp with overlay: true"],
     [{ action: "awaitEvent", id: "panel" }, "launchApp with overlay: true"],
-    [{ action: "show", spec, reset: true }, "reset is Android only"],
+    [{ action: "show", spec, reset: true }, "launchApp with overlay: true"],
   ])("iOS %o without an injected agent never reaches CtrlProxy", async (input, guidance) => {
     const { response, payload } = await call(input, { ...device, platform: "ios" });
     expect(response.isError).toBe(true);
@@ -985,6 +1043,10 @@ describe("overlay discovery over MCP", () => {
     unsubscribe = registerOverlayTools();
     registerHighlightTools();
     registerToolSelectionTools();
+    // Compile the advertised output schemas once here, not on the test's first re-list.
+    precompileMcpOutputSchemas(
+      ToolRegistry.getToolDefinitions().map((definition) => definition.outputSchema),
+    );
   });
   afterAll(async () => {
     unsubscribe();
@@ -1035,6 +1097,26 @@ describe("overlay CLI and advertised schema registration", () => {
     expect(ToolRegistry.getTool("highlight")!.defaultEnabled).toBe(false);
     expect(definition.name).toBe("prototype");
     expect(definition.outputSchema).toBeDefined();
+  });
+  test("the advertised spec accepts a components map and use nodes in any child slot", () => {
+    const validate = compileAjv2020(definition.inputSchema);
+    const show = (spec: unknown) => validate({ action: "show", spec });
+    const authored = {
+      id: "panel",
+      window: { placement: { type: "fullscreen" } },
+      components: { row: { root: { type: "text", text: "{props.label}" } } },
+      root: {
+        type: "column",
+        children: [{ type: "use", component: "row", props: { label: "A" } }],
+      },
+    };
+    expect(show(authored)).toBe(true);
+    expect(show({ ...authored, components: { row: { root: authored.root, extra: 1 } } })).toBe(
+      false,
+    );
+    expect(show({ ...authored, root: { type: "use", component: "row", props: { a: [1] } } })).toBe(
+      false,
+    );
   });
   test("the advertised theme objects reject empty objects like the validator does", () => {
     type Node = { minProperties?: number; properties: Record<string, Node> };

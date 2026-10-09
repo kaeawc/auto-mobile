@@ -62,6 +62,12 @@ export class FakeTimer implements Timer {
   private pendingSleeps: PendingSleep[] = [];
   private sleepHistory: number[] = [];
   private currentTime: number = 0;
+  /** Wall-clock time the simulated host spent asleep; the monotonic clock skips it (#10699). */
+  private hostSleptMs: number = 0;
+  /** The monotonic clock also runs while the host sleeps (Windows/Linux semantics). */
+  private sleepCountingMonotonic = false;
+  /** Net wall-clock step (an NTP or manual clock change); only `now()` sees it (#11080). */
+  private wallClockStepMs: number = 0;
   private pendingTimeouts: PendingTimeout[] = [];
   private pendingIntervals: PendingInterval[] = [];
   private nextTimeoutId: number = 1;
@@ -244,7 +250,48 @@ export class FakeTimer implements Timer {
    * Get the current fake time.
    */
   now(): number {
-    return this.currentTime;
+    return this.currentTime + this.wallClockStepMs;
+  }
+
+  /**
+   * The monotonic clock: it moves with every advance and `setCurrentTime`, but not across
+   * {@link simulateHostSleep}, like `performance.now()` across a macOS suspend. With
+   * {@link simulateSleepCountingMonotonicClock} it runs through sleep too, as on Windows and Linux.
+   */
+  monotonicNow(): number {
+    return this.monotonicIncludesHostSleep ? this.currentTime : this.currentTime - this.hostSleptMs;
+  }
+
+  /** See `Timer.monotonicIncludesHostSleep`; false (a macOS-like clock) unless switched. */
+  get monotonicIncludesHostSleep(): boolean {
+    return this.sleepCountingMonotonic;
+  }
+
+  /**
+   * Make the monotonic clock run through {@link simulateHostSleep}, like `QueryPerformanceCounter`
+   * on Windows or `CLOCK_BOOTTIME` on Linux, so sleep is indistinguishable from a stall.
+   */
+  simulateSleepCountingMonotonicClock(): void {
+    this.sleepCountingMonotonic = true;
+  }
+
+  /**
+   * Simulate the host suspending for `ms`: the wall clock (`now()`) jumps ahead while the monotonic
+   * clock stands still, and no timer fires (nothing runs while the host is asleep). Overdue timers
+   * fire on the next advance, as they do on wake.
+   */
+  simulateHostSleep(ms: number): void {
+    this.currentTime += ms;
+    this.hostSleptMs += ms;
+  }
+
+  /**
+   * Simulate the wall clock being stepped by `ms` (negative for a backward step), as an NTP
+   * correction or a manual clock change does (#11080): only `now()` moves. The monotonic clock and
+   * every pending timer are unaffected, as real timers are scheduled on the monotonic clock.
+   */
+  stepWallClock(ms: number): void {
+    this.wallClockStepMs += ms;
   }
 
   /**
@@ -341,6 +388,9 @@ export class FakeTimer implements Timer {
     this.consecutiveBursts = 0;
     this.sleepHistory = [];
     this.currentTime = 0;
+    this.hostSleptMs = 0;
+    this.wallClockStepMs = 0;
+    this.sleepCountingMonotonic = false;
     this.pendingTimeouts = [];
     this.pendingIntervals = [];
     this.nextEventSeq = 1;

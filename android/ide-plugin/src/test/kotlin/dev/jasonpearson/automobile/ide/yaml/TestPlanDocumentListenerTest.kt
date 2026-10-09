@@ -233,11 +233,11 @@ class TestPlanDocumentListenerTest {
     override fun fireReadOnlyModificationAttempt() {}
 
     override fun addDocumentListener(
-      listener: com.intellij.openapi.editor.event.DocumentListener
+      listener: com.intellij.openapi.editor.event.DocumentListener,
     ) {}
 
     override fun removeDocumentListener(
-      listener: com.intellij.openapi.editor.event.DocumentListener
+      listener: com.intellij.openapi.editor.event.DocumentListener,
     ) {}
 
     override fun createRangeMarker(startOffset: Int, endOffset: Int): RangeMarker =

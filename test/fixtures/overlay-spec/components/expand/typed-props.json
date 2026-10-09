@@ -1,0 +1,112 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "dark": false,
+      "n": 0
+    },
+    "components": {
+      "toggleRow": {
+        "root": {
+          "type": "row",
+          "children": [
+            {
+              "type": "text",
+              "text": "{props.label} ({props.count})",
+              "styleWhen": [
+                {
+                  "when": {
+                    "key": "{props.key}",
+                    "equals": "{props.on}"
+                  },
+                  "style": {
+                    "color": "primary"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "button",
+              "label": "{props.label}",
+              "onTap": [
+                {
+                  "type": "setState",
+                  "key": "{props.key}",
+                  "value": "{props.on}"
+                },
+                {
+                  "type": "setState",
+                  "key": "n",
+                  "value": "{props.count}"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "root": {
+      "type": "use",
+      "component": "toggleRow",
+      "props": {
+        "key": "dark",
+        "on": true,
+        "count": 3,
+        "label": "Dark mode"
+      }
+    }
+  },
+  "expanded": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "dark": false,
+      "n": 0
+    },
+    "root": {
+      "type": "row",
+      "children": [
+        {
+          "type": "text",
+          "text": "Dark mode (3)",
+          "styleWhen": [
+            {
+              "when": {
+                "key": "dark",
+                "equals": true
+              },
+              "style": {
+                "color": "primary"
+              }
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Dark mode",
+          "onTap": [
+            {
+              "type": "setState",
+              "key": "dark",
+              "value": true
+            },
+            {
+              "type": "setState",
+              "key": "n",
+              "value": 3
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

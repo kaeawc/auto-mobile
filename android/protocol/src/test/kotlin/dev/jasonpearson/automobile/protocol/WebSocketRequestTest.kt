@@ -154,7 +154,7 @@ class WebSocketRequestTest {
   fun `deserialize request_list_keyboard_profiles with negotiated catalog versions`() {
     val request =
       json.decodeFromString<WebSocketRequest>(
-        """{"type":"request_list_keyboard_profiles","requestId":"profiles-1","supportedCatalogVersions":[1]}"""
+        """{"type":"request_list_keyboard_profiles","requestId":"profiles-1","supportedCatalogVersions":[1]}""",
       )
 
     assertIs<RequestListKeyboardProfiles>(request)
@@ -200,7 +200,7 @@ class WebSocketRequestTest {
   fun `deserialize atomic double tap opt in`() {
     val request =
       json.decodeFromString<WebSocketRequest>(
-        """{"type":"request_tap_coordinates","requestId":"double","x":100,"y":200,"doubleTap":true}"""
+        """{"type":"request_tap_coordinates","requestId":"double","x":100,"y":200,"doubleTap":true}""",
       )
     assertIs<RequestTapCoordinates>(request)
     assertEquals(true, request.doubleTap)
@@ -349,13 +349,13 @@ class WebSocketRequestTest {
   fun `deserialize pre-dispatch state read and optional insert baseline`() {
     val capture =
       json.decodeFromString<WebSocketRequest>(
-        """{"type":"request_insert_text_state","requestId":"before"}"""
+        """{"type":"request_insert_text_state","requestId":"before"}""",
       )
     assertIs<RequestInsertTextState>(capture)
     assertEquals("before", capture.requestId)
     val insert =
       json.decodeFromString<WebSocketRequest>(
-        """{"type":"request_insert_text","text":"😀","precedingState":{"text":"éx","selectionStart":2,"selectionEnd":2}}"""
+        """{"type":"request_insert_text","text":"😀","precedingState":{"text":"éx","selectionStart":2,"selectionEnd":2}}""",
       )
     assertIs<RequestInsertText>(insert)
     assertEquals(InsertTextState("éx", false, 2, 2), insert.precedingState)
@@ -364,7 +364,7 @@ class WebSocketRequestTest {
     assertIs<RequestInsertText>(legacy)
     assertEquals(null, legacy.precedingState)
     assertFalse(
-      json.encodeToString(WebSocketRequest.serializer(), legacy).contains("precedingState")
+      json.encodeToString(WebSocketRequest.serializer(), legacy).contains("precedingState"),
     )
   }
 
@@ -372,7 +372,7 @@ class WebSocketRequestTest {
   fun `deserialize request_insert_text with expectedSuffix`() {
     val request =
       json.decodeFromString<WebSocketRequest>(
-        """{"type":"request_insert_text","requestId":"id","text":"t","expectedSuffix":"ab"}"""
+        """{"type":"request_insert_text","requestId":"id","text":"t","expectedSuffix":"ab"}""",
       )
     assertIs<RequestInsertText>(request)
     assertEquals("ab", request.expectedSuffix)
@@ -382,7 +382,7 @@ class WebSocketRequestTest {
   fun `deserialize request_insert_text capability opt in`() {
     val request =
       json.decodeFromString<WebSocketRequest>(
-        """{"type":"request_insert_text","text":"t","acceptsCaretNotPlaced":true}"""
+        """{"type":"request_insert_text","text":"t","acceptsCaretNotPlaced":true}""",
       ) as RequestInsertText
     assertTrue(request.acceptsCaretNotPlaced)
   }

@@ -254,6 +254,8 @@ const TOOL_TIMEOUT_FLOORS: ReadonlyMap<string, number> = new Map(
     explore: DEFAULT_EXPLORE_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
     putAppFile: APP_FILE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
     setDeviceResources: DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    reconcileDeviceResources:
+      DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     uninstallApp: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
     crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
     getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
@@ -548,6 +550,20 @@ function resolveLegacyStartDeviceBudgetMs(
   );
 }
 
+const DEVICE_RESOURCE_TOOLS: ReadonlySet<string> = new Set([
+  "setDeviceResources",
+  "reconcileDeviceResources",
+]);
+
+function resolveDeviceResourceToolBudgetMs(
+  toolName: unknown,
+  argumentsRecord: Record<string, unknown>,
+): number | undefined {
+  return DEVICE_RESOURCE_TOOLS.has(String(toolName))
+    ? resolveDeviceResourceBudgetMs(argumentsRecord)
+    : undefined;
+}
+
 function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | undefined {
   if (request.method !== "tools/call") {
     return undefined;
@@ -571,10 +587,8 @@ function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | 
         Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS
       );
     }
-    case "setDeviceResources":
-      return resolveDeviceResourceBudgetMs(argumentsRecord);
     default:
-      return undefined;
+      return resolveDeviceResourceToolBudgetMs(request.params?.name, argumentsRecord);
   }
 }
 

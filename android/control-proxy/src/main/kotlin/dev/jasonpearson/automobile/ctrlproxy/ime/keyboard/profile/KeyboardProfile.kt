@@ -47,11 +47,12 @@ object KeyboardProfiles {
     )
 
   /**
-   * Behavior verified on-device (2026-09-23): per-character `setComposingText` word composing with
-   * `finishComposingText` on separators, batched edits, and direct `commitText` for symbols. In a
-   * rich markdown composer the fenced-code autoformat fires, and the InputConnection call sequence
-   * is byte-identical to the stock Gboard (captured via the IC trace recorder). Prediction and
-   * autocorrect nuances are out of scope by design.
+   * Matches the InputConnection traces captured from real Gboard on API 36 (#7495): every character
+   * is a plain `commitText` (no composing text, even with the suggestion strip active), a caret
+   * move into a word emits only `finishComposingText` (never `setComposingRegion`), and backspace
+   * does not re-open the remaining word. Committing per character still triggers rich-composer
+   * autoformat such as fenced code blocks. Prediction and autocorrect (`commitCorrection`) are out
+   * of scope.
    */
   val GBOARD =
     KeyboardProfile(
@@ -72,16 +73,16 @@ object KeyboardProfiles {
         ),
       behavior =
         TypingBehavior(
-          composeWords = true,
+          composeWords = false,
           enterStrategy = EnterStrategy.KEY_EVENT,
           backspaceStrategy = BackspaceStrategy.DELETE_SURROUNDING,
-          recomposeOnCursorMove = true,
-          recomposeOnBackspaceIntoWord = true,
-          batchEdits = true,
+          recomposeOnCursorMove = false,
+          recomposeOnBackspaceIntoWord = false,
+          batchEdits = false,
         ),
       evidenceStatus = "focused_trace",
       evidenceNote =
-        "A focused call sequence matched captured Gboard traces; cursor-move recomposition is enabled pending emulator trace confirmation, and full vendor equivalence is not claimed.",
+        "Typing and caret-move call sequences match traces captured from real Gboard on API 36 (bare commitText per character with no batch wrapper, finishComposingText only on caret move); autocorrect and full vendor equivalence are not claimed.",
     )
 
   /**

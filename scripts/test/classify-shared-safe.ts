@@ -30,9 +30,10 @@
  *   bun scripts/test/classify-shared-safe.ts           # regenerate the list
  *   bun scripts/test/classify-shared-safe.ts --check   # CI gate (Fast Validation)
  */
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import ts from "typescript";
+import { sortedReaddirEntriesSync } from "../../src/utils/io";
 
 export type Tier = "A" | "B" | "C";
 
@@ -341,7 +342,7 @@ export function runCli(argv: readonly string[], io: CliIo): number {
 }
 
 function discoverTestFiles(root: string, directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return sortedReaddirEntriesSync(directory).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       return discoverTestFiles(root, path);

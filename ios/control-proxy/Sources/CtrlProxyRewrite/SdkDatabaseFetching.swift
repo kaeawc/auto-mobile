@@ -5,7 +5,13 @@ import Foundation
 /// reference blocked on a `DispatchSemaphore`). Refines `Sendable` so a Phase-6
 /// `Sendable` CommandHandler can hold it.
 public protocol SdkDatabaseFetching: Sendable {
-    func executeSQL(databasePath: String, query: String, sessionId: String?, mutationToken: String?) async throws
+    func executeSQL(
+        databasePath: String,
+        query: String,
+        sessionId: String?,
+        mutationToken: String?,
+        readOnly: Bool?
+    ) async throws
         -> SdkExecuteSqlResult
     func listDatabases() async throws -> [SdkDatabaseInfo]
     func storageCapabilities() async throws -> SdkStorageCapabilities

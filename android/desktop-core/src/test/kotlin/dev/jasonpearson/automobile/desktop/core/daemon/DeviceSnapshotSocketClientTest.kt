@@ -204,7 +204,7 @@ class DeviceSnapshotSocketClientTest {
       )
       .use { server ->
         assertTrue(
-          DeviceSnapshotSocketClient(socketPathValue = server.socketPath.toString()).isAvailable()
+          DeviceSnapshotSocketClient(socketPathValue = server.socketPath.toString()).isAvailable(),
         )
       }
   }

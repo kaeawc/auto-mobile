@@ -1,6 +1,6 @@
-import { readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
+import { sortedReaddirEntriesSync } from "../src/utils/io";
 
 const SOURCE_ROOT = "src/daemon";
 const OWNER = "src/daemon/DaemonLauncher.ts";
@@ -31,7 +31,7 @@ export function repositoryPath(file: string): string {
 }
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return sortedReaddirEntriesSync(directory).flatMap((entry) => {
     const path = join(directory, entry.name);
     return entry.isDirectory()
       ? sourceFiles(path)

@@ -77,20 +77,20 @@ internal object OverlayScreenshotEnvironment {
         fail(
           "No overlay screenshot baseline for '$name' at ${result.baseline.path}. Record it with " +
             "./gradlew -p android :control-proxy:testDebugUnitTest -D$RECORD_PROPERTY=true " +
-            "on the reference OS, then commit the PNG with the test."
+            "on the reference OS, then commit the PNG with the test.",
         )
       is OverlayScreenshotComparator.Result.SizeMismatch ->
         fail(
           "Overlay screenshot '$name' size changed: baseline " +
             "${result.expectedWidth}x${result.expectedHeight}, actual " +
-            "${result.actualWidth}x${result.actualHeight}. Rejected image: ${result.actualFile.path}"
+            "${result.actualWidth}x${result.actualHeight}. Rejected image: ${result.actualFile.path}",
         )
       is OverlayScreenshotComparator.Result.Mismatch ->
         fail(
           "Overlay screenshot '$name' differs: ${result.differentPixelCount} pixels " +
             "(${"%.4f".format(Locale.ROOT, result.differentPixelRatio * 100)}%) exceed tolerance. " +
             "Diff: ${result.diffFile.path}, rejected: ${result.actualFile.path}. " +
-            "If intentional, re-record with -D$RECORD_PROPERTY=true."
+            "If intentional, re-record with -D$RECORD_PROPERTY=true.",
         )
     }
   }

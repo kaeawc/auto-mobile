@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,12 +29,15 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.DefaultShadowColor
 import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.RadialGradientShader
 import androidx.compose.ui.graphics.Shader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
@@ -62,10 +66,8 @@ internal fun OverlayRuntimeContent(
 ) {
   val snapshot by runtime.snapshots.collectAsState()
   val resolver = LocalContext.current.contentResolver
-  val motion =
-    remember(snapshot.spec) {
-      overlayMotionEnabled(snapshot.spec.motion, readAnimatorDurationScale(resolver))
-    }
+  val durationScale by rememberAnimatorDurationScale(resolver)
+  val motion = overlayMotionEnabled(snapshot.spec.motion, durationScale)
   if (snapshot.active) {
     key(runtime) {
       // One ordered queue drained by one coroutine: interactions reach the controller exactly in
@@ -97,14 +99,174 @@ fun OverlaySpecContent(
   interact: (OverlayInteraction) -> Unit = {},
 ) {
   OverlayTheme(root, theme) {
-    Box(Modifier.semantics { testTagsAsResourceId = true }) {
-      RenderOverlayNode(root, interact)
-      modalOverlaySheets(root).forEach { node ->
-        key(node.identity) {
-          RenderOverlaySheet(node, overlayNodeModifier(node, interact), interact)
+    val anchorLocals = remember { OverlayAnchorLocals() }
+    CompositionLocalProvider(LocalOverlayAnchorLocals provides anchorLocals) {
+      val fillsWindow = LocalOverlayFillsWindow.current
+      Box(Modifier.semantics { testTagsAsResourceId = true }) {
+        val modals = modalOverlaySheets(root)
+        // An open dialog is modal: the page behind it leaves the accessibility tree, as it does
+        // on iOS and as touches already do. A snackbar or sheet does not block the page.
+        val pageBlocked = modals.any { it.role == "dialog" }
+        // The page box takes the fill: it is the root's parent and must measure the window.
+        Box(
+          Modifier.then(if (fillsWindow) Modifier.fillWhenEmpty() else Modifier)
+            .then(if (pageBlocked) Modifier.clearAndSetSemantics {} else Modifier),
+        ) {
+          RenderOverlayNode(root, interact, windowRoot = true)
+          OverlayAnchorLayer(layeredOverlayAnchors(root), interact)
+        }
+        modals.forEach { node ->
+          key(node.identity) {
+            RenderOverlayModal(node, interact)
+            OverlayAnchorLayer(layeredOverlayAnchorsIn(node.children), interact)
+          }
         }
       }
     }
+  }
+}
+
+/**
+ * True where the overlay content sits in a window that already covers the screen (fullscreen
+ * placement), so [fillWhenEmpty] cannot change what the window occupies. False for floating and
+ * sheet windows, which wrap their content: filling there would grow the window over the app, which
+ * it would then block from touches and from `observe`.
+ */
+internal val LocalOverlayFillsWindow = compositionLocalOf { false }
+
+/**
+ * Gives a content box that measured empty the whole bounded space it was offered. A root whose
+ * children are all anchored (#10814) measures 0x0 because the anchor layer takes no space, and
+ * Compose clips every descendant's accessibility bounds to its ancestors, so the anchored nodes
+ * reported empty, invisible bounds and `observe` dropped them (#10870). A non-empty box keeps its
+ * measured size. Apply only inside a window that is already full-size ([LocalOverlayFillsWindow]).
+ */
+internal fun Modifier.fillWhenEmpty(): Modifier = layout { measurable, constraints ->
+  val placeable = measurable.measure(constraints)
+  val width =
+    if (placeable.width == 0 && constraints.hasBoundedWidth) constraints.maxWidth
+    else placeable.width
+  val height =
+    if (placeable.height == 0 && constraints.hasBoundedHeight) constraints.maxHeight
+    else placeable.height
+  layout(width, height) { placeable.place(0, 0) }
+}
+
+/**
+ * The CompositionLocals in force where each anchored node was authored, by node identity (#10803).
+ * The anchored node is drawn in a window-level layer, away from the card (or other provider) it
+ * sits in, so it is composed with these again: Material's content colour, content alpha and text
+ * style would otherwise reset to the window's defaults.
+ */
+internal class OverlayAnchorLocals {
+  val byIdentity = mutableStateMapOf<String, CapturedAnchor>()
+}
+
+/** What an anchored node takes from where it was authored: its locals and its ancestors' fade. */
+internal class CapturedAnchor(
+  val locals: CompositionLocalContext,
+  val fade: () -> Float,
+  /** The capture call site that wrote this entry; only it may remove the entry (#10913). */
+  val owner: Any = Unit,
+)
+
+private val LocalOverlayAnchorLocals = compositionLocalOf<OverlayAnchorLocals?> { null }
+
+/**
+ * Records the locals at an anchored node's authored position, where the node itself is not drawn.
+ */
+@Composable
+private fun CaptureAnchorLocals(identity: String) {
+  val registry = LocalOverlayAnchorLocals.current ?: return
+  // Written while composing, not in an effect: the layer composes after this in the same pass and
+  // must not draw the node a frame with the wrong locals first.
+  val owner = remember { Any() }
+  registry.byIdentity[identity] =
+    CapturedAnchor(currentCompositionLocalContext, LocalOverlayAnchorFade.current, owner)
+  DisposableEffect(registry, identity, owner) {
+    onDispose {
+      // A re-registration from another call site (the motion branch flipping) composes before
+      // this one disposes and has already replaced the entry: removing it would hide the node.
+      if (registry.byIdentity[identity]?.owner === owner) registry.byIdentity.remove(identity)
+    }
+  }
+}
+
+@Composable
+private fun WithAnchorLocals(identity: String, content: @Composable () -> Unit) {
+  val captured = LocalOverlayAnchorLocals.current?.byIdentity?.get(identity)
+  if (captured != null) CompositionLocalProvider(captured.locals, content = content) else content()
+}
+
+/**
+ * Draws [nodes], the anchored nodes of the content below it, above that content and at window level
+ * (#10803). Drawn inside their parents, a wrap-content parent clipped them to its slot and reserved
+ * that slot for them. The layer takes no space of its own, measures each node against the whole
+ * space the overlay content is given (not its parent's slot) and places it at the layer's origin,
+ * from which [overlayAnchor] moves it, touch target and semantics included, onto its anchor. Only
+ * the window and the host's content viewport clip it.
+ */
+@Composable
+private fun OverlayAnchorLayer(
+  anchors: List<LayeredOverlayAnchor>,
+  interact: (OverlayInteraction) -> Unit,
+) {
+  if (anchors.isEmpty()) return
+  Layout(
+    content = {
+      anchors.forEach { anchor ->
+        key(anchor.node.identity) { LayeredAnchorEntry(anchor, interact) }
+      }
+    },
+  ) { measurables, constraints ->
+    val loose = constraints.copy(minWidth = 0, minHeight = 0)
+    val placeables = measurables.map { it.measure(loose) }
+    layout(constraints.minWidth, constraints.minHeight) { placeables.forEach { it.place(0, 0) } }
+  }
+}
+
+/**
+ * One anchored node of the layer, composed with the locals of its authored position. While an
+ * ancestor with a `visibleWhen` hides, the node stays composed until that ancestor's exit has
+ * finished and fades with it (its alpha is the ancestors' exit progress, #10869); it fades in with
+ * them again. Without motion, or with no animated ancestor, it follows them instantly. Only a fade:
+ * a shrink would clip the node to the layer's zero-size slot, not to the ancestor it was authored
+ * in.
+ */
+@Composable
+private fun LayeredAnchorEntry(
+  anchor: LayeredOverlayAnchor,
+  interact: (OverlayInteraction) -> Unit,
+) {
+  val node = anchor.node
+  val content: @Composable () -> Unit = {
+    WithAnchorLocals(node.identity) { RenderOverlayNode(node, interact, anchorLayer = true) }
+  }
+  if (LocalOverlayMotion.current && anchor.animatedAncestor != null) {
+    // Composed exactly while the authored ancestors are: their exit keeps them (and so this) up
+    // until it finishes, and their fade, not a transition of our own, drives the alpha (#10869).
+    val captured = LocalOverlayAnchorLocals.current?.byIdentity?.get(node.identity)
+    if (captured != null) Box(Modifier.anchorFade(captured.fade)) { content() }
+  } else if (anchor.ancestorsShown) content()
+}
+
+@Composable
+private fun RenderOverlayModal(node: OverlayRenderNode, interact: (OverlayInteraction) -> Unit) {
+  val modifier = overlayNodeModifier(node, interact)
+  when (node.role) {
+    "dialog" ->
+      RenderOverlayDialog(node, modifier, interact) {
+        node.children.forEach {
+          RenderOverlayNode(
+            it,
+            interact,
+            columnWeight(it),
+            it.weightAxis(OverlayWeightAxis.VERTICAL),
+          )
+        }
+      }
+    "snackbar" -> RenderOverlaySnackbar(node, modifier, interact)
+    else -> RenderOverlaySheet(node, modifier, interact)
   }
 }
 
@@ -114,7 +276,14 @@ private fun RenderOverlayNode(
   interact: (OverlayInteraction) -> Unit,
   parentModifier: Modifier = Modifier,
   weightAxis: OverlayWeightAxis? = null,
+  windowRoot: Boolean = false,
+  anchorLayer: Boolean = false,
 ) {
+  // An anchored node below the root is drawn by its window's anchor layer, not in its parent.
+  if (!windowRoot && !anchorLayer && isLayeredOverlayAnchor(node)) {
+    CaptureAnchorLocals(node.identity)
+    return
+  }
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
   if (LocalOverlayMotion.current && node.source?.visibleWhen != null) {
     // The row/column weight rides on the animated container: it is the Row/Column's direct child.
@@ -124,10 +293,12 @@ private fun RenderOverlayNode(
       enter = overlayEnterTransition(node.source.transition),
       exit = overlayExitTransition(node.source.transition),
     ) {
-      RenderOverlayNodeContent(node, interact, weightAxis = weightAxis)
+      ProvideAnchorFade(none = node.source.transition == "none") {
+        RenderOverlayNodeContent(node, interact, weightAxis = weightAxis, windowRoot = windowRoot)
+      }
     }
   } else if (node.visible) {
-    RenderOverlayNodeContent(node, interact, parentModifier, weightAxis)
+    RenderOverlayNodeContent(node, interact, parentModifier, weightAxis, windowRoot)
   }
 }
 
@@ -137,8 +308,9 @@ private fun RenderOverlayNodeContent(
   interact: (OverlayInteraction) -> Unit,
   parentModifier: Modifier = Modifier,
   weightAxis: OverlayWeightAxis? = null,
+  windowRoot: Boolean = false,
 ) {
-  val modifier = parentModifier.then(overlayNodeModifier(node, interact, weightAxis))
+  val modifier = parentModifier.then(overlayNodeModifier(node, interact, weightAxis, windowRoot))
   // Containers whose children can appear, disappear or change animate their size with them.
   val containerModifier = modifier.overlayAnimateSize(LocalOverlayMotion.current)
   when (node.role) {
@@ -195,7 +367,13 @@ private fun RenderOverlayNodeContent(
         // Only an authored family overrides; otherwise the text inherits the theme's family through
         // its role or the themed body style, as plain text in the prototyped app would (#10561).
         fontFamily = if (source.fontFamily != null) rememberOverlayFontFamily(node.style) else null,
+        // Authored-only, like fontWeight: an unset property keeps what the role or theme gives.
+        fontStyle = if (source.fontStyle != null) node.style.fontStyle else null,
+        letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
+        textDecoration = if (source.textDecoration != null) node.style.textDecoration else null,
         textAlign = node.style.textAlign,
+        lineHeight = source.lineHeight?.toFloat()?.sp ?: TextUnit.Unspecified,
+        overflow = node.style.overflow,
         maxLines = source.maxLines ?: Int.MAX_VALUE,
         style = role ?: LocalTextStyle.current,
       )
@@ -217,8 +395,8 @@ private fun RenderOverlayNodeContent(
             .defaultMinSize(24.dp, 24.dp)
             .background(
               overlayThemedColor(node.style.background, node.style.source.background)
-                ?: Color.LightGray
-            )
+                ?: Color.LightGray,
+            ),
         )
     }
     "image" -> OverlayImageContent(node, modifier)
@@ -233,8 +411,18 @@ private fun RenderOverlayNodeContent(
     "pager" -> RenderOverlayPager(node, modifier, interact)
     "tabBar",
     "bottomNav" -> RenderOverlayNavigation(node, modifier, interact)
-    "bottomSheet" ->
-      Unit // Modal content is hoisted above the whole author tree, within this window.
+    "bottomSheet",
+    "dialog",
+    "snackbar" -> Unit // Modal content is hoisted above the whole author tree, within this window.
+    "iconButton" -> RenderOverlayIconButton(node, modifier, interact)
+    "fab" -> RenderOverlayFab(node, modifier, interact)
+    "segmentedButton" -> RenderOverlaySegmentedButton(node, modifier, interact)
+    "topAppBar" -> RenderOverlayTopAppBar(node, modifier, interact)
+    "divider" -> RenderOverlayDivider(node, modifier)
+    "badge" -> RenderOverlayBadge(node, modifier)
+    "progress" -> RenderOverlayProgress(node, modifier)
+    "timePicker" -> RenderOverlayTimePicker(node, modifier, interact)
+    "datePicker" -> RenderOverlayDatePicker(node, modifier, interact)
     "textField" -> RenderOverlayTextField(node, modifier, interact)
     "switch",
     "checkbox" -> RenderOverlayToggle(node, modifier, interact)
@@ -315,8 +503,10 @@ private fun RenderOverlayPager(
   val source = node.source as? OverlayPagerNode ?: return
   val pager = rememberPagerState(initialPage = node.page) { node.children.size }
   val animate = LocalOverlayMotion.current
-  LaunchedEffect(node.page) {
-    if (pager.currentPage != node.page) {
+  // Keyed on motion too: turning motion off mid-scroll cancels the animation and snaps to the page.
+  // The offset check matters then: past the halfway point currentPage already reads the target.
+  LaunchedEffect(node.page, animate) {
+    if (pager.currentPage != node.page || pager.currentPageOffsetFraction != 0f) {
       if (animate) pager.animateScrollToPage(node.page) else pager.scrollToPage(node.page)
     }
   }
@@ -416,7 +606,7 @@ private fun RenderOverlaySheet(
     Box(
       Modifier.fillMaxSize()
         .background(source.scrim?.let(::overlayColor) ?: Color(0x66000000))
-        .clickable { interact(OverlayInteraction.SheetDismiss(source.openWhen)) }
+        .clickable { interact(OverlayInteraction.SheetDismiss(source.openWhen)) },
     )
     Column(
       modifier
@@ -428,7 +618,7 @@ private fun RenderOverlaySheet(
           // fill would cover them, so the surface is only the fallback when neither is authored.
           if (node.style.source.background == null && node.style.source.gradient == null)
             Modifier.background(MaterialTheme.colorScheme.surface)
-          else Modifier
+          else Modifier,
         )
         .pointerInput(heights, height, source.dismissOnSwipe) {
           detectVerticalDragGestures(
@@ -450,14 +640,14 @@ private fun RenderOverlaySheet(
         .clickable {
           if (!source.onTap.isNullOrEmpty())
             interact(OverlayInteraction.Tap(source.onTap.orEmpty()))
-        }
+        },
     ) {
       if (source.dragHandle)
         Box(
           Modifier.align(Alignment.CenterHorizontally)
             .padding(8.dp)
             .size(32.dp, 4.dp)
-            .background(Color.Gray, RoundedCornerShape(2.dp))
+            .background(Color.Gray, RoundedCornerShape(2.dp)),
         )
       node.children.forEach {
         RenderOverlayNode(it, interact, columnWeight(it), it.weightAxis(OverlayWeightAxis.VERTICAL))
@@ -471,42 +661,49 @@ private fun overlayNodeModifier(
   node: OverlayRenderNode,
   interact: (OverlayInteraction) -> Unit,
   weightAxis: OverlayWeightAxis? = null,
+  windowRoot: Boolean = false,
 ): Modifier {
   val style = node.style.source
   val actions = node.source?.onTap.orEmpty()
   val tappable =
     actions.isNotEmpty() &&
       node.role != "textField" &&
-      node.role != "bottomSheet" &&
+      node.role !in OVERLAY_MODAL_ROLES &&
       node.role !in OVERLAY_COMPONENT_ROLES &&
-      node.role !in OVERLAY_SELECTION_ROLES
+      node.role !in OVERLAY_SELECTION_ROLES &&
+      node.role !in OVERLAY_MATERIAL_ROLES
+  val presses = remember { MutableInteractionSource() }
   var modifier: Modifier = Modifier
+  // Outermost: the anchor fixes where the whole node, offset and touch target included, lands on
+  // screen (#9316). The host resolved element anchors to screen dp bounds before sending.
+  val anchor = node.source?.anchor as? OverlayBoundsAnchor
+  if (anchor != null) {
+    modifier = modifier.overlayAnchor(anchor, currentOverlayWindowGeometry(), windowRoot)
+  }
+  // A draw-time shift of the whole node (shadow, touch target and semantics included); siblings
+  // keep the layout slot it would have had.
+  style.offset?.let { modifier = modifier.offset(it.x.toFloat().dp, it.y.toFloat().dp) }
+  // Outside the touch target and drawing, so the whole node (shadow included) shrinks as one.
+  val pressScale = style.pressScale
+  if (tappable && pressScale != null) {
+    modifier = modifier.overlayPressScale(presses, pressScale.toFloat())
+  }
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).
   if (tappable) modifier = modifier.minimumInteractiveComponentSize()
-  // Bounds before the authored size: `width`/`height`/`fill` are then coerced into min/max, where
-  // the reverse order would clamp the bounds into an already-fixed size instead (#10537).
-  modifier = sizeConstraintModifier(modifier, style)
-  modifier =
-    dimensionModifier(
-      modifier,
-      style.width,
-      horizontal = true,
-      weighted = weightAxis == OverlayWeightAxis.HORIZONTAL,
-    )
-  modifier =
-    dimensionModifier(
-      modifier,
-      style.height,
-      horizontal = false,
-      weighted = weightAxis == OverlayWeightAxis.VERTICAL,
-    )
+  // A cover anchor sizes the node to the anchor bounds: authored sizes would only wrap or clamp it.
+  if (anchor == null || !overlayAnchorCovers(anchor))
+    modifier = authoredSizeModifier(modifier, style, weightAxis)
   modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
-  style.aspectRatio?.let { modifier = modifier.aspectRatio(it.toFloat()) }
   val shape =
     overlayCornerShape(MaterialTheme.shapes, style.cornerRadius ?: OverlayCornerRadius.Dp(0.0))
   // Before clip/background/border so the shadow is drawn outside the clipped content.
-  style.elevation?.let { modifier = modifier.shadow(it.toFloat().dp, shape) }
+  style.elevation?.let {
+    val shadowColor =
+      overlayThemedColor(node.style.shadowColor, style.shadowColor) ?: DefaultShadowColor
+    modifier =
+      modifier.shadow(it.toFloat().dp, shape, ambientColor = shadowColor, spotColor = shadowColor)
+  }
   if (style.cornerRadius != null) modifier = modifier.clip(shape)
   overlayThemedColor(node.style.background, style.background)?.let {
     modifier = modifier.background(it, shape)
@@ -518,19 +715,37 @@ private fun overlayNodeModifier(
   }
   // Click handling and semantics go before the inset and authored padding, so the whole drawn node
   // is tappable, its ripple covers it, and its accessibility bounds are its drawn bounds (#10435).
-  if (tappable) modifier = modifier.clickable { interact(OverlayInteraction.Tap(actions)) }
-  modifier = modifier.semantics {
-    if (node.role != "textField") text = AnnotatedString(node.text)
-    this[OverlayRole] = node.role
-    if (node.role == "icon" || node.role == "image") role = Role.Image
-    // Compose has no native role for text or layout containers; the kind travels in OverlayRole.
-    overlayContentDescription(node.role, node.text, node.iconName, tappable, node.children)?.let {
-      contentDescription = it
+  if (tappable) {
+    modifier =
+      modifier.clickable(interactionSource = presses, indication = LocalIndication.current) {
+        interact(OverlayInteraction.Tap(actions))
+      }
+  }
+  val description =
+    overlayContentDescription(
+      node.role,
+      node.text,
+      node.iconName,
+      tappable,
+      node.children,
+      node.contentDescription,
+    )
+  val state =
+    overlayStateDescription(node.role, node.page, node.children.size, overlayPickerValue(node))
+  // A layout container with nothing of its own to report gets no semantics node, so its children
+  // join the nearest reporting ancestor, as with Compose's own layouts (#10446).
+  if (!isSemanticsFreeContainer(node, tappable, description, state)) {
+    modifier = modifier.semantics {
+      if (node.role != "textField" && node.role !in SEMANTICS_FREE_CONTAINERS) {
+        text = AnnotatedString(node.text)
+      }
+      this[OverlayRole] = node.role
+      if (node.role == "icon" || node.role == "image") role = Role.Image
+      // Compose has no native role for text or layout containers; the kind travels in OverlayRole.
+      description?.let { contentDescription = it }
+      state?.let { stateDescription = it }
+      node.testTag?.let { testTag = it }
     }
-    overlayStateDescription(node.role, node.page, node.children.size)?.let {
-      stateDescription = it
-    }
-    node.testTag?.let { testTag = it }
   }
   val insetFloor = LocalOverlayInsetFloor.current
   node.safeArea?.let { safeArea ->
@@ -543,7 +758,7 @@ private fun overlayNodeModifier(
             "cutout" -> WindowInsets.displayCutout
             "ime" -> WindowInsets.ime
             else -> WindowInsets(0, 0, 0, 0)
-          }
+          },
         )
     }
     val sides =
@@ -573,14 +788,39 @@ private fun overlayNodeModifier(
 }
 
 private val SEMANTICS_FREE_CONTAINERS =
-  setOf("box", "row", "column", "scroll", "pager", "spacer", "card")
+  setOf("box", "row", "column", "scroll", "pager", "spacer", "card", "divider")
 
 /**
- * The accessible label for an overlay node. Authored text wins; an icon-only tappable node reads as
- * its icon name, and so does a tappable layout container whose only content is an icon (a FAB). A
- * layout container is never labelled by its node kind ("box", "row") while it has content
- * (#10524, #10608): its children label it instead. Only a tappable container with no children at
- * all keeps its kind, as nothing else names it. Every other node keeps its kind as the label.
+ * Navigation bars are labelled by their tabs, which carry the Tab role and selected state, so their
+ * node kind ("tabBar") is never their label (#10446).
+ */
+private val CHILD_LABELLED_ROLES = setOf("tabBar", "bottomNav")
+
+/**
+ * Whether a node is a layout container with nothing to report: no label, text, tap, test tag or
+ * state. Such a node is merged away like an unannotated Compose layout instead of appearing in the
+ * accessibility tree as an empty wrapper (#10446).
+ */
+internal fun isSemanticsFreeContainer(
+  node: OverlayRenderNode,
+  tappable: Boolean,
+  description: String?,
+  state: String?,
+): Boolean =
+  node.role in SEMANTICS_FREE_CONTAINERS &&
+    !tappable &&
+    node.text.isEmpty() &&
+    node.testTag == null &&
+    description == null &&
+    state == null
+
+/**
+ * The accessible label for an overlay node. An authored `contentDescription` wins, then authored
+ * text; an icon-only tappable node reads as its icon name, and so does a tappable layout container
+ * whose only content is an icon (a FAB). A layout container or navigation bar is never labelled by
+ * its node kind ("box", "row", "tabBar") while it has content (#10524, #10608, #10446): its
+ * children label it instead. Only a tappable container with no children at all keeps its kind, as
+ * nothing else names it. Every other node keeps its kind as the label.
  */
 internal fun overlayContentDescription(
   role: String,
@@ -588,10 +828,13 @@ internal fun overlayContentDescription(
   iconName: String?,
   tappable: Boolean,
   children: List<OverlayRenderNode> = emptyList(),
+  authored: String? = null,
 ): String? =
   when {
+    !authored.isNullOrEmpty() -> authored
     text.isNotEmpty() -> text
-    tappable && !iconName.isNullOrEmpty() -> iconName
+    (tappable || role in OVERLAY_ICON_CONTROL_ROLES) && !iconName.isNullOrEmpty() -> iconName
+    role in CHILD_LABELLED_ROLES -> null
     role !in SEMANTICS_FREE_CONTAINERS -> role
     !tappable -> null
     children.isEmpty() -> role
@@ -613,14 +856,59 @@ private fun overlayIconOnlyLabel(children: List<OverlayRenderNode>): String? {
   }
 }
 
-/** A pager reports its position (`Page 2 of 4`); other roles carry no state of their own here. */
-internal fun overlayStateDescription(role: String, page: Int, pageCount: Int): String? =
-  if (role == "pager" && pageCount > 0) "Page ${page + 1} of $pageCount" else null
+/**
+ * A pager reports its position (`Page 2 of 4`) and a time or date picker its bound [value]
+ * (`07:30`, `2026-10-08`); other roles carry no state of their own here.
+ */
+internal fun overlayStateDescription(
+  role: String,
+  page: Int,
+  pageCount: Int,
+  value: String? = null,
+): String? =
+  when {
+    role == "pager" && pageCount > 0 -> "Page ${page + 1} of $pageCount"
+    role == "timePicker" || role == "datePicker" -> value
+    else -> null
+  }
+
+/** A time picker's bound value as 24-hour `HH:mm`, or a date picker's `YYYY-MM-DD`. */
+internal fun overlayPickerValue(node: OverlayRenderNode): String? =
+  when (node.role) {
+    "timePicker" -> String.format(java.util.Locale.ROOT, "%02d:%02d", node.hour, node.minute)
+    "datePicker" -> node.selectedValue
+    else -> null
+  }
 
 /**
  * A node with no authored size on the main axis of its Row/Column `weight` ([weighted]) takes the
  * weighted space: wrapping its content there would shrink an empty box to nothing (#10537).
  */
+private fun authoredSizeModifier(
+  modifier: Modifier,
+  style: OverlayStyle,
+  weightAxis: OverlayWeightAxis?,
+): Modifier {
+  // Bounds before the authored size: `width`/`height`/`fill` are then coerced into min/max, where
+  // the reverse order would clamp the bounds into an already-fixed size instead (#10537).
+  var sized = sizeConstraintModifier(modifier, style)
+  sized =
+    dimensionModifier(
+      sized,
+      style.width,
+      horizontal = true,
+      weighted = weightAxis == OverlayWeightAxis.HORIZONTAL,
+    )
+  sized =
+    dimensionModifier(
+      sized,
+      style.height,
+      horizontal = false,
+      weighted = weightAxis == OverlayWeightAxis.VERTICAL,
+    )
+  return style.aspectRatio?.let { sized.aspectRatio(it.toFloat()) } ?: sized
+}
+
 private fun dimensionModifier(
   modifier: Modifier,
   size: OverlayDimension?,

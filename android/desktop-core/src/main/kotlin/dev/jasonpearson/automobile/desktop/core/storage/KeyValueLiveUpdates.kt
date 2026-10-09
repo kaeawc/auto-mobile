@@ -82,7 +82,7 @@ internal fun parseKeyValue(rawValue: String?, type: KeyValueType): Any? {
  * Returns the receiver unchanged when nothing matched, so callers can skip recomposition.
  */
 internal fun List<KeyValueFile>.applyStorageUpdate(
-  update: StorageStreamUpdate
+  update: StorageStreamUpdate,
 ): List<KeyValueFile> {
   val target = firstOrNull { it.name == update.fileName } ?: return this
   val changedKey = update.key
@@ -141,7 +141,7 @@ internal fun List<KeyValueFile>.applyKeyValueEdit(
       value = value,
       valueType = type,
       sequenceNumber = 0L,
-    )
+    ),
   )
 
 /**

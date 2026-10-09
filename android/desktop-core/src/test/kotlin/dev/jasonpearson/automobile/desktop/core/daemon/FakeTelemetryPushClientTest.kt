@@ -117,7 +117,7 @@ class FakeTelemetryPushClientTest {
         requestBody = null,
         responseBody = null,
         contentType = null,
-      )
+      ),
     )
     client.emitEvent(
       TelemetryDisplayEvent.Os(
@@ -125,7 +125,7 @@ class FakeTelemetryPushClientTest {
         category = "lifecycle",
         kind = "foreground",
         details = null,
-      )
+      ),
     )
 
     assertEquals(2, collected.size)

@@ -86,7 +86,7 @@ class NodeSelectorTest {
           collectionRow = 4,
           collectionColumn = 0,
         ),
-      )
+      ),
     )
   }
 
@@ -100,7 +100,7 @@ class NodeSelectorTest {
       nodeActionFailure(
         "long_click",
         listOf(AccessibilityNodeInfo.ACTION_CLICK, AccessibilityNodeInfo.ACTION_LONG_CLICK),
-      )
+      ),
     )
   }
 

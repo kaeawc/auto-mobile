@@ -1,7 +1,9 @@
 import { z } from "zod";
 import contract from "../../../schemas/overlay-spec-contract.json";
 import { logger } from "../../utils/logger";
-import { repeatErrors } from "./overlayRepeat";
+import { expandOverlayComponents } from "./overlayComponents";
+import { repeatErrors, repeatKeyInstances, type KeyInstance } from "./overlayRepeat";
+import { BOUND_STATE_KEY_PATTERN } from "./overlayTemplate";
 import { overlaySpecSchema, type OverlaySpec, MAX_OVERLAY_SPEC_BYTES } from "./overlaySpec";
 
 interface Rule {
@@ -321,6 +323,7 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     (rule.empty === true || value.length > 0) &&
     (!rule.nonblank || value.trim().length > 0),
   key: (value) => typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(value),
+  boundKey: (value) => typeof value === "string" && BOUND_STATE_KEY_PATTERN.test(value),
   color: (value) => typeof value === "string" && /^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(value),
   number: numberValid,
   boolean: (value) => typeof value === "boolean",
@@ -413,7 +416,7 @@ function walk(
   }
   return primitiveChecks[rule.kind]?.(value, rule)
     ? undefined
-    : fail(path, `Invalid ${rule.kind} value`);
+    : fail(path, `Invalid ${rule.kind === "boundKey" ? "key" : rule.kind} value`);
 }
 function pagerErrors(context: Context): OverlayValidationError | undefined {
   const pagers = new Set<string>();
@@ -433,13 +436,15 @@ function pagerErrors(context: Context): OverlayValidationError | undefined {
   }
   return undefined;
 }
+/** A radio group or segmented button binds a string key to one of its unique option values. */
 function radioGroupErrors(
   value: Record<string, unknown>,
   path: string,
   stored: unknown,
 ): OverlayValidationError | undefined {
+  const name = value.type === "segmentedButton" ? "Segmented button" : "Radio group";
   if (typeof stored !== "string") {
-    return fail(`${path}.stateKey`, "Radio group requires a string state key");
+    return fail(`${path}.stateKey`, `${name} requires a string state key`);
   }
   const values = new Set<unknown>();
   for (const [index, option] of (Array.isArray(value.options) ? value.options : []).entries()) {
@@ -451,20 +456,86 @@ function radioGroupErrors(
   }
   return undefined;
 }
+/** An extended FAB (one with a label) has a single size, so `size` applies only to icon FABs. */
+function fabErrors(
+  value: Record<string, unknown>,
+  path: string,
+): OverlayValidationError | undefined {
+  return typeof value.label === "string" && value.size !== undefined
+    ? fail(`${path}.size`, "Extended FAB cannot set size")
+    : undefined;
+}
+/** A bound progress indicator is determinate over 0..max (default 1); unbound is indeterminate. */
+function progressErrors(
+  value: Record<string, unknown>,
+  path: string,
+  stored: unknown,
+): OverlayValidationError | undefined {
+  if (typeof value.stateKey !== "string") {
+    return value.max === undefined ? undefined : fail(`${path}.max`, "Requires stateKey");
+  }
+  const max = typeof value.max === "number" ? value.max : 1;
+  if (max <= 0) {
+    return fail(`${path}.max`, "Progress max must be greater than 0");
+  }
+  if (typeof stored !== "number" || !Number.isFinite(stored) || stored < 0 || stored > max) {
+    return fail(`${path}.stateKey`, "Progress requires a numeric state key within 0 and max");
+  }
+  return undefined;
+}
+/** A time picker binds two distinct integer keys: hour 0..23 and minute 0..59. */
+function timePickerErrors(
+  value: Record<string, unknown>,
+  path: string,
+  state: Record<string, unknown>,
+): OverlayValidationError | undefined {
+  const fields = [
+    { field: "hourKey", max: 23, message: "Time picker hour requires an integer 0..23 state key" },
+    {
+      field: "minuteKey",
+      max: 59,
+      message: "Time picker minute requires an integer 0..59 state key",
+    },
+  ];
+  for (const { field, max, message } of fields) {
+    const key = value[field];
+    const stored = typeof key === "string" ? state[key] : undefined;
+    if (!numberValid(stored, { kind: "number", integer: true, min: 0, max })) {
+      return fail(`${path}.${field}`, message);
+    }
+  }
+  return value.hourKey === value.minuteKey
+    ? fail(`${path}.minuteKey`, "Time picker hour and minute keys must differ")
+    : undefined;
+}
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+/** A `YYYY-MM-DD` calendar date in 1900..2100, the Material date picker's year range. */
+function isOverlayDate(value: unknown): boolean {
+  if (typeof value !== "string" || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value)) {
+    return false;
+  }
+  const [year, month, day] = value.split("-").map(Number);
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const days = month === 2 && leap ? 29 : DAYS_IN_MONTH[month - 1];
+  return year >= 1900 && year <= 2100 && days !== undefined && day >= 1 && day <= days;
+}
 /** A list item's trailing switch or checkbox binds a boolean, like the standalone controls. */
 function listItemBindingErrors(
-  context: Context,
+  checked: Checked,
   data: Record<string, unknown>,
 ): OverlayValidationError | undefined {
   const state = object(data.state) ?? {};
-  for (const { value, path } of context.nodes) {
+  for (const { value, path, item } of checked.nodes) {
     const trailing = value.type === "listItem" ? object(value.trailing) : undefined;
     if (
       trailing &&
       typeof trailing.stateKey === "string" &&
       typeof state[trailing.stateKey] !== "boolean"
     ) {
-      return fail(`${path}.trailing.stateKey`, "Toggle control requires a boolean state key");
+      return forItem(
+        fail(`${path}.trailing.stateKey`, "Toggle control requires a boolean state key"),
+        item,
+      );
     }
   }
   return undefined;
@@ -501,8 +572,8 @@ function chipErrors(
   if (value.variant === "filter" && !bound) {
     return fail(`${path}.stateKey`, "Filter chip requires a boolean state key");
   }
-  if (value.variant === "assist" && bound) {
-    return fail(`${path}.stateKey`, "Assist chip cannot bind a state key");
+  if (value.variant !== undefined && value.variant !== "filter" && bound) {
+    return fail(`${path}.stateKey`, "Only a filter chip can bind a state key");
   }
   if (bound && typeof stored !== "boolean") {
     return fail(`${path}.stateKey`, "Filter chip requires a boolean state key");
@@ -524,20 +595,43 @@ function componentBindingErrors(
   if (value.type === "slider") {
     return sliderErrors(value, path, stored);
   }
-  if (value.type === "radioGroup") {
-    return radioGroupErrors(value, path, stored);
+  return componentFormErrors(value, path, stored, state);
+}
+function componentFormErrors(
+  value: Record<string, unknown>,
+  path: string,
+  stored: unknown,
+  state: Record<string, unknown>,
+): OverlayValidationError | undefined {
+  switch (value.type) {
+    case "radioGroup":
+    case "segmentedButton":
+      return radioGroupErrors(value, path, stored);
+    case "chip":
+      return chipErrors(value, path, stored);
+    case "fab":
+      return fabErrors(value, path);
+    case "progress":
+      return progressErrors(value, path, stored);
+    case "timePicker":
+      return timePickerErrors(value, path, state);
+    case "datePicker":
+      return isOverlayDate(stored)
+        ? undefined
+        : fail(`${path}.stateKey`, "Date picker requires a YYYY-MM-DD state key in 1900..2100");
+    default:
+      return undefined;
   }
-  return value.type === "chip" ? chipErrors(value, path, stored) : undefined;
 }
 function bindingErrors(
-  context: Context,
+  checked: Checked,
   data: Record<string, unknown>,
 ): OverlayValidationError | undefined {
   const state = object(data.state) ?? {};
-  for (const { value, path } of context.nodes) {
+  for (const { value, path, item } of checked.nodes) {
     const component = componentBindingErrors(value, path, state);
     if (component) {
-      return component;
+      return forItem(component, item);
     }
     if (typeof value.stateKey !== "string") {
       continue;
@@ -547,24 +641,35 @@ function bindingErrors(
       continue;
     }
     if (!numberValid(stored, { kind: "number", integer: true, min: 0 })) {
-      return fail(`${path}.stateKey`, "Selection requires a nonnegative integer state key");
+      return forItem(
+        fail(`${path}.stateKey`, "Selection requires a nonnegative integer state key"),
+        item,
+      );
     }
   }
   return undefined;
 }
+/** Nodes opened by a boolean `openWhen` key; an existing key must hold a boolean. */
+const MODAL_NAMES: Record<string, string | undefined> = {
+  bottomSheet: "Sheet",
+  dialog: "Dialog",
+  snackbar: "Snackbar",
+};
 function sheetBindingErrors(
-  context: Context,
+  checked: Checked,
   data: Record<string, unknown>,
 ): OverlayValidationError | undefined {
   const state = object(data.state) ?? {};
-  for (const { value, path } of context.nodes) {
-    if (value.type !== "bottomSheet") {
+  for (const { value, path, item } of checked.nodes) {
+    const type = String(value.type);
+    const name = Object.hasOwn(MODAL_NAMES, type) ? MODAL_NAMES[type] : undefined;
+    if (name === undefined) {
       continue;
     }
     const condition = object(value.openWhen);
     const key = condition?.key;
     if (typeof key === "string" && Object.hasOwn(state, key) && typeof state[key] !== "boolean") {
-      return fail(`${path}.openWhen.key`, "Sheet requires a boolean state key");
+      return forItem(fail(`${path}.openWhen.key`, `${name} requires a boolean state key`), item);
     }
   }
   return undefined;
@@ -584,20 +689,57 @@ const stateActionTypes: Record<string, { check: (stored: unknown) => boolean; me
   },
 };
 function stateActionErrors(
-  context: Context,
+  checked: Checked,
   data: Record<string, unknown>,
 ): OverlayValidationError | undefined {
   const state = object(data.state) ?? {};
-  for (const { value, path } of context.actions) {
+  for (const { value, path, item } of checked.actions) {
     const rule =
       typeof value.type === "string" && Object.hasOwn(stateActionTypes, value.type)
         ? stateActionTypes[value.type]
         : undefined;
     if (rule && typeof value.key === "string" && !rule.check(state[value.key])) {
-      return fail(`${path}.key`, rule.message);
+      return forItem(fail(`${path}.key`, rule.message), item);
     }
   }
   return undefined;
+}
+/** A node or action as the state-type checks see it: keys bound for one repeat item, if any. */
+interface Bound {
+  value: Record<string, unknown>;
+  path: string;
+  item?: number;
+}
+interface Checked {
+  nodes: Bound[];
+  actions: Bound[];
+}
+function forItem(error: OverlayValidationError, item: number | undefined): OverlayValidationError {
+  return item === undefined
+    ? error
+    : { ...error, message: `${error.message} (repeat item ${item})` };
+}
+const bound = ({ located, value, item }: KeyInstance<Located>): Bound => ({
+  value,
+  path: located.path,
+  item,
+});
+/** State-type checks over every repeat instance: a templated key is checked once per item. */
+function stateTypeErrors(
+  value: unknown,
+  context: Context,
+  data: Record<string, unknown>,
+): OverlayValidationError | undefined {
+  const checked: Checked = {
+    nodes: repeatKeyInstances(value, context.nodes).map(bound),
+    actions: repeatKeyInstances(value, context.actions).map(bound),
+  };
+  return (
+    bindingErrors(checked, data) ??
+    listItemBindingErrors(checked, data) ??
+    sheetBindingErrors(checked, data) ??
+    stateActionErrors(checked, data)
+  );
 }
 function validateValue(value: unknown): OverlayValidationResult {
   const context: Context = {
@@ -612,10 +754,7 @@ function validateValue(value: unknown): OverlayValidationResult {
     walk(value, definitions.spec, "", context, 0) ??
     repeatErrors(value) ??
     pagerErrors(context) ??
-    bindingErrors(context, data) ??
-    listItemBindingErrors(context, data) ??
-    sheetBindingErrors(context, data) ??
-    stateActionErrors(context, data);
+    stateTypeErrors(value, context, data);
   if (error) {
     return { success: false, error };
   }
@@ -624,6 +763,27 @@ function validateValue(value: unknown): OverlayValidationResult {
     return { success: false, error: fail("$", "Internal schema/contract mismatch") };
   }
   return { success: true, data: parsed.data };
+}
+/**
+ * Expands reusable components (#11053) before validating, so every limit applies to the tree the
+ * device receives. The expanded spec must also fit the byte limit, because the device re-validates
+ * bytes, and an error inside an expansion is reported at its authored location.
+ */
+function validateExpanded(value: unknown): OverlayValidationResult {
+  const expansion = expandOverlayComponents(value);
+  if (!expansion.success) {
+    return { success: false, error: expansion.error };
+  }
+  if (expansion.expanded && bytes(expansion.spec) > MAX_OVERLAY_SPEC_BYTES) {
+    return { success: false, error: fail("$", "Expanded spec byte limit exceeded") };
+  }
+  const result = validateValue(expansion.spec);
+  return result.success
+    ? result
+    : {
+        success: false,
+        error: { path: expansion.locate(result.error.path), message: result.error.message },
+      };
 }
 /** Raw JSON strings measure transmitted UTF-8 bytes; object input measures compact JSON bytes. */
 export function validateOverlaySpec(json: unknown): OverlayValidationResult {
@@ -635,7 +795,7 @@ export function validateOverlaySpec(json: unknown): OverlayValidationResult {
     if (Buffer.byteLength(input, "utf8") > MAX_OVERLAY_SPEC_BYTES) {
       return { success: false, error: fail("$", "Spec byte limit exceeded") };
     }
-    return validateValue(typeof json === "string" ? JSON.parse(input) : json);
+    return validateExpanded(typeof json === "string" ? JSON.parse(input) : json);
   } catch (error) {
     logger.warn("Overlay JSON could not be decoded", error);
     return { success: false, error: fail("$", "Invalid JSON") };

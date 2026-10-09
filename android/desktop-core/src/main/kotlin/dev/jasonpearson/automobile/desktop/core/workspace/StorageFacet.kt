@@ -13,14 +13,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DesktopInputAllocation
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.allocatingClientProvider
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
@@ -41,6 +45,22 @@ internal fun resolveStoragePackage(apps: List<InstalledApp>): String? =
 /** Map the workspace [Platform] to the storage layer's [StoragePlatform]. */
 internal fun Platform.toStoragePlatform(): StoragePlatform =
   if (this == Platform.Ios) StoragePlatform.iOS else StoragePlatform.Android
+
+/**
+ * The client behind the Storage dashboard (#10977). With an [allocation], key-value edits and SQL
+ * writes are device mutations: the pane's device is allocated to the desktop session first (a
+ * refused allocation sends nothing) and the call carries the desktop session, so the daemon admits
+ * the user on a device their own session holds and counts the edit as use. Resource reads
+ * (browsing) pass straight through and allocate nothing. Without an [allocation] (previews,
+ * non-daemon transports) the [base] client is used as is.
+ */
+internal fun storageClientProvider(
+  base: () -> AutoMobileClient,
+  allocation: DesktopInputAllocation?,
+  sessionUuidProvider: () -> String?,
+): () -> AutoMobileClient =
+  if (allocation == null) base
+  else requireNotNull(allocatingClientProvider(base, { allocation }, sessionUuidProvider))
 
 private sealed interface StorageFacetState {
   data object Loading : StorageFacetState
@@ -74,6 +94,7 @@ fun StorageFacet(
   column: DeviceColumn,
   loadInstalledApps: (suspend (String) -> Result<List<InstalledApp>>)? = null,
   sessionUuidProvider: () -> String? = { null },
+  inputAllocation: DesktopInputAllocation? = null,
   observationStreamFactory: (String) -> ObservationStream = {
     ObservationStreamClient(sessionUuidProvider = sessionUuidProvider)
   },
@@ -92,6 +113,13 @@ fun StorageFacet(
             .getInstalledApps()
         }
       }
+  val latestSessionUuidProvider by rememberUpdatedState(sessionUuidProvider)
+  val storageClient =
+    remember(graph, inputAllocation) {
+      storageClientProvider({ graph.autoMobileClient }, inputAllocation) {
+        latestSessionUuidProvider()
+      }
+    }
   var attempt by remember(column.deviceId) { mutableStateOf(0) }
   var state by
     remember(column.deviceId, attempt) {
@@ -128,7 +156,7 @@ fun StorageFacet(
         )
       StorageDashboard(
         dataSourceMode = DataSourceMode.Real,
-        clientProvider = { graph.autoMobileClient },
+        clientProvider = storageClient,
         deviceId = column.deviceId,
         packageName = current.packageName,
         platform = column.platform.toStoragePlatform(),

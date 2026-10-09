@@ -106,6 +106,9 @@ import { IOSCtrlProxyClient } from "../../observe/ios";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
 import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 import { unsupportedDisplayOptionMessage } from "../../observe/SessionDisplayContext";
+import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
+import { assessSwipeNavigation } from "./swipeNavigation";
+import { settleSdkRouteAssessment, type SdkRouteSource } from "./sdkRouteSettle";
 
 const DISPLAY_SWIPE_OPTIONS = [
   "lookFor",
@@ -113,6 +116,8 @@ const DISPLAY_SWIPE_OPTIONS = [
   "autoTarget",
   "includeSystemInsets",
   "scrollMode",
+  // Display routes resolve and dispatch without the layer checks below (issue #9305).
+  "layer",
 ] as const;
 
 /** TalkBack state for an explicit-display swipe; `unknownWarning` is set when detection is unconfirmed. */
@@ -157,7 +162,27 @@ function unsupportedDisplaySwipeOption({
   platform: BootedDevice["platform"];
 }) {
   return DISPLAY_SWIPE_OPTIONS.find(
-    (key) => options[key] !== undefined && (platform !== "android" || key === "focusTarget"),
+    (key) =>
+      options[key] !== undefined &&
+      (platform !== "android" || key === "focusTarget" || key === "layer"),
+  );
+}
+
+/**
+ * Refuse a swipe whose start point lies on the other `layer`: the window under the down event
+ * receives the whole gesture (issue #9305). Resolution itself is scoped where the target is found.
+ */
+function assertSwipeStartOnLayer(
+  hierarchy: ViewHierarchyResult | undefined,
+  layer: SwipeOnOptions["layer"],
+  startX: number,
+  startY: number,
+): void {
+  assertGestureOnLayer(
+    hierarchy,
+    layer,
+    [{ x: Math.floor(startX), y: Math.floor(startY) }],
+    "swipe",
   );
 }
 
@@ -215,6 +240,7 @@ export class SwipeOn extends BaseVisualChange {
   private visionConfig: VisionFallbackConfig;
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;
+  private readonly sdkRouteSourceOverride: SdkRouteSource | undefined;
 
   constructor(
     device: BootedDevice,
@@ -234,6 +260,7 @@ export class SwipeOn extends BaseVisualChange {
     this.screenshotCapturer =
       dependencies.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
     this.visionAnalyzer = dependencies.visionAnalyzer;
+    this.sdkRouteSourceOverride = dependencies.sdkRouteSource;
     if (dependencies.observeScreen) {
       this.observeScreen = dependencies.observeScreen;
     }
@@ -315,7 +342,10 @@ export class SwipeOn extends BaseVisualChange {
     };
   }
 
-  private async getScrollableContext(signal?: AbortSignal): Promise<{
+  private async getScrollableContext(
+    signal?: AbortSignal,
+    layer?: SwipeOnOptions["layer"],
+  ): Promise<{
     scrollables: Element[];
     candidates: ScrollableCandidate[];
     observeResult?: ObserveResult;
@@ -366,7 +396,9 @@ export class SwipeOn extends BaseVisualChange {
     if (resolutionGeneration !== undefined) {
       completeWindowResolutionRead(this.device.deviceId, resolutionGeneration);
     }
-    const scrollables = this.scrollables.findScrollableElements(observeResult.viewHierarchy);
+    const scrollables = this.scrollables.findScrollableElements(
+      scopeHierarchyForSelector(observeResult.viewHierarchy, layer),
+    );
     const candidates = this.buildScrollableCandidates(scrollables);
     return { scrollables, candidates, observeResult };
   }
@@ -1023,12 +1055,20 @@ export class SwipeOn extends BaseVisualChange {
         options.container,
       ).bounds;
     }
-    return this.scrollUntilVisible.resolveElement(
+    const container = this.scrollUntilVisible.resolveElement(
       observation.viewHierarchy,
       options.container,
       "inspect",
       options.container.text !== undefined,
-    )?.bounds;
+    );
+    // A page inside a pager swipes as its scrollable ancestor (#10752).
+    return container && options.direction
+      ? this.scrollUntilVisible.resolveSwipeTarget(
+          observation.viewHierarchy,
+          container,
+          options.direction,
+        ).bounds
+      : container?.bounds;
   }
 
   private async executeExplicitDisplay(
@@ -1215,7 +1255,7 @@ export class SwipeOn extends BaseVisualChange {
     perf: PerformanceTracker;
     signal?: AbortSignal;
   }): Promise<SwipeOnResult> {
-    const context = await this.getScrollableContext(signal);
+    const context = await this.getScrollableContext(signal, options.layer);
     const decision = this.resolveAutoTargetDecision({
       ...context,
       direction: options.direction,
@@ -1467,14 +1507,19 @@ export class SwipeOn extends BaseVisualChange {
     diagnostics: { boomerang?: BoomerangConfig },
   ): Promise<SwipeOnResult> {
     let previous: ObserveResult | null = null;
+    let swipeEndedAtMs: number | undefined;
+    const sdkRoutes = this.sdkRouteSource();
     const result: SwipeOnResult = await this.observedInteraction(
       async (observation, fence) => {
         previous = observation;
-        return block(observation, fence);
+        const swipe = await block(observation, fence);
+        swipeEndedAtMs = sdkRoutes ? this.timer.now() : undefined;
+        return swipe;
       },
       // A boomerang whose return leg failed has moved the content: observe it on iOS too.
       { ...options, observePartialApplication: true },
     );
+    await this.annotateSwipeNavigation(result, previous, swipeEndedAtMs, sdkRoutes);
     if (this.device.platform !== "android") {
       return result;
     }
@@ -1494,6 +1539,56 @@ export class SwipeOn extends BaseVisualChange {
       );
     }
     return result;
+  }
+
+  /** The Android SDK route store for this device; iOS has no equivalent here. */
+  private sdkRouteSource(): SdkRouteSource | undefined {
+    if (this.device.platform !== "android") {
+      return undefined;
+    }
+    return (
+      this.sdkRouteSourceOverride ?? {
+        receivedAtMs: (packageName) =>
+          this.accessibilityService.getSdkScreenIdentityReceivedAtMs(packageName),
+        awaitRouteAfter: (packageName, sinceMs, timeoutMs) =>
+          this.accessibilityService.awaitSdkScreenIdentityAfter(packageName, sinceMs, timeoutMs),
+      }
+    );
+  }
+
+  /** A swipe that opened a different screen (e.g. acted as a tap on a row) must not read as a scroll. */
+  private async annotateSwipeNavigation(
+    result: SwipeOnResult,
+    previous: ObserveResult | null,
+    swipeEndedAtMs: number | undefined,
+    sdkRoutes: SdkRouteSource | undefined,
+  ): Promise<void> {
+    if (!result.success) {
+      return;
+    }
+    const assess = () =>
+      assessSwipeNavigation(
+        previous,
+        result.observation,
+        { x: result.x1, y: result.y1 },
+        this.device.platform,
+      );
+    const assessment = await settleSdkRouteAssessment(
+      assess(),
+      previous,
+      result.observation,
+      swipeEndedAtMs,
+      sdkRoutes,
+      assess,
+    );
+    if (!assessment) {
+      return;
+    }
+    result.navigated = assessment.navigated;
+    if (assessment.warning) {
+      logger.warn(`[SwipeOn] ${assessment.warning}`);
+      result.warning = this.autoTargetSelector.mergeWarnings(result.warning, assessment.warning);
+    }
   }
 
   private unchangedSwipeWarning(result: SwipeOnResult, previous: ObserveResult | null): string {
@@ -1540,6 +1635,7 @@ export class SwipeOn extends BaseVisualChange {
           options.direction,
           bounds,
         );
+        assertSwipeStartOnLayer(observeResult.viewHierarchy, options.layer, startX, startY);
 
         const duration = this.getDuration(options);
         const gestureOptions: FencedGestureOptions = {
@@ -1676,6 +1772,7 @@ export class SwipeOn extends BaseVisualChange {
           element,
           observeResult,
         );
+        assertSwipeStartOnLayer(viewHierarchy, options.layer, startX, startY);
 
         const duration = this.getDuration(options);
         const gestureOptions: FencedGestureOptions = {

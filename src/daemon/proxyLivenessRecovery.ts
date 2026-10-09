@@ -82,6 +82,67 @@ export function livenessRecoveryCallWaitMs(leaseMs: number, requestTimeoutMs: nu
 }
 
 /**
+ * How long a challenger keeps claiming a session whose owner keeps renewing its lease (#10701).
+ * A restarted harness's old proxy exits when its stdin closes, normally within seconds of the new
+ * proxy starting; a minute covers a slow shutdown. An owner still renewing after that is a live
+ * owner, not a handoff in progress, and the challenger gives up.
+ */
+export const LIVE_OWNER_HANDOFF_ALLOWANCE_MS = 60_000;
+
+/**
+ * How far a refusal's reported hold end must move past the latest one seen to count as the owner
+ * renewing its lease, rather than request latency jittering the same hold end.
+ */
+const OWNER_HOLD_RENEWAL_TOLERANCE_MS = 1_000;
+
+/** The owner's hold as a `liveness_owner_conflict` refusal reports it (#10701). */
+export interface ReportedOwnerHold {
+  /** Milliseconds until the owner's hold (lease plus suspect grace) ends. */
+  holdRemainingMs: number;
+}
+
+/** A challenger's view of one session's ownership conflict. */
+export interface OwnerConflictLeash {
+  /** Proxy-clock time of the first refusal. */
+  since: number;
+  /** Latest proxy-clock time the daemon reported the owner's hold to end. */
+  holdEndsAt?: number;
+}
+
+/**
+ * Fold one refused claim into the conflict's leash and say whether the challenger should give up.
+ *
+ * The leash follows the daemon's report of the owner's hold, not the challenger's own lease
+ * config: a daemon lease longer than the proxy's, or an old owner still stopping, is waited out.
+ * Only an owner that renews its hold after the handoff allowance has passed is a live owner the
+ * challenger cannot win against. A refusal without a report (an older daemon) falls back to
+ * `fallbackLeashMs` from the first refusal.
+ */
+export function advanceOwnerConflictLeash(
+  previous: OwnerConflictLeash | undefined,
+  now: number,
+  hold: ReportedOwnerHold | undefined,
+  fallbackLeashMs: number,
+): { leash: OwnerConflictLeash; exhausted: boolean } {
+  const since = previous?.since ?? now;
+  if (!hold) {
+    return { leash: { ...previous, since }, exhausted: now - since >= fallbackLeashMs };
+  }
+  const reportedEnd = now + hold.holdRemainingMs;
+  const seenEnd = previous?.holdEndsAt ?? reportedEnd;
+  // A hold that has (all but) run out is the end of the one already seen, not a renewal: the
+  // next claim wins.
+  if (hold.holdRemainingMs <= OWNER_HOLD_RENEWAL_TOLERANCE_MS) {
+    return { leash: { since, holdEndsAt: seenEnd }, exhausted: false };
+  }
+  const renewed = reportedEnd > seenEnd + OWNER_HOLD_RENEWAL_TOLERANCE_MS;
+  return {
+    leash: { since, holdEndsAt: Math.max(seenEnd, reportedEnd) },
+    exhausted: renewed && now - since >= LIVE_OWNER_HANDOFF_ALLOWANCE_MS,
+  };
+}
+
+/**
  * How long a proxy keeps retrying a claim another owner refuses (#10050). The other owner's
  * session can stay refused for its whole lease plus the suspect grace window, and the retry that
  * wins lands one heartbeat cadence after the daemon lets go, so all three are covered.
@@ -151,6 +212,12 @@ export interface LivenessHandover {
   /** Latest acknowledged heartbeat across the listed sessions (proxy clock, ms). */
   lastAcknowledgedHeartbeatAt: number;
   action: typeof RESTART_DAEMON_THEN_RESUME_ACTION | typeof REACQUIRE_LOST_SESSIONS_ACTION;
+  /**
+   * What stalled first, when it differs from `code`: a `proxy_stalled` loss reported after a
+   * `daemon_stalled` handover came from a daemon stall, not a proxy one (#10991). Message wording
+   * only; it is not part of the wire payload.
+   */
+  stalledBy?: "daemon";
 }
 
 function describeSessions(sessions: readonly StalledSession[]): string {
@@ -167,6 +234,13 @@ export function livenessHandoverMessage(handover: LivenessHandover): string {
       `${handover.attempts} automatic recovery attempts (reconnect and re-heartbeat with the same ` +
       `owner token) and has stopped. It never restarts the daemon because other harnesses share ` +
       `it: restart the daemon yourself, then resume each session by passing its sessionUuid.`
+    );
+  }
+  if (handover.stalledBy === "daemon") {
+    return (
+      `The AutoMobile daemon stalled and stopped acknowledging heartbeats; once it answered again ` +
+      `it reported that it released ${sessions} or that another liveness owner has taken them ` +
+      `over. This MCP proxy itself did not stall. Reacquire the devices with getAndroid or getApple.`
     );
   }
   return (
@@ -189,6 +263,70 @@ export function livenessHandoverPayload(handover: LivenessHandover) {
       lastAcknowledgedHeartbeatAt: handover.lastAcknowledgedHeartbeatAt,
       retryable: true,
       recovery: { action: handover.action },
+    },
+  };
+}
+
+/** Code of the warning a tool result carries once a handed-over session is resumed (#10989). */
+export const DAEMON_STALL_RESUMED_CODE = "daemon_stall_resumed";
+
+/**
+ * Code of the warning a tool result carries when a handed-over session was resumed on a daemon
+ * process other than the one that stalled: the daemon was restarted meanwhile (#11018).
+ */
+export const DAEMON_RESTART_RESUMED_CODE = "daemon_restart_resumed";
+
+/** The daemon processes a resumed session went from and to, when the daemon was restarted. */
+export interface DaemonRestartEvidence {
+  /** The daemon process that last acknowledged a heartbeat before the handover. */
+  previousDaemonInstance: string;
+  /** The daemon process that acknowledged the resume. */
+  daemonInstance: string;
+}
+
+/**
+ * The warning the first tool call to reach a session resumed after a `daemon_stalled` handover
+ * carries. The same daemon process answering again means the harness can disregard the handover
+ * and needs nothing restarted; a different process means the daemon was restarted and restored
+ * the session, so device and runner state may have been rebuilt (#11018).
+ */
+export function livenessResumedNotice(
+  handover: LivenessHandover,
+  sessionUuid: string,
+  restart?: DaemonRestartEvidence,
+) {
+  const session = handover.sessions.find((entry) => entry.sessionUuid === sessionUuid);
+  const deviceId = session?.deviceId ?? null;
+  if (restart) {
+    return {
+      warning: {
+        code: DAEMON_RESTART_RESUMED_CODE,
+        message:
+          `The AutoMobile daemon stopped acknowledging heartbeats for session ${sessionUuid} and ` +
+          `this proxy reported ${handover.code}. The daemon was then restarted (process ` +
+          `${restart.previousDaemonInstance} was replaced by ${restart.daemonInstance}) and the ` +
+          `new daemon restored the session, so it was resumed with the same UUID. The restart may ` +
+          `have rebuilt device and runner state: observe the screen again before relying on ` +
+          `anything seen before the handover.`,
+        sessionUuid,
+        deviceId,
+        handedOverCode: handover.code,
+        previousDaemonInstance: restart.previousDaemonInstance,
+        daemonInstance: restart.daemonInstance,
+      },
+    };
+  }
+  return {
+    warning: {
+      code: DAEMON_STALL_RESUMED_CODE,
+      message:
+        `The AutoMobile daemon stopped acknowledging heartbeats for session ${sessionUuid} and ` +
+        `this proxy reported ${handover.code}. The daemon answered again and still held the ` +
+        `session, so it was resumed with the same UUID: disregard that handover, nothing needs ` +
+        `restarting.`,
+      sessionUuid,
+      deviceId,
+      handedOverCode: handover.code,
     },
   };
 }
@@ -244,6 +382,8 @@ interface FailedSession {
   /** The state to report it under: `proxy_stalled` only when the daemon said it was lost. */
   code: LivenessStallCode;
   attempts: number;
+  /** Set when a daemon stall led to this `proxy_stalled` loss (#10991). */
+  stalledBy?: "daemon";
   /** Proxy clock reading when recovery gave up on it. */
   failedAt: number;
 }
@@ -260,6 +400,7 @@ interface AttemptOutcomeContext {
   attempt: number;
   outcome: RecoveryAttemptOutcome;
   restoredAfterLapse: boolean;
+  deviceAtStart: string | undefined;
 }
 
 const HANDOVER_ORDER: readonly LivenessStallCode[] = [DAEMON_STALLED_CODE, PROXY_STALLED_CODE];
@@ -342,6 +483,9 @@ export class LivenessRecovery {
 
   private async run(sessionUuid: string, code: LivenessStallCode, episode: Episode): Promise<void> {
     const startedAt = this.deps.timer.now();
+    // The proxy may forget the session's device while attempts run (a release or not-found
+    // answer on the heartbeat tick), but the handover still has to name it (#10991).
+    const deviceAtStart = this.deps.deviceIdOf(sessionUuid);
     // Captured first: a successful attempt records a fresh acknowledgement.
     const lastAckBefore = this.deps.lastAckAt(sessionUuid);
     const slotMs = recoveryAttemptSlotMs({
@@ -359,14 +503,63 @@ export class LivenessRecovery {
         return;
       }
       const restoredAfterLapse = startedAt - lastAckBefore > this.deps.leaseMs;
-      if (this.settle({ sessionUuid, code, episode, attempt, outcome, restoredAfterLapse })) {
+      if (
+        this.settle({
+          sessionUuid,
+          code,
+          episode,
+          attempt,
+          outcome,
+          restoredAfterLapse,
+          deviceAtStart,
+        }) ||
+        this.recoveredByLateAck(sessionUuid, code, attempt, lastAckBefore, restoredAfterLapse)
+      ) {
         return;
       }
       await this.waitForSlotEnd(startedAt + attempt * slotMs, attempt);
     }
+    const restoredAfterLapse = startedAt - lastAckBefore > this.deps.leaseMs;
+    if (
+      this.recoveredByLateAck(
+        sessionUuid,
+        code,
+        LIVENESS_RECOVERY_ATTEMPTS,
+        lastAckBefore,
+        restoredAfterLapse,
+      )
+    ) {
+      return;
+    }
     // No attempt got an answer. A daemon that does not answer is stalled, whatever stalled the
     // proxy first; only an answer from the daemon proves a session lost.
-    this.markFailed(sessionUuid, episode, DAEMON_STALLED_CODE, LIVENESS_RECOVERY_ATTEMPTS);
+    this.markFailed({
+      sessionUuid,
+      episode,
+      code: DAEMON_STALLED_CODE,
+      attempts: LIVENESS_RECOVERY_ATTEMPTS,
+      deviceAtStart,
+    });
+  }
+
+  /**
+   * A heartbeat acknowledgement arrived after recovery started, even one answering a request whose
+   * time slot had already run out (#10973): the daemon renewed the lease, so the session is
+   * recovered (owner decision 2026-10-09, matching the daemon's own stall forgiveness). Its
+   * recovery ends here and the keeper resumes the normal cadence.
+   */
+  private recoveredByLateAck(
+    sessionUuid: string,
+    code: LivenessStallCode,
+    attempts: number,
+    lastAckBefore: number,
+    restoredAfterLapse: boolean,
+  ): boolean {
+    if (!this.deps.hasAcknowledgedSince(sessionUuid, lastAckBefore)) {
+      return false;
+    }
+    this.deps.onRecovered({ sessionUuid, code, attempts, restoredAfterLapse });
+    return true;
   }
 
   /** Act on an attempt's outcome; true when recovery for the session is over. */
@@ -388,7 +581,14 @@ export class LivenessRecovery {
     if (outcome === "session-gone" || outcome === "superseded") {
       // The daemon answered that the session is released or now belongs to another owner: the
       // loss the `proxy_stalled` handover reports, with the session fenced.
-      this.markFailed(sessionUuid, episode, PROXY_STALLED_CODE, attempt);
+      this.markFailed({
+        sessionUuid,
+        episode,
+        code: PROXY_STALLED_CODE,
+        attempts: attempt,
+        deviceAtStart: context.deviceAtStart,
+        stalledBy: code === DAEMON_STALLED_CODE ? "daemon" : undefined,
+      });
       return true;
     }
     return false;
@@ -440,16 +640,20 @@ export class LivenessRecovery {
     });
   }
 
-  private markFailed(
-    sessionUuid: string,
-    episode: Episode,
-    code: LivenessStallCode,
-    attempts: number,
-  ): void {
+  private markFailed(failure: {
+    sessionUuid: string;
+    episode: Episode;
+    code: LivenessStallCode;
+    attempts: number;
+    deviceAtStart: string | undefined;
+    stalledBy?: "daemon";
+  }): void {
+    const { sessionUuid, episode, code, attempts, deviceAtStart, stalledBy } = failure;
     episode.failed.set(sessionUuid, {
+      ...(stalledBy ? { stalledBy } : {}),
       session: {
         sessionUuid,
-        deviceId: this.deps.deviceIdOf(sessionUuid) ?? null,
+        deviceId: this.deps.deviceIdOf(sessionUuid) ?? deviceAtStart ?? null,
         lastAcknowledgedHeartbeatAt: this.deps.lastAckAt(sessionUuid),
       },
       code,
@@ -502,6 +706,7 @@ export class LivenessRecovery {
         code === DAEMON_STALLED_CODE
           ? RESTART_DAEMON_THEN_RESUME_ACTION
           : REACQUIRE_LOST_SESSIONS_ACTION,
+      ...(failed.every((entry) => entry.stalledBy === "daemon") ? { stalledBy: "daemon" } : {}),
     });
   }
 }

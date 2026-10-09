@@ -39,6 +39,25 @@ describe("KeyedJsonConfigRepository", () => {
     await db.destroy();
   });
 
+  test("a named key addresses its own row and leaves the global row alone (#10976)", async () => {
+    const repo = new KeyedJsonConfigRepository<{ theme: string }>({
+      tableName: "appearance_configs",
+      db,
+    });
+
+    await repo.setConfig({ theme: "global" });
+    await repo.setConfig({ theme: "a" }, "session:a");
+    await repo.setConfig({ theme: "b" }, "session:b");
+
+    expect(await repo.getConfig()).toEqual({ theme: "global" });
+    expect(await repo.getConfig("session:a")).toEqual({ theme: "a" });
+
+    await repo.clearConfig("session:a");
+    expect(await repo.getConfig("session:a")).toBeNull();
+    expect(await repo.getConfig("session:b")).toEqual({ theme: "b" });
+    expect(await repo.getConfig()).toEqual({ theme: "global" });
+  });
+
   for (const { tableName, firstConfig, secondConfig } of tableCases) {
     test(`stores, updates, and clears the singleton config in ${tableName}`, async () => {
       const repo = new KeyedJsonConfigRepository<typeof firstConfig>({

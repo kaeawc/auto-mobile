@@ -22,6 +22,7 @@ const EXCLUDED_FILES = new Set([
   "design-docs/plat/ios/ctrlproxy-rewrite/README.md",
   "design-docs/plat/ios/ctrlproxy-rewrite/STATUS.md",
   "design-docs/plat/ios/ctrlproxy-rewrite/fixup-hierarchy-merger-geometry.md",
+  "design-docs/plat/ios/ctrlproxy-rewrite/golden-replay.md",
   "using/perf-analysis.md",
   // Author/design docs kept in the repo but intentionally off the site nav
   // (mirrors mkdocs.yml `not_in_nav`).

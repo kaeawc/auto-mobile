@@ -63,13 +63,39 @@ enum JSONValue: Codable, Equatable {
         if case let .bool(value) = self { return value }
         return nil
     }
+
+    var stringValue: String? {
+        if case let .string(value) = self { return value }
+        return nil
+    }
 }
 
 struct OverlaySpec: Decodable {
     let id: String
     let window: WindowSpec
     let state: [String: JSONValue]?
+    let theme: OverlayTheme?
+    /// `none` keeps every visibility and page change instant; `standard` (the default) animates them
+    /// unless the system reduces motion (#10442). See `OverlayMotion`.
+    let motion: String?
+    /// The node tree with every `repeat` list template already expanded (see `OverlayRepeat`).
     let root: OverlayNode
+
+    private enum CodingKeys: String, CodingKey {
+        case id, window, state, theme, motion, root
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        window = try container.decode(WindowSpec.self, forKey: .window)
+        state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
+        theme = try container.decodeIfPresent(OverlayTheme.self, forKey: .theme)
+        motion = try container.decodeIfPresent(String.self, forKey: .motion)
+        let raw = try container.decode(JSONValue.self, forKey: .root)
+        try OverlayLimits.guardTree(raw)
+        root = try JSONDecoder().decode(OverlayNode.self, from: JSONEncoder().encode(OverlayRepeat.expand(raw)))
+    }
 }
 
 struct WindowSpec: Decodable {
@@ -120,14 +146,66 @@ struct Border: Decodable {
     let color: String
 }
 
+/// `cornerRadius`: dp number, Material 3 shape token, or per-corner dp radii.
+enum CornerRadius: Decodable, Equatable {
+    case uniform(Double)
+    /// A Material 3 shape step, resolved against the theme's `shapes` by `OverlayShapes`.
+    case token(String)
+    case corners(topStart: Double, topEnd: Double, bottomEnd: Double, bottomStart: Double)
+
+    private struct Corners: Decodable {
+        let topStart: Double?
+        let topEnd: Double?
+        let bottomEnd: Double?
+        let bottomStart: Double?
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(Double.self) {
+            self = .uniform(value)
+        } else if let token = try? container.decode(String.self) {
+            // Material 3 Shapes steps; an unknown token is square rather than a decode failure.
+            self = OverlayShapes.stepNames.contains(token) ? .token(token) : .uniform(0)
+        } else {
+            let corners = try container.decode(Corners.self)
+            self = .corners(
+                topStart: corners.topStart ?? 0,
+                topEnd: corners.topEnd ?? 0,
+                bottomEnd: corners.bottomEnd ?? 0,
+                bottomStart: corners.bottomStart ?? 0
+            )
+        }
+    }
+}
+
+/// `fontFamily`: a keyword, or `{asset: id}` naming an uploaded font.
+enum FontFamily: Decodable, Equatable {
+    case keyword(String)
+    case asset(String)
+
+    private struct Asset: Decodable { let asset: String }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let keyword = try? container.decode(String.self) {
+            self = .keyword(keyword)
+        } else {
+            self = try .asset(container.decode(Asset.self).asset)
+        }
+    }
+}
+
 struct Style: Decodable {
     let width: Dimension?
     let height: Dimension?
     let padding: Padding?
     let background: String?
-    let cornerRadius: Double?
+    let cornerRadius: CornerRadius?
     let border: Border?
     let alpha: Double?
+    /// Scale (0.5-1) a tappable node shrinks to while pressed.
+    let pressScale: Double?
     let alignment: String?
     let arrangement: String?
     let spacing: Double?
@@ -136,7 +214,61 @@ struct Style: Decodable {
     let color: String?
     let textAlign: String?
     let maxLines: Int?
-    let fontFamily: String?
+    let fontFamily: FontFamily?
+    let elevation: Double?
+    let shadowColor: String?
+    let offset: Offset?
+    let lineHeight: Double?
+    let letterSpacing: Double?
+    let textDecoration: String?
+    let fontStyle: String?
+    let overflow: String?
+    /// A Material 3 type role (`titleLarge`...) supplying size, weight, line height and spacing.
+    let textStyle: String?
+
+    /// Android's `mergedOver`: properties set on `overlay` win, unset ones keep this style's value.
+    /// A present property replaces the base value as a whole (`padding` and `border` included).
+    func merged(with overlay: Style) -> Style {
+        Style(
+            width: overlay.width ?? width,
+            height: overlay.height ?? height,
+            padding: overlay.padding ?? padding,
+            background: overlay.background ?? background,
+            cornerRadius: overlay.cornerRadius ?? cornerRadius,
+            border: overlay.border ?? border,
+            alpha: overlay.alpha ?? alpha,
+            pressScale: overlay.pressScale ?? pressScale,
+            alignment: overlay.alignment ?? alignment,
+            arrangement: overlay.arrangement ?? arrangement,
+            spacing: overlay.spacing ?? spacing,
+            textSize: overlay.textSize ?? textSize,
+            fontWeight: overlay.fontWeight ?? fontWeight,
+            color: overlay.color ?? color,
+            textAlign: overlay.textAlign ?? textAlign,
+            maxLines: overlay.maxLines ?? maxLines,
+            fontFamily: overlay.fontFamily ?? fontFamily,
+            elevation: overlay.elevation ?? elevation,
+            shadowColor: overlay.shadowColor ?? shadowColor,
+            offset: overlay.offset ?? offset,
+            lineHeight: overlay.lineHeight ?? lineHeight,
+            letterSpacing: overlay.letterSpacing ?? letterSpacing,
+            textDecoration: overlay.textDecoration ?? textDecoration,
+            fontStyle: overlay.fontStyle ?? fontStyle,
+            overflow: overlay.overflow ?? overflow,
+            textStyle: overlay.textStyle ?? textStyle
+        )
+    }
+
+    /// The scale a tappable node draws at: `pressScale` while pressed, 1 otherwise.
+    func scale(pressed: Bool) -> Double {
+        pressed ? pressScale ?? 1 : 1
+    }
+}
+
+/// One `styleWhen` entry: `style` is merged over the node's own style while `when` holds.
+struct StyleWhen: Decodable {
+    let when: Condition
+    let style: Style
 }
 
 struct OverlayAction: Decodable {
@@ -147,7 +279,7 @@ struct OverlayAction: Decodable {
     let page: JSONValue?
     let key: String?
     let value: JSONValue?
-    /// `increment` step; 1 when omitted.
+    /// `increment`/`decrement` step; 1 when omitted.
     let by: Double?
 }
 
@@ -247,6 +379,32 @@ struct NavItem: Decodable {
     let image: String?
 }
 
+/// One `radioGroup` or `segmentedButton` choice.
+struct OverlayOption: Decodable, Equatable {
+    let value: String
+    let label: String
+}
+
+/// A `topAppBar` navigation icon or action: an icon-only button with its accessible label.
+struct OverlayAppBarAction: Decodable {
+    let icon: String
+    let label: String
+    let onTap: [OverlayAction]?
+}
+
+/// A `dialog` or `snackbar` button: a tap closes its container, then runs `onTap`.
+struct OverlayDialogButton: Decodable {
+    let label: String
+    let onTap: [OverlayAction]?
+}
+
+/// The control at the end of a `listItem`: a bound `switch` or `checkbox`, or a decorative `icon`.
+struct OverlayListItemTrailing: Decodable {
+    let type: String
+    let stateKey: String?
+    let name: String?
+}
+
 /// One spec node. A class so `child` can recurse; the renderer reads only the fields its type uses.
 final class OverlayNode: Decodable {
     let type: String
@@ -254,17 +412,27 @@ final class OverlayNode: Decodable {
     let testTag: String?
     let onTap: [OverlayAction]?
     let style: Style?
+    let styleWhen: [StyleWhen]?
     let visibleWhen: Condition?
+    /// The `visibleWhen` enter/exit: `none`, `fade`, `expand` or `slide`; absent is fade + expand.
+    let transition: String?
     let safeAreaPadding: SafeAreaPadding?
+    /// Screen placement resolved by the host (#9316); see `OverlayAnchor`.
+    let anchor: OverlayAnchor?
     let children: [OverlayNode]?
     let child: OverlayNode?
     let text: String?
+    /// Authored accessible label (#10446); wins over the label derived from text or icon.
+    let contentDescription: String?
     let asset: String?
     let contentScale: String?
     let name: String?
-    /// `button` text, and the optional `switch`/`checkbox` label.
+    /// `button`/`chip`/extended `fab` text, and the optional `switch`/`checkbox`/`slider` label.
     let label: String?
-    /// `button` style: filled (default), outlined or text.
+    /// Per-type style: `button` filled (default), tonal, elevated, outlined or text; `chip` assist,
+    /// filter, input or suggestion; `card` filled, elevated or outlined; `iconButton` standard,
+    /// filled, tonal or outlined; `topAppBar` small, centerAligned, medium or large; `progress`
+    /// linear or circular.
     let variant: String?
     let stateKey: String?
     let placeholder: String?
@@ -276,6 +444,47 @@ final class OverlayNode: Decodable {
     let detents: [Detent]?
     let scrim: String?
     let dragHandle: Bool?
+    /// `radioGroup` and `segmentedButton` choices.
+    let options: [OverlayOption]?
+    /// Built-in icon name of a `button`, `iconButton`, `fab` or `dialog`.
+    let icon: String?
+    /// `fab` size: small, regular (default) or large.
+    let size: String?
+    /// `divider` orientation: horizontal (default) or vertical.
+    let orientation: String?
+    /// `slider` range and `progress` maximum. Inside this class use `Swift.min`/`Swift.max`.
+    let min: Double?
+    let max: Double?
+    let step: Double?
+    /// `topAppBar` and `dialog` title.
+    let title: String?
+    let navigationIcon: OverlayAppBarAction?
+    let actions: [OverlayAppBarAction]?
+    /// `dialog` buttons and the `snackbar` action.
+    let confirm: OverlayDialogButton?
+    let dismiss: OverlayDialogButton?
+    let action: OverlayDialogButton?
+    /// `snackbar` only: closes itself this many milliseconds after opening (1 to 600000); absent
+    /// stays until closed.
+    let durationMs: Int?
+    /// `timePicker` integer keys and clock style; nil `is24Hour` follows the device setting.
+    let hourKey: String?
+    let minuteKey: String?
+    let is24Hour: Bool?
+    /// `listItem` content.
+    let headline: String?
+    let supporting: String?
+    let leadingIcon: String?
+    let trailing: OverlayListItemTrailing?
+
+    /// Android's `resolveOverlayStyle`: every `styleWhen` entry whose condition holds is merged over
+    /// `style` in authored order, so a later matching entry wins per property. Nil when the node has
+    /// no style at all and no entry matches.
+    func resolvedStyle(state: [String: JSONValue]) -> Style? {
+        (styleWhen ?? []).filter { $0.when.holds(state) }.reduce(style) { resolved, entry in
+            resolved.map { $0.merged(with: entry.style) } ?? entry.style
+        }
+    }
 
     /// Pager ids and their page counts, so `setPage` can clamp without consulting the view tree.
     func collectPagers(into counts: inout [String: Int]) {
@@ -286,18 +495,25 @@ final class OverlayNode: Decodable {
         child?.collectPagers(into: &counts)
     }
 
-    /// The first node whose accessibility identifier (`testTag`, else `id`) is `identifier`.
-    func find(identifier: String) -> OverlayNode? {
-        if (testTag ?? id) == identifier { return self }
-        for node in (children ?? []) + [child].compactMap({ $0 }) {
-            if let match = node.find(identifier: identifier) { return match }
-        }
-        return nil
+    /// `fontFamily: {asset}` ids on this node's own style and its `styleWhen` entries.
+    func fontAssetIds() -> Set<String> {
+        let styles = [style].compactMap { $0 } + (styleWhen ?? []).map(\.style)
+        return Set(styles.compactMap { style -> String? in
+            if case let .asset(id) = style.fontFamily { id } else { nil }
+        })
+    }
+
+    /// Every font asset id in this subtree.
+    func collectFontAssets(into ids: inout Set<String>) {
+        ids.formUnion(fontAssetIds())
+        children?.forEach { $0.collectFontAssets(into: &ids) }
+        child?.collectFontAssets(into: &ids)
     }
 
     /// Asset ids the spec references, for the `missingAssets` warning.
     func collectAssets(into ids: inout Set<String>) {
         if let asset { ids.insert(asset) }
+        ids.formUnion(fontAssetIds())
         items?.compactMap(\.image).forEach { ids.insert($0) }
         children?.forEach { $0.collectAssets(into: &ids) }
         child?.collectAssets(into: &ids)

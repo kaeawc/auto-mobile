@@ -151,6 +151,36 @@ runner-readiness budget vs ~85s cold CtrlProxy launch — fixed by CI
 _ordering_, not budget inflation), #5248/#5393 (macOS runner contention
 flake classification).
 
+## 2026-10 liveness vs activity clocks (#10655)
+
+Devices stayed held for minutes to hours with no tool use because a heartbeat
+also renewed the idle deadline (#10656; related #10657, #10658, #10050/#10051,
+#9335, #10115). Each earlier fix pinned only "kept while the owner heartbeats".
+The investigation produced the two-sided scenario matrix
+(`test/daemon/livenessScenarioMatrix.test.ts`, #10667) and extended the
+seeded expiry properties with a real `DevicePool`, daemon restart and
+known-failure properties (#10705). Owner decisions 2026-10-08: only tool usage
+extends the idle deadline, host sleep counts toward the idle window (#10661),
+desktop taps are tool use while watching is not (#10693, #10730), and the
+desktop may watch any device while control stays with its owner (#10698,
+#10731, #8902). Regressions the series found and closed: #10692 (a device driven
+through a platform/deviceId selector was fenced at 30 minutes), #10693 (the
+client's lapse rebind undid the idle release and pane taps never counted),
+#10694 (the deadline was stamped when a call started, so a long call released
+the device right after it ended), #10699 (sleep versus daemon stall), #10700
+(a `--daemon heartbeat` keeper held a cli-idle session forever). Autolock
+sessions now use the default owner lease (#10729), so a dead autolock owner is
+released after ~10 s, not the 60 s autolock window. Later hold-policy work:
+per-adb-server device claims (#10708, #10709) and CtrlProxy forward ownership
+(#10690).
+
+Owner decisions 2026-10-09 (#10982): ownership is a cooperative guard, not a
+local security boundary; streams keep a lightweight observer registration that is
+not a session; reads are free and never activity, control is owned (#10964,
+#10969); recordings stop on release (#10957, #10961, #10958); acquisition
+refusals are typed and retryable (#10960); appearance config is per session; the
+CLI idle default stays 2 minutes. Canonical text: `docs/using/device-ownership.md`.
+
 ## Cross-index: bug class → instances
 
 1. **Release/teardown asymmetry**: #2445, #5266, #5287, #5302, #5303
@@ -163,3 +193,5 @@ flake classification).
    #5298
 7. **Readiness budget vs cold start**: #3110, #5376, #4989
 8. **Daemon process identity/replacement**: #2444, #2599, #2732, #5419
+9. **Liveness clock conflated with activity clock**: #10656, #10658, #10657,
+   #10699, #10667

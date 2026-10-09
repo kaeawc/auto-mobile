@@ -254,7 +254,7 @@ class SdkAnrRetainedDeliveryTest {
     private val proxy = Robolectric.buildService(CtrlProxy::class.java).get()
     private val scope =
       CoroutineScope(
-        test.backgroundScope.coroutineContext + StandardTestDispatcher(test.testScheduler)
+        test.backgroundScope.coroutineContext + StandardTestDispatcher(test.testScheduler),
       )
     private val server = WebSocketServer(port = 0, scope = scope)
     val transport = RecordingTransport()

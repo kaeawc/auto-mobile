@@ -84,7 +84,7 @@ class InsertTextPlannerTest {
     val plan = planInsertText("", false, -1, -1, "abc")
     val node =
       FakeNode(
-        listOf(InsertTextSnapshot("", false, -1, -1), InsertTextSnapshot("abc", false, -1, -1))
+        listOf(InsertTextSnapshot("", false, -1, -1), InsertTextSnapshot("abc", false, -1, -1)),
       )
     val timer = FakeTimer()
     assertEquals(false, node.selectionListed)
@@ -203,7 +203,8 @@ class InsertTextPlannerTest {
     val plan = InsertTextPlan("abc", 3, true)
     val node =
       FakeNode(
-        List(8) { InsertTextSnapshot("", false, -1, -1) } + InsertTextSnapshot("abc", false, -1, -1)
+        List(8) { InsertTextSnapshot("", false, -1, -1) } +
+          InsertTextSnapshot("abc", false, -1, -1),
       )
     val timer = FakeTimer()
     assertEquals(

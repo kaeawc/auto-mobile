@@ -237,6 +237,38 @@ JSON
   [[ "$output" == *"Node Tests → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
 }
 
+@test "classifies a timing-budget flap on the folded budget step of the ubuntu unit leg" {
+  fixture="$BATS_TEST_TMPDIR/folded-timing-budget-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/folded-timing-budget",
+  "jobs": [
+    {"databaseId": 1, "name": "Node Unit Tests (ubuntu-latest)", "conclusion": "failure", "steps": [{"name": "Enforce 100ms budget for changed unit tests", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 127
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Node Unit Tests (ubuntu-latest) → Enforce 100ms budget for changed unit tests → none → RERUN-DONT-FIX"* ]]
+}
+
+@test "classifies a timing-budget flap on the required Ubuntu build-and-test job (#10893)" {
+  fixture="$BATS_TEST_TMPDIR/required-timing-budget-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/required-timing-budget",
+  "jobs": [
+    {"databaseId": 1, "name": "Node TypeScript Build and Test (ubuntu-latest)", "conclusion": "failure", "steps": [{"name": "Enforce 100ms budget for changed unit tests", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 127
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Node TypeScript Build and Test (ubuntu-latest) → Enforce 100ms budget for changed unit tests → none → RERUN-DONT-FIX"* ]]
+}
+
 @test "investigates a timing-budget breach retained by isolated median rechecks" {
   fixture="$BATS_TEST_TMPDIR/timing-budget-median-run.json"
   cat > "$fixture" <<'JSON'
@@ -401,6 +433,24 @@ JSON
   [ "$status" -eq 0 ]
   [[ "$output" == *"Run Playground Automobile Emulator Tests → Run ./.github/actions/android-emulator → none → INVESTIGATE"* ]]
   [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
+@test "classifies the combined Android emulator job's boot flake and runner-connect (#10891)" {
+  fixture="$BATS_TEST_TMPDIR/combined-emulator-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/android-emulator-combined",
+  "jobs": [
+    {"databaseId": 6, "name": "Run Android Emulator Tests", "conclusion": "failure", "steps": [{"name": "Run ./.github/actions/android-emulator", "conclusion": "failure"}]},
+    {"databaseId": 35, "name": "Run Android Emulator Tests", "conclusion": "failure", "steps": [{"name": "Run ./.github/actions/android-emulator", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 7786
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == *"Run Android Emulator Tests → Run ./.github/actions/android-emulator → none → RERUN-DONT-FIX"* ]]
+  [[ "${lines[1]}" == *"Run Android Emulator Tests → Run ./.github/actions/android-emulator → none → INVESTIGATE"* ]]
 }
 
 @test "does not classify a Playground runner-health failure as runner-connect" {
@@ -813,6 +863,13 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
 @test "investigates a unit shard that timed out on both attempts of its infra retry" {
   runner_shutdown_fixture "Node Unit Tests (ubuntu-latest)"
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'RETRY: unit shard 2 hit its 720s wall-clock budget (exit 124) after 721s; retrying once with the same budget\nTIMEOUT: unit shard 2 exceeded its wall-clock budget after a retry\ntest-ts: unit shards total wall=1450s status=124 retried=1' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INVESTIGATE — unit shard hit its wall budget on both attempts of the in-job infra retry"* ]]
+}
+
+@test "investigates a Windows unit shard timeout in the required Windows build job (#10894)" {
+  runner_shutdown_fixture "Node TypeScript Build and Test (windows-latest)"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'TIMEOUT: unit shard 1 exceeded its wall-clock budget after a retry' bash "$SCRIPT" 123
   [ "$status" -eq 0 ]
   [[ "$output" == *"INVESTIGATE — unit shard hit its wall budget on both attempts of the in-job infra retry"* ]]
 }

@@ -2,7 +2,9 @@ package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import dev.jasonpearson.automobile.protocol.OverlayStyle
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OverlaySemanticsTest {
@@ -47,7 +49,7 @@ class OverlaySemanticsTest {
     assertNull(overlayContentDescription("row", "", null, true, listOf(icon, text)))
     assertNull(overlayContentDescription("box", "", null, true, listOf(text)))
     assertNull(
-      overlayContentDescription("box", "", null, true, listOf(icon.copy(visible = false), text))
+      overlayContentDescription("box", "", null, true, listOf(icon.copy(visible = false), text)),
     )
   }
 
@@ -55,7 +57,33 @@ class OverlaySemanticsTest {
   fun `a childless tappable container and non-container kinds keep their kind`() {
     assertEquals("box", overlayContentDescription("box", "", null, tappable = true))
     assertEquals("icon", overlayContentDescription("icon", "", null, tappable = false))
-    assertEquals("tabBar", overlayContentDescription("tabBar", "", null, tappable = false))
+  }
+
+  @Test
+  fun `navigation bars are labelled by their tabs, not their kind`() {
+    assertNull(overlayContentDescription("tabBar", "", null, tappable = false))
+    assertNull(overlayContentDescription("bottomNav", "", null, tappable = false))
+  }
+
+  @Test
+  fun `an authored content description wins over text, icon and kind`() {
+    assertEquals(
+      "Close",
+      overlayContentDescription("icon", "close", "close", true, authored = "Close"),
+    )
+    assertEquals("Promo", overlayContentDescription("box", "", null, false, authored = "Promo"))
+    assertEquals("Next", overlayContentDescription("button", "Go", null, false, authored = "Next"))
+  }
+
+  @Test
+  fun `only a layout container with nothing to report is semantics free`() {
+    val box = node("box")
+    assertTrue(isSemanticsFreeContainer(box, tappable = false, description = null, state = null))
+    assertFalse(isSemanticsFreeContainer(box, tappable = true, description = null, state = null))
+    assertFalse(isSemanticsFreeContainer(box, false, description = "Promo", state = null))
+    assertFalse(isSemanticsFreeContainer(node("pager"), false, null, state = "Page 1 of 2"))
+    assertFalse(isSemanticsFreeContainer(box.copy(testTag = "promo"), false, null, null))
+    assertFalse(isSemanticsFreeContainer(node("text"), false, null, null))
   }
 
   @Test

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { RTCPeerConnection } from "werift";
+import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { WebRtcPublisher } from "../../src/features/webrtc/WebRtcPublisher";
 import type { WhipClient } from "../../src/features/webrtc/WhipClient";
 import {
@@ -129,6 +130,9 @@ function installFakes() {
       return source as unknown as AndroidH264Source;
     },
     resolveVideoJar: async () => null,
+    // A fresh registry per test: the process-wide default keeps a capture that an earlier test
+    // left acquired, so a later start would share it and never call createSource.
+    captureRegistry: createDeviceCaptureRegistry(),
     timer,
     now: () => new Date("2026-07-11T00:00:00.000Z"),
   });

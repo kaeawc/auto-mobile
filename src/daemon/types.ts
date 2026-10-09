@@ -58,6 +58,14 @@ export interface DaemonResponse {
   error?: string;
   /** Structured daemon error code, or JSON-RPC parse/invalid-request code. */
   code?: string | number;
+  /**
+   * Why a session-not-found answer names a session the daemon knows it released (#10730), e.g.
+   * `heartbeat-timeout`, `cleanup-expired` or `owner-disconnected`. Absent for a UUID the daemon
+   * never issued. Additive: older clients ignore it.
+   */
+  releaseReason?: string;
+  /** With `releaseReason`: the session was released by its idle window (#10832). Additive. */
+  idle?: true;
   /** Rejected before any device operation was admitted. */
   handshakeFailure?: DaemonHandshakeFailure;
   /**
@@ -124,6 +132,12 @@ export const DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE = "liveness_owner_not_owner";
  */
 export const DAEMON_SESSION_SUSPECT_CODE = "daemon_session_suspect";
 
+/**
+ * A heartbeat named the daemon process it expects (`expectedDaemonInstance`) and reached a
+ * different one: the daemon was restarted. Nothing changed on the session (#10989).
+ */
+export const DAEMON_INSTANCE_CHANGED_CODE = "daemon_instance_changed";
+
 /** A claim from a different token was rejected because the owner's lease is live (#10050). */
 export const DAEMON_LIVENESS_OWNER_CONFLICT_CODE = "liveness_owner_conflict";
 
@@ -160,25 +174,82 @@ export interface BoundSessionLoss {
   release?: SessionReleaseSnapshot;
 }
 
+/** The daemon's `releaseReason` carried on a session-not-found error (#10730), when it sent one. */
+export function releaseReasonFromError(error: unknown): string | undefined {
+  if (error === null || typeof error !== "object" || !("releaseReason" in error)) {
+    return undefined;
+  }
+  const { releaseReason } = error;
+  return typeof releaseReason === "string" && releaseReason.length > 0 ? releaseReason : undefined;
+}
+
 /** Release reasons that mean the session ran out its idle window rather than being taken away. */
 const IDLE_EXPIRY_LOSS_REASONS: ReadonlySet<string> = new Set([
   "lazy-expiry",
   "cleanup-expired",
-  "heartbeat-timeout",
   "cli-idle-timeout",
 ]);
+
+/** Whether a release reason is an idle-window release (#10832), as opposed to a lapse or loss. */
+export function isIdleReleaseReason(reason: string): boolean {
+  return IDLE_EXPIRY_LOSS_REASONS.has(reason);
+}
+
+/**
+ * The release fields of a session-not-found answer: the recorded `releaseReason` and, for an
+ * idle-window release, `idle: true` so a client can tell "reacquire" from a restart or loss (#10832).
+ */
+export function releasedSessionNotFoundFields(releaseReason: string | undefined): {
+  releaseReason?: string;
+  idle?: true;
+} {
+  if (!releaseReason) {
+    return {};
+  }
+  return isIdleReleaseReason(releaseReason) ? { releaseReason, idle: true } : { releaseReason };
+}
+
+const OWNER_DISCONNECTED_LOSS_REASON = "owner-disconnected";
+
+function isDaemonRestartLossReason(reason: string): boolean {
+  return reason === "daemon-shutdown" || reason.startsWith("device-restart");
+}
+
+/** The owner stopped heartbeating: its liveness lease lapsed, whatever its tool activity. */
+const HEARTBEAT_TIMEOUT_LOSS_REASON = "heartbeat-timeout";
 
 /**
  * The owner-facing message for a lost bound session. An idle expiry says so, including that the
  * wall-clock window keeps running while the host sleeps, so a call after a long sleep gets an
- * explanation and a next step rather than a bare "no longer active".
+ * explanation and a next step rather than a bare "no longer active". A heartbeat timeout is not
+ * idleness: the daemon stopped hearing the owner's liveness heartbeats on an awake host, and host
+ * sleep never lapses a lease (#10699), so that message says so instead.
  */
 export function boundSessionLossMessage(failure: BoundSessionLoss): string {
   const base = `Device session ${failure.sessionUuid} is no longer active (${failure.reason}). `;
+  const next = "Acquire a new device session before continuing.";
+  if (failure.reason === HEARTBEAT_TIMEOUT_LOSS_REASON) {
+    return (
+      `${base}The daemon stopped receiving this session's liveness heartbeats, so it released ` +
+      `the device; check that the client process holding the session is still running. ${next}`
+    );
+  }
+  if (failure.reason === OWNER_DISCONNECTED_LOSS_REASON) {
+    return (
+      `${base}The client connection that owned this session closed, so the daemon released the ` +
+      `device. ${next}`
+    );
+  }
+  if (isDaemonRestartLossReason(failure.reason)) {
+    return (
+      `${base}The daemon shut down or restarted, or the device restarted, and this session was ` +
+      `not restored. ${next}`
+    );
+  }
   return IDLE_EXPIRY_LOSS_REASONS.has(failure.reason)
     ? `${base}The session was released after sitting idle past its window; time the host spent ` +
-        "asleep counts toward that window. Acquire a new device session before continuing."
-    : `${base}Acquire a new device session before continuing.`;
+        `asleep counts toward that window. ${next}`
+    : `${base}${next}`;
 }
 
 function hasSessionReleaseSnapshotFields(
@@ -287,6 +358,11 @@ export interface DaemonNotification {
   reason?: string;
   /** Authoritative terminal state captured before SessionManager removed it. */
   release?: SessionReleaseSnapshot;
+  /**
+   * Recording ids the release is finalizing (`notifications/session/released` only, additive).
+   * The previous owner can still fetch each one by id after the release (#10958).
+   */
+  recordingIds?: string[];
   /**
    * The client-supplied progress token this tick belongs to, for
    * `notifications/progress` frames (issue #6205) — echoed verbatim from the

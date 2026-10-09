@@ -81,6 +81,7 @@ function harness(
   const lifecycle = new StreamDeviceLifecycleEmitter();
   const ownership = new Set<(id: string) => void>();
   const releases = new Set<(id: string) => void>();
+  const observerReleases = new Set<(id: string) => void>();
   let lifecycleListeners = 0;
   const state = {
     owner: options.owner ?? (null as string | null),
@@ -166,6 +167,14 @@ function harness(
           };
         },
       },
+      observerReleases: {
+        subscribe: (cb) => {
+          observerReleases.add(cb);
+          return () => {
+            observerReleases.delete(cb);
+          };
+        },
+      },
       deviceLifecycle: () => ({
         onDeviceRestored: (cb) => lifecycle.onDeviceRestored(cb),
         onDeviceRemoved: (cb) => {
@@ -230,6 +239,7 @@ function harness(
     lifecycle,
     ownership,
     releases,
+    observerReleases,
     state,
     sources,
     captureHints,
@@ -321,6 +331,19 @@ test.each(["released", "expired", "releasing", "owner release"])(
     expect(endings(h)).toHaveLength(1);
   },
 );
+test("c: a released or expired observer's viewer stream ends without waiting for its lease (#11076)", async () => {
+  const h = harness({ owner: "b" });
+  const first = await h.start();
+  expect(first.subscriptionKind).toBe("viewer");
+  // The observer registry no longer admits "a"; no device owner changed and no session released.
+  h.state.live.delete("a");
+  for (const cb of h.observerReleases) {
+    cb("a");
+  }
+  await flush();
+  expect(h.sources[0].stopped).toBe(true);
+  expect(endings(h)).toHaveLength(1);
+});
 test("d: removal ends owner and viewer; all lease reads are typed and start can re-subscribe", async () => {
   const h = harness();
   const viewer = await h.start();
@@ -1056,7 +1079,7 @@ test.each([false, true])(
   },
 );
 
-test("transport default rejects a registered observer-only session", async () => {
+test("transport default admits a registered observer-only session as a viewer of an owned device (#10698)", async () => {
   const sessions = releasingSessionHarness();
   sessions.observers.register("observer", "desktop");
   expect(sessions.observers.resolveObserverScope("observer").kind).not.toBe("denied");
@@ -1065,6 +1088,8 @@ test("transport default rejects a registered observer-only session", async () =>
     spyOn(state, "isInitialized").mockReturnValue(true),
     spyOn(state, "getSessionManager").mockReturnValue(sessions.manager),
     spyOn(state, "getObserverSessionRegistry").mockReturnValue(sessions.observers),
+    // An agent holds the device; the observer holds nothing at all.
+    spyOn(sessions.manager, "getSessionForDevice").mockReturnValue("agent-session"),
   ];
   const previousAuth = process.env.AUTOMOBILE_DAEMON_STREAM_AUTH;
   process.env.AUTOMOBILE_DAEMON_STREAM_AUTH = "1";
@@ -1077,11 +1102,20 @@ test("transport default rejects a registered observer-only session", async () =>
       deviceId: device.deviceId,
     });
     await flush();
-    expect(socket.getWrittenMessages()[0]).toMatchObject({
+    expect(socket.getWrittenMessages()[0]).toMatchObject({ success: true });
+    expect(h.sources).toHaveLength(1);
+
+    const stranger = new FakeSocket();
+    await h.server.line(stranger, {
+      action: "start",
+      sessionUuid: "stranger",
+      deviceId: device.deviceId,
+    });
+    await flush();
+    expect(stranger.getWrittenMessages()[0]).toMatchObject({
       success: false,
       error: expect.stringContaining("unknown or expired"),
     });
-    expect(h.sources).toHaveLength(0);
   } finally {
     for (const spy of stateSpies) {
       spy.mockRestore();

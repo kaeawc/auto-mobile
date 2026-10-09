@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { platform } from "node:os";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
@@ -20,6 +21,68 @@ function getUserId(): string {
 }
 
 const uid = getUserId();
+
+/**
+ * Isolation namespace suffix for the daemon's /tmp state files (socket, pid, lock).
+ *
+ * A private daemon started with `AUTOMOBILE_AUX_SOCKET_DIR` must not share the
+ * resident daemon's `/tmp/auto-mobile-daemon-<uid>.*` files, or it would bind (or
+ * contend for) the resident control socket (issue #10871). The suffix is a short
+ * hash of the resolved aux dir rather than the dir itself, so the path stays well
+ * under the ~104-byte `sun_path` limit however deep the isolation dir is. Daemon
+ * and every TS client compute it from the same env, so they agree. An explicit
+ * per-file `AUTOMOBILE_DAEMON_*_PATH` override still wins. Unset/blank aux dir
+ * yields "" (the resident, unsuffixed names).
+ */
+export function resolveDaemonIsolationSuffix(env: NodeJS.ProcessEnv = process.env): string {
+  const auxDir = env.AUTOMOBILE_AUX_SOCKET_DIR?.trim();
+  if (!auxDir) {
+    return "";
+  }
+  const resolved = resolvePathFromDaemonLaunchWorkingDirectory(auxDir, env);
+  return `-${createHash("sha256").update(resolved).digest("hex").slice(0, 10)}`;
+}
+
+/** Default `/tmp` state-file path for this uid, isolated per `AUTOMOBILE_AUX_SOCKET_DIR`. */
+export function resolveIsolatedDaemonStatePath(
+  extension: "sock" | "pid" | "lock",
+  env: NodeJS.ProcessEnv = process.env,
+  userId: string = uid,
+): string {
+  return `/tmp/auto-mobile-daemon-${userId}${resolveDaemonIsolationSuffix(env)}.${extension}`;
+}
+
+function readDaemonStatePathOverride(
+  extension: "sock" | "pid" | "lock",
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  switch (extension) {
+    case "sock":
+      return env.AUTOMOBILE_DAEMON_SOCKET_PATH ?? env.AUTO_MOBILE_DAEMON_SOCKET_PATH;
+    case "pid":
+      return env.AUTOMOBILE_DAEMON_PID_FILE_PATH ?? env.AUTO_MOBILE_DAEMON_PID_FILE_PATH;
+    case "lock":
+      return env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH ?? env.AUTO_MOBILE_DAEMON_LOCK_FILE_PATH;
+  }
+}
+
+/**
+ * Effective daemon state-file path: an explicit `AUTOMOBILE_DAEMON_*_PATH` override
+ * (resolved against the daemon launch directory) first, then the
+ * `AUTOMOBILE_AUX_SOCKET_DIR`-isolated `/tmp` default. The JUnit runner, desktop
+ * app and XCTestRunner port this rule; `test/fixtures/daemon-isolation-paths.json`
+ * holds the shared vectors all of them are tested against (#10906).
+ */
+export function resolveDaemonStatePath(
+  extension: "sock" | "pid" | "lock",
+  env: NodeJS.ProcessEnv = process.env,
+  userId: string = uid,
+): string {
+  const override = readDaemonStatePathOverride(extension, env);
+  return override
+    ? resolvePathFromDaemonLaunchWorkingDirectory(override, env)
+    : resolveIsolatedDaemonStatePath(extension, env, userId);
+}
 
 /**
  * Default port for the daemon's internal HTTP server
@@ -130,11 +193,7 @@ export const DAEMON_PORT_RANGE_END = 3010;
  */
 export const DEFAULT_SOCKET_PATH = `/tmp/auto-mobile-daemon-${uid}.sock`;
 
-const socketPathOverride =
-  process.env.AUTOMOBILE_DAEMON_SOCKET_PATH ?? process.env.AUTO_MOBILE_DAEMON_SOCKET_PATH;
-export const SOCKET_PATH = socketPathOverride
-  ? resolvePathFromDaemonLaunchWorkingDirectory(socketPathOverride)
-  : DEFAULT_SOCKET_PATH;
+export const SOCKET_PATH = resolveDaemonStatePath("sock");
 
 /**
  * PID lock file path
@@ -146,22 +205,14 @@ export const SOCKET_PATH = socketPathOverride
  */
 export const DEFAULT_PID_FILE_PATH = `/tmp/auto-mobile-daemon-${uid}.pid`;
 
-const pidFilePathOverride =
-  process.env.AUTOMOBILE_DAEMON_PID_FILE_PATH ?? process.env.AUTO_MOBILE_DAEMON_PID_FILE_PATH;
-export const PID_FILE_PATH = pidFilePathOverride
-  ? resolvePathFromDaemonLaunchWorkingDirectory(pidFilePathOverride)
-  : DEFAULT_PID_FILE_PATH;
+export const PID_FILE_PATH = resolveDaemonStatePath("pid");
 
 /**
  * Lock file path for coordinating concurrent daemon start operations.
  * Prevents thundering herd when multiple proxy processes try to start
  * the daemon simultaneously.
  */
-const lockFilePathOverride =
-  process.env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH ?? process.env.AUTO_MOBILE_DAEMON_LOCK_FILE_PATH;
-export const LOCK_FILE_PATH = lockFilePathOverride
-  ? resolvePathFromDaemonLaunchWorkingDirectory(lockFilePathOverride)
-  : `/tmp/auto-mobile-daemon-${uid}.lock`;
+export const LOCK_FILE_PATH = resolveDaemonStatePath("lock");
 
 /**
  * Absolute path of the launch-capture log inherited from DaemonManager. The
@@ -274,6 +325,14 @@ export const DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS = 5_000;
  */
 export const DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS = 3;
 export const DAEMON_START_PROCESS_TABLE_SCAN_RETRY_DELAYS_MS = [200, 500] as const;
+
+/**
+ * How long a daemon RPC socket whose peer closed its side may keep flushing replies already queued
+ * to it before it is destroyed (#11058). Under Bun a reply queued to a peer that has gone away
+ * neither flushes nor errors, so the automatic end never completes and the socket never closes:
+ * the connection's sessions were never handed to the owner-disconnect policy.
+ */
+export const DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS = 1_000;
 
 /** Bound on the explicit-restart canonical-port availability probe. */
 export const DAEMON_PORT_AVAILABILITY_PROBE_TIMEOUT_MS = 1_000;
@@ -448,6 +507,14 @@ export const SESSION_RELEASE_DRAIN_TIMEOUT_MS = 5_000;
 export const DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD = "daemon/releaseLivenessOwnership";
 
 export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
+
+/**
+ * Lists the live device sessions whose liveness owner is the given token (#10990). A proxy
+ * restarted with its harness-supplied stable `--liveness-owner-token` asks this on connect, then
+ * re-claims and heartbeats every session it owned before the owner-disconnect grace ends. Only the
+ * owning token learns its sessions; any other token gets an empty list.
+ */
+export const DAEMON_TOKEN_OWNED_SESSIONS_METHOD = "daemon/tokenOwnedSessions";
 
 /**
  * Client-to-daemon cancellation frame (issue #6384). Sent by `DaemonClient`

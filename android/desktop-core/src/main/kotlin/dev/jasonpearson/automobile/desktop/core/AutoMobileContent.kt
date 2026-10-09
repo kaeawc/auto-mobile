@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,9 +22,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -63,12 +60,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
-import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession
 import dev.jasonpearson.automobile.desktop.core.control.DeviceKeyboardEventTranslator
 import dev.jasonpearson.automobile.desktop.core.control.GestureStreamingConfig
+import dev.jasonpearson.automobile.desktop.core.control.rememberDeviceControlSession
+import dev.jasonpearson.automobile.desktop.core.daemon.ActiveRecordingTracker
+import dev.jasonpearson.automobile.desktop.core.daemon.AllocatingAppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DEVICE_OWNED_BY_OTHER_SESSION_CODE
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBinding
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotActions
@@ -89,8 +89,10 @@ import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfigClien
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamSocketClient
+import dev.jasonpearson.automobile.desktop.core.daemon.allocatingClientProvider
 import dev.jasonpearson.automobile.desktop.core.daemon.isStreamSessionRejection
 import dev.jasonpearson.automobile.desktop.core.daemon.rememberDesktopDaemonSession
+import dev.jasonpearson.automobile.desktop.core.daemon.screenshotObserveArguments
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
@@ -157,7 +159,6 @@ import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import dev.jasonpearson.automobile.desktop.core.telemetry.matchesSearch
 import dev.jasonpearson.automobile.desktop.core.test.TestDashboard
 import dev.jasonpearson.automobile.desktop.core.theme.AppIcons
-import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import dev.jasonpearson.automobile.desktop.core.timeline.TimelineCanvas
 import dev.jasonpearson.automobile.desktop.core.timeline.TimelineCategory
@@ -197,22 +198,18 @@ internal fun activeDeviceConnectionLostEvent(
 }
 
 /**
- * The daemon session binding for the studio/desktop pane (#10660). Binding reserves the device
- * against CLI/MCP sessions, so it is derived only from an explicit user pick that is still the
- * displayed device. The auto-selected first device is display-only: with a null binding the session
- * loop takes the observer-only `ensureRegistered()` path and never calls `setActiveDevice`, so it
- * cannot grab a device back after an agent releases it.
+ * The device the studio pane shows, as the daemon session's pane list (#10730). Showing a device,
+ * whether the user picked it or it was auto-selected, allocates nothing: the session only watches
+ * it (#10660). The user's first input on it allocates it, so the session can never grab a device
+ * back after an agent releases it.
  */
-internal fun desktopSessionBindingFor(
+internal fun desktopSessionPanesFor(
   isRealMode: Boolean,
-  userSelectedDeviceId: String?,
   activeDeviceId: String?,
   isIos: Boolean,
-): DesktopDaemonSessionBinding? {
-  if (!isRealMode || userSelectedDeviceId == null || userSelectedDeviceId != activeDeviceId) {
-    return null
-  }
-  return DesktopDaemonSessionBinding(userSelectedDeviceId, if (isIos) "ios" else "android")
+): List<DesktopDaemonSessionBinding> {
+  if (!isRealMode || activeDeviceId == null) return emptyList()
+  return listOf(DesktopDaemonSessionBinding(activeDeviceId, if (isIos) "ios" else "android"))
 }
 
 internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String?): Boolean {
@@ -626,6 +623,12 @@ fun AutoMobileContent(
    * reference desktop app opts in.
    */
   enableDeviceControl: Boolean = false,
+  /**
+   * Whether the host (the IDE tool window) is showing this content (#10695). While it stays hidden
+   * past a short grace the daemon session releases the picked device; it binds again on the next
+   * input or Take control after the host is shown.
+   */
+  hostVisible: Boolean = true,
 ) {
   // When a MenuBarActions bridge is supplied (from Main.kt's MenuBar), delegate
   // pane-visibility and overlay state to it so the native menu items and the
@@ -737,11 +740,14 @@ fun AutoMobileContent(
   // allocation-bearing daemon session binding (#10660); `activeDeviceId` also holds the
   // display-only auto-selected first device, which must never reserve a device on its own.
   var userSelectedDeviceId by remember { mutableStateOf<String?>(null) }
+  // Why the last sidebar kill of a device failed, shown on its row until the next attempt. A kill
+  // the daemon refuses because another session holds the device (#10785) lands here too.
+  var killDeviceErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
   // Log state changes for debugging
   LaunchedEffect(activeDeviceId, isDevicePanelExpanded) {
     LOG.info(
-      "State changed: activeDeviceId=$activeDeviceId, isDevicePanelExpanded=$isDevicePanelExpanded"
+      "State changed: activeDeviceId=$activeDeviceId, isDevicePanelExpanded=$isDevicePanelExpanded",
     )
   }
 
@@ -803,7 +809,7 @@ fun AutoMobileContent(
   // Log when connectedMcpProcess changes
   LaunchedEffect(connectedMcpProcess) {
     LOG.info(
-      "connectedMcpProcess changed to: ${connectedMcpProcess?.let { "${it.name} (PID ${it.pid}, ${it.connectionType})" } ?: "null"}"
+      "connectedMcpProcess changed to: ${connectedMcpProcess?.let { "${it.name} (PID ${it.pid}, ${it.connectionType})" } ?: "null"}",
     )
   }
 
@@ -819,7 +825,7 @@ fun AutoMobileContent(
             ?: processes.firstOrNull { it.connectionType == McpConnectionType.StreamableHttp }
         if (preferred != null) {
           LOG.info(
-            "Auto-connecting to MCP process: ${preferred.name} (PID ${preferred.pid}, ${preferred.connectionType})"
+            "Auto-connecting to MCP process: ${preferred.name} (PID ${preferred.pid}, ${preferred.connectionType})",
           )
           connectedMcpProcess = preferred
         }
@@ -827,21 +833,30 @@ fun AutoMobileContent(
     }
   }
 
-  val desktopSessionBinding = remember { mutableStateOf<DesktopDaemonSessionBinding?>(null) }
+  val desktopSessionPanes = remember {
+    mutableStateOf<List<DesktopDaemonSessionBinding>>(emptyList())
+  }
   val desktopSocketPath =
     connectedMcpProcess
       ?.takeIf {
         dataSourceMode == DataSourceMode.Real && it.connectionType == McpConnectionType.UnixSocket
       }
       ?.let { it.socketPath ?: DaemonSocketPaths.socketPath() }
-  val desktopSessionState = rememberDesktopDaemonSession(desktopSocketPath, desktopSessionBinding)
+  val activeRecordings = remember { ActiveRecordingTracker() }
+  val desktopSessionState =
+    rememberDesktopDaemonSession(
+      desktopSocketPath,
+      desktopSessionPanes,
+      hostVisible = hostVisible,
+      activeRecordings = activeRecordings,
+    )
   val desktopDaemonSession = desktopSessionState.session
 
   // Client provider function for dashboards to access MCP data
   val clientProvider: (() -> AutoMobileClient)? =
     remember(connectedMcpProcess, dataSourceMode, desktopDaemonSession) {
       LOG.info(
-        "clientProvider being computed, connectedMcpProcess=${connectedMcpProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}"
+        "clientProvider being computed, connectedMcpProcess=${connectedMcpProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}",
       )
       connectedMcpProcess?.let { process ->
         {
@@ -861,23 +876,44 @@ fun AutoMobileContent(
       }
     }
 
-  val selectedBinding =
-    desktopSessionBindingFor(
+  // Input is active tool use and watching is not (#10730): each input allocates its device to the
+  // desktop session before it is sent, on the dispatch thread, and is dropped when it cannot be.
+  val inputAllocation by rememberUpdatedState(desktopSessionState.inputAllocation)
+  val latestActiveDeviceId by rememberUpdatedState(activeDeviceId)
+  // Dashboard controls that act on a device (snapshots, recording, storage SQL, screenshot) are
+  // input too (#10831): they allocate the device to the desktop session first and run as it, as
+  // the desktop app's controls do. Their reads still only watch.
+  val deviceActingClientProvider: (() -> AutoMobileClient)? =
+    remember(clientProvider, desktopDaemonSession) {
+      allocatingClientProvider(
+        clientProvider,
+        allocation = { inputAllocation },
+        sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+      )
+    }
+
+  val shownPanes =
+    desktopSessionPanesFor(
       isRealMode = dataSourceMode == DataSourceMode.Real && clientProvider != null,
-      userSelectedDeviceId = userSelectedDeviceId,
       activeDeviceId = activeDeviceId,
       isIos =
         realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical,
     )
-  SideEffect { desktopSessionBinding.value = selectedBinding }
+  SideEffect { desktopSessionPanes.value = shownPanes }
+  // Live view and screen sharing need a session the daemon admits on the stream sockets. Watching
+  // never requires holding the device (owner decision 2026-10-08): the daemon admits a registered
+  // observer session read-only on any device, whoever owns it (#10698, #10730).
   val desktopSessionReady =
-    desktopSessionState.boundDeviceId == activeDeviceId && activeDeviceId != null
+    activeDeviceId != null &&
+      (desktopSessionState.boundDeviceId == activeDeviceId || desktopSessionState.isRegistered)
 
   // Device snapshots span two transports: the verbs are MCP tool/resource calls, while the
   // retention config is its own Unix socket. Both are null in Fake mode so the dashboard renders
   // its empty state instead of reaching for a daemon that isn't there.
   val snapshotActions: DeviceSnapshotActions? =
-    remember(clientProvider) { clientProvider?.let { McpDeviceSnapshotActions(it) } }
+    remember(deviceActingClientProvider) {
+      deviceActingClientProvider?.let { McpDeviceSnapshotActions(it) }
+    }
   val snapshotConfigClient: DeviceSnapshotConfigClient? =
     remember(dataSourceMode) {
       if (dataSourceMode == DataSourceMode.Real) DeviceSnapshotSocketClient() else null
@@ -888,8 +924,12 @@ fun AutoMobileContent(
   val appearanceClient: AppearanceClient? =
     remember(dataSourceMode, desktopDaemonSession) {
       if (dataSourceMode == DataSourceMode.Real) {
-        AppearanceSocketClient(
-          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+        AllocatingAppearanceClient(
+          AppearanceSocketClient(
+            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+          ),
+          allocation = { inputAllocation },
+          activeDeviceId = { latestActiveDeviceId },
         )
       } else {
         null
@@ -900,7 +940,9 @@ fun AutoMobileContent(
       if (dataSourceMode == DataSourceMode.Real) VideoRecordingSocketClient() else null
     }
   val recordingActions: VideoRecordingActions? =
-    remember(clientProvider) { clientProvider?.let { McpVideoRecordingActions(it) } }
+    remember(deviceActingClientProvider) {
+      deviceActingClientProvider?.let { McpVideoRecordingActions(it) }
+    }
   // Screen sharing is daemon-side publishing, so it needs no MCP client -- just the socket.
   val webRtcStreamClient: WebRtcStreamClient? =
     remember(dataSourceMode, desktopDaemonSession, desktopSessionReady) {
@@ -909,7 +951,7 @@ fun AutoMobileContent(
           (desktopDaemonSession == null || desktopSessionReady)
       ) {
         WebRtcStreamSocketClient(
-          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
         )
       } else {
         null
@@ -926,7 +968,7 @@ fun AutoMobileContent(
       ) {
         videoStreamSourceFactory?.invoke()
           ?: VideoStreamClient(
-            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
           )
       } else {
         null
@@ -962,30 +1004,16 @@ fun AutoMobileContent(
   // screenshotScope: taps queued behind a blocked request would drain through the superseded
   // client once it unblocked, and that session's independent error claim could publish a banner
   // into the new context.
-  val controlClientProvider by rememberUpdatedState(clientProvider)
-  // Each dispatched input is the user using the device: after an inactivity release it binds the
-  // device again (owner decision 2026-10-08).
-  val onUserInteraction by rememberUpdatedState(desktopSessionState.onUserInteraction)
   val deviceControlSession =
-    remember(screenshotScope) {
-      DeviceControlSession(
-        scope = screenshotScope,
-        clientProvider = {
-          activeDeviceIdState.value?.let { onUserInteraction(it) }
-          controlClientProvider?.invoke()
-        },
-        platform = { controlPlatform.value },
-        nowMs = MONOTONIC_NOW_MS,
-        publishError = { message -> deviceControlTapError = message },
-        streamingEnabled = GestureStreamingConfig.enabled,
-      )
-    }
-
-  // The provider swaps behind the session via rememberUpdatedState; this drops everything captured
-  // against the PREVIOUS provider — the queued backlog (closing each pending client, so a
-  // superseded dispatcher can never hold unclosed AutoMobileClient instances), the error claim, and
-  // any pending post-input refresh wait.
-  LaunchedEffect(clientProvider) { deviceControlSession.reset() }
+    rememberDeviceControlSession(
+      scope = screenshotScope,
+      clientProvider = clientProvider,
+      inputAllocation = { inputAllocation },
+      platform = { controlPlatform.value },
+      nowMs = MONOTONIC_NOW_MS,
+      publishError = { message -> deviceControlTapError = message },
+      streamingEnabled = GestureStreamingConfig.enabled,
+    )
 
   // One coherent reset of the control context (issues #3347, #3348), run at every point that
   // invalidates the rendered frame identity (device change, transport/mode change, stream
@@ -998,13 +1026,16 @@ fun AutoMobileContent(
   var deviceCanvasFocused by remember { mutableStateOf(false) }
 
   val takeScreenshot: () -> Unit =
-    remember(clientProvider, screenshotScope) {
+    remember(deviceActingClientProvider, screenshotScope) {
       takeScreenshot@{
-        val provider = clientProvider ?: return@takeScreenshot
+        val provider = deviceActingClientProvider ?: return@takeScreenshot
+        val deviceId = latestActiveDeviceId ?: return@takeScreenshot
+        val platform = controlPlatform.value
         screenshotScope.launch(Dispatchers.IO) {
           val client = provider()
           try {
-            client.callTool("screenshot", buildJsonObject {})
+            // There is no `screenshot` tool (#10831): `observe` captures the screen and saves it.
+            client.callTool("observe", screenshotObserveArguments(deviceId, platform))
           } catch (e: Exception) {
             LOG.warn("Screenshot request failed: ${e.message}")
           } finally {
@@ -1054,7 +1085,7 @@ fun AutoMobileContent(
                 realDevice = firstDevice
                 activeDeviceId = firstDevice.id
                 LOG.info(
-                  "Set realDevice from MCP: ${firstDevice.name} (${firstDevice.id}), total devices: ${allBootedDevices.size}"
+                  "Set realDevice from MCP: ${firstDevice.name} (${firstDevice.id}), total devices: ${allBootedDevices.size}",
                 )
               }
             }
@@ -1097,7 +1128,7 @@ fun AutoMobileContent(
         if (consecutiveFailures <= 1) baseDelayMs
         else
           (baseDelayMs * (1L shl (consecutiveFailures - 1).coerceAtMost(4))).coerceAtMost(
-            maxDelayMs
+            maxDelayMs,
           )
       kotlinx.coroutines.delay(delayMs)
       kotlinx.coroutines.withContext(Dispatchers.IO) {
@@ -1307,7 +1338,7 @@ fun AutoMobileContent(
     remember(dataSourceMode, isFailuresPanelCollapsed, desktopDaemonSession) {
       if (dataSourceMode == DataSourceMode.Real && !isFailuresPanelCollapsed)
         StreamingFailuresDataSource(
-          FailuresStreamSocketClient(sessionUuidProvider = desktopSessionState.sessionUuidProvider)
+          FailuresStreamSocketClient(sessionUuidProvider = desktopSessionState.sessionUuidProvider),
         )
       else null
     }
@@ -1374,10 +1405,10 @@ fun AutoMobileContent(
     ) {
       obsClient =
         ObservationStreamClient(
-          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
         )
       LOG.info(
-        "Connecting observation stream for device: $deviceId (client: ${obsClient.hashCode()})"
+        "Connecting observation stream for device: $deviceId (client: ${obsClient.hashCode()})",
       )
       // Cadence starts at the daemon default; the focus-aware effect below raises it while the
       // live layout inspector is active and relaxes it otherwise.
@@ -1447,7 +1478,7 @@ fun AutoMobileContent(
   LaunchedEffect(observationStreamClient, isLiveLayoutMode) {
     val client = observationStreamClient ?: return@LaunchedEffect
     client.setCadence(
-      screenshotIntervalMs = if (isLiveLayoutMode) LIVE_SCREENSHOT_INTERVAL_MS else null
+      screenshotIntervalMs = if (isLiveLayoutMode) LIVE_SCREENSHOT_INTERVAL_MS else null,
     )
   }
 
@@ -1721,7 +1752,7 @@ fun AutoMobileContent(
                 buildJsonObject {
                   put("type", event::class.simpleName ?: "unknown")
                   put("timestamp", event.timestamp)
-                }
+                },
               )
             }
           }
@@ -1737,7 +1768,7 @@ fun AutoMobileContent(
         onOpenSettings = { showSettings = true },
         onTakeScreenshot = takeScreenshot,
         onToggleLiveLayout = { showNavigationView = !showNavigationView },
-      )
+      ),
     )
   }
 
@@ -1775,7 +1806,7 @@ fun AutoMobileContent(
                   label = label,
                   preview = preview,
                   onSelect = {},
-                )
+                ),
               )
             }
           // Navigation screens from mock data
@@ -1793,7 +1824,7 @@ fun AutoMobileContent(
                   label = screen.name,
                   preview = "${screen.type} · ${screen.packageName}",
                   onSelect = {},
-                )
+                ),
               )
             }
           // Installed apps as hierarchy elements
@@ -1808,7 +1839,7 @@ fun AutoMobileContent(
                   label = app.packageName.substringAfterLast('.'),
                   preview = app.packageName,
                   onSelect = { selectedAppId = app.packageName },
-                )
+                ),
               )
             }
           return results
@@ -1890,7 +1921,7 @@ fun AutoMobileContent(
         } else {
           false
         }
-      }
+      },
   ) {
     ThreePaneShell(
       showLeftPane = showLeftPane,
@@ -1971,7 +2002,7 @@ fun AutoMobileContent(
                 // capture identity, so it is only an Inspector-mode rendering source and must not
                 // decide whether the independently paired screenshot is actionable.
                 liveFrame = null,
-              )
+              ),
             )
           // What a CLICK acts through. While a post-input refresh is pending this is the retained
           // frame rather than the live decision, so the coherent frame on screen stays clickable
@@ -2066,23 +2097,37 @@ fun AutoMobileContent(
               horizontalAlignment = Alignment.CenterHorizontally,
               verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-              // The picked device is held by another session: this pane only views it and never
-              // takes it on its own (#10660). Take control is the one explicit bind attempt.
-              if (activeDeviceId != null && desktopSessionState.viewingDeviceId == activeDeviceId) {
-                DeviceViewingNotice(onTakeControl = desktopSessionState.requestControl)
-              }
-              // Released for inactivity: still controllable; the next input re-binds it.
+              val noticeDeviceId = activeDeviceId
+              // An input was refused because another session holds the device: the pane keeps
+              // watching and never takes it on its own (#10660, #10730). Take control is the one
+              // explicit bind attempt.
               if (
-                activeDeviceId != null && desktopSessionState.idleReleasedDeviceId == activeDeviceId
+                noticeDeviceId != null &&
+                  desktopSessionState.heldElsewhereDeviceId == noticeDeviceId
               ) {
-                DeviceIdleReleasedNotice(onTakeControl = desktopSessionState.requestControl)
+                DeviceViewingNotice(
+                  onTakeControl = { desktopSessionState.requestControl(noticeDeviceId) },
+                )
               }
-              // A bind that failed for another reason is an error, not viewing (#10682).
+              // Released after inactivity: still controllable; the next input allocates it again.
+              if (
+                noticeDeviceId != null && desktopSessionState.idleReleasedDeviceId == noticeDeviceId
+              ) {
+                DeviceIdleReleasedNotice(
+                  reason = desktopSessionState.releaseReason,
+                  onTakeControl = { desktopSessionState.requestControl(noticeDeviceId) },
+                )
+              }
+              // A bind that failed for another reason is an error, not held elsewhere (#10682).
               val bindError = desktopSessionState.bindErrorMessage
-              if (activeDeviceId != null && bindError != null) {
+              if (
+                noticeDeviceId != null &&
+                  bindError != null &&
+                  desktopSessionState.bindErrorDeviceId == noticeDeviceId
+              ) {
                 DeviceBindErrorNotice(
                   message = bindError,
-                  onRetry = desktopSessionState.requestControl,
+                  onRetry = { desktopSessionState.requestControl(noticeDeviceId) },
                 )
               }
 
@@ -2097,7 +2142,7 @@ fun AutoMobileContent(
                     (deviceControlDecision as? DeviceControlDecision.Blocked)?.reason
                   } else {
                     null
-                  }
+                  },
               )
 
               deviceControlTapError?.let { message ->
@@ -2155,7 +2200,7 @@ fun AutoMobileContent(
                   "storage" ->
                     StorageDashboard(
                       dataSourceMode = dataSourceMode,
-                      clientProvider = clientProvider,
+                      clientProvider = deviceActingClientProvider,
                       deviceId = activeDeviceId,
                       packageName = selectedAppId,
                       platform = storagePlatform,
@@ -2174,6 +2219,9 @@ fun AutoMobileContent(
                       recordingConfigClient = recordingConfigClient,
                       streamClient = webRtcStreamClient,
                       activeDeviceId = activeDeviceId,
+                      activeRecordings = activeRecordings,
+                      sessionUuidProvider = desktopSessionState.sessionUuidProvider,
+                      releasedDeviceId = desktopSessionState.idleReleasedDeviceId,
                     )
                   "diagnostics" ->
                     DiagnosticsDashboard(
@@ -2222,24 +2270,37 @@ fun AutoMobileContent(
             sidebarDevices
               .firstOrNull { it.id == deviceId }
               ?.let { device ->
+                killDeviceErrors = killDeviceErrors - device.id
                 screenshotScope.launch(Dispatchers.IO) {
                   try {
+                    // On a Unix daemon this is the desktop session's client, so a device the
+                    // desktop holds is stopped as its holder; without a session (MCP HTTP) the
+                    // call is sessionless and a held device refuses it, shown on the row below.
                     val client = clientProvider?.invoke()
                     val platform = device.toSidebarDeviceInfo().platform
                     LOG.info(
-                      "Killing device ${device.name} (${device.id}) via ${client?.transportName}"
+                      "Killing device ${device.name} (${device.id}) via ${client?.transportName}",
                     )
                     val result = client?.killDevice(device.name, device.id, platform)
-                    if (result?.success == false)
+                    if (result?.success == false) {
                       LOG.warn("Failed to kill device: ${result.message}")
+                      killDeviceErrors =
+                        killDeviceErrors + (device.id to (result.message ?: "Failed to kill"))
+                      if (result.code == DEVICE_OWNED_BY_OTHER_SESSION_CODE) {
+                        desktopSessionState.reportHeldElsewhere(device.id)
+                      }
+                    }
                   } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                   } catch (e: Exception) {
                     LOG.warn("Failed to kill device ${device.name}", e)
+                    killDeviceErrors =
+                      killDeviceErrors + (device.id to (e.message ?: "Failed to kill"))
                   }
                 }
               }
           },
+          killDeviceErrors = killDeviceErrors,
           installedApps = installedApps,
           selectedAppId = selectedAppId,
           onAppSelected = { selectedAppId = it },
@@ -2382,268 +2443,6 @@ private fun MainContentViewToggle(
 }
 
 @Composable
-private fun GlobalShellHeader(
-  devices: List<BootedDevice>,
-  activeDeviceId: String?,
-  onDeviceSelected: (String) -> Unit,
-  isDevicePanelExpanded: Boolean = false,
-  availableEmulators: List<AvailableEmulator> = emptyList(),
-  systemImages: List<SystemImage> = emptyList(),
-  onBootEmulator: (String) -> Unit = {},
-  onCreateEmulator: (String) -> Unit = {},
-  onCollapsePanel: () -> Unit = {},
-  needsSetup: Boolean = false,
-  onSetupClick: () -> Unit = {},
-  dataSourceMode: DataSourceMode = DataSourceMode.Fake,
-  onDataSourceModeChanged: (DataSourceMode) -> Unit = {},
-  onMcpDeviceSelected: (deviceId: String, deviceName: String?) -> Unit = { _, _ -> },
-  onProcessConnected: (McpProcess?) -> Unit = {},
-  suppressAutoSelect: Boolean = false,
-  // App selector props (kept for backwards compatibility, but FG toggle is preferred)
-  installedApps: List<InstalledApp> = emptyList(),
-  selectedAppId: String? = null,
-  isAppListLoading: Boolean = false,
-  appDropdownExpanded: Boolean = false,
-  onAppDropdownExpandedChange: (Boolean) -> Unit = {},
-  onAppSelected: (String?) -> Unit = {},
-  onSettingsClicked: () -> Unit = {},
-) {
-  val colors = SharedTheme.globalColors
-
-  Column(modifier = Modifier.fillMaxWidth().background(SharedTheme.globalColors.panelBackground)) {
-    FlowRow(
-      modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-      // Left side: Device selection
-      if (dataSourceMode == DataSourceMode.Fake) {
-        Row(
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Text(
-            "Devices:",
-            fontSize = 11.sp,
-            maxLines = 1,
-            softWrap = false,
-            color = colors.text.normal.copy(alpha = 0.5f),
-          )
-
-          // Device icons
-          Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            devices.forEach { device ->
-              DeviceIcon(
-                device = device,
-                isActive = device.id == activeDeviceId,
-                onClick = { onDeviceSelected(device.id) },
-              )
-            }
-          }
-        }
-      } else {
-        // Real mode: show MCP server indicator or empty space
-        Row(
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          // Show "Devices:" when a device is selected, "MCP Servers" otherwise
-          if (activeDeviceId != null) {
-            Text(
-              "Devices:",
-              fontSize = 11.sp,
-              maxLines = 1,
-              softWrap = false,
-              color = Color(0xFF2196F3),
-              modifier =
-                Modifier.clickable {
-                    // Clicking "Devices:" expands the device panel
-                    // We need to deselect the device and expand the panel
-                    onDeviceSelected("")
-                  }
-                  .pointerHoverIcon(PointerIcon.Hand),
-            )
-
-            // Show device buttons next to "Devices:" using emojis with tooltips
-            devices.forEach { device ->
-              val isActive = device.id == activeDeviceId
-              val deviceIsIos =
-                device.type == DeviceType.iOSSimulator || device.type == DeviceType.iOSPhysical
-              Tooltip(
-                tooltip = {
-                  Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(device.name, fontSize = 12.sp)
-                    Text(
-                      "Status: ${device.status}",
-                      fontSize = 10.sp,
-                      color = colors.text.normal.copy(alpha = 0.6f),
-                    )
-                    device.foregroundApp?.let { app ->
-                      Text(
-                        "App: $app",
-                        fontSize = 10.sp,
-                        color = colors.text.normal.copy(alpha = 0.6f),
-                      )
-                    }
-                  }
-                }
-              ) {
-                Box(
-                  modifier =
-                    Modifier.background(
-                        if (isActive) Color(0xFF2196F3).copy(alpha = 0.15f)
-                        else colors.text.normal.copy(alpha = 0.08f),
-                        RoundedCornerShape(4.dp),
-                      )
-                      .clickable {
-                        if (device.id == activeDeviceId) {
-                          // Tapping active device expands panel to show more devices
-                          onDeviceSelected("")
-                        } else {
-                          onDeviceSelected(device.id)
-                        }
-                      }
-                      .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                  Icon(
-                    imageVector = PlatformIcons.logo(deviceIsIos),
-                    contentDescription = PlatformIcons.contentDescription(deviceIsIos),
-                    tint = PlatformIcons.tint(deviceIsIos),
-                    modifier = Modifier.size(16.dp),
-                  )
-                }
-              }
-            }
-          } else {
-            Text(
-              "🔌",
-              fontSize = 14.sp,
-            )
-            Text(
-              "MCP Servers",
-              fontSize = 11.sp,
-              maxLines = 1,
-              softWrap = false,
-              color = colors.text.normal.copy(alpha = 0.7f),
-            )
-          }
-        }
-      }
-
-      // Right side: Setup button (conditional), Real Data toggle, Live toggle
-      Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        // Setup AutoMobile button (shown when service not detected)
-        if (needsSetup) {
-          Box(
-            modifier =
-              Modifier.background(
-                  Color(0xFF2196F3).copy(alpha = 0.15f),
-                  RoundedCornerShape(4.dp),
-                )
-                .clickable(onClick = onSetupClick)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-          ) {
-            Text(
-              "Setup",
-              fontSize = 10.sp,
-              maxLines = 1,
-              softWrap = false,
-              color = Color(0xFF64B5F6),
-            )
-          }
-        }
-
-        // Real Data switch
-        RealDataSwitch(
-          isRealData = dataSourceMode == DataSourceMode.Real,
-          onToggle = { isReal ->
-            onDataSourceModeChanged(if (isReal) DataSourceMode.Real else DataSourceMode.Fake)
-          },
-        )
-
-        // Settings gear
-        Text(
-          "⚙",
-          fontSize = 16.sp,
-          modifier =
-            Modifier.clickable { onSettingsClicked() }
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 8.dp, vertical = 4.dp),
-        )
-      }
-    }
-
-    // Device management panel (expanded when no active device selected)
-    if (isDevicePanelExpanded) {
-      if (dataSourceMode == DataSourceMode.Real) {
-        McpProcessesPanel(
-          useRealData = true,
-          onDeviceSelected = onMcpDeviceSelected,
-          onProcessConnected = onProcessConnected,
-          suppressAutoSelect = suppressAutoSelect,
-        )
-      } else {
-        McpProcessesPanel(
-          useRealData = false,
-          onDeviceSelected = onMcpDeviceSelected,
-          onProcessConnected = onProcessConnected,
-          suppressAutoSelect = suppressAutoSelect,
-        )
-      }
-    }
-  }
-}
-
-@Composable
-private fun RealDataSwitch(
-  isRealData: Boolean,
-  onToggle: (Boolean) -> Unit,
-) {
-  val colors = SharedTheme.globalColors
-  val trackColor = if (isRealData) Color(0xFF4CAF50) else colors.text.normal.copy(alpha = 0.3f)
-  val thumbColor = Color.White
-
-  Row(
-    horizontalArrangement = Arrangement.spacedBy(6.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    Text(
-      "Real Data",
-      fontSize = 11.sp,
-      maxLines = 1,
-      softWrap = false,
-      color = if (isRealData) colors.text.normal else colors.text.normal.copy(alpha = 0.5f),
-    )
-    Box(
-      modifier =
-        Modifier.width(32.dp)
-          .height(18.dp)
-          .clip(RoundedCornerShape(9.dp))
-          .background(trackColor)
-          .clickable { onToggle(!isRealData) }
-          .pointerHoverIcon(PointerIcon.Hand)
-          .padding(2.dp)
-    ) {
-      Box(
-        modifier =
-          Modifier.size(14.dp)
-            .offset(x = if (isRealData) 14.dp else 0.dp)
-            .clip(CircleShape)
-            .background(thumbColor)
-      )
-    }
-  }
-}
-
-@Composable
 private fun DraggableTabs(
   tabs: List<Dashboard>,
   selectedIndex: Int,
@@ -2661,7 +2460,7 @@ private fun DraggableTabs(
   var dragOffset by remember { mutableStateOf(0f) }
 
   BoxWithConstraints(
-    modifier = Modifier.fillMaxWidth().background(SharedTheme.globalColors.panelBackground)
+    modifier = Modifier.fillMaxWidth().background(SharedTheme.globalColors.panelBackground),
   ) {
     // Three modes: icons only (< 300dp), icon + text (300-600dp), text only (> 600dp)
     val useIconsOnly = maxWidth < 300.dp
@@ -2695,7 +2494,7 @@ private fun DraggableTabs(
                     Color(0xFF2196F3).copy(alpha = 0.5f),
                     RoundedCornerShape(6.dp),
                   )
-                else Modifier
+                else Modifier,
               )
               .clickable {
                 LOG.debug("Tab clicked via clickable: $index (${tabs[index]})")

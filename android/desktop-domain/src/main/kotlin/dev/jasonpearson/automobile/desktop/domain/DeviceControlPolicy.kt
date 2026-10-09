@@ -356,7 +356,7 @@ public object DeviceControlPolicy {
         hierarchySequence = hierarchy.sequence,
         liveFrameSequence = liveFrame?.sequence,
         nativeScale = pairedNativeScale,
-      )
+      ),
     )
   }
 

@@ -401,9 +401,9 @@ class AutoMobilePlanRedactionTest {
                 "stepIndex" to JsonPrimitive(1),
                 "tool" to JsonPrimitive(tool),
                 "error" to JsonPrimitive(error),
-              )
+              ),
             ),
-        )
+        ),
       )
     val textPayload = Json.encodeToString(JsonElement.serializer(), payload)
     val result =
@@ -416,11 +416,11 @@ class AutoMobilePlanRedactionTest {
                   mapOf(
                     "type" to JsonPrimitive("text"),
                     "text" to JsonPrimitive(textPayload),
-                  )
-                )
-              )
-            )
-        )
+                  ),
+                ),
+              ),
+            ),
+        ),
       )
     return DaemonResponse(
       id = "test",
@@ -437,7 +437,7 @@ class AutoMobilePlanRedactionTest {
  */
 private class CapturingAgent :
   AutoMobileAgent(
-    recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = true, maxToolCalls = 5)
+    recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = true, maxToolCalls = 5),
   ) {
   var captured: FailedStepContext? = null
   var capturedSecretValues: List<String>? = null

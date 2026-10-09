@@ -75,7 +75,7 @@ class StorageChangeWireEncoderTest {
   fun `long values retain both signed 64-bit boundaries as strings`() {
     val obj =
       encodeAndParse(
-        baseEvent(Long.MAX_VALUE.toString(), "LONG", Long.MIN_VALUE.toString(), "LONG")
+        baseEvent(Long.MAX_VALUE.toString(), "LONG", Long.MIN_VALUE.toString(), "LONG"),
       )
 
     assertEquals(Long.MAX_VALUE.toString(), obj["value"]!!.jsonPrimitive.content)
@@ -131,7 +131,7 @@ class StorageChangeWireEncoderTest {
     val obj = encodeAndParse(baseEvent("""["x"]""", "STRING_SET", """["a","b"]""", "STRING_SET"))
     // previousValue parses as an array element, not a string — assert it is not a primitive string.
     assertTrue(
-      obj["previousValue"] !is JsonPrimitive || !obj["previousValue"]!!.jsonPrimitive.isString
+      obj["previousValue"] !is JsonPrimitive || !obj["previousValue"]!!.jsonPrimitive.isString,
     )
   }
 }

@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
   isOwnOverlayFocused,
-  ownOverlayHidesApp,
   ownOverlayWindows,
 } from "../../../src/features/observe/ownOverlayFocus";
 import {
@@ -20,38 +19,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 const bounds = { left: 0, top: 0, right: 1080, bottom: 2400 };
 
-describe("ownOverlayHidesApp (overlay_window_metadata_v1)", () => {
-  test("only a fullscreen, fully opaque overlay hides the app", () => {
-    expect(ownOverlayHidesApp({ overlayPlacement: "fullscreen", overlayOpaque: true }, false)).toBe(
-      true,
-    );
-    expect(ownOverlayHidesApp({ overlayPlacement: "fullscreen", overlayOpaque: false }, true)).toBe(
-      false,
-    );
-    expect(ownOverlayHidesApp({ overlayPlacement: "sheet", overlayOpaque: true }, true)).toBe(
-      false,
-    );
-    expect(ownOverlayHidesApp({ overlayPlacement: "floating", overlayOpaque: true }, true)).toBe(
-      false,
-    );
-  });
-
-  test("falls back to the bounds answer when either field is absent", () => {
-    expect(ownOverlayHidesApp({}, true)).toBe(true);
-    expect(ownOverlayHidesApp({}, false)).toBe(false);
-    expect(ownOverlayHidesApp({ overlayPlacement: "fullscreen" }, true)).toBe(true);
-    expect(ownOverlayHidesApp({ overlayOpaque: true }, false)).toBe(false);
-  });
-
-  test("a window without the pair never hides the app once the APK advertises the metadata", () => {
-    // CtrlProxy's highlight window is an own overlay window that never carries the pair.
-    expect(ownOverlayHidesApp({}, true, true)).toBe(false);
-    expect(ownOverlayHidesApp({ overlayPlacement: "fullscreen" }, true, true)).toBe(false);
-    expect(
-      ownOverlayHidesApp({ overlayPlacement: "fullscreen", overlayOpaque: true }, false, true),
-    ).toBe(true);
-  });
-
+describe("overlay_window_metadata_v1 window fields", () => {
   test("CtrlProxyHierarchy conversion keeps the fields from the wire window entry", () => {
     const wire = JSON.parse(launcherCapture.rawViewHierarchy.json) as AccessibilityHierarchy;
     wire.windows = wire.windows!.map((entry) =>
@@ -77,11 +45,9 @@ describe("ownOverlayHidesApp (overlay_window_metadata_v1)", () => {
     const window = ownOverlayWindows(opaque)[0];
     expect(window.overlayPlacement).toBe("fullscreen");
     expect(window.overlayOpaque).toBe(true);
-    expect(ownOverlayHidesApp(window, false)).toBe(true);
 
     const bare = ownOverlayWindows(capturedOverlayHierarchy({ fullScreen: true }))[0];
     expect(bare.overlayPlacement).toBeUndefined();
-    expect(ownOverlayHidesApp(bare, true)).toBe(true);
   });
 });
 

@@ -70,13 +70,34 @@ import os
             var message: NSString?
             let succeeded = ObjCExceptionCatcher_synthesizeDisplayTouch(
                 CGFloat(touch.start.x), CGFloat(touch.start.y), CGFloat(touch.end.x), CGFloat(touch.end.y),
-                touch.pressDuration, touch.moveDuration, touch.displayId, touch.interfaceOrientation,
+                touch.pressDuration, touch.moveDuration, touch.holdDuration, touch.displayId,
+                touch.interfaceOrientation,
                 &unavailable, &message
             )
             if succeeded { return true }
             guard unavailable.boolValue else {
                 throw GesturePerformer.GestureError
                     .gestureFailed(message as String? ?? "display-targeted touch synthesis failed")
+            }
+            return false
+        }
+
+        func synthesizePinch(_ pinch: DisplayPinch) throws -> Bool {
+            var unavailable: ObjCBool = false
+            var message: NSString?
+            let points = ObjCPinchPoints(
+                start1: CGPoint(x: pinch.first.start.x, y: pinch.first.start.y),
+                end1: CGPoint(x: pinch.first.end.x, y: pinch.first.end.y),
+                start2: CGPoint(x: pinch.second.start.x, y: pinch.second.start.y),
+                end2: CGPoint(x: pinch.second.end.x, y: pinch.second.end.y)
+            )
+            let succeeded = ObjCExceptionCatcher_synthesizeDisplayPinch(
+                points, pinch.duration, pinch.displayId, pinch.interfaceOrientation, &unavailable, &message
+            )
+            if succeeded { return true }
+            guard unavailable.boolValue else {
+                throw GesturePerformer.GestureError
+                    .gestureFailed(message as String? ?? "display-targeted pinch synthesis failed")
             }
             return false
         }

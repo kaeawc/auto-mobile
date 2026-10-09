@@ -155,11 +155,24 @@ open class AutoMobileAgent(
       // caller could pass raw concrete secrets, and matching only those would miss the escaped
       // representation in JSON tool results. Idempotent for the executor's already-expanded input.
       val redactionValues = SecretRedactor.secretValues(secretValues)
+      // Every recovery call — the agent's tools, WaitForTool and the liveness observe — targets
+      // the device the failed step ran on, not whichever device the daemon defaults to (#10089).
+      val pinnedClient =
+        DevicePinningMCPClient.pinTo(mcpClient, context.deviceId, context.sessionUuid)
+      // Recovery that holds the failed attempt's session waits, bounded, for its device if the
+      // idle window released it during a long think (#10979).
+      // A held session the daemon released mid-recovery fails every later call at once with the
+      // daemon's reason instead of driving a device the runner no longer holds (#11072).
+      val deviceClient =
+        if (context.sessionUuid.isNullOrBlank()) pinnedClient
+        else
+          HeldDeviceWaitingMCPClient(SessionLossGuardMCPClient(pinnedClient, context.sessionUuid))
       val agentMcpClient =
-        if (redactionValues.isEmpty()) mcpClient else RedactingMCPClient(mcpClient, redactionValues)
+        if (redactionValues.isEmpty()) deviceClient
+        else RedactingMCPClient(deviceClient, redactionValues)
       val waitForRawMcpClient =
-        if (redactionValues.isEmpty()) mcpClient
-        else FailureRedactingMCPClient(mcpClient, redactionValues)
+        if (redactionValues.isEmpty()) deviceClient
+        else FailureRedactingMCPClient(deviceClient, redactionValues)
       val aiAgent =
         aiAgentFactory.createAIAgentWithMCPTools(
           modelConfig,
@@ -224,7 +237,7 @@ open class AutoMobileAgent(
       val recoveryResult = runBlocking {
         try {
           println(
-            "Starting AI recovery for step ${context.failedStepIndex + 1} (${context.failedTool})..."
+            "Starting AI recovery for step ${context.failedStepIndex + 1} (${context.failedTool})...",
           )
 
           aiAgent.run(recoveryPrompt)
@@ -239,7 +252,7 @@ open class AutoMobileAgent(
               // Scrub the post-recovery liveness observe too (issue #6094): its view hierarchy can
               // carry an on-screen secret, and it is surfaced on the RecoveryOutcome. The device is
               // still queried with real values — only the returned text is redacted.
-              SecretRedactor.redact(mcpClient.callTool("observe", emptyMap()), redactionValues)
+              SecretRedactor.redact(deviceClient.callTool("observe", emptyMap()), redactionValues)
             } catch (e: Exception) {
               println("Warning: Post-recovery observe failed: ${e.message}")
               null
@@ -265,7 +278,7 @@ open class AutoMobileAgent(
       System.err.println(
         "AI-assisted recovery could not start: ${e.message}. " +
           "The failed step is reported as a plain failure. Make sure the AutoMobile daemon " +
-          "is running and a model API key is configured, or disable AI assistance."
+          "is running and a model API key is configured, or disable AI assistance.",
       )
     } finally {
       try {
@@ -436,7 +449,7 @@ open class AutoMobileAgent(
       if (!connectivity.isDaemonAlive()) {
         throw RuntimeException(
           "AutoMobile daemon is not reachable on its socket; AI recovery runs through the " +
-            "same daemon as the plan (the configured MCP url $serverUrl is not used)"
+            "same daemon as the plan (the configured MCP url $serverUrl is not used)",
         )
       }
       connected = true
@@ -457,7 +470,7 @@ open class AutoMobileAgent(
         }
       if (!response.success) {
         throw RuntimeException(
-          "Failed to call MCP tool $toolName: ${response.error ?: "daemon returned failure"}"
+          "Failed to call MCP tool $toolName: ${response.error ?: "daemon returned failure"}",
         )
       }
       val result = response.result ?: return ""
@@ -474,7 +487,7 @@ open class AutoMobileAgent(
      */
     override fun listAvailableTools(): List<MCPToolDefinition> =
       throw UnsupportedOperationException(
-        "Tool discovery is not available over the daemon socket; the recovery tool surface is fixed"
+        "Tool discovery is not available over the daemon socket; the recovery tool surface is fixed",
       )
 
     /**
@@ -955,21 +968,21 @@ open class AutoMobileAgent(
             System.getenv("OPENAI_API_KEY")
               ?: System.getProperty("automobile.openai.api.key")
               ?: throw RuntimeException(
-                "OpenAI API key not found. Set OPENAI_API_KEY environment variable or automobile.openai.api.key system property"
+                "OpenAI API key not found. Set OPENAI_API_KEY environment variable or automobile.openai.api.key system property",
               )
 
           ModelProvider.ANTHROPIC ->
             System.getenv("ANTHROPIC_API_KEY")
               ?: System.getProperty("automobile.anthropic.api.key")
               ?: throw RuntimeException(
-                "Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable or automobile.anthropic.api.key system property"
+                "Anthropic API key not found. Set ANTHROPIC_API_KEY environment variable or automobile.anthropic.api.key system property",
               )
 
           ModelProvider.GOOGLE ->
             System.getenv("GOOGLE_API_KEY")
               ?: System.getProperty("automobile.google.api.key")
               ?: throw RuntimeException(
-                "Google API key not found. Set GOOGLE_API_KEY environment variable or automobile.google.api.key system property"
+                "Google API key not found. Set GOOGLE_API_KEY environment variable or automobile.google.api.key system property",
               )
         }
 
@@ -1130,7 +1143,7 @@ open class AutoMobileAgent(
 
     private fun unsupportedGoogleProvider(): Nothing {
       throw UnsupportedOperationException(
-        "Koog 1.0.0 stable artifacts do not publish a Google prompt executor; use OpenAI or Anthropic."
+        "Koog 1.0.0 stable artifacts do not publish a Google prompt executor; use OpenAI or Anthropic.",
       )
     }
   }

@@ -25,6 +25,43 @@ final class OverlaySpecDecodingTests: XCTestCase {
         }
     }
 
+    /// Every spec the shared validator accepts must decode on iOS too (#10440).
+    func testEverySharedValidFixtureDecodes() throws {
+        let dir = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("test/fixtures/overlay-spec/valid")
+        let files = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }
+        XCTAssertGreaterThan(files.count, 20)
+        for file in files {
+            XCTAssertNoThrow(
+                try JSONDecoder().decode(OverlaySpec.self, from: Data(contentsOf: file)),
+                file.lastPathComponent
+            )
+        }
+    }
+
+    func testStyleFormsAddedAfterThePrototypeDecode() throws {
+        let node = try JSONDecoder().decode(OverlayNode.self, from: Data("""
+        {"type":"text","text":"x","style":{"fontFamily":{"asset":"brand"},"cornerRadius":{"topStart":4},
+         "shadowColor":"primary","offset":{"x":1,"y":2},"lineHeight":20,"letterSpacing":-1,
+         "textDecoration":"underline","fontStyle":"italic","overflow":"ellipsis","elevation":3}}
+        """.utf8))
+        let style = try XCTUnwrap(node.style)
+        XCTAssertEqual(style.fontFamily, .asset("brand"))
+        XCTAssertEqual(style.cornerRadius, .corners(topStart: 4, topEnd: 0, bottomEnd: 0, bottomStart: 0))
+        XCTAssertEqual(style.offset?.y, 2)
+        XCTAssertEqual(style.textDecoration, "underline")
+        let token = try JSONDecoder().decode(
+            Style.self,
+            from: Data(#"{"cornerRadius":"large","fontFamily":"serif"}"#.utf8)
+        )
+        XCTAssertEqual(token.cornerRadius, .token("large"))
+        XCTAssertEqual(OverlayShapes.standard.resolve(.token("large")), .uniform(16))
+        XCTAssertEqual(token.fontFamily, .keyword("serif"))
+    }
+
     func testConditionWithoutAComparisonIsRejected() {
         XCTAssertThrowsError(try condition(#"{"key":"ready"}"#))
     }
@@ -67,5 +104,60 @@ final class OverlaySpecDecodingTests: XCTestCase {
     func testIntValueIsNilOutsideIntRange() {
         XCTAssertEqual(JSONValue.number(2.9).intValue, 2)
         XCTAssertNil(JSONValue.number(1e300).intValue)
+    }
+}
+
+final class OverlayAccessibilityLabelTests: XCTestCase {
+    private func node(_ json: String) throws -> OverlayNode {
+        try JSONDecoder().decode(OverlayNode.self, from: Data(json.utf8))
+    }
+
+    private let state: [String: JSONValue] = ["n": .number(3), "who": .string("Ada")]
+
+    func testContentDescriptionDecodesAndWinsOverText() throws {
+        let box = try node(#"{"type":"text","text":"Close","contentDescription":"Close dialog"}"#)
+        XCTAssertEqual(box.contentDescription, "Close dialog")
+        XCTAssertEqual(box.accessibilityLabel(state: [:], pager: nil, tappable: false), "Close dialog")
+    }
+
+    func testPlaceholdersAreFilledInTheDescription() throws {
+        let box = try node(#"{"type":"box","contentDescription":"{who} has {n} items"}"#)
+        XCTAssertEqual(box.accessibilityLabel(state: state, pager: nil, tappable: false), "Ada has 3 items")
+    }
+
+    func testPagerPlaceholdersResolveInsideAPager() throws {
+        let text = try node(#"{"type":"box","contentDescription":"Page {page} of {pageCount}"}"#)
+        let label = text.accessibilityLabel(state: [:], pager: PagerPosition(page: 1, count: 4), tappable: false)
+        XCTAssertEqual(label, "Page 2 of 4")
+    }
+
+    func testTextIsUsedWhenThereIsNoDescription() throws {
+        let text = try node(#"{"type":"text","text":"Hello {who}"}"#)
+        XCTAssertEqual(text.accessibilityLabel(state: state, pager: nil, tappable: false), "Hello Ada")
+    }
+
+    func testEmptyResolvedDescriptionFallsThroughToText() throws {
+        let text = try node(#"{"type":"text","text":"Fallback","contentDescription":""}"#)
+        XCTAssertEqual(text.accessibilityLabel(state: [:], pager: nil, tappable: false), "Fallback")
+    }
+
+    func testTappableIconReadsAsItsNameButDecorativeIconDoesNot() throws {
+        let icon = try node(#"{"type":"icon","name":"settings"}"#)
+        XCTAssertEqual(icon.accessibilityLabel(state: [:], pager: nil, tappable: true), "settings")
+        XCTAssertNil(icon.accessibilityLabel(state: [:], pager: nil, tappable: false))
+    }
+
+    func testDescriptionBeatsIconName() throws {
+        let icon = try node(#"{"type":"icon","name":"settings","contentDescription":"Open settings"}"#)
+        XCTAssertEqual(icon.accessibilityLabel(state: [:], pager: nil, tappable: true), "Open settings")
+    }
+
+    func testContainersAreNotLabelledByKind() throws {
+        let row = try node(#"{"type":"row"}"#)
+        XCTAssertNil(row.accessibilityLabel(state: [:], pager: nil, tappable: true))
+    }
+
+    func testUnknownPlaceholderIsLeftAsWritten() {
+        XCTAssertEqual(interpolateOverlayText("a {missing} b", state: state, pager: nil), "a {missing} b")
     }
 }

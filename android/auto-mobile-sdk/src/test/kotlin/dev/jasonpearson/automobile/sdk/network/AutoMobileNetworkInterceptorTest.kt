@@ -135,7 +135,7 @@ class AutoMobileNetworkInterceptorTest {
         .message("OK")
         .header("Content-Type", responseContentType)
         .body(
-          responseBodyOverride ?: responseBody.toResponseBody(responseContentType.toMediaType())
+          responseBodyOverride ?: responseBody.toResponseBody(responseContentType.toMediaType()),
         )
         .build()
     }
@@ -735,7 +735,7 @@ class AutoMobileNetworkInterceptorTest {
 
     val response =
       interceptor.intercept(
-        FakeInterceptorChain(responseCode = 202, onProceed = { proceedCalls++ })
+        FakeInterceptorChain(responseCode = 202, onProceed = { proceedCalls++ }),
       )
 
     assertEquals(1, proceedCalls)
@@ -759,7 +759,7 @@ class AutoMobileNetworkInterceptorTest {
           FakeInterceptorChain(
             throwOnProceed = hostFailure,
             onProceed = { proceedCalls++ },
-          )
+          ),
         )
       }
 
@@ -787,7 +787,7 @@ class AutoMobileNetworkInterceptorTest {
 
     val response =
       interceptor.intercept(
-        FakeInterceptorChain(responseCode = 204, onProceed = { proceedCalls++ })
+        FakeInterceptorChain(responseCode = 204, onProceed = { proceedCalls++ }),
       )
 
     assertEquals(1, proceedCalls)
@@ -837,7 +837,7 @@ class AutoMobileNetworkInterceptorTest {
 
     val response =
       interceptor.intercept(
-        FakeInterceptorChain(responseCode = 204, onProceed = { proceedCalls++ })
+        FakeInterceptorChain(responseCode = 204, onProceed = { proceedCalls++ }),
       )
     drainDelivery()
 
@@ -917,7 +917,7 @@ class AutoMobileNetworkInterceptorTest {
             request.body!!.writeTo(wire)
             sent = wire.readUtf8()
           },
-        )
+        ),
       )
       .close()
     drainDelivery()
@@ -1031,7 +1031,7 @@ class AutoMobileNetworkInterceptorTest {
         fakeChain(
           responseContentType = "text/event-stream",
           responseBodyOverride = streamingBody(source, "text/event-stream"),
-        )
+        ),
       )
     drainDelivery()
 
@@ -1051,7 +1051,7 @@ class AutoMobileNetworkInterceptorTest {
 
     val response =
       interceptor.intercept(
-        fakeChain(responseBodyOverride = streamingBody(source, "application/json"))
+        fakeChain(responseBodyOverride = streamingBody(source, "application/json")),
       )
     drainDelivery()
     assertEquals(0, source.reads)
@@ -1096,7 +1096,7 @@ class AutoMobileNetworkInterceptorTest {
 
     val response =
       interceptor.intercept(
-        fakeChain(responseBodyOverride = streamingBody(source, "application/json"))
+        fakeChain(responseBodyOverride = streamingBody(source, "application/json")),
       )
     val thrown = assertFailsWith<IOException> { response.body.string() }
     drainDelivery()
@@ -1122,7 +1122,7 @@ class AutoMobileNetworkInterceptorTest {
 
     val response =
       interceptor.intercept(
-        fakeChain(responseBodyOverride = streamingBody(source, "application/json"))
+        fakeChain(responseBodyOverride = streamingBody(source, "application/json")),
       )
     response.body.source().require(1)
     drainDelivery()

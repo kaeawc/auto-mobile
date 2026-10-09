@@ -2,11 +2,11 @@ import { DaemonState } from "../daemon/daemonState";
 import type { DevicePool, PooledDevice } from "../daemon/devicePool";
 import type { SessionManager } from "../daemon/sessionManager";
 import type { DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
-import type { Platform } from "../models";
+import type { BootedDevice, Platform, SomePlatform } from "../models";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { DisplayPinNeedsSessionError } from "../models/PinnedDisplayError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+import { DeviceSessionManager, type DeviceReadyOptions } from "../devices/DeviceSessionManager";
 import { logger } from "../utils/logger";
 import { deviceListRefreshFailureMessage } from "../daemon/devicePoolRefresh";
 import { createJSONToolResponse } from "../utils/toolUtils";
@@ -15,6 +15,8 @@ import {
   resolveDirectSessionDevice,
 } from "./directSessionDeviceRegistry";
 import { prepareSessionDisplayPin } from "./sessionDisplayPin";
+import { deviceAssignedToOtherSessionError } from "../daemon/inputDeviceOwnership";
+import { executionTracker } from "./executionTracker";
 
 export interface SetActiveDeviceArgs {
   deviceId: string;
@@ -25,13 +27,28 @@ export interface SetActiveDeviceArgs {
 interface HandlerArgs extends SetActiveDeviceArgs {
   sessionUuid?: string;
   __mcpSessionId?: string;
+  __executionId?: string;
 }
 
 type ResumeCtrlProxy = (deviceId: string, platform: Platform) => Promise<void>;
 
+/** The global device selection the sessionless path readies and pins. */
+export interface LegacyDeviceSelection {
+  getCurrentDevice(): BootedDevice | undefined;
+  getCurrentPlatform(): Platform | undefined;
+  ensureDeviceReady(
+    platform: SomePlatform,
+    providedDeviceId?: string,
+    options?: DeviceReadyOptions,
+  ): Promise<BootedDevice>;
+  setExplicitDevicePin(device: BootedDevice): void;
+}
+
 interface SetActiveDeviceDependencies {
   displayInventory?: DisplayInventoryProvider;
   resumeCtrlProxy: ResumeCtrlProxy;
+  /** Defaults to the process-wide DeviceSessionManager. */
+  legacyDeviceSelection?: () => LegacyDeviceSelection;
 }
 
 /** Preserve the existing MCP-owned autolock resolution and explicit UUID precedence. */
@@ -78,9 +95,7 @@ function assertDeviceOwner(input: {
     device.sessionId !== sessionUuid &&
     sessions.getSession(device.sessionId)
   ) {
-    throw new ActionableError(
-      `Device '${device.id}' is already assigned to session ${device.sessionId}`,
-    );
+    throw deviceAssignedToOtherSessionError(device.id, device.sessionId, sessionUuid);
   }
 }
 
@@ -107,9 +122,7 @@ async function bindRequestedDevice(input: {
     true,
   );
   if (boundSession !== args.sessionUuid) {
-    throw new ActionableError(
-      `Device '${args.deviceId}' is already assigned to session ${boundSession}`,
-    );
+    throw deviceAssignedToOtherSessionError(args.deviceId, boundSession, args.sessionUuid);
   }
   sessions.setDeviceReadiness(args.sessionUuid, "booted");
 }
@@ -143,18 +156,65 @@ async function selectSessionDevice(input: {
   return args.display !== undefined || hadDisplayPin;
 }
 
+/**
+ * In daemon mode a sessionless selection of a device another session holds (a live bound session
+ * or an autolock owner) is refused before readiness touches it (#11071): readiness would set up
+ * CtrlProxy, appearance and settings on the holder's device and make it the global pin. The
+ * holder's own connection adopts its session instead (#10994). A selection admitted on a free
+ * device is marked as sessionless device use, so a session acquiring the device mid-call cancels
+ * it (#10829).
+ */
+function admitSessionlessSelection(args: HandlerArgs): void {
+  const daemonState = DaemonState.getInstance();
+  if (args.sessionUuid || !daemonState.isInitialized()) {
+    return;
+  }
+  const pool = daemonState.getDevicePool();
+  const sessions = daemonState.getSessionManager();
+  const boundHolder = sessions.getSessionForDevice(args.deviceId);
+  const liveHolder =
+    (boundHolder && sessions.getSession(boundHolder) ? boundHolder : undefined) ??
+    pool.getDevice(args.deviceId)?.autolockSessionId;
+  if (liveHolder) {
+    const ownSession = pool.resolveOwnedDeviceSessionForMcpSession(
+      args.__mcpSessionId,
+      args.deviceId,
+    );
+    if (ownSession) {
+      args.sessionUuid = ownSession;
+      return;
+    }
+    if (args.display !== undefined) {
+      // A display pin needs a session regardless of who holds the device.
+      throw new DisplayPinNeedsSessionError();
+    }
+    throw deviceAssignedToOtherSessionError(args.deviceId, liveHolder, undefined);
+  }
+  if (args.__executionId && args.display === undefined) {
+    executionTracker.markSessionlessDeviceUse(args.__executionId, args.deviceId);
+  }
+}
+
 async function selectLegacyDevice(input: {
   args: HandlerArgs;
   resumeCtrlProxy: ResumeCtrlProxy;
+  sessions: LegacyDeviceSelection;
+  signal?: AbortSignal;
 }): Promise<void> {
-  const { args, resumeCtrlProxy } = input;
-  const sessions = DeviceSessionManager.getInstance();
+  const { args, resumeCtrlProxy, sessions, signal } = input;
   const previousDevice = sessions.getCurrentDevice();
   const previousPlatform = sessions.getCurrentPlatform();
   // #5870: "either" lets deviceId disambiguate when platform is omitted.
-  const readyDevice = await sessions.ensureDeviceReady(args.platform ?? "either", args.deviceId);
+  const readyDevice = await sessions.ensureDeviceReady(
+    args.platform ?? "either",
+    args.deviceId,
+    signal ? { signal } : undefined,
+  );
+  // A session that acquired the device during readiness cancelled this call: never pin its device.
+  signal?.throwIfAborted();
   const resolvedPlatform = args.platform ?? readyDevice.platform;
   await resumeCtrlProxy(readyDevice.deviceId, resolvedPlatform);
+  signal?.throwIfAborted();
   if (args.sessionUuid && resolveDirectSessionDevice(args.sessionUuid)) {
     registerDirectSessionDevice(args.sessionUuid, readyDevice);
   }
@@ -180,10 +240,13 @@ function currentDisplayPinResult(input: { sessionUuid?: string; reportClearedPin
 
 /** Existing device selection with a session-only, side-effect-free display selection slot. */
 export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDependencies) {
-  return async (args: HandlerArgs) => {
+  const legacyDeviceSelection =
+    dependencies.legacyDeviceSelection ?? (() => DeviceSessionManager.getInstance());
+  return async (args: HandlerArgs, _progress?: unknown, signal?: AbortSignal) => {
     const mcpSessionId = args.__mcpSessionId;
     try {
       const selectedAutolockSession = resolveAutolockSelection(args);
+      admitSessionlessSelection(args);
       const sessionUuid = args.sessionUuid;
       const sessionScoped = Boolean(sessionUuid) && DaemonState.getInstance().isInitialized();
       if (args.display !== undefined && !sessionScoped) {
@@ -196,7 +259,12 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
           dependencies,
         });
       } else {
-        await selectLegacyDevice({ args, resumeCtrlProxy: dependencies.resumeCtrlProxy });
+        await selectLegacyDevice({
+          args,
+          resumeCtrlProxy: dependencies.resumeCtrlProxy,
+          sessions: legacyDeviceSelection(),
+          signal,
+        });
       }
       if (selectedAutolockSession) {
         await DaemonState.getInstance()

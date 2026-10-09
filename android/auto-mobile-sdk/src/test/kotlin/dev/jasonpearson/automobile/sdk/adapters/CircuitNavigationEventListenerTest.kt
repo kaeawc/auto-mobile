@@ -246,7 +246,7 @@ class CircuitNavigationEventListenerTest {
       composition.setContent {
         val listener =
           CircuitAdapter.rememberCircuitNavigationEventListener(
-            extractArguments = { error("extractor failure") }
+            extractArguments = { error("extractor failure") },
           )
         navigator =
           rememberInterceptingNavigator(
@@ -275,7 +275,7 @@ class CircuitNavigationEventListenerTest {
       composition.setContent {
         val currentVersion = recompositionVersion
         CircuitAdapter.rememberCircuitNavigationEventListener(
-          extractMetadata = { mapOf("version" to currentVersion.toString()) }
+          extractMetadata = { mapOf("version" to currentVersion.toString()) },
         )
       }
 

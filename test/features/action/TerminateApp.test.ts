@@ -39,6 +39,10 @@ import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
 import { logger } from "../../../src/utils/logger";
+import { AdbClient as RealAdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { createExecResult } from "../../../src/utils/execResult";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 describe("TerminateApp (Android install listing)", () => {
   const device: BootedDevice = { deviceId: "emulator-9426", name: "Pixel", platform: "android" };
@@ -82,6 +86,16 @@ describe("TerminateApp (Android install listing)", () => {
     expect(adb.wasCommandExecuted("force-stop")).toBe(false);
   });
 
+  test("a failed process read does not mask the not-installed result (#9758)", async () => {
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.other");
+    adb.setCommandError("shell dumpsys activity processes", new Error("dumpsys timed out"));
+    expect(await app.execute("com.example.app", { skipObservation: true })).toMatchObject({
+      success: true,
+      wasInstalled: false,
+    });
+    expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+  });
+
   test("install-aware targeting force-stops a personal-only background app", async () => {
     adb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
     adb.setUsers([
@@ -104,12 +118,71 @@ describe("TerminateApp (Android install listing)", () => {
     expect(usersSpy).toHaveBeenCalledTimes(1);
   });
 
+  test("retires the app's process state after a force-stop and for an already-dead process", async () => {
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
+    const retiring = app as unknown as { cacheInvalidator: FakeDeviceWindowCacheInvalidator };
+    retiring.cacheInvalidator = cacheInvalidator;
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
+    adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
+    await app.execute("com.example.app", { skipObservation: true });
+    expect(cacheInvalidator.retiredProcesses).toEqual([{ device, packageName: "com.example.app" }]);
+
+    adb.setCommandResult("shell dumpsys activity processes", "");
+    await app.execute("com.example.app", { skipObservation: true });
+    expect(cacheInvalidator.retiredProcesses).toHaveLength(2);
+  });
+
   test("force-stops an installed running package", async () => {
     adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
     adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
     const result = await app.execute("com.example.app", { skipObservation: true });
     expect(result).toMatchObject({ success: true, wasInstalled: true, wasRunning: true });
     expect(adb.wasCommandExecuted("shell am force-stop --user 0 'com.example.app'")).toBe(true);
+  });
+
+  test("issues the install, process and foreground reads concurrently before force-stop (#9758)", async () => {
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
+    adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
+    adb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
+
+    // Each read parks until released, so a sequential implementation can never
+    // have more than one read in flight.
+    const events: string[] = [];
+    const releases: Array<() => void> = [];
+    const park = (name: string) =>
+      new Promise<void>((resolve) => {
+        events.push(`start:${name}`);
+        releases.push(() => {
+          events.push(`end:${name}`);
+          resolve();
+        });
+      });
+    const realExecute = adb.executeCommand.bind(adb);
+    const realForeground = adb.getForegroundApp.bind(adb);
+    const executeSpy = spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+      const command = String(args[0]);
+      if (command.includes("pm list packages") || command.includes("dumpsys activity processes")) {
+        await park(command.includes("pm list") ? "installed" : "processes");
+      }
+      return realExecute(...args);
+    });
+    const foregroundSpy = spyOn(adb, "getForegroundApp").mockImplementation(async (...args) => {
+      await park("foreground");
+      return realForeground(...args);
+    });
+
+    const outcome = app.execute("com.example.app", { skipObservation: true, userId: 0 });
+    for (let i = 0; i < 20 && releases.length < 3; i++) {
+      await Promise.resolve();
+    }
+    expect(events).toEqual(["start:installed", "start:processes", "start:foreground"]);
+    expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+    releases.forEach((release) => release());
+
+    expect(await outcome).toMatchObject({ success: true, wasRunning: true, wasForeground: true });
+    expect(adb.wasCommandExecuted("shell am force-stop --user 0 'com.example.app'")).toBe(true);
+    executeSpy.mockRestore();
+    foregroundSpy.mockRestore();
   });
 
   test("propagates an aborted request as cancellation", async () => {
@@ -847,6 +920,7 @@ describe("TerminateApp (Android)", () => {
       invalidate: (device: BootedDevice) => {
         invalidated.push(device);
       },
+      retireAppProcess: () => {},
     };
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
@@ -878,6 +952,7 @@ describe("TerminateApp (Android)", () => {
       invalidate: (device: BootedDevice) => {
         invalidated.push(device);
       },
+      retireAppProcess: () => {},
     };
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
@@ -902,6 +977,7 @@ describe("TerminateApp (Android)", () => {
       invalidate: (device: BootedDevice) => {
         invalidated.push(device);
       },
+      retireAppProcess: () => {},
     };
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
@@ -1268,3 +1344,58 @@ beforeOutputSchema(() => {
   );
 });
 afterOutputSchema(() => executeOutputSchemaSpy.mockRestore());
+
+describe("TerminateApp (shared foreground dumpsys, #9758)", () => {
+  const device: BootedDevice = { deviceId: "emulator-9758", name: "Pixel", platform: "android" };
+  // Captured `dumpsys activity activities`: com.google.android.contacts is resumed for user 0.
+  const capture = readFileSync(
+    join(__dirname, "../observe/activityActivitiesDumps/api33-home-settings-secondapp.log"),
+    "utf8",
+  ).replace(/\r\n/g, "\n");
+  const contacts = "com.google.android.contacts";
+  const foregroundDumpsys = "shell dumpsys activity activities";
+
+  function harness() {
+    const commands: string[] = [];
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new RealAdbClient(
+      device,
+      async (command) => {
+        commands.push(command);
+        if (command.includes("dumpsys activity activities")) {
+          return createExecResult(capture, "");
+        }
+        if (command.includes("pm list packages")) {
+          return createExecResult(`package:${contacts}`, "");
+        }
+        if (command.includes("dumpsys activity processes")) {
+          return createExecResult(`3220:${contacts}/u0a123`, "");
+        }
+        return createExecResult("", "");
+      },
+      null,
+      undefined,
+      timer,
+    );
+    const app = new TerminateApp(device, adb, { timer });
+    return { app, commands };
+  }
+
+  const foregroundReads = (commands: string[]) =>
+    commands.filter((command) => command.includes(foregroundDumpsys)).length;
+
+  test("reads the foreground dumpsys once when the resolver already did", async () => {
+    const { app, commands } = harness();
+    const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+      throw new Error("CtrlProxy unavailable");
+    });
+    const result = await app
+      .execute(contacts, { skipObservation: true })
+      .finally(() => ctrlProxySpy.mockRestore());
+
+    expect(result).toMatchObject({ success: true, wasRunning: true, wasForeground: true });
+    expect(foregroundReads(commands)).toBe(1);
+    expect(commands.some((command) => command.includes("am force-stop --user 0"))).toBe(true);
+  });
+});

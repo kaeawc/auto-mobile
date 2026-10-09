@@ -167,7 +167,7 @@ class FailuresViewModelTest {
           createTestFailureGroup("g1"),
           createTestFailureGroup("g2"),
           createTestFailureGroup("g3"),
-        )
+        ),
       )
     vm.onAction(FailuresAction.Refresh)
 

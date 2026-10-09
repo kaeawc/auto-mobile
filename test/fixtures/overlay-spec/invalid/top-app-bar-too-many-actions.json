@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "a",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": {},
+    "root": {
+      "type": "topAppBar",
+      "title": "T",
+      "actions": [
+        { "icon": "add", "label": "A" },
+        { "icon": "add", "label": "B" },
+        { "icon": "add", "label": "C" },
+        { "icon": "add", "label": "D" }
+      ]
+    }
+  },
+  "expectedPath": "root.actions"
+}

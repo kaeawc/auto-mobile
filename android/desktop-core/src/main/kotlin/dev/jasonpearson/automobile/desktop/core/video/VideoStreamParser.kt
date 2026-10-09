@@ -208,7 +208,7 @@ class VideoStreamParser {
       val codecId = view.int
       if (codecId != CODEC_ID_H264) {
         throw VideoStreamFormatException(
-          "Unexpected codec id 0x${codecId.toUInt().toString(16)}; this client only decodes H.264"
+          "Unexpected codec id 0x${codecId.toUInt().toString(16)}; this client only decodes H.264",
         )
       }
       onHeader(VideoStreamHeader(view.int, view.int))
@@ -264,7 +264,7 @@ class VideoStreamParser {
             },
           droppedFrames = if (isDroppedFrames) ptsAndFlags and PTS_MASK else null,
           heartbeat = isHeartbeat,
-        )
+        ),
       )
       offset = start + size
     }

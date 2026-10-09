@@ -95,6 +95,12 @@ describe("navigation resource session resolution", () => {
       );
     a = make("A");
     b = make("B");
+  });
+
+  beforeEach(async () => {
+    // Tests switch A, B and the global manager to other apps (and back), and an explicit
+    // app switch leaves the screen unknown (#10193), so each test re-seeds every manager's
+    // current app and screen instead of depending on the order tests run in.
     for (const [manager, appId, screen] of [
       [a, "app.a", "HomeA"],
       [b, "app.b", "HomeB"],
@@ -110,9 +116,6 @@ describe("navigation resource session resolution", () => {
       });
     }
     await harness.manager.setCurrentApp("launcher");
-  });
-
-  beforeEach(() => {
     timer = new FakeTimer();
     timeout = spyOn(defaultTimer, "setTimeout").mockImplementation((callback, ms) =>
       timer.setTimeout(callback, ms),

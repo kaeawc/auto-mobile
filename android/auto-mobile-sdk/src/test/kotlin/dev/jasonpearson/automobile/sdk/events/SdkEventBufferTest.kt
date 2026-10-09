@@ -547,7 +547,7 @@ class SdkEventBufferTest {
             EventProcessor { event ->
               if (shouldThrow) throw RuntimeException("fail")
               event
-            }
+            },
           ),
       )
 

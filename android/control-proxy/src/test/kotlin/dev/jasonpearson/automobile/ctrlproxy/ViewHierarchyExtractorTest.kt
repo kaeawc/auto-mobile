@@ -102,7 +102,7 @@ class ViewHierarchyExtractorTest {
     assertNull(
       wire
         .decodeFromString(WindowInfo.serializer(), """{"id":3,"type":1,"isActive":false}""")
-        .packageName
+        .packageName,
     )
   }
 
@@ -572,7 +572,7 @@ class ViewHierarchyExtractorTest {
     assertFalse(
       verboseJson
         .encodeToString(UIElementInfo.serializer(), UIElementInfo(text = "Plain text"))
-        .contains("semantic-links")
+        .contains("semantic-links"),
     )
     assertTrue(
       verboseJson
@@ -580,7 +580,7 @@ class ViewHierarchyExtractorTest {
           UIElementInfo.serializer(),
           UIElementInfo(semanticLinks = listOf(SemanticLink("Terms", 0, 0, 5))),
         )
-        .contains("semantic-links")
+        .contains("semantic-links"),
     )
   }
 
@@ -624,7 +624,7 @@ class ViewHierarchyExtractorTest {
       extractor.detectNotificationPermissionDialogForTest(
         root,
         "com.android.permissioncontroller",
-      )
+      ),
     )
   }
 
@@ -643,7 +643,7 @@ class ViewHierarchyExtractorTest {
       extractor.detectNotificationPermissionDialogForTest(
         root,
         "com.example.app",
-      )
+      ),
     )
   }
 
@@ -709,7 +709,7 @@ class ViewHierarchyExtractorTest {
           it.errorMessage == null &&
           it.actions == null &&
           it.rangeInfo == null
-      }
+      },
     )
   }
 
@@ -764,7 +764,7 @@ class ViewHierarchyExtractorTest {
     assertEquals(
       "Checked",
       extractor.stateDescriptionFromExtras(
-        mapOf("other" to "x", stateDescriptionExtraKey to "Checked")
+        mapOf("other" to "x", stateDescriptionExtraKey to "Checked"),
       ),
     )
   }
@@ -786,7 +786,7 @@ class ViewHierarchyExtractorTest {
     assertEquals(
       "compose_row_7",
       extractor.testTagFromExtras(
-        mapOf("androidx.compose.ui.semantics.testTag" to "compose_row_7")
+        mapOf("androidx.compose.ui.semantics.testTag" to "compose_row_7"),
       ),
     )
   }
@@ -865,7 +865,7 @@ class ViewHierarchyExtractorTest {
         disableAllFiltering = false,
         occlusionEnabled = true,
         windowCount = 2,
-      )
+      ),
     )
   }
 
@@ -876,7 +876,7 @@ class ViewHierarchyExtractorTest {
         disableAllFiltering = false,
         occlusionEnabled = false,
         windowCount = 2,
-      )
+      ),
     )
   }
 
@@ -887,7 +887,7 @@ class ViewHierarchyExtractorTest {
         disableAllFiltering = true,
         occlusionEnabled = true,
         windowCount = 2,
-      )
+      ),
     )
   }
 
@@ -898,7 +898,7 @@ class ViewHierarchyExtractorTest {
         disableAllFiltering = false,
         occlusionEnabled = true,
         windowCount = 1,
-      )
+      ),
     )
   }
 
@@ -1198,7 +1198,7 @@ class ViewHierarchyExtractorTest {
         ownOverlayMetadata = { pkg, title ->
           asked += pkg to title?.toString()
           OverlayWindowMetadata("floating", opaque = false)
-        }
+        },
       )
     val own = "dev.jasonpearson.automobile.ctrlproxy"
     for (type in
@@ -1248,7 +1248,7 @@ class ViewHierarchyExtractorTest {
             clipboardOverlayHierarchy(),
             windowBounds = bounds(0, 0, 1080, 2400),
           ),
-        )
+        ),
       )
     val filtered = extractor.filterOccludedHierarchyForTest(app, info, 420, "", true)!!
 
@@ -1272,7 +1272,7 @@ class ViewHierarchyExtractorTest {
               clipboardOverlayHierarchy(),
               windowBounds = windowBounds,
             ),
-          )
+          ),
         )
       val filtered = extractor.filterOccludedHierarchyForTest(app, info, 420, "", true)!!
 
@@ -1308,7 +1308,7 @@ class ViewHierarchyExtractorTest {
         listOf(
           extractor.createWindowEntry(420, 0, app),
           extractor.createWindowEntry(423, 3, target, windowBounds = bounds(0, 1291, 295, 1543)),
-        )
+        ),
       )
     val filtered = extractor.filterOccludedHierarchyForTest(app, info, 420, "", true)!!
 
@@ -1324,7 +1324,7 @@ class ViewHierarchyExtractorTest {
         text = "Notifications",
         children =
           listOf(
-            fakeNode("com.android.systemui", text = "Grouped notification", visibleToUser = false)
+            fakeNode("com.android.systemui", text = "Grouped notification", visibleToUser = false),
           ),
       )
     val result =
@@ -1334,7 +1334,7 @@ class ViewHierarchyExtractorTest {
       )
 
     assertTrue(
-      json.encodeToString(ViewHierarchy.serializer(), result).contains("Grouped notification")
+      json.encodeToString(ViewHierarchy.serializer(), result).contains("Grouped notification"),
     )
   }
 
@@ -1361,7 +1361,7 @@ class ViewHierarchyExtractorTest {
             clipboardOverlayHierarchy(),
             windowBounds = bounds(0, 1291, 295, 1543),
           ),
-        )
+        ),
       )
     val filtered = extractor.filterOccludedHierarchyForTest(app, info, 420, "", true)!!
 
@@ -1380,7 +1380,7 @@ class ViewHierarchyExtractorTest {
             contentDesc = "Clipboard",
             resourceId = "com.android.systemui:id/clipboard_ui",
             bounds = bounds(0, 136, 1080, 1517),
-          )
+          ),
         ),
     )
 
@@ -1459,7 +1459,7 @@ class ViewHierarchyExtractorTest {
               occlusionState = "partial",
               occludedBy = "system-ui",
               occludedByViewId = "system-ui-id",
-            )
+            ),
           ),
       )
     assertEquals(expected, actual)
@@ -1533,7 +1533,7 @@ class ViewHierarchyExtractorTest {
           extractor.createWindowEntry(1, 0, app),
           extractor.createWindowEntry(2, 1, overlapping),
           extractor.createWindowEntry(3, 2, disjoint),
-        )
+        ),
       )
 
     assertEquals(
@@ -1569,7 +1569,7 @@ class ViewHierarchyExtractorTest {
           indexedExtractor.createWindowEntry(1, 0, window("app")),
           indexedExtractor.createWindowEntry(2, 1, window("system"), windowType = "system"),
           indexedExtractor.createWindowEntry(3, 2, window("ime"), windowType = "input_method"),
-        )
+        ),
       )
       return stats.occlusionCandidateComparisons.get()
     }
@@ -1602,7 +1602,7 @@ class ViewHierarchyExtractorTest {
         listOf(
           indexedExtractor.createWindowEntry(1, 0, window("app")),
           indexedExtractor.createWindowEntry(2, 1, window("overlay")),
-        )
+        ),
       )
     assertTrue(
       "duplicate rectangles must not multiply index visits: ${stats.occlusionIndexEntriesVisited.get()}",
@@ -1641,7 +1641,7 @@ class ViewHierarchyExtractorTest {
         listOf(
           extractor.createWindowEntry(1, 0, app),
           extractor.createWindowEntry(2, 0, overlay),
-        )
+        ),
       )
     val root =
       extractor.filterOccludedHierarchyForTest(
@@ -2043,7 +2043,7 @@ class ViewHierarchyExtractorTest {
           type = AccessibilityWindowInfo.TYPE_SYSTEM,
           layer = 1,
           hasRoot = true,
-        )
+        ),
       )
     assertNull(extractor.pickPrimaryAppWindowId(windows))
   }
@@ -2183,7 +2183,7 @@ class ViewHierarchyExtractorTest {
               text = "8:33",
               resourceId = "com.android.systemui:id/clock",
               bounds = Rect(21, 0, 107, 63),
-            )
+            ),
           ),
       )
     val windows =
@@ -2252,7 +2252,7 @@ class ViewHierarchyExtractorTest {
             overlay,
             type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
             active = true,
-          )
+          ),
         ),
         null,
         occlusionEnabled = false,
@@ -2289,7 +2289,7 @@ class ViewHierarchyExtractorTest {
             type = AccessibilityWindowInfo.TYPE_SYSTEM,
             focused = true,
             active = true,
-          )
+          ),
         ),
         null,
         occlusionEnabled = false,
@@ -2477,7 +2477,7 @@ class ViewHierarchyExtractorTest {
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(7, 0, discarded, type = AccessibilityWindowInfo.TYPE_SYSTEM, active = true)
+          fakeWindow(7, 0, discarded, type = AccessibilityWindowInfo.TYPE_SYSTEM, active = true),
         ),
         budgetTree("Fallback", 2),
         disableAllFiltering = true,
@@ -2671,7 +2671,7 @@ class ViewHierarchyExtractorTest {
     val result =
       extractor.extractFromAllWindows(
         listOf(
-          fakeWindow(1, 0, budgetTree("System", 0), type = AccessibilityWindowInfo.TYPE_SYSTEM)
+          fakeWindow(1, 0, budgetTree("System", 0), type = AccessibilityWindowInfo.TYPE_SYSTEM),
         ),
         budgetTree("Fallback", 0),
         disableAllFiltering = true,
@@ -2749,7 +2749,7 @@ class ViewHierarchyExtractorTest {
     shadow.setFocused(focused)
     shadow.setActive(active)
     shadow.setBoundsInScreen(
-      bounds ?: Rect(0, 0, 1080, if (type == AccessibilityWindowInfo.TYPE_SYSTEM) 63 else 2400)
+      bounds ?: Rect(0, 0, 1080, if (type == AccessibilityWindowInfo.TYPE_SYSTEM) 63 else 2400),
     )
     return window
   }
@@ -3484,7 +3484,7 @@ class ViewHierarchyExtractorTest {
 
     val regions =
       extractor.detectContentHiddenRegionsAcrossRootsForTest(
-        listOf(firstWindow, duplicateWindow, secondWindow)
+        listOf(firstWindow, duplicateWindow, secondWindow),
       )
 
     assertNotNull(regions)
@@ -3501,12 +3501,12 @@ class ViewHierarchyExtractorTest {
 
   // Helper method to read the visible typed children of a hierarchy node (issue #5471).
   private fun ViewHierarchyExtractor.extractChildrenFromHierarchy(
-    element: UIElementInfo
+    element: UIElementInfo,
   ): List<UIElementInfo> = this.visibleChildren(element)
 
   @Suppress("UNCHECKED_CAST")
   private fun ViewHierarchyExtractor.optimizeHierarchyForTest(
-    element: UIElementInfo
+    element: UIElementInfo,
   ): List<UIElementInfo> {
     val method = this.javaClass.getDeclaredMethod("optimizeHierarchy", UIElementInfo::class.java)
     method.isAccessible = true
@@ -3699,7 +3699,7 @@ class ViewHierarchyExtractorTest {
   }
 
   private fun ViewHierarchyExtractor.buildOcclusionInfoForTest(
-    windowEntries: List<Any>
+    windowEntries: List<Any>,
   ): Map<*, *> {
     val method = this.javaClass.getDeclaredMethod("buildOcclusionInfo", List::class.java)
     method.isAccessible = true
@@ -3747,7 +3747,7 @@ class ViewHierarchyExtractorTest {
   }
 
   private fun ViewHierarchyExtractor.detectContentHiddenRegionsAcrossRootsForTest(
-    elements: List<UIElementInfo>
+    elements: List<UIElementInfo>,
   ): List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>? {
     val method =
       this.javaClass.getDeclaredMethod(

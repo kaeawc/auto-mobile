@@ -137,7 +137,7 @@ class VideoServerArgumentsTest {
           "emulator-5554",
           "--forward-port",
           "61234",
-        )
+        ),
       )
     assertEquals("automobile_video.session-1", options.socketName)
     assertEquals("abcd-efgh-1234", options.token)

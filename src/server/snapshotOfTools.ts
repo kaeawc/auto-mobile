@@ -23,6 +23,7 @@ import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../utils/tempDir";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { ToolRegistry } from "./toolRegistry";
+import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelectionContext";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 
 const finite = z.number().finite();
@@ -100,7 +101,12 @@ export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {
       try {
         const capture =
           dependencies.hierarchyCaptureFactory?.(device) ?? createDeviceHierarchyCapture(device);
-        const snapshot = await capture.capture({ freshness: "fresh" });
+        // A watcher's read (#10830) uses the isolated observer capture: on a held device it only
+        // connects to the running hierarchy service and leaves the holder's client untouched.
+        const snapshot = await capture.capture({
+          freshness: "fresh",
+          ...(isSessionlessDeviceRead() ? { observerMode: true } : {}),
+        });
         const screenSize = {
           width: snapshot.hierarchy.screenWidth,
           height: snapshot.hierarchy.screenHeight,
@@ -112,9 +118,6 @@ export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {
         const screenshot = await (
           dependencies.screenshotFactory?.(device) ?? new TakeScreenshot(device)
         ).execute({ format: "png" });
-        if (screenshot.actionableError) {
-          throw screenshot.actionableError;
-        }
         if (!screenshot.success || !screenshot.path) {
           throw new ActionableError(
             `snapshotOf screenshot capture failed: ${screenshot.error ?? "no path"}`,
@@ -159,6 +162,10 @@ export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {
         throw toActionableError(error, "Failed to create snapshotOf crop");
       }
     },
-    { defaultEnabled: false },
+    {
+      defaultEnabled: false,
+      // A crop of a fresh capture; a non-holder watches a held device read-only (#10830).
+      deviceReadOnly: true,
+    },
   );
 }

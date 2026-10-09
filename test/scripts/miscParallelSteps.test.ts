@@ -3,9 +3,8 @@ import { indexOfNamed, indexOfWaitOn, loadJobSteps, stepNamed } from "../helpers
 
 // Guards issue #4130: the remaining parallel-steps wins.
 //
-//  7d The two cache restores in `mcp-build-and-test` and `ts-code-coverage` hit
-//     disjoint paths (~/.bun/install/cache + node_modules vs .turbo), so they
-//     overlap each other. The barrier MUST precede `Setup Auto Mobile`: that
+//  7d The two cache restores in `mcp-build-and-test` hit disjoint paths
+//     (~/.bun/install/cache vs .turbo), so they overlap each other. The barrier MUST precede `Setup Auto Mobile`: that
 //     composite runs `turbo run build`, which reads and writes the same .turbo
 //     directory the cache restores — racing them would miss or corrupt it.
 //  7e hadolint pulls a Docker image and has no consumer, so it is hoisted to
@@ -19,37 +18,61 @@ import { indexOfNamed, indexOfWaitOn, loadJobSteps, stepNamed } from "../helpers
 const PR_WORKFLOW = ".github/workflows/pull_request.yml";
 const DOCS_WORKFLOW = ".github/workflows/docs.yml";
 
-for (const jobId of ["mcp-build-and-test", "ts-code-coverage"]) {
-  describe(`#4130 cache fan-out (${jobId})`, () => {
-    const steps = loadJobSteps(PR_WORKFLOW, jobId);
+describe("#4130 cache fan-out (mcp-build-and-test)", () => {
+  const steps = loadJobSteps(PR_WORKFLOW, "mcp-build-and-test");
 
-    test("the job exists and has steps", () => {
-      expect(steps.length).toBeGreaterThan(0);
-    });
-
-    test("both cache restores are backgrounded with ids", () => {
-      const bun = stepNamed(steps, "Cache Bun dependencies");
-      expect(bun?.background).toBe(true);
-      expect(bun?.id).toBe("cache-bun");
-
-      const turbo = stepNamed(steps, "Cache Turborepo");
-      expect(turbo?.background).toBe(true);
-      expect(turbo?.id).toBe("cache-turbo");
-    });
-
-    test("one barrier covers both and precedes Setup Auto Mobile", () => {
-      // Load-bearing: the composite runs `turbo run build` against .turbo.
-      const waitBun = indexOfWaitOn(steps, "cache-bun");
-      const waitTurbo = indexOfWaitOn(steps, "cache-turbo");
-      const setupIndex = indexOfNamed(steps, "Setup Auto Mobile");
-
-      expect(waitBun).toBeGreaterThanOrEqual(0);
-      expect(waitBun).toBe(waitTurbo);
-      expect(setupIndex).toBeGreaterThanOrEqual(0);
-      expect(waitBun).toBeLessThan(setupIndex);
-    });
+  test("the job exists and has steps", () => {
+    expect(steps.length).toBeGreaterThan(0);
   });
-}
+
+  test("both cache restores are backgrounded with ids", () => {
+    const bun = stepNamed(steps, "Cache Bun dependencies");
+    expect(bun?.background).toBe(true);
+    expect(bun?.id).toBe("cache-bun");
+
+    const turbo = stepNamed(steps, "Cache Turborepo");
+    expect(turbo?.background).toBe(true);
+    expect(turbo?.id).toBe("cache-turbo");
+  });
+
+  test("the Bun package store is restore-only; main primes it", () => {
+    // A PR-side save wrote a ~100 MB PR-scoped entry no other PR could read
+    // and churned the repo cache; prime-bun-cache.yml saves it on main.
+    expect(stepNamed(steps, "Cache Bun dependencies")?.uses).toBe("actions/cache/restore@v5");
+  });
+
+  test("one barrier covers both and precedes Setup Auto Mobile", () => {
+    // Load-bearing: the composite runs `turbo run build` against .turbo.
+    const waitBun = indexOfWaitOn(steps, "cache-bun");
+    const waitTurbo = indexOfWaitOn(steps, "cache-turbo");
+    const setupIndex = indexOfNamed(steps, "Setup Auto Mobile");
+
+    expect(waitBun).toBeGreaterThanOrEqual(0);
+    expect(waitBun).toBe(waitTurbo);
+    expect(setupIndex).toBeGreaterThanOrEqual(0);
+    expect(waitBun).toBeLessThan(setupIndex);
+  });
+});
+
+describe("#4130 turbo cache barrier (ts-build-and-test)", () => {
+  const steps = loadJobSteps(PR_WORKFLOW, "ts-build-and-test");
+
+  test("restores .turbo in the background without a Bun dependency cache", () => {
+    // Linux frozen installs take ~1 s; the PR-scoped Bun cache was never
+    // restored by another PR and only churned the repo cache.
+    expect(stepNamed(steps, "Cache Bun dependencies")).toBeUndefined();
+    const turbo = stepNamed(steps, "Cache Turborepo");
+    expect(turbo?.background).toBe(true);
+    expect(turbo?.id).toBe("cache-turbo");
+  });
+
+  test("the turbo barrier precedes Setup Auto Mobile", () => {
+    const waitTurbo = indexOfWaitOn(steps, "cache-turbo");
+    const setupIndex = indexOfNamed(steps, "Setup Auto Mobile");
+    expect(waitTurbo).toBeGreaterThanOrEqual(0);
+    expect(waitTurbo).toBeLessThan(setupIndex);
+  });
+});
 
 describe("#4130 hadolint hoist (fast-validation)", () => {
   const steps = loadJobSteps(PR_WORKFLOW, "fast-validation");

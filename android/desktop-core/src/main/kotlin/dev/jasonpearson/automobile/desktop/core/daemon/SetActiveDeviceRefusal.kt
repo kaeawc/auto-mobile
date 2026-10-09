@@ -31,8 +31,10 @@ enum class SetActiveDeviceRefusal {
 
 private const val SESSION_OWNERSHIP_LOST_CODE = "session_ownership_lost"
 
-// The daemon has no structured code for an ownership refusal (only `session_ownership_lost` for a
-// terminal session), so its wordings are matched:
+// The daemon's typed ownership refusal (#10832): `setActiveDevice` and the pool bind carry
+// [DEVICE_OWNED_BY_OTHER_SESSION_CODE] as a top-level `code` in the tool error payload, like
+// `input/*` and device-aware `tools/call`. Older daemons sent ownership refusals as plain
+// text, and the autolock wordings still are, so those wordings are matched as a fallback:
 //  - `Device '<id>' is already assigned to session <uuid>` (src/server/setActiveDevice.ts,
 //    src/daemon/devicePool.ts)
 //  - `Device '<id>' is already assigned to another session.` (devicePool.ts,
@@ -41,7 +43,7 @@ private const val SESSION_OWNERSHIP_LOST_CODE = "session_ownership_lost"
 // The id is matched with `.+` because a device id may itself contain a quote.
 private val HELD_BY_ANOTHER_SESSION_MESSAGE =
   Regex(
-    """Device '.+' is (?:already assigned to (?:session |another session)|locked to another session)"""
+    """Device '.+' is (?:already assigned to (?:session |another session)|locked to another session)""",
   )
 
 // `TerminalSessionError`, which `toActionableError` may wrap into a plain text error.
@@ -63,11 +65,13 @@ internal fun classifySetActiveDeviceRefusal(
       ?.mapNotNull { it as? JsonObject }
       ?.firstOrNull { (it["type"] as? JsonPrimitive)?.contentOrNull == "text" }
       ?.let { (it["text"] as? JsonPrimitive)?.contentOrNull } ?: return null
-  val error =
-    (runCatching { json.parseToJsonElement(text) }.getOrNull() as? JsonObject)?.get("error")
-  val code = ((error as? JsonObject)?.get("code") as? JsonPrimitive)?.contentOrNull
+  val payload = runCatching { json.parseToJsonElement(text) }.getOrNull() as? JsonObject
+  val code = ((payload?.get("error") as? JsonObject)?.get("code") as? JsonPrimitive)?.contentOrNull
+  val topLevelCode = (payload?.get("code") as? JsonPrimitive)?.contentOrNull
   return when {
     code == SESSION_OWNERSHIP_LOST_CODE -> SetActiveDeviceRefusal.SESSION_RELEASED
+    topLevelCode == DEVICE_OWNED_BY_OTHER_SESSION_CODE ->
+      SetActiveDeviceRefusal.HELD_BY_ANOTHER_SESSION
     TERMINAL_SESSION_MESSAGE.containsMatchIn(text) -> SetActiveDeviceRefusal.SESSION_RELEASED
     HELD_BY_ANOTHER_SESSION_MESSAGE.containsMatchIn(text) ->
       SetActiveDeviceRefusal.HELD_BY_ANOTHER_SESSION

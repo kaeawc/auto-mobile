@@ -91,7 +91,7 @@ class FailuresDataSourceOffMainThreadTest {
       resumedOn += currentCoroutineContext()[ContinuationInterceptor] as? CoroutineDispatcher
       assertTrue(source.getFailureGroups(dateRange = null, type = null) is Result.Success)
       assertTrue(
-        source.getTimelineData(DateRange.TwentyFourHours, TimeAggregation.Hour) is Result.Success
+        source.getTimelineData(DateRange.TwentyFourHours, TimeAggregation.Hour) is Result.Success,
       )
       assertTrue(source.pollNewNotifications() is Result.Success)
       assertTrue(source.acknowledgeNotifications(listOf(1, 2)) is Result.Success)
@@ -316,7 +316,7 @@ class FailuresDataSourceOffMainThreadTest {
     }
 
     override fun pollNotifications(
-      request: FailuresNotificationsRequest
+      request: FailuresNotificationsRequest,
     ): FailuresNotificationsResponse =
       call(FailuresNotificationsResponse(success = true, notifications = emptyList()))
 
@@ -332,7 +332,7 @@ class FailuresDataSourceOffMainThreadTest {
 
   /** [AutoMobileClient] whose only interesting member is the blocking [readResource]. */
   private class ThreadRecordingClient(
-    private val delegate: FakeAutoMobileClient = FakeAutoMobileClient()
+    private val delegate: FakeAutoMobileClient = FakeAutoMobileClient(),
   ) : AutoMobileClient by delegate {
     val threadNames = CopyOnWriteArrayList<String>()
     val uris = CopyOnWriteArrayList<String>()
@@ -357,7 +357,7 @@ class FailuresDataSourceOffMainThreadTest {
         }
       }
       return listOf(
-        McpResourceContent(uri = uri, mimeType = "application/json", text = responseText)
+        McpResourceContent(uri = uri, mimeType = "application/json", text = responseText),
       )
     }
   }

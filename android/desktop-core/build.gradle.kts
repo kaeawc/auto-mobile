@@ -58,7 +58,7 @@ val generateDesktopBuildInfo =
             const val VERSION: String = "${versionName.get()}"
           }
           """
-            .trimIndent() + "\n"
+            .trimIndent() + "\n",
         )
     }
   }
@@ -142,6 +142,20 @@ tasks.withType<Test>().configureEach {
   screenshotProperties.forEach { key ->
     System.getProperty(key)?.let { value -> systemProperty(key, value) }
   }
+
+  // DesktopWireFixtureCompositionTest replays the desktop<->daemon wire fixtures that
+  // test/daemon/desktopWireContract.test.ts generates (#10669). Declaring them as an input keeps a
+  // fixture-only regeneration from reusing a cached test result.
+  inputs
+    .dir(rootDir.resolve("../test/fixtures/desktop-wire"))
+    .withPropertyName("desktopWireFixtures")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+  // DaemonIsolationPathVectorsTest reads the daemon state-path vectors shared with the TypeScript
+  // daemon, the JUnit runner and XCTestRunner (#10906).
+  inputs
+    .file(rootDir.resolve("../test/fixtures/daemon-isolation-paths.json"))
+    .withPropertyName("daemonIsolationPathVectors")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
 
   // Run this module's tests in a single worker JVM (#5422). desktop-core's Compose UI tests
   // (`runComposeUiTest`) drive real dispatchers, a frame/animation clock, and gesture timing;

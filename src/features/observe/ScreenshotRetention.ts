@@ -20,26 +20,16 @@ import {
 export const SCREENSHOT_PATH_MIN_LIFETIME_MS = 10 * 60 * 1000;
 export const MAX_SCREENSHOT_PATH_PROTECTIONS = 4096;
 const SWEEP_INTERVAL_MS = 60_000;
+/**
+ * At capacity, the oldest unreferenced screenshots are evicted before their guarantee expires
+ * rather than failing the new capture (#8758). A file touched (written or returned) this
+ * recently is never evicted: it may be a frame another process has not published yet.
+ */
+export const SCREENSHOT_PRESSURE_EVICTION_MIN_AGE_MS = 5_000;
 /** Reconcile once per admission when its projected bytes or count reach 90% of a cap. */
 export const SCREENSHOT_INVENTORY_RECONCILE_RATIO = 0.9;
 const screenshotName =
   /^(?:screenshot_.+\.(?:png|jpe?g|webp)(?:\.temp)?|snapshot-of-.+\.png|crop-[A-Za-z0-9_-]+\.png)$/;
-
-export class ScreenshotRetentionCapacityError extends ActionableError {
-  readonly code = "SCREENSHOT_RETENTION_CAPACITY";
-  override readonly name = "ScreenshotRetentionCapacityError";
-  constructor(
-    readonly liveBytes: number,
-    readonly liveCount: number,
-    readonly earliestExpiresAt: number,
-    readonly cap = SCREENSHOT_CACHE_MAX_SIZE_BYTES,
-    readonly countCap = MAX_SCREENSHOT_PATH_PROTECTIONS,
-  ) {
-    super(
-      `Screenshot retention capacity reached (${cap} bytes / ${countCap} files; ${liveBytes} bytes / ${liveCount} files retained). Retry after ${new Date(earliestExpiresAt).toISOString()} when the earliest guarantee expires; cleanup failures or cache references may delay space becoming available.`,
-    );
-  }
-}
 
 export interface ScreenshotRetentionWrite {
   size: number;
@@ -176,16 +166,9 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
     this.start(directory);
     const transition = this.serialize(state, async () => {
       await this.prepareAdmission(directory, state, operation.size);
-      this.assertCapacity(state, true);
+      await this.evictUnderPressure(state, operation.size);
       await this.performWrite(path, operation, state);
       this.addFile(state, { path, size: operation.size, mtimeMs: this.timer.now() });
-      try {
-        // The new unpublished frame can be rolled back without breaking a lease.
-        this.assertCapacity(state, false);
-      } catch (error) {
-        await this.rollback(path, operation, state);
-        throw toActionableError(error, "Screenshot capacity check failed");
-      }
     }).then(() => false);
     const key = this.key(path);
     this.removals.set(key, transition);
@@ -413,6 +396,79 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
     }
     return remaining;
   }
+  /** Last write or return of a file; a returned path's lease began this long ago. */
+  private lastTouched(file: ScreenshotCacheFile, state: DirectoryRetention): number {
+    const key = this.key(file.path);
+    const lease = this.deadlines.get(key);
+    return Math.max(
+      file.mtimeMs,
+      lease === undefined ? 0 : lease - SCREENSHOT_PATH_MIN_LIFETIME_MS,
+      state.recovered?.has(key) ? this.startedAt : 0,
+    );
+  }
+  /**
+   * Make room for an incoming frame by evicting least-recently-touched files, even inside their
+   * guarantee. Refusing the capture instead fails observe outright, which is worse than an
+   * early eviction (#8758). Files no live cache references and not touched in the last 5 s go
+   * first; if they are not enough, eviction continues into referenced and recent files, still
+   * least recently touched first. Only writes in flight are never deleted. A frame that cannot
+   * fit even then (bigger than the cap, or an unlink failed) is admitted anyway with a warning.
+   */
+  private async evictUnderPressure(state: DirectoryRetention, incoming: number): Promise<void> {
+    const fits = () =>
+      state.bytes + incoming <= SCREENSHOT_CACHE_MAX_SIZE_BYTES &&
+      (state.files?.size ?? 0) + 1 <= this.countCap;
+    if (fits()) {
+      return;
+    }
+    const references = await this.references();
+    const newest = this.timer.now() - SCREENSHOT_PRESSURE_EVICTION_MIN_AGE_MS;
+    const candidates = [...(state.files?.values() ?? [])]
+      .filter((file) => !this.removals.has(this.key(file.path)))
+      .map((file) => {
+        const touched = this.lastTouched(file, state);
+        const spared = touched > newest || references.has(this.key(file.path));
+        return { file, touched, spared };
+      })
+      .sort((a, b) => Number(a.spared) - Number(b.spared) || a.touched - b.touched);
+    let evicted = 0;
+    let sparedEvicted = 0;
+    for (const { file, spared } of candidates) {
+      if (fits()) {
+        break;
+      }
+      if (await this.evict(file.path, state)) {
+        evicted += 1;
+        sparedEvicted += spared ? 1 : 0;
+      }
+    }
+    if (evicted > 0) {
+      logger.warn(
+        `Screenshot retention at capacity; evicted ${evicted} least-recently-used screenshots before their guarantee expired (${sparedEvicted} were referenced or recently used)`,
+      );
+    }
+    if (!fits()) {
+      logger.warn(
+        `Screenshot retention cannot fit a ${incoming}-byte capture within ${SCREENSHOT_CACHE_MAX_SIZE_BYTES} bytes / ${this.countCap} files; admitting it anyway`,
+      );
+    }
+  }
+  private async evict(path: string, state: DirectoryRetention): Promise<boolean> {
+    const key = this.key(path);
+    // Register the removal so a concurrent protect() waits for it instead of leasing a ghost.
+    const removal = this.unlink(path, state);
+    this.removals.set(key, removal);
+    try {
+      const removed = await removal;
+      if (removed) {
+        this.dropFile(state, path);
+        this.deadlines.delete(key);
+      }
+      return removed;
+    } finally {
+      this.removals.delete(key);
+    }
+  }
   private async unlink(path: string, state: DirectoryRetention): Promise<boolean> {
     try {
       await state.fileSystem.unlink(path);
@@ -427,44 +483,6 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
         }
       }
       return false;
-    }
-  }
-  private assertCapacity(state: DirectoryRetention, before: boolean): void {
-    // Include expired files whose unlink failed or which caches still reference:
-    // failures must not permit unlimited disk growth on successive admissions.
-    const bytes = state.bytes;
-    const count = state.files?.size ?? 0;
-    const over = before
-      ? bytes >= SCREENSHOT_CACHE_MAX_SIZE_BYTES || count >= this.countCap
-      : bytes > SCREENSHOT_CACHE_MAX_SIZE_BYTES || count > this.countCap;
-    if (over) {
-      const earliest = Math.min(
-        ...[...(state.files?.values() ?? [])].map((file) => this.expiry(file, state)),
-      );
-      throw new ScreenshotRetentionCapacityError(
-        bytes,
-        count,
-        Number.isFinite(earliest) ? earliest : this.timer.now() + SCREENSHOT_PATH_MIN_LIFETIME_MS,
-        SCREENSHOT_CACHE_MAX_SIZE_BYTES,
-        this.countCap,
-      );
-    }
-  }
-  private async rollback(
-    path: string,
-    operation: ScreenshotRetentionWrite,
-    state: DirectoryRetention,
-  ): Promise<void> {
-    try {
-      await operation.remove();
-      this.dropFile(state, path);
-    } catch (error) {
-      logger.warn(`Failed to remove unpublished screenshot: ${path}`, error);
-      if (this.directoryChanged(error)) {
-        state.reconcileNeeded = true;
-        this.dropFile(state, path);
-        await this.inventory(nodePath.dirname(path), state);
-      }
     }
   }
 }
@@ -515,14 +533,4 @@ export async function writeRetainedScreenshot(
     write: () => writer.write(path, bytes),
     remove: () => writer.remove(path),
   });
-}
-
-/** Preserve typed capture failures when a caller explicitly requires a screenshot. */
-export function requireScreenshotSuccess(
-  result: { actionableError?: ActionableError },
-  required: boolean,
-): void {
-  if (required && result.actionableError) {
-    throw result.actionableError;
-  }
 }

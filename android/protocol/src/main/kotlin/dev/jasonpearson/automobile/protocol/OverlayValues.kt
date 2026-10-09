@@ -31,15 +31,26 @@ sealed class OverlayFontFamily {
   data class Asset(val id: String) : OverlayFontFamily()
 }
 
-/** A dp number, or a Material 3 Shapes step (`none`, `extraSmall` ... `extraLarge`, `full`). */
+/**
+ * A dp number, a Material 3 Shapes step (`none`, `extraSmall` ... `extraLarge`, `full`), or
+ * per-corner dp radii where an omitted corner is square.
+ */
 @Serializable(with = OverlayCornerRadiusSerializer::class)
 sealed class OverlayCornerRadius {
   data class Dp(val dp: Double) : OverlayCornerRadius()
 
   data class Token(val name: String) : OverlayCornerRadius()
 
+  data class Corners(
+    val topStart: Double? = null,
+    val topEnd: Double? = null,
+    val bottomEnd: Double? = null,
+    val bottomStart: Double? = null,
+  ) : OverlayCornerRadius()
+
   companion object {
     val TOKENS = setOf("none", "extraSmall", "small", "medium", "large", "extraLarge", "full")
+    val CORNERS = listOf("topStart", "topEnd", "bottomEnd", "bottomStart")
   }
 }
 
@@ -142,6 +153,7 @@ object OverlayFontFamilySerializer :
 object OverlayCornerRadiusSerializer :
   OverlayJsonValueSerializer<OverlayCornerRadius>("OverlayCornerRadius") {
   override fun fromJson(value: JsonElement): OverlayCornerRadius {
+    if (value is JsonObject) return corners(value)
     val primitive = value as? JsonPrimitive ?: throw SerializationException("Invalid cornerRadius")
     if (primitive.isString) {
       if (primitive.content !in OverlayCornerRadius.TOKENS)
@@ -158,7 +170,32 @@ object OverlayCornerRadiusSerializer :
     when (value) {
       is OverlayCornerRadius.Dp -> JsonPrimitive(value.dp)
       is OverlayCornerRadius.Token -> JsonPrimitive(value.name)
+      is OverlayCornerRadius.Corners ->
+        buildJsonObject {
+          value.topStart?.let { put("topStart", it) }
+          value.topEnd?.let { put("topEnd", it) }
+          value.bottomEnd?.let { put("bottomEnd", it) }
+          value.bottomStart?.let { put("bottomStart", it) }
+        }
     }
+
+  private fun corners(value: JsonObject): OverlayCornerRadius.Corners {
+    val unknown = value.keys - OverlayCornerRadius.CORNERS.toSet()
+    if (unknown.isNotEmpty()) throw SerializationException("Unknown corner $unknown")
+    fun corner(name: String): Double? {
+      val element = value[name] ?: return null
+      val number = (element as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull
+      if (number == null || !number.isFinite() || number < 0.0)
+        throw SerializationException("Invalid $name radius")
+      return number
+    }
+    return OverlayCornerRadius.Corners(
+      corner("topStart"),
+      corner("topEnd"),
+      corner("bottomEnd"),
+      corner("bottomStart"),
+    )
+  }
 }
 
 object OverlayDetentSerializer : OverlayJsonValueSerializer<OverlayDetent>("OverlayDetent") {

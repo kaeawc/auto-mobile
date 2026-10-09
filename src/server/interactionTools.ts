@@ -5,6 +5,7 @@ import { toActionableError } from "../models/ActionableError";
 import { nodeAttributes } from "../models/ViewHierarchyResult";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
+import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelectionContext";
 import { TapOnElement } from "../features/action/TapOnElement";
 import {
   LONG_PRESS_MIN_MS,
@@ -315,6 +316,13 @@ export const keyboardSchema = addDeviceTargetingToSchema(
     })
     .strict(),
 );
+
+/** Keyboard actions that change no UI (#10965): reads, allowed without holding the device. */
+const KEYBOARD_READ_ACTIONS: ReadonlySet<KeyboardArgs["action"]> = new Set([
+  "detect",
+  "listImes",
+  "listProfiles",
+]);
 
 export async function setKeyboardProfileForTool(
   device: BootedDevice,
@@ -651,6 +659,7 @@ export const tapAtSchema = withJsonSchemaOverride(
         .enum(["tap", "longPress", "doubleTap"])
         .optional()
         .describe("Coordinate gesture (default: tap)"),
+      layer: hierarchyLayerSchema.optional(),
       durationMs: z
         .number()
         .int()
@@ -905,6 +914,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
             `Speed multiplier for return swipe (> ${SWIPE_RETURN_SPEED_EXCLUSIVE_MIN}, <= ${SWIPE_RETURN_SPEED_MAX}; default: 1); return duration <= ${SWIPE_RETURN_DURATION_MAX_MS} ms and total boomerang <= ${SWIPE_BOOMERANG_MAX_MS} ms`,
           ),
         speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
+        layer: hierarchyLayerSchema.optional(),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
         // its own.
@@ -975,6 +985,7 @@ export const pinchOnSchema = withJsonSchemaOverride(
             "Nested container scope; selectionStrategy (first/random/unique) is supported only inside each container level, not at the top level",
           ),
         autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
+        layer: hierarchyLayerSchema.optional(),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
         // its own.
@@ -989,6 +1000,7 @@ export const pinchOnSchema = withJsonSchemaOverride(
 export const selectAllTextSchema = addDeviceTargetingToSchema(
   z
     .object({
+      layer: hierarchyLayerSchema.optional(),
       // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
       // not required — a device handle from getAndroid/getApple is sufficient on
       // its own.
@@ -1620,7 +1632,10 @@ export function formatRecentAppsMessage(result: { success?: boolean; error?: str
 }
 
 export function formatSwipeOnMessage(
-  result: Pick<SwipeOnToolPayload, "success" | "error" | "found" | "scrollIterations">,
+  result: Pick<
+    SwipeOnToolPayload,
+    "success" | "error" | "found" | "scrollIterations" | "navigated"
+  >,
   direction: string,
 ): string {
   if (!result.success) {
@@ -1628,8 +1643,12 @@ export function formatSwipeOnMessage(
     // non-empty fallback, otherwise the tool returns a blank message (#4183 P4).
     return result.error || `Swipe ${direction} failed`;
   }
-  return result.found
-    ? `Swiped ${direction} and found element after ${result.scrollIterations ?? 1} swipe(s)`
+  if (result.found) {
+    return `Swiped ${direction} and found element after ${result.scrollIterations ?? 1} swipe(s)`;
+  }
+  // A swipe that opened another screen did not scroll; say so instead of "Swiped up".
+  return result.navigated
+    ? `Swiped ${direction}, but the screen changed instead of scrolling (see warning)`
     : `Swiped ${direction}`;
 }
 
@@ -1686,6 +1705,7 @@ export async function swipeOnHandler(
       boomerang: args.boomerang,
       apexPause: args.apexPause,
       returnSpeed: args.returnSpeed,
+      layer: args.layer,
     },
     progress,
     signal,
@@ -1751,6 +1771,7 @@ export async function pinchOnHandler(
       includeSystemInsets: args.includeSystemInsets,
       container: args.container,
       autoTarget: args.autoTarget,
+      layer: args.layer,
     },
     progress,
     signal,
@@ -1870,6 +1891,47 @@ export function setHitTestObservationFactory(
 
 export function resetHitTestObservationFactory(): void {
   hitTestObservationFactory = (device) => new RealObserveScreen(device);
+}
+
+type HitTestDeviceReader = Pick<RealObserveScreen, "executeDeviceRead">;
+let hitTestDeviceReadFactory: (device: BootedDevice, display?: string) => HitTestDeviceReader = (
+  device,
+  display,
+) => new RealObserveScreen(device, undefined, { display, deviceReadOnly: true });
+
+/** The observer-capture reader hitTest uses on the read-only device path (#10965). */
+export function setHitTestDeviceReadFactory(
+  factory: (device: BootedDevice, display?: string) => HitTestDeviceReader,
+): void {
+  hitTestDeviceReadFactory = factory;
+}
+
+export function resetHitTestDeviceReadFactory(): void {
+  hitTestDeviceReadFactory = (device, display) =>
+    new RealObserveScreen(device, undefined, { display, deviceReadOnly: true });
+}
+
+/**
+ * hitTest's observation. A watcher of a held device (the read-only device path) reads through the
+ * observer capture, connect-only, like `observe {deviceId}`; it never touches the holder's session
+ * pipeline or cache (#10965). Every other caller reads the session pipeline's cached-ok capture.
+ */
+async function readHitTestObservation(
+  device: BootedDevice,
+  display: string | undefined,
+  signal: AbortSignal | undefined,
+) {
+  if (isSessionlessDeviceRead()) {
+    return await hitTestDeviceReadFactory(device, display).executeDeviceRead(signal, "none");
+  }
+  return await hitTestObservationFactory(device).execute({
+    display,
+    freshness: "cached-ok",
+    skipScreenshot: true,
+    skipAccessibilityAudit: true,
+    skipPerformanceAudit: true,
+    skipRecompositionTracking: true,
+  });
 }
 
 const VISIBLE_HIERARCHY_TEXT_KEYS = new Set([
@@ -2233,6 +2295,7 @@ export async function tapAtHandler(
       snapshotId: args.snapshotId,
       action: args.action,
       durationMs: args.durationMs,
+      layer: args.layer,
     },
     progress,
     signal,
@@ -2253,15 +2316,13 @@ export async function tapAtHandler(
   return result.success ? response : { ...response, isError: true as const };
 }
 
-export async function hitTestHandler(device: BootedDevice, args: z.infer<typeof hitTestSchema>) {
-  const observation = await hitTestObservationFactory(device).execute({
-    display: args.display,
-    freshness: "cached-ok",
-    skipScreenshot: true,
-    skipAccessibilityAudit: true,
-    skipPerformanceAudit: true,
-    skipRecompositionTracking: true,
-  });
+export async function hitTestHandler(
+  device: BootedDevice,
+  args: z.infer<typeof hitTestSchema>,
+  _progress?: ProgressCallback,
+  signal?: AbortSignal,
+) {
+  const observation = await readHitTestObservation(device, args.display, signal);
   if (args.snapshotId) {
     const staleReason = snapshotReferences.staleReason(
       args.snapshotId,
@@ -2418,13 +2479,15 @@ export function resetSelectAllTextFactory(): void {
 
 export async function selectAllTextHandler(
   device: BootedDevice,
-  _args: SelectAllTextArgs,
+  args: SelectAllTextArgs,
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
   try {
     const selectAllText = selectAllTextFactory(device);
-    const result: SelectAllTextResult = await selectAllText.execute(progress, signal);
+    const result: SelectAllTextResult = await selectAllText.execute(progress, signal, {
+      layer: args.layer,
+    });
 
     const message = result.success
       ? "Selected all text in focused input field"
@@ -2513,6 +2576,23 @@ export function resetSetPostureFactory(): void {
   setPostureFactory = (device) => new SetPosture(device);
 }
 
+export function formatSetPostureMessage(result: SetPostureOutput): string {
+  if ("status" in result) {
+    return result.message;
+  }
+  const message =
+    result.hingeAngle !== undefined
+      ? result.observedHingeAngle === undefined
+        ? `Requested hinge angle ${result.hingeAngle} degrees; the resulting angle could not be verified (posture ${result.posture})`
+        : Math.abs(result.observedHingeAngle - result.hingeAngle) > 1
+          ? `Requested hinge angle ${result.hingeAngle} degrees; the device reports ${result.observedHingeAngle} degrees (posture ${result.posture})`
+          : `Set hinge angle to ${result.hingeAngle} degrees; device reports posture ${result.posture}${result.postureReason ? ` (${result.postureReason})` : ""}`
+      : `Set device posture to ${result.posture}`;
+  return result.keyguardDismissed
+    ? `${message}; dismissed the swipe keyguard the change raised (the device was unlocked and has no lock credential)`
+    : message;
+}
+
 export async function setPostureHandler(
   device: BootedDevice,
   args: {
@@ -2543,17 +2623,7 @@ export async function setPostureHandler(
             signal,
           })
         : await action.execute(args.posture!, args.displayPreset, signal);
-    const message =
-      "status" in result
-        ? result.message
-        : result.hingeAngle !== undefined
-          ? result.observedHingeAngle === undefined
-            ? `Requested hinge angle ${result.hingeAngle} degrees; the resulting angle could not be verified (posture ${result.posture})`
-            : Math.abs(result.observedHingeAngle - result.hingeAngle) > 1
-              ? `Requested hinge angle ${result.hingeAngle} degrees; the device reports ${result.observedHingeAngle} degrees (posture ${result.posture})`
-              : `Set hinge angle to ${result.hingeAngle} degrees; device reports posture ${result.posture}${result.postureReason ? ` (${result.postureReason})` : ""}`
-          : `Set device posture to ${result.posture}`;
-    return createStructuredToolResponse({ message, ...result });
+    return createStructuredToolResponse({ message: formatSetPostureMessage(result), ...result });
   } catch (error) {
     throw toActionableError(error, "Failed to set device posture");
   }
@@ -3713,7 +3783,9 @@ export function registerInteractionTools() {
     "Preview hierarchy-bounds candidates at a platform-native screen point; no input is dispatched and the actual event recipient is unknown.",
     hitTestSchema,
     hitTestHandler,
-    { defaultEnabled: false },
+    // Dispatches no input: a read (#10965). On a held device it reads through the observer
+    // capture (`readHitTestObservation`), never the holder's session pipeline (#10828).
+    { defaultEnabled: false, deviceReadOnly: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3758,7 +3830,12 @@ export function registerInteractionTools() {
     "Open, close, detect, list/select installed Android IMEs, or switch the AutoMobile typing profile",
     keyboardSchema,
     keyboardHandler,
-    { defaultEnabled: true, outputSchema: keyboardResultSchema },
+    {
+      defaultEnabled: true,
+      outputSchema: keyboardResultSchema,
+      // detect, listImes and listProfiles change no UI: reads (#10965). The rest are control.
+      deviceReadOnly: (args: KeyboardArgs) => KEYBOARD_READ_ACTIONS.has(args.action),
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3800,6 +3877,7 @@ export function registerInteractionTools() {
     "Clipboard operations (copy/paste/clear/get)",
     clipboardSchema,
     clipboardHandler,
-    { defaultEnabled: false },
+    // get changes no UI: a read (#10965). copy, paste and clear are control.
+    { defaultEnabled: false, deviceReadOnly: (args: ClipboardArgs) => args.action === "get" },
   );
 }

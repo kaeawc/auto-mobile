@@ -405,6 +405,34 @@ public final class GesturePerformer: GesturePerforming {
         return nil
     }
 
+    /// Query sequencing shared with the XCUI adapter, so host tests cover budget forwarding
+    /// through both native fields and custom wrappers without contacting an application.
+    nonisolated static func resolveFocusedTextElement<Element, OtherElements: Sequence>(
+        checkBudget: () throws -> Void,
+        predicateMatch: () throws -> Element?,
+        nativeQueries: [() throws -> [Element]],
+        otherQuery: () throws -> OtherElements,
+        nativeHasFocus: (Element) throws -> Bool,
+        otherHasFocus: (Element) throws -> Bool
+    )
+        throws -> Element? where OtherElements.Element == Element
+    {
+        try checkBudget()
+        if let match = try predicateMatch() { return match }
+        for query in nativeQueries {
+            try checkBudget()
+            if let focused = try firstFocusedCandidate(
+                in: query(), checkBudget: checkBudget, hasFocus: nativeHasFocus
+            ) {
+                return focused
+            }
+        }
+        try checkBudget()
+        return try firstFocusedCandidate(
+            in: otherQuery(), checkBudget: checkBudget, hasFocus: otherHasFocus
+        )
+    }
+
     /// The runner supplies XCUITest operations; host tests supply fast clock-driven fakes.
     nonisolated static func performHorizontalArrow<C: Clock, Element>(
         clock: C, key: String,
@@ -1625,38 +1653,25 @@ public final class GesturePerformer: GesturePerforming {
             throws -> XCUIElement?
         {
             try catchingObjCException {
-                try checkBudget()
-                let byPredicate = app.descendants(matching: .any)
-                    .matching(NSPredicate(format: "hasKeyboardFocus == true"))
-                    .firstMatch
-                if byPredicate.exists {
-                    return byPredicate
-                }
-
-                let queries: [XCUIElementQuery] = [
-                    app.textFields,
-                    app.secureTextFields,
-                    app.textViews,
-                    app.searchFields,
-                ]
-                for query in queries {
-                    try checkBudget()
-                    let candidates = query.allElementsBoundByIndex
-                    if let focused = try Self.firstFocusedCandidate(
-                        in: candidates, checkBudget: checkBudget,
-                        hasFocus: { (try? $0.snapshot())?.hasFocus == true }
-                    ) {
-                        return focused
-                    }
-                }
-
-                try checkBudget()
-                let otherQuery = app.otherElements
-                let otherCount = otherQuery.count
-                return try Self.firstFocusedCandidate(
-                    in: (0 ..< otherCount).lazy.map { otherQuery.element(boundBy: $0) },
+                try Self.resolveFocusedTextElement(
                     checkBudget: checkBudget,
-                    hasFocus: { candidate in
+                    predicateMatch: {
+                        let match = app.descendants(matching: .any)
+                            .matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
+                        return match.exists ? match : nil
+                    },
+                    nativeQueries: [
+                        { app.textFields.allElementsBoundByIndex },
+                        { app.secureTextFields.allElementsBoundByIndex },
+                        { app.textViews.allElementsBoundByIndex },
+                        { app.searchFields.allElementsBoundByIndex },
+                    ],
+                    otherQuery: {
+                        let query = app.otherElements
+                        return (0 ..< query.count).lazy.map { query.element(boundBy: $0) }
+                    },
+                    nativeHasFocus: { (try? $0.snapshot())?.hasFocus == true },
+                    otherHasFocus: { candidate in
                         guard let snap = try? candidate.snapshot() else { return false }
                         return snap.hasFocus && GesturePerformer.snapshotLooksLikeTextInput(snap)
                     }

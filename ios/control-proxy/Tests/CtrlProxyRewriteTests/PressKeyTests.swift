@@ -48,6 +48,10 @@ private final class ArrowKeyScenario {
     var candidateDuration: Duration = .zero
     var focusedCandidate: Int?
     var scannedCandidates: [Int] = []
+    var useProductionResolver = false
+    var nativeCandidateCount = 0
+    var nativeQueries = 0
+    var otherQueries = 0
 
     func run(
         knownCaret: (String) -> Int? = { _ in nil },
@@ -65,14 +69,31 @@ private final class ArrowKeyScenario {
                 self.resolutions += 1
                 self.clock.advance(by: self.lookupDuration)
                 if let count = self.scanCandidateCount {
-                    let match = try GesturePerformer.firstFocusedCandidate(
-                        in: 0 ..< count, checkBudget: checkBudget,
-                        hasFocus: { index in
-                            self.scannedCandidates.append(index)
-                            self.clock.advance(by: self.candidateDuration)
-                            return index == self.focusedCandidate
-                        }
-                    )
+                    let hasFocus: (Int) -> Bool = { index in
+                        self.scannedCandidates.append(index)
+                        self.clock.advance(by: self.candidateDuration)
+                        return index == self.focusedCandidate
+                    }
+                    let match: Int?
+                    if self.useProductionResolver {
+                        match = try GesturePerformer.resolveFocusedTextElement(
+                            checkBudget: checkBudget,
+                            predicateMatch: { nil },
+                            nativeQueries: [{
+                                self.nativeQueries += 1
+                                return Array(0 ..< self.nativeCandidateCount)
+                            }],
+                            otherQuery: {
+                                self.otherQueries += 1
+                                return 0 ..< count
+                            },
+                            nativeHasFocus: hasFocus, otherHasFocus: hasFocus
+                        )
+                    } else {
+                        match = try GesturePerformer.firstFocusedCandidate(
+                            in: 0 ..< count, checkBudget: checkBudget, hasFocus: hasFocus
+                        )
+                    }
                     return match.map { ("field-\($0)", "abc") } ?? (nil, nil)
                 }
                 return ("field", "abc")
@@ -356,6 +377,34 @@ final class PressKeyTests: XCTestCase {
         XCTAssertTrue(try scenario.run())
         XCTAssertEqual(scenario.scannedCandidates, [0, 1, 2])
         XCTAssertEqual(scenario.sends, 1)
+    }
+
+    func testProductionResolverStopsNativeScanBeforeQueryingCustomWrappers() {
+        assertProductionResolverStopsScan(nativeCandidateCount: 254, expectedOtherQueries: 0)
+    }
+
+    func testProductionResolverStopsCustomWrapperScanAfterNativeQueries() {
+        assertProductionResolverStopsScan(nativeCandidateCount: 0, expectedOtherQueries: 1)
+    }
+
+    private func assertProductionResolverStopsScan(nativeCandidateCount: Int, expectedOtherQueries: Int) {
+        let scenario = ArrowKeyScenario()
+        scenario.useProductionResolver = true
+        scenario.nativeCandidateCount = nativeCandidateCount
+        scenario.scanCandidateCount = 254
+        scenario.candidateDuration = .milliseconds(250)
+        XCTAssertThrowsError(try scenario.run()) { error in
+            guard case let GesturePerformer.GestureError.arrowBudgetExhausted(step, elapsedMs) = error else {
+                return XCTFail("Expected pre-send budget error, got \(error)")
+            }
+            XCTAssertEqual(step, "focus check")
+            XCTAssertEqual(elapsedMs, 3500)
+        }
+        XCTAssertEqual(scenario.scannedCandidates, Array(0 ..< 14))
+        XCTAssertEqual(scenario.nativeQueries, 1)
+        XCTAssertEqual(scenario.otherQueries, expectedOtherQueries)
+        XCTAssertEqual(scenario.sends, 0)
+        XCTAssertEqual(scenario.probes, 0)
     }
 
     func testArrowBudgetExhaustedDuringCaretProbeDoesNotSendKey() {

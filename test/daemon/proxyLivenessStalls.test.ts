@@ -140,6 +140,7 @@ describe("proxy liveness stalls (#10053)", () => {
   let handovers: LivenessHandover[];
   let infoSpy: ReturnType<typeof spyOn>;
   let warnSpy: ReturnType<typeof spyOn>;
+  let errorSpy: ReturnType<typeof spyOn>;
   let isAvailableSpy: ReturnType<typeof spyOn>;
   const proxies: DaemonMcpProxy[] = [];
 
@@ -278,7 +279,7 @@ describe("proxy liveness stalls (#10053)", () => {
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     infoSpy = spyOn(logger, "info").mockImplementation(() => {});
     warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    spyOn(logger, "error").mockImplementation(() => {});
+    errorSpy = spyOn(logger, "error").mockImplementation(() => {});
   });
 
   afterEach(async () => {
@@ -288,6 +289,7 @@ describe("proxy liveness stalls (#10053)", () => {
     isAvailableSpy.mockRestore();
     infoSpy.mockRestore();
     warnSpy.mockRestore();
+    errorSpy.mockRestore();
     sessionManager.stopCleanupTimer();
   });
 

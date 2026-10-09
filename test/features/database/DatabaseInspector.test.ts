@@ -38,6 +38,23 @@ describe("DatabaseInspector", () => {
     inspector = new DatabaseInspector(device, fakeAdb, fakeTimer);
   });
 
+  describe("readOnly request flag (#10966)", () => {
+    const base = `shell content call --uri 'content://${appId}.automobile.database' --method executeSQL --extra databasePath:s:'${databasePath}' --extra query:s:'select 1'`;
+    const ok = `Bundle[{success=true, result={"type":"query","columns":["1"],"rows":[[1]]}}]`;
+
+    test("adds the readOnly extra only when asked", async () => {
+      fakeAdb.setCommandResult(`${base} --extra readOnly:s:'true'`, ok);
+      fakeAdb.setCommandResult(base, ok);
+
+      await inspector.executeSQL(appId, databasePath, "select 1", true);
+      await inspector.executeSQL(appId, databasePath, "select 1");
+
+      const commands = fakeAdb.getAllCommands();
+      expect(commands.some((c) => c.includes("--extra readOnly:s:'true'"))).toBe(true);
+      expect(commands.filter((c) => c.includes("readOnly"))).toHaveLength(1);
+    });
+  });
+
   describe("sqlQuery against an app that is not running (#10210)", () => {
     const sqlCmd = `shell content call --uri 'content://${appId}.automobile.database' --method executeSQL --extra databasePath:s:'${databasePath}' --extra query:s:'select 1'`;
     const disabled = `Bundle[{success=false, errorType=DISABLED, error=Database inspection is disabled}]`;

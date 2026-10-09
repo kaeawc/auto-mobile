@@ -262,7 +262,14 @@ async function executeSqlForDevice(device: BootedDevice, args: SqlQueryArgs): Pr
   if (device.platform === "android") {
     const adb = defaultAdbClientFactory.create(device);
     const inspector = new DatabaseInspector(device, adb);
-    return inspector.executeSQL(args.appId, args.databasePath, args.query);
+    // Defence in depth: when the host classifier calls the query a read, tell the SDK to enforce it
+    // so a classifier gap can never become a write on the device (#10966).
+    return inspector.executeSQL(
+      args.appId,
+      args.databasePath,
+      args.query,
+      isReadOnlySqlQuery(args.query),
+    );
   }
 
   if (device.platform === "ios") {
@@ -271,6 +278,8 @@ async function executeSqlForDevice(device: BootedDevice, args: SqlQueryArgs): Pr
         args.appId,
         args.databasePath,
         args.query,
+        undefined,
+        isReadOnlySqlQuery(args.query),
       );
     } catch (error) {
       throw new ActionableError(

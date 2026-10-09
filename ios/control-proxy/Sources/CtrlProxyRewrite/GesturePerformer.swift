@@ -1011,15 +1011,64 @@ public final class GesturePerformer: GesturePerforming {
         /// The application a coordinate gesture targets: the pinned app unless the locator's
         /// tracked foreground app has moved on (e.g. after `simctl launch`, #10858).
         private func gestureApplication() -> XCUIApplication? {
-            switch GestureApplicationTarget.resolve(
+            gestureApplication(for: gestureApplicationTarget())
+        }
+
+        private func gestureApplicationTarget() -> GestureApplicationTarget {
+            GestureApplicationTarget.resolve(
                 pinnedBundleId: pinnedBundleId,
                 trackedBundleId: elementLocator.foregroundBundleId
-            ) {
+            )
+        }
+
+        private func gestureApplication(for target: GestureApplicationTarget) -> XCUIApplication? {
+            switch target {
             case .keepPinned:
                 return application
             case let .rebind(bundleId):
                 updateApplication(bundleId: bundleId)
                 return application
+            }
+        }
+
+        /// Delivers a one-finger tap or swipe without an `XCUIApplication` when the foreground app
+        /// was launched outside the runner (#10858); see `GestureDeliveryRoute`. Returns false when
+        /// the route does not apply or the private synthesis symbols are unavailable, so the caller
+        /// keeps its `XCUICoordinate` path. The pinned app is left as is, so a later `launchApp`
+        /// still pins its app and returns gestures to the `XCUICoordinate` path.
+        private func deliverToUnpinnedForegroundApp(
+            target: GestureApplicationTarget, forced: TapCoordinateStrategy?,
+            start: GesturePoint, end: GesturePoint, duration: TimeInterval
+        )
+            throws -> Bool
+        {
+            let route = GestureDeliveryRoute.resolve(
+                target: target, forced: forced, geometry: elementLocator.gestureCoordinateGeometry
+            )
+            guard case let .synthesizedEventRecord(orientation) = route else { return false }
+            return try catchingObjCException { () -> Bool in
+                GesturePhaseDiagnostics.current?.begin("synthesizedGesture")
+                defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
+                var errorMessage: NSString?
+                var symbolsUnavailable: ObjCBool = false
+                // A tap is a stationary path; 0.05 s is the synthesis helper's minimum contact.
+                let succeeded = ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
+                    CGFloat(start.x), CGFloat(start.y), CGFloat(end.x), CGFloat(end.y),
+                    1, 0, max(duration, 0.05), orientation, &symbolsUnavailable, &errorMessage
+                )
+                if succeeded {
+                    logger.notice(
+                        "gesture synthesized for unpinned foreground app orientation=\(orientation, privacy: .public)"
+                    )
+                    return true
+                }
+                guard symbolsUnavailable.boolValue else {
+                    throw GestureError.gestureFailed(errorMessage as String? ?? "gesture synthesis failed")
+                }
+                logger.warning(
+                    "gesture synthesis unavailable; using XCUICoordinate: \((errorMessage as String?) ?? "", privacy: .public)"
+                )
+                return false
             }
         }
 
@@ -1066,7 +1115,19 @@ public final class GesturePerformer: GesturePerforming {
             throws -> TapDiagnostics?
         {
             GesturePhaseDiagnostics.current?.begin("targetResolution")
-            guard let app = gestureApplication() else {
+            let target = gestureApplicationTarget()
+            let point = GesturePoint(x: x, y: y)
+            if try deliverToUnpinnedForegroundApp(
+                target: target, forced: forced, start: point, end: point, duration: duration
+            ) {
+                return requested.map { requested in
+                    TapDiagnostics(requested: .init(
+                        x: requested.x, y: requested.y, durationMs: requested.durationMs,
+                        coordinateConstruction: "synthesizedScreenPoint"
+                    ))
+                }
+            }
+            guard let app = gestureApplication(for: target) else {
                 throw GestureError.noApplication
             }
 
@@ -1169,7 +1230,14 @@ public final class GesturePerformer: GesturePerforming {
 
         public func swipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws {
             GesturePhaseDiagnostics.current?.begin("targetResolution")
-            guard let app = gestureApplication() else {
+            let target = gestureApplicationTarget()
+            if try deliverToUnpinnedForegroundApp(
+                target: target, forced: nil, start: GesturePoint(x: startX, y: startY),
+                end: GesturePoint(x: endX, y: endY), duration: duration
+            ) {
+                return
+            }
+            guard let app = gestureApplication(for: target) else {
                 throw GestureError.noApplication
             }
 

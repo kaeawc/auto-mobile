@@ -1,6 +1,7 @@
 import type { TimingData } from "../utils/PerformanceTracker";
 import { isDeviceLossCancellationReason } from "./emulatorLossIncident";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
+import { SessionCleanupReceipts } from "./sessionCleanupReceipts";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
 import { Rotate, type RotationRestoreState } from "../features/action/Rotate";
@@ -103,7 +104,7 @@ export class SessionActivityPersistenceError extends ActionableError {
  * payload to `restore` — the behavioral half of the #2973 typed-slot round trip.
  */
 export interface KeepScreenAwakeRestorer {
-  restore(state: KeepScreenAwakeState): Promise<void>;
+  restore(state: KeepScreenAwakeState): Promise<void | boolean>;
 }
 
 /** Original simulator enrollment restored when a session releases its device. */
@@ -1055,6 +1056,7 @@ export function getDefaultPreFirstHeartbeatGraceMs(): number {
 }
 
 export class SessionManager {
+  readonly cleanupReceipts = new SessionCleanupReceipts();
   private stallProbe: (() => void) | undefined;
   private sessions: Map<string, Session> = new Map();
   private sessionDeviceMap: Map<string, string> = new Map(); // sessionId -> deviceId
@@ -1266,10 +1268,13 @@ export class SessionManager {
   }
 
   private restoreIncarnationIsCurrent(target: { deviceId: string; incarnation?: number }): boolean {
-    return (
+    const current =
       target.incarnation === undefined ||
-      this.deviceHealth?.incarnation(target.deviceId) === target.incarnation
-    );
+      this.deviceHealth?.incarnation(target.deviceId) === target.incarnation;
+    if (!current) {
+      this.cleanupReceipts.invalidateDevice(target.deviceId, "device_incarnation_changed");
+    }
+    return current;
   }
 
   private clearRestoreHealth(
@@ -1292,6 +1297,7 @@ export class SessionManager {
     restore: () => Promise<void>,
     restoreTimeoutMs: number = NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
   ): void {
+    this.cleanupReceipts.failDevice(target.deviceId, `restoration_abandoned:${reason}`);
     const health = this.deviceHealth;
     if (target.incarnation === undefined) {
       logger.warn(
@@ -1348,6 +1354,7 @@ export class SessionManager {
       }
     });
     this.healthRecoveries.set(key, recovery);
+    this.cleanupReceipts.trackDevice(target.deviceId, recovery);
     void recovery
       .catch((error: unknown) => {
         logger.warn(`Device health recovery failed on ${target.deviceId}`, error);
@@ -1589,6 +1596,9 @@ export class SessionManager {
    * device to the pool.
    */
   registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
+    // External hooks include best-effort recording/network/location cleanup. Their void
+    // contract does not prove success, even when fulfilled. Preserve that uncertainty.
+    this.cleanupReceipts.trackDevice(deviceId, cleanup, true);
     this.trackPendingDeviceCleanup(deviceId, [cleanup]);
   }
 
@@ -1805,6 +1815,7 @@ export class SessionManager {
     }
     this.observerSessions?.release(session.sessionId, "promotion");
     this.sessions.set(session.sessionId, session);
+    this.cleanupReceipts.bind(session, this.pendingPersistedRecoveries.has(session.sessionId));
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
     this.cancelSessionlessUseOnAcquisition(session.assignedDevice, session.sessionId);
@@ -2815,6 +2826,7 @@ export class SessionManager {
       this.notifyDeviceOwnershipChange(assignedDevice);
       return existing;
     }
+    this.cleanupReceipts.invalidate(sessionId, "session_rebound");
 
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     if (pendingRebind) {
@@ -3173,6 +3185,10 @@ export class SessionManager {
     }
 
     this.releasingSessions.add(session);
+    this.cleanupReceipts.begin(session, {
+      executionsJoined: !this.activeSessionExecutionChecker(sessionId),
+      terminal: isTerminalReleaseReason(releaseReason),
+    });
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     const reason = this.createReleaseReasonState(sessionId, releaseReason);
     const promise =
@@ -3186,7 +3202,13 @@ export class SessionManager {
     this.releasePromises.set(sessionId, release);
     this.activeReleasePromises.add(release);
     try {
-      return await promise;
+      const deviceId = await promise;
+      this.cleanupReceipts.finish(session, deviceId);
+      return deviceId;
+    } catch (error) {
+      this.cleanupReceipts.fail(sessionId, "release_failed");
+      this.cleanupReceipts.finish(session, null);
+      throw error;
     } finally {
       this.activeReleasePromises.delete(release);
       if (this.releasePromises.get(sessionId) === release) {
@@ -3648,7 +3670,17 @@ export class SessionManager {
     if (!this.releaseNeedsTeardown(session)) {
       return [];
     }
-    return this.runUnderTeardownShield(() => this.startReleaseTeardown(sessionId, session));
+    return this.runUnderTeardownShield(async () => {
+      const stages = await this.startReleaseTeardown(sessionId, session);
+      // Join the original promises, not the bounded wrappers: hitting the cap is
+      // failure evidence and cannot turn unfinished device work into completion.
+      for (const stage of stages) {
+        if (stage.pending) {
+          this.cleanupReceipts.track(sessionId, stage.pending);
+        }
+      }
+      return stages;
+    });
   }
 
   /** Own the restore signal until all stages settle, bounded by the shared teardown cap. */
@@ -3780,11 +3812,13 @@ export class SessionManager {
       { pending: pendingSetups },
       {
         pending: pendingRestoration,
-        abandon: () =>
+        abandon: () => {
+          this.cleanupReceipts.fail(sessionId, "restoration_abandoned:keep_awake");
           logger.warn(
             `Gave up restoring keep-awake state on ${deviceId} after ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms; ` +
               `the screen may stay awake until the next session changes it`,
-          ),
+          );
+        },
       },
       {
         pending: pendingBiometricRestoration,
@@ -4047,6 +4081,7 @@ export class SessionManager {
       try {
         callback(snapshot.sessionId, snapshot.deviceId, snapshot.releaseReason, snapshot, options);
       } catch (error) {
+        this.cleanupReceipts.fail(snapshot.sessionId, "release_callback_failed");
         logger.warn(`Session release callback failed for ${snapshot.sessionId}: ${error}`);
       }
     }
@@ -4207,7 +4242,10 @@ export class SessionManager {
     }
     const restoration = this.restoreKeepScreenAwake(session).then(
       () => ({ outcome: "restored" as const }),
-      (error) => ({ outcome: "failed" as const, error }),
+      (error) => {
+        this.cleanupReceipts.fail(session.sessionId, "restoration_failed:keep_awake");
+        return { outcome: "failed" as const, error };
+      },
     );
     const timeout = new Error("Keep-awake restore timed out");
     const result = await raceWithDeadline(restoration, {
@@ -4267,7 +4305,10 @@ export class SessionManager {
     if (!this.restoreIncarnationIsCurrent(target)) {
       return;
     }
-    await this.biometricEnrollmentRestorerFactory(device).restore(target.enrollment);
+    await this.trackReceiptRestoration(
+      device.deviceId,
+      this.biometricEnrollmentRestorerFactory(device).restore(target.enrollment),
+    );
     this.clearRestoreHealth(target, "biometric-enrollment");
   }
 
@@ -4455,7 +4496,10 @@ export class SessionManager {
           if (!this.restoreIncarnationIsCurrent(healthTarget)) {
             return;
           }
-          await this.clockRestorerFactory(device).restore(target.state, target.controller.signal);
+          await this.trackReceiptRestoration(
+            deviceId,
+            this.clockRestorerFactory(device).restore(target.state, target.controller.signal),
+          );
           target.controller.signal.throwIfAborted();
           defaultDeviceClockRestoreRegistry.restored(deviceId, target.state);
           target.clear();
@@ -4553,6 +4597,7 @@ export class SessionManager {
 
   /** Removal retires in-memory ownership; no retries may target a replacement device. */
   retireClockRestoration(deviceId: string): void {
+    this.cleanupReceipts.invalidateDevice(deviceId, "device_removed");
     const incarnation = this.deviceHealth?.incarnation(deviceId);
     if (incarnation !== undefined) {
       this.deviceHealth?.markers.clear(deviceId, incarnation, "clock");
@@ -4645,7 +4690,10 @@ export class SessionManager {
     const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
     const restore = async () => {
       target.controller.signal.throwIfAborted();
-      await this.rotationRestorerFactory(device).restore(target.state, target.controller.signal);
+      await this.trackReceiptRestoration(
+        deviceId,
+        this.rotationRestorerFactory(device).restore(target.state, target.controller.signal),
+      );
       target.controller.signal.throwIfAborted();
       target.clear();
       const targets = this.pendingRotationRestores.get(deviceId);
@@ -4752,6 +4800,7 @@ export class SessionManager {
     lastError: unknown,
     when: string,
   ): void {
+    this.cleanupReceipts.failDevice(deviceId, "restoration_abandoned:rotation");
     if (target.removed) {
       return;
     }
@@ -4818,7 +4867,10 @@ export class SessionManager {
     const attempt = (async () => {
       try {
         await raceWithDeadline(
-          this.rotationRestorerFactory(device).restore(state, controller.signal),
+          this.trackReceiptRestoration(
+            deviceId,
+            this.rotationRestorerFactory(device).restore(state, controller.signal),
+          ),
           {
             timer: this.timer,
             timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
@@ -4853,6 +4905,7 @@ export class SessionManager {
 
   /** Removal retires in-memory ownership; no retries may target a replacement device. */
   retireRotationRestoration(deviceId: string): void {
+    this.cleanupReceipts.invalidateDevice(deviceId, "device_removed");
     const targets = this.pendingRotationRestores.get(deviceId);
     this.rotationRemovalGenerations.set(
       deviceId,
@@ -4925,9 +4978,9 @@ export class SessionManager {
     const device: BootedDevice = { name: deviceId, deviceId, platform: target.state.platform };
     const restore = async () => {
       target.controller.signal.throwIfAborted();
-      await this.screenReaderRestorerFactory(device).restore(
-        target.state,
-        target.controller.signal,
+      await this.trackReceiptRestoration(
+        deviceId,
+        this.screenReaderRestorerFactory(device).restore(target.state, target.controller.signal),
       );
       target.controller.signal.throwIfAborted();
       target.clear();
@@ -5014,6 +5067,7 @@ export class SessionManager {
   }
 
   private abandonScreenReaderRestore(deviceId: string, target: PendingScreenReaderRestore): void {
+    this.cleanupReceipts.failDevice(deviceId, "restoration_abandoned:screen_reader");
     if (target.removed) {
       return;
     }
@@ -5062,7 +5116,10 @@ export class SessionManager {
     const attempt = (async () => {
       try {
         await raceWithDeadline(
-          this.screenReaderRestorerFactory(device).restore(state, controller.signal),
+          this.trackReceiptRestoration(
+            deviceId,
+            this.screenReaderRestorerFactory(device).restore(state, controller.signal),
+          ),
           {
             timer: this.timer,
             timeoutMs: SCREEN_READER_RESTORE_TIMEOUT_MS,
@@ -5091,6 +5148,7 @@ export class SessionManager {
 
   /** Removal retires in-memory ownership; no retries may target a replacement device. */
   retireScreenReaderRestoration(deviceId: string): void {
+    this.cleanupReceipts.invalidateDevice(deviceId, "device_removed");
     const targets = this.pendingScreenReaderRestores.get(deviceId);
     this.screenReaderRemovalGenerations.set(
       deviceId,
@@ -5259,6 +5317,8 @@ export class SessionManager {
       return;
     }
     state.installedRevision = rule.revision;
+    // The lease's stop cancels its timer but does not join a renewal already in flight.
+    this.cleanupReceipts.invalidate(session.sessionId, "network_lease_not_joined");
     this.iosAppNetworkLeases.start(session.sessionId, rule, () => {
       const current = session.cacheData.networkCondition?.iosAppRule;
       return (
@@ -5295,7 +5355,10 @@ export class SessionManager {
       if (!this.restoreIncarnationIsCurrent(target)) {
         return;
       }
-      await this.iosAppNetworkRuleRestorer.reset(target.iosAppRule);
+      await this.trackReceiptRestoration(
+        target.deviceId,
+        this.iosAppNetworkRuleRestorer.reset(target.iosAppRule),
+      );
       this.clearRestoreHealth(target, "network-condition");
       return;
     }
@@ -5307,7 +5370,10 @@ export class SessionManager {
     if (!this.restoreIncarnationIsCurrent(target)) {
       return;
     }
-    await this.networkConditionRestorerFactory(device).restore(target.profile);
+    await this.trackReceiptRestoration(
+      target.deviceId,
+      this.networkConditionRestorerFactory(device).restore(target.profile),
+    );
     this.clearRestoreHealth(target, "network-condition");
   }
 
@@ -5685,6 +5751,9 @@ export class SessionManager {
   }
 
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<unknown>[]): void {
+    for (const cleanup of cleanups) {
+      this.cleanupReceipts.trackDevice(deviceId, cleanup);
+    }
     const previous = this.pendingDeviceCleanups.get(deviceId);
     const cleanup = Promise.allSettled(previous ? [previous, ...cleanups] : cleanups).then(
       () => undefined,
@@ -6881,6 +6950,12 @@ export class SessionManager {
     return true;
   }
 
+  /** Retain original device work even if a caller's deadline or removal wins its race. */
+  private trackReceiptRestoration<T>(deviceId: string, work: Promise<T>): Promise<T> {
+    this.cleanupReceipts.trackDevice(deviceId, work);
+    return work;
+  }
+
   private async restoreKeepScreenAwake(session: Session): Promise<void> {
     if (session.platform !== "android") {
       return;
@@ -6896,7 +6971,9 @@ export class SessionManager {
       deviceId: session.assignedDevice,
     };
     const manager = this.keepScreenAwakeRestorerFactory(device);
-    await manager.restore(state);
+    if ((await this.trackReceiptRestoration(device.deviceId, manager.restore(state))) === false) {
+      throw new Error("Keep-awake restoration did not complete");
+    }
   }
 
   /**

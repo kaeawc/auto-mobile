@@ -1318,6 +1318,7 @@ export class DevicePool {
   }
 
   private registerSessionReleaseHandlers(): void {
+    this.sessionManager.cleanupReceipts.setGeneration(this.daemonSessionId);
     this.sessionManager.setRecoveryExpiryReleaseHandler({
       release: (sessionId, reason, attempt, options) => {
         const recoveryRelease = this.recoveryCoordinator.releaseFailedRecoveryOnExpiry(
@@ -6104,23 +6105,29 @@ export class DevicePool {
    * Frees the device so it can be assigned to other sessions.
    */
   async releaseDevice(deviceId: string, expectedSessionId: string): Promise<void> {
-    const releasedCapture = this.releasedDeviceCaptures.get(expectedSessionId);
-    if (releasedCapture?.deviceId === deviceId) {
-      this.releasedDeviceCaptures.delete(expectedSessionId);
-      await this.releaseCapturedDevice(
-        releasedCapture.device,
-        expectedSessionId,
-        releasedCapture.assignmentCount,
-      );
-      return;
-    }
+    try {
+      const releasedCapture = this.releasedDeviceCaptures.get(expectedSessionId);
+      if (releasedCapture?.deviceId === deviceId) {
+        this.releasedDeviceCaptures.delete(expectedSessionId);
+        await this.releaseCapturedDevice(
+          releasedCapture.device,
+          expectedSessionId,
+          releasedCapture.assignmentCount,
+        );
+        return;
+      }
 
-    const device = this.devices.get(deviceId);
-    if (!device) {
-      logger.warn(`Cannot release device ${deviceId}: not in pool`);
-      return;
+      const device = this.devices.get(deviceId);
+      if (!device) {
+        logger.warn(`Cannot release device ${deviceId}: not in pool`);
+        this.sessionManager.cleanupReceipts.poolReleaseUnconfirmed(expectedSessionId);
+        return;
+      }
+      await this.releaseCapturedDevice(device, expectedSessionId, device.assignmentCount);
+    } catch (error) {
+      this.sessionManager.cleanupReceipts.poolReleaseFailed(expectedSessionId);
+      throw error;
     }
-    await this.releaseCapturedDevice(device, expectedSessionId, device.assignmentCount);
   }
 
   private captureReleasedDevice(sessionId: string, deviceId: string): void {
@@ -6142,6 +6149,7 @@ export class DevicePool {
   ): Promise<void> {
     const deviceId = device.id;
     if (!this.isCapturedReleaseCurrent(device, expectedSessionId, expectedAssignmentCount)) {
+      this.sessionManager.cleanupReceipts.poolReleaseUnconfirmed(expectedSessionId);
       return;
     }
 
@@ -6177,9 +6185,10 @@ export class DevicePool {
           this.deferredDeviceReleases.delete(deviceId);
           return this.releaseCapturedDevice(device, expectedSessionId, expectedAssignmentCount);
         })
-        .catch((error) =>
-          logger.warn(`Failed to release device ${deviceId} after late session teardown: ${error}`),
-        );
+        .catch((error) => {
+          this.sessionManager.cleanupReceipts.poolReleaseFailed(expectedSessionId);
+          logger.warn(`Failed to release device ${deviceId} after late session teardown: ${error}`);
+        });
       logger.info(`Keeping device ${deviceId} assigned until late session teardown completes`);
       return;
     }
@@ -6203,6 +6212,7 @@ export class DevicePool {
     this.releaseDeviceClaim(deviceId);
     this.lastReleasedDeviceId = deviceId;
     this.notifyMultiDeviceAllocationWaiters();
+    this.sessionManager.cleanupReceipts.poolReleased(expectedSessionId, deviceId);
 
     logger.info(`Released device ${deviceId} from session ${sessionId}`);
   }
@@ -7636,6 +7646,7 @@ export class DevicePool {
         logger.info(`Released device ${deviceId} from session ${sessionId}`);
       })
       .catch((error) => {
+        this.sessionManager.cleanupReceipts.poolReleaseFailed(sessionId);
         logger.warn(`Failed to release expired-session device ${deviceId}: ${error}`, error);
       });
   }

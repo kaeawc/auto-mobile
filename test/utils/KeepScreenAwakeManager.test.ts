@@ -266,6 +266,34 @@ describe("KeepScreenAwakeManager", () => {
 
     expect(adb.calls.length).toBe(0);
   });
+
+  test("restore reports false for a swallowed setting failure and still attempts the other setting", async () => {
+    const adb = new FakeAdb({ reject: ["settings put global"] });
+    const manager = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
+    expect(
+      await manager.restore({
+        applied: true,
+        method: "settings",
+        appliedSettings: { stayOnWhilePluggedIn: true, screenOffTimeout: true },
+        originalStayOnWhilePluggedIn: "0",
+        originalScreenOffTimeout: "60000",
+      }),
+    ).toBe(false);
+    expect(adb.called("settings put system screen_off_timeout 60000")).toBe(true);
+  });
+
+  test("restore reports false when the original applied setting is unknown", async () => {
+    const manager = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(new FakeAdb()),
+      () => failingSettingsClient,
+    );
+    expect(await manager.restore({ applied: true, method: "svc" })).toBe(false);
+  });
   test("a two-method settings client supports apply, restore, and throwing fallback paths", async () => {
     for (const mode of ["success", "method throws", "provider throws"]) {
       const getCalls: Parameters<KeepScreenAwakeSettingsClient["requestSettingsGet"]>[] = [];

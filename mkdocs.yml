@@ -123,6 +123,7 @@ nav:
       - "Environment variables": using/environment-variables.md
       - "Screen control": using/screen-control.md
       - "Device ownership": using/device-ownership.md
+      - "Session cleanup receipts": session-cleanup-receipts.md
       - "Managed Macs and CI runners": using/managed-macs.md
       - "WebRTC Streaming": webrtc-streaming.md
   - "How it Works":

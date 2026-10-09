@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { load } from "js-yaml";
 import { sortedReaddirEntriesSync } from "../src/utils/io";
 
@@ -76,14 +76,36 @@ function lineForBunSetup(content: string, occurrence: number): number {
   return 1;
 }
 
+// Deliberately advisory canaries that run a newer Bun than the repo pin. Keyed by
+// workflow path (relative to the repo root) + job id, and by the exact version the
+// job may use, so any other job or any other version in that job still fails.
+const ADVISORY_BUN_CANARIES: ReadonlyArray<{ workflow: string; job: string; version: string }> = [
+  // Bun 1.4 upgrade canary (#10854): continue-on-error, no downstream dependents.
+  { workflow: ".github/workflows/nightly.yml", job: "node-bun-14-canary", version: "1.4.2" },
+];
+
+function allowedCanarySteps(document: unknown, relativePath: string): Map<WorkflowNode, string> {
+  const jobs = (document as { jobs?: Record<string, unknown> } | null)?.jobs ?? {};
+  return new Map(
+    ADVISORY_BUN_CANARIES.filter((canary) => canary.workflow === relativePath).flatMap((canary) =>
+      findBunSetupSteps(jobs[canary.job]).map((step): [WorkflowNode, string] => [
+        step,
+        canary.version,
+      ]),
+    ),
+  );
+}
+
 const mismatches = workflowPaths.flatMap((path) => {
   const content = readFileSync(path, "utf8");
   const document = load(content, { filename: path });
+  const canarySteps = allowedCanarySteps(document, relative(root, path).split(sep).join("/"));
   return findBunSetupSteps(document).flatMap((step, index) => {
     const version = step.with?.["bun-version"];
     const normalizedVersion =
       version === undefined || version === null ? "<missing>" : String(version);
-    return normalizedVersion === packageManagerVersion
+    return normalizedVersion === packageManagerVersion ||
+      canarySteps.get(step) === normalizedVersion
       ? []
       : `${path}:${lineForBunSetup(content, index)}: ${normalizedVersion}`;
   });

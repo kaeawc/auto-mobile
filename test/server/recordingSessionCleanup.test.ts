@@ -72,6 +72,9 @@ class FakeRecordings implements RecordingSessionCleanupDeps {
   stopFailure: Error | null = null;
   /** When set, video stops never settle (a wedged backend). */
   hangStops = false;
+  /** Segmented sessions the owner has; their stop hangs when `hangSegmented` is set. */
+  segmentedIds: string[] = [];
+  hangSegmented = false;
   timer = new FakeTimer();
   incomplete: string[] = [];
   capMs = 120_000;
@@ -91,15 +94,18 @@ class FakeRecordings implements RecordingSessionCleanupDeps {
     const video = [...this.active.values()]
       .filter((record) => record.deviceId === deviceId && record.ownerSessionUuid === sessionId)
       .map((record) => record.recordingId);
-    return this.isTestRecordingOwnedBy(sessionId, deviceId)
-      ? [...video, `test-${sessionId}`]
-      : video;
+    const all = [...video, ...this.segmentedIds];
+    return this.isTestRecordingOwnedBy(sessionId, deviceId) ? [...all, `test-${sessionId}`] : all;
   }
   hasRecordingsToStop(sessionId: string | undefined, deviceId: string): boolean {
     return this.active.size > 0 || this.isTestRecordingOwnedBy(sessionId, deviceId);
   }
   async stopSegmentedRecordings(sessionId: string | undefined, deviceId: string): Promise<void> {
+    if (this.hangSegmented) {
+      await new Promise<void>(() => {});
+    }
     this.segmentedStops.push(`${sessionId}@${deviceId}`);
+    this.segmentedIds = [];
   }
   async listActiveVideoRecordings(deviceId: string) {
     return [...this.active.values()].filter((record) => record.deviceId === deviceId);
@@ -306,6 +312,48 @@ describe("registerRecordingSessionCleanup", () => {
 
     expect(recordings.incomplete).toEqual([]);
     expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  describe("finalize cap covers every recording (#11041)", () => {
+    test("a hung segmented stop force-stops the segment and the test recording, not just the single-file one", async () => {
+      const { manager, recordings } = setup();
+      recordings.start("SIM-1", "session-a");
+      recordings.segmentedIds = ["seg-1"];
+      recordings.testRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
+      recordings.hangSegmented = true;
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        manager.release("session-a", "SIM-1");
+        const done = manager.settle();
+        await recordings.timer.advanceTimersByTimeAsync(120_000);
+        await done;
+        expect([...recordings.incomplete].sort()).toEqual([
+          "rec-session-a",
+          "seg-1",
+          "test-session-a",
+        ]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("recordings finalized before the cap are not marked incomplete", async () => {
+      const { manager, recordings } = setup();
+      recordings.start("SIM-1", "session-a");
+      recordings.segmentedIds = ["seg-1"];
+      recordings.testRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
+      recordings.hangStops = true;
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        manager.release("session-a", "SIM-1");
+        const done = manager.settle();
+        await recordings.timer.advanceTimersByTimeAsync(120_000);
+        await done;
+        expect([...recordings.incomplete].sort()).toEqual(["rec-session-a", "test-session-a"]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 
   describe("owner-less recordings on acquisition (#10961)", () => {

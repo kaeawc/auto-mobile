@@ -1,0 +1,40 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "components": {
+      "a": {
+        "root": {
+          "type": "column",
+          "children": [
+            {
+              "type": "use",
+              "component": "b"
+            }
+          ]
+        }
+      },
+      "b": {
+        "root": {
+          "type": "column",
+          "children": [
+            {
+              "type": "use",
+              "component": "a"
+            }
+          ]
+        }
+      }
+    },
+    "root": {
+      "type": "use",
+      "component": "a"
+    }
+  },
+  "expectedPath": "root (use a) → components.a.root.children[0] (use b) → components.b.root.children[0].component",
+  "expectedMessage": "Component cycle: a → b → a"
+}

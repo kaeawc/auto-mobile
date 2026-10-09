@@ -73,9 +73,10 @@ describe("automobile:prototype resource", () => {
     const blocks = [...renderPrototypeGuide().matchAll(/```json\n([\s\S]*?)```/g)].map((m) =>
       JSON.parse(m[1]),
     );
-    expect(blocks).toHaveLength(2);
-    const [minimal, list] = blocks;
+    expect(blocks).toHaveLength(3);
+    const [minimal, list, components] = blocks;
     expect(validateOverlaySpec(minimal).success).toBe(true);
+    expect(validateOverlaySpec(components)).toMatchObject({ success: true });
     const wrapped = {
       id: "list",
       window: { placement: { type: "fullscreen" } },

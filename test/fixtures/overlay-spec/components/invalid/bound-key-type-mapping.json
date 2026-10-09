@@ -1,0 +1,41 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "liked_a": 1
+    },
+    "components": {
+      "like": {
+        "root": {
+          "type": "text",
+          "text": "Like",
+          "onTap": [
+            {
+              "type": "toggle",
+              "key": "{props.key}"
+            }
+          ]
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "use",
+          "component": "like",
+          "props": {
+            "key": "liked_a"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0] (use like) → components.like.root.onTap[0].key",
+  "expectedMessage": "Toggle requires a boolean state key"
+}

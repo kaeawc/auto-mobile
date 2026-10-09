@@ -81,12 +81,56 @@ Rejected (same paths in TypeScript and Kotlin):
   depth is unaffected because instances are siblings
 `;
 
+export const GUIDE_COMPONENTS = `## Reuse: components
+
+A top-level \`components\` map names node templates; a \`use\` node places one anywhere a node goes.
+The host expands every \`use\` before validating and sending, so devices only see plain nodes and
+every limit counts the expanded tree.
+
+\`\`\`json
+{
+  "id": "feed",
+  "window": { "placement": { "type": "fullscreen" } },
+  "state": { "liked_a": false, "liked_b": true },
+  "components": {
+    "postCard": {
+      "root": {
+        "type": "card",
+        "children": [
+          { "type": "text", "text": "{props.name}" },
+          { "type": "button", "label": "Like", "onTap": [{ "type": "toggle", "key": "{props.likeKey}" }] }
+        ]
+      }
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      { "type": "use", "component": "postCard", "props": { "name": "Alexey", "likeKey": "liked_a" } },
+      { "type": "use", "component": "postCard", "props": { "name": "Bea", "likeKey": "liked_b" } }
+    ]
+  }
+}
+\`\`\`
+
+- A \`use\` node has only \`type\`, \`component\` and \`props\`; props are scalars (string, number,
+  boolean). \`{props.<field>}\` binds in the same fields as repeat placeholders, state keys included,
+  and a string that is exactly one placeholder keeps the prop's type.
+- A component may contain \`repeat\` and other \`use\` nodes. A \`use\` inside a repeat template may
+  pass item placeholders as props (\`"likeKey": "liked_{item.id}"\`); the repeat binds them later.
+- Rejected: an unknown component, a missing or unused prop, a non-scalar prop, a cycle (including
+  a component that uses itself) and \`use\` nesting deeper than its limit (see Limits).
+- An error inside an expansion names each \`use\` it went through, for example
+  \`root.children[2] (use postCard) → components.postCard.root.children[1].label\`.
+`;
+
 export const GUIDE_ERRORS = `## Common validation errors
 
 | Message | Fix |
 | --- | --- |
 | \`Unknown overlay icon name\` | Look the name up with \`automobile:prototype/icons?query=<word>\`. |
 | \`Unknown repeat field "x"\` | Every item needs the field the placeholder names. |
+| \`Missing component prop "x"\` / \`Unused component prop\` | Pass exactly the props the component's \`{props.*}\` placeholders name. |
 | \`Expanded node limit exceeded\` | Fewer items or a smaller template; the limit counts every instance. |
 | a \`stateKey\` rejected | The key must be initialised in \`state\` with the type the node binds (string, boolean, number). |
 | an unknown property | Nodes and actions are strict: only the fields listed above are accepted. |

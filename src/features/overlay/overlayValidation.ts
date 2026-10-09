@@ -1,6 +1,7 @@
 import { z } from "zod";
 import contract from "../../../schemas/overlay-spec-contract.json";
 import { logger } from "../../utils/logger";
+import { expandOverlayComponents } from "./overlayComponents";
 import { repeatErrors, repeatKeyInstances, type KeyInstance } from "./overlayRepeat";
 import { BOUND_STATE_KEY_PATTERN } from "./overlayTemplate";
 import { overlaySpecSchema, type OverlaySpec, MAX_OVERLAY_SPEC_BYTES } from "./overlaySpec";
@@ -763,6 +764,27 @@ function validateValue(value: unknown): OverlayValidationResult {
   }
   return { success: true, data: parsed.data };
 }
+/**
+ * Expands reusable components (#11053) before validating, so every limit applies to the tree the
+ * device receives. The expanded spec must also fit the byte limit, because the device re-validates
+ * bytes, and an error inside an expansion is reported at its authored location.
+ */
+function validateExpanded(value: unknown): OverlayValidationResult {
+  const expansion = expandOverlayComponents(value);
+  if (!expansion.success) {
+    return { success: false, error: expansion.error };
+  }
+  if (expansion.expanded && bytes(expansion.spec) > MAX_OVERLAY_SPEC_BYTES) {
+    return { success: false, error: fail("$", "Expanded spec byte limit exceeded") };
+  }
+  const result = validateValue(expansion.spec);
+  return result.success
+    ? result
+    : {
+        success: false,
+        error: { path: expansion.locate(result.error.path), message: result.error.message },
+      };
+}
 /** Raw JSON strings measure transmitted UTF-8 bytes; object input measures compact JSON bytes. */
 export function validateOverlaySpec(json: unknown): OverlayValidationResult {
   try {
@@ -773,7 +795,7 @@ export function validateOverlaySpec(json: unknown): OverlayValidationResult {
     if (Buffer.byteLength(input, "utf8") > MAX_OVERLAY_SPEC_BYTES) {
       return { success: false, error: fail("$", "Spec byte limit exceeded") };
     }
-    return validateValue(typeof json === "string" ? JSON.parse(input) : json);
+    return validateExpanded(typeof json === "string" ? JSON.parse(input) : json);
   } catch (error) {
     logger.warn("Overlay JSON could not be decoded", error);
     return { success: false, error: fail("$", "Invalid JSON") };

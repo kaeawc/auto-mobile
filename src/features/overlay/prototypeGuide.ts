@@ -1,5 +1,6 @@
 import contract from "../../../schemas/overlay-spec-contract.json";
-import { GUIDE_ERRORS, GUIDE_INTRO, GUIDE_REPEAT } from "./prototypeGuideProse";
+import { GUIDE_COMPONENTS, GUIDE_ERRORS, GUIDE_INTRO, GUIDE_REPEAT } from "./prototypeGuideProse";
+import { MAX_OVERLAY_COMPONENT_DEPTH } from "./overlayComponents";
 
 /** Resource URIs served by the prototype authoring guide. */
 export const PROTOTYPE_GUIDE_URI = "automobile:prototype";
@@ -95,6 +96,7 @@ export function renderLimitsTable(): string {
   const items = (definitions.repeat.fields?.items.rule ?? {}) as Rule;
   rows.push(`| actions per \`onTap\` | ${onTap.min}..${onTap.max} |`);
   rows.push(`| \`repeat.items\` | ${items.min}..${items.max} |`);
+  rows.push(`| \`use\` nesting (host-expanded components) | ${MAX_OVERLAY_COMPONENT_DEPTH} |`);
   return ["| Limit | Value |", "| --- | --- |", ...rows].join("\n");
 }
 
@@ -186,6 +188,7 @@ export function renderPrototypeGuide(): string {
     renderNodes(),
     renderActions(),
     GUIDE_REPEAT,
+    GUIDE_COMPONENTS,
     renderTheme(),
     renderIcons(),
     GUIDE_ERRORS,

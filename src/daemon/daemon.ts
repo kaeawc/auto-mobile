@@ -123,7 +123,10 @@ import { announceSessionRelease } from "./announceSessionRelease";
 import { clearSessionAppearanceConfig } from "../server/appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { NetworkState } from "../server/NetworkState";
-import { registerNetworkStateSessionCleanup } from "../server/networkStateSessionCleanup";
+import {
+  createOwnerlessNetworkStateAcquisitionCleanup,
+  registerNetworkStateSessionCleanup,
+} from "../server/networkStateSessionCleanup";
 import { registerPerformanceMonitorSessionCleanup } from "../server/performanceMonitorSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
@@ -853,11 +856,16 @@ export class Daemon {
     // holder (#10829). The call performing the acquisition is spared.
     // A sessionless recording on the device is stopped and finalized the same way (#10961).
     const stopOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(this.sessionManager);
+    // Sessionless network mocks and simulations are cleared the same way (#11130).
+    const clearOwnerlessNetworkState = createOwnerlessNetworkStateAcquisitionCleanup(
+      this.sessionManager,
+    );
     this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
       executionTracker.cancelSessionlessDeviceUse(deviceId, {
         excludeExecutionId: getToolSelectionContext()?.execution?.executionId,
       });
       stopOwnerlessRecordings(deviceId);
+      clearOwnerlessNetworkState(deviceId);
     });
     this.sessionManager.onSessionCreated((session) => {
       NavigationGraphManager.clearReleasedSession(session.sessionId);

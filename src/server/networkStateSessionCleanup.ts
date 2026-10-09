@@ -68,3 +68,24 @@ export function registerNetworkStateSessionCleanup(
   manager.onSessionRelease(cleanup);
   manager.onSessionDeviceUnbound(cleanup);
 }
+
+/**
+ * A session acquiring a device clears the sessionless mocks and simulation on it (#11130), so
+ * state no session owns cannot outlive the free period and shape the new holder's traffic. Mirrors
+ * `createOwnerlessRecordingAcquisitionCleanup`: returns the callback to run where acquisition
+ * cancels sessionless executions, and tracks the device push as acquisition cleanup so the
+ * acquiring holder's own reuse is not refused.
+ */
+export function createOwnerlessNetworkStateAcquisitionCleanup(
+  manager: Pick<SessionManager, "registerAcquisitionDeviceCleanup">,
+  options: NetworkStateSessionCleanupOptions = {},
+): (deviceId: string) => void {
+  const pusher = options.pusher ?? defaultNetworkDeviceStatePusher;
+  return (deviceId) => {
+    const state = options.state?.() ?? NetworkState.getInstance();
+    if (!state.clearSessionlessDeviceState(deviceId)) {
+      return;
+    }
+    manager.registerAcquisitionDeviceCleanup(deviceId, pushClearedState(pusher, deviceId));
+  };
+}

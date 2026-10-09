@@ -34,6 +34,7 @@ import {
 } from "./androidSegmentedPlanVideoSession";
 import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { type StoppedSegment, writeSegmentManifest } from "./segmentManifest";
 
 const DEFAULT_MAX_DURATION_SECONDS = 30;
@@ -503,11 +504,46 @@ function segmentedStopResponse(stopped: StoppedSegmentedSession) {
   });
 }
 
-async function tryStopSegmentedSession(recordingId: string) {
+/**
+ * An active recording another session started is not the caller's to stop (#11130): a stop by id
+ * needs no device, so without this any live session holding a recordingId could end a capture on a
+ * device it does not hold. Ownerless recordings and unscoped (sessionless) callers stay open, the
+ * same visibility rule the finalized lookups use.
+ */
+function assertActiveRecordingOwner(input: {
+  recordingId: string;
+  deviceId: string;
+  recordingOwner: string | undefined;
+  requesterSessionUuid: string | undefined;
+}): void {
+  const { recordingId, deviceId, recordingOwner, requesterSessionUuid } = input;
+  if (!recordingOwner || requesterSessionUuid === undefined) {
+    return;
+  }
+  if (recordingOwner === requesterSessionUuid) {
+    return;
+  }
+  throw new InputDeviceOwnedError(
+    "videoRecording stop",
+    deviceId,
+    requesterSessionUuid,
+    undefined,
+    `videoRecording stop refused: recording ${recordingId} on device '${deviceId}' belongs to ` +
+      "another session. Only the session that started an active recording can stop it.",
+  );
+}
+
+async function tryStopSegmentedSession(recordingId: string, ownerSessionUuid?: string) {
   const session = segmentedSessions.get(recordingId);
   if (!session) {
     return null;
   }
+  assertActiveRecordingOwner({
+    recordingId,
+    deviceId: session.deviceId,
+    recordingOwner: session.ownerSession,
+    requesterSessionUuid: ownerSessionUuid,
+  });
 
   try {
     return segmentedStopResponse(await segmentedSessions.stopAndRemove(recordingId, session));
@@ -561,7 +597,7 @@ async function finalizedStopResponse(recordingId: string, ownerSessionUuid?: str
 }
 
 async function stopRecordingById(recordingId: string, ownerSessionUuid?: string) {
-  const segmented = await tryStopSegmentedSession(recordingId);
+  const segmented = await tryStopSegmentedSession(recordingId, ownerSessionUuid);
   if (segmented) {
     return segmented;
   }
@@ -575,6 +611,13 @@ async function stopRecordingById(recordingId: string, ownerSessionUuid?: string)
     if (finalized) {
       return finalized;
     }
+  } else {
+    assertActiveRecordingOwner({
+      recordingId,
+      deviceId: matching.deviceId,
+      recordingOwner: matching.ownerSessionUuid,
+      requesterSessionUuid: ownerSessionUuid,
+    });
   }
 
   try {

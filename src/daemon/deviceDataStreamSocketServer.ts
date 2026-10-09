@@ -24,6 +24,7 @@ import type {
 } from "./deviceSessionRegistry";
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { ObserverReleaseBroadcaster, type ObserverReleaseSource } from "./observerReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
@@ -480,6 +481,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   /** Identities each connection was admitted with, so a gone observer's streams end (#11076). */
   private readonly identitiesBySocket = new Map<Socket, Set<string>>();
   private removeObserverReleaseListener: (() => void) | null = null;
+  private removeSessionReleaseListener: (() => void) | null = null;
   /** Serializes lifecycle operations for one device-side storage observer. */
   private readonly storageOperations = new Map<string, Promise<void>>();
   private observationRequestTimeoutMs = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS;
@@ -503,6 +505,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       { allowObserverSessions: true },
     ),
     private readonly observerReleases: ObserverReleaseSource = ObserverReleaseBroadcaster,
+    /** Device-session releases; same listener shape as observer releases (#11130). */
+    private readonly sessionReleases: ObserverReleaseSource = SessionReleaseBroadcaster,
   ) {
     super(socketPath, timer, "DeviceDataStream");
   }
@@ -512,6 +516,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     this.removeObserverReleaseListener?.();
     this.removeObserverReleaseListener = this.observerReleases.subscribe((sessionId) => {
       this.revokeIdentity(sessionId);
+    });
+    // A released device session (heartbeat, idle, plan, explicit) is not an observer release, so
+    // re-resolve every admitted identity the way the video relay does: a released key may be a
+    // derived `${base}:${label}` or a base whose derived keys a socket was admitted under (#11130).
+    this.removeSessionReleaseListener?.();
+    this.removeSessionReleaseListener = this.sessionReleases.subscribe(() => {
+      this.endStaleIdentitySockets();
     });
   }
 
@@ -525,24 +536,65 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       .filter(([, identities]) => identities.has(sessionUuid))
       .map(([socket]) => socket);
     for (const socket of sockets) {
-      logger.info("[DeviceDataStream] ending connection: reason=session_ended");
-      try {
-        if (!socket.destroyed) {
-          this.sendJson(socket, {
-            type: "error",
-            success: false,
-            code: "SESSION_ENDED",
-            error: "Observation stream ended: session_ended",
-          } satisfies SubscriptionResponse);
-        }
-      } catch (error) {
-        // The peer may already be gone; its subscriptions are released below either way.
-        logger.debug(`[DeviceDataStream] session_ended notice failed: ${errorMessage(error)}`);
-      }
-      this.onConnectionClose(socket);
-      this.endRevokedSocket(socket);
+      this.endSessionEndedSocket(socket);
     }
     return sockets.length;
+  }
+
+  /**
+   * End every connection admitted under an identity that is no longer live (released, expired or
+   * releasing). Called on session release and before each device frame push, so a subscriber of a
+   * released session never sees the next holder's hierarchies, screenshots or storage (#11130).
+   */
+  private endStaleIdentitySockets(): number {
+    const sockets = [...this.identitiesBySocket.keys()].filter((socket) =>
+      this.isSocketIdentityStale(socket),
+    );
+    for (const socket of sockets) {
+      this.endSessionEndedSocket(socket);
+    }
+    return sockets.length;
+  }
+
+  /** Whether any identity this connection was admitted with is gone. Pure; never ends the socket. */
+  private isSocketIdentityStale(socket: Socket): boolean {
+    const identities = this.identitiesBySocket.get(socket);
+    return !!identities && [...identities].some((sessionUuid) => !this.isIdentityLive(sessionUuid));
+  }
+
+  private isIdentityLive(sessionUuid: string): boolean {
+    const identity = this.authenticator.resolveSubscriptionIdentity?.({ sessionUuid });
+    if (identity) {
+      return !identity.authEnabled || identity.sessionExists;
+    }
+    try {
+      this.authenticator.authorize({ sessionUuid });
+      return true;
+    } catch (error) {
+      // A refused re-authorization is the expected answer for a released identity; the caller
+      // ends the connection with SESSION_ENDED, so there is nothing further to surface here.
+      logger.debug(`[DeviceDataStream] identity no longer authorized: ${errorMessage(error)}`);
+      return false;
+    }
+  }
+
+  private endSessionEndedSocket(socket: Socket): void {
+    logger.info("[DeviceDataStream] ending connection: reason=session_ended");
+    try {
+      if (!socket.destroyed) {
+        this.sendJson(socket, {
+          type: "error",
+          success: false,
+          code: "SESSION_ENDED",
+          error: "Observation stream ended: session_ended",
+        } satisfies SubscriptionResponse);
+      }
+    } catch (error) {
+      // The peer may already be gone; its subscriptions are released below either way.
+      logger.debug(`[DeviceDataStream] session_ended notice failed: ${errorMessage(error)}`);
+    }
+    this.onConnectionClose(socket);
+    this.endRevokedSocket(socket);
   }
 
   private endRevokedSocket(socket: Socket): void {
@@ -607,6 +659,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     if (this.isDeviceRoutingSuspended(deviceId)) {
       return 0;
     }
+    // Re-check before every device frame: a released session's socket must not receive the next
+    // holder's frames even if no release event reached this server (#11130).
+    this.endStaleIdentitySockets();
     const subscriber = target ? this.subscribers.get(target.subscriptionId) : undefined;
     if (target && (target.signal.aborted || !subscriber || subscriber.socket.destroyed)) {
       return 0;
@@ -991,7 +1046,11 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    */
   hasSubscriberForDevice(deviceId: string): boolean {
     for (const subscriber of this.subscribers.values()) {
-      if (subscriber.backfilling || subscriber.socket.destroyed) {
+      if (
+        subscriber.backfilling ||
+        subscriber.socket.destroyed ||
+        this.isSocketIdentityStale(subscriber.socket)
+      ) {
         continue;
       }
 
@@ -1457,6 +1516,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   protected onServerClosing(): void {
     this.removeObserverReleaseListener?.();
     this.removeObserverReleaseListener = null;
+    this.removeSessionReleaseListener?.();
+    this.removeSessionReleaseListener = null;
     this.identitiesBySocket.clear();
     super.onServerClosing();
     this.abortRemovedInitialFrameWaiters();
@@ -1541,6 +1602,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * deliberately remains intact across that runner-only reconnect.
    */
   async reapplyStorageSubscriptionsForDevice(deviceId: string): Promise<void> {
+    // A released session's storage observer must not be re-registered against the next holder.
+    this.endStaleIdentitySockets();
     const subscriptions = [...this.storageSubscriptions.entries()].filter(
       ([, subscription]) => subscription.deviceId === deviceId,
     );

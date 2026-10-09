@@ -3,6 +3,7 @@ import type { SessionManager } from "../../src/daemon/sessionManager";
 import { NetworkState } from "../../src/server/NetworkState";
 import { buildNetworkMockRules } from "../../src/server/networkMockRules";
 import {
+  createOwnerlessNetworkStateAcquisitionCleanup,
   registerNetworkStateSessionCleanup,
   type NetworkDeviceStatePusher,
 } from "../../src/server/networkStateSessionCleanup";
@@ -204,5 +205,63 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
 
     expect(state.getMocks(DEVICE_A).size).toBe(0);
     await expect(manager.pendingCleanups[0].cleanup).resolves.toBeUndefined();
+  });
+});
+
+describe("createOwnerlessNetworkStateAcquisitionCleanup (#11130)", () => {
+  let state: NetworkState;
+  let pusher: FakePusher;
+  let acquisitionCleanups: Array<{ deviceId: string; cleanup: Promise<unknown> }>;
+  let acquire: (deviceId: string) => void;
+
+  beforeEach(() => {
+    state = new NetworkState({
+      timer: new FakeTimer(),
+      notifier: { notifyResourceUpdated: () => {} },
+    });
+    pusher = new FakePusher(state);
+    acquisitionCleanups = [];
+    acquire = createOwnerlessNetworkStateAcquisitionCleanup(
+      {
+        registerAcquisitionDeviceCleanup: (deviceId, cleanup) => {
+          acquisitionCleanups.push({ deviceId, cleanup });
+        },
+      },
+      { state: () => state, pusher },
+    );
+  });
+
+  test("acquiring a device clears sessionless mocks and simulation and pushes the rest", async () => {
+    state.addMock(DEVICE_A, rule("sessionless.com"));
+    const owned = state.addMock(DEVICE_A, rule("owned.com"), "session-1");
+    state.startSimulation(DEVICE_A, "timeout", 30, null);
+    const otherDevice = state.addMock(DEVICE_B, rule("b.com"));
+
+    acquire(DEVICE_A);
+
+    expect(Array.from(state.getMocks(DEVICE_A).keys())).toEqual([owned.mockId]);
+    expect(state.getSimulation(DEVICE_A)).toBeNull();
+    expect(Array.from(state.getMocks(DEVICE_B).keys())).toEqual([otherDevice.mockId]);
+    expect(acquisitionCleanups.map((entry) => entry.deviceId)).toEqual([DEVICE_A]);
+    await acquisitionCleanups[0].cleanup;
+    expect(pusher.pushes).toEqual([
+      { deviceId: DEVICE_A, ruleIds: [owned.mockId], simulating: false },
+    ]);
+  });
+
+  test("a session-owned simulation survives acquisition", () => {
+    state.startSimulation(DEVICE_A, "timeout", 30, null, "session-1");
+
+    acquire(DEVICE_A);
+
+    expect(state.getSimulation(DEVICE_A)).not.toBeNull();
+    expect(acquisitionCleanups).toEqual([]);
+    expect(pusher.pushes).toEqual([]);
+  });
+
+  test("acquiring a device with no sessionless state registers nothing", () => {
+    acquire(DEVICE_A);
+
+    expect(acquisitionCleanups).toEqual([]);
   });
 });

@@ -2616,9 +2616,11 @@ export class Daemon {
     if (process.platform === "win32" || !isHarnessPrivateDaemon(SOCKET_PATH, DEFAULT_SOCKET_PATH)) {
       return;
     }
+    const launcherPid = process.ppid;
     this.orphanWatchdog = new PrivateDaemonOrphanWatchdog(
       {
         parentPid: () => process.ppid,
+        launcherPid: () => launcherPid,
         clientCount: () =>
           (this.socketServer?.getClientConnectionCount() ?? 0) +
           getLiveAuxSocketConnectionCount() +

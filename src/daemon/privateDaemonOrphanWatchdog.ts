@@ -3,8 +3,10 @@ import { logger } from "../utils/logger";
 
 /** What the watchdog observes about this daemon process. */
 export interface PrivateDaemonOrphanPort {
-  /** Current parent PID; 1 once the launching parent has exited and init adopted us. */
+  /** Current parent PID; changes (to 1, or to a subreaper's pid) once the launcher exits. */
   parentPid(): number;
+  /** The parent PID recorded when this daemon started: the launcher. */
+  launcherPid(): number;
   /** Open control-socket and auxiliary-socket connections and in-flight HTTP requests. */
   clientCount(): number;
   /**
@@ -105,6 +107,16 @@ export class PrivateDaemonOrphanWatchdog {
     }
   }
 
+  /**
+   * The launcher is gone once init adopted us or any other process did: under a
+   * Linux subreaper (systemd --user, container inits) the new parent is not pid 1
+   * but is still not the launcher we recorded at start.
+   */
+  private isOrphaned(): boolean {
+    const parent = this.port.parentPid();
+    return parent === INIT_PID || parent !== this.port.launcherPid();
+  }
+
   /** One check; returns true when it requested shutdown. */
   check(): boolean {
     if (this.shutdownRequested) {
@@ -115,7 +127,7 @@ export class PrivateDaemonOrphanWatchdog {
       this.lastClientActivityCount !== null && activityCount !== this.lastClientActivityCount;
     this.lastClientActivityCount = activityCount;
     const orphanedAndIdle =
-      this.port.parentPid() === INIT_PID &&
+      this.isOrphaned() &&
       !clientSinceLastCheck &&
       this.port.clientCount() === 0 &&
       this.port.liveSessionCount() === 0;

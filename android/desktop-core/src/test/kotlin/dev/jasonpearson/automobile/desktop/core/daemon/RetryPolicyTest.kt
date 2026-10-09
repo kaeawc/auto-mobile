@@ -154,4 +154,18 @@ class RetryPolicyTest {
     // With maxDelayMs=5, 2 sleeps should total at most ~10ms (plus overhead)
     assertTrue(elapsed < 200, "Expected fast execution with capped delay, got ${elapsed}ms")
   }
+
+  @Test
+  fun delayBeforeRetryGrowsWithJitterAndStaysUnderTheCap() {
+    val policy = RetryPolicy(initialDelayMs = 1_000, maxDelayMs = 5_000, jitterFraction = 0.5)
+    val noJitter =
+      object : kotlin.random.Random() {
+        override fun nextBits(bitCount: Int) = 0
+      }
+    assertEquals(1_000, policy.delayBeforeRetryMs(0, noJitter))
+    assertEquals(2_000, policy.delayBeforeRetryMs(1, noJitter))
+    assertEquals(5_000, policy.delayBeforeRetryMs(5, noJitter))
+    repeat(50) { assertTrue(policy.delayBeforeRetryMs(1) in 2_000..3_000) }
+    assertEquals(5_000, policy.delayBeforeRetryMs(6))
+  }
 }

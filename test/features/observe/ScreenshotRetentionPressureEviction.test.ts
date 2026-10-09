@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   BoundedScreenshotPathProtection,
   SCREENSHOT_PRESSURE_EVICTION_MIN_AGE_MS,
-  ScreenshotRetentionCapacityError,
 } from "../../../src/features/observe/ScreenshotRetention";
 import { SCREENSHOT_CACHE_MAX_SIZE_BYTES } from "../../../src/features/observe/screenshotCacheEviction";
 import {
@@ -125,18 +124,68 @@ describe("screenshot retention under capacity pressure (#8758)", () => {
     expect(files.unlinked).toEqual([frame(1)]);
   });
 
-  test("the cap still refuses a capture when only referenced or very recent frames remain", async () => {
+  test("referenced and recent frames are evicted, in LRU order, once unprotected ones run out", async () => {
     const half = SCREENSHOT_CACHE_MAX_SIZE_BYTES / 2;
     await capture(0, half);
     timer.advanceTime(60_000);
-    state.referenced = [frame(0)];
     await capture(1, half);
     timer.advanceTime(SCREENSHOT_PRESSURE_EVICTION_MIN_AGE_MS - 1);
-    await expect(capture(2, LARGE_FRAME_BYTES)).rejects.toBeInstanceOf(
-      ScreenshotRetentionCapacityError,
-    );
-    expect(files.unlinked).toEqual([]);
-    expect(files.existsSync(frame(2))).toBe(false);
+    // frame 0 is referenced, frame 1 was returned moments ago; both protected.
+    state.referenced = [frame(0)];
+    await capture(2, half + 1);
+    expect(files.unlinked).toEqual([frame(0), frame(1)]);
+    expect(files.existsSync(frame(2))).toBe(true);
+  });
+
+  test("unprotected frames go before older referenced ones", async () => {
+    const third = Math.floor(SCREENSHOT_CACHE_MAX_SIZE_BYTES / 3);
+    await capture(0, third);
+    timer.advanceTime(1_000);
+    await capture(1, third);
+    timer.advanceTime(1_000);
+    await capture(2, third);
+    timer.advanceTime(60_000);
+    state.referenced = [frame(0)];
+    await capture(3, third);
+    expect(files.unlinked).toEqual([frame(1)]);
+  });
+
+  test("a capture is never refused, even when every frame is referenced and recent", async () => {
+    const half = SCREENSHOT_CACHE_MAX_SIZE_BYTES / 2;
+    await capture(0, half);
+    await capture(1, half);
+    state.referenced = [frame(0), frame(1)];
+    await capture(2, LARGE_FRAME_BYTES);
+    expect(files.existsSync(frame(2))).toBe(true);
+    expect(files.bytes()).toBeLessThanOrEqual(SCREENSHOT_CACHE_MAX_SIZE_BYTES);
+  });
+
+  test("a half-written capture is never deleted under its writer by a concurrent capture", async () => {
+    const half = SCREENSHOT_CACHE_MAX_SIZE_BYTES / 2;
+    await capture(0, half);
+    timer.advanceTime(60_000);
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const slow = protection.write(frame(1), {
+      size: half,
+      fileSystem: files,
+      write: async () => {
+        await gate;
+        files.add(frame(1), half, timer.now());
+      },
+      remove: () => files.unlink(frame(1)),
+    });
+    const next = capture(2, half);
+    await Promise.resolve();
+    expect(files.existsSync(frame(1))).toBe(false);
+    finish();
+    await slow;
+    await next;
+    // Frame 1 only became evictable once its writer finished; frame 0 went first.
+    expect(files.unlinked[0]).toBe(frame(0));
+    expect(files.existsSync(frame(2))).toBe(true);
   });
 
   test("the file-count cap also evicts the oldest frame", async () => {

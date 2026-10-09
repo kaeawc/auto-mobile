@@ -1,4 +1,3 @@
-import { ScreenshotRetentionCapacityError } from "../../../src/features/observe/ScreenshotRetention";
 import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../../src/features/observe/ScreenshotRetention";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { logger } from "../../../src/utils/logger";
@@ -454,61 +453,52 @@ function writeFrame(name: string, size: number) {
   });
 }
 
-test("two devices and sessions share the byte cap without evicting live paths", async () => {
+test("two devices and sessions share the byte cap; the least recently returned live path is evicted first", async () => {
   const paths = [
     files.add("screenshot_0_deviceA_sessionA.png", 64 * 1024 * 1024, 0),
     files.add("screenshot_0_deviceB_sessionB.png", 64 * 1024 * 1024, 0),
   ];
   timer.advanceTime(100);
   await protection.protect(paths[0]);
+  timer.advanceTime(100);
   await protection.protect(paths[1]);
-  let failure: unknown;
-  try {
-    await writeFrame("crop-capacity.png", 1);
-  } catch (error) {
-    failure = error;
-  }
-  expect(failure).toBeInstanceOf(ScreenshotRetentionCapacityError);
-  expect(failure).toMatchObject({
-    cap: 128 * 1024 * 1024,
-    liveCount: 2,
-    earliestExpiresAt: 600_100,
-  });
-  expect((failure as Error).message).toContain(new Date(600_100).toISOString());
-  for (const path of paths) {
-    expect(files.existsSync(path)).toBe(true);
-  }
-  expect(files.existsSync("/screenshots/crop-capacity.png")).toBe(false);
+  timer.advanceTime(10_000);
+  await writeFrame("crop-capacity.png", 1);
+  expect(files.existsSync(paths[0])).toBe(false);
+  expect(files.existsSync(paths[1])).toBe(true);
+  expect(files.existsSync("/screenshots/crop-capacity.png")).toBe(true);
 });
 
-test("count capacity refuses a new file and never drops a live file", async () => {
+test("count capacity evicts the oldest file instead of refusing a new one", async () => {
   // A small injected cap exercises the same admission path as the production 4096 without
   // building and sweeping 4096 fake files (~10 ms, the slowest test in this file).
   const countCap = 16;
   protection = new BoundedScreenshotPathProtection(timer, undefined, countCap);
   for (let i = 0; i < countCap; i++) {
-    files.add(`crop-count-${i}.png`, 1, 0);
+    files.add(`crop-count-${i}.png`, 1, i);
   }
-  await expect(writeFrame("crop-count-overflow.png", 1)).rejects.toMatchObject({
-    countCap,
-    liveCount: countCap,
-    earliestExpiresAt: 600_000,
-  });
-  expect(files.existsSync("/screenshots/crop-count-0.png")).toBe(true);
-  expect(files.existsSync(`/screenshots/crop-count-${countCap - 1}.png`)).toBe(true);
+  timer.advanceTime(10_000);
+  await writeFrame("crop-count-overflow.png", 1);
+  expect(files.existsSync("/screenshots/crop-count-0.png")).toBe(false);
+  expect(files.existsSync("/screenshots/crop-count-1.png")).toBe(true);
+  expect(files.existsSync("/screenshots/crop-count-overflow.png")).toBe(true);
 });
 
-test("post-write overshoot rolls back only the new unpublished frame", async () => {
-  const live = files.add("screenshot_0_device_live.png", 127 * 1024 * 1024, 0);
+test("a capture larger than the cap is admitted with a warning and its own file kept", async () => {
+  const live = files.add("screenshot_0_device_live.png", 1024, 0);
   await protection.protect(live);
-  const unlink = spyOn(files, "unlink");
-  await expect(writeFrame("crop-overshoot.png", 2 * 1024 * 1024)).rejects.toBeInstanceOf(
-    ScreenshotRetentionCapacityError,
-  );
-  expect(unlink.mock.calls).toEqual([["/screenshots/crop-overshoot.png"]]);
-  expect(files.existsSync(live)).toBe(true);
-  expect(files.existsSync("/screenshots/crop-overshoot.png")).toBe(false);
-  unlink.mockRestore();
+  timer.advanceTime(10_000);
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    await writeFrame("crop-oversized.png", 129 * 1024 * 1024);
+    expect(files.existsSync("/screenshots/crop-oversized.png")).toBe(true);
+    expect(files.existsSync(live)).toBe(false);
+    expect(warn.mock.calls.some((call) => String(call[0]).includes("admitting it anyway"))).toBe(
+      true,
+    );
+  } finally {
+    warn.mockRestore();
+  }
 });
 
 test("unlink failure logs and retries next sweep without rejecting capture cleanup", async () => {
@@ -529,22 +519,24 @@ test("unlink failure logs and retries next sweep without rejecting capture clean
   }
 });
 
-test("cleanup failures still consume capacity and cannot permit unlimited new captures", async () => {
+test("cleanup failures do not refuse a capture and the unremovable file still counts", async () => {
   files.add("crop-unremovable.png", 128 * 1024 * 1024, 0);
   timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS);
   const unlink = spyOn(files, "unlink").mockRejectedValue(new Error("denied"));
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
-    await expect(writeFrame("crop-not-admitted.png", 1)).rejects.toBeInstanceOf(
-      ScreenshotRetentionCapacityError,
-    );
-    expect(files.existsSync("/screenshots/crop-not-admitted.png")).toBe(false);
+    await writeFrame("crop-admitted.png", 1);
+    expect(files.existsSync("/screenshots/crop-admitted.png")).toBe(true);
+    expect(files.existsSync("/screenshots/crop-unremovable.png")).toBe(true);
   } finally {
     unlink.mockRestore();
+    warn.mockRestore();
   }
 });
 
-test("publication waits for post-write admission and cannot lease an oversized frame", async () => {
+test("publication of a frame written under pressure waits for admission and then leases it", async () => {
   files.add("screenshot_0_device_live.png", 127 * 1024 * 1024, 0);
+  timer.advanceTime(10_000);
   let publication!: Promise<number>;
   const path = "/screenshots/crop-in-flight.png";
   const write = protection.write(path, {
@@ -553,12 +545,11 @@ test("publication waits for post-write admission and cannot lease an oversized f
     write: async () => {
       files.add("crop-in-flight.png", 2 * 1024 * 1024, timer.now());
       publication = protection.protect(path);
-      // Attach the rejection reader before the write's admission settles.
-      void publication.catch(() => {});
     },
     remove: () => files.unlink(path),
   });
-  await expect(write).rejects.toBeInstanceOf(ScreenshotRetentionCapacityError);
-  await expect(publication).rejects.toBeInstanceOf(ScreenshotRetentionCapacityError);
-  expect(files.existsSync(path)).toBe(false);
+  await write;
+  await expect(publication).resolves.toBeGreaterThan(timer.now());
+  expect(files.existsSync(path)).toBe(true);
+  expect(files.existsSync("/screenshots/screenshot_0_device_live.png")).toBe(false);
 });

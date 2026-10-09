@@ -322,28 +322,25 @@ observation, call `observe({ screenshot: "settled" })` and read its
 `screenshotPath`.
 
 Every returned full-screen fresh (settled or device-read), cached fallback, per-display,
-and crop (`crop-*` and `snapshot-of-*`) path exists for **at least 10 minutes after
-return**, unless it is evicted at capacity (below). A flat `<x>Path` has a sibling `<x>ExpiresAt`: top-level and per-display
-`screenshotExpiresAt`; objects owning a path have `expiresAt` (`crop.expiresAt`
-and snapshotOf's `expiresAt`). These optional numbers are host-clock epoch milliseconds.
+and crop (`crop-*` and `snapshot-of-*`) path is kept for **at least 10 minutes after
+return** unless capacity pressure evicts it early (below). A flat `<x>Path` has a sibling
+`<x>ExpiresAt`: top-level and per-display `screenshotExpiresAt`; objects owning a path have
+`expiresAt` (`crop.expiresAt` and snapshotOf's `expiresAt`). These optional numbers are
+host-clock epoch milliseconds and are not a promise that the file survives that long.
 Returning a cached path again extends its guarantee and recomputes the deadline.
 
-Admission enforces a hard cap of **128 MiB and 4096 files** for the shared screenshots
-directory across all devices and sessions in a process. When a new capture would
-exceed either cap, the least recently written or returned screenshots are evicted early,
-inside their guarantee, until it fits. Evicting is preferred to refusing because a refused
-capture fails `observe` outright: large-screen devices (iPhone Pro at ~3.3 MB per frame, a
-foldable's inner panel) reach 128 MiB within one benchmark run. Eviction never removes a
-file referenced by a live observe cache entry or screenshot state, or a file written or
-returned in the last 5 seconds (it may be another process's unpublished frame). Copy a
-returned path promptly when a session captures many large frames.
-
-Only when those kept files alone fill the cap is a new capture refused. An oversized new
-frame is removed before publication. Default screenshot
-provenance degrades to an observation without a path and with a failure reason; an
-existing cached path can still be returned. Explicit `screenshot: "settled"`, `crop`,
-`includeScreenshotImage`, and `snapshotOf` requests surface an actionable capacity error
-with the earliest guarantee expiry. Observations without screenshots are unaffected.
+Admission enforces a cap of **128 MiB and 4096 files** for the shared screenshots
+directory across all devices and sessions in a process. A new capture is never refused.
+When it would exceed either cap, the least recently written or returned screenshots are
+evicted, in that order, even inside their guarantee, until it fits. Files no live observe
+cache entry or screenshot state references, and not touched in the last 5 seconds, go
+first; if they are not enough, eviction continues into referenced and recent files, still
+least recently used first, so a returned path (even one a live cache still references) may
+no longer exist when a later call uses it. Only a capture's own in-flight write is never
+deleted. A single frame larger than the cap is admitted anyway and logged as a warning.
+Large-screen devices (iPhone Pro at ~3.3 MB per frame, a foldable's inner panel) reach
+128 MiB within one benchmark run, so copy a returned path promptly when a session captures
+many large frames. Observations without screenshots are unaffected.
 A per-process in-memory inventory tracks capacity. It reconciles with the directory on
 periodic or explicit sweeps and near either cap, picking up files from other processes.
 Concurrent processes can exceed the aggregate cap before reconciliation; discovered

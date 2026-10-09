@@ -127,7 +127,8 @@ Primary:
   the legacy `MCP_ENDPOINT`) selects the HTTP transport instead of the daemon Unix socket; the value
   is normalized to `…/auto-mobile/streamable`. The daemon answers POSTs with `text/event-stream`, so
   the client parses SSE frames as well as plain JSON bodies.
-- `AUTOMOBILE_DAEMON_SOCKET_PATH`: Daemon socket path (default: `/tmp/auto-mobile-daemon-$UID.sock`).
+- `AUTOMOBILE_DAEMON_SOCKET_PATH`: Daemon socket path (default: `/tmp/auto-mobile-daemon-$UID.sock`;
+  with `AUTOMOBILE_AUX_SOCKET_DIR` set, the same hash-suffixed path the daemon uses).
 - `AUTOMOBILE_TEST_PLAN`: Path to YAML automation plan.
 - `AUTOMOBILE_TEST_RETRY_COUNT`: Number of retry attempts (default: `0`).
 - `AUTOMOBILE_TEST_TIMEOUT_SECONDS`: Test timeout in seconds (default: `300`).

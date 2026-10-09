@@ -9,18 +9,14 @@ public enum DaemonManager {
     /// The npm package name used for pinned daemon launches and repo-root discovery. Frozen contract.
     static let packageName = "@kaeawc/auto-mobile"
 
+    /// Resolved like the daemon itself: explicit override, then the `AUTOMOBILE_AUX_SOCKET_DIR`
+    /// isolation suffix, then `/tmp/auto-mobile-daemon-<uid>.pid` (#10906).
     public static var pidFilePath: String {
-        let uid = String(getuid())
-        return ProcessInfo.processInfo.environment["AUTOMOBILE_DAEMON_PID_FILE_PATH"]
-            ?? ProcessInfo.processInfo.environment["AUTO_MOBILE_DAEMON_PID_FILE_PATH"]
-            ?? "/tmp/auto-mobile-daemon-\(uid).pid"
+        DaemonStatePaths.resolve(.pid, environment: ProcessInfo.processInfo.environment)
     }
 
     public static var socketPath: String {
-        let uid = String(getuid())
-        return ProcessInfo.processInfo.environment["AUTOMOBILE_DAEMON_SOCKET_PATH"]
-            ?? ProcessInfo.processInfo.environment["AUTO_MOBILE_DAEMON_SOCKET_PATH"]
-            ?? "/tmp/auto-mobile-daemon-\(uid).sock"
+        DaemonStatePaths.resolve(.socket, environment: ProcessInfo.processInfo.environment)
     }
 
     public static func isDaemonRunning() -> Bool {

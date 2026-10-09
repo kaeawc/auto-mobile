@@ -28,17 +28,14 @@ version: 2.1
 # file references a context.
 #
 # #10887 migration mirrors (job `name:`s match the GitHub job names so the status
-# reads `ci/circleci: <GitHub name>`): "XCTestRunner Simulator Tests",
-# "Build Root SPM Package" and "iOS Device Capture to WHEP". They run ALONGSIDE
-# the GitHub jobs until the owner flips the gates; see the migration doc.
+# reads `ci/circleci: <GitHub name>`): "Build Root SPM Package" and "iOS Device
+# Capture to WHEP". They run ALONGSIDE the GitHub jobs until the owner flips the
+# gates; see the migration doc. XCTestRunner Simulator Tests is deliberately NOT
+# mirrored: GitHub runs it nightly and on PRs only with the `run-ios-sim` label
+# (#10895), so a PR-triggered CircleCI run would re-add the cost that was cut.
 
 parameters:
   run-ios:
-    type: boolean
-    default: false
-  # Set by path filtering in config.yml from the same paths as pull_request.yml's
-  # filter-native-integration (XCTestRunner Simulator Tests).
-  run-ios-integration:
     type: boolean
     default: false
   # Set by path filtering in config.yml from the same paths as pull_request.yml's
@@ -298,195 +295,6 @@ jobs:
             echo "build took ${SECONDS}s"
           no_output_timeout: 15m
 
-  # Mirror of pull_request.yml → "XCTestRunner Simulator Tests" (advisory; GitHub:
-  # 48 min job cap). GitHub's backgrounded installs and boot are serialized here:
-  # CircleCI has no `wait` barrier, and the boot's UDID must reach later steps via
-  # $BASH_ENV. Per-step GitHub caps are kept with run_with_timeout. One simulator
-  # per job, used serially (CLAUDE.md); the odd-width test shuts it down first.
-  xctestrunner-simulator-tests:
-    executor: ios
-    environment:
-      AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS: "240"
-      AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS: "150000"
-      AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "60000"
-      AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA: "/tmp/automobile-ctrl-proxy"
-      AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD: "true"
-    steps:
-      - checkout_without_lfs
-      - restore_spm_cache
-      - run:
-          name: "Configure job paths"
-          # GitHub uses ${{ github.workspace }}/ci-logs/daemon-logs; CircleCI's
-          # working directory is only known at run time.
-          command: |
-            echo "export AUTOMOBILE_LOG_DIR=\"${PWD}/ci-logs/daemon-logs\"" >> "${BASH_ENV}"
-      - run:
-          name: "Ensure iOS Simulator runtime"
-          command: ./scripts/ios/ensure-simulator-runtime.sh
-      - run:
-          name: "Install XcodeGen, xcpretty and ffmpeg"
-          command: |
-            export XCODEGEN_PREFIX="${HOME}/.local"
-            ./scripts/ios/install-xcodegen.sh
-            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
-            gem install xcpretty
-            brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
-      - setup_auto_mobile_npm_package
-      - run:
-          name: "Check CtrlProxy XcodeGen Project Drift"
-          command: ./scripts/ios/xcodegen-drift-check.sh --ctrl-proxy
-      - run:
-          name: "Resolve CtrlProxy Swift package dependencies"
-          command: cd ios/control-proxy && swift package resolve
-      - run:
-          name: "Boot iOS Simulator for CtrlProxy UI tests"
-          no_output_timeout: 12m
-          command: |
-            ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
-            result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000 --min-os-version "${ios_version}" --max-os-version "${ios_version}")"
-            simulator_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
-            if [[ -z "${simulator_udid}" || "${simulator_udid}" == "null" ]]; then
-              echo "AutoMobile product boot returned no deviceId." >&2
-              exit 1
-            fi
-            echo "export SIMULATOR_UDID=\"${simulator_udid}\"" >> "${BASH_ENV}"
-      - run:
-          name: "Build CtrlProxy iOS for Testing"
-          no_output_timeout: 20m
-          command: |
-            SECONDS=0
-            ./scripts/ios/ctrl-proxy-build-for-testing.sh
-            echo "build took ${SECONDS}s"
-            touch /tmp/ctrlproxy-build-ok
-      - run:
-          name: "Verify CtrlProxy iOS Artifacts"
-          command: |
-            ls -la /tmp/automobile-ctrl-proxy/Build/Products/
-            ls -la /tmp/automobile-ctrl-proxy/Build/Products/Debug-iphonesimulator/ || true
-            find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1
-      - run:
-          name: "Pin Source-Built CtrlProxy Runner Integrity"
-          command: |
-            runner_binary="/tmp/automobile-ctrl-proxy/Build/Products/Debug-iphonesimulator/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests"
-            if [[ ! -f "${runner_binary}" ]]; then
-              echo "Source-built CtrlProxy xctest executable not found: ${runner_binary}" >&2
-              exit 1
-            fi
-            runner_sha256="$(shasum -a 256 "${runner_binary}" | awk '{print $1}')"
-            if [[ ! "${runner_sha256}" =~ ^[a-f0-9]{64}$ ]]; then
-              echo "Unable to compute a valid CtrlProxy xctest SHA256" >&2
-              exit 1
-            fi
-            {
-              echo "export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=${runner_sha256}"
-              echo "export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest"
-            } >> "${BASH_ENV}"
-      - run:
-          name: "Run selected CtrlProxy iOS tests"
-          command: |
-            source ./scripts/ios/run_with_timeout.sh
-            if [[ ! "${SIMULATOR_UDID}" =~ ^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$ ]]; then
-              echo "Invalid simulator UDID" >&2
-              exit 1
-            fi
-            XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
-            run_with_timeout 480 xcodebuild test-without-building \
-              -xctestrun "${XCTESTRUN}" \
-              -destination "id=${SIMULATOR_UDID}" \
-              -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests \
-              -only-testing:CtrlProxyUITests/RotationOrientationTests \
-              -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree \
-              -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testScreenshotCapturesScreenAfterTrackedAppTerminates \
-              -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testPressKeyForwardDeleteRemovesFollowingCharacter \
-              -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testPressKeyForwardDeleteAtEndOfTextFailsClosed
-      # GitHub runs the remaining steps under `!cancelled() && build succeeded`,
-      # i.e. even after an earlier test failed. `when: always` plus the build
-      # marker reproduces that.
-      - run:
-          name: "Ensure AutoMobile daemon ready"
-          when: always
-          environment:
-            AUTOMOBILE_DAEMON_DEBUG: "1"
-            AUTOMOBILE_DAEMON_EMBEDDED_SDK: "1"
-          command: |
-            [[ -f /tmp/ctrlproxy-build-ok ]] || { echo "CtrlProxy build failed; skipping."; exit 0; }
-            # Same isolation GitHub applies ("Prepare isolated video recording
-            # database"), from this step onward only. One stable tool profile is
-            # kept across warm-up and both integrations.
-            mkdir -p /tmp/auto-mobile-video-recording-db
-            {
-              echo 'export AUTOMOBILE_DB_DIR="/tmp/auto-mobile-video-recording-db"'
-              echo 'export AUTOMOBILE_ENABLED_TOOLS="videoRecording,navigateTo,getNavigationGraph,explore"'
-            } >> "${BASH_ENV}"
-            export AUTOMOBILE_DB_DIR="/tmp/auto-mobile-video-recording-db"
-            export AUTOMOBILE_ENABLED_TOOLS="videoRecording,navigateTo,getNavigationGraph,explore"
-            ./scripts/ci/ensure-daemon-ready.sh
-      - run:
-          name: "Warm up iOS CtrlProxy"
-          when: always
-          command: |
-            [[ -f /tmp/ctrlproxy-build-ok ]] || { echo "CtrlProxy build failed; skipping."; exit 0; }
-            source ./scripts/ios/run_with_timeout.sh
-            run_with_timeout 720 ./scripts/ci/ensure-ctrl-proxy-ready.sh
-      - run:
-          name: "Run videoRecording MP4 integration test"
-          command: |
-            source ./scripts/ios/run_with_timeout.sh
-            run_with_timeout 600 ./scripts/ios/video-recording-start-stop-integration.sh
-      - run:
-          name: "Run iOS navigation graph Simulator workflow"
-          when: always
-          command: |
-            [[ -f /tmp/ctrlproxy-build-ok ]] || { echo "CtrlProxy build failed; skipping."; exit 0; }
-            source ./scripts/ios/run_with_timeout.sh
-            run_with_timeout 300 ./scripts/ios/navigation-graph-sdk-event-integration.sh "${SIMULATOR_UDID}"
-      - run:
-          name: "Stop AutoMobile daemon before odd-width boot"
-          when: always
-          command: |
-            [[ -f /tmp/ctrlproxy-build-ok && -n "${SIMULATOR_UDID:-}" ]] || exit 0
-            source ./scripts/ios/run_with_timeout.sh
-            run_with_timeout 20 auto-mobile --daemon stop || true
-      - run:
-          name: "Run odd-width CtrlProxy screenshot test (iPhone 15)"
-          when: always
-          no_output_timeout: 15m
-          command: |
-            [[ -f /tmp/ctrlproxy-build-ok && -n "${SIMULATOR_UDID:-}" ]] || { echo "Build or boot failed; skipping."; exit 0; }
-            bash ./scripts/ios/shutdown-main-simulator.sh "${SIMULATOR_UDID}"
-            ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
-            result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000 --name "iPhone 15" --min-os-version "${ios_version}" --max-os-version "${ios_version}")"
-            odd_width_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
-            if [[ -z "${odd_width_udid}" || "${odd_width_udid}" == "null" ]]; then
-              echo "AutoMobile product boot returned no iPhone 15 deviceId." >&2
-              exit 1
-            fi
-            trap 'xcrun simctl shutdown "${odd_width_udid}" >/dev/null 2>&1 || true' EXIT
-            simulator_device_type="$(
-              xcrun simctl list devices --json |
-                jq -r --arg udid "${odd_width_udid}" '.devices[][] | select(.udid == $udid) | .deviceTypeIdentifier'
-            )"
-            if [[ "${simulator_device_type}" != "com.apple.CoreSimulator.SimDeviceType.iPhone-15" ]]; then
-              echo "Expected iPhone 15 for odd-width screenshot coverage; got '${simulator_device_type:-unknown}'." >&2
-              exit 1
-            fi
-            XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
-            xcodebuild test-without-building \
-              -xctestrun "${XCTESTRUN}" \
-              -destination "id=${odd_width_udid}" \
-              -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testScreenshotMatchesNativeDimensionsOnOddWidthDevice
-      # store_artifacts always runs; stage the daemon logs only on failure, as
-      # GitHub uploads them only on failure.
-      - run:
-          name: "Stage AutoMobile daemon logs"
-          when: on_fail
-          command: |
-            mkdir -p /tmp/failure-artifacts
-            cp -R ci-logs/daemon-logs /tmp/failure-artifacts/ 2>/dev/null || true
-      - store_artifacts:
-          path: /tmp/failure-artifacts
-          destination: automobile-daemon-logs-xctestrunner
-
   # Mirror of pull_request.yml → "iOS Device Capture to WHEP" (GitHub: 35 min cap).
   # The capture loop, retry and reap logic stay identical to GitHub's step.
   ios-device-webrtc:
@@ -626,14 +434,8 @@ workflows:
       - ios-spm-root-package-build:
           name: "Build Root SPM Package"
 
-  # #10887 mirrors gated on their own GitHub path filters. No contexts: these run
+  # #10887 mirror gated on its own GitHub path filter. No contexts: this runs
   # on fork PRs, which must never see secrets.
-  ios-integration-macos:
-    when: << pipeline.parameters.run-ios-integration >>
-    jobs:
-      - xctestrunner-simulator-tests:
-          name: "XCTestRunner Simulator Tests"
-
   ios-webrtc-macos:
     when: << pipeline.parameters.run-webrtc >>
     jobs:

@@ -51,24 +51,28 @@ I measured GitHub-hosted macOS time from recent runs. The PR sample is the last
 
 | Lane                                                 | Runs in sample   | Mean min/run |
 | ---------------------------------------------------- | ---------------- | ------------ |
-| XCTestRunner Simulator Tests                         | 20 / 100 PR runs | 21.6         |
+| XCTestRunner Simulator Tests (before #10895)         | 20 / 100 PR runs | 21.6         |
 | iOS Device Capture to WHEP                           | 5 / 100          | 10.0         |
 | Swift Packages (Xcode 26.5)                          | 3 / 100          | 5.0          |
 | Build Xcode Projects (Playground + CtrlProxy shards) | 3 / 100          | 2.3 + 1.0    |
 | Build Root SPM Package                               | 3 / 100          | 1.3          |
 | Nightly macOS total (10 jobs)                        | per night        | ≈ 34         |
 
-- **PR load:** ≈ 510 hosted macOS minutes per 100 PR runs, which is about 4.4 h of
-  campaign-pace PR traffic. On CircleCI that is about 102,000 credits, or about 3.4
-  months of the open-source allowance. Seven XCTestRunner runs use up a month's
-  allowance.
+- **PR load:** XCTestRunner Simulator Tests ran on PRs when this sample was taken.
+  It now runs nightly and on PRs only with the `run-ios-sim` label (#10895), and it
+  is not mirrored on CircleCI. The sample total was ≈ 510 hosted macOS minutes per
+  100 PR runs (about 102,000 CircleCI credits, 3.4 months of the allowance). Without
+  XCTestRunner (20 × 21.6 = 432 min) the remaining PR lanes are ≈ 78 min per 100 PR
+  runs, which is about 15,600 credits, or about half a month of the open-source
+  allowance, for about 4.4 h of campaign-pace traffic.
 - **Nightly load:** ≈ 34 min/night, plus about 1.5 min of VM start per job, ≈ 49
   min. That is ≈ 9,800 credits/night, or ≈ 294,000 credits/month, which is 10× the
   allowance. At the overage price that is about $176/month for nightly alone.
-- **Concurrency:** the 20 XCTestRunner runs alone are 432 job-minutes in 264
-  wall-clock minutes. That needs at least 2 macOS jobs running at all times. At a
-  concurrency of 1–2, the queue grows without bound during a campaign. Today
-  GitHub gives 5.
+- **Concurrency:** before #10895 the 20 XCTestRunner runs alone were 432
+  job-minutes in 264 wall-clock minutes, which needs at least 2 macOS jobs running
+  at all times. With XCTestRunner off the PR path, the mirrored lanes are short
+  (about 78 job-minutes per 264 wall-clock minutes), so a concurrency of 1–2 is
+  workable for them. Today GitHub gives 5.
 
 **Conclusion:** the Free/open-source plan cannot carry the PR and nightly macOS
 load. Moving everything would replace free, 5-wide GitHub macOS capacity with
@@ -78,7 +82,9 @@ load. Moving everything would replace free, 5-wide GitHub macOS capacity with
 $15/25k credits. Options, in order of cost:
 
 1. Keep CircleCI as overflow for short, path-filtered build lanes (today's
-   setup) and leave XCTestRunner, which is about 85% of PR macOS minutes, on GitHub.
+   setup). XCTestRunner Simulator Tests stays on GitHub (nightly / `run-ios-sim`
+   label, #10895) and is not mirrored on PRs; CircleCI uses the organization's
+   existing plan.
 2. Buy a paid plan and move PR lanes in the order of the table in §3, judged by
    one week of credit burn.
 3. Move only nightly, on a paid plan. It is the most predictable load (≈ 49
@@ -93,8 +99,9 @@ CircleCI posts **commit statuses**, not check runs, with the context
 (or the job key). On this repository they are created by `circleci-app[bot]`,
 the CircleCI GitHub App (app id **302869**, slug `circleci-app`). The mirrors
 added for #10887 use `name:` values identical to the GitHub jobs, so they report
-as `ci/circleci: XCTestRunner Simulator Tests`, `ci/circleci: Build Root SPM
-Package` and `ci/circleci: iOS Device Capture to WHEP`. The required contexts
+as `ci/circleci: Build Root SPM Package` and `ci/circleci: iOS Device Capture to
+WHEP`. XCTestRunner Simulator Tests has no PR mirror: GitHub runs it nightly and
+on PRs only with the `run-ios-sim` label (#10895). The required contexts
 in the `green-main` ruleset (id 11406121) are bare names (`SwiftLint`, `Swift
 Code Coverage`, `Build Root SPM Package`, `iOS Build`, `Installer Minimal
 (macos-latest)`, …), all pinned to integration **15368** (GitHub Actions). A
@@ -148,8 +155,7 @@ The shim rules:
 
 - **Filter on creator.** Count only statuses from `circleci-app[bot]`, so no
   other token can satisfy the gate by posting the context.
-- **Gate on the path-only output**, `ios_changed` (and `native_integration_changed`
-  / the WebRTC path output), never on `ios_should_run`. CircleCI cannot see the
+- **Gate on the path-only output**, `ios_changed` (and the WebRTC path output), never on `ios_should_run`. CircleCI cannot see the
   `run-ios` / `run-native` labels or the WebRTC title/body opt-in. For a
   label-forced run whose paths did not change, keep running the GitHub job
   itself, as `ios-playground-tests` already does. Otherwise the shim would wait
@@ -162,8 +168,8 @@ The shim rules:
   enforces on GitHub.
 - **Cost:** shim minutes are Ubuntu minutes, which are free on a public repo,
   and `namespace-profile-auto-mobile-small` covers same-repo PRs.
-- **Advisory lanes** (`XCTestRunner Simulator Tests`, `iOS Device Capture to
-  WHEP`, `iOS Playground Tests`, `Prototype Simulator`) are not required and need
+- **Advisory lanes** (`iOS Device Capture to WHEP`, `iOS Playground Tests`,
+  `Prototype Simulator`) are not required and need
   no shim. Remove their GitHub jobs once the CircleCI ones have been green for a
   week.
 
@@ -177,7 +183,7 @@ there is no hosted sample. Credits = minutes × 200 (`m4pro.medium`).
 
 | GitHub job (workflow)                                                                                      | Today                                       | CircleCI job                                           | Class        | Est. min/run                                | Est. credits/run  | Secrets                                                                                           | Move?                                                         |
 | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------ | ------------ | ------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| XCTestRunner Simulator Tests (PR, advisory)                                                                | hosted `macos-26`                           | `xctestrunner-simulator-tests` (added)                 | m4pro.medium | ~24                                         | ~4,800            | none                                                                                              | Only on a paid plan; about 85% of PR macOS minutes            |
+| XCTestRunner Simulator Tests (nightly + `run-ios-sim` label, #10895)                                       | hosted `macos-26`                           | none (not mirrored on PRs)                             | —            | ~24                                         | 0 on CircleCI     | none                                                                                              | No; stays on GitHub, off the PR path                          |
 | iOS Device Capture to WHEP (PR, advisory)                                                                  | hosted `macos-26`                           | `ios-device-webrtc` (added)                            | m4pro.medium | ~12                                         | ~2,400            | none                                                                                              | Paid plan; ScreenCaptureKit on CircleCI VMs is not yet proven |
 | Build Root SPM Package (PR, **required**)                                                                  | hosted `macos-26`                           | `ios-spm-root-package-build` (added)                   | m4pro.medium | ~3                                          | ~600              | none                                                                                              | Yes, behind the §2 shim                                       |
 | Swift Packages (PR → **iOS Build**)                                                                        | hosted `macos-26`                           | `ios-swift-packages` (existing; API check added)       | m4pro.medium | ~7                                          | ~1,400            | none (signing pinned off)                                                                         | Yes, behind the shim                                          |
@@ -233,8 +239,8 @@ from `circleci-app[bot]`. The remaining steps are all in the CircleCI web app.
    restricted signing context only if release jobs ever move (§3).
 5. **Project Settings → Triggers / Schedules:** add a nightly schedule only after
    choosing a paid plan (§1 option 2 or 3).
-6. Watch one week of `ci/circleci: XCTestRunner Simulator Tests`,
-   `Build Root SPM Package` and `iOS Device Capture to WHEP` results and credit
+6. Watch one week of `ci/circleci: Build Root SPM Package` and
+   `iOS Device Capture to WHEP` results and credit
    burn on the **Plan → Usage** page. Then land the §2 shims and remove the
    matching GitHub macOS jobs in the same PR (issue #10887 step 6).
 
@@ -245,6 +251,7 @@ from `circleci-app[bot]`. The remaining steps are all in the CircleCI web app.
   (every job, command, executor and pipeline parameter resolves) passed, and
   every `run` body passes shellcheck.
 - `test/scripts/circleciMacosMigrationPolicy.test.ts` checks four things. The
-  `run-ios-integration` / `run-webrtc` mappings must equal glob-for-glob
-  translations of the GitHub filters. The mirrors must keep their GitHub names.
+  `run-webrtc` mapping must equal the glob-for-glob translation of the GitHub
+  filter, and no `run-ios-integration` parameter or XCTestRunner job may exist
+  (#10895). The mirrors must keep their GitHub names.
   No workflow may use a context. The executor must pin signing off.

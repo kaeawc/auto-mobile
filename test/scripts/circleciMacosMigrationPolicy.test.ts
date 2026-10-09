@@ -18,6 +18,7 @@ interface CircleWorkflow {
 }
 
 interface CircleConfig {
+  parameters?: Record<string, unknown>;
   executors?: Record<string, { environment?: Record<string, string> }>;
   jobs?: Record<string, { steps?: Array<string | Record<string, Record<string, unknown>>> }>;
   workflows?: Record<string, CircleWorkflow>;
@@ -83,15 +84,22 @@ describe("CircleCI macOS migration policy (#10887)", () => {
     expect(() => globToOrbRegex("src/{a,b}.ts")).toThrow("unsupported glob syntax");
   });
 
-  test.each([
-    ["run-ios-integration", "Check for native-integration-affecting changes", "native_integration"],
-    ["run-webrtc", "Check for WebRTC publisher changes", "webrtc"],
-  ])("%s mapping mirrors the GitHub %s filter", (param, stepName, key) => {
-    const expected = [
-      ...githubFilterGlobs(stepName, key).map(globToOrbRegex),
-      CIRCLE_CONFIG_SELF_TRIGGER,
-    ];
-    expect(setupMapping().get(param)).toEqual(expected);
+  test.each([["run-webrtc", "Check for WebRTC publisher changes", "webrtc"]])(
+    "%s mapping mirrors the GitHub %s filter",
+    (param, stepName, key) => {
+      const expected = [
+        ...githubFilterGlobs(stepName, key).map(globToOrbRegex),
+        CIRCLE_CONFIG_SELF_TRIGGER,
+      ];
+      expect(setupMapping().get(param)).toEqual(expected);
+    },
+  );
+
+  test("XCTestRunner Simulator Tests is not mirrored on PRs (#10895)", () => {
+    const continueConfig = loadCircle(".circleci/continue_config.yml");
+    expect(Object.keys(continueConfig.parameters ?? {})).not.toContain("run-ios-integration");
+    expect(Object.keys(continueConfig.jobs ?? {})).not.toContain("xctestrunner-simulator-tests");
+    expect(setupMapping().has("run-ios-integration")).toBe(false);
   });
 
   test("mirrored jobs keep their GitHub job names", () => {
@@ -103,11 +111,7 @@ describe("CircleCI macOS migration policy (#10887)", () => {
           : Object.values(invocation).map((options) => options?.name),
       ),
     );
-    for (const name of [
-      "XCTestRunner Simulator Tests",
-      "Build Root SPM Package",
-      "iOS Device Capture to WHEP",
-    ]) {
+    for (const name of ["Build Root SPM Package", "iOS Device Capture to WHEP"]) {
       expect(names).toContain(name);
     }
   });

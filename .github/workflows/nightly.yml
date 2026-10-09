@@ -177,6 +177,74 @@ jobs:
           AUTOMOBILE_UNIT_RANDOM_SEED: ${{ github.run_number }}
         run: bash scripts/test-ts.sh unit
 
+  # Advisory canary for the Bun 1.4 upgrade (scratch/bun-14-upgrade.md, step 1).
+  # Every other job stays pinned to 1.3.14; this one runs the full unit and
+  # integration suites on the newer runtime. No downstream job depends on it.
+  node-bun-14-canary:
+    name: "Node Tests on Bun 1.4 (Advisory)"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 60
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Setup Bun 1.4"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      # Both lanes always run so one failure does not hide the other; the step
+      # still fails (advisory) when either lane fails.
+      - name: "Run unit and integration lanes on Bun 1.4"
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+        run: |
+          mkdir -p scratch/bun-14-canary
+          summary=scratch/bun-14-canary/summary.md
+          {
+            echo "# Bun 1.4 canary"
+            echo
+            echo "- bun: $(bun --version)"
+            echo "- commit: ${GITHUB_SHA}"
+            echo
+          } > "$summary"
+          failed=0
+          for lane in unit integration; do
+            case "$lane" in
+              unit) wall=720 ;;
+              integration) wall=900 ;;
+            esac
+            set +e
+            AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS="$wall" bash scripts/test-ts.sh "$lane" \
+              2>&1 | tee "scratch/bun-14-canary/${lane}.log"
+            status="${PIPESTATUS[0]}"
+            set -e
+            echo "- ${lane}: exit ${status}" >> "$summary"
+            if [[ "$status" -ne 0 ]]; then failed=1; fi
+          done
+          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+          exit "$failed"
+
+      - name: "Upload Bun 1.4 canary summary"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: bun-14-canary
+          path: |
+            scratch/bun-14-canary/
+            scratch/test-ts-unit-shards/**
+            scratch/timing-unit-reports/**
+          if-no-files-found: ignore
+          retention-days: 7
+
   # Opt-in diagnostic only: like the foldable lane, this cannot fail Nightly.
   # No downstream job depends on its result; guard findings remain visible here.
   auto-advance-race-guard:

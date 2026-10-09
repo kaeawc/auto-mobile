@@ -9,9 +9,6 @@ export async function validateCapturedScreenshot(
   exists: (path: string) => Promise<boolean> = pathExists,
 ): Promise<string> {
   if (!result.success) {
-    if (result.actionableError) {
-      throw result.actionableError;
-    }
     throw new ActionableError(
       `Screenshot capture failed for device ${deviceId}: ${result.error ?? "no error details"}`,
     );

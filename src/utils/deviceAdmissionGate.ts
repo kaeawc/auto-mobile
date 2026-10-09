@@ -1,3 +1,4 @@
+import type { BootedDevice } from "../models";
 import type { AndroidTransportRouting } from "./androidSerial";
 
 /** Narrow admission contract shared by device clients and daemon adapters. */
@@ -5,6 +6,11 @@ export interface DeviceAdmissionGate {
   assertDeviceActionable(deviceId: string, purpose: string): void;
   /** Optional explicit pool-owned transport resolver; direct mode has no pool. */
   getAndroidTransportRouting?(): AndroidTransportRouting;
+  /**
+   * Fold raw Android readiness rows onto pooled canonical ids and re-route a
+   * group whose canonical transport is gone (e.g. USB unplugged, Wi-Fi alive).
+   */
+  mapAndroidReadinessDiscovery?(devices: readonly BootedDevice[]): BootedDevice[];
 }
 
 /** Direct mode has no pooled identity quarantine. */
@@ -30,5 +36,8 @@ export const daemonDeviceAdmissionGate: DeviceAdmissionGate = {
       resolveTransport: (deviceId) =>
         admissionGate?.getAndroidTransportRouting?.().resolveTransport(deviceId) ?? deviceId,
     };
+  },
+  mapAndroidReadinessDiscovery(devices): BootedDevice[] {
+    return admissionGate?.mapAndroidReadinessDiscovery?.(devices) ?? [...devices];
   },
 };

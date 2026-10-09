@@ -610,10 +610,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
       perf.startOperation("androidDeviceScan");
       // A missing adb binary (or its cooldown) must not read as a complete,
       // empty scan: that would let reconciliation clear a pinned Android device.
-      const androidDevices = await this.adb.getBootedAndroidDevices({
-        signal,
-        throwOnMissingAdb: true,
-      });
+      const androidDevices = this.mapAndroidReadinessRows(
+        await this.adb.getBootedAndroidDevices({
+          signal,
+          throwOnMissingAdb: true,
+        }),
+      );
       perf.endOperation("androidDeviceScan");
       devices.push(...androidDevices);
       scannedSources.android = true;
@@ -1116,7 +1118,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     // Identity reconciliation/lifting uses discovery directly, never readiness.
     this.admissionGate.assertDeviceActionable(deviceId, "to verify Android device readiness");
     this.executionBinding.bindDeviceExecution(deviceId);
-    const allDevices = await this.adb.getBootedAndroidDevices();
+    const allDevices = this.mapAndroidReadinessRows(await this.adb.getBootedAndroidDevices());
     const device = allDevices.find((device) => device.deviceId === deviceId);
 
     if (!device) {
@@ -1501,6 +1503,15 @@ export class DeviceSessionManager implements DeviceSessionManager {
       this.currentDevice &&
       (this.currentPlatform === platform || this.currentPlatform === resolvedPlatform)
     );
+  }
+
+  /**
+   * Raw adb rows name transports, while pooled sessions hold a canonical id. A
+   * USB+Wi-Fi phone keeps its USB serial after the cable is pulled, so map
+   * through the pool's alias groups before matching readiness ids (#11133).
+   */
+  private mapAndroidReadinessRows(devices: BootedDevice[]): BootedDevice[] {
+    return this.admissionGate.mapAndroidReadinessDiscovery?.(devices) ?? devices;
   }
 
   private normalizeReadinessScan(

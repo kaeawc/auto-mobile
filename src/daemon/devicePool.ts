@@ -7785,6 +7785,11 @@ export class DevicePool {
     return this.androidTransportAliases.mapDiscovery(devices);
   }
 
+  /** Readiness sees live rows, so a surviving alias also takes over dispatch (#11133). */
+  mapAndroidReadinessDiscovery(devices: readonly BootedDevice[]): BootedDevice[] {
+    return this.androidTransportAliases.mapDiscovery(devices, true);
+  }
+
   private isPooledAndroidEmulator(deviceId: string): boolean {
     return (
       isAndroidEmulatorSerial(deviceId) ||

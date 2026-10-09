@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DAEMON_OWNED_SESSIONS_PARAM } from "../../src/daemon/constants";
 import type { RefusedOwnedSessionRestore } from "../../src/daemon/devicePool";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -15,8 +16,16 @@ const REFUSED: RefusedOwnedSessionRestore = {
   reason: "owned-by-other-connection",
 };
 
+/** The socket server's private restore step, the only seam this test drives. */
+interface RestoreSeam {
+  restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void>;
+}
+
 function serverRefusing(autolockRestores: string[][]): UnixSocketServer {
   const pool = {
+    refreshDevices: async () => 0,
+    getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
+    releaseDevice: async () => {},
     restoreOwnedDeviceSessionsForMcpSession: async () => [REFUSED],
     restoreAutolockSessionsForMcpSession: async (ids: string[]) => {
       autolockRestores.push(ids);
@@ -26,13 +35,13 @@ function serverRefusing(autolockRestores: string[][]): UnixSocketServer {
   return new UnixSocketServer(
     "/tmp/never-listened.sock",
     "http://localhost:0/mcp",
-    { isInitialized: () => true, getDevicePool: () => pool } as any,
+    { isInitialized: () => true, getDevicePool: () => pool } as unknown as DaemonStateAccess,
     new FakeTimer(),
   );
 }
 
 function restore(server: UnixSocketServer, args: Record<string, unknown>): Promise<void> {
-  return (server as any).restoreSelectorSessions(
+  return (server as unknown as RestoreSeam).restoreSelectorSessions(
     { ...args, [DAEMON_OWNED_SESSIONS_PARAM]: [OTHER_SESSION, MINE] },
     "client",
   );

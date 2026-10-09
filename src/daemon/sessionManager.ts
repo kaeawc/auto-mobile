@@ -68,7 +68,6 @@ import {
   ownerLeaseLiveAt,
   livenessLeaseState,
   livenessOwnerHold,
-  sessionLeaseSnapshot,
   sessionOwnerLeaseSnapshot,
   sessionJudgedLeaseSnapshot,
   suspectGraceMsFor,

@@ -107,6 +107,17 @@ describe("ToolRegistry autolock session enforcement", () => {
       const tool = registerTool("mutateHeld");
       const error = await tool.handler({ deviceId: androidA.deviceId }).catch((e: unknown) => e);
       expect(error).toMatchObject({ code: "device_owned_by_other_session" });
+      // Refused before readiness acts on the holder's device.
+      expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    });
+
+    test("a non-owner call with no deviceId that would land on the held device does no readiness", async () => {
+      setAutolock(true);
+      await lockedPool();
+      const tool = registerTool("mutateHeldImplicit");
+      const error = await tool.handler({ platform: "android" }).catch((e: unknown) => e);
+      expect(error).toMatchObject({ code: "device_owned_by_other_session" });
+      expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
     });
 
     test("a deviceReadOnly (watching) call on the held device is allowed", async () => {
@@ -149,11 +160,14 @@ describe("ToolRegistry autolock session enforcement", () => {
         () => undefined,
         (error: unknown) => error,
       );
-      await entered.promise;
+      // Enabled, the held device is refused before readiness (#10833); the flip then lands between
+      // calls. Disabled, it lands mid-call, inside readiness.
+      await Promise.race([entered.promise, first]);
       setAutolock(!initiallyEnabled);
       release.resolve();
       const outcome = await first;
       if (initiallyEnabled) {
+        expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
         expect(outcome).toBeInstanceOf(ActionableError);
         expect(String(outcome)).toContain("held by another session");
       } else {

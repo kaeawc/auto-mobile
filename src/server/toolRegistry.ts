@@ -995,21 +995,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       logger.info(`[ToolRegistry] ${name}: Skipping device resolution.`);
     }
 
-    // Enforce autolock: a locked device may only be driven by the session that locked it.
-    // Tools flagged `deviceReadOnly` only watch, which is allowed on any device (#10833).
-    if (
-      device &&
-      autolockEnabled &&
-      !options.deviceReadOnly &&
-      DaemonState.getInstance().isInitialized()
-    ) {
-      DaemonState.getInstance()
-        .getDevicePool()
-        .assertAutolockAccess(device.deviceId, sessionUuid, autolockEnabled);
-    }
-
     // The resolved target too: a call without a deviceId can land on a held device.
     assertToolCallerHoldsDevice(name, options, device?.deviceId, sessionUuid, autolockEnabled);
+    if (device && execution && !sessionUuid && !options.deviceReadOnly) {
+      // Admitted on a device no session holds: a session acquiring it from here on cancels this
+      // call, which may not keep driving the new holder's device (#10829).
+      executionTracker.markSessionlessDeviceUse(execution.executionId, device.deviceId);
+    }
 
     // Bind session to device's CtrlProxyClient for multi-agent NavigationGraphManager isolation
     if (device && sessionUuid) {
@@ -1964,12 +1956,14 @@ function assertToolCallerHoldsDevice(
   if (!deviceId || !DaemonState.getInstance().isInitialized()) {
     return;
   }
-  // An autolocked device is governed by autolock's own check and remedies, after resolution.
-  if (
-    options.deviceReadOnly ||
-    (autolockEnabled &&
-      DaemonState.getInstance().getDevicePool().getDevice(deviceId)?.autolockSessionId)
-  ) {
+  if (options.deviceReadOnly) {
+    return;
+  }
+  // An autolocked device is governed by autolock's own check and remedies. Like the general check,
+  // it runs before readiness touches the device (#10833).
+  const devicePool = DaemonState.getInstance().getDevicePool();
+  if (autolockEnabled && devicePool.getDevice(deviceId)?.autolockSessionId) {
+    devicePool.assertAutolockAccess(deviceId, sessionUuid, autolockEnabled);
     return;
   }
   const sessionManager = DaemonState.getInstance().getSessionManager();
@@ -2121,9 +2115,9 @@ async function invokeResolvedDeviceHandler(input: {
   signal?.addEventListener("abort", onAbort, { once: true });
   let succeeded = false;
   try {
-    if (signal?.aborted) {
-      withdraw?.();
-    }
+    // The dispatch boundary: a call cancelled since admission (for instance because another
+    // session acquired its device, #10829) never reaches the device. `finally` withdraws it.
+    signal?.throwIfAborted();
     // The action reports when its gesture goes out, so a tool that waited for its target
     // is attributed from the dispatch, not from the start (#10196).
     const response = await runReportingDispatch(withdraw, () =>

@@ -101,6 +101,7 @@ import {
 import { currentDaemonProcessGenerationToken } from "./processGeneration";
 import { processGenerationRecordFields } from "./processGenerationFields";
 import { executionTracker } from "../server/executionTracker";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
   DaemonHandoffInterruptionError,
@@ -791,6 +792,13 @@ export class Daemon {
     this.sessionManager.setExpiryReleaseExecutionCanceller((sessionId, reason, query) =>
       this.cancelExecutionsForExpiryRelease(sessionId, reason, query),
     );
+    // A sessionless call admitted while the device was free must not keep driving it for the new
+    // holder (#10829). The call performing the acquisition is spared.
+    this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
+      executionTracker.cancelSessionlessDeviceUse(deviceId, {
+        excludeExecutionId: getToolSelectionContext()?.execution?.executionId,
+      });
+    });
     this.sessionManager.onSessionCreated((session) => {
       NavigationGraphManager.clearReleasedSession(session.sessionId);
       this.setupNavigationGraphUpdateListener(

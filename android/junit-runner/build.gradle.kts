@@ -128,6 +128,13 @@ tasks.withType<Test> {
   // JUnit 4 suites (e.g. RecoveryLoopTest) running on the same platform.
   useJUnitPlatform()
 
+  // DaemonStatePathsTest reads the daemon state-path vectors shared with the TypeScript daemon,
+  // the desktop app and XCTestRunner (#10906).
+  inputs
+    .file(layout.projectDirectory.file("../../test/fixtures/daemon-isolation-paths.json"))
+    .withPropertyName("daemonIsolationPathVectors")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+
   // Enable parallel test execution across multiple devices
   maxParallelForks = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)
   dependsOn(":control-proxy:assembleDebug")

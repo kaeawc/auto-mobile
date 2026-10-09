@@ -30,18 +30,43 @@ export function resolvePrivateDaemonOrphanIdleMs(env: NodeJS.ProcessEnv = proces
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS;
 }
 
+/** Explicit harness marker: `1` arms the orphan watchdog, `0` opts a daemon out of it. */
+export const HARNESS_PRIVATE_DAEMON_ENV = "AUTOMOBILE_HARNESS_PRIVATE_DAEMON";
+
 /**
- * A harness-style private daemon (a test, lane, or acceptance run) isolates both
- * its control socket and its auxiliary socket directory. A user's long-lived
- * daemon that merely uses a custom control socket is never subject to the
- * watchdog, nor is the resident daemon on the default socket.
+ * A harness-style private daemon (a test, lane, or acceptance run) is one whose
+ * launcher says so (`AUTOMOBILE_HARNESS_PRIVATE_DAEMON=1`), or, failing an explicit
+ * marker, one that both EXPLICITLY overrides its control socket
+ * (`AUTOMOBILE_DAEMON_SOCKET_PATH`) to a non-default path and isolates its
+ * auxiliary socket directory -- the shape of every ad-hoc private daemon behind
+ * #10497. The effective socket path alone is not evidence: since #10881 any
+ * `AUTOMOBILE_AUX_SOCKET_DIR` daemon gets a suffixed control socket, so a user's
+ * long-lived daemon configured with only an aux dir must not be shut down 15
+ * minutes after its launcher exits (#10906). Neither is a user's daemon that
+ * merely uses a custom control socket, nor the resident daemon on the default one.
  */
 export function isHarnessPrivateDaemon(
   socketPath: string,
   defaultSocketPath: string,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return socketPath !== defaultSocketPath && (env.AUTOMOBILE_AUX_SOCKET_DIR?.trim() ?? "") !== "";
+  const marker = env[HARNESS_PRIVATE_DAEMON_ENV]?.trim();
+  if (marker === "1" || marker === "0") {
+    return marker === "1";
+  }
+  const explicitSocket = firstNonBlank(env, [
+    "AUTOMOBILE_DAEMON_SOCKET_PATH",
+    "AUTO_MOBILE_DAEMON_SOCKET_PATH",
+  ]);
+  return (
+    explicitSocket !== "" &&
+    socketPath !== defaultSocketPath &&
+    firstNonBlank(env, ["AUTOMOBILE_AUX_SOCKET_DIR"]) !== ""
+  );
+}
+
+function firstNonBlank(env: NodeJS.ProcessEnv, keys: string[]): string {
+  return keys.map((key) => env[key]?.trim() ?? "").find((value) => value !== "") ?? "";
 }
 
 /**

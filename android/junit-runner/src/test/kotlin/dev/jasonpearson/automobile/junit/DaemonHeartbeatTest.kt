@@ -119,6 +119,7 @@ class DaemonHeartbeatTest {
     val commands = mutableListOf<List<String>>()
     val resolver =
       DaemonUserIdResolver(
+        envProvider = { null },
         osName = { "Linux" },
         userName = { throw AssertionError("Successful UID must not use the fallback") },
         runCommand = {
@@ -193,6 +194,7 @@ class DaemonHeartbeatTest {
     var userNameCalls = 0
     val resolver =
       DaemonUserIdResolver(
+        envProvider = { null },
         osName = { "Windows 11" },
         userName = {
           userNameCalls++

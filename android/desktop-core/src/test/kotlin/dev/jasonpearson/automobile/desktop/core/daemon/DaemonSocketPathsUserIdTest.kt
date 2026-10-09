@@ -9,14 +9,18 @@ import kotlin.test.assertEquals
 
 /** #10238: the uid is resolved once per process, never per path lookup, and not for overrides. */
 class DaemonSocketPathsUserIdTest {
+  private val noEnv: (String) -> String? = { null }
+
+  private fun env(vararg pairs: Pair<String, String>): (String) -> String? = mapOf(*pairs)::get
+
   @Test
   fun `many socket and pid path lookups resolve the uid once`() {
     val lookups = AtomicInteger()
     val userId = CachedDaemonUserId { "501".also { lookups.incrementAndGet() } }
 
     repeat(25) {
-      assertEquals("/tmp/auto-mobile-daemon-501.sock", DaemonSocketPaths.socketPath(userId, null))
-      assertEquals("/tmp/auto-mobile-daemon-501.pid", DaemonSocketPaths.pidFilePath(userId, null))
+      assertEquals("/tmp/auto-mobile-daemon-501.sock", DaemonSocketPaths.socketPath(userId, noEnv))
+      assertEquals("/tmp/auto-mobile-daemon-501.pid", DaemonSocketPaths.pidFilePath(userId, noEnv))
     }
 
     assertEquals(1, lookups.get())
@@ -27,12 +31,24 @@ class DaemonSocketPathsUserIdTest {
     val lookups = AtomicInteger()
     val userId = CachedDaemonUserId { "501".also { lookups.incrementAndGet() } }
 
-    assertEquals("/run/am.sock", DaemonSocketPaths.socketPath(userId, "/run/am.sock"))
-    assertEquals("/run/am.pid", DaemonSocketPaths.pidFilePath(userId, "/run/am.pid"))
+    assertEquals(
+      "/run/am.sock",
+      DaemonSocketPaths.socketPath(userId, env("AUTOMOBILE_DAEMON_SOCKET_PATH" to "/run/am.sock")),
+    )
+    assertEquals(
+      "/run/am.pid",
+      DaemonSocketPaths.pidFilePath(
+        userId,
+        env("AUTOMOBILE_DAEMON_PID_FILE_PATH" to "/run/am.pid"),
+      ),
+    )
     assertEquals(0, lookups.get())
 
     // A blank override is no override: the default path pays for the (single) lookup.
-    assertEquals("/tmp/auto-mobile-daemon-501.sock", DaemonSocketPaths.socketPath(userId, "  "))
+    assertEquals(
+      "/tmp/auto-mobile-daemon-501.sock",
+      DaemonSocketPaths.socketPath(userId, env("AUTOMOBILE_DAEMON_SOCKET_PATH" to "  ")),
+    )
     assertEquals(1, lookups.get())
   }
 

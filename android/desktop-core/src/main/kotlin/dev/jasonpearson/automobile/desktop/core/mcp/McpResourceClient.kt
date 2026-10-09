@@ -340,8 +340,9 @@ object McpResourceClientFactory {
   /** Read the daemon port from the PID file */
   private fun readDaemonPort(): Int? {
     return try {
-      val userId = getUserId()
-      val pidFile = File("/tmp/auto-mobile-daemon-$userId.pid")
+      // Same resolver as the control socket, so an AUTOMOBILE_AUX_SOCKET_DIR daemon's suffixed PID
+      // file (and an explicit PID path override) is found (#10906).
+      val pidFile = File(DaemonSocketPaths.pidFilePath())
       logger.debug("[McpResourceClientFactory] Looking for PID file at: ${pidFile.absolutePath}")
 
       if (!pidFile.exists()) {
@@ -358,31 +359,6 @@ object McpResourceClientFactory {
     } catch (e: Exception) {
       logger.warn("[McpResourceClientFactory] Error reading PID file: ${e.message}", e)
       null
-    }
-  }
-
-  private fun getUserId(): String {
-    val userName = System.getProperty("user.name", "default").ifBlank { "default" }
-    val osName = System.getProperty("os.name", "").lowercase()
-    if (osName.contains("win")) {
-      return userName
-    }
-
-    return try {
-      val process = ProcessBuilder("id", "-u").start()
-      val completed = process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
-      if (!completed) {
-        process.destroy()
-        return userName
-      }
-      val uid = process.inputStream.bufferedReader().readText().trim()
-      if (uid.isNotEmpty()) uid else userName
-    } catch (e: Exception) {
-      // Safe to swallow because the user name is the fallback identifier.
-      logger.debug(
-        "[McpResourceClientFactory] Could not read user ID; using user name: ${e.message}",
-      )
-      userName
     }
   }
 }

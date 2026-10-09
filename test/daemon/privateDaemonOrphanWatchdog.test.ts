@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS,
   PrivateDaemonOrphanWatchdog,
+  HARNESS_PRIVATE_DAEMON_ENV,
   isHarnessPrivateDaemon,
   resolvePrivateDaemonOrphanIdleMs,
   type PrivateDaemonOrphanPort,
@@ -99,7 +100,10 @@ describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
 
   test("arms only for harness-style private daemons, never a custom long-lived socket", () => {
     const defaultSocket = "/tmp/auto-mobile-daemon-501.sock";
-    const harnessEnv = { AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/priv/aux" };
+    const harnessEnv = {
+      AUTOMOBILE_DAEMON_SOCKET_PATH: "/tmp/priv/daemon.sock",
+      AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/priv/aux",
+    };
     expect(isHarnessPrivateDaemon("/tmp/priv/daemon.sock", defaultSocket, harnessEnv)).toBe(true);
     // A user's own daemon on a custom control socket, with shared aux sockets.
     expect(isHarnessPrivateDaemon("/Users/me/am.sock", defaultSocket, {})).toBe(false);
@@ -113,6 +117,35 @@ describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
     expect(
       resolvePrivateDaemonOrphanIdleMs({ AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: "0" }),
     ).toBe(0);
+  });
+
+  test("an aux-dir-only daemon's suffixed socket is not a harness marker (#10906)", () => {
+    const defaultSocket = "/tmp/auto-mobile-daemon-501.sock";
+    // #10881: AUTOMOBILE_AUX_SOCKET_DIR alone moves the control socket to a suffixed path.
+    const suffixedSocket = "/tmp/auto-mobile-daemon-501-0123456789.sock";
+    const auxOnly = { AUTOMOBILE_AUX_SOCKET_DIR: "/Users/me/am-aux" };
+    expect(isHarnessPrivateDaemon(suffixedSocket, defaultSocket, auxOnly)).toBe(false);
+  });
+
+  test("the explicit harness marker arms or disarms the watchdog regardless of paths", () => {
+    const defaultSocket = "/tmp/auto-mobile-daemon-501.sock";
+    const suffixedSocket = "/tmp/auto-mobile-daemon-501-0123456789.sock";
+    expect(
+      isHarnessPrivateDaemon(suffixedSocket, defaultSocket, {
+        [HARNESS_PRIVATE_DAEMON_ENV]: "1",
+        AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/lane/aux",
+      }),
+    ).toBe(true);
+    expect(
+      isHarnessPrivateDaemon(defaultSocket, defaultSocket, { [HARNESS_PRIVATE_DAEMON_ENV]: "1" }),
+    ).toBe(true);
+    expect(
+      isHarnessPrivateDaemon("/tmp/priv/daemon.sock", defaultSocket, {
+        [HARNESS_PRIVATE_DAEMON_ENV]: "0",
+        AUTOMOBILE_DAEMON_SOCKET_PATH: "/tmp/priv/daemon.sock",
+        AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/priv/aux",
+      }),
+    ).toBe(false);
   });
 
   test("a zero idle timeout disables the watchdog", async () => {

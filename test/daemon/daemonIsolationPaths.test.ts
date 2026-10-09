@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   resolveDaemonIsolationSuffix,
+  resolveDaemonStatePath,
   resolveIsolatedDaemonStatePath,
 } from "../../src/daemon/constants";
+import vectors from "../fixtures/daemon-isolation-paths.json";
 
 describe("daemon isolation state paths (issue #10871)", () => {
   test("without an aux socket dir the resident unsuffixed paths are used", () => {
@@ -33,4 +35,17 @@ describe("daemon isolation state paths (issue #10871)", () => {
     const deep = { AUTOMOBILE_AUX_SOCKET_DIR: `/tmp/${"x".repeat(300)}` };
     expect(resolveIsolatedDaemonStatePath("sock", deep, "501").length).toBeLessThan(100);
   });
+});
+
+describe("shared daemon state-path vectors (#10906)", () => {
+  // The JUnit runner, desktop app and XCTestRunner test their ports against the same file.
+  for (const vector of vectors.cases) {
+    test.skipIf(vector.posixOnly && process.platform === "win32")(vector.name, () => {
+      const env: NodeJS.ProcessEnv = vector.env;
+      expect(resolveDaemonIsolationSuffix(env)).toBe(vector.suffix);
+      expect(resolveDaemonStatePath("sock", env, vectors.uid)).toBe(vector.socketPath);
+      expect(resolveDaemonStatePath("pid", env, vectors.uid)).toBe(vector.pidFilePath);
+      expect(resolveDaemonStatePath("lock", env, vectors.uid)).toBe(vector.lockFilePath);
+    });
+  }
 });

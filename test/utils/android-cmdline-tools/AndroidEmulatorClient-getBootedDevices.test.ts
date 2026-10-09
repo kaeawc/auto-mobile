@@ -531,6 +531,63 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     ]);
   });
 
+  test("does not reuse a runtime ABI when a different AVD takes over the emulator serial (#11063)", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([
+      { name: "ignored", platform: "android", deviceId: "emulator-5554" } satisfies BootedDevice,
+    ]);
+    adb.setCommandResponse("emu avd name", execResult("Pixel_9_API_36\n"));
+    adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("x86_64\n"));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+      new FakeAvdConfigReader(null),
+    );
+    await expect(client.getBootedDevicesChecked()).resolves.toEqual([
+      expect.objectContaining({ name: "Pixel_9_API_36", architecture: "x86_64" }),
+    ]);
+
+    adb.setCommandResponse("emu avd name", execResult("Medium_Phone_API_35\n"));
+    adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("arm64-v8a\n"));
+
+    await expect(client.getBootedDevicesChecked()).resolves.toEqual([
+      expect.objectContaining({ name: "Medium_Phone_API_35", architecture: "arm64-v8a" }),
+    ]);
+  });
+
+  test("forgets a departed serial's ABI so a reconnecting device is probed afresh (#11063)", async () => {
+    const adb = new FakeAdbExecutor();
+    const tcpDevice = {
+      name: "ignored",
+      platform: "android",
+      deviceId: "192.168.1.20:5555",
+    } satisfies BootedDevice;
+    adb.setDevices([tcpDevice]);
+    adb.setCommandResponse("shell getprop ro.product.model", execResult("Pixel 9\n"));
+    adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("arm64-v8a\n"));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+    );
+    await expect(client.getBootedDevicesChecked()).resolves.toEqual([
+      expect.objectContaining({ model: "Pixel 9", architecture: "arm64-v8a" }),
+    ]);
+
+    adb.setDevices([]);
+    await expect(client.getBootedDevicesChecked()).resolves.toEqual([]);
+
+    adb.setDevices([tcpDevice]);
+    adb.setCommandResponse("shell getprop ro.product.model", execResult("Pixel Tablet\n"));
+    adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("x86_64\n"));
+    await expect(client.getBootedDevicesChecked()).resolves.toEqual([
+      expect.objectContaining({ model: "Pixel Tablet", architecture: "x86_64" }),
+    ]);
+  });
+
   test("prefers the configured AVD architecture over the runtime ABI for a booted emulator", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDevices([

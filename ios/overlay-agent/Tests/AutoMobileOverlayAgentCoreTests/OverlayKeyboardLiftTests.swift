@@ -8,7 +8,9 @@ final class OverlayKeyboardLiftTests: XCTestCase {
     private func lift(
         _ type: String = "sheet", edge: String? = "bottom", keyboard: OverlayRect?? = nil,
         originY: Double = 0, height: Double = 800
-    ) -> Double {
+    )
+        -> Double
+    {
         OverlayKeyboardLift.amount(
             placementType: type, edge: edge, keyboardFrame: keyboard ?? self.keyboard,
             windowOriginY: originY, windowHeight: height
@@ -57,9 +59,21 @@ final class OverlayKeyboardLiftTests: XCTestCase {
     }
 
     func testSheetFrameMovesUpWithTheLiftAndStaysInTheWindow() {
-        let raised = OverlaySheetFrame.rect(containerWidth: 400, containerHeight: 800, edge: "bottom", height: 200, lift: 300)
+        let raised = OverlaySheetFrame.rect(
+            containerWidth: 400,
+            containerHeight: 800,
+            edge: "bottom",
+            height: 200,
+            lift: 300
+        )
         XCTAssertEqual(raised, OverlayRect(x: 0, y: 300, width: 400, height: 200))
-        let capped = OverlaySheetFrame.rect(containerWidth: 400, containerHeight: 800, edge: nil, height: 200, lift: 700)
+        let capped = OverlaySheetFrame.rect(
+            containerWidth: 400,
+            containerHeight: 800,
+            edge: nil,
+            height: 200,
+            lift: 700
+        )
         XCTAssertEqual(capped.y, 0)
         let top = OverlaySheetFrame.rect(containerWidth: 400, containerHeight: 800, edge: "top", height: 200, lift: 300)
         XCTAssertEqual(top.y, 0, "a top sheet ignores the lift")

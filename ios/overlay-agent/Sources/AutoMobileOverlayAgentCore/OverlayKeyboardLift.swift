@@ -20,7 +20,9 @@ enum OverlayKeyboardLift {
         keyboardFrame: OverlayRect?,
         windowOriginY: Double,
         windowHeight: Double
-    ) -> Double {
+    )
+        -> Double
+    {
         guard appliesTo(placementType: placementType, edge: edge), let keyboardFrame,
               keyboardFrame.height > 0, windowHeight > 0 else { return 0 }
         let windowBottom = windowOriginY + windowHeight

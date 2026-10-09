@@ -44,7 +44,15 @@ extension OverlayRect {
 enum OverlaySheetFrame {
     static let defaultHeight = 200.0
 
-    static func rect(containerWidth: Double, containerHeight: Double, edge: String?, height: Double?, lift: Double = 0) -> OverlayRect {
+    static func rect(
+        containerWidth: Double,
+        containerHeight: Double,
+        edge: String?,
+        height: Double?,
+        lift: Double = 0
+    )
+        -> OverlayRect
+    {
         let sheetHeight = Swift.min(Swift.max(height ?? defaultHeight, 0), containerHeight)
         let y = edge == "top" ? 0 : Swift.max(containerHeight - sheetHeight - Swift.max(lift, 0), 0)
         return OverlayRect(x: 0, y: y, width: containerWidth, height: sheetHeight)

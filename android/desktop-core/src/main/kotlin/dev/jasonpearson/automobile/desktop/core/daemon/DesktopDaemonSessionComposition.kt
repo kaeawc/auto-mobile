@@ -262,6 +262,11 @@ fun rememberDesktopDaemonSession(
   hostVisible: Boolean = true,
   hiddenReleaseGraceMs: Long = HIDDEN_RELEASE_GRACE_MS,
   inputAllocationTimeoutMs: Long = INPUT_ALLOCATION_TIMEOUT_MS,
+  /**
+   * The recording the desktop started. A hidden host does not release the device it is recording
+   * (#10978): the hidden release is skipped, and the daemon's idle window frees the device later.
+   */
+  activeRecordings: ActiveRecordingTracker = remember { ActiveRecordingTracker() },
   onDaemonRecovered: suspend () -> Boolean = { true },
   bindRetryBackoff: BindRetryBackoff = BindRetryBackoff.Default,
 ): DesktopDaemonSessionState {
@@ -310,6 +315,12 @@ fun rememberDesktopDaemonSession(
       hiddenPastGrace = false
     } else {
       delay(hiddenReleaseGraceMs)
+      if (inputDeviceId?.let(activeRecordings::isRecordingOn) == true) {
+        // Releasing would stop the recording the user started; recording is not use, so the
+        // daemon's idle window still frees the device eventually (#10978).
+        LOG.info("Desktop host hidden while recording $inputDeviceId; keeping the device held")
+        return@LaunchedEffect
+      }
       hiddenPastGrace = true
       // Nobody can see the device (#10695): stop holding it, as after an idle release. Showing the
       // host again allocates nothing until the user's next input.

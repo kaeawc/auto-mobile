@@ -63,6 +63,7 @@ import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession
 import dev.jasonpearson.automobile.desktop.core.control.DeviceKeyboardEventTranslator
 import dev.jasonpearson.automobile.desktop.core.control.GestureStreamingConfig
+import dev.jasonpearson.automobile.desktop.core.daemon.ActiveRecordingTracker
 import dev.jasonpearson.automobile.desktop.core.daemon.AllocatingAppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
@@ -842,11 +843,13 @@ fun AutoMobileContent(
         dataSourceMode == DataSourceMode.Real && it.connectionType == McpConnectionType.UnixSocket
       }
       ?.let { it.socketPath ?: DaemonSocketPaths.socketPath() }
+  val activeRecordings = remember { ActiveRecordingTracker() }
   val desktopSessionState =
     rememberDesktopDaemonSession(
       desktopSocketPath,
       desktopSessionPanes,
       hostVisible = hostVisible,
+      activeRecordings = activeRecordings,
     )
   val desktopDaemonSession = desktopSessionState.session
 
@@ -2227,6 +2230,9 @@ fun AutoMobileContent(
                       recordingConfigClient = recordingConfigClient,
                       streamClient = webRtcStreamClient,
                       activeDeviceId = activeDeviceId,
+                      activeRecordings = activeRecordings,
+                      sessionUuidProvider = desktopSessionState.sessionUuidProvider,
+                      releasedDeviceId = desktopSessionState.idleReleasedDeviceId,
                     )
                   "diagnostics" ->
                     DiagnosticsDashboard(

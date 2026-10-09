@@ -5,12 +5,10 @@ target app. This is the iOS counterpart of the
 [Android overlay specification](../android/overlay-ux.md); the spec, validation limits
 and node vocabulary are shared. See epic #10563 and the prototype in #10498.
 
-Status: the agent and a prototype driver exist (`ios/overlay-agent/`,
-`scripts/ios/overlay-agent-demo.ts`). The release asset (#10564), runtime
-download (#10565), per-launch port, token and handshake (#10566), `launchApp
-{ overlay: true }` (#10567) and `prototype` routing (#10568) are tracked as children of #10563.
-This page describes the intended behavior of the finished feature and marks
-what is still prototype-only.
+Status: the agent (`ios/overlay-agent/`), the release dylib and its checksum-verified
+download (#10564, #10565), the per-launch port, token and handshake (#10566),
+`launchApp { overlay: true }` (#10567) and `prototype` routing (#10568) are merged.
+`scripts/ios/overlay-agent-demo.ts` is a standalone driver that launches with a fresh port and token.
 
 ## How it works
 
@@ -31,7 +29,8 @@ what is still prototype-only.
 6. Each launch gets its own port and a random token. The host passes them as
    `AUTOMOBILE_OVERLAY_PORT` and `AUTOMOBILE_OVERLAY_TOKEN`; the first frame on a connection
    must be a `hello` carrying the token, and the agent replies with its version and
-   capabilities. (The prototype still uses a fixed port 8771 with no token until #10566 lands.)
+   capabilities. The agent does not start its server without both values, and the token
+   must be at least 16 characters.
 
 Because the window lives inside the app's process, `observe`, `tapOn`, `sendKeys`,
 screenshots and video recording all see the overlay the same way they see app UI.
@@ -83,7 +82,7 @@ scheme yourself:
 2. Under **Environment Variables**, add `DYLD_INSERT_LIBRARIES` with the absolute path of the
    dylib: the cached file under `~/.auto-mobile/overlay-agent/`, or the file named by
    `AUTOMOBILE_IOS_OVERLAY_AGENT` for a local build.
-3. Add `AUTOMOBILE_OVERLAY_PORT` (and, once #10566 lands, `AUTOMOBILE_OVERLAY_TOKEN`) with
+3. Add `AUTOMOBILE_OVERLAY_PORT` and `AUTOMOBILE_OVERLAY_TOKEN` (at least 16 characters) with
    values you also give the client, since AutoMobile did not choose them.
 4. Run on a **simulator** destination. In a scheme the variable is `DYLD_INSERT_LIBRARIES`
    itself; the `SIMCTL_CHILD_` prefix applies only to `simctl launch`.

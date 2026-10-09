@@ -579,12 +579,12 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
 | 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
-| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, or reports Android prototypes.           |
+| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, or reports overlay prototypes.           |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
 
 ### prototype
 
-The Android-only `prototype` tool (formerly `overlay`, which remains a hidden
+The `prototype` tool, on Android and iOS simulators (formerly `overlay`, which remains a hidden
 deprecated alias for one release) is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is
 `show`, `dismiss`, `status`, `inspect`, or `awaitEvent`. `show` requires a full `spec` (id,
@@ -648,6 +648,11 @@ no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
 Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker
 bound to state keys, and scroll/pager/tabBar/bottomNav/bottomSheet; actions are
 emit/setPage/setState/toggle/increment/decrement/dismiss.
+A spec may also carry a `theme` (light/dark mode, a seed colour, per-role colour
+overrides, typography and shapes), per-node `style` and `styleWhen` fields,
+`transition` on `visibleWhen` nodes, and a spec-level `motion` of `none` to make
+every change instant. Android also accepts element anchors, which place a node on
+an app element resolved at `show` time; the result lists the resolved `anchors`.
 See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).
 
 #### iOS simulators
@@ -948,6 +953,12 @@ scrollable containers/lists.
 (`swipeFingerTowardsDirection`, the default) or content scrolling
 (`scrollTowardsDirection`). `setUIState.scrollDirection` sets the initial
 search scroll direction.
+
+A successful `swipeOn` that can compare the screen before and after reports
+`navigated`. `navigated: true` means the screen identity changed, so the swipe
+probably acted as a tap and opened the row under it instead of scrolling, and
+`warning` says so; `navigated: false` means the screen is the same. The field is
+absent when the two observations carry no comparable screen identity.
 
 On Android, `keyboard` can list installed input methods with
 `{"action":"listImes"}` and select an enabled component with
@@ -1664,6 +1675,13 @@ subject to the display-transition fence. On iOS, the settle notification still
 follows the final observation; freshness is checked before that notification.
 Only a fresh final observation can remember the requested iOS posture for later
 `display.posture` reads, including `half_opened` on the inner panel.
+
+On Android, folding a device such as a Pixel Fold can raise the "swipe up to
+continue" keyguard even though no lock credential is set. When the device was
+unlocked before the posture change and the keyguard now showing is definitely not
+secure, `setPosture` dismisses it and returns `keyguardDismissed: true`. A secure
+or unreadable lock state is left alone (call `wakeAndUnlock`), and if dismissing
+fails the result carries a `warnings` entry saying so.
 
 Both `rotate` and `setPosture` declare output schemas and return the same JSON
 payload in text content and `structuredContent`. Ordinary clients receive

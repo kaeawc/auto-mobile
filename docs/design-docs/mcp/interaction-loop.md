@@ -69,8 +69,17 @@ capture passed the gate:
   reaches structural stability (a ticking clock, a blinking caret). Re-observe
   if the completeness of the screen matters.
 
-In diff mode (`--actions-diff-observe`) the flag rides on the diff alongside
-`activeWindow` and `freshness`, so one accessor works in both modes.
+When the gate ran, the observation also carries `settleMs` (milliseconds the gate
+spent re-observing) and `settlePolls` (how many re-observations it took). A
+`settled: false` result with `settleMs` near the 1000 ms budget means the screen
+kept changing or device reads were slow; `settlePolls` tells the two apart. A
+settle read that fails or is cancelled returns the action's own capture with
+`settled: false` and `settleMs` but no `settlePolls`. Both fields are absent when
+the action was never gated.
+
+In diff mode (`--actions-diff-observe`) `settled`, `settleMs` and `settlePolls`
+ride on the diff alongside `activeWindow` and `freshness`, so one accessor works
+in both modes.
 
 ## Default compact action metadata
 

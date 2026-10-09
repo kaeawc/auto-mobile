@@ -49,7 +49,8 @@ acquire a device and pass it with `--session-uuid`.
 
 A device a session holds takes calls only from that session: a `--cli` call
 without that session's `--session-uuid` on it is refused with
-`device_owned_by_other_session`, except read-only `observe`. `killDevice` and
+`device_owned_by_other_session`, except the read-only tools `observe`,
+`identifyInteractions` and `hitTest`. `killDevice` and
 `deleteDevice` accept `--force true` to stop a held device anyway. See
 [Device ownership](using/device-ownership.md).
 

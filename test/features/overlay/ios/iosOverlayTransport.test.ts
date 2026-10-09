@@ -61,7 +61,11 @@ describe("IosOverlayTransport.captureWithOverlayHidden", () => {
     const transport = new IosOverlayTransport(fakeAgent(["show_overlay"], calls));
     const result = await transport.captureWithOverlayHidden(async () => "png");
     expect(calls).toEqual([]);
-    expect(result).toEqual({ value: "png", screenshotIncludesOverlay: true });
+    expect(result).toEqual({
+      value: "png",
+      screenshotIncludesOverlay: true,
+      hideUnconfirmed: true,
+    });
   });
 
   test("a failed hide still captures, skips restore, and flags the overlay as present", async () => {
@@ -77,6 +81,7 @@ describe("IosOverlayTransport.captureWithOverlayHidden", () => {
     });
     expect(calls).toEqual(["hide_for_capture:1500", "capture"]);
     expect(result.screenshotIncludesOverlay).toBe(true);
+    expect(result.hideUnconfirmed).toBe(true);
   });
 
   test("a hide that found nothing visible is not claimed as hidden", async () => {
@@ -86,6 +91,7 @@ describe("IosOverlayTransport.captureWithOverlayHidden", () => {
     );
     const result = await transport.captureWithOverlayHidden(async () => "png");
     expect(result.screenshotIncludesOverlay).toBe(true);
+    expect(result.hideUnconfirmed).toBeUndefined();
   });
 
   test("a lost restore is tolerated", async () => {

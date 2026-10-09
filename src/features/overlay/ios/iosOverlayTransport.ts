@@ -57,6 +57,12 @@ export interface CaptureWithOverlayHidden<T> {
   value: T;
   /** False only when the agent confirmed the overlay was hidden for the whole capture. */
   screenshotIncludesOverlay: boolean;
+  /**
+   * True when the agent never confirmed a hide (no capability, a failed request): the overlay may
+   * be in the image. Absent when the agent answered, even with `hidden: false` (nothing was
+   * visible to hide), where the image is known to exclude it.
+   */
+  hideUnconfirmed?: true;
 }
 
 export function overlayAgentNotConnectedMessage(deviceId: string): string {
@@ -109,7 +115,7 @@ export class IosOverlayTransport implements OverlayTransport {
     deadlineMs: number = DEFAULT_CAPTURE_HIDE_DEADLINE_MS,
   ): Promise<CaptureWithOverlayHidden<T>> {
     if (!this.supportsCapability(SCREENSHOT_HIDE_OVERLAY_CAPABILITY)) {
-      return { value: await capture(), screenshotIncludesOverlay: true };
+      return { value: await capture(), screenshotIncludesOverlay: true, hideUnconfirmed: true };
     }
     let holding = false;
     let hidden = false;
@@ -121,7 +127,12 @@ export class IosOverlayTransport implements OverlayTransport {
       logger.warn(`[overlay-agent] hide_for_capture failed: ${errorMessage(error)}`, error);
     }
     try {
-      return { value: await capture(), screenshotIncludesOverlay: !hidden };
+      const value = await capture();
+      return {
+        value,
+        screenshotIncludesOverlay: !hidden,
+        ...(holding ? {} : ({ hideUnconfirmed: true } as const)),
+      };
     } finally {
       if (holding) {
         await this.agent.request("restore_after_capture").catch((error: unknown) => {

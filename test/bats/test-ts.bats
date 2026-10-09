@@ -2345,6 +2345,35 @@ EOF
   [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
 }
 
+@test "a chunk deadline spent before the shard launches still leaves a non-empty watchdog snapshot (#11019)" {
+  # Discovery runs after the lane-wide deadline starts; a slow find (loaded
+  # runner) can consume the whole 1s budget, so the shard exits 124 before its
+  # watchdog ever runs. The snapshot must still exist and say why.
+  cat > "$STUB_BIN/find" <<'EOF'
+#!/usr/bin/env bash
+sleep 1.3
+for ((i = 0; i < 12; i += 1)); do printf 'test/fixture%02d.test.ts\n' "$i"; done
+EOF
+  chmod +x "$STUB_BIN/find"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 124 ]
+  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
+  grep -Fq "deadline" scratch/test-ts-unit-shards/watchdog-shard-0.txt
+}
+
+@test "a retried watchdog timeout keeps attempt 1's snapshot and writes a fresh non-empty one (#11019)" {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    STUB_BUN_SLEEP_SECONDS=5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"RETRY: unit shard 0"* ]]
+  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.attempt-1.txt ]
+  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
+  [ -z "$(ls scratch/test-ts-unit-shards | grep -F '.tmp.' || true)" ]
+}
+
 @test "chunk size rejects invalid values just like worker count before invoking Bun" {
   for value in '' abc 1.5 0 -1 05; do
     run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_CHUNK_FILES="$value" \

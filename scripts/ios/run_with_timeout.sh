@@ -63,13 +63,18 @@ run_with_timeout() {
         # pid so concurrent calls do not overwrite one another.
         local snapshot_file="${AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE:-scratch/watchdog-snapshot-${cmd_pid}.txt}"
         if mkdir -p "$(dirname "$snapshot_file")" 2> /dev/null; then
-          if ! ps -o pid,ppid,pgid,etime,command -g "$cmd_pid" > "$snapshot_file" 2>&1 || [ "$(wc -l < "$snapshot_file")" -lt 2 ]; then
+          # Build the group listing in a sibling file and rename it into place,
+          # so a reader (or a retry moving the snapshot aside) never sees the
+          # empty file a direct `>` redirect creates before ps writes (#11019).
+          local snapshot_tmp="${snapshot_file}.tmp.$$"
+          if ! ps -o pid,ppid,pgid,etime,command -g "$cmd_pid" > "$snapshot_tmp" 2>&1 || [ "$(wc -l < "$snapshot_tmp")" -lt 2 ]; then
             {
               printf 'PID PPID PGID ETIME COMMAND (target pgid %s)\n' "$cmd_pid"
               ps -e -o pid,ppid,pgid,etime,command | \
                 awk -v pgid="$cmd_pid" 'NR > 1 && ($3 == pgid || $1 == pgid)' || true
-            } > "$snapshot_file" 2>&1 || true
+            } > "$snapshot_tmp" 2>&1 || true
           fi
+          mv -f "$snapshot_tmp" "$snapshot_file" 2> /dev/null || true
         fi
         # Optional macOS pressure diagnostics. Run separately from signalling so
         # a missing/failing sampler cannot postpone the deadline's TERM/KILL.

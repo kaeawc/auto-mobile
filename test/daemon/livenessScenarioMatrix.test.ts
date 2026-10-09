@@ -809,6 +809,39 @@ describe("another session names a device the agent holds", () => {
   });
 });
 
+describe("a sessionless watcher reads a device the agent holds (#10830)", () => {
+  test("every read succeeds on the read-only path, never drives or readies the device, and does not extend the holder's idle window", async () => {
+    scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
+    const holder = await scenario.acquire(DEVICE_A);
+    await scenario.toolCall(holder);
+    const lastCallAt = scenario.timer.now();
+    const drivenBefore = scenario.driven.length;
+    const readinessBefore = scenario.readinessTouches;
+
+    // Held side: the watcher observes the held device again and again over most of the window.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await scenario.idle(10_000);
+      expect(
+        await rejection(scenario.daemonToolCallWith({ deviceId: DEVICE_A, display: "all" })),
+      ).toBeUndefined();
+      expectHeld(holder, DEVICE_A);
+    }
+    // Watching is the observer capture, not the control path: no tool body reached the device,
+    // nothing was readied, and each read resolved the device from the booted list.
+    expect(scenario.watched.reads).toEqual(Array(8).fill(DEVICE_A));
+    expect(scenario.watched.resolutions).toBe(8);
+    expect(scenario.driven.length).toBe(drivenBefore);
+    expect(scenario.readinessTouches).toBe(readinessBefore);
+
+    // Released side: watching is not use, so the holder is freed one window after ITS last call.
+    const releasedAt = await scenario.idleUntilReleased(holder, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(releasedAt).toBeGreaterThan(lastCallAt + IDLE_WINDOW_MS);
+    expect(releasedAt).toBeLessThanOrEqual(lastCallAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(IDLE_REASONS).toContain(scenario.releaseOf(holder)?.reason!);
+    expectFreed(DEVICE_A);
+  });
+});
+
 describe("IDE retries setActiveDevice after a refusal (#10660)", () => {
   test("refused for as long as the agent holds the device, without costing the agent its window or the IDE its own device; granted once the agent's session is freed", async () => {
     scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });

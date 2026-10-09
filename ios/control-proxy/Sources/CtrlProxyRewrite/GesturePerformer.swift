@@ -1001,12 +1001,13 @@ public final class GesturePerformer: GesturePerforming {
 
         public func setApplication(_ app: XCUIApplication) {
             ownedApplication = nil
-            pinnedBundleId = nil
+            pinnedApplication.clear()
             application = app
         }
 
-        /// Bundle id `application` was built for; nil when it was injected without one.
-        private var pinnedBundleId: String?
+        /// Bundle id `application` was built for by `updateApplication` (launch); empty when it
+        /// was injected without one. Gesture rebinding never changes it.
+        private var pinnedApplication = GesturePinnedApplication()
 
         /// The application a coordinate gesture targets: the pinned app unless the locator's
         /// tracked foreground app has moved on (e.g. after `simctl launch`, #10858).
@@ -1015,10 +1016,7 @@ public final class GesturePerformer: GesturePerforming {
         }
 
         private func gestureApplicationTarget() -> GestureApplicationTarget {
-            GestureApplicationTarget.resolve(
-                pinnedBundleId: pinnedBundleId,
-                trackedBundleId: elementLocator.foregroundBundleId
-            )
+            pinnedApplication.target(trackedBundleId: elementLocator.foregroundBundleId)
         }
 
         private func gestureApplication(for target: GestureApplicationTarget) -> XCUIApplication? {
@@ -1026,8 +1024,9 @@ public final class GesturePerformer: GesturePerforming {
             case .keepPinned:
                 return application
             case let .rebind(bundleId):
-                updateApplication(bundleId: bundleId)
-                return application
+                // A fresh instance for this gesture only: storing it as the pinned app would send
+                // every later gesture on this externally launched app down `.keepPinned` (#10858).
+                return catchingObjCExceptionNonThrowing({ XCUIApplication(bundleIdentifier: bundleId) }, fallback: nil)
             }
         }
 
@@ -1042,10 +1041,17 @@ public final class GesturePerformer: GesturePerforming {
         )
             throws -> Bool
         {
-            let route = GestureDeliveryRoute.resolve(
+            let decision = GestureDeliveryRoute.decide(
                 target: target, forced: forced, geometry: elementLocator.gestureCoordinateGeometry
             )
-            guard case let .synthesizedEventRecord(orientation) = route else { return false }
+            // One line per gesture: tells a stale tracker (keepPinned) from a missing observation.
+            let pinned = pinnedApplication.bundleId ?? "none"
+            let tracked = elementLocator.foregroundBundleId ?? "none"
+            let fallback = decision.fallback?.rawValue ?? "none"
+            logger.info(
+                "gesture_route target=\(target.logLabel, privacy: .public) pinned=\(pinned, privacy: .public) tracked=\(tracked, privacy: .public) fallback=\(fallback, privacy: .public)"
+            )
+            guard case let .synthesizedEventRecord(orientation) = decision.route else { return false }
             return try catchingObjCException { () -> Bool in
                 GesturePhaseDiagnostics.current?.begin("synthesizedGesture")
                 defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
@@ -2897,7 +2903,7 @@ public final class GesturePerformer: GesturePerforming {
             catchingObjCExceptionNonThrowing({
                 let app = XCUIApplication(bundleIdentifier: bundleId)
                 self.ownedApplication = app
-                self.pinnedBundleId = bundleId
+                self.pinnedApplication.pin(bundleId)
                 self.application = app
             }, fallback: ())
         }

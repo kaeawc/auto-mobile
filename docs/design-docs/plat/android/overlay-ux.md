@@ -726,8 +726,11 @@ Android only, and element anchors resolve against the default display (another
 
 The renderer lays an anchored node at its screen rectangle by subtracting the window's
 screen origin and the node's own position inside the window (cutout, system bars, the
-fullscreen host row, safe-area and authored padding). The node keeps a slot of its
-anchored size in its parent and is drawn translated onto the rectangle. Cover sizes the
+fullscreen host row, safe-area and authored padding). An anchored node below the root
+is drawn in a window-level layer above the author tree (modal content: above its modal),
+so its parent neither reserves a slot for it nor clips it, and its touch target and
+accessibility bounds are where it is drawn (#10803). It is shown while all its
+ancestors are; it does not inherit their opacity. Cover sizes the
 node to the bounds, ignoring authored width/height. Window size is determined by
 placement/content, not by implicitly resizing to an anchor:
 

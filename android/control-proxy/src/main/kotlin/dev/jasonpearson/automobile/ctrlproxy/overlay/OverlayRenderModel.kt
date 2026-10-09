@@ -547,3 +547,34 @@ fun modalOverlaySheets(node: OverlayRenderNode): List<OverlayRenderNode> {
     if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page)) else node.children
   return (if (modal) listOf(node) else emptyList()) + children.flatMap(::modalOverlaySheets)
 }
+
+/** Roles that compose their children inline through the node renderer; others never draw them. */
+private val OVERLAY_INLINE_CONTAINER_ROLES =
+  setOf("box", "row", "column", "scroll", "card", "pager")
+
+/** A non-root anchored node: drawn in the window-level anchor layer, never in its parent. */
+internal fun isLayeredOverlayAnchor(node: OverlayRenderNode): Boolean =
+  node.source?.anchor is OverlayBoundsAnchor
+
+/**
+ * The anchored nodes under [node] that the renderer draws in a window-level layer above the author
+ * tree (#10803), in tree order. Drawn inside their parent they were clipped to its slot (a
+ * wrap-content parent animating its size clips) and took a slot there. A node is listed when every
+ * ancestor below [node] is shown: visible, on the settled pager page, and not inside a modal
+ * (modals list their own through [layeredOverlayAnchorsIn]). The anchored node's own visibility is
+ * left to the renderer, so its `visibleWhen` transition still runs. [node] itself is never listed:
+ * a window root keeps its own anchored placement.
+ */
+fun layeredOverlayAnchors(node: OverlayRenderNode): List<OverlayRenderNode> {
+  if (!node.visible || node.role !in OVERLAY_INLINE_CONTAINER_ROLES) return emptyList()
+  val children =
+    if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page)) else node.children
+  return layeredOverlayAnchorsIn(children)
+}
+
+/** [layeredOverlayAnchors] for content drawn as [children], such as a modal's body. */
+fun layeredOverlayAnchorsIn(children: List<OverlayRenderNode>): List<OverlayRenderNode> =
+  children.flatMap { child ->
+    (if (isLayeredOverlayAnchor(child)) listOf(child) else emptyList()) +
+      layeredOverlayAnchors(child)
+  }

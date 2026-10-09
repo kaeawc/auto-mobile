@@ -487,6 +487,13 @@ launch_unit_shard() {
       if [[ -n "$chunk_deadline" ]]; then
         shard_budget=$((chunk_deadline - $(date +%s)))
         if [[ "$shard_budget" -le 0 ]]; then
+          # The lane deadline passed during discovery/launch, so the watchdog
+          # never runs. Leave the snapshot it would have written (write-then-
+          # rename, never an empty or partial file) so the artifact says why.
+          snapshot_tmp="${AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE}.tmp.$$"
+          printf 'chunk deadline expired before %s started (budget %ss; discovery or startup consumed it)\n' \
+            "$AUTOMOBILE_WATCHDOG_LABEL" "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" > "$snapshot_tmp"
+          mv -f "$snapshot_tmp" "$AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE"
           exit 124
         fi
       fi

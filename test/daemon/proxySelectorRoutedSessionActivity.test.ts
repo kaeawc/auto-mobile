@@ -202,7 +202,8 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
       await timer.advanceTimeAsync(lastCallAt + IDLE_WINDOW_MS - INTERVAL_MS * 4 - timer.now());
       expect(await nextTicksHeartbeat()).toEqual([ANDROID.sessionUuid]);
 
-      // Released when idle: past the window, the next call is told to acquire a new device.
+      // Released when idle: past the window, the next call is told to acquire a new device
+      // (a read after that goes through without a session, #10971).
       await timer.advanceTimeAsync(INTERVAL_MS * 2);
       await expect(proxy.callTool(CONTROL, { ...CONTROL_ARGS, ...args })).rejects.toThrow(
         /released/,
@@ -247,6 +248,38 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
       IDLE_WINDOW_MS * 2,
     );
     expect(await nextTicksHeartbeat()).toEqual([IOS.sessionUuid]);
+  });
+
+  // #10971: read-only access never requires a session, in any situation.
+  test("after an idle release, reads are forwarded without a session once the release was reported; control calls stay fenced", async () => {
+    await proxy.callTool("getAndroid", {});
+    await timer.advanceTimeAsync(IDLE_WINDOW_MS + INTERVAL_MS * 2);
+
+    // The first call learns of the release.
+    await expect(proxy.callTool("observe", { deviceId: ANDROID.deviceId })).rejects.toThrow(
+      /released/,
+    );
+    const forwardedBefore = client.callToolCalls.length;
+    for (const [name, args] of [
+      ["observe", { deviceId: ANDROID.deviceId }],
+      ["observe", { deviceId: IOS.deviceId }],
+      ["listApps", {}],
+    ] as const) {
+      await expect(proxy.callTool(name, args)).resolves.toBeDefined();
+      const forwarded = client.callToolCalls.at(-1)!;
+      expect(forwarded.toolName).toBe(name);
+      expect(forwarded.params.sessionUuid).toBeUndefined();
+      expect(forwarded.params[DAEMON_OWNED_SESSIONS_PARAM]).toBeUndefined();
+    }
+    expect(client.callToolCalls.length).toBe(forwardedBefore + 3);
+
+    // Control keeps the fence and the reacquire guidance, every time.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(
+        proxy.callTool(CONTROL, { ...CONTROL_ARGS, deviceId: ANDROID.deviceId }),
+      ).rejects.toThrow(/Call getAndroid or getApple/);
+    }
+    expect(client.callToolCalls.length).toBe(forwardedBefore + 3);
   });
 
   describe("#10974: the proxy credits exactly the session the daemon echoes", () => {

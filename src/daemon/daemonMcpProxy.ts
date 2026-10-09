@@ -156,6 +156,11 @@ const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 // released they must be able to discover the stable target for an explicit
 // getAndroid/getApple reacquisition (#7144).
 const SESSIONLESS_DEVICE_DISCOVERY_TOOLS = ["listDevices", "listDeviceImages"] as const;
+/**
+ * A tool definition's read classification, generated from the tool's `deviceReadOnly`
+ * registration (#10971): the tool only watches a device, which never requires a session.
+ */
+const DEVICE_READ_ONLY_META_KEY = "automobile/deviceReadOnly";
 
 export function isDeviceInventoryTool(name: unknown): boolean {
   return (
@@ -1160,6 +1165,11 @@ export class DaemonMcpProxy {
    * keeper keeps retrying the claim, and the leash only starts once a tool call needs the session.
    */
   private initialSessionAwaitingFirstCall = false;
+  /**
+   * The terminally released binding whose release a tool call has already been told about
+   * (#10971). From then on, read-only tools are forwarded without a session.
+   */
+  private releaseSurfacedFor: string | undefined;
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
   private readonly livenessRecovery: LivenessRecovery;
   /** The call-wait bound of the current stretch of liveness recovery (#10508). */
@@ -3750,7 +3760,7 @@ export class DaemonMcpProxy {
     const isTerminalSessionlessDiscovery =
       this.terminalBoundSession !== undefined &&
       this.sessionUuidFromArgs(callerArgs) === undefined &&
-      isDeviceInventoryTool(name);
+      (isDeviceInventoryTool(name) || this.isSessionlessReadAfterRelease(name));
     const usesDeviceSelector =
       this.toolTargetsDevice(name) &&
       this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice");
@@ -3769,6 +3779,30 @@ export class DaemonMcpProxy {
       allowReleasedSession:
         isSessionAcquisition || isTerminalSessionlessDiscovery || canUseSurvivingSession,
     };
+  }
+
+  /**
+   * Read-only access never requires a session (owner decision 2026-10-09, #10971). After the
+   * binding is released and one call has been told so, a read-only tool that names no session is
+   * forwarded without one: the daemon serves it on its read-only device path. Control tools keep
+   * the fence and its reacquire guidance, as does a liveness handover, which every call reports
+   * until the harness acts on it.
+   */
+  private isSessionlessReadAfterRelease(name: string): boolean {
+    const terminal = this.terminalBoundSession;
+    return (
+      terminal !== undefined &&
+      this.releaseSurfacedFor === terminal.sessionUuid &&
+      !this.stallHandovers.has(terminal.sessionUuid) &&
+      this.isDeviceReadOnlyTool(name)
+    );
+  }
+
+  private isDeviceReadOnlyTool(name: string): boolean {
+    const definition =
+      this.cachedTools?.find((tool) => tool.name === name) ??
+      this.staticToolDefinitionsProvider().find((tool) => tool.name === name);
+    return definition?._meta?.[DEVICE_READ_ONLY_META_KEY] === true;
   }
 
   private toolTargetsDevice(name: string): boolean {
@@ -3941,6 +3975,8 @@ export class DaemonMcpProxy {
       !terminal.fromResultMint ||
       this.stallHandovers.has(terminal.sessionUuid) ||
       (explicitSessionUuid !== undefined && explicitSessionUuid === terminal.sessionUuid);
+    // The agent has now been told about this release; later reads go through without a session.
+    this.releaseSurfacedFor = terminal.sessionUuid;
     if (callerReferencedTerminal) {
       throw this.boundSessionExpiredError(explicitSessionUuid);
     }

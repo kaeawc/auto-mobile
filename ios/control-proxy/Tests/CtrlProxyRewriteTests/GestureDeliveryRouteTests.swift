@@ -133,4 +133,55 @@ final class GestureDeliveryRouteTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - Drag and pinch (#10858)
+
+    func testEveryGestureKindSharesTheSameDecisionInputs() {
+        XCTAssertEqual(GestureKind.allCases, [.tap, .swipe, .drag, .pinch])
+        for kind in GestureKind.allCases {
+            XCTAssertEqual(
+                GestureDeliveryRoute.decide(target: unpinned, forced: nil, geometry: geometry()),
+                .init(route: .synthesizedEventRecord(interfaceOrientation: 1), fallback: nil), kind.rawValue
+            )
+            XCTAssertEqual(
+                GestureDeliveryRoute.decide(target: .keepPinned, forced: nil, geometry: geometry()),
+                .init(route: .xcuiCoordinate, fallback: .pinnedApp), kind.rawValue
+            )
+            XCTAssertEqual(
+                GestureDeliveryRoute.decide(target: unpinned, forced: nil, geometry: nil).fallback,
+                .noObservation, kind.rawValue
+            )
+        }
+    }
+
+    func testDragTouchKeepsPressMoveHoldTimingAndPoints() {
+        let touch = UnpinnedGestureSynthesis.drag(
+            start: GesturePoint(x: 10, y: 20), end: GesturePoint(x: 300, y: 400),
+            press: 0.5, move: 1.2, hold: 0.3, displayId: 7, interfaceOrientation: 4
+        )
+        XCTAssertEqual(touch, DisplayTouch(
+            start: GesturePoint(x: 10, y: 20), end: GesturePoint(x: 300, y: 400), pressDuration: 0.5,
+            moveDuration: 1.2, holdDuration: 0.3, displayId: 7, interfaceOrientation: 4
+        ))
+    }
+
+    func testDragTouchClampsNonFiniteAndNegativeDurations() {
+        let touch = UnpinnedGestureSynthesis.drag(
+            start: GesturePoint(x: 0, y: 0), end: GesturePoint(x: 1, y: 1),
+            press: -1, move: .nan, hold: .infinity, displayId: 1, interfaceOrientation: 1
+        )
+        XCTAssertEqual([touch.pressDuration, touch.moveDuration, touch.holdDuration], [0, 0, 0])
+    }
+
+    func testMainDisplayIdComesFromTheMainScreenOnly() {
+        typealias Screen = TapDiagnostics.DisplayScreen
+        XCTAssertEqual(
+            UnpinnedGestureSynthesis.mainDisplayId(screens: [
+                Screen(displayId: 2, isMain: false), Screen(displayId: 1, isMain: true),
+            ]),
+            1
+        )
+        XCTAssertNil(UnpinnedGestureSynthesis.mainDisplayId(screens: [Screen(displayId: 2, isMain: false)]))
+        XCTAssertNil(UnpinnedGestureSynthesis.mainDisplayId(screens: []))
+    }
 }

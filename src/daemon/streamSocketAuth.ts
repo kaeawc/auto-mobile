@@ -16,8 +16,9 @@ import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/s
  * identity mechanism the main daemon socket uses (issue #4655): a request must
  * carry a `sessionUuid` resolving to a live, non-releasing device session (or,
  * on authenticators built with `allowObserverSessions`, a live registered
- * observer). Video relay subscribe and WebRTC start explicitly admit read-only
- * viewers on any device; the owning session attaches with owner kind. The viewer
+ * observer). Video relay subscribe, WebRTC start and the observation socket's
+ * on-demand reads (#10830) explicitly admit read-only viewers on any device; the
+ * owning session attaches with owner kind. The viewer
  * grant (#10698) is held by any live identity, device session or observer alike,
  * so a desktop that holds nothing can watch a device an agent drives, and holding
  * an unrelated device grants nothing more. Viewers cannot mutate an owner's
@@ -50,7 +51,7 @@ export interface StreamAuthorizeInput {
   sessionUuid?: string;
   /** Target device, when the request names one. */
   deviceId?: string;
-  /** Video relay/WebRTC admission only: a live non-owner may attach read-only. */
+  /** Read-only admission (video relay, WebRTC, observation reads): a live non-owner may watch. */
   admitViewer?: boolean;
   /** Rechecks of an attached subscriber require its session to still own the device. */
   requireOwnership?: boolean;
@@ -256,7 +257,7 @@ export interface ObserverStreamAuthenticatorOptions {
 /**
  * Opt-in admission of registration-only observer sessions. Device scope is unchanged: an observer
  * reaches an owned device only through explicit read-only viewer admission (video relay subscribe,
- * WebRTC start), never through the observation and push paths (`observerMaySeeDeviceOwner`).
+ * WebRTC start, and the observation socket's on-demand reads, #10830).
  */
 export class ObserverAdmittingStreamAuthenticator extends SessionScopedStreamAuthenticator {
   constructor(private readonly options: ObserverStreamAuthenticatorOptions) {

@@ -21,6 +21,7 @@ import {
   DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
   DAEMON_SESSION_NOT_FOUND_CODE,
   DaemonRequest,
+  releasedSessionNotFoundFields,
 } from "./types";
 import {
   DeviceLabelMap,
@@ -169,6 +170,8 @@ export type DaemonMethodResult = {
   error?: string;
   /** With a session-not-found `code`: why a session the daemon knows is released was released. */
   releaseReason?: string;
+  /** With `releaseReason`: an idle-window release (#10832). */
+  idle?: true;
   code?:
     | typeof DAEMON_SESSION_NOT_FOUND_CODE
     | typeof DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
@@ -358,7 +361,8 @@ export function isTokenOwnedOrClaimPending(session: {
 
 /**
  * Session-not-found answer. A session the daemon knows it released also says why
- * (`releaseReason`, #10730) so a client can tell an idle release from a restart or lapsed owner;
+ * (`releaseReason`, #10730; `idle: true` for an idle-window release, #10832) so a client can tell
+ * an idle release from a restart or lapsed owner;
  * a UUID the daemon never issued stays a plain not-found.
  */
 async function sessionNotFoundResult(
@@ -370,7 +374,7 @@ async function sessionNotFoundResult(
     success: false,
     error: `Session not found: ${sessionId}`,
     code: DAEMON_SESSION_NOT_FOUND_CODE,
-    ...(releaseReason ? { releaseReason } : {}),
+    ...releasedSessionNotFoundFields(releaseReason),
   };
 }
 

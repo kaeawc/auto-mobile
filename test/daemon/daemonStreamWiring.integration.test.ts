@@ -1334,7 +1334,8 @@ describe("Daemon stream wiring", () => {
       }
     });
 
-    test("refuses an all-device subscribe that expands to a device owned by another session", async () => {
+    // Watching stored values is a read (#10830): another session's device is watched too.
+    test("an all-device subscribe also watches a device owned by another session", async () => {
       const { daemon, internals } = await daemonWithPool(
         [
           { id: "emulator-5554", platform: "android" },
@@ -1353,23 +1354,21 @@ describe("Daemon stream wiring", () => {
       })) as typeof AndroidCtrlProxyClient.getExistingInstance;
 
       try {
-        await expect(
-          internals.applyStorageSubscriptionRequest({
-            deviceId: null,
-            sessionUuid: "caller-session",
-            packageName: "com.example",
-            fileName: "prefs.xml",
-            subscribe: true,
-          }),
-        ).rejects.toThrow(/emulator-5556/);
-        expect(touched).toEqual(["emulator-5554"]);
+        await internals.applyStorageSubscriptionRequest({
+          deviceId: null,
+          sessionUuid: "caller-session",
+          packageName: "com.example",
+          fileName: "prefs.xml",
+          subscribe: true,
+        });
+        expect(touched).toEqual(["emulator-5554", "emulator-5556"]);
       } finally {
         AndroidCtrlProxyClient.getExistingInstance = originalGetExistingInstance;
         daemon.getSessionManager().stopCleanupTimer();
       }
     });
 
-    test("reports a per-device observation failure for another session's device", async () => {
+    test("reports a per-device observation failure for an unknown session", async () => {
       const { daemon, internals } = await daemonWithPool(
         [{ id: "emulator-5556", platform: "android" }],
         new Set(),
@@ -1383,12 +1382,12 @@ describe("Daemon stream wiring", () => {
         internals.setupDeviceDataStreamCallback();
         const observations = await stream.observationHandler!({
           deviceId: null,
-          sessionUuid: "caller-session",
+          sessionUuid: "stranger-session",
           signal: new AbortController().signal,
         });
         expect(observations).toHaveLength(1);
         expect(observations[0]?.deviceId).toBe("emulator-5556");
-        expect(observations[0]?.observation.error).toMatch(/different daemon session/);
+        expect(observations[0]?.observation.error).toMatch(/not an active daemon session/);
       } finally {
         daemon.getSessionManager().stopCleanupTimer();
       }

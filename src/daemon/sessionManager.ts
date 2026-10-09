@@ -79,7 +79,7 @@ import {
   getSessionIdleTimeoutMs,
 } from "./sessionLivenessWindows";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
+import { DAEMON_SESSION_SUSPECT_CODE, isIdleReleaseReason } from "./types";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -1910,20 +1910,54 @@ export class SessionManager {
     if (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason)) {
       return undefined;
     }
+    return this.releaseSnapshotFromPersisted(sessionId, persisted, persisted.release_reason);
+  }
+
+  /**
+   * An idle-window release is non-terminal by design, but its UUID was issued: report the release
+   * (`session_ownership_lost` with its snapshot) instead of "never issued" (#10832).
+   */
+  private assertNotIdleReleased(sessionId: string, persisted: DeviceSession | undefined): void {
+    if (!persisted || this.isRecoverablePersistedSession(persisted)) {
+      return;
+    }
+    const idleRelease = this.idleReleaseFromPersisted(sessionId, persisted);
+    if (idleRelease) {
+      throw new TerminalSessionError(sessionId, idleRelease);
+    }
+  }
+
+  /** The release of a row this daemon idle-released (`lazy-expiry`/`cleanup-expired`), if it was. */
+  private idleReleaseFromPersisted(
+    sessionId: string,
+    persisted: DeviceSession,
+  ): SessionReleaseSnapshot | undefined {
+    const reason = persisted.release_reason;
+    if (!reason || !isIdleReleaseReason(reason) || isTerminalReleaseReason(reason)) {
+      return undefined;
+    }
+    return this.releaseSnapshotFromPersisted(sessionId, persisted, reason);
+  }
+
+  private releaseSnapshotFromPersisted(
+    sessionId: string,
+    persisted: DeviceSession,
+    releaseReason: string,
+  ): SessionReleaseSnapshot {
     const releasedAtMs = persisted.released_at_ms ?? persisted.last_used_at_ms;
     return {
       sessionId,
       deviceId: persisted.device_id,
-      releaseReason: persisted.release_reason,
+      releaseReason,
       releasedAtMs,
-      terminal: true,
+      terminal: isTerminalReleaseReason(releaseReason),
       heartbeat: {
         lastHeartbeatMs: persisted.last_used_at_ms,
         hasReceivedHeartbeat: persisted.has_received_heartbeat === 1,
         // Match the live snapshot: a missing-first-heartbeat reap is governed by
         // the pre-first-heartbeat grace, not the stored heartbeat timeout.
         timeoutMs:
-          persisted.release_reason === "missing-first-heartbeat"
+          releaseReason === "missing-first-heartbeat"
             ? getDefaultPreFirstHeartbeatGraceMs()
             : persisted.heartbeat_timeout_ms,
         ageMs: Math.max(0, releasedAtMs - persisted.last_used_at_ms),
@@ -2395,6 +2429,10 @@ export class SessionManager {
     // never-issued sessionUuid (e.g. "kumquat-D") whenever the #6045 admit guard
     // was bypassed by the call path — the ownership bypass this closes. The
     // pool-less `if (!devicePool)` throw below stays as a secondary safety net.
+    if (requireIssuedSession || !devicePool) {
+      // Before terminalization, which would overwrite the recorded idle reason.
+      this.assertNotIdleReleased(sessionId, persisted);
+    }
     if (requireIssuedSession && !this.isRecoverablePersistedSession(persisted)) {
       await this.terminalizeExpiredPersistedSession(persisted);
       throw new UnissuedSessionError(

@@ -64,6 +64,8 @@ export interface DaemonResponse {
    * never issued. Additive: older clients ignore it.
    */
   releaseReason?: string;
+  /** With `releaseReason`: the session was released by its idle window (#10832). Additive. */
+  idle?: true;
   /** Rejected before any device operation was admitted. */
   handshakeFailure?: DaemonHandshakeFailure;
   /**
@@ -181,6 +183,25 @@ const IDLE_EXPIRY_LOSS_REASONS: ReadonlySet<string> = new Set([
   "cleanup-expired",
   "cli-idle-timeout",
 ]);
+
+/** Whether a release reason is an idle-window release (#10832), as opposed to a lapse or loss. */
+export function isIdleReleaseReason(reason: string): boolean {
+  return IDLE_EXPIRY_LOSS_REASONS.has(reason);
+}
+
+/**
+ * The release fields of a session-not-found answer: the recorded `releaseReason` and, for an
+ * idle-window release, `idle: true` so a client can tell "reacquire" from a restart or loss (#10832).
+ */
+export function releasedSessionNotFoundFields(releaseReason: string | undefined): {
+  releaseReason?: string;
+  idle?: true;
+} {
+  if (!releaseReason) {
+    return {};
+  }
+  return isIdleReleaseReason(releaseReason) ? { releaseReason, idle: true } : { releaseReason };
+}
 
 const OWNER_DISCONNECTED_LOSS_REASON = "owner-disconnected";
 

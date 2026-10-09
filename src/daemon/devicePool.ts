@@ -34,6 +34,7 @@ import {
   type SessionRecoveryTarget,
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
+import { deviceAssignedToOtherSessionError } from "./inputDeviceOwnership";
 import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import {
   SessionRecoveryAssignmentError,
@@ -6992,9 +6993,7 @@ export class DevicePool {
           }
 
           if (existingSession) {
-            throw new ActionableError(
-              `Device '${deviceId}' is already assigned to session ${device.sessionId}.`,
-            );
+            throw deviceAssignedToOtherSessionError(deviceId, device.sessionId, sessionId);
           }
 
           // Looking up an expired owner may itself start its release.

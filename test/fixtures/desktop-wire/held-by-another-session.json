@@ -100,7 +100,7 @@
           "content": [
             {
               "type": "text",
-              "text": "Error: Device 'emulator-5554' is already assigned to session a0000000-0000-4000-8000-00000000000a"
+              "text": "{\"success\":false,\"error\":\"Device 'emulator-5554' is already assigned to session a0000000-0000-4000-8000-00000000000a\",\"code\":\"device_owned_by_other_session\",\"deviceId\":\"emulator-5554\",\"retryable\":false}"
             }
           ],
           "isError": true

@@ -229,6 +229,11 @@ describe("desktop wire contract (#10669, #10730)", () => {
     const refused = await wire.send("desktop", "bind-refused", "tools/call", bindParams(DESKTOP_1));
     expect(isToolError(refused)).toBe(true);
     expect(textOf(refused)).toContain(`is already assigned to session ${AGENT}`);
+    // The refusal is typed (#10832): the desktop matches the code, not the message.
+    expect(JSON.parse(textOf(refused))).toMatchObject({
+      code: "device_owned_by_other_session",
+      deviceId: PIXEL.deviceId,
+    });
     await wire.heartbeats("heartbeat-viewing", DESKTOP_1, 3);
     expect(wire.holderOf(PIXEL.deviceId)).toBe(AGENT);
 

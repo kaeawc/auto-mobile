@@ -67,6 +67,8 @@ describe("navigation request dispatch characterization", () => {
           {
             sessionUuid: "session",
             deviceId: deviceSessionUuid ? "device" : undefined,
+            // Reading the graph is watching, admitted on a held device too (#10830).
+            admitViewer: true,
           },
         ]);
         expect(apps).toEqual([appId ?? null]);

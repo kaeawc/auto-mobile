@@ -873,7 +873,12 @@ describe("device state tools", () => {
         platform: "ios",
         sessionUuid: "session-a",
       }),
-    ).rejects.toThrow(/already assigned to session session-b/);
+    ).rejects.toMatchObject({
+      message: expect.stringMatching(/already assigned to session session-b/),
+      // Typed like the input/* and tools/call refusals (#10832); clients match the code.
+      code: "device_owned_by_other_session",
+      deviceId: "sim-b",
+    });
 
     expect(sessionManager.getSession("session-a")?.assignedDevice).toBe("sim-a");
     expect(devicePool.getDevice("sim-a")?.sessionId).toBe("session-a");

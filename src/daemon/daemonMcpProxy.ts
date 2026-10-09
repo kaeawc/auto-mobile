@@ -22,6 +22,7 @@ import {
   DAEMON_VERSION,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  DAEMON_ONE_SHOT_CLI_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
@@ -815,6 +816,13 @@ export interface DaemonMcpProxyConfig {
     order: "forward" | "reverse";
     capability: string;
   };
+  /**
+   * Set only by the one-shot `--cli` runner (#11096): every tool call carries
+   * {@link DAEMON_ONE_SHOT_CLI_PARAM}, so the daemon treats this connection's acquisitions as
+   * anonymous and repeated `--cli` acquisitions of one device stay idempotent (#2421).
+   * Long-lived MCP proxies leave it unset and stay identified by their connection.
+   */
+  oneShotCli?: boolean;
 }
 
 /**
@@ -3636,6 +3644,7 @@ export class DaemonMcpProxy {
     delete callerArgs[DAEMON_OWNED_SESSIONS_PARAM];
     delete callerArgs[DAEMON_RELEASED_SESSION_PARAM];
     delete callerArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
+    delete callerArgs[DAEMON_ONE_SHOT_CLI_PARAM];
     delete callerArgs[INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM];
     delete callerArgs[INTERNAL_ACTIONS_COMPACT_METADATA_PARAM];
     // The acceptance controls are configuration of the dedicated harness proxy,
@@ -3664,7 +3673,7 @@ export class DaemonMcpProxy {
       callerArgs,
       isSessionAcquisition,
     );
-    const forwardedArgs = this.withAcceptanceConfiguration(routedArgs);
+    const forwardedArgs = this.withOneShotCliMarker(this.withAcceptanceConfiguration(routedArgs));
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
     // Snapshot the release epoch at forward time. If a session-released signal for
@@ -3795,6 +3804,10 @@ export class DaemonMcpProxy {
       this.releaseAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
       this.removeProgressListener(registeredClient, registeredRequestId);
     }
+  }
+
+  private withOneShotCliMarker(args: Record<string, unknown>): Record<string, unknown> {
+    return this.config.oneShotCli ? { ...args, [DAEMON_ONE_SHOT_CLI_PARAM]: true } : args;
   }
 
   private withAcceptanceConfiguration(args: Record<string, unknown>): Record<string, unknown> {

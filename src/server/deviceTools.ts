@@ -862,6 +862,8 @@ export interface StartDeviceArgs {
   runnerReadinessTimeoutMs?: number;
   createIfMissing?: boolean;
   __mcpSessionId?: string;
+  /** Daemon-forwarded: the caller is a one-shot `--cli` connection, so it acquires anonymously (#11096). */
+  __oneShotCli?: boolean;
   /** Acceptance-only, non-mutating discovery presentation control. */
   presentationOrder?: "forward" | "reverse";
   /** Internal exact runtime identity used by getAndroid. */
@@ -895,6 +897,8 @@ export interface ProvisionDeviceArgs {
   resources?: DeviceResourceConfiguration;
   timeoutMs?: number;
   __mcpSessionId?: string;
+  /** Daemon-forwarded one-shot `--cli` marker (#11096). */
+  __oneShotCli?: boolean;
   /** Daemon-provided remaining transport budget. */
   __mcpRequestTimeoutMs?: number;
   /** Daemon-provided absolute transport deadline. */
@@ -3618,6 +3622,7 @@ export function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
 
 export function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceArgs {
   const __mcpSessionId = input.__mcpSessionId;
+  const __oneShotCli = input.__oneShotCli === true;
   const __mcpRequestDeadlineMs = input.__mcpRequestDeadlineMs;
   const __mcpLiveDeadlineKey =
     typeof input.__mcpLiveDeadlineKey === "string" ? input.__mcpLiveDeadlineKey : undefined;
@@ -3634,6 +3639,7 @@ export function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionD
     boot: parsed.boot ?? true,
     readiness: parsed.readiness ?? "automation",
     __mcpSessionId,
+    ...(__oneShotCli ? { __oneShotCli } : {}),
     __mcpRequestDeadlineMs,
     ...(__mcpLiveDeadlineKey ? { __mcpLiveDeadlineKey } : {}),
   };
@@ -4208,6 +4214,7 @@ export async function reserveInitialDeviceForReadiness(
   boot: DeviceBootResult,
   releaseReadinessReservations: DeviceReadinessReservation[],
   mcpSessionId: string | undefined,
+  oneShotCli = false,
 ): Promise<void> {
   const devicePool = getStartDevicePool(daemonState);
   if (!devicePool) {
@@ -4219,7 +4226,7 @@ export async function reserveInitialDeviceForReadiness(
       boot.device,
       boot.sourceImage?.name ?? boot.device.name,
       undefined,
-      mcpSessionId ? { mcpSessionId } : undefined,
+      oneShotCli ? { oneShotCli } : mcpSessionId ? { mcpSessionId } : undefined,
       true,
     ),
   );

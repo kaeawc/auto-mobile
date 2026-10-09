@@ -689,4 +689,9 @@ export interface SessionContext {
    * request id, so a client cancel frame can abandon one (issue #6384).
    */
   requestCancellations: Map<string, AbortController>;
+  /**
+   * Set once a tool call on this socket carried `DAEMON_ONE_SHOT_CLI_PARAM` (#11096): the
+   * connection is a one-shot `--cli` invocation, whose acquisitions are anonymous.
+   */
+  oneShotCli?: boolean;
 }

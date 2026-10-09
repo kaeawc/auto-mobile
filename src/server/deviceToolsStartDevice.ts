@@ -370,6 +370,7 @@ async function reserveBootReadiness(
           state.boot!,
           initialReservations,
           args.__mcpSessionId,
+          args.__oneShotCli === true,
         );
         // A grant can win the mutex just as the caller loses its deadline race.
         // Never publish that orphan into the caller's already-drained release list.
@@ -669,6 +670,7 @@ async function bindBootedDeviceSession(
       verifiedAndroidAvdIdentity,
       undefined,
       args.__mcpSessionId,
+      args.__oneShotCli === true,
     );
   recordAcquiredSessionReadiness(daemonState, boundSessionId, achievedReadiness);
   return boundSessionId;
@@ -793,6 +795,7 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     const args = {
       ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),
       __mcpSessionId: internalSessionId,
+      ...(rawArgs.__oneShotCli === true ? { __oneShotCli: true } : {}),
     };
     validateCameraPosterPlatform(args);
     const exactAndroidAvdName = args.platform === "android" ? args.avdName : undefined;

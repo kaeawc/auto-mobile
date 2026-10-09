@@ -181,6 +181,18 @@ rotates to a fresh observer session and does not re-send the bind; the next
 input allocates the device again. `test/fixtures/desktop-wire/` records these
 exchanges against the real handlers.
 
+Viewer stream rule (owner decision 2026-10-09, #8902): a video-relay or WebRTC/WHEP
+subscription keeps streaming when device ownership changes (another session acquires,
+releases, or idle-releases the device). An owner subscription whose session lost the
+device is downgraded to a read-only viewer; viewers are never revoked by an ownership
+change. Only input requires ownership. A stream ends only when its own subscribing
+identity ends (`session_ended`), the viewer disconnects, or the device goes away
+(`device_removed`, `device_restored`, `identity_quarantined`, `daemon_shutdown`), each
+delivered as a typed reason, and the shared capture (including the shared iOS capture)
+keeps running for the remaining subscribers. Recordings are a separate concern and stop
+on release. Policy lives in `src/daemon/streamSubscriptionPolicy.ts`; tests in
+`test/daemon/*StreamSocketServer.viewerSubscription.test.ts`.
+
 Open owner question: is non-persistence acceptable? Clients must register again
 after daemon restart. (Resolved question: watching is allowed on any device and
 control stays with the owner, per the 2026-10-08 decision above; the viewer grant

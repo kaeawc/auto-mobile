@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import type { Database as BunDatabase } from "bun:sqlite";
 import { CompiledQuery } from "kysely";
-import { BunSqliteConnectionState, DEFAULT_RETRY_TOTAL_WAIT_MS } from "../../src/db/bunSqliteDialect";
+import {
+  BunSqliteConnectionState,
+  DEFAULT_RETRY_TOTAL_WAIT_MS,
+} from "../../src/db/bunSqliteDialect";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { Random } from "../../src/utils/Random";

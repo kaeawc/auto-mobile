@@ -3,7 +3,10 @@
 This is the current, unversioned contract for #9296, child of #9295. Compose
 rendering on Android (#9299, #9300), asset transport (#9301), wire messages
 (#9298), the `prototype` MCP tool (#9302) and the
-[iOS simulator agent](../ios/overlay-agent.md) implement it. No code,
+[iOS simulator agent](../ios/overlay-agent.md) implement it; the iOS agent's
+[feature support table](../ios/overlay-agent.md#feature-support) lists what is Android only
+(`display`, `window.layer: "app"`, `window.persistence: "device"`, `inspect`, idle TTL).
+No code,
 expressions, URLs, image bytes, or migration instructions are accepted in a
 spec.
 
@@ -909,6 +912,10 @@ is shown and returns to the screen edge when it hides.
 
 Device checks must cover keyguard timing, daemon death, pager page 3
 across rotation, fold/display removal, and API 30/34/36 keyboard/cutout geometry.
+
+This is Android only. The iOS agent does not lift a sheet above the keyboard, and whether to
+rely on UIKit keyboard avoidance or match this behaviour is an open decision (see
+[iOS overlay agent](../ios/overlay-agent.md#open-decisions)).
 
 ## Rejection paths and deterministic first error
 

@@ -5,10 +5,48 @@ target app. This is the iOS counterpart of the
 [Android overlay specification](../android/overlay-ux.md); the spec, validation limits
 and node vocabulary are shared. See epic #10563 and the prototype in #10498.
 
-Status: the agent (`ios/overlay-agent/`), the release dylib and its checksum-verified
-download (#10564, #10565), the per-launch port, token and handshake (#10566),
-`launchApp { overlay: true }` (#10567) and `prototype` routing (#10568) are merged.
+Status: epic #10563 is complete apart from device verification. The agent (`ios/overlay-agent/`), the
+release dylib and its checksum-verified download (#10564, #10565), the per-launch port, token and
+handshake (#10566), `launchApp { overlay: true }` (#10567), `prototype` routing (#10568) and the
+advisory per-runtime simulator smoke test (#10569) are merged, and the tool now covers anchors
+(#10874), `pressScale` (#10885), `reset` on show (#10998), hiding the overlay from `layer: "app"`
+screenshots (#10943, #10988) and the renderer and accessibility fixes that followed (#10903,
+#10918, #10928, #10953). Still open: device verification of the iOS window-layer `tapOn` fix from
+#10498, and the decisions listed under [Open decisions](#open-decisions).
 `scripts/ios/overlay-agent-demo.ts` is a standalone driver that launches with a fresh port and token.
+
+## Feature support
+
+| Feature                                                                  | iOS simulator                                                                     |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `show`, `dismiss`, `status`, `awaitEvent`; fullscreen, floating, sheet   | Supported                                                                         |
+| Replace in place, and `reset: true` to start fresh                       | Supported (`overlay_show_in_place_v1`)                                            |
+| Element and bounds anchors                                               | Supported, in points (`overlay_anchor_v1`); see [Anchors](#anchors)               |
+| `pressScale`, motion, `visibleWhen`, state and actions, assets and fonts | Supported                                                                         |
+| Material component nodes, dialog, snackbar, pickers                      | Supported; see [Material components](#material-components)                        |
+| Overlay hidden from `layer: "app"` observe screenshots (`target`)        | Supported (#10943, #10988); the host restores it after capture                    |
+| `display` selector                                                       | Refused: a simulator has one screen                                               |
+| `window.layer: "app"`                                                    | Refused: the window level is fixed at alert + 1 (see open decision 4)             |
+| `window.persistence: "device"`                                           | Refused: the agent lives in the app process and dies with it                      |
+| `inspect`                                                                | Refused (open decision 1)                                                         |
+| Idle TTL, `disconnect` and `teardown` dismissed reasons                  | Not implemented; only `user` and `agent` are reported (open decision 2)           |
+| Bottom sheet lifting above the keyboard                                  | Not implemented or verified (open decision 3)                                     |
+| Foreground scoping to the shown-over app                                 | Not needed: the agent lives in the app, so backgrounding the app hides its window |
+
+## Open decisions
+
+These are undecided; the table above describes today's code, and nothing here promises a behaviour.
+
+1. **`inspect`.** Keep it refused, or map it to the agent's `get_overlay_status` and adopt the
+   result into the host store. The agent dies with the app, so there is little to adopt beyond
+   `status`.
+2. **Idle TTL and disconnect dismissal.** Options are none (an overlay lives until dismissed or
+   the app exits), dismiss on last client disconnect (`reason: disconnect`) so a crashed daemon
+   leaves no orphan, or Android's idle TTL.
+3. **Keyboard handling for sheets.** Rely on UIKit and SwiftUI keyboard avoidance, or match
+   Android by lifting the sheet with keyboard-frame notifications. Needs a simulator check first.
+4. **`window.layer: "app"`.** Keep refusing it, or accept and ignore it with a warning so one
+   spec runs on both platforms.
 
 ## How it works
 
@@ -97,7 +135,10 @@ is simulator-only and device launches will fail to load it.
   `reset: true` starts it fresh (the agent advertises `overlay_show_in_place_v1`, and the host refuses
   `reset` on an older agent). For a variant
   carousel, compose the spec yourself and `show` it.
-- No `display` selector; a simulator has a single screen.
+- No `display` selector, no `window.layer: "app"` and no `window.persistence: "device"`; the host
+  refuses them. See [Feature support](#feature-support).
+- No `inspect`, idle TTL or disconnect dismissal, and no keyboard lift for sheets (open decisions
+  above).
 - Rendering is SwiftUI in the app's process rather than Compose in CtrlProxy, so there is no
   separate accessibility service involved.
 - Android reaches any app through CtrlProxy; iOS reaches only apps launched with the agent.

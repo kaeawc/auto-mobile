@@ -1,4 +1,11 @@
 import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
+import {
+  DEVICE_CLEANUP_IN_PROGRESS_CODE,
+  DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+  DeviceOwnedByOtherDaemonError,
+  SESSION_CREATION_TIMEOUT_CODE,
+  RetryableDeviceAcquisitionError,
+} from "../daemon/deviceAcquisitionRefusals";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { observeConfiguredDeviceResources } from "./deviceResourceTools";
@@ -53,6 +60,7 @@ import {
 } from "../utils/deviceTimeouts";
 import {
   type ExactDeviceProvisioner,
+  type ProvisionDeviceFailureCode,
   ProvisionDeviceError,
 } from "../devices/exactDeviceProvisioning";
 import type { ProvisionDeviceLifecycleOutcome } from "../devices/provisionDeviceLifecycle";
@@ -165,6 +173,17 @@ type ProvisionBootResult = {
   sourceImage?: DeviceInfo;
   resources?: DeviceResourceConfigurationResult;
 };
+
+function retryableAcquisitionProvisionCode(code: string): ProvisionDeviceFailureCode | undefined {
+  switch (code) {
+    case DEVICE_OWNED_BY_OTHER_DAEMON_CODE:
+    case DEVICE_CLEANUP_IN_PROGRESS_CODE:
+    case SESSION_CREATION_TIMEOUT_CODE:
+      return code;
+    default:
+      return undefined;
+  }
+}
 
 export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
   const { bindBootedDeviceSession, ensureCtrlProxyReady, executeDeleteDevice } = hooks;
@@ -406,6 +425,26 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
         true,
         { deviceId: error.deviceId },
+      );
+    }
+    const acquisitionCode =
+      error instanceof RetryableDeviceAcquisitionError
+        ? retryableAcquisitionProvisionCode(error.code)
+        : undefined;
+    if (error instanceof RetryableDeviceAcquisitionError && acquisitionCode) {
+      // Typed retryable refusals from the shared bind path keep their wire code and wait hint
+      // so a controller retries them the way startDevice/getAndroid clients do.
+      return new ProvisionDeviceError(
+        acquisitionCode,
+        `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
+        true,
+        {
+          deviceId: error.deviceId,
+          retryAfterMs: error.retryAfterMs,
+          ...(error instanceof DeviceOwnedByOtherDaemonError && error.ownerPid !== undefined
+            ? { ownerPid: error.ownerPid }
+            : {}),
+        },
       );
     }
     if (error instanceof RunnerReadinessError) {
@@ -2044,6 +2083,8 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       ...(diagnostics.attempt !== undefined ? { attempt: diagnostics.attempt } : {}),
       ...(diagnostics.incidentId ? { incidentId: diagnostics.incidentId } : {}),
       ...(diagnostics.deviceId ? { deviceId: diagnostics.deviceId } : {}),
+      ...(diagnostics.ownerPid !== undefined ? { ownerPid: diagnostics.ownerPid } : {}),
+      ...(diagnostics.retryAfterMs !== undefined ? { retryAfterMs: diagnostics.retryAfterMs } : {}),
       ...(diagnostics.resourceDrift ? { resourceDrift: diagnostics.resourceDrift } : {}),
       ...(diagnostics.runtimeCompatibility
         ? { runtimeCompatibility: diagnostics.runtimeCompatibility }

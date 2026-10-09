@@ -1,4 +1,11 @@
 import { provisionCancellationOutcomes } from "../../src/server/provisionCancellationOutcomes";
+import {
+  DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
+  DEVICE_OWNED_BY_OTHER_DAEMON_RETRY_AFTER_MS,
+  DeviceCleanupInProgressError,
+  DeviceOwnedByOtherDaemonError,
+  SessionCreationTimeoutError,
+} from "../../src/daemon/deviceAcquisitionRefusals";
 import { deviceAlreadyAssignedToAnotherSessionError } from "../../src/daemon/inputDeviceOwnership";
 import { FakeDeviceResourceObserver } from "../fakes/FakeDeviceResourceObserver";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -4160,6 +4167,43 @@ describe("provisionDevice handler", () => {
       },
     });
   });
+
+  test.each([
+    [
+      new DeviceOwnedByOtherDaemonError("emulator-5554", 4242),
+      "device_owned_by_other_daemon",
+      { ownerPid: 4242, retryAfterMs: DEVICE_OWNED_BY_OTHER_DAEMON_RETRY_AFTER_MS },
+    ],
+    [
+      new DeviceCleanupInProgressError("emulator-5554", 750),
+      "device_cleanup_in_progress",
+      { retryAfterMs: 750 },
+    ],
+    [
+      new SessionCreationTimeoutError("s-1", "emulator-5554", 5000),
+      "session_creation_timeout",
+      { retryAfterMs: DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS },
+    ],
+  ] as const)(
+    "a typed acquisition refusal %# is a retryable %s failure with its hints",
+    async (refusal, code, extra) => {
+      deviceManager.setBootedDevices("android", [
+        { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+      ]);
+      exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: async () => {
+          throw refusal;
+        },
+      });
+
+      const response = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+
+      expect(response).toMatchObject({
+        error: { code, retryable: true, deviceId: "emulator-5554", ...extra },
+      });
+    },
+  );
 
   // #11065: a repeated call re-runs readiness instead of replaying a stored failure.
   test("preserves missing-device diagnostics and re-runs readiness on a repeated call", async () => {

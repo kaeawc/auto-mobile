@@ -7,7 +7,10 @@ import {
   DAEMON_REGISTER_SESSION_METHOD,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "../../src/daemon/constants";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import {
+  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+  SessionManager,
+} from "../../src/daemon/sessionManager";
 import {
   ObserverSessionRegistry,
   type ObserverSessionStore,
@@ -280,7 +283,8 @@ describe("registration-only daemon requests", () => {
         error: `Session ${sessionId} release is still in progress after ${SESSION_RELEASE_DRAIN_TIMEOUT_MS}ms; retry registration`,
       });
       expect(registry.list()).toEqual([]);
-      expect(timer.getPendingTimeoutCount()).toBe(0);
+      // Only the still-running release's own write deadline (#10836) remains.
+      expect(timer.getPendingTimeouts()).toEqual([SESSION_RELEASE_PERSIST_TIMEOUT_MS]);
       expect(timer.getPendingSleepCount()).toBe(0);
     } finally {
       persistence.finishRelease.resolve();

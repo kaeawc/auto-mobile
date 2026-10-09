@@ -3789,9 +3789,10 @@ describe("DevicePool", () => {
 
       const replacementPublished = Promise.withResolvers<void>();
       const finishPoolIdentityUpdate = Promise.withResolvers<void>();
-      sessionManager.waitForSessionRelease = async () => {
+      sessionManager.waitForSessionReleaseWithin = async () => {
         replacementPublished.resolve();
         await finishPoolIdentityUpdate.promise;
+        return true;
       };
 
       const replacementBinding = devicePool.bindOrReuseDeviceSession(

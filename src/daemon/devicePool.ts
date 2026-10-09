@@ -26,6 +26,8 @@ import { truncateBodyText } from "../utils/truncateBodyText";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import { getObserveCacheStore } from "../features/observe/cache/ObserveCacheRegistry";
 import {
+  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+  SESSION_RELEASE_TEARDOWN_CAP_MS,
   SessionManager,
   SessionRecoveryIdentityLossError,
   type Session,
@@ -571,6 +573,14 @@ const ALLOCATION_SNAPSHOT_STALE_RETRIES = 3;
 
 /** Bound on the adb state read that decides a recovery reservation's lift (#10074). */
 const ANDROID_OFFLINE_PROBE_TIMEOUT_MS = 10_000;
+/**
+ * How long a session create waits, inside the assignment mutex, for a release admitted while
+ * it was being created (#10836). It covers the release's capped teardown plus its bounded
+ * terminal write and reason upgrade, with margin; past it the create is refused rather than
+ * holding every other assignment behind a release that never settles.
+ */
+export const CREATE_SESSION_RELEASE_WAIT_MS =
+  SESSION_RELEASE_TEARDOWN_CAP_MS + 2 * SESSION_RELEASE_PERSIST_TIMEOUT_MS + 10_000;
 
 /** Evidence belongs only to the entry captured before this target's discovery. */
 export interface TargetDeviceDiscoverySnapshot {
@@ -6013,7 +6023,22 @@ export class DevicePool {
         // Return the attempted object so rollback can preserve the replacement.
         return session;
       }
-      await this.sessionManager.waitForSessionRelease(session.sessionId);
+      const releaseSettled = await this.sessionManager.waitForSessionReleaseWithin(
+        session.sessionId,
+        CREATE_SESSION_RELEASE_WAIT_MS,
+      );
+      if (!releaseSettled) {
+        logger.warn(
+          `Refusing session ${session.sessionId} on ${device.id}: a release admitted during its ` +
+            `creation has not settled after ${CREATE_SESSION_RELEASE_WAIT_MS}ms ` +
+            "(reason=create-release-wait-timeout)",
+        );
+        throw new ActionableError(
+          `Session ${session.sessionId} was released while it was being created on device ` +
+            `'${device.id}', and that release has not finished after ` +
+            `${CREATE_SESSION_RELEASE_WAIT_MS}ms. Retry the request to acquire a device.`,
+        );
+      }
       // A tracked process can exit while the durable session write is pending.
       // Do not publish success for a device that eviction already removed or
       // released; undo the just-published session before restoring the pool.

@@ -148,6 +148,8 @@ describe("UnixSocketServer exact-tool selection enforcement", () => {
       key: "name",
       value: "value",
       type: "STRING",
+      // The device is held, so a mutating frame must name its holder (#10698).
+      sessionUuid: "device-session-1",
     });
 
     expect(response.success).toBe(true);
@@ -192,6 +194,8 @@ describe("UnixSocketServer exact-tool selection enforcement", () => {
       key: "name",
       value: "value",
       type: "STRING",
+      // The device is held, so a mutating frame must name its holder (#10698).
+      sessionUuid: "device-session-1",
     });
 
     expect(response.success).toBe(true);

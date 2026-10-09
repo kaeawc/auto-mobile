@@ -21,13 +21,26 @@ final class OverlayModel: ObservableObject {
 
     /// Closes snackbars that set `durationMs`; created with the model so it can call back into it.
     private lazy var snackbarTimeouts = SnackbarTimeouts(clock: clock) { [weak self] node in
-        self?.closeModal(node)
+        // A timer closing a snackbar is not user activity, so it must not restart the idle TTL.
+        self?.apply(activity: false) { $0.closeModal(node) }
+    }
+
+    /// Ends an overlay nobody has touched for the TTL (`reason: ttl`, as on Android).
+    private lazy var idleTimer = OverlayIdleTimer(clock: clock) { [weak self] in
+        self?.dismiss(reason: .ttl)
     }
 
     private let clock: OverlayClock
 
     init(clock: OverlayClock = SystemOverlayClock()) {
         self.clock = clock
+    }
+
+    /// Local override of the five-minute idle TTL; no wire field carries it. Applies from the next
+    /// show or interaction.
+    var idleTtlMilliseconds: Int {
+        get { idleTimer.ttlMilliseconds }
+        set { idleTimer.ttlMilliseconds = newValue }
     }
 
     var spec: OverlaySpec? {
@@ -62,6 +75,8 @@ final class OverlayModel: ObservableObject {
         // them on a same-geometry re-show would leave the overlay passing every touch through.
         session.show(spec, reset: reset)
         syncSnackbarTimeouts()
+        // An accepted show, including a same-id replace, is activity.
+        idleTimer.arm()
         onVisibilityChange?(true)
     }
 
@@ -107,7 +122,10 @@ final class OverlayModel: ObservableObject {
     }
 
     func setPage(_ pager: String, _ target: Int) {
-        apply { $0.setPage(pager, target) }
+        // SwiftUI reports the settled page on appear; only a page that changed is activity.
+        let before = session.pages[pager]
+        apply(activity: false) { $0.setPage(pager, target) }
+        if session.isShown, session.pages[pager] != before { idleTimer.arm() }
     }
 
     func toggle(_ key: String, then actions: [OverlayAction]) {
@@ -145,14 +163,30 @@ final class OverlayModel: ObservableObject {
     }
 
     func dismiss(reason: OverlayDismissReason) {
-        apply { $0.dismiss(reason: reason) }
+        apply(activity: false) { $0.dismiss(reason: reason) }
+    }
+
+    /// The last host connection is gone: the overlay ends with `reason: disconnect` and its
+    /// uploaded assets are dropped, shown or not (Android's `onClientCountChanged(0)`).
+    func hostDisconnected() {
+        dismiss(reason: .disconnect)
+        if !assets.isEmpty {
+            objectWillChange.send()
+            assets = [:]
+        }
     }
 
     /// Runs one session transition, pushes its events, and tears the window down when the
-    /// transition ended the overlay.
-    private func apply(_ transition: (inout OverlaySession) -> [OverlayEvent]) {
+    /// transition ended the overlay. `activity` marks a user interaction, which restarts the idle
+    /// TTL while the overlay stays up.
+    private func apply(activity: Bool = true, _ transition: (inout OverlaySession) -> [OverlayEvent]) {
         let wasShown = session.isShown
         let events = transition(&session)
+        if session.isShown {
+            if activity { idleTimer.arm() }
+        } else {
+            idleTimer.cancel()
+        }
         syncSnackbarTimeouts()
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
         for event in events {

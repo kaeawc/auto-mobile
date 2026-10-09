@@ -26,11 +26,11 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 | Material component nodes, dialog, snackbar, pickers                      | Supported; see [Material components](#material-components)                        |
 | Overlay hidden from `layer: "app"` observe screenshots (`target`)        | Supported (#10943, #10988); the host restores it after capture                    |
 | `display` selector                                                       | Refused: a simulator has one screen                                               |
-| `window.layer: "app"`                                                    | Refused: the window level is fixed at alert + 1 (see open decision 4)             |
+| `window.layer: "app"`                                                    | Refused: the window level is fixed at alert + 1 (see open decision 3)             |
 | `window.persistence: "device"`                                           | Refused: the agent lives in the app process and dies with it                      |
 | `inspect`                                                                | Refused (open decision 1)                                                         |
-| Idle TTL, `disconnect` and `teardown` dismissed reasons                  | Not implemented; only `user` and `agent` are reported (open decision 2)           |
-| Bottom sheet lifting above the keyboard                                  | Not implemented or verified (open decision 3)                                     |
+| Idle TTL and dismissal on host disconnect                                | Supported; see [Expiry](#expiry). Reasons `user`, `agent`, `ttl`, `disconnect`    |
+| Bottom sheet lifting above the keyboard                                  | Not implemented or verified (open decision 2)                                     |
 | Foreground scoping to the shown-over app                                 | Not needed: the agent lives in the app, so backgrounding the app hides its window |
 
 ## Open decisions
@@ -40,13 +40,32 @@ These are undecided; the table above describes today's code, and nothing here pr
 1. **`inspect`.** Keep it refused, or map it to the agent's `get_overlay_status` and adopt the
    result into the host store. The agent dies with the app, so there is little to adopt beyond
    `status`.
-2. **Idle TTL and disconnect dismissal.** Options are none (an overlay lives until dismissed or
-   the app exits), dismiss on last client disconnect (`reason: disconnect`) so a crashed daemon
-   leaves no orphan, or Android's idle TTL.
-3. **Keyboard handling for sheets.** Rely on UIKit and SwiftUI keyboard avoidance, or match
+2. **Keyboard handling for sheets.** Rely on UIKit and SwiftUI keyboard avoidance, or match
    Android by lifting the sheet with keyboard-frame notifications. Needs a simulator check first.
-4. **`window.layer: "app"`.** Keep refusing it, or accept and ignore it with a warning so one
+3. **`window.layer: "app"`.** Keep refusing it, or accept and ignore it with a warning so one
    spec runs on both platforms.
+
+## Expiry
+
+Owner decision 2026-10-09: iOS overlays expire exactly like Android session overlays
+([Lifecycle and safety](../android/overlay-ux.md#lifecycle-and-safety)).
+
+- **Idle TTL.** Five minutes (300,000 ms; `OverlayIdleTimer`, settable locally through
+  `OverlayModel.idleTtlMilliseconds`, no wire field). An accepted `show_overlay` (including a same-id
+  replace) and a user interaction (taps, edits, a pager page that actually changed) restart it.
+  Initial pager reports, a snackbar's own `durationMs` close, `hide_for_capture` and `get_overlay_status`
+  do not. A hidden overlay still expires.
+- **Disconnect.** The overlay belongs to the host session, not one socket. The agent counts
+  authenticated connections (`OverlayClientTracker`); when the last one closes the overlay is dismissed
+  and the uploaded assets are dropped, whether or not an overlay was showing. A `show_overlay` handled
+  after that edge is dismissed the same way.
+- **Events.** Each expiry emits one `overlay_event` `kind: "dismissed"` with a null `name` and
+  `payload: {"reason": "ttl"}` or `{"reason": "disconnect"}`, sequenced from the same per-id ledger as every
+  other event (the disconnect event has no socket to reach). `user` and `agent` are unchanged.
+- **Not applicable.** `teardown` is never emitted: the agent has no service to unbind, and the overlay
+  dies with the app process. There is no `persistence: "device"`, so nothing is exempt from the TTL.
+- **Host.** No host change or capability is needed: the host holds one persistent connection per
+  launch and already treats any `dismissed` event as removing shown status.
 
 ## How it works
 
@@ -137,8 +156,8 @@ is simulator-only and device launches will fail to load it.
   carousel, compose the spec yourself and `show` it.
 - No `display` selector, no `window.layer: "app"` and no `window.persistence: "device"`; the host
   refuses them. See [Feature support](#feature-support).
-- No `inspect`, idle TTL or disconnect dismissal, and no keyboard lift for sheets (open decisions
-  above).
+- No `inspect` and no keyboard lift for sheets (open decisions above). Idle TTL and disconnect
+  dismissal match Android; see [Expiry](#expiry).
 - Rendering is SwiftUI in the app's process rather than Compose in CtrlProxy, so there is no
   separate accessibility service involved.
 - Android reaches any app through CtrlProxy; iOS reaches only apps launched with the agent.

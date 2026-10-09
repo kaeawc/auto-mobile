@@ -135,3 +135,5 @@ test/fixtures/windows-netstat/*.txt -text
 test/fixtures/ios/ctrlproxy-golden/**/*.json text eol=lf
 test/fixtures/ios/merger-pairs/*.json text eol=lf
 android/control-proxy/src/test/resources/ime-traces/*.txt text eol=lf
+test/fixtures/ios-sim-fleet/*.txt text eol=lf
+test/fixtures/ios-sim-fleet/*.json text eol=lf

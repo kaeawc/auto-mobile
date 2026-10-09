@@ -51,6 +51,11 @@ import {
   NetworkFilterStatusInspector,
   type NetworkFilterHostStatus,
 } from "../../features/networkFilter/NetworkFilterInstaller";
+import {
+  checkIosSimulatorFleetCost,
+  createIosSimFleetDoctorDependencies,
+  type IosSimFleetDoctorDependencies,
+} from "./iosSimFleet";
 import { detectMdmEnrollment } from "./macMdmEnrollment";
 import { NETWORK_FILTER_INSTALL_COMMAND } from "../../features/networkFilter/networkFilterApp";
 
@@ -147,6 +152,11 @@ export interface IosDoctorDependencies {
   networkFilterInspector?: {
     inspect(options?: { timeoutMs?: number }): Promise<NetworkFilterHostStatus>;
   };
+  /**
+   * Read-only simulator fleet cost / capacity report (#6696). Optional so suites that
+   * build their own dependencies skip the check rather than probing the real host.
+   */
+  simFleet?: IosSimFleetDoctorDependencies;
 }
 
 /**
@@ -532,6 +542,7 @@ export function createIosDoctorDependencies(
     runnerInspector: createIosCtrlProxyRunnerInspector(() => new SimCtlClient(), logger),
     observeRoundTripInspector: createIosObserveRoundTripInspector(() => new SimCtlClient(), logger),
     networkFilterInspector: new NetworkFilterStatusInspector(),
+    simFleet: createIosSimFleetDoctorDependencies(),
   };
 }
 
@@ -1546,6 +1557,10 @@ export async function runIosChecks(
   await run(() => checkAppleDeveloperAccount(dependencies, options));
   await run(() => checkProvisioningProfiles(dependencies, options));
   await run(() => checkBootedSimulators(dependencies, options));
+  if (dependencies.simFleet) {
+    const simFleet = dependencies.simFleet;
+    await run(() => checkIosSimulatorFleetCost(simFleet, options));
+  }
   await run(() => checkIosCtrlProxyRunner(dependencies, options));
   await run(() => checkIosObserveRoundTrip(dependencies, options));
   await run(() => checkIosNetworkFilter(dependencies, options));

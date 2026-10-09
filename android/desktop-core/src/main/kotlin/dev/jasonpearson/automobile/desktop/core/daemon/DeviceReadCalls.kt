@@ -5,9 +5,9 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Whether a device-naming tool call only reads (#10968). Reads never need a session and never take
- * a device: the daemon serves them sessionless, so the desktop sends them with no `sessionUuid`
- * and without allocating the device first. `observe` captures the screen without acting on it, and
- * a `sqlQuery` is a read when [isReadOnlySqlQuery] says its text is.
+ * a device: the daemon serves them sessionless, so the desktop sends them with no `sessionUuid` and
+ * without allocating the device first. `observe` captures the screen without acting on it, and a
+ * `sqlQuery` is a read when [isReadOnlySqlQuery] says its text is.
  *
  * This is a UI hint only. The daemon classifies the call itself and refuses a write from a session
  * that does not hold the device, so a query misjudged here as a read cannot mutate anything.
@@ -15,7 +15,10 @@ import kotlinx.serialization.json.JsonPrimitive
 internal fun isDeviceReadCall(name: String, arguments: JsonObject): Boolean =
   when (name) {
     "observe" -> true
-    "sqlQuery" -> (arguments["query"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    "sqlQuery" ->
+      (arguments["query"] as? JsonPrimitive)
+        ?.takeIf { it.isString }
+        ?.content
         ?.let(::isReadOnlySqlQuery) == true
     else -> false
   }

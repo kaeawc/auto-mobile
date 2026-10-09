@@ -16,10 +16,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 
 /**
- * Pins the composition wiring that makes the IDE's device controls active tool use (#10975): a
- * tap issued through the host's [rememberDeviceControlSession] allocates its device to the
- * desktop session before the daemon sees it. The unit tests of `inputAllocatingClient` cannot
- * catch a call site that hands the session the raw provider; this does.
+ * Pins the composition wiring that makes the IDE's device controls active tool use (#10975): a tap
+ * issued through the host's [rememberDeviceControlSession] allocates its device to the desktop
+ * session before the daemon sees it. The unit tests of `inputAllocatingClient` cannot catch a call
+ * site that hands the session the raw provider; this does.
  */
 @OptIn(ExperimentalTestApi::class)
 class RememberDeviceControlSessionUiTest {
@@ -172,7 +172,8 @@ class RememberDeviceControlSessionUiTest {
     // The composition tests above pin the helper; this pins that the host uses it, so a host that
     // constructs the session itself with a raw provider cannot slip past them (#10975).
     val host =
-      java.io.File("src/main/kotlin/dev/jasonpearson/automobile/desktop/core/AutoMobileContent.kt")
+      java.io
+        .File("src/main/kotlin/dev/jasonpearson/automobile/desktop/core/AutoMobileContent.kt")
         .readText()
     assertTrue("rememberDeviceControlSession(" in host, "the host must use the shared wiring")
     assertTrue("DeviceControlSession(" !in host.replace("rememberDeviceControlSession(", ""))

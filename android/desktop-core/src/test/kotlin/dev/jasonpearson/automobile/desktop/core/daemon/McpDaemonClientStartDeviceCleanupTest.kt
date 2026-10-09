@@ -12,26 +12,26 @@ import kotlinx.serialization.json.put
 /**
  * #10960: a start the daemon refuses as `device_cleanup_in_progress` keeps its retry hint on the
  * result so the picker can wait instead of failing. The payload mirrors the refusal
- * `shapeToolCallError` renders for `DeviceCleanupInProgressError` (`test/cli/deviceOwnershipRefusal.test.ts`).
+ * `shapeToolCallError` renders for `DeviceCleanupInProgressError`
+ * (`test/cli/deviceOwnershipRefusal.test.ts`).
  */
 class McpDaemonClientStartDeviceCleanupTest {
   private fun start(payload: String): StartDeviceResult {
-    val envelope =
-      buildJsonObject {
-          put("isError", JsonPrimitive(true))
-          put(
-            "content",
-            buildJsonArray {
-              add(
-                buildJsonObject {
-                  put("type", "text")
-                  put("text", payload)
-                },
-              )
+    val envelope = buildJsonObject {
+      put("isError", JsonPrimitive(true))
+      put(
+        "content",
+        buildJsonArray {
+          add(
+            buildJsonObject {
+              put("type", "text")
+              put("text", payload)
             },
           )
-        }
-        .toString()
+        },
+      )
+    }
+      .toString()
     return McpDaemonClient(
         requestTransport =
           DaemonRequestTransport { request ->
@@ -52,13 +52,13 @@ class McpDaemonClientStartDeviceCleanupTest {
     val result =
       start(
         buildJsonObject {
-            put("success", false)
-            put("error", "Device 'emulator-5554' is still completing the previous session's cleanup")
-            put("code", "device_cleanup_in_progress")
-            put("deviceId", "emulator-5554")
-            put("retryable", true)
-            put("retryAfterMs", 4_000)
-          }
+          put("success", false)
+          put("error", "Device 'emulator-5554' is still completing the previous session's cleanup")
+          put("code", "device_cleanup_in_progress")
+          put("deviceId", "emulator-5554")
+          put("retryable", true)
+          put("retryAfterMs", 4_000)
+        }
           .toString(),
       )
     assertFalse(result.success)
@@ -70,10 +70,10 @@ class McpDaemonClientStartDeviceCleanupTest {
     val result =
       start(
         buildJsonObject {
-            put("success", false)
-            put("error", "cleanup")
-            put("code", "device_cleanup_in_progress")
-          }
+          put("success", false)
+          put("error", "cleanup")
+          put("code", "device_cleanup_in_progress")
+        }
           .toString(),
       )
     assertEquals(1_000L, result.cleanupRetryAfterMs)
@@ -84,11 +84,11 @@ class McpDaemonClientStartDeviceCleanupTest {
     val result =
       start(
         buildJsonObject {
-            put("success", false)
-            put("error", "held")
-            put("code", "device_owned_by_other_session")
-            put("retryAfterMs", 4_000)
-          }
+          put("success", false)
+          put("error", "held")
+          put("code", "device_owned_by_other_session")
+          put("retryAfterMs", 4_000)
+        }
           .toString(),
       )
     assertFalse(result.success)

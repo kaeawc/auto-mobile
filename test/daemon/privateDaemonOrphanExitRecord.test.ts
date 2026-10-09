@@ -25,15 +25,22 @@ describe("private daemon orphan exit record", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function managerWithSocket(): { inheritOrphanExitSettings(o: object): object } {
-    return new DaemonManager(
+  type Inheriting = {
+    inheritOrphanExitSettings(o: object): Promise<object>;
+    portFreeProbe: (port: number) => Promise<boolean>;
+  };
+
+  function managerWithSocket(timer = new FakeTimer()): Inheriting {
+    const manager = new DaemonManager(
       undefined,
       undefined,
-      new FakeTimer(),
+      timer,
       join(dir, "daemon.lock"),
       join(dir, "daemon.pid"),
       socketPath,
-    ) as unknown as { inheritOrphanExitSettings(o: object): object };
+    ) as unknown as Inheriting;
+    manager.portFreeProbe = async () => true;
+    return manager;
   }
 
   test("a record round-trips once and is consumed", () => {
@@ -47,24 +54,44 @@ describe("private daemon orphan exit record", () => {
     expect(consumePrivateDaemonOrphanExitRecord(socketPath)).toBeUndefined();
   });
 
-  test("the replacement for an orphan-stopped daemon binds the same port strictly", () => {
+  test("the replacement for an orphan-stopped daemon binds the same port strictly", async () => {
     writePrivateDaemonOrphanExitRecord(socketPath, { port: 3171, exitedAtMs: 5 });
 
-    expect(managerWithSocket().inheritOrphanExitSettings({ debug: true })).toEqual({
+    expect(await managerWithSocket().inheritOrphanExitSettings({ debug: true })).toEqual({
       debug: true,
       port: 3171,
       strictPort: true,
     });
   });
 
-  test("an explicit port wins and still consumes the record", () => {
+  test("an explicit port wins and still consumes the record", async () => {
     writePrivateDaemonOrphanExitRecord(socketPath, { port: 3171, exitedAtMs: 5 });
 
-    expect(managerWithSocket().inheritOrphanExitSettings({ port: 4000 })).toEqual({ port: 4000 });
+    expect(await managerWithSocket().inheritOrphanExitSettings({ port: 4000 })).toEqual({
+      port: 4000,
+    });
     expect(existsSync(orphanExitRecordPath(socketPath))).toBe(false);
   });
 
-  test("a start with no record keeps its own settings", () => {
-    expect(managerWithSocket().inheritOrphanExitSettings({})).toEqual({});
+  test("a start with no record keeps its own settings", async () => {
+    expect(await managerWithSocket().inheritOrphanExitSettings({})).toEqual({});
+  });
+
+  test("a record older than the TTL is ignored", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(31 * 60 * 1000);
+    writePrivateDaemonOrphanExitRecord(socketPath, { port: 3171, exitedAtMs: 0 });
+
+    expect(await managerWithSocket(timer).inheritOrphanExitSettings({ debug: true })).toEqual({
+      debug: true,
+    });
+  });
+
+  test("a busy inherited port falls back to non-strict binding", async () => {
+    writePrivateDaemonOrphanExitRecord(socketPath, { port: 3171, exitedAtMs: 5 });
+    const manager = managerWithSocket();
+    manager.portFreeProbe = async () => false;
+
+    expect(await manager.inheritOrphanExitSettings({})).toEqual({ port: 3171 });
   });
 });

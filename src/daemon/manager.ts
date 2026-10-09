@@ -4,6 +4,7 @@ import {
   republishResultSchema,
   type IdentityRecoveryIO,
 } from "./identityRecovery";
+import { createServer } from "node:net";
 import { errorMessage } from "../utils/describeUnknownError";
 import { consumePrivateDaemonOrphanExitRecord } from "./privateDaemonOrphanExitRecord";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -504,6 +505,17 @@ function isDaemonAdmittedRestartReason(
  * - Check daemon status
  * - Restart daemon
  */
+/** An orphan-exit port record older than this no longer describes the port's state (#11092). */
+const ORPHAN_EXIT_RECORD_TTL_MS = 30 * 60 * 1000;
+
+function isTcpPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = createServer();
+    probe.once("error", () => resolve(false));
+    probe.listen(port, () => probe.close(() => resolve(true)));
+  });
+}
+
 export class DaemonManager implements DaemonManagerLike {
   private identityRecoveryInFlight?: Promise<DaemonStatus>;
   private recoveryOwner?: DaemonStatus;
@@ -533,6 +545,8 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly daemonProtocolHealthProbe: () => Promise<boolean>;
   private readonly launchCommandResolver: (() => DaemonLaunchCommand) | undefined;
   private heldLockLogPath: string | undefined;
+  /** Whether a TCP port can be bound right now; replaceable so tests need no real socket. */
+  private portFreeProbe: (port: number) => Promise<boolean> = isTcpPortFree;
   /**
    * A per-instance owner token written into the startup lock alongside the PID
    * (issue #5904). It distinguishes a genuinely new lock holder from the prior one
@@ -1230,13 +1244,24 @@ export class DaemonManager implements DaemonManagerLike {
    * start that names no port is the next client auto-starting a replacement: bind the same port,
    * strictly, instead of silently moving to the default one.
    */
-  private inheritOrphanExitSettings(options: DaemonOptions): DaemonOptions {
+  private async inheritOrphanExitSettings(options: DaemonOptions): Promise<DaemonOptions> {
     const record = consumePrivateDaemonOrphanExitRecord(this.socketPath);
     if (!record || options.port !== undefined) {
       return options;
     }
+    // A record from a long-ago exit says nothing about the port now (#11092).
+    if (this.timer.now() - record.exitedAtMs > ORPHAN_EXIT_RECORD_TTL_MS) {
+      logger.debug(`Ignoring stale private daemon orphan exit record (port ${record.port})`);
+      return options;
+    }
+    const inherited = { ...options, port: record.port };
+    if (!(await this.portFreeProbe(record.port))) {
+      // Another process took the port; a strict bind would fail the start outright.
+      stderrLog(`Previous private daemon port ${record.port} is busy; binding without strictness`);
+      return inherited;
+    }
     stderrLog(`Restarting private daemon on its previous port ${record.port} (stopped when idle)`);
-    return { ...options, port: record.port, strictPort: true };
+    return { ...inherited, strictPort: true };
   }
 
   /**
@@ -1247,7 +1272,7 @@ export class DaemonManager implements DaemonManagerLike {
     recoverySignal?: AbortSignal,
   ): Promise<DaemonStartResult> {
     options = daemonProcessOptions(options);
-    options = this.inheritOrphanExitSettings(options);
+    options = await this.inheritOrphanExitSettings(options);
     // The overall start budget, captured before any work so the post-exit peer
     // rejoin (issue #6103) can only ever spend time the caller still has. The
     // client times its `tools/list` out at DAEMON_STARTUP_TIMEOUT_MS; launchAndWait

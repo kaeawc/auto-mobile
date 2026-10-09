@@ -2110,9 +2110,7 @@ export class UnixSocketServer {
           ownerSocket,
           signal: activeRequestSignal,
         });
-        return (
-          (await this.provisionCancellationReply(request, failure, activeRequestSignal)) ?? failure
-        );
+        return failure;
       }
     };
     // Admit through the socket's queue: same-lane requests keep arrival order, while an
@@ -2137,10 +2135,19 @@ export class UnixSocketServer {
           }
           // A cancelled provisionDevice is answered by its handler (after a bounded wait for the
           // typed cancellation result), not by this race, which would reply at once (#11074).
-          return this.runCancellableQueuedHandler(
-            handler,
-            this.isProvisionDeviceCall(request) ? undefined : cancellation.signal,
-          );
+          // provisionDevice is a barrier, so a cancel must release it at once: its typed
+          // cancellation reply is awaited outside the barrier below (#11092).
+          return this.isProvisionDeviceCall(request)
+            ? this.runProvisionBarrier(handler, cancellation.signal, () =>
+                this.mcpForwardFailureResponse({
+                  error: cancellation.signal.reason,
+                  request,
+                  sessionId,
+                  ownerSocket,
+                  signal: cancellation.signal,
+                }),
+              )
+            : this.runCancellableQueuedHandler(handler, cancellation.signal);
         },
         {
           timer: this.timer,
@@ -2161,7 +2168,46 @@ export class UnixSocketServer {
             }),
         },
       )
+      .then(async (response) =>
+        response && !response.success
+          ? ((await this.provisionCancellationReply(
+              request,
+              response,
+              cancellation.signal.aborted ? cancellation.signal : activeRequestSignal,
+            )) ?? response)
+          : response,
+      )
       .finally(cancellation.dispose);
+  }
+
+  /**
+   * Runs the provisionDevice handler inside the admission barrier but gives the barrier back as
+   * soon as the caller cancels, answering with [cancelledReply]. The handler keeps rolling back in
+   * the background; its typed outcome is awaited by the caller of the barrier, not inside it.
+   */
+  private runProvisionBarrier(
+    handler: () => Promise<DaemonResponse | undefined>,
+    cancelSignal: AbortSignal,
+    cancelledReply: () => DaemonResponse | undefined,
+  ): Promise<DaemonResponse | undefined> {
+    const operation = handler();
+    this.trackRequestHandler(
+      operation.then(
+        () => {},
+        () => {},
+      ),
+    );
+    return new Promise((resolve, reject) => {
+      const onAbort = () => resolve(cancelledReply());
+      if (cancelSignal.aborted) {
+        onAbort();
+      } else {
+        cancelSignal.addEventListener("abort", onAbort, { once: true });
+      }
+      operation
+        .then(resolve, reject)
+        .finally(() => cancelSignal.removeEventListener("abort", onAbort));
+    });
   }
 
   /** Retryable refusal for a request that has not started work (no `requestMayHaveDispatched`). */

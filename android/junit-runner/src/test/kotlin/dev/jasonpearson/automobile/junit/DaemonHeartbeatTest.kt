@@ -75,6 +75,58 @@ class DaemonHeartbeatTest {
   }
 
   @Test
+  fun `a bare 404 before any successful heartbeat keeps heartbeating`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { sessionId ->
+      if (fake.sentSessions.size <= 3) {
+        throw DaemonSessionReleasedException(sessionId, null, "Session not found")
+      }
+    }
+    fake.maxSleeps = 5
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("new")
+    fake.onSleep = { if (fake.sleepIntervals.size == 5) handle.close() }
+
+    fake.runnables.single().run()
+
+    assertEquals(5, fake.sentSessions.size)
+    assertNull(fake.manager.sessionLoss("new"))
+  }
+
+  @Test
+  fun `a bare 404 after a successful heartbeat is a confirmed loss`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { sessionId ->
+      if (fake.sentSessions.size > 1) {
+        throw DaemonSessionReleasedException(sessionId, null, "Session not found")
+      }
+    }
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("s1")
+    fake.onSleep = { if (fake.sleepIntervals.size == 3) handle.close() }
+
+    fake.runnables.single().run()
+
+    assertEquals(2, fake.sentSessions.size)
+    assertEquals(true, fake.manager.sessionLoss("s1")?.confirmed)
+  }
+
+  @Test
+  fun `a never-acknowledged id gives up after a bounded number of 404s as unconfirmed`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { throw DaemonSessionReleasedException(it, null, "Session not found") }
+    fake.maxSleeps = 40
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("ghost")
+    fake.onSleep = { if (fake.sleepIntervals.size == 40) handle.close() }
+
+    fake.runnables.single().run()
+
+    assertEquals(30, fake.sentSessions.size)
+    assertEquals(false, fake.manager.sessionLoss("ghost")?.confirmed)
+  }
+
+  @Test
   fun `a transient heartbeat failure keeps the session heartbeating`() {
     val fake = HeartbeatFake()
     fake.onSend = { throw java.io.IOException("connection refused") }
@@ -341,6 +393,7 @@ class DaemonHeartbeatTest {
     val sleepIntervals = mutableListOf<Long>()
     val threadNames = mutableListOf<String>()
     val runnables = mutableListOf<Runnable>()
+    var maxSleeps = 3
     var onSleep: () -> Unit = { throw AssertionError("Unexpected sleep") }
     val manager =
       BackgroundHeartbeatManager(
@@ -350,7 +403,7 @@ class DaemonHeartbeatTest {
         },
         sleeper = {
           sleepIntervals.add(it)
-          assertTrue("Loop must stop deterministically", sleepIntervals.size <= 3)
+          assertTrue("Loop must stop deterministically", sleepIntervals.size <= maxSleeps)
           onSleep()
         },
         threadFactory = { name, runnable ->

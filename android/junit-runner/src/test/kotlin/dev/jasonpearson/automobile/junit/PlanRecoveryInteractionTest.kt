@@ -227,6 +227,24 @@ class PlanRecoveryInteractionTest {
   }
 
   @Test
+  fun `an unconfirmed loss on the early return still releases the held session`() {
+    daemon.cannedFailure = failedPayload { it }
+    heartbeat.onRegister = { sessionId ->
+      heartbeat.losses[sessionId] =
+        DaemonSessionLoss(sessionId, null, "Session not found: $sessionId", confirmed = false)
+    }
+
+    val result = executeSimplePlan()
+
+    assertFalse(result.success)
+    assertTrue("recovery never ran", recordingAgent.contexts.isEmpty())
+    assertEquals(
+      listOf("daemon/releaseSession" to daemon.sessionUuidArgs[0]),
+      daemon.daemonMethodCalls,
+    )
+  }
+
+  @Test
   fun `a session released while recovery runs is never resumed`() {
     daemon.cannedFailure = failedPayload { it }
     recordingAgent.onRecovery = { context ->

@@ -132,6 +132,12 @@ export const DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE = "liveness_owner_not_owner";
  */
 export const DAEMON_SESSION_SUSPECT_CODE = "daemon_session_suspect";
 
+/**
+ * A heartbeat named the daemon process it expects (`expectedDaemonInstance`) and reached a
+ * different one: the daemon was restarted. Nothing changed on the session (#10989).
+ */
+export const DAEMON_INSTANCE_CHANGED_CODE = "daemon_instance_changed";
+
 /** A claim from a different token was rejected because the owner's lease is live (#10050). */
 export const DAEMON_LIVENESS_OWNER_CONFLICT_CODE = "liveness_owner_conflict";
 

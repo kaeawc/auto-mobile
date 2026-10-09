@@ -267,6 +267,30 @@ export function livenessHandoverPayload(handover: LivenessHandover) {
   };
 }
 
+/** Code of the warning a tool result carries once a handed-over session is resumed (#10989). */
+export const DAEMON_STALL_RESUMED_CODE = "daemon_stall_resumed";
+
+/**
+ * The warning the first tool call to reach a session resumed after a `daemon_stalled` handover
+ * carries: the harness was told the session stalled, and now learns it needs nothing restarted.
+ */
+export function livenessResumedNotice(handover: LivenessHandover, sessionUuid: string) {
+  const session = handover.sessions.find((entry) => entry.sessionUuid === sessionUuid);
+  return {
+    warning: {
+      code: DAEMON_STALL_RESUMED_CODE,
+      message:
+        `The AutoMobile daemon stopped acknowledging heartbeats for session ${sessionUuid} and ` +
+        `this proxy reported ${handover.code}. The daemon answered again and still held the ` +
+        `session, so it was resumed with the same UUID: disregard that handover, nothing needs ` +
+        `restarting.`,
+      sessionUuid,
+      deviceId: session?.deviceId ?? null,
+      handedOverCode: handover.code,
+    },
+  };
+}
+
 /**
  * - `acknowledged`: the daemon answered the heartbeat; the session is live (or restored).
  * - `session-gone`: the daemon answered that it does not know the session.

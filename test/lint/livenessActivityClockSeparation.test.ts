@@ -253,6 +253,24 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "The tokenOwnedSessions answer schema (zod) declares lastUsedAt, not a clock value.",
   },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.stallRestoreSnapshot": {
+    writes: 1,
+    reason:
+      "Rollback record: a daemon_stalled handover copies the session's tool-use clock " +
+      "(boundSessionUuidAt or the held lastUsedAt) unchanged, so a resume can put it back (#10989).",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.restoreResumedSession": {
+    writes: 1,
+    reason:
+      "Rollback: a session resumed after a daemon_stalled handover is held again with the " +
+      "lastUsedAt it had before the handover; the heartbeat ack that resumed it renews nothing (#10989).",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.rebindResumedSession": {
+    writes: 1,
+    reason:
+      "Rollback: a latest binding resumed after a daemon_stalled handover gets back the replay " +
+      "lease it had before the handover; the heartbeat ack that resumed it renews nothing (#10989).",
+  },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.updateBoundSessionUuid": {
     writes: 1,
     reason: "Tool usage: a forwarded call (explicit or injected sessionUuid) renews the lease.",

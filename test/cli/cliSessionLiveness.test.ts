@@ -912,6 +912,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
           livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
           livenessOwnerToken: "old-mcp-token",
           reportIdleRelease: true,
+          reportDaemonInstance: true,
         },
       });
       expect(sessionManager.getSession(sessionUuid)).toMatchObject({

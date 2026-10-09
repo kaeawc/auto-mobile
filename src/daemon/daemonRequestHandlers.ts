@@ -14,6 +14,7 @@ import {
   type ObserverSessionStore,
 } from "./observerSessionRegistry";
 import {
+  DAEMON_INSTANCE_CHANGED_CODE,
   DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
   DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
@@ -74,8 +75,16 @@ export const INPUT_TYPE_TEXT_APPEND_CAPABILITY = "input/typeText.mode:append";
  */
 export const INPUT_GESTURE_STREAM_CAPABILITY = "input/gestureStream";
 
+/**
+ * Identifies this daemon process. A restarted daemon reports a different value, so a proxy can
+ * tell a daemon that resumed after a stall from a new one (#10989).
+ */
+const DAEMON_PROCESS_INSTANCE = `${process.pid}:${performance.timeOrigin}`;
+
 export interface DaemonStateAccess {
   isInitialized(): boolean;
+  /** Overrides this process's {@link DAEMON_PROCESS_INSTANCE} (tests). */
+  getDaemonInstance?(): string;
   /** Overrides the production lease-activity sources (tests). */
   getDeviceLeaseActivitySources?(): DeviceLeaseActivitySources;
   /** Overrides the production lease-relinquish policy and release (tests). */
@@ -179,7 +188,8 @@ export type DaemonMethodResult = {
     | typeof DAEMON_LIVENESS_OWNER_UNOWNED_CODE
     | typeof DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE
     | typeof DAEMON_LIVENESS_OWNER_CONFLICT_CODE
-    | typeof DAEMON_LIVENESS_OWNER_IS_PROXY_CODE;
+    | typeof DAEMON_LIVENESS_OWNER_IS_PROXY_CODE
+    | typeof DAEMON_INSTANCE_CHANGED_CODE;
 };
 
 /** Device-session listing entry; a quarantined UUID cannot be subscribed to until identity resolves. */
@@ -445,6 +455,8 @@ async function handleHeartbeat(
         livenessOwnerToken?: string;
         claimLivenessOwnership?: boolean;
         reportIdleRelease?: boolean;
+        reportDaemonInstance?: boolean;
+        expectedDaemonInstance?: string;
         livenessOwnerKind?: string;
       }
     | undefined;
@@ -455,6 +467,19 @@ async function handleHeartbeat(
       error: "sessionId parameter required",
     };
   }
+  const daemonInstance = state.getDaemonInstance?.() ?? DAEMON_PROCESS_INSTANCE;
+  const instanceRefusal = refuseOtherDaemonInstance(
+    heartbeatParams?.expectedDaemonInstance,
+    daemonInstance,
+    sessionId,
+  );
+  if (instanceRefusal) {
+    return instanceRefusal;
+  }
+  const ackReport: HeartbeatAckReport = {
+    idleRelease: heartbeatParams?.reportIdleRelease === true,
+    ...(heartbeatParams?.reportDaemonInstance === true ? { daemonInstance } : {}),
+  };
   const manager = state.getSessionManager();
   const session = manager.getSession(sessionId);
   if (!session || isSessionReleasing(manager, sessionId, session)) {
@@ -505,7 +530,7 @@ async function handleHeartbeat(
       // A verified keeper proves only that its current owner is still
       // alive. Policy changes are explicit claims, never recurring ticks.
       manager.recordHeartbeat?.(sessionId);
-      return heartbeatAck(manager, sessionId, heartbeatParams?.reportIdleRelease === true);
+      return heartbeatAck(manager, sessionId, ackReport);
     }
   }
   // A one-shot `--cli` client declares itself here (issue #6870) so the
@@ -539,13 +564,40 @@ async function handleHeartbeat(
     // `restoreHeartbeatLivenessPolicy` records the heartbeat itself as part
     // of re-stamping the deadlines off the restored timeouts.
     if (manager.restoreHeartbeatLivenessPolicy?.(sessionId)) {
-      return heartbeatAck(manager, sessionId, heartbeatParams?.reportIdleRelease === true, {
+      return heartbeatAck(manager, sessionId, ackReport, {
         livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
       });
     }
   }
   manager.recordHeartbeat?.(sessionId);
-  return heartbeatAck(manager, sessionId, heartbeatParams?.reportIdleRelease === true);
+  return heartbeatAck(manager, sessionId, ackReport);
+}
+
+/** What a heartbeat asked its acknowledgement to report besides the session id. */
+interface HeartbeatAckReport {
+  idleRelease: boolean;
+  /** This daemon's process instance, when the heartbeat asked for it (#10989). */
+  daemonInstance?: string;
+}
+
+/**
+ * Refuse, before anything changes, a heartbeat meant for another daemon process (#10989). A proxy
+ * probing for a daemon that resumed after a stall names the process it last heard from, so a
+ * restarted daemon is not adopted behind the harness's back.
+ */
+function refuseOtherDaemonInstance(
+  expected: unknown,
+  daemonInstance: string,
+  sessionId: string,
+): DaemonMethodResult | undefined {
+  if (typeof expected !== "string" || expected === daemonInstance) {
+    return undefined;
+  }
+  return {
+    success: false,
+    code: DAEMON_INSTANCE_CHANGED_CODE,
+    error: `The daemon was restarted since this heartbeat's owner last heard from it, so the heartbeat for session ${sessionId} was refused and nothing changed. Resume the session by naming its sessionUuid in a tool call.`,
+  };
 }
 
 /**
@@ -559,12 +611,14 @@ async function handleHeartbeat(
 function heartbeatAck(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
-  reportIdleRelease: boolean,
+  report: HeartbeatAckReport,
   extra: Record<string, unknown> = {},
 ): DaemonMethodResult {
   const session = manager.getSession(sessionId);
+  const instance =
+    report.daemonInstance === undefined ? {} : { daemonInstance: report.daemonInstance };
   const idle =
-    reportIdleRelease && session
+    report.idleRelease && session
       ? {
           idleReleaseAt: vetoedIdleReleaseAt(
             session,
@@ -572,7 +626,7 @@ function heartbeatAck(
           ),
         }
       : {};
-  return { success: true, result: { sessionId, ...extra, ...idle } };
+  return { success: true, result: { sessionId, ...extra, ...idle, ...instance } };
 }
 
 /**

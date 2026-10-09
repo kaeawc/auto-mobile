@@ -219,3 +219,38 @@ describe("nightly macOS unit process recycling", () => {
     }
   });
 });
+
+describe("nightly Bun 1.4 canary", () => {
+  const jobId = "node-bun-14-canary";
+  const workflow = loadWorkflow(WORKFLOW);
+  const job = workflow.jobs?.[jobId];
+  const steps = loadJobSteps(WORKFLOW, jobId);
+
+  test("is an independent advisory ubuntu job exclusive to nightly", () => {
+    expect(job).toHaveProperty("continue-on-error", true);
+    expect(job?.["runs-on"]).toBe("ubuntu-latest");
+    expect(job?.["timeout-minutes"]).toBe(60);
+    expect(job?.needs).toBeUndefined();
+    for (const other of Object.values(workflow.jobs ?? {})) {
+      const needs = other?.needs;
+      expect(Array.isArray(needs) ? needs : needs ? [needs] : []).not.toContain(jobId);
+    }
+    for (const file of ["pull_request.yml", "merge.yml"]) {
+      expect(loadWorkflow(`.github/workflows/${file}`).jobs?.[jobId]).toBeUndefined();
+    }
+  });
+
+  test("runs the unit and integration lanes on Bun 1.4.x only", () => {
+    expect(String(stepNamed(steps, "Setup Bun 1.4")?.with?.["bun-version"])).toMatch(/^1\.4\.\d+$/);
+    const run = stepNamed(steps, "Run unit and integration lanes on Bun 1.4");
+    expect(run?.run).toContain("scripts/test-ts.sh");
+    expect(run?.run).toContain("unit integration");
+  });
+
+  test("always uploads the summary artifact", () => {
+    const upload = stepNamed(steps, "Upload Bun 1.4 canary summary");
+    expect(upload?.uses).toBe("actions/upload-artifact@v6");
+    expect(upload?.if).toBe("always()");
+    expect(String(upload?.with?.path)).toContain("scratch/bun-14-canary/");
+  });
+});

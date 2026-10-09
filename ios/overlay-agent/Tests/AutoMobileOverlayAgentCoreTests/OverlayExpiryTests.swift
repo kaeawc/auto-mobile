@@ -51,7 +51,7 @@ private final class ExpiryHarness {
     func show(_ spec: OverlaySpec) {
         session.show(spec)
         timer.arm()
-        if tracker.count == 0 { dismiss(.disconnect) }
+        if tracker.count < 1 { dismiss(.disconnect) }
     }
 
     func dismiss(_ reason: OverlayDismissReason) {

@@ -258,6 +258,10 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       "DELETE FROM t",
       "SELECT 1; DROP TABLE t",
       "PRAGMA journal_mode = DELETE",
+      // #10966: a `)` in a literal or comment no longer ends the CTE early.
+      "WITH a AS (SELECT ')' UNION SELECT 1) DELETE FROM t",
+      "WITH a AS (SELECT 1 /* ) */ UNION SELECT 2) DELETE FROM t",
+      'WITH a AS (SELECT ")" UNION SELECT 1) UPDATE t SET b = 1',
     ]) {
       test(`a sessionless sqlQuery write on a held device is refused with the ownership code: ${query}`, async () => {
         const error = await outcome("sqlQuery", {

@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  isMutationQuery,
-  isReadOnlySqlQuery,
-  stripLeadingSqlNoise,
-} from "../../src/server/databaseTools";
+import { isMutationQuery, isReadOnlySqlQuery } from "../../src/server/databaseTools";
 
 describe("isMutationQuery", () => {
   test("classifies plain mutations", () => {
@@ -68,20 +64,65 @@ describe("isReadOnlySqlQuery", () => {
     expect(isReadOnlySqlQuery("PRAGMA user_version = 1")).toBe(false);
     expect(isReadOnlySqlQuery("BEGIN")).toBe(false);
     expect(isReadOnlySqlQuery("SELECT 1; DELETE FROM t")).toBe(false);
-    expect(isReadOnlySqlQuery("SELECT ';'")).toBe(false);
   });
 });
 
-describe("stripLeadingSqlNoise", () => {
-  test("removes leading whitespace, line, and block comments", () => {
-    expect(stripLeadingSqlNoise("  \n-- a\n/* b */ SELECT 1")).toBe("SELECT 1");
+describe("statement boundaries hidden in literals and comments (#10966)", () => {
+  // Each of these used to read as a CTE SELECT: the classifier counted a `)` inside a literal,
+  // comment or quoted identifier, closed the CTE early and found the SELECT inside it.
+  const disguisedWrites = [
+    "WITH a AS (SELECT ')' UNION SELECT 1) DELETE FROM t",
+    "WITH a AS (SELECT 1 /* ) */ UNION SELECT 2) DELETE FROM t",
+    "WITH a AS (SELECT 1 -- )\n UNION SELECT 2) DELETE FROM t",
+    'WITH a AS (SELECT ")" UNION SELECT 1) DELETE FROM t',
+    "WITH a AS (SELECT [)] UNION SELECT 1) UPDATE t SET b = ')'",
+    "WITH a AS (SELECT `)` UNION SELECT 1) INSERT INTO t VALUES (1)",
+    "WITH a AS (SELECT 'it''s )' UNION SELECT 1) DELETE FROM t",
+  ];
+
+  for (const query of disguisedWrites) {
+    test(`classifies as a write: ${query}`, () => {
+      expect(isReadOnlySqlQuery(query)).toBe(false);
+      expect(isMutationQuery(query)).toBe(true);
+    });
+  }
+
+  test("a statement after a ';' outside any literal is a second statement", () => {
+    expect(isReadOnlySqlQuery("SELECT 1 /* ; */; DELETE FROM t")).toBe(false);
+    expect(isMutationQuery("SELECT 1; DELETE FROM t")).toBe(true);
+    expect(isMutationQuery("SELECT 1; SELECT 2")).toBe(false);
+    expect(isReadOnlySqlQuery("SELECT 1; SELECT 2")).toBe(false);
   });
 
-  test("is a no-op for a bare statement", () => {
-    expect(stripLeadingSqlNoise("SELECT 1")).toBe("SELECT 1");
+  test("a ';' or keyword inside a literal, identifier or comment is not a statement", () => {
+    expect(isReadOnlySqlQuery("SELECT ';'")).toBe(true);
+    expect(isReadOnlySqlQuery("SELECT '; DELETE FROM t'")).toBe(true);
+    expect(isReadOnlySqlQuery('SELECT "a;b" FROM t -- ; DROP TABLE t')).toBe(true);
+    expect(isReadOnlySqlQuery("WITH a AS (SELECT ')(' AS x) SELECT * FROM a")).toBe(true);
+    expect(isReadOnlySqlQuery('WITH "delete" AS (SELECT 1) SELECT * FROM "delete"')).toBe(true);
+    expect(isReadOnlySqlQuery("WITH update_cte AS (SELECT 1) SELECT * FROM update_cte")).toBe(true);
   });
 
-  test("handles an unterminated block comment without hanging", () => {
-    expect(stripLeadingSqlNoise("/* never closed DELETE FROM t")).toBe("");
+  test("unterminated literals, identifiers and comments are not read-only", () => {
+    expect(isReadOnlySqlQuery("SELECT 'never closed")).toBe(false);
+    expect(isReadOnlySqlQuery('SELECT "never closed')).toBe(false);
+    expect(isReadOnlySqlQuery("SELECT 1 /* never closed")).toBe(false);
+    expect(isMutationQuery("/* never closed DELETE FROM t")).toBe(true);
+  });
+
+  test("unbalanced CTE parentheses are not read-only", () => {
+    expect(isReadOnlySqlQuery("WITH a AS (SELECT 1)) SELECT 1")).toBe(false);
+  });
+
+  test("an empty or comment-only query is not read-only", () => {
+    expect(isReadOnlySqlQuery("")).toBe(false);
+    expect(isReadOnlySqlQuery("-- nothing")).toBe(false);
+    expect(isMutationQuery(";;")).toBe(true);
+  });
+
+  test("a schema-qualified read-only PRAGMA is a read; a quoted pragma name is not", () => {
+    expect(isReadOnlySqlQuery("PRAGMA main.user_version")).toBe(true);
+    expect(isReadOnlySqlQuery('PRAGMA "user_version"')).toBe(false);
+    expect(isReadOnlySqlQuery("PRAGMA main.user_version = 3")).toBe(false);
   });
 });

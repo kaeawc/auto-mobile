@@ -167,7 +167,9 @@ themselves; control calls, the holder's own reads and reads of a free device (wh
 readiness) stay on the control lane. Read-only tools: `observe`, `snapshotOf`, `listApps`, `getDeviceState`,
 `getNetworkGraph`, `getPreference`, `listDataStores`, `getDataStore`, and
 `sqlQuery` when `isReadOnlySqlQuery` accepts the statement (a write, or anything
-the classifier cannot prove read-only, needs the holder). `identifyInteractions`
+the classifier cannot prove read-only, needs the holder). The classifier lexes the
+query first (`src/features/database/sqlLexer.ts`), so a `)` or `;` inside a string
+literal, quoted identifier or comment cannot end a CTE or a statement (#10966). `identifyInteractions`
 and `hitTest` read through the session observe pipeline and its shared caches,
 so they are not `deviceReadOnly`. An autolocked device keeps autolock's
 own refusal. Plain lifecycle tools that stop a running device (`killDevice`, and

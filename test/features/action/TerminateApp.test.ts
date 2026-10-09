@@ -39,6 +39,10 @@ import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
 import { logger } from "../../../src/utils/logger";
+import { AdbClient as RealAdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { createExecResult } from "../../../src/utils/execResult";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 describe("TerminateApp (Android install listing)", () => {
   const device: BootedDevice = { deviceId: "emulator-9426", name: "Pixel", platform: "android" };
@@ -1323,3 +1327,58 @@ beforeOutputSchema(() => {
   );
 });
 afterOutputSchema(() => executeOutputSchemaSpy.mockRestore());
+
+describe("TerminateApp (shared foreground dumpsys, #9758)", () => {
+  const device: BootedDevice = { deviceId: "emulator-9758", name: "Pixel", platform: "android" };
+  // Captured `dumpsys activity activities`: com.google.android.contacts is resumed for user 0.
+  const capture = readFileSync(
+    join(__dirname, "../observe/activityActivitiesDumps/api33-home-settings-secondapp.log"),
+    "utf8",
+  ).replace(/\r\n/g, "\n");
+  const contacts = "com.google.android.contacts";
+  const foregroundDumpsys = "shell dumpsys activity activities";
+
+  function harness() {
+    const commands: string[] = [];
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new RealAdbClient(
+      device,
+      async (command) => {
+        commands.push(command);
+        if (command.includes("dumpsys activity activities")) {
+          return createExecResult(capture, "");
+        }
+        if (command.includes("pm list packages")) {
+          return createExecResult(`package:${contacts}`, "");
+        }
+        if (command.includes("dumpsys activity processes")) {
+          return createExecResult(`3220:${contacts}/u0a123`, "");
+        }
+        return createExecResult("", "");
+      },
+      null,
+      undefined,
+      timer,
+    );
+    const app = new TerminateApp(device, adb, { timer });
+    return { app, commands };
+  }
+
+  const foregroundReads = (commands: string[]) =>
+    commands.filter((command) => command.includes(foregroundDumpsys)).length;
+
+  test("reads the foreground dumpsys once when the resolver already did", async () => {
+    const { app, commands } = harness();
+    const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+      throw new Error("CtrlProxy unavailable");
+    });
+    const result = await app
+      .execute(contacts, { skipObservation: true })
+      .finally(() => ctrlProxySpy.mockRestore());
+
+    expect(result).toMatchObject({ success: true, wasRunning: true, wasForeground: true });
+    expect(foregroundReads(commands)).toBe(1);
+    expect(commands.some((command) => command.includes("am force-stop --user 0"))).toBe(true);
+  });
+});

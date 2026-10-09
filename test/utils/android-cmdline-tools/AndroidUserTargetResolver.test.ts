@@ -234,4 +234,44 @@ describe("AndroidUserTargetResolver.resolve", () => {
 
     await expect(new AndroidUserTargetResolver(adb).resolve()).rejects.toThrow("unavailable");
   });
+  describe("includeForegroundApp", () => {
+    const foreground = { packageName: "com.example.other", userId: 10 };
+
+    test("returns the foreground read when it matched the package", async () => {
+      const adb = new FakeAdbExecutor();
+      const match = { packageName: "com.example.app", userId: 10 };
+      adb.setForegroundApp(match);
+      await expect(
+        new AndroidUserTargetResolver(adb).resolve({
+          packageName: "com.example.app",
+          includeForegroundApp: true,
+        }),
+      ).resolves.toEqual({ userId: 10, source: "foregroundPackage", foregroundApp: match });
+    });
+
+    test("returns the non-matching foreground read alongside the fallback user", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setUsers([work]);
+      adb.setForegroundApp(foreground);
+      const foregroundSpy = spyOn(adb, "getForegroundApp");
+      await expect(
+        new AndroidUserTargetResolver(adb).resolve({
+          packageName: "com.example.app",
+          includeForegroundApp: true,
+        }),
+      ).resolves.toEqual({ userId: 12, source: "managedProfile", foregroundApp: foreground });
+      expect(foregroundSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test("omits it when no foreground read happened", async () => {
+      const adb = new FakeAdbExecutor();
+      await expect(
+        new AndroidUserTargetResolver(adb).resolve({
+          packageName: "com.example.app",
+          explicitUserId: 0,
+          includeForegroundApp: true,
+        }),
+      ).resolves.toEqual({ userId: 0, source: "explicit" });
+    });
+  });
 });

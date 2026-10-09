@@ -161,16 +161,16 @@ export class TerminateApp extends BaseVisualChange {
     return runWithNestedPerfTracker(perf, async () => {
       const terminateLogic = async (): Promise<TerminateAppResult> => {
         // Auto-detect target user if not specified
-        const targetUserId = await perf.track("detectTargetUser", async () => {
-          return (
-            await new AndroidUserTargetResolver(this.adb).resolve({
-              packageName,
-              explicitUserId: options?.userId,
-              installedOnly: true,
-              signal,
-            })
-          ).userId;
-        });
+        const target = await perf.track("detectTargetUser", () =>
+          new AndroidUserTargetResolver(this.adb).resolve({
+            packageName,
+            explicitUserId: options?.userId,
+            installedOnly: true,
+            includeForegroundApp: true,
+            signal,
+          }),
+        );
+        const targetUserId = target.userId;
 
         throwIfAborted(signal);
 
@@ -183,7 +183,11 @@ export class TerminateApp extends BaseVisualChange {
             .track("checkInstalled", () => this.checkInstalled(packageName, targetUserId, signal)),
           perf.fork().track("checkRunning", () => this.readRunningPids(packageName, targetUserId)),
           perf.fork().track("checkForeground", async () => {
-            const foregroundApp = await this.adb.getForegroundApp();
+            // The resolver already ran this dumpsys when it chose the user; reuse it.
+            const foregroundApp =
+              target.foregroundApp !== undefined
+                ? target.foregroundApp
+                : await this.adb.getForegroundApp();
             return (
               foregroundApp?.packageName === packageName && foregroundApp.userId === targetUserId
             );

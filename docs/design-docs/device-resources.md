@@ -120,8 +120,9 @@ insufficient. Each producer must define its evidence coverage for each OS and
 device type; it must report `unknown` when that coverage is incomplete.
 
 Desired provisioning configuration is separate from this snapshot. There is no
-overall mode or profile identity, and callers must not infer that a requested
-reduction succeeded.
+named mode or profile catalog: a workload profile is only a requested resource
+map, identified by the content fingerprint of that map. Callers must not infer
+that a requested reduction succeeded.
 
 ### Runtime producers
 
@@ -132,8 +133,10 @@ never derives observations from requested configuration. Every catalog target
 must be verified for an enabled/disabled group; mixed or partially absent evidence
 is unknown, wholly absent or unapproved read paths are unsupported, and native
 read failures are logged and reported as unknown. Physical devices currently
-return complete unsupported snapshots with reasons. Exposure to callers through
-tools, device listings, or MCP resources is not yet wired.
+return complete unsupported snapshots with reasons. For iOS Simulators,
+`reconcileDeviceResources` exposes a snapshot together with requested-versus-observed
+drift (see [Reconciling workload profiles](#reconciling-workload-profiles)); device
+listings and MCP resources do not include it.
 
 ## Configuring resources
 
@@ -215,6 +218,15 @@ or restores the exact job without rebooting, then verifies both the override and
 job registration. Runtime discovery is shared within a request. Group membership
 does not overlap, so enabling one resource cannot silently restore another.
 
+Every native command is argv-based and bounded by both the request deadline and
+`IOS_RESOURCE_COMMAND_TIMEOUT_MS` (30,000 ms). Idempotent inventory and
+`launchctl print-disabled` reads retry at most twice with a 100/400 ms backoff when
+the deadline allows; writes are never retried, because the post-write verification
+re-reads state and a retry of the whole request reconciles any partial change.
+Resource operations hold the device's lifecycle lease, so they serialize per device
+with boot, shutdown, teardown and other configuration, and the device-aware tool
+path enforces session ownership.
+
 Broad `backgroundSync` and `icloudSync` remain unsupported. Physical iOS devices
 remain unsupported. Android controls are described below; requests can apply
 supported entries and report unsupported entries in the same result.
@@ -250,6 +262,41 @@ Device boot/readiness and resource-configuration success are separate facts.
 Booted provisioning responses expose the session as a top-level `sessionId`
 field, with no `sessionUuid` alias, including resource failures and replayed
 operations. With `boot: false`, no top-level session field is present.
+
+## Reconciling workload profiles
+
+After a verified write, the iOS controller records which services AutoMobile
+changed to `disabled` in `device_resource_applications`, keyed by the simulator
+incarnation: UDID, runtime identifier and device type together, never the UDID
+alone. Only resources AutoMobile changed are recorded; a service that was already
+disabled is never claimed. Re-enabling a resource removes it. The record is
+ownership of an override, not of the simulator. Recording is best effort and never
+changes the mutation result.
+
+`reconcileDeviceResources` (opt-in, like `setDeviceResources`) compares a requested
+map with an independent observation and returns typed drift:
+
+| Kind               | Meaning                                                                      |
+| ------------------ | ---------------------------------------------------------------------------- |
+| `missingRequested` | A requested state is explicitly contradicted.                                |
+| `ownedExtra`       | A recorded AutoMobile override outside the requested map is still in effect. |
+| `unsupported`      | The runtime cannot provide or control the requested resource.                |
+| `commandFailure`   | Native evidence is unknown, mixed or missing; never a guessed state.         |
+
+The default is report only, with no writes. `repair: true` passes only the drifted
+`missingRequested` and `commandFailure` entries to the controller, then re-reads every
+resource; `releaseOwnedExtras: true` also re-enables owned extras. A second run with
+no drift issues no commands. `success` is true only when the final observation proves
+every requested entry and no owned extra remains, so unsupported resources fail
+closed. After an erase the overrides are gone: requested entries report
+`missingRequested`, recorded entries observed enabled are neither extras nor kept,
+and a repair reapplies them. A recreated simulator or a replaced runtime is a new
+incarnation without a record. Physical devices, Android targets and simulators that
+are not booted are rejected before any command runs.
+
+`provisionDevice.resources` already applies resources after boot and before
+automation readiness under the provisioning lifecycle lease; its writes are recorded
+the same way, so a later reconciliation recognizes them.
 
 ## Automation capabilities
 

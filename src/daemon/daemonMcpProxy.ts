@@ -2721,7 +2721,7 @@ export class DaemonMcpProxy {
     if (this.closing) {
       throw new DaemonUnavailableError("MCP proxy is closing");
     }
-    this.throwIfBoundSessionFenced(allowReleasedSession);
+    this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
     const reconnectRecoverableHandoff = this.hasRecoverableBoundSessionHandoff();
     if (reconnectRecoverableHandoff) {
       await this.resetConnection();
@@ -2738,7 +2738,7 @@ export class DaemonMcpProxy {
       // attempt as a recoverable transport failure, preserving the fences.
       await this.ensureConnected();
       signal.throwIfAborted();
-      this.throwIfBoundSessionFenced(allowReleasedSession);
+      this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
       established = true;
       return await operation();
     } catch (error) {
@@ -2746,7 +2746,7 @@ export class DaemonMcpProxy {
       if (this.closing) {
         throw error;
       }
-      this.throwIfBoundSessionFenced(allowReleasedSession);
+      this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
       this.throwIfBoundSessionLost(error);
       if (!this.isRecoverableDaemonSessionError(error, established)) {
         throw error;
@@ -2771,15 +2771,15 @@ export class DaemonMcpProxy {
       );
       await this.resetConnection();
       signal.throwIfAborted();
-      this.throwIfBoundSessionFenced(allowReleasedSession);
+      this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
       await this.ensureConnected();
       signal.throwIfAborted();
-      this.throwIfBoundSessionFenced(allowReleasedSession);
+      this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
       try {
         return await operation();
       } catch (retryError) {
         signal.throwIfAborted();
-        this.throwIfBoundSessionFenced(allowReleasedSession);
+        this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
         const sessionNotFoundFenceTarget = this.sessionNotFoundFenceTarget(
           retryError,
           attemptedSessionUuid,
@@ -3764,7 +3764,7 @@ export class DaemonMcpProxy {
       this.stallHandovers.has(terminal.sessionUuid) ||
       (explicitSessionUuid !== undefined && explicitSessionUuid === terminal.sessionUuid);
     if (callerReferencedTerminal) {
-      throw this.boundSessionExpiredError();
+      throw this.boundSessionExpiredError(explicitSessionUuid);
     }
     throw new DaemonConnectionSessionReleasedError(terminal.reason);
   }
@@ -4052,16 +4052,34 @@ export class DaemonMcpProxy {
     return true;
   }
 
-  private throwIfBoundSessionFenced(allowReleasedSession = false): void {
+  private throwIfBoundSessionFenced(allowReleasedSession = false, namedSessionUuid?: string): void {
     if (this.terminalBoundSession && !allowReleasedSession) {
-      throw this.boundSessionExpiredError();
+      throw this.boundSessionExpiredError(namedSessionUuid);
     }
   }
 
-  private boundSessionExpiredError(): DaemonBoundSessionExpiredError {
+  /**
+   * The ownership-lost error for the fenced binding. `namedSessionUuid` is the session the failing
+   * call referenced: when it is not the fenced binding (this proxy fences only its latest one) the
+   * error reports the named session, never the unrelated latest binding (#10991).
+   */
+  private boundSessionExpiredError(namedSessionUuid?: string): DaemonBoundSessionExpiredError {
     const terminal = this.terminalBoundSession;
     if (!terminal) {
       throw new Error("Bound session is not terminal");
+    }
+    if (namedSessionUuid !== undefined && namedSessionUuid !== terminal.sessionUuid) {
+      const namedStall = this.stallHandovers.get(namedSessionUuid);
+      if (namedStall) {
+        namedStall.delivered = true;
+        return new DaemonSessionStalledError(namedSessionUuid, namedStall.handover);
+      }
+      if (!this.stallHandovers.has(terminal.sessionUuid)) {
+        return new DaemonBoundSessionExpiredError(
+          namedSessionUuid,
+          this.releasedSessionReasons.get(namedSessionUuid) ?? terminal.reason,
+        );
+      }
     }
     const stall = this.stallHandovers.get(terminal.sessionUuid);
     if (stall) {
@@ -4672,6 +4690,7 @@ export class DaemonMcpProxy {
       this.pendingSessionLosses.set(sessionUuid, {
         ...record.handover,
         code: PROXY_STALLED_CODE,
+        ...(record.handover.code === DAEMON_STALLED_CODE ? { stalledBy: "daemon" as const } : {}),
         sessions: record.handover.sessions.filter((session) => session.sessionUuid === sessionUuid),
         lastAcknowledgedHeartbeatAt:
           record.handover.sessions.find((session) => session.sessionUuid === sessionUuid)

@@ -212,6 +212,12 @@ export interface LivenessHandover {
   /** Latest acknowledged heartbeat across the listed sessions (proxy clock, ms). */
   lastAcknowledgedHeartbeatAt: number;
   action: typeof RESTART_DAEMON_THEN_RESUME_ACTION | typeof REACQUIRE_LOST_SESSIONS_ACTION;
+  /**
+   * What stalled first, when it differs from `code`: a `proxy_stalled` loss reported after a
+   * `daemon_stalled` handover came from a daemon stall, not a proxy one (#10991). Message wording
+   * only; it is not part of the wire payload.
+   */
+  stalledBy?: "daemon";
 }
 
 function describeSessions(sessions: readonly StalledSession[]): string {
@@ -228,6 +234,13 @@ export function livenessHandoverMessage(handover: LivenessHandover): string {
       `${handover.attempts} automatic recovery attempts (reconnect and re-heartbeat with the same ` +
       `owner token) and has stopped. It never restarts the daemon because other harnesses share ` +
       `it: restart the daemon yourself, then resume each session by passing its sessionUuid.`
+    );
+  }
+  if (handover.stalledBy === "daemon") {
+    return (
+      `The AutoMobile daemon stalled and stopped acknowledging heartbeats; once it answered again ` +
+      `it reported that it released ${sessions} or that another liveness owner has taken them ` +
+      `over. This MCP proxy itself did not stall. Reacquire the devices with getAndroid or getApple.`
     );
   }
   return (
@@ -305,6 +318,8 @@ interface FailedSession {
   /** The state to report it under: `proxy_stalled` only when the daemon said it was lost. */
   code: LivenessStallCode;
   attempts: number;
+  /** Set when a daemon stall led to this `proxy_stalled` loss (#10991). */
+  stalledBy?: "daemon";
   /** Proxy clock reading when recovery gave up on it. */
   failedAt: number;
 }
@@ -321,6 +336,7 @@ interface AttemptOutcomeContext {
   attempt: number;
   outcome: RecoveryAttemptOutcome;
   restoredAfterLapse: boolean;
+  deviceAtStart: string | undefined;
 }
 
 const HANDOVER_ORDER: readonly LivenessStallCode[] = [DAEMON_STALLED_CODE, PROXY_STALLED_CODE];
@@ -403,6 +419,9 @@ export class LivenessRecovery {
 
   private async run(sessionUuid: string, code: LivenessStallCode, episode: Episode): Promise<void> {
     const startedAt = this.deps.timer.now();
+    // The proxy may forget the session's device while attempts run (a release or not-found
+    // answer on the heartbeat tick), but the handover still has to name it (#10991).
+    const deviceAtStart = this.deps.deviceIdOf(sessionUuid);
     // Captured first: a successful attempt records a fresh acknowledgement.
     const lastAckBefore = this.deps.lastAckAt(sessionUuid);
     const slotMs = recoveryAttemptSlotMs({
@@ -420,14 +439,30 @@ export class LivenessRecovery {
         return;
       }
       const restoredAfterLapse = startedAt - lastAckBefore > this.deps.leaseMs;
-      if (this.settle({ sessionUuid, code, episode, attempt, outcome, restoredAfterLapse })) {
+      if (
+        this.settle({
+          sessionUuid,
+          code,
+          episode,
+          attempt,
+          outcome,
+          restoredAfterLapse,
+          deviceAtStart,
+        })
+      ) {
         return;
       }
       await this.waitForSlotEnd(startedAt + attempt * slotMs, attempt);
     }
     // No attempt got an answer. A daemon that does not answer is stalled, whatever stalled the
     // proxy first; only an answer from the daemon proves a session lost.
-    this.markFailed(sessionUuid, episode, DAEMON_STALLED_CODE, LIVENESS_RECOVERY_ATTEMPTS);
+    this.markFailed({
+      sessionUuid,
+      episode,
+      code: DAEMON_STALLED_CODE,
+      attempts: LIVENESS_RECOVERY_ATTEMPTS,
+      deviceAtStart,
+    });
   }
 
   /** Act on an attempt's outcome; true when recovery for the session is over. */
@@ -449,7 +484,14 @@ export class LivenessRecovery {
     if (outcome === "session-gone" || outcome === "superseded") {
       // The daemon answered that the session is released or now belongs to another owner: the
       // loss the `proxy_stalled` handover reports, with the session fenced.
-      this.markFailed(sessionUuid, episode, PROXY_STALLED_CODE, attempt);
+      this.markFailed({
+        sessionUuid,
+        episode,
+        code: PROXY_STALLED_CODE,
+        attempts: attempt,
+        deviceAtStart: context.deviceAtStart,
+        stalledBy: code === DAEMON_STALLED_CODE ? "daemon" : undefined,
+      });
       return true;
     }
     return false;
@@ -501,16 +543,20 @@ export class LivenessRecovery {
     });
   }
 
-  private markFailed(
-    sessionUuid: string,
-    episode: Episode,
-    code: LivenessStallCode,
-    attempts: number,
-  ): void {
+  private markFailed(failure: {
+    sessionUuid: string;
+    episode: Episode;
+    code: LivenessStallCode;
+    attempts: number;
+    deviceAtStart: string | undefined;
+    stalledBy?: "daemon";
+  }): void {
+    const { sessionUuid, episode, code, attempts, deviceAtStart, stalledBy } = failure;
     episode.failed.set(sessionUuid, {
+      ...(stalledBy ? { stalledBy } : {}),
       session: {
         sessionUuid,
-        deviceId: this.deps.deviceIdOf(sessionUuid) ?? null,
+        deviceId: this.deps.deviceIdOf(sessionUuid) ?? deviceAtStart ?? null,
         lastAcknowledgedHeartbeatAt: this.deps.lastAckAt(sessionUuid),
       },
       code,
@@ -563,6 +609,7 @@ export class LivenessRecovery {
         code === DAEMON_STALLED_CODE
           ? RESTART_DAEMON_THEN_RESUME_ACTION
           : REACQUIRE_LOST_SESSIONS_ACTION,
+      ...(failed.every((entry) => entry.stalledBy === "daemon") ? { stalledBy: "daemon" } : {}),
     });
   }
 }

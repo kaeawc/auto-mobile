@@ -2889,7 +2889,10 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         error: {
           code: error.errorCode,
           message: error.message,
-          retryable: error.lifecycle.reason?.retryable ?? false,
+          // A stored terminal failure replays for every re-issue of this
+          // operationId, so retrying it cannot help; the provider's verdict
+          // still drives `recovery.nextAction` (retry with a new operationId).
+          retryable: false,
           ...provisionDeviceLifecycleDiagnosticFields(error.lifecycle.reason),
         },
       });

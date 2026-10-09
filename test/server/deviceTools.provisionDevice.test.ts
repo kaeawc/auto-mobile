@@ -5897,13 +5897,16 @@ describe("provisionDevice handler", () => {
         daemonBuild: expect.any(String),
       },
     });
-    const { recovery: firstRecovery, ...firstOutcome } = first;
+    const { recovery: firstRecovery, error: firstError, ...firstOutcome } = first;
     expect(replay).toMatchObject(firstOutcome);
+    // #11064: the stored terminal failure replays for every re-issue of this
+    // operationId, so the replay is not retryable under it.
+    expect(replay.error).toMatchObject({ ...firstError, retryable: false });
     // A replay has no live attempt: it reports the stored failure and never invents ownership.
     expect(replay.recovery).toMatchObject({
       boundary: "readiness_failure",
       originalError: { code: "device_lost" },
-      nextAction: { automaticRetrySafe: true },
+      nextAction: { action: "retry_with_new_operation", automaticRetrySafe: false },
     });
     expect(replay.recovery.device?.ownership ?? "unknown").toBe("unknown");
     expect(readinessCalls).toBe(1);
@@ -5914,7 +5917,7 @@ describe("provisionDevice handler", () => {
       outcomes: { deviceCreation: "not_created" },
       cleanup: { status: "unnecessary" },
       originalError: { code: "device_lost" },
-      nextAction: { action: "retry_original_operation", automaticRetrySafe: true },
+      nextAction: { action: "retry_with_new_operation", automaticRetrySafe: false },
     });
   });
 

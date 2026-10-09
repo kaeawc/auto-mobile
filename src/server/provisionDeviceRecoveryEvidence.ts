@@ -18,6 +18,7 @@ type DeviceOwnership = "created_by_operation" | "adopted";
 export type ProvisionDeviceRecoveryAction =
   | "retry_original_operation"
   | "wait_then_retry_original_operation"
+  | "retry_with_new_operation"
   | "reacquire_retained_device"
   | "perform_cleanup"
   | "obtain_further_evidence";
@@ -85,6 +86,12 @@ export interface ProvisionDeviceRecoveryInput {
   ownership?: DeviceOwnership;
   /** Failure boundaries: the provider's own verdict on whether retrying can help. */
   retryable?: boolean;
+  /**
+   * False when `lifecycle` was noted in memory only (a cancelled rollback that
+   * kept the operation row retryable), so the original operationId is still
+   * admitted instead of replaying a stored terminal failure. Defaults to true.
+   */
+  lifecycleDurable?: boolean;
 }
 
 type Cleanup = ProvisionDeviceRecoveryEvidence["cleanup"];
@@ -117,12 +124,31 @@ function isUnretryableFailureBoundary(input: ProvisionDeviceRecoveryInput): bool
   return failureBoundary && input.retryable !== true;
 }
 
-function nextAction(input: ProvisionDeviceRecoveryInput, cleanup: Cleanup) {
+/**
+ * Lifecycle states the operation row treats as terminal: re-issuing the same
+ * operationId replays the stored failure until the row expires instead of
+ * starting a new attempt (`provisionDeviceOperationRepository.ts`).
+ */
+function replaysStoredFailure(input: ProvisionDeviceRecoveryInput): boolean {
+  if (input.lifecycleDurable === false) {
+    return false;
+  }
+  switch (input.lifecycle?.state) {
+    case "no_device_created":
+    case "removed":
+    case "cleanup_in_progress":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function nextAction(
+  input: ProvisionDeviceRecoveryInput,
+  cleanup: Cleanup,
+): ProvisionDeviceRecoveryEvidence["nextAction"] {
   const retryAfterMs = input.retryAfterMs;
-  if (
-    cleanup.status === "pending" ||
-    (input.boundary === "caller_cancellation" && !input.settled)
-  ) {
+  if (input.boundary === "caller_cancellation" && !input.settled) {
     return {
       action: "wait_then_retry_original_operation" as const,
       reason: "Work is still settling; retrying the original operationId converges once it ends.",
@@ -154,6 +180,14 @@ function nextAction(input: ProvisionDeviceRecoveryInput, cleanup: Cleanup) {
       automaticRetrySafe: true,
     };
   }
+  return evidenceGatedRetryAction(input, cleanup);
+}
+
+/** The retry path once settling, retained, and persistence evidence are ruled out. */
+function evidenceGatedRetryAction(
+  input: ProvisionDeviceRecoveryInput,
+  cleanup: Cleanup,
+): ProvisionDeviceRecoveryEvidence["nextAction"] {
   if (isUnretryableFailureBoundary(input)) {
     return {
       action: "obtain_further_evidence" as const,
@@ -168,6 +202,20 @@ function nextAction(input: ProvisionDeviceRecoveryInput, cleanup: Cleanup) {
       reason:
         "No lifecycle evidence was recorded, so the response cannot establish whether a device was created; query inventory before acting.",
       automaticRetrySafe: false,
+    };
+  }
+  if (replaysStoredFailure(input)) {
+    return {
+      action: "retry_with_new_operation" as const,
+      reason:
+        cleanup.status === "pending"
+          ? "Cleanup is still settling and the original operationId only replays this terminal failure; once it settles, retry with a new operationId."
+          : "The operation ended in a terminal state, so the original operationId only replays this failure; retry with a new operationId.",
+      // Automatically re-issuing the ORIGINAL operationId can only replay.
+      automaticRetrySafe: false,
+      ...(cleanup.status === "pending" && input.retryAfterMs !== undefined
+        ? { retryAfterMs: input.retryAfterMs }
+        : {}),
     };
   }
   return {

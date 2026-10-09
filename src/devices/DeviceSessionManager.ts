@@ -50,6 +50,7 @@ import {
   applyAppearanceOnConnect,
   type AppearanceOnConnectDependencies,
 } from "../server/applyAppearanceOnConnect";
+import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { disableStylusHandwriting } from "../utils/disableStylusHandwriting";
 import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
 import { RunnerReadinessError, RunnerReadinessService } from "../ctrlProxy/RunnerReadinessService";
@@ -710,7 +711,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
     options?.signal?.throwIfAborted();
     this.setCurrentDevice(selectedDevice, resolvedPlatform);
     if (deviceSource !== "current") {
-      await applyAppearanceOnConnect(selectedDevice, this.appearanceOnConnectDependencies);
+      await applyAppearanceOnConnect(
+        selectedDevice,
+        this.appearanceOnConnectDependencies,
+        resolveAppearanceSessionKey(options?.sessionId),
+      );
       options?.signal?.throwIfAborted();
       await disableStylusHandwriting(selectedDevice, this.adbFactory);
     }

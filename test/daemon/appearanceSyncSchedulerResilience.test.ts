@@ -52,7 +52,7 @@ describe("AppearanceSyncScheduler resilience", () => {
       isEnabled: () => true,
       getConfig,
       resolveMode: async () => "dark",
-      getTargets: () => [],
+      getTargets: () => [makeTarget(1)],
       apply: async () => {},
     });
     // If trigger() re-threw, this await would reject and fail the test.

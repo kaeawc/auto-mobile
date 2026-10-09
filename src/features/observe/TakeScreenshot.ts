@@ -66,6 +66,10 @@ import {
 import { readImageHeaderDimensions } from "../../utils/screenshot/imageHeaderDimensions";
 import { displayTransitions } from "./DisplayTransition";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
+import {
+  defaultIosCaptureOverlayHider,
+  type IosCaptureOverlayHiderResolver,
+} from "../overlay/ios/iosCaptureOverlayHider";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 const SCREENSHOT_CLEANUP_TIMEOUT_MS = 1500;
@@ -82,9 +86,10 @@ export interface ScreenshotOptions {
   /** Android logical display selected by observe. */
   displayId?: number;
   /**
-   * Android: capture through CtrlProxy with its overlay hidden (#9305). Set only for a device that
-   * advertises `screenshot_hide_overlay_v1`. There is no ADB fallback: a capture that cannot
-   * confirm the overlay was hidden fails rather than return an image that shows it.
+   * Capture with the device's overlay hidden (#9305). Set only for a device whose agent advertises
+   * `screenshot_hide_overlay_v1`: Android CtrlProxy, or the connected iOS overlay agent. There is
+   * no fallback: a capture that cannot confirm the overlay was hidden fails rather than return an
+   * image that shows it.
    */
   hideOverlays?: boolean;
 }
@@ -146,6 +151,12 @@ function ctrlProxyScreenshotFormat(
     throw new Error("Android CtrlProxy returned an unsupported screenshot format");
   }
   return mime.slice(6) as "png" | "jpeg" | "webp";
+}
+
+function resolveIosOverlayHider(
+  hider: IosCaptureOverlayHiderResolver | undefined,
+): IosCaptureOverlayHiderResolver {
+  return hider ?? defaultIosCaptureOverlayHider;
 }
 
 export class TakeScreenshot implements ScreenshotService {
@@ -268,6 +279,7 @@ export class TakeScreenshot implements ScreenshotService {
   private fileSystem: FileSystem;
   private cacheDirResolver: () => string;
   private readonly pathProtection: ScreenshotPathProtection;
+  private readonly iosOverlayHider: IosCaptureOverlayHiderResolver;
   private readonly physicalDisplayIdResolver: PhysicalDisplayIdResolver;
   private static cacheDir: string | null = null;
 
@@ -299,9 +311,13 @@ export class TakeScreenshot implements ScreenshotService {
       timer,
     }),
     cleanupOnCreate = true,
-    options: { pathProtection?: ScreenshotPathProtection } = {},
+    options: {
+      pathProtection?: ScreenshotPathProtection;
+      iosOverlayHider?: IosCaptureOverlayHiderResolver;
+    } = {},
   ) {
     this.pathProtection = options.pathProtection ?? screenshotPathProtection;
+    this.iosOverlayHider = resolveIosOverlayHider(options.iosOverlayHider);
     this.device = device;
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
@@ -694,11 +710,13 @@ export class TakeScreenshot implements ScreenshotService {
       throwIfAborted(signal);
 
       // Request screenshot from CtrlProxy iOS
-      const result = await awaitWhileRequestIsLive(
-        client.requestScreenshot(10000, undefined, signal),
-        signal,
-      );
-      return await this.writeiOSScreenshot(finalPath, result, startTime, options, signal);
+      const request = (): Promise<CtrlProxyScreenshotResult> =>
+        awaitWhileRequestIsLive(client.requestScreenshot(10000, undefined, signal), signal);
+      const result = await this.requestiOSScreenshot(request, options);
+      const written = await this.writeiOSScreenshot(finalPath, result, startTime, options, signal);
+      return options.hideOverlays === true && written.success
+        ? { ...written, overlaysHidden: true }
+        : written;
     } catch (error) {
       const errorMsg = errorMessage(error);
       logger.warn(`[SCREENSHOT] iOS screenshot capture failed: ${errorMsg}`, error);
@@ -707,6 +725,42 @@ export class TakeScreenshot implements ScreenshotService {
         error: errorMsg,
       };
     }
+  }
+
+  private requestiOSScreenshot(
+    request: () => Promise<CtrlProxyScreenshotResult>,
+    options: ScreenshotOptions,
+  ): Promise<CtrlProxyScreenshotResult> {
+    return options.hideOverlays === true
+      ? this.requestiOSScreenshotWithOverlayHidden(request)
+      : request();
+  }
+
+  /**
+   * Hide-capture-restore around the simulator screenshot (#9305). The agent answers the hide before the
+   * capture runs; a hide it never confirmed fails the capture rather than return an image that
+   * shows the overlay.
+   */
+  private async requestiOSScreenshotWithOverlayHidden(
+    request: () => Promise<CtrlProxyScreenshotResult>,
+  ): Promise<CtrlProxyScreenshotResult> {
+    const hider = this.iosOverlayHider(this.device.deviceId);
+    if (hider === undefined) {
+      return {
+        success: false,
+        error:
+          "The iOS overlay agent is no longer connected, so the overlay cannot be hidden for the capture; retry the observe",
+      };
+    }
+    const { value, hideUnconfirmed } = await hider.captureWithOverlayHidden(request);
+    if (hideUnconfirmed === true && value.success) {
+      return {
+        success: false,
+        error:
+          "The iOS overlay agent could not confirm its overlay was hidden for the capture; retry the observe",
+      };
+    }
+    return value;
   }
 
   private async writeiOSScreenshot(

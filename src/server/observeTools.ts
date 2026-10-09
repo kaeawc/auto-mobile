@@ -4,6 +4,7 @@ import {
   MAX_WAIT_FOR_TIMEOUT_MS,
 } from "../features/observe/waitForTimeout";
 import { publishScreenshotPaths } from "../features/observe/ScreenshotRetention";
+import { iosAgentHidesOverlayForCapture } from "../features/overlay/ios/iosCaptureOverlayHider";
 import { readObservationForInteractions } from "./identifyInteractionsObservation";
 import {
   screenshotPathProtection,
@@ -1947,8 +1948,14 @@ interface ObserveToolDependencies {
   hidesOverlayForScreenshot?: (device: BootedDevice) => Promise<boolean>;
 }
 
-/** Android CtrlProxy advertising `screenshot_hide_overlay_v1`; the iOS agent hide is not wired here. */
+/**
+ * An Android CtrlProxy or a connected iOS overlay agent advertising `screenshot_hide_overlay_v1`
+ * (#9305). The iOS agent hides itself around the host's simulator screenshot.
+ */
 async function ctrlProxyHidesOverlayForScreenshot(device: BootedDevice): Promise<boolean> {
+  if (device.platform === "ios") {
+    return iosAgentHidesOverlayForCapture(device.deviceId);
+  }
   if (device.platform !== "android") {
     return false;
   }

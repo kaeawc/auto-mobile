@@ -228,7 +228,8 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 - Run `scripts/prepush-ios.sh` before pushing any Swift change. It enforces the
   pinned SwiftFormat 0.54.6, SwiftLint's error-severity rules, and the
   simulator-free XCTestRunner package subset.
-- `XCTestRunner Simulator Tests` is advisory, not required. Classify it from
+- `XCTestRunner Simulator Tests` is advisory, not required, and runs nightly or
+  on a PR labelled `run-ios-sim` (`xctestrunner-simulator-tests.yml`). Classify it from
   the exact job log before rerunning or changing code. The 2026-09-07–13
   signatures were: CtrlProxy UI-test action timed out after five minutes;
   CtrlProxy still running after forced teardown; video recording's `simctl list`

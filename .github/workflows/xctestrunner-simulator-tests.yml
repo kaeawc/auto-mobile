@@ -1,0 +1,331 @@
+name: "XCTestRunner Simulator Tests"
+
+# The advisory iOS simulator integration lane (CtrlProxy UI tests, the
+# videoRecording MP4 integration, the navigation-graph Simulator workflow and
+# the odd-width screenshot test). It used ~85% of PR hosted-macOS minutes, so it
+# is off the default PR path (#10895): nightly.yml calls it every night and
+# pull_request.yml calls it only when the PR carries the `run-ios-sim` label.
+# Callers see the check as "XCTestRunner Simulator Tests / Simulator Tests".
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  ios-xctest-runner-simulator-tests:
+    name: "Simulator Tests"
+    runs-on: macos-26
+    timeout-minutes: 48
+    # CI's XCUITest cold-start routinely exceeds the defaults; give the daemon a
+    # generous health-poll window (240 × 500ms = 120s) so it doesn't give up (and
+    # then kill+respawn) a runner still coming up, and let an `observe` request wait
+    # (150s > 120s) for that cold start instead of aborting at the 30s default (#2834).
+    #
+    # The daemon's own readiness budget (DAEMON_STARTUP_TIMEOUT_MS, default 30s) must
+    # cover the entire serial bring-up: Bun cold start + from-scratch migrations +
+    # `initializeDevicePoolWithTimeout(5s)` + `initializeIosServices(5s)`. The default
+    # covers normal cold startup; this Xcode lane can add two serial iOS readiness probes,
+    # so keep its explicit 60s budget. The env var name must match
+    # src/daemon/constants.ts exactly — a typo silently falls back to 30000.
+    env:
+      AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS: "240"
+      AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS: "150000"
+      AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "60000"
+      # This is both the runtime destination and the uploaded artifact path.
+      # Keeping one explicit absolute path avoids reimplementing Node path
+      # semantics in a failure-only shell step.
+      AUTOMOBILE_LOG_DIR: "${{ github.workspace }}/ci-logs/daemon-logs"
+      # This job builds CtrlProxy into /tmp/automobile-ctrl-proxy before daemon
+      # startup. Pin both the build script and every restarted daemon to that
+      # path, and make the local build authoritative so PR runs do not depend on
+      # a published release IPA existing for package.json's current version.
+      AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA: "/tmp/automobile-ctrl-proxy"
+      AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD: "true"
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Select Xcode 26.5"
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.5"
+
+      - name: "Cache XCTestRunner Swift package dependencies"
+        uses: actions/cache@v5
+        id: cache-xctestrunner-spm
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm/cache
+          key: ${{ runner.os }}-spm-xctestrunner-26.5-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-xctestrunner-26.5-
+
+      - name: "Cache XCTestRunner DerivedData"
+        uses: actions/cache@v5
+        id: cache-xctestrunner-derived-data
+        with:
+          path: |
+            /tmp/automobile-ctrl-proxy/Build
+            /tmp/automobile-ctrl-proxy/ModuleCache.noindex
+          key: ${{ runner.os }}-derived-xctestrunner-26.5-${{ hashFiles('ios/control-proxy/**/*.swift', 'ios/control-proxy/**/*.m', 'ios/control-proxy/**/*.mm', 'ios/control-proxy/**/*.h', 'ios/control-proxy/**/*.c', 'ios/control-proxy/**/*.cpp', 'ios/control-proxy/**/*.xcconfig', 'ios/control-proxy/**/*.plist', 'ios/control-proxy/**/*.entitlements', 'ios/control-proxy/**/*.storyboard', 'ios/control-proxy/**/*.xib', 'ios/control-proxy/**/*.xcassets/**', 'ios/control-proxy/**/*.strings', 'ios/control-proxy/**/*.ttf', 'ios/control-proxy/**/*.otf', 'ios/control-proxy/**/*.xcprivacy', 'ios/control-proxy/**/*.pbxproj', 'ios/control-proxy/**/*.xcscheme', 'ios/control-proxy/**/project.yml', 'ios/control-proxy/**/Package.swift', 'ios/control-proxy/**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-derived-xctestrunner-26.5-
+
+      - name: "Ensure iOS Simulator runtime"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
+
+      # These installs are independent, network/I/O-bound, and neither the Bun
+      # setup nor the npm-package install below consumes them — so background
+      # them and let the Bun pair overlap. Each `wait` barrier re-syncs before
+      # that install's first consumer (the drift check needs xcodegen; the build
+      # needs xcodegen + xcpretty; the videoRecording test needs ffmpeg).
+      # Validated by the #3779 spike: outputs unused here, `- wait: [ids]` list
+      # barrier works, and an install failure surfaces loudly at the wait.
+      - name: "Install XcodeGen"
+        run: ./scripts/ios/install-xcodegen.sh
+        background: true
+        id: install-xcodegen
+
+      - name: "Install xcpretty"
+        run: gem install xcpretty
+        background: true
+        id: install-xcpretty
+
+      # ffmpeg is consumed only by the videoRecording test far below, so it gets
+      # the widest possible window: it overlaps the drift check, the CtrlProxy
+      # build, the UI test, and the Xcode 26.5 simulator boot. Previously this
+      # ran inline in that test step, charging a cold multi-minute brew install
+      # against the step's own 10-minute cap and the test's 180s budget — a known
+      # intermittent timeout (#4124). No brew-lock contention: install-xcodegen.sh
+      # deliberately avoids Homebrew (#3975) and nothing else here shells to brew.
+      - name: "Install ffmpeg"
+        run: brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+        background: true
+        id: install-ffmpeg
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - wait: [install-xcodegen, install-xcpretty]
+
+      - name: "Check CtrlProxy XcodeGen Project Drift"
+        run: ./scripts/ios/xcodegen-drift-check.sh --ctrl-proxy
+
+      - name: "Resolve CtrlProxy Swift package dependencies"
+        run: (cd ios/control-proxy && swift package resolve)
+
+      # Simulator boot is minutes of otherwise-idle wall-clock and needs neither
+      # xcodegen nor the build, so start it in the background here and let the
+      # CtrlProxy build (below) run concurrently. Boot is wait/I/O-bound, so it
+      # overlaps the CPU-bound xcodebuild cleanly (mild contention, per #3779).
+      # The #3779 spike confirmed a backgrounded step's outputs survive `wait`,
+      # so the UI test can still read steps.ctrlproxy-simulator.outputs.simulator_udid
+      # after the barrier — no file fallback needed.
+      - name: "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.5)"
+        id: ctrlproxy-simulator
+        run: |
+          ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          # 600000ms matches the Android emulator product-boot budget
+          # (scripts/android/boot-emulator.sh). The whole boot draws from ONE
+          # shared deadline, including the in-process CiIosBootRecovery
+          # shutdown+erase+reboot. At 300000ms a slow first cold `bootstatus -b`
+          # on a loaded runner left the recovery's second boot with
+          # remainingBudgetMs=0 (`startDevice timeout exhausted while starting
+          # the device`), so the CLI returned no deviceId and this step, its
+          # `wait` barrier, and the nav-graph step (which reuses this UDID) all
+          # failed as a cascade. Healthy boots finish far inside either budget.
+          result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000 --min-os-version "${ios_version}" --max-os-version "${ios_version}")"
+          simulator_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
+          if [[ -z "${simulator_udid}" || "${simulator_udid}" == "null" ]]; then
+            echo "::error::AutoMobile product boot returned no deviceId." >&2
+            exit 1
+          fi
+          echo "simulator_udid=${simulator_udid}" >> "${GITHUB_OUTPUT}"
+        background: true
+
+      - name: "Build CtrlProxy iOS for Testing"
+        id: build-ctrlproxy
+        run: |
+          echo "Swift package cache hit: ${{ steps.cache-xctestrunner-spm.outputs.cache-hit }}"
+          echo "DerivedData cache hit: ${{ steps.cache-xctestrunner-derived-data.outputs.cache-hit }}"
+          SECONDS=0
+          ./scripts/ios/ctrl-proxy-build-for-testing.sh
+          echo "build took ${SECONDS}s"
+
+      - name: "Verify CtrlProxy iOS Artifacts"
+        run: |
+          echo "Checking CtrlProxy iOS artifacts..."
+          ls -la /tmp/automobile-ctrl-proxy/Build/Products/
+          ls -la /tmp/automobile-ctrl-proxy/Build/Products/Debug-iphonesimulator/ || true
+          XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
+          echo "xctestrun file: ${XCTESTRUN}"
+
+      # The source build intentionally differs from the published release whose
+      # checksum is compiled into the daemon. Publish this job's exact xctest
+      # executable hash so the pre-launch TOCTOU check remains enabled and every
+      # restarted daemon verifies the artifact it is actually about to execute.
+      - name: "Pin Source-Built CtrlProxy Runner Integrity"
+        shell: bash
+        run: |
+          runner_binary="/tmp/automobile-ctrl-proxy/Build/Products/Debug-iphonesimulator/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests"
+          if [[ ! -f "${runner_binary}" ]]; then
+            echo "::error::Source-built CtrlProxy xctest executable not found: ${runner_binary}" >&2
+            exit 1
+          fi
+          runner_sha256="$(shasum -a 256 "${runner_binary}" | awk '{print $1}')"
+          if [[ ! "${runner_sha256}" =~ ^[a-f0-9]{64}$ ]]; then
+            echo "::error::Unable to compute a valid CtrlProxy xctest SHA256" >&2
+            exit 1
+          fi
+          {
+            echo "AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=${runner_sha256}"
+            echo "AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest"
+          } >> "${GITHUB_ENV}"
+
+      # Re-sync before the test, which needs both the build artifacts and the
+      # booted sim's UDID.
+      - wait: ctrlproxy-simulator
+
+      - name: "Run selected CtrlProxy iOS tests (Xcode 26.5)"
+        # About 2 min xcodebuild startup, 2.3 min tests, remainder teardown (passing 4m51s; failing teardown 60-80 s).
+        timeout-minutes: 8
+        env:
+          SIMULATOR_UDID: ${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}
+        run: |
+          if [[ ! "${SIMULATOR_UDID}" =~ ^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$ ]]; then
+            echo "::error::Invalid simulator UDID" >&2
+            exit 1
+          fi
+          XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
+          # Exercise the rewrite hierarchy, privacy mapping, and rotation contracts on iOS.
+          xcodebuild test-without-building \
+            -xctestrun "${XCTESTRUN}" \
+            -destination "id=${SIMULATOR_UDID}" \
+            -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests \
+            -only-testing:CtrlProxyUITests/RotationOrientationTests \
+            -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree \
+            -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testScreenshotCapturesScreenAfterTrackedAppTerminates \
+            -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testPressKeyForwardDeleteRemovesFollowingCharacter \
+            -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testPressKeyForwardDeleteAtEndOfTextFailsClosed
+
+      # Bring the daemon to ready and warm CtrlProxy on the freshly-booted sim
+      # BEFORE any simulator workflow that opens an in-process session — including
+      # the videoRecording test below. When videoRecording ran first (issue #5376),
+      # its in-process session auto-start had to cold-launch CtrlProxy
+      # (xcodebuild test-without-building, ~85s) inside the bounded runner-readiness
+      # budget (30s since #5362) and flaked; with CtrlProxy already warm here, that
+      # auto-start short-circuits to the readiness fast path. Keep these two warm-up
+      # steps ahead of the videoRecording test — do NOT move videoRecording above
+      # them. Pre-starting the daemon and waiting for readiness also makes a startup
+      # failure surface loudly here instead of silently skipping the test (#2730);
+      # `auto-mobile` (installed to ~/.bun/bin by `bun add -g .`) is thereby on PATH
+      # for the swift-test steps.
+      - name: "Prepare isolated video recording database"
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
+        run: |
+          integration_db_dir="${RUNNER_TEMP}/auto-mobile-video-recording-db"
+          mkdir -p "${integration_db_dir}"
+          echo "AUTOMOBILE_DB_DIR=${integration_db_dir}" >> "${GITHUB_ENV}"
+
+      - name: "Ensure AutoMobile daemon ready (Xcode 26.5)"
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
+        env:
+          AUTOMOBILE_DAEMON_DEBUG: "1"
+          AUTOMOBILE_DAEMON_EMBEDDED_SDK: "1"
+          # Keep one stable daemon profile across warm-up and both integrations.
+          AUTOMOBILE_ENABLED_TOOLS: "videoRecording,navigateTo,getNavigationGraph,explore"
+        run: ./scripts/ci/ensure-daemon-ready.sh
+
+      # Launch CtrlProxy on the booted sim now (a slow, one-time xcodebuild launch)
+      # so the first `observe` from any downstream step (videoRecording, then the
+      # navigation-graph workflow) doesn't pay that cost inside its short waitFor
+      # window and time out (#2730 follow-up). Worst case ≈ 3 × (observe floor 150s
+      # + delay); bound the step so a pathological hang points here instead of at
+      # the 45-min job cap.
+      - name: "Warm up iOS CtrlProxy (Xcode 26.5)"
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
+        timeout-minutes: 12
+        run: ./scripts/ci/ensure-ctrl-proxy-ready.sh
+
+      # Re-sync the backgrounded ffmpeg install before its only consumer. With the
+      # install hoisted out, this step's 10-minute cap now covers the test alone.
+      # (The warm-up steps above don't need ffmpeg, so its background install gets
+      # extra time to finish before this wait.)
+      - wait: install-ffmpeg
+
+      - name: "Run videoRecording MP4 integration test"
+        timeout-minutes: 10
+        env:
+          AUTOMOBILE_ENABLED_TOOLS: "videoRecording,navigateTo,getNavigationGraph,explore"
+        run: ./scripts/ios/video-recording-start-stop-integration.sh
+
+      - name: "Run iOS navigation graph Simulator workflow"
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
+        timeout-minutes: 5
+        env:
+          AUTOMOBILE_ENABLED_TOOLS: "videoRecording,navigateTo,getNavigationGraph,explore"
+        run: |
+          ./scripts/ios/navigation-graph-sdk-event-integration.sh "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}"
+
+      - name: "Stop AutoMobile daemon before odd-width boot"
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' && steps.ctrlproxy-simulator.outcome == 'success' }}
+        run: |
+          source ./scripts/ios/run_with_timeout.sh
+          run_with_timeout 20 auto-mobile --daemon stop || true
+
+      # The main simulator is no longer needed after navigation. Shut it down
+      # before starting iPhone 15: the second boot correlated with simctl list
+      # stalls and exhaustion of the odd-width step's budget (#7771).
+      # 60s shutdown (including its 15s request) + 600s boot + ~120s
+      # inspection/xcodebuild (718s historical boot+inspection+test) = ~780s
+      # minimum. Allow 15 minutes for headroom; the daemon-stop step is separate.
+      - name: "Run odd-width CtrlProxy screenshot test (iPhone 15)"
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' && steps.ctrlproxy-simulator.outcome == 'success' }}
+        timeout-minutes: 15
+        env:
+          SIMULATOR_UDID: ${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}
+        run: |
+          bash ./scripts/ios/shutdown-main-simulator.sh "${SIMULATOR_UDID}"
+          ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+          result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000 --name "iPhone 15" --min-os-version "${ios_version}" --max-os-version "${ios_version}")"
+          odd_width_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
+          if [[ -z "${odd_width_udid}" || "${odd_width_udid}" == "null" ]]; then
+            echo "::error::AutoMobile product boot returned no iPhone 15 deviceId." >&2
+            exit 1
+          fi
+          trap 'xcrun simctl shutdown "${odd_width_udid}" >/dev/null 2>&1 || true' EXIT
+          simulator_device_type="$(
+            xcrun simctl list devices --json |
+              jq -r --arg udid "${odd_width_udid}" '.devices[][] | select(.udid == $udid) | .deviceTypeIdentifier'
+          )"
+          if [[ "${simulator_device_type}" != "com.apple.CoreSimulator.SimDeviceType.iPhone-15" ]]; then
+            echo "::error::Expected iPhone 15 for odd-width screenshot coverage; got '${simulator_device_type:-unknown}'." >&2
+            exit 1
+          fi
+          XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
+          xcodebuild test-without-building \
+            -xctestrun "${XCTESTRUN}" \
+            -destination "id=${odd_width_udid}" \
+            -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testScreenshotMatchesNativeDimensionsOnOddWidthDevice
+
+      # Daemon-internal logs (CtrlProxy startup/health/observe timing) are the only
+      # way to diagnose iOS observe failures — the swift-test stdout doesn't include
+      # them. Upload on failure only (they aren't needed on green runs, and this
+      # avoids publishing env/path details from passing runs).
+      - name: "Upload AutoMobile daemon logs"
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: automobile-daemon-logs-xctestrunner
+          path: ci-logs/daemon-logs/
+          if-no-files-found: ignore
+          retention-days: 7

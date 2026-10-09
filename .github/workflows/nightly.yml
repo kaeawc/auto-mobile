@@ -676,6 +676,12 @@ jobs:
           path: scratch/xctestrunner-tsan/
           if-no-files-found: ignore
 
+  # The advisory iOS simulator integration lane moved off the default PR path
+  # (#10895); nightly is its regular home. PRs opt in with the run-ios-sim label.
+  xctestrunner-simulator-tests:
+    name: "XCTestRunner Simulator Tests"
+    uses: ./.github/workflows/xctestrunner-simulator-tests.yml
+
   ios-xcode-build-sweep:
     name: "Build Xcode Projects Sweep (${{ matrix.config.name }})"
     runs-on: ${{ matrix.config.runner }}

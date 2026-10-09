@@ -11,7 +11,7 @@ WHEP, or `XCTestRunner Simulator Tests` failures.
 1. Resolve the exact PR head and current main base. Do not trust a prior green
    head after a rebase or merge queue update.
 2. Identify whether the check is required. `XCTestRunner Simulator Tests` is
-   advisory; the required iOS checks are `SwiftLint`,
+   advisory (nightly, or on a PR labelled `run-ios-sim`); the required iOS checks are `SwiftLint`,
    `Swift Code Coverage`, and `iOS Build`.
 3. Read the failed job by run and job ID with
    `gh run view <run-id> --job <job-id> --log-failed`. If it is incomplete,

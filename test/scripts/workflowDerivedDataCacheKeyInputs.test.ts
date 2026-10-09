@@ -181,6 +181,7 @@ describe("DerivedData cache keys hash every build input", () => {
     ".github/workflows/pull_request.yml",
     ".github/workflows/merge.yml",
     ".github/workflows/nightly.yml",
+    ".github/workflows/xctestrunner-simulator-tests.yml",
   ]) {
     test(`${workflow} DerivedData cache keys cover non-Swift build inputs`, () => {
       const steps = collectDerivedDataCacheSteps(workflow);

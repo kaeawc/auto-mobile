@@ -41,7 +41,11 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { logger, type Logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import { PLAN_AUTO_RELEASE_REASON } from "../daemon/sessionManager";
+import {
+  PLAN_AUTO_RELEASE_REASON,
+  UnissuedSessionError,
+  type Session,
+} from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
 import { assertInputRequesterHoldsDevice, TOOL_CALL_REMEDY } from "../daemon/inputDeviceOwnership";
 import {
@@ -432,11 +436,13 @@ export interface RegisteredTool {
   outputSchema?: any;
   appUiResourceUri?: string;
   /**
-   * Registered `deviceReadOnly: true` for every call: the tool only watches a device. Advertised
-   * as `_meta["automobile/deviceReadOnly"]` so a proxy can forward such reads without a session
-   * (#10971). A tool whose classification depends on its args (sqlQuery) is not marked.
+   * A device-aware tool's read/control classification (#10965): true for a read, a per-args
+   * classifier for a mixed tool, absent for control. Enumerated by
+   * `test/lint/toolReadControlClassification.test.ts`. Only `true` (a read for every call) is
+   * advertised as `_meta["automobile/deviceReadOnly"]`, so a proxy can forward such reads without
+   * a session (#10971); a per-args tool (sqlQuery, keyboard, clipboard, ...) is not marked.
    */
-  deviceReadOnly?: boolean;
+  deviceReadOnly?: boolean | ((args: any) => boolean);
 }
 
 /**
@@ -748,6 +754,32 @@ function foreignDeviceRead(
   return assignedDevice && assignedDevice !== providedDeviceId ? providedDeviceId : undefined;
 }
 
+/**
+ * Admit a read under its session without refreshing or claiming it (#10964): the live session, or
+ * null when the id names no live device session this daemon can route the read to (never issued,
+ * such as an IDE observer session (#10968), or not live) so the read runs sessionless. A terminal
+ * or suspect session keeps its typed error. Undefined when there is no daemon session manager.
+ */
+async function admitReadSession(
+  sessionUuid: string,
+  execution: { executionId: string; startTime: number } | undefined,
+): Promise<Session | null | undefined> {
+  if (!DaemonState.getInstance().isInitialized()) {
+    return undefined;
+  }
+  try {
+    const session = await DaemonState.getInstance()
+      .getSessionManager()
+      .admitIssuedSessionForAutomation(sessionUuid, execution, { access: "read-only" });
+    return session?.assignedDevice ? session : null;
+  } catch (error) {
+    if (error instanceof UnissuedSessionError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 /** A device another session holds: a live owner, or an autolock holder. */
 function isDeviceHeld(deviceId: string): boolean {
   const daemonState = DaemonState.getInstance();
@@ -941,6 +973,25 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // A read is not use of the session it runs under, so it is never echoed as routed (#10974).
       executionTracker.markDeviceReadCall(execution.executionId);
     }
+    // A read is admitted read-only (#10964): it never refreshes or claims the session, and its end
+    // is not use. Only control calls extend a session's idle deadline.
+    const readSession =
+      readOnly && sessionUuid && shouldResolveDevice
+        ? await admitReadSession(sessionUuid, execution)
+        : undefined;
+    if (readSession === null) {
+      // Read-only access never requires a session (#10968): a read carrying an id that names no
+      // live device session (an IDE observer session) runs as a sessionless read.
+      logger.info(
+        `[ToolRegistry] ${name}: ${sessionUuid} is not a live device session; reading sessionlessly`,
+      );
+      sessionUuid = undefined;
+      delete args.sessionUuid;
+      if (options.sessionlessDeviceRead && providedDeviceId) {
+        // The same contract as a sessionless `observe {deviceId}`: no session, no readiness.
+        return resolveSessionlessDeviceRead(input, options.sessionlessDeviceRead, providedDeviceId);
+      }
+    }
     // A sessionless read-only call that would land on a held device watches it through the
     // read-only path: no readiness, pin or settings work on the holder's device (#10830).
     const watchedDeviceId = await this.heldDeviceToWatch({
@@ -990,12 +1041,11 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // A terminal ID keeps its durable TerminalSessionError. Only an ID that
       // was live during daemon restart can reach context creation without a
       // live session; never-issued IDs are rejected before assignment.
-      const admittedSession = await sessionManager.admitIssuedSessionForAutomation(
-        sessionUuid,
-        execution,
-      );
-      if (execution) {
-        // Only an admitted call's end is session use (#10824).
+      const admittedSession =
+        readSession ??
+        (await sessionManager.admitIssuedSessionForAutomation(sessionUuid, execution));
+      if (execution && !readSession) {
+        // Only an admitted control call's end is session use (#10824, #10964).
         executionTracker.markSessionAdmitted(execution.executionId);
       }
       assertSessionDeviceRouting(
@@ -2634,7 +2684,7 @@ export class ToolRegistryClass {
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,
       appUiResourceUri: options.appUiResourceUri,
-      deviceReadOnly: options.deviceReadOnly === true,
+      deviceReadOnly: options.deviceReadOnly,
     });
   }
 
@@ -3013,7 +3063,7 @@ export class ToolRegistryClass {
         definition._meta = { ...definition._meta, "automobile/embeddedSdkOnly": true };
       }
       // Read/control classification for the proxy (#10971) — additive; other clients ignore it.
-      if (tool.deviceReadOnly) {
+      if (tool.deviceReadOnly === true) {
         definition._meta = { ...definition._meta, "automobile/deviceReadOnly": true };
       }
       // MCP Apps UI pointer (issue #4669) — additive; non-Apps hosts ignore it.

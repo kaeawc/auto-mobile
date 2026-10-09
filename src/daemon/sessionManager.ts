@@ -984,7 +984,7 @@ const EXPIRY_RELEASE_REASONS = new Set([
   "rehydration-owner-timeout",
 ]);
 
-class UnissuedSessionError extends ActionableError {}
+export class UnissuedSessionError extends ActionableError {}
 
 /**
  * Synchronous commit predicate for a conditional release. Returning `false`

@@ -22,7 +22,8 @@ on:
         required: false
         default: "all"
         type: choice
-        options: [all, active, no-heartbeat, idle, stdin-eof, selector, stream, provision]
+        options:
+          [all, active, no-heartbeat, idle, stdin-eof, selector, observe-only, stream, provision]
       idle-timeout-ms:
         description: "AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS for the private daemon"
         required: false

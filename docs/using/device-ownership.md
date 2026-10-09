@@ -18,8 +18,21 @@ A call that acts on a held device is refused with the typed code
 A derived `<base>:<label>` session counts as its base session. A device that no
 session holds takes calls from anyone.
 
-Tools that only watch stay allowed on any device, whichever session holds it:
-`observe`, `identifyInteractions` and `hitTest`.
+Reads stay allowed on any device, whichever session holds it, and need no
+session (owner decisions 2026-10-09, #10965). Anything that changes visible UI
+or starts a device-side process is control. Reads: `observe`, `snapshotOf`,
+`hitTest`, `identifyInteractions`, `listApps`, `getDeviceState`,
+`getNetworkGraph`, `getPreference`, `listDataStores`, `getDataStore`,
+`getAppPermissions`, `getNotificationPolicy`, `getDeepLinks` and
+`getNavigationGraph`. Mixed tools are classified per call: `keyboard`
+detect/listImes/listProfiles, `clipboard` get, `displayConfig` with no set field,
+`accessibility` with no toggle, `prototype` status/inspect, and a single
+read-only `sqlQuery` statement are reads; their other forms, `systemTray`,
+`videoRecording` and `deviceSnapshot` are control. Viewer video streaming stays
+an open read. A read is
+never use, not even the holder's own (#10964): it does not extend the session's
+idle window. Only control calls do, including a holder's calls that name only
+`deviceId`, which run as the holder's session.
 
 ## Passing the session
 

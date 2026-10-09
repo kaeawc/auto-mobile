@@ -302,12 +302,15 @@ A stdio proxy acquires the emulator with `getAndroid`. The script then checks
 three scenarios:
 
 - **active**: the device stays held past the idle window while the proxy
-  heartbeats and calls `observe`.
+  heartbeats and makes control calls (`homeScreen`). Reads such as `observe`
+  are not activity (#10964).
 - **no-heartbeat**: the proxy is suspended with SIGSTOP, so its socket stays open.
   The device must be released within about 10 s.
 - **idle**: the proxy heartbeats but makes no calls. `lastOwnerHeartbeatAt` must
   advance while `lastToolActivityAt` stays put, and the device must be released
   once the idle window passes, with the proxy still alive.
+- **observe-only**: the owner only calls `observe {deviceId}`. `lastToolActivityAt`
+  must not move, and the device must be released at the idle window.
 
 Each scenario reads `--daemon active-sessions` and also requires `holderKind` to
 be `stdio-proxy`. Afterwards `adb get-state` must still answer, since release

@@ -164,12 +164,27 @@ tools/calls serialize per `device:<id>`; a `deviceReadOnly` call from a caller t
 hold a held device runs on that device's read lane (`device:<id>:read`) instead, so a watcher
 never waits behind the holder's in-flight control call (#10969). Reads serialize among
 themselves; control calls, the holder's own reads and reads of a free device (which may run
-readiness) stay on the control lane. Read-only tools: `observe`, `snapshotOf`, `listApps`, `getDeviceState`,
-`getNetworkGraph`, `getPreference`, `listDataStores`, `getDataStore`, and
-`sqlQuery` when `isReadOnlySqlQuery` accepts the statement (a write, or anything
-the classifier cannot prove read-only, needs the holder). `identifyInteractions`
-and `hitTest` read through the session observe pipeline and its shared caches,
-so they are not `deviceReadOnly`. An autolocked device keeps autolock's
+readiness) stay on the control lane.
+A `deviceReadOnly` call whose `sessionUuid` names no device session this
+daemon issued (the IDE injects its observer session UUID into every call) is
+handled as sessionless rather than refused as unissued (#10968). Read-only tools
+(owner decisions 2026-10-09, #10965: anything that changes visible UI or starts a
+device-side process is control; read-only access never requires a session):
+`observe`, `snapshotOf`, `hitTest`, `identifyInteractions`, `listApps`,
+`getDeviceState`, `getNetworkGraph`, `getPreference`, `listDataStores`,
+`getDataStore`, `getAppPermissions`, `getNotificationPolicy`, `getDeepLinks`,
+`getNavigationGraph`; per call, `keyboard` detect/listImes/listProfiles,
+`clipboard` get, `displayConfig` with no set field, `accessibility` with no
+toggle, `prototype` status/inspect, and `sqlQuery` when `isReadOnlySqlQuery`
+accepts the statement (a write, or anything the classifier cannot prove
+read-only, needs the holder). The classifier lexes the query first
+(`src/features/database/sqlLexer.ts`), so a `)` or `;` inside a string literal,
+quoted identifier or comment cannot end a CTE or a statement (#10966).
+`systemTray`, `videoRecording` and `deviceSnapshot` stay control. On the
+read-only device path `hitTest` and `identifyInteractions` read through the
+observer capture (`executeDeviceRead`), not the holder's session pipeline or
+cache. `test/lint/toolReadControlClassification.test.ts` enumerates every
+registered device-aware tool against its declared classification. An autolocked device keeps autolock's
 own refusal. Plain lifecycle tools that stop a running device (`killDevice`, and
 `deleteDevice` on a booted target) never reach that resolver, so they apply the
 same code through `assertLifecycleCallerHoldsDevice`
@@ -180,6 +195,10 @@ guarded by the pool's own owner check instead.
 
 Owner decisions 2026-10-08 (#10730) settle the viewing question: watching is
 allowed on any device, whichever session owns it, and watching is not use.
+Owner decision 2026-10-09 (#10964) extends that to the owner: no read counts as
+activity. A `deviceReadOnly` call naming a live session is admitted with
+`access: "read-only"` (no refresh, no `markSessionAdmitted`), so only control
+calls move `lastUsedAt`/`expiresAt`.
 Desktop input is use. The desktop and IDE clients register an observer session
 that allocates nothing, allocate a device with `setActiveDevice` on the first
 `input/*` to it, and send input under that session, so each input restarts the

@@ -251,7 +251,8 @@ export function registerNavigationTools({
     "Get navigation graph for debugging",
     getNavigationGraphSchema,
     getNavigationGraphHandler,
-    { defaultEnabled: false, embeddedSdkOnly: true },
+    // Reads only; read-only access never requires a session (#10965).
+    { defaultEnabled: false, embeddedSdkOnly: true, deviceReadOnly: true },
   );
 
   // Explore handler

@@ -51,6 +51,10 @@ import {
  *    liveness path that persists the session cannot write fresh activity.
  * 5. The read side (#10700, #10703): an idle-expiry judgement reads only
  *    activity clocks, and a lease judgement reads only liveness clocks.
+ * 6. Reads are not use (#10964): in the device-tool registry, every
+ *    `markSessionAdmitted` call (which makes the call's end session activity) is
+ *    in the then-branch of an `if` that negates the call's read classification,
+ *    so a `deviceReadOnly` call can never be credited.
  *
  * The clock names come from `src/daemon/sessionClocks.ts`, which checks them
  * against the `Session` fields, so a rename cannot silently escape this guard.
@@ -860,6 +864,64 @@ function forbiddenReads(model: FileModel, root: string, forbidden: ReadonlySet<s
 }
 
 /** The innermost named function enclosing `node`, or `<module>`. */
+/** The device-tool admission sites, and the read-classification names their guard must negate. */
+const ADMISSION_SITES: Readonly<Record<string, readonly string[]>> = {
+  "src/server/toolRegistry.ts": ["readOnly", "readSession"],
+};
+
+/** Whether `condition` contains `!name` for one of `names`, possibly among `&&` operands. */
+function negatesOneOf(condition: ts.Expression, names: readonly string[]): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isPrefixUnaryExpression(node) &&
+      node.operator === ts.SyntaxKind.ExclamationToken &&
+      ts.isIdentifier(unwrap(node.operand)) &&
+      names.includes((unwrap(node.operand) as ts.Identifier).text)
+    ) {
+      found = true;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(condition);
+  return found;
+}
+
+/** Rule 6: `markSessionAdmitted` calls not guarded by a negated read classification. */
+function unguardedAdmissions(model: FileModel, readNames: readonly string[]): string[] {
+  const problems: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "markSessionAdmitted"
+    ) {
+      let guarded = false;
+      for (let child: ts.Node = node, parent = node.parent; parent;) {
+        if (
+          ts.isIfStatement(parent) &&
+          parent.thenStatement === child &&
+          negatesOneOf(parent.expression, readNames)
+        ) {
+          guarded = true;
+          break;
+        }
+        if (ts.isFunctionLike(parent)) {
+          break;
+        }
+        child = parent;
+        parent = parent.parent;
+      }
+      if (!guarded) {
+        problems.push(`${model.path}:${lineOf(model.source, node)} credits a read`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(model.source);
+  return problems;
+}
+
 function enclosingKey(model: FileModel, node: ts.Node): string {
   for (let current: ts.Node | undefined = node; current; current = current.parent) {
     const key = model.keyByNode.get(current);
@@ -1098,6 +1160,14 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     expect(problems).toEqual([]);
   });
 
+  test("a device-tool admission is credited only for a control call, never a read (#10964)", () => {
+    for (const [path, readNames] of Object.entries(ADMISSION_SITES)) {
+      const model = parse(path, readFileSync(join(ROOT, path), "utf8"));
+      expect(model.source.text).toContain("markSessionAdmitted");
+      expect(unguardedAdmissions(model, readNames)).toEqual([]);
+    }
+  });
+
   describe("rule coverage on a seeded source", () => {
     const SEEDED = `
       function widen(session) { session.expiresAt = Math.max(session.expiresAt, session.lastUsedAt + 1); }
@@ -1230,6 +1300,23 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       expect(forbiddenReads(judgements, "Monitor.isIdle", LIVENESS_READS)).toEqual([]);
       expect(forbiddenReads(judgements, "Monitor.leaseLapsed", ACTIVITY_CLOCKS)).toEqual([
         "judgements.ts Monitor.leaseLapsed:5 reads lastUsedAt",
+      ]);
+    });
+
+    test("reports an admission credited without negating the read classification (#10964)", () => {
+      const admissions = parse(
+        "admissions.ts",
+        [
+          "async function resolve(readOnly, execution, tracker) {",
+          "  if (execution && !readOnly) { tracker.markSessionAdmitted(execution.id); }",
+          "  if (execution) { tracker.markSessionAdmitted(execution.id); }",
+          "  if (!readOnly) {} else { tracker.markSessionAdmitted(execution.id); }",
+          "}",
+        ].join("\n"),
+      );
+      expect(unguardedAdmissions(admissions, ["readOnly"])).toEqual([
+        "admissions.ts:3 credits a read",
+        "admissions.ts:4 credits a read",
       ]);
     });
 

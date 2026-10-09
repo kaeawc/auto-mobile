@@ -191,9 +191,14 @@ invocations, so the next invocation's new token can always claim it.
 
 Heartbeats prove liveness, not use (owner decision 2026-10-08, #10656). A
 heartbeat-policy session also has a 2-minute idle window measured from the end
-of its last tool call, and heartbeats never extend it: they renew only the owner
-lease and its grace window. Only tool usage extends the idle deadline, so a
-heartbeat from an idle but live owner does not. A tool call in flight is
+of its last control call, and heartbeats never extend it: they renew only the owner
+lease and its grace window. Only control calls extend the idle deadline, so a
+heartbeat from an idle but live owner does not. No read counts as activity, not
+even the owner's own (owner decision 2026-10-09, #10964): `observe` and the other
+read-only tools never extend the idle window, so an agent that only observes its
+device for longer than the window loses it. Read-only access never requires a
+session (#10965); see [device ownership](device-ownership.md) for which tools and
+argument forms are reads. A tool call in flight is
 activity, so the idle window does not release a session mid-call, and it
 restarts when the call ends (#10694). That hold is bounded: it lasts until the
 latest in-flight call's request deadline plus 10 s, or 30 minutes after it began

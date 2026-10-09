@@ -365,8 +365,10 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
     failure surfaces as an error and must never be read as "not running"
     (#6407, child of #6371).
 
-16. **Liveness proves the owner is alive; only tool usage proves the device is
-    in use.** A heartbeat renews the owner lease and never the idle deadline
+16. **Liveness proves the owner is alive; only control calls prove the device
+    is in use.** No read counts as activity, not even the owner's own
+    (#10964): a `deviceReadOnly` call is admitted read-only and its end is not
+    use; the matrix's default "tool call" is a control call. A heartbeat renews the owner lease and never the idle deadline
     (#10656). Every change to a liveness path ships a two-sided test: each
     "kept while X" assertion is paired with "released when Y", driven by the
     real producers (the proxy's own keeper, tool calls, tokenless desktop

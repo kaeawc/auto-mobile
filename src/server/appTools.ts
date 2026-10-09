@@ -1628,7 +1628,8 @@ export function registerAppTools() {
     "Read app permission state",
     getAppPermissionsSchema,
     getAppPermissionsHandler,
-    { defaultEnabled: false },
+    // Reads only; read-only access never requires a session (#10965).
+    { defaultEnabled: false, deviceReadOnly: true },
   );
 
   ToolRegistry.registerDeviceAware(

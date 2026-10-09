@@ -167,6 +167,10 @@ while IFS= read -r line; do
   elif [[ "${FAKE_SELECTOR_NOT_CREDITED:-0}" != 1 ]]; then
     target="$(jq -r '.params.arguments.deviceId // empty' <<< "${line}")"
   fi
+  # No read counts as activity (#10964); FAKE_READS_COUNT_AS_USE models the old daemon.
+  if [[ "${tool}" == observe && "${FAKE_READS_COUNT_AS_USE:-0}" != 1 ]]; then
+    target=""
+  fi
   if [[ -n "${target}" && -d "${state}/${target}" ]]; then
     # A tool call takes a millisecond of virtual time, so successive calls are distinguishable.
     printf '%s\n' "$(($(now) + 1))" > "${FAKE}/clock"
@@ -270,13 +274,14 @@ run_check() {
   [[ "${output}" == *"PASS idle"* ]]
   [[ "${output}" == *"PASS stdin-eof"* ]]
   [[ "${output}" == *"PASS selector"* ]]
+  [[ "${output}" == *"PASS observe-only"* ]]
   [[ "${output}" == *"PASS stream"* ]]
   # two-devices needs --second-serial and is not part of the default sweep.
   [[ "${output}" != *"two-devices"* ]]
 
   # Each scenario released the device the way it should.
   run cut -d' ' -f2 "${FAKE}/releases"
-  [ "${output}" = "$(printf 'owner-disconnected\nheartbeat-timeout\ncleanup-expired\nowner-disconnected\nowner-disconnected\ncleanup-expired')" ]
+  [ "${output}" = "$(printf 'owner-disconnected\nheartbeat-timeout\ncleanup-expired\nowner-disconnected\nowner-disconnected\ncleanup-expired\ncleanup-expired')" ]
 
   # A fully private daemon on the explicit port, with the short idle window.
   grep -qx "AUTOMOBILE_DAEMON_SOCKET_PATH=${WORK}/d.sock" "${FAKE}/daemon.env"
@@ -294,13 +299,15 @@ run_check() {
   run sort -u "${FAKE}/proxy.calls"
   [ "${output}" = "--port 3920 --strict-port" ]
 
-  # The device is acquired by serial and observed with the session the daemon reported.
+  # The device is acquired by serial and driven by control calls with the session the daemon
+  # reported; only the observe-only scenario reads.
   grep -qx 'getAndroid {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
-  grep -qx "observe {\"sessionUuid\":\"${SESSION_UUID}\"}" "${FAKE}/tool.calls"
+  grep -qx "homeScreen {\"sessionUuid\":\"${SESSION_UUID}\"}" "${FAKE}/tool.calls"
+  grep -qx 'observe {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
 
   # Ground truth and evidence for every scenario.
-  [ "$(grep -c 'get-state' "${FAKE}/adb.calls")" -eq 7 ]
-  for scenario in active no-heartbeat idle stdin-eof selector stream; do
+  [ "$(grep -c 'get-state' "${FAKE}/adb.calls")" -eq 8 ]
+  for scenario in active no-heartbeat idle stdin-eof selector observe-only stream; do
     [ -s "${EVIDENCE}/${scenario}.sessions.log" ]
   done
 }
@@ -349,13 +356,28 @@ run_check() {
   run_check --scenario selector
   [ "${status}" -eq 0 ]
   [[ "${output}" == *"PASS selector"* ]]
-  grep -qx 'observe {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
+  grep -qx 'homeScreen {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
 }
 
 @test "selector: fails when deviceId-only calls are not credited to the session" {
   FAKE_SELECTOR_NOT_CREDITED=1 run_check --scenario selector
   [ "${status}" -eq 1 ]
   [[ "${output}" == *"FAIL selector"* ]]
+}
+
+@test "observe-only: an owner that only observes loses the device at the idle window" {
+  run_check --scenario observe-only
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS observe-only"* ]]
+  grep -qx 'observe {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
+  run cut -d' ' -f2 "${FAKE}/releases"
+  [ "${output}" = "cleanup-expired" ]
+}
+
+@test "observe-only: fails when a read counts as use" {
+  FAKE_READS_COUNT_AS_USE=1 run_check --scenario observe-only
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL observe-only"*"a read must not count as use"* ]]
 }
 
 @test "all: a failing scenario does not hide the scenarios after it" {

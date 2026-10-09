@@ -85,6 +85,11 @@ const CONNECTION = "scenario-connection";
 export const SOCKET_CLIENT_CONNECTION = "scenario-socket-client";
 export const OWNER_TOKEN = "scenario-proxy-owner";
 const PLATFORM = "android" as const;
+/**
+ * The device tool a scenario's "tool call" uses: a control call, because only control calls are
+ * activity (#10964). A read (`observe`) never extends a session's idle window.
+ */
+const CONTROL_TOOL = "homeScreen";
 
 export interface ReleaseRecord {
   at: number;
@@ -502,8 +507,11 @@ export class LivenessScenario {
     return sessionId;
   }
 
-  /** A device tool call on `sessionId` that settles at once. */
-  async toolCall(sessionId: string, tool = "observe"): Promise<void> {
+  /**
+   * A device tool call on `sessionId` that settles at once. The default is a control call: no read
+   * counts as activity, not even the owner's own (#10964).
+   */
+  async toolCall(sessionId: string, tool = CONTROL_TOOL): Promise<void> {
     await this.proxy.callTool(tool, { sessionUuid: sessionId });
   }
 
@@ -512,7 +520,7 @@ export class LivenessScenario {
    * the desktop or a JUnit runner over the socket): the proxy's own released-session refusal does
    * not apply, so the daemon's admission decides.
    */
-  async daemonToolCall(sessionId: string, tool = "observe"): Promise<unknown> {
+  async daemonToolCall(sessionId: string, tool = CONTROL_TOOL): Promise<unknown> {
     return await this.runDeviceTool(tool, { sessionUuid: sessionId }, SOCKET_CLIENT_CONNECTION);
   }
 
@@ -534,7 +542,7 @@ export class LivenessScenario {
   }
 
   /** A tool call that stays in flight until `settle()`. */
-  startLongCall(sessionId: string, tool = "observe"): LongCall {
+  startLongCall(sessionId: string, tool = CONTROL_TOOL): LongCall {
     let open!: () => void;
     this.gates.set(
       sessionId,

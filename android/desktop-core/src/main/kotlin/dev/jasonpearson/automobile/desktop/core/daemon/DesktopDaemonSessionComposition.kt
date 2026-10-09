@@ -42,13 +42,27 @@ private const val HEARTBEAT_INTERVAL_MS = 2_000L
 internal const val MAX_BIND_ATTEMPTS = 3
 
 /**
- * Cadence of the automatic single re-attempt while a bind error is surfaced and the pane stays open
- * (#10716), so a device that comes back needs no manual Retry. Slow on purpose: the error already
- * burned [MAX_BIND_ATTEMPTS] attempts, and each retry is a daemon round trip.
+ * Ceiling of the delay before the automatic single re-attempt while a bind error is surfaced and
+ * the pane stays open (#10716), so a device that comes back needs no manual Retry. Slow on purpose:
+ * the error already burned [MAX_BIND_ATTEMPTS] attempts, and each retry is a daemon round trip.
  */
-internal const val BIND_ERROR_RETRY_INTERVAL_MS = 30_000L
-private const val BIND_ERROR_RETRY_TICKS =
-  (BIND_ERROR_RETRY_INTERVAL_MS / HEARTBEAT_INTERVAL_MS).toInt()
+internal const val BIND_ERROR_RETRY_MAX_DELAY_MS = 30_000L
+
+/**
+ * Delay before the [retry]th (0-based) automatic re-attempt of a surfaced bind error (#10832). The
+ * default backs off exponentially with jitter up to [BIND_ERROR_RETRY_MAX_DELAY_MS]; tests inject a
+ * deterministic one.
+ */
+fun interface BindRetryBackoff {
+  fun delayMs(retry: Int): Long
+
+  companion object {
+    val Default = BindRetryBackoff { retry ->
+      RetryPolicy(initialDelayMs = 5_000L, maxDelayMs = BIND_ERROR_RETRY_MAX_DELAY_MS)
+        .delayBeforeRetryMs(retry)
+    }
+  }
+}
 
 /**
  * How long the host (the desktop window, the IDE tool window) may stay hidden before the session
@@ -64,6 +78,14 @@ const val HIDDEN_RELEASE_GRACE_MS = 10_000L
  * few seconds. Past this the input is shed so the pane's single dispatch thread is not held.
  */
 const val INPUT_ALLOCATION_TIMEOUT_MS = 10_000L
+
+/**
+ * How long heartbeats may keep failing for a reason other than the daemon answering "session not
+ * found" before a held device is treated as lost (#11072): the daemon's heartbeat lease plus its
+ * grace. A shorter blip (a connect error, a daemon briefly busy or restarting its socket) keeps the
+ * hold and retries on the next tick, since the daemon still holds the session.
+ */
+const val HEARTBEAT_LAPSE_MS = 8_000L
 
 /** A device a visible pane shows, and the platform `setActiveDevice` needs to allocate it. */
 data class DesktopDaemonSessionBinding(val deviceId: String, val platform: String)
@@ -248,7 +270,15 @@ fun rememberDesktopDaemonSession(
   hostVisible: Boolean = true,
   hiddenReleaseGraceMs: Long = HIDDEN_RELEASE_GRACE_MS,
   inputAllocationTimeoutMs: Long = INPUT_ALLOCATION_TIMEOUT_MS,
+  /**
+   * The recording the desktop started. A hidden host does not release the device it is recording
+   * (#10978): the hidden release is skipped, and the daemon's idle window frees the device later.
+   */
+  activeRecordings: ActiveRecordingTracker = remember { ActiveRecordingTracker() },
   onDaemonRecovered: suspend () -> Boolean = { true },
+  bindRetryBackoff: BindRetryBackoff = BindRetryBackoff.Default,
+  /** Monotonic milliseconds, for [HEARTBEAT_LAPSE_MS]; tests pass their virtual clock. */
+  monotonicClockMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ): DesktopDaemonSessionState {
   // Bumped to replace the session with a fresh one (#10659). Releasing a session is how a hold is
   // dropped, and a released UUID is terminal on the daemon, so the fresh one registers as an
@@ -295,6 +325,12 @@ fun rememberDesktopDaemonSession(
       hiddenPastGrace = false
     } else {
       delay(hiddenReleaseGraceMs)
+      if (inputDeviceId?.let(activeRecordings::isRecordingOn) == true) {
+        // Releasing would stop the recording the user started; recording is not use, so the
+        // daemon's idle window still frees the device eventually (#10978).
+        LOG.info("Desktop host hidden while recording $inputDeviceId; keeping the device held")
+        return@LaunchedEffect
+      }
       hiddenPastGrace = true
       // Nobody can see the device (#10695): stop holding it, as after an idle release. Showing the
       // host again allocates nothing until the user's next input.
@@ -435,6 +471,10 @@ fun rememberDesktopDaemonSession(
     // more bind attempt (#10716). Counted in ticks, not wall time, so tests drive it with the
     // virtual clock.
     var ticksWithBindError = 0
+    // Automatic re-attempts spent on this error (the backoff index), and the tick count the current
+    // wait needs (-1 until chosen). Both reset once a bind succeeds.
+    var bindErrorRetries = 0
+    var bindErrorWaitTicks = -1
     if (carried != null) {
       bindErrorMessage = carried.second
       bindErrorDeviceId = carried.first
@@ -443,6 +483,9 @@ fun rememberDesktopDaemonSession(
     // holds a device the user no longer drives (#10682 C3), or the daemon released its UUID
     // terminally so it can never bind again (C4).
     var rotateSession = false
+    // When a heartbeat last reached the daemon. Transient failures keep a held device until this is
+    // more than [HEARTBEAT_LAPSE_MS] old (#11072).
+    var lastHeartbeatOkAtMs = monotonicClockMs()
     while (isActive && bindingGeneration.get() == generation) {
       val registered = runCatching {
         bindingMutex.withLock {
@@ -461,6 +504,7 @@ fun rememberDesktopDaemonSession(
                   result.success -> {
                     bindingAcknowledged = true
                     failedBinds = 0
+                    bindErrorRetries = 0
                     // A later bind succeeding (the device came back) clears a surfaced bind error
                     // without a Retry click.
                     bindErrorMessage = null
@@ -573,18 +617,36 @@ fun rememberDesktopDaemonSession(
         .onFailure { error ->
           if (error is CancellationException) throw error
           lapse = error
-          LOG.warn("Desktop daemon session lapsed, re-registering: ${error.message}")
+          LOG.warn("Desktop daemon session heartbeat failed: ${error.message}")
         }
         .isSuccess
+      if (alive) lastHeartbeatOkAtMs = monotonicClockMs()
+      // Only the daemon's "session not found" means the session is gone. Any other failure (a
+      // connect error, a missing socket, a daemon still initializing) is retried on the next tick,
+      // and only a streak longer than the lease plus grace counts as a lapse (#11072).
+      val sessionGone = lapse is DaemonSessionNotFoundException
+      val lapsedPastLease = !alive && monotonicClockMs() - lastHeartbeatOkAtMs > HEARTBEAT_LAPSE_MS
       if (alive && failedBinds >= MAX_BIND_ATTEMPTS && bindErrorMessage != null) {
+        if (bindErrorWaitTicks < 0) {
+          val delayMs = bindRetryBackoff.delayMs(bindErrorRetries)
+          bindErrorWaitTicks =
+            ((delayMs + HEARTBEAT_INTERVAL_MS - 1) / HEARTBEAT_INTERVAL_MS).toInt()
+        }
         ticksWithBindError++
-        if (ticksWithBindError >= BIND_ERROR_RETRY_TICKS) {
+        if (ticksWithBindError >= bindErrorWaitTicks) {
           // One attempt: a failure puts the count straight back to the cap and keeps the message.
           ticksWithBindError = 0
+          bindErrorWaitTicks = -1
+          bindErrorRetries++
           failedBinds = MAX_BIND_ATTEMPTS - 1
         }
       } else {
         ticksWithBindError = 0
+        bindErrorWaitTicks = -1
+      }
+      if (!alive && bindingAcknowledged && target != null && !sessionGone && !lapsedPastLease) {
+        // A transient miss: the daemon still holds the session, so keep the device and retry.
+        continue
       }
       if (!alive && bindingAcknowledged && target != null) {
         // The daemon no longer has this session's hold: it idle-released it after the idle window
@@ -598,7 +660,13 @@ fun rememberDesktopDaemonSession(
         heldDevice.set(null)
         idleReleasedDeviceId = target.deviceId
         releaseReason =
-          SessionReleaseReason.fromDaemon((lapse as? DaemonSessionNotFoundException)?.releaseReason)
+          if (sessionGone) {
+            SessionReleaseReason.fromDaemon(
+              (lapse as? DaemonSessionNotFoundException)?.releaseReason,
+            )
+          } else {
+            SessionReleaseReason.HEARTBEAT_LAPSED
+          }
         inputDeviceId = null
         pendingRecoveryRefresh.set(true)
         sessionEpoch++
@@ -610,6 +678,7 @@ fun rememberDesktopDaemonSession(
         // A surfaced bind error is retried once the session re-registers after a lapse (a daemon
         // restart may have brought the device back); a success clears it.
         if (failedBinds >= MAX_BIND_ATTEMPTS) failedBinds = 0
+        bindErrorRetries = 0
       }
     }
   }

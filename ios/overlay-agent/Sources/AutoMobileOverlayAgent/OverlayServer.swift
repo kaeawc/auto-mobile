@@ -16,6 +16,8 @@ final class OverlayServer {
         let connection: NWConnection
         var gate: OverlayConnectionGate
         var framer = OverlayLineFramer()
+        /// Whether this connection currently counts toward `OverlayServer.tracker`.
+        var counted = false
 
         init(connection: NWConnection, token: String, capabilities: [String]) {
             self.connection = connection
@@ -28,6 +30,11 @@ final class OverlayServer {
     private let handler: Handler
     private var listener: NWListener?
     private var clients: [ObjectIdentifier: Client] = [:]
+    private var tracker = OverlayClientTracker<ObjectIdentifier>()
+    /// Reports the authenticated-connection count on the main queue each time it changes. Hops
+    /// from the same serial queue as request dispatch, so a handler sees the count that was true
+    /// when its request arrived.
+    var onClientCountChanged: ((Int) -> Void)?
     private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.overlay-agent")
 
     init(configuration: OverlayAgentConfiguration, capabilities: [String], handler: @escaping Handler) {
@@ -75,7 +82,7 @@ final class OverlayServer {
         clients[key] = client
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
-            case .failed, .cancelled: self?.clients[key] = nil
+            case .failed, .cancelled: self?.remove(key)
             default: break
             }
         }
@@ -85,6 +92,17 @@ final class OverlayServer {
             self.perform(client.gate.fail(.helloTimeout), on: client)
         }
         receive(on: client)
+    }
+
+    private func remove(_ key: ObjectIdentifier) {
+        guard let client = clients.removeValue(forKey: key) else { return }
+        guard client.counted else { return }
+        client.counted = false
+        if let count = tracker.close(key) { publish(count) }
+    }
+
+    private func publish(_ count: Int) {
+        DispatchQueue.main.async { self.onClientCountChanged?(count) }
     }
 
     private func receive(on client: Client) {
@@ -118,6 +136,11 @@ final class OverlayServer {
         switch action {
         case let .helloAccepted(result):
             send(result, on: client.connection)
+            let key = ObjectIdentifier(client.connection)
+            if !client.counted, let count = tracker.authenticate(key) {
+                client.counted = true
+                publish(count)
+            }
         case let .dispatch(message):
             dispatch(message, on: client.connection)
         case let .rejectMalformed(result):

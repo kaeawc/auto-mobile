@@ -33,8 +33,17 @@ class DesktopSessionRegistration(
     if (held) holdsDevice = true
   }
 
+  /**
+   * A failed heartbeat drops readiness so the session re-registers, except a transient failure
+   * while a device is held (#11072): the daemon still holds that session, and streams keep
+   * authenticating with it until the session loop decides the hold lapsed.
+   */
   fun heartbeat() {
-    runCatching { heartbeat.invoke() }.onFailure { ready.value = false }.getOrThrow()
+    runCatching { heartbeat.invoke() }
+      .onFailure { error ->
+        if (error is DaemonSessionNotFoundException || !holdsDevice) ready.value = false
+      }
+      .getOrThrow()
   }
 
   fun clear() {

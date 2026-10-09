@@ -1,0 +1,28 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "components": {
+      "t": {
+        "node": {
+          "type": "spacer"
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "use",
+          "component": "t"
+        }
+      ]
+    }
+  },
+  "expectedPath": "components.t.node",
+  "expectedMessage": "Unknown property"
+}

@@ -81,6 +81,7 @@ function harness(
   const lifecycle = new StreamDeviceLifecycleEmitter();
   const ownership = new Set<(id: string) => void>();
   const releases = new Set<(id: string) => void>();
+  const observerReleases = new Set<(id: string) => void>();
   let lifecycleListeners = 0;
   const state = {
     owner: options.owner ?? (null as string | null),
@@ -166,6 +167,14 @@ function harness(
           };
         },
       },
+      observerReleases: {
+        subscribe: (cb) => {
+          observerReleases.add(cb);
+          return () => {
+            observerReleases.delete(cb);
+          };
+        },
+      },
       deviceLifecycle: () => ({
         onDeviceRestored: (cb) => lifecycle.onDeviceRestored(cb),
         onDeviceRemoved: (cb) => {
@@ -230,6 +239,7 @@ function harness(
     lifecycle,
     ownership,
     releases,
+    observerReleases,
     state,
     sources,
     captureHints,
@@ -321,6 +331,19 @@ test.each(["released", "expired", "releasing", "owner release"])(
     expect(endings(h)).toHaveLength(1);
   },
 );
+test("c: a released or expired observer's viewer stream ends without waiting for its lease (#11076)", async () => {
+  const h = harness({ owner: "b" });
+  const first = await h.start();
+  expect(first.subscriptionKind).toBe("viewer");
+  // The observer registry no longer admits "a"; no device owner changed and no session released.
+  h.state.live.delete("a");
+  for (const cb of h.observerReleases) {
+    cb("a");
+  }
+  await flush();
+  expect(h.sources[0].stopped).toBe(true);
+  expect(endings(h)).toHaveLength(1);
+});
 test("d: removal ends owner and viewer; all lease reads are typed and start can re-subscribe", async () => {
   const h = harness();
   const viewer = await h.start();

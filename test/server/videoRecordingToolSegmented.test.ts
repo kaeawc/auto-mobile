@@ -29,12 +29,14 @@ import {
   setSegmentedSessionRecordingDependencies,
   setSegmentedSessionTimer,
   setVideoRecordingDeviceDetectorForTesting,
+  stopSegmentedVideoRecordingsForOwner,
 } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   startVideoRecording,
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
+  stopVideoRecordingUnattended,
 } from "../../src/server/videoRecordingManager";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
@@ -312,6 +314,66 @@ describe("videoRecording tool segmentation branch", () => {
     ).rejects.toThrow(
       "Failed to stop video recordings: No active video recording found for device.",
     );
+  });
+
+  describe("stop by id after a release-time stop (#10958)", () => {
+    test("the previous owner gets the finalized single recording, a foreign session does not", async () => {
+      const active = await startVideoRecording({
+        device: androidDevice,
+        ownerSessionUuid: "session-a",
+      });
+      await fsPromises.writeFile(active.outputPath, "video-bytes");
+      await stopVideoRecordingUnattended(active.recordingId);
+      const stopsBefore = fakeBackend.stopCalls.length;
+
+      const response = parse(
+        await handler()(androidDevice, {
+          action: "stop",
+          recordingId: active.recordingId,
+          sessionUuid: "session-a",
+        }),
+      );
+
+      expect((response.recordings as Array<{ recordingId: string }>)[0].recordingId).toBe(
+        active.recordingId,
+      );
+      expect(response.alreadyStopped).toBe(true);
+      expect(fakeBackend.stopCalls.length).toBe(stopsBefore);
+      await expect(
+        handler()(androidDevice, {
+          action: "stop",
+          recordingId: active.recordingId,
+          sessionUuid: "session-b",
+        }),
+      ).rejects.toThrow("Failed to stop video recording");
+    });
+
+    test("the previous owner gets the finalized segmented recording by handle", async () => {
+      const start = parse(
+        await handler()(androidDevice, {
+          action: "start",
+          platform: "android",
+          maxDuration: 181,
+          sessionUuid: "session-a",
+        }),
+      );
+      const handle = (start.recordings as Array<{ recordingId: string }>)[0].recordingId;
+      await stopSegmentedVideoRecordingsForOwner("session-a", androidDevice.deviceId);
+
+      const response = parse(
+        await handler()(androidDevice, {
+          action: "stop",
+          recordingId: handle,
+          sessionUuid: "session-a",
+        }),
+      );
+
+      expect(response.segmented).toBe(true);
+      expect((response.recordings as Array<{ recordingId: string }>)[0].recordingId).toBe(handle);
+      await expect(
+        handler()(androidDevice, { action: "stop", recordingId: handle, sessionUuid: "session-b" }),
+      ).rejects.toThrow("Failed to stop video recording");
+    });
   });
 
   test("stop response never returns a recording it evicted", async () => {

@@ -122,7 +122,10 @@ class CtrlProxyMessageHandler(
       is RequestHierarchyIfStale ->
         actions.requestHierarchyIfStale(request.sinceTimestamp, request.requestId)
       is SetHierarchyInterval -> actions.setHierarchyInterval(request.intervalMs)
-      is RequestScreenshot -> actions.requestScreenshot(request.requestId, request.displayId)
+      is RequestScreenshot ->
+        if (request.hideOverlays)
+          actions.requestScreenshot(request.requestId, request.displayId, hideOverlays = true)
+        else actions.requestScreenshot(request.requestId, request.displayId)
       is RequestSwipe -> {
         if (request.displayId != null) {
           GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->

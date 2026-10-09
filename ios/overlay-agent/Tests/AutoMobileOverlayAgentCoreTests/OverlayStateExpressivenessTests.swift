@@ -123,6 +123,35 @@ final class OverlayStateExpressivenessTests: XCTestCase {
         XCTAssertEqual(session.state["count"], .number(0))
     }
 
+    /// #11051: state keys bind per item, so each repeated row owns its like toggle and style.
+    func testBoundStateKeysToggleEachRowIndependently() throws {
+        let spec = try sharedFixture("repeat-state-keys")
+        let rows = try XCTUnwrap(spec.root.children?.compactMap(\.children))
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows.map { $0[1].onTap?.first?.key }, ["liked_a", "liked_b"])
+        XCTAssertEqual(rows.map { $0[3].stateKey }, ["notify_a", "notify_b"])
+        XCTAssertEqual(rows.map { $0[4].onTap?.map(\.key) }, [["count_a", "last_0"], ["count_b", "last_1"]])
+        XCTAssertEqual(rows.map { $0[5].trailing?.stateKey }, ["saved_a", "saved_b"])
+        XCTAssertEqual(rows.map { $0[6].confirm?.onTap?.first?.key }, ["open_a", "open_b"])
+        var session = OverlaySession()
+        session.show(spec)
+        func liked() -> [Bool] {
+            rows.map { $0[2].visibleWhen?.holds(session.state) ?? true }
+        }
+        func highlighted() -> [Bool] {
+            rows.map { $0[1].resolvedStyle(state: session.state)?.color != nil }
+        }
+        XCTAssertEqual(liked(), [false, true])
+        XCTAssertEqual(highlighted(), [false, true])
+        _ = try session.run(XCTUnwrap(rows[0][1].onTap))
+        XCTAssertEqual(liked(), [true, true])
+        _ = try session.run(XCTUnwrap(rows[1][1].onTap))
+        XCTAssertEqual(liked(), [true, false])
+        XCTAssertEqual(highlighted(), [true, false])
+        XCTAssertEqual(session.state["liked_a"], .bool(true))
+        XCTAssertEqual(session.state["liked_b"], .bool(false))
+    }
+
     func testAPlaceholderThatIsTheWholeOperandKeepsTheItemType() throws {
         let expanded = OverlayRepeat.expand(.object([
             "type": .string("column"),

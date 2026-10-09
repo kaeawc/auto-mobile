@@ -7,7 +7,8 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { resetAndroidInventoryEnrichmentCache } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { AndroidAvdProvenanceCache } from "../utils/AndroidAvdProvenanceCache";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
-import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../devices/deviceUtils";
+import { PlatformDeviceManager } from "../devices/deviceUtils";
+import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
 import { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { logger } from "../utils/logger";
@@ -23,11 +24,9 @@ import {
   type AppleDeviceType,
 } from "../utils/ios-cmdline-tools/SimCtlClient";
 import {
-  compareSimctlVersions,
-  decodeSimctlVersion,
-  parseSimctlVersion,
-  type SimctlVersionTuple,
-} from "../utils/ios-cmdline-tools/simctlVersion";
+  deviceTypeRuntimeBounds,
+  evaluateRuntimeCompatibility,
+} from "../utils/ios-cmdline-tools/runtimeCompatibility";
 import {
   createConfiguredInventoryContract,
   failedConfiguredInventoryObservation,
@@ -130,12 +129,29 @@ interface ProvisioningRuntime {
   availability: ProvisioningAvailability;
 }
 
+/**
+ * Per-model runtime compatibility. `known` carries inclusive normalized bounds
+ * (`maxRuntimeVersion: null` is an unbounded maximum) and the installed,
+ * available runtimes inside them; an empty `compatibleRuntimeIds` is an
+ * authoritative "none". `unknown` means the evidence was missing or malformed
+ * and says nothing about which runtimes work.
+ */
+type ProvisioningRuntimeCompatibility =
+  | {
+      knowledge: "known";
+      minRuntimeVersion: string;
+      maxRuntimeVersion: string | null;
+      compatibleRuntimeIds: string[];
+    }
+  | { knowledge: "unknown"; reason: string };
+
 interface ProvisioningDeviceType {
   platform: Platform;
   id: string;
   name: string;
   family?: string;
   availability: ProvisioningAvailability;
+  runtimeCompatibility?: ProvisioningRuntimeCompatibility;
 }
 
 interface ProvisioningAvailability {
@@ -225,7 +241,7 @@ export function createDeviceImageResourcesHandler(
   getDeviceImagesByPlatform: (params: Record<string, string>) => Promise<ResourceContent>;
   getDeviceImagesForPlatforms: (platforms: Platform[]) => Promise<DeviceImagesResourceContent>;
 } {
-  const deviceManager = deps?.deviceManager ?? new MultiPlatformDeviceManager();
+  const deviceManager = deps?.deviceManager ?? PlatformDeviceManagerFactory.getInstance();
   const avdManager = deps?.avdManager ?? new AvdManagerService();
   // Tests often inject only the Android/device seam. Avoid creating a real simctl
   // client in those partial fakes; production construction always includes it.
@@ -799,6 +815,7 @@ function buildIosProvisioningCatalogEntries(
       name: deviceType.name,
       family: deviceType.productFamily,
       availability,
+      runtimeCompatibility: iosRuntimeCompatibility(deviceType, runtimeEntries),
     };
   });
 
@@ -816,30 +833,47 @@ function buildIosProvisioningCatalogEntries(
   };
 }
 
+function iosRuntimeCompatibility(
+  deviceType: AppleDeviceType,
+  runtimeEntries: IosRuntimeEntry[],
+): ProvisioningRuntimeCompatibility {
+  const bounds = deviceTypeRuntimeBounds(deviceType);
+  if (!bounds) {
+    return {
+      knowledge: "unknown",
+      reason: evaluateRuntimeCompatibility(deviceType, undefined).reason ?? "unknown",
+    };
+  }
+  return {
+    knowledge: "known",
+    minRuntimeVersion: bounds.minVersion,
+    maxRuntimeVersion: bounds.maxVersion,
+    compatibleRuntimeIds: runtimeEntries
+      .filter(
+        ({ runtime, availability }) =>
+          availability.available &&
+          evaluateRuntimeCompatibility(deviceType, runtime.version).status === "supported",
+      )
+      .map(({ runtime }) => runtime.identifier),
+  };
+}
+
+interface IosRuntimeEntry {
+  runtime: AppleDeviceRuntime;
+  availability: ProvisioningAvailability;
+}
+
 function iosDeviceTypeAvailability(
   deviceType: AppleDeviceType,
-  runtimeEntries: Array<{
-    runtime: AppleDeviceRuntime;
-    availability: ProvisioningAvailability;
-  }>,
+  runtimeEntries: IosRuntimeEntry[],
 ): ProvisioningAvailability {
-  const minVersion: SimctlVersionTuple | undefined =
-    parseSimctlVersion(deviceType.minRuntimeVersionString) ??
-    decodeSimctlVersion(deviceType.minRuntimeVersion);
-  const maxVersion: SimctlVersionTuple | undefined =
-    parseSimctlVersion(deviceType.maxRuntimeVersionString) ??
-    decodeSimctlVersion(deviceType.maxRuntimeVersion);
-  if (!minVersion || !maxVersion) {
+  if (!deviceTypeRuntimeBounds(deviceType)) {
     throw new Error("device type has an invalid runtime version range");
   }
-  const matchingRuntimes = runtimeEntries.filter(({ runtime }) => {
-    const version = parseSimctlVersion(runtime.version);
-    return (
-      version !== undefined &&
-      compareSimctlVersions(version, minVersion) >= 0 &&
-      compareSimctlVersions(version, maxVersion) <= 0
-    );
-  });
+  const matchingRuntimes = runtimeEntries.filter(
+    ({ runtime }) =>
+      evaluateRuntimeCompatibility(deviceType, runtime.version).status === "supported",
+  );
   const availableRuntime = matchingRuntimes.find(({ availability }) => availability.available);
   const unavailableRuntime = matchingRuntimes[0];
   return availableRuntime

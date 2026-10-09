@@ -235,8 +235,13 @@ export class AndroidSegmentedPlanVideoSession {
       : this.device.deviceId === device.deviceId;
   }
 
+  /** Daemon session that started this recording; undefined for a sessionless start. */
+  get ownerSession(): string | undefined {
+    return this.ownerSessionUuid;
+  }
+
   /** True when the daemon session `sessionUuid` owns this recording session on `deviceId`. */
-  isOwnedBy(sessionUuid: string, deviceId: string): boolean {
+  isOwnedBy(sessionUuid: string | undefined, deviceId: string): boolean {
     return this.ownerSessionUuid === sessionUuid && this.device.deviceId === deviceId;
   }
 

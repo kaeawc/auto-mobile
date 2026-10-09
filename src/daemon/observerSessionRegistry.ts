@@ -51,12 +51,17 @@ export function observerMaySeeDeviceOwner(ownerSessionId: string | null): boolea
 export class ObserverSessionRegistry implements ObserverSessionStore {
   private readonly sessions = new Map<string, ObserverSession>();
   private disposed = false;
+  private sweepHandle: NodeJS.Timeout | null = null;
+  private sweepAtMs = Number.POSITIVE_INFINITY;
 
   constructor(
     private readonly timer: Timer = defaultTimer,
     // An observer gets the same no-heartbeat budget as a session owner: the lease plus the
     // suspect grace, so one late heartbeat at the 2 s client cadence never expires it.
     private readonly heartbeatTimeoutMs = getDefaultSessionHeartbeatTimeoutMs() + SUSPECT_GRACE_MS,
+    // Called when an observer is gone for good (explicit release or heartbeat expiry). Not called
+    // for "promotion": the same UUID lives on as a device session and keeps its state.
+    private readonly onObserverGone?: (sessionId: string) => void,
   ) {}
 
   register(sessionId: string, clientName: string): ObserverRegistrationResult {
@@ -76,6 +81,7 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
     const lastHeartbeat = this.timer.now();
     const expiresAtMs = lastHeartbeat + this.heartbeatTimeoutMs;
     this.sessions.set(sessionId, { sessionId, clientName, lastHeartbeat, expiresAtMs });
+    this.scheduleSweep();
     logger.debug(`Registered observer session ${sessionId} (${clientName})`);
     return { accepted: true, heartbeatTimeoutMs: this.heartbeatTimeoutMs, expiresAtMs };
   }
@@ -120,17 +126,59 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
   dispose(): void {
     this.disposed = true;
     this.sessions.clear();
+    this.cancelSweep();
   }
 
   private remove(sessionId: string, reason: ObserverReleaseReason): boolean {
     const removed = this.sessions.delete(sessionId);
     if (removed) {
       logger.debug(`Removed observer session ${sessionId}: ${reason}`);
+      if (reason !== "promotion") {
+        this.onObserverGone?.(sessionId);
+      }
     }
     return removed;
   }
 
-  /** Lazy expiry uses the injected clock; no timer can retain the daemon or leak on shutdown. */
+  /**
+   * Expire observers on time, not only on the next lookup (#11076): a released or expired
+   * observer's "gone" event is what ends its viewer streams, and an idle registry may never be
+   * read again. One unref'd timeout targets the earliest expiry; a heartbeat that pushes expiry
+   * later just lets it fire early and re-arm. Disposal cancels it.
+   */
+  private scheduleSweep(): void {
+    if (this.disposed) {
+      return;
+    }
+    const nextExpiryMs = Math.min(
+      ...Array.from(this.sessions.values(), (session) => session.expiresAtMs),
+    );
+    if (!Number.isFinite(nextExpiryMs) || (this.sweepHandle && this.sweepAtMs <= nextExpiryMs)) {
+      return;
+    }
+    this.cancelSweep();
+    this.sweepAtMs = nextExpiryMs;
+    this.sweepHandle = this.timer.setTimeout(
+      () => {
+        this.sweepHandle = null;
+        this.sweepAtMs = Number.POSITIVE_INFINITY;
+        this.purgeExpired();
+        this.scheduleSweep();
+      },
+      Math.max(0, nextExpiryMs - this.timer.now()),
+    );
+    (this.sweepHandle as { unref?: () => void } | null)?.unref?.();
+  }
+
+  private cancelSweep(): void {
+    if (this.sweepHandle) {
+      this.timer.clearTimeout(this.sweepHandle);
+      this.sweepHandle = null;
+    }
+    this.sweepAtMs = Number.POSITIVE_INFINITY;
+  }
+
+  /** Expiry uses the injected clock, both on lookup and from the scheduled sweep. */
   private purgeExpired(): void {
     const now = this.timer.now();
     for (const session of this.sessions.values()) {

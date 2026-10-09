@@ -6,8 +6,9 @@ export const DAEMON_HANDOFF_INTERRUPTED_MESSAGE =
 
 /**
  * The daemon lifecycle interrupted an admitted request while transferring
- * ownership to a replacement generation. Retrying is safe for idempotent
- * operations such as provisionDevice's operationId-backed lifecycle.
+ * ownership to a replacement generation. Retrying is safe for requests whose
+ * lifecycle re-runs idempotently, such as provisionDevice, which adopts the
+ * exact device it may already have created under the device lifecycle lease.
  */
 export class DaemonHandoffInterruptionError extends ActionableError {
   readonly code = DAEMON_HANDOFF_INTERRUPTED_ERROR_CODE;

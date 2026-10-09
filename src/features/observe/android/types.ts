@@ -250,6 +250,8 @@ export interface ScreenshotResult extends ScreenshotPerformanceMetadata {
   rotation?: number;
   error?: string;
   frameContext?: string;
+  /** Present when the request carried hideOverlays: true when the image excludes the overlay. */
+  overlaysHidden?: boolean;
 }
 
 /** Swipe result from accessibility service */

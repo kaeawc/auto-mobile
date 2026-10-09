@@ -111,6 +111,10 @@ function collectMalformedReads(): MalformedRead[] {
   // registerAppResources kicks off installed-app discovery, so a fake device manager
   // (no booted devices) must be in place before anything registers: nothing here may
   // reach adb, simctl or a CtrlProxy.
+  // Start from an empty registry: under a shared-process randomized run, files
+  // loaded ahead of this one may have left templates (for example the SDK
+  // capability template) that are cleared again before this file's tests run.
+  ResourceRegistry.clearResources();
   PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager());
   registerEveryResource();
   return ResourceRegistry.getTemplateDefinitions().flatMap((template) =>
@@ -122,6 +126,7 @@ const reads = collectMalformedReads();
 
 describe("every registered resource template tolerates a malformed percent-escape (#10117)", () => {
   beforeAll(() => {
+    ResourceRegistry.clearResources();
     PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager());
     registerEveryResource();
   });

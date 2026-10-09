@@ -1,0 +1,33 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "components": {
+      "t": {
+        "root": {
+          "type": "text",
+          "text": "{props.a}"
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "use",
+          "component": "t",
+          "props": {
+            "a": "x",
+            "extra": 1
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].props.extra",
+  "expectedMessage": "Unused component prop"
+}

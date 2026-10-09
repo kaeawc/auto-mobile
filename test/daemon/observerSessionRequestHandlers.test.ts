@@ -256,7 +256,8 @@ describe("registration-only daemon requests", () => {
         success: true,
         result: { sessionId },
       });
-      expect(timer.getPendingTimeoutCount()).toBe(0);
+      // Only the observer's expiry sweep (#11076); no device-session timer.
+      expect(timer.getPendingTimeoutCount()).toBe(1);
     } finally {
       finishSetup.resolve();
       await release;
@@ -329,7 +330,8 @@ describe("registration-only daemon requests", () => {
       });
       expect(registry.list()).toHaveLength(1);
       expect(manager.getSession(sessionId)).toBeNull();
-      expect(timer.getPendingTimeoutCount()).toBe(0);
+      // Only the observer's expiry sweep (#11076); no device-session timer.
+      expect(timer.getPendingTimeoutCount()).toBe(1);
     } finally {
       persistence.finishRelease.reject(new Error("release write failed"));
       await releaseError;

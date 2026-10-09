@@ -1,0 +1,49 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "components": {
+      "postCard": {
+        "root": {
+          "type": "row",
+          "children": [
+            {
+              "type": "text",
+              "text": "{props.name}"
+            },
+            {
+              "type": "button",
+              "label": "{props.label}"
+            }
+          ]
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "spacer"
+        },
+        {
+          "type": "text",
+          "text": "t"
+        },
+        {
+          "type": "use",
+          "component": "postCard",
+          "props": {
+            "name": "Alexey",
+            "label": ""
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[2] (use postCard) → components.postCard.root.children[1].label",
+  "expectedMessage": "Invalid string value"
+}

@@ -241,6 +241,12 @@ export function registerAccessibilityTools() {
     "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device, regardless of feature flags: enabled is what the device reports. When force-accessibility-mode or accessibility-auto-detect: off changes what the action tools assume, detectionOverride names it ({ mode: forced-on | auto-detect-off, effectiveEnabled }); it is absent otherwise.",
     accessibilitySchema,
     accessibilityHandler,
-    { defaultEnabled: false, outputSchema: accessibilityStateSchema },
+    {
+      defaultEnabled: false,
+      outputSchema: accessibilityStateSchema,
+      // The check form (no talkback/voiceover) reads (#10965); a toggle is control.
+      deviceReadOnly: (args: AccessibilityArgs) =>
+        args.talkback === undefined && args.voiceover === undefined,
+    },
   );
 }

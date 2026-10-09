@@ -426,6 +426,49 @@ class DatabaseInspectorProviderTest {
   }
 
   @Test
+  fun `host read-only flag refuses a write disguised as a read even when mutations are allowed`() {
+    val capabilities = mutationCapabilities(allowMutations = true)
+    val disguised =
+      listOf(
+        "WITH a AS (SELECT ')' UNION SELECT 1) DELETE FROM notes",
+        "WITH a AS (SELECT 1 /* ) */ UNION SELECT 2) UPDATE notes SET body = 'x'",
+        "INSERT INTO notes (id, body) VALUES (2, 'blocked') RETURNING id",
+        "DELETE FROM notes",
+      )
+
+    disguised.forEach { query ->
+      val error = runCatching {
+        provider.handleExecuteSQL(
+          driver,
+          executeSqlExtras(query).apply { putString("readOnly", "true") },
+          capabilities,
+        )
+      }
+        .exceptionOrNull()
+      assertTrue(
+        "Expected MutationNotAllowed for $query, got $error",
+        error is DatabaseError.MutationNotAllowed,
+      )
+    }
+    val rows =
+      provider.handleExecuteSQL(driver, executeSqlExtras("SELECT body FROM notes"), capabilities)
+    assertEquals(1, rows.getJSONArray("rows").length())
+    assertEquals("hello", rows.getJSONArray("rows").getJSONArray(0).getString(0))
+  }
+
+  @Test
+  fun `host read-only flag still runs reads when mutations are allowed`() {
+    val response =
+      provider.handleExecuteSQL(
+        driver,
+        executeSqlExtras("SELECT body FROM notes").apply { putString("readOnly", "true") },
+        mutationCapabilities(allowMutations = true),
+      )
+
+    assertEquals("query", response.getString("type"))
+  }
+
+  @Test
   fun `multiple statements take precedence over mutation policy on both provider paths`() {
     driver.executeSQL(databasePath, "CREATE TABLE backup AS SELECT * FROM notes")
     listOf(true, false).forEach { allowMutations ->

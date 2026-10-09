@@ -64,6 +64,7 @@ import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+  DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS,
 } from "./constants";
 import {
   isHostInventoryCall,
@@ -132,6 +133,11 @@ import {
   parseInputRequesterSessionUuid,
 } from "./inputDeviceOwnership";
 import { ToolRegistry } from "../server/toolRegistry";
+import { provisionCancellationOutcomes } from "../server/provisionCancellationOutcomes";
+import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../server/deviceTools";
+
+/** Slack after the handler's settlement wait for it to finish rollback and build its result. */
+const PROVISION_CANCELLATION_OUTCOME_GRACE_MS = 2_000;
 import { preferenceSetWarning, validateTypeForPlatform } from "../server/storageTools";
 import {
   clearAndroidKeyValueFileDirect,
@@ -647,7 +653,28 @@ interface SocketDaemonStateAccess extends DaemonStateAccess {
   getSessionManager(): ReturnType<DaemonStateAccess["getSessionManager"]> & {
     isReleasedSessionInRestartRecoveryWindow?(sessionId: string): Promise<boolean>;
   };
+  getDevicePool(): ReturnType<DaemonStateAccess["getDevicePool"]> & {
+    getDevice?(deviceId: string): { autolockSessionId?: string | null } | null | undefined;
+    resolveOwnedDeviceSessionForMcpSession?(
+      mcpSessionId: string | undefined,
+      deviceId: string,
+    ): string | undefined;
+  };
 }
+
+/** Classifies one tools/call argument set as a device read (`deviceReadOnly`). */
+export type DeviceReadToolCallClassifier = (toolName: string, args: unknown) => boolean;
+
+const registeredDeviceReadClassifier: DeviceReadToolCallClassifier = (toolName, args) =>
+  ToolRegistry.getRegisteredTool(toolName)?.isDeviceReadOnlyCall?.(args) === true;
+
+/**
+ * Suffix of a device's read lane (#10969). A watcher's read of a device another session holds
+ * runs on the read path, which has no device side effects there, so it never queues behind the
+ * holder's control calls on `device:<id>`. Reads still serialize among themselves.
+ */
+const MCP_FORWARD_READ_LANE_SUFFIX = ":read";
+const MCP_FORWARD_DEVICE_KEY_PREFIX = "device:";
 
 interface McpForwardRoute {
   /** Serializes work that targets the same physical device or session. */
@@ -890,6 +917,12 @@ export class UnixSocketServer {
   private timer: Timer;
   private readonly onFrameTrace?: (event: SocketFrameTraceEvent) => void;
   private readonly idGenerator: IdGenerator;
+  /**
+   * The daemon-generated key ({@link INTERNAL_LIVE_DEADLINE_KEY_PARAM}) last forwarded with each
+   * tools/call request. It is the only identity both this layer and the tool handler share for one
+   * call, so a cancelled provisionDevice publishes its outcome under it (#11065: no operationId).
+   */
+  private readonly forwardedCallKeys = new WeakMap<DaemonRequest, string>();
   /** Observation-only liveness probe used before an existing socket's reclaim (issue #6232). */
   private readonly socketReachability: DaemonSocketReachabilityLike;
   /** Observation-only owner check that fails every bind closed on an inconclusive probe (issue #6232). */
@@ -934,6 +967,9 @@ export class UnixSocketServer {
    * Defaults to the real {@link createMcpClient}; tests assign a fake here to
    * exercise forwarding without a live HTTP endpoint.
    */
+  /** Test seam: the per-args `deviceReadOnly` classification behind the read lane (#10969). */
+  deviceReadToolCallClassifier: DeviceReadToolCallClassifier = registeredDeviceReadClassifier;
+
   mcpClientFactory: McpClientFactory = (
     sessionUuid,
     toolSelectionProfileUuid,
@@ -1139,9 +1175,9 @@ export class UnixSocketServer {
       // recovery-rewire reason as list-changed; close() unsubscribes symmetrically.
       this.sessionReleaseUnsubscribe?.();
       this.sessionReleaseUnsubscribe = SessionReleaseBroadcaster.subscribe(
-        (sessionId, reason, snapshot) => {
+        (sessionId, reason, snapshot, extras) => {
           this.clearBoundMcpClientsForReleasedSession(sessionId);
-          this.broadcastSessionReleased(sessionId, reason, snapshot);
+          this.broadcastSessionReleased(sessionId, reason, snapshot, extras?.recordingIds);
         },
       );
 
@@ -1302,7 +1338,29 @@ export class UnixSocketServer {
       framer.push(data);
     });
 
+    // The peer closed its side (#11058). Replies already queued may still flush within the grace;
+    // past it the socket is destroyed, because a reply queued to a peer that is gone can stay
+    // unflushed without an error, so the automatic end would never complete and `close` (and the
+    // owner-disconnect release it triggers) would never run.
+    let peerEndGrace: NodeJS.Timeout | undefined;
+    socket.on("end", () => {
+      if (socket.destroyed || peerEndGrace) {
+        return;
+      }
+      peerEndGrace = this.timer.setTimeout(() => {
+        if (!socket.destroyed) {
+          logger.debug(
+            `Daemon RPC socket ${sessionId} peer closed with ${socket.writableLength} bytes unflushed; destroying`,
+          );
+          socket.destroy();
+        }
+      }, DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS);
+    });
+
     socket.on("close", (hadError) => {
+      if (peerEndGrace) {
+        this.timer.clearTimeout(peerEndGrace);
+      }
       if (idleTimeout) {
         this.timer.clearTimeout(idleTimeout);
       }
@@ -1670,6 +1728,7 @@ export class UnixSocketServer {
     releasedSessionId: string,
     reason?: string,
     release?: DaemonNotification["release"],
+    recordingIds?: string[],
   ): void {
     const notification: DaemonNotification = {
       type: "daemon_notification",
@@ -1677,6 +1736,7 @@ export class UnixSocketServer {
       sessionId: releasedSessionId,
       ...(reason !== undefined ? { reason } : {}),
       ...(release !== undefined ? { release } : {}),
+      ...(recordingIds && recordingIds.length > 0 ? { recordingIds } : {}),
     };
     for (const sessionId of this.notificationSubscribers) {
       const socket = this.clientSockets.get(sessionId);
@@ -2043,13 +2103,16 @@ export class UnixSocketServer {
           mcpRequest.dispose();
         }
       } catch (error) {
-        return this.mcpForwardFailureResponse({
+        const failure = this.mcpForwardFailureResponse({
           error,
           request,
           sessionId,
           ownerSocket,
           signal: activeRequestSignal,
         });
+        return (
+          (await this.provisionCancellationReply(request, failure, activeRequestSignal)) ?? failure
+        );
       }
     };
     // Admit through the socket's queue: same-lane requests keep arrival order, while an
@@ -2072,7 +2135,12 @@ export class UnixSocketServer {
           if (this.onFrameTrace) {
             this.traceFrame("admission_granted", request.id, deviceId);
           }
-          return this.runCancellableQueuedHandler(handler, cancellation.signal);
+          // A cancelled provisionDevice is answered by its handler (after a bounded wait for the
+          // typed cancellation result), not by this race, which would reply at once (#11074).
+          return this.runCancellableQueuedHandler(
+            handler,
+            this.isProvisionDeviceCall(request) ? undefined : cancellation.signal,
+          );
         },
         {
           timer: this.timer,
@@ -2105,6 +2173,39 @@ export class UnixSocketServer {
       error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
       daemonShuttingDown: daemonShuttingDownFailure(),
     };
+  }
+
+  /**
+   * `provisionDevice` finishes its rollback after a caller abort and builds a typed
+   * `request_cancelled` result with `recovery` evidence. Wait a bounded time for it so the reply to
+   * the abandoned request carries it instead of the generic abandonment error (#11074).
+   */
+  private isProvisionDeviceCall(request: DaemonRequest): boolean {
+    return request.method === "tools/call" && request.params?.name === "provisionDevice";
+  }
+
+  private async provisionCancellationReply(
+    request: DaemonRequest,
+    failure: DaemonResponse | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<DaemonResponse | undefined> {
+    const requestKey = this.forwardedCallKeys.get(request);
+    if (
+      !failure ||
+      !this.isProvisionDeviceCall(request) ||
+      requestKey === undefined ||
+      !(signal?.reason instanceof ClientRequestCancellation)
+    ) {
+      return undefined;
+    }
+    const outcome = await provisionCancellationOutcomes.await(
+      requestKey,
+      PROVISION_DEVICE_SETTLEMENT_WAIT_MS + PROVISION_CANCELLATION_OUTCOME_GRACE_MS,
+      this.timer,
+    );
+    return outcome === undefined
+      ? undefined
+      : { id: request.id, type: "mcp_response", success: true, result: outcome };
   }
 
   private mcpForwardFailureResponse({
@@ -2509,11 +2610,14 @@ export class UnixSocketServer {
     socketSessionId: string,
   ): McpForwardRoute | Promise<McpForwardRoute> {
     if (request.method === "tools/call") {
-      return this.getToolsCallForwardRoute(
+      const route = this.getToolsCallForwardRoute(
         request.params?.arguments,
         socketSessionId,
         request.params?.name,
       );
+      const toLane = (resolved: McpForwardRoute) =>
+        this.withDeviceReadLane(resolved, request, socketSessionId);
+      return route instanceof Promise ? route.then(toLane) : toLane(route);
     }
 
     return this.withAdmittedBoundSession(
@@ -2521,6 +2625,86 @@ export class UnixSocketServer {
       (recoverableSessionUuid) =>
         this.getAdmittedMcpForwardRoute(request, socketSessionId, recoverableSessionUuid),
     );
+  }
+
+  /**
+   * Move a watcher's read of a held device onto the device's read lane (#10969). Control calls,
+   * the holder's own calls (by session, device label, autolock or the acquiring connection) and
+   * reads of a free device, which may run readiness, stay on the control lane. Re-resolved before
+   * the forward runs, so an acquisition or release while queued moves the call between lanes.
+   */
+  private withDeviceReadLane(
+    route: McpForwardRoute,
+    request: DaemonRequest,
+    socketSessionId: string,
+  ): McpForwardRoute {
+    const toolName = request.params?.name;
+    const args = request.params?.arguments;
+    if (
+      !route.executionKey.startsWith(MCP_FORWARD_DEVICE_KEY_PREFIX) ||
+      typeof toolName !== "string" ||
+      !this.isDeviceReadToolCall(toolName, args)
+    ) {
+      return route;
+    }
+    const deviceId = route.executionKey.slice(MCP_FORWARD_DEVICE_KEY_PREFIX.length);
+    const holder = this.getDeviceHolderSession(deviceId);
+    if (!holder) {
+      return route;
+    }
+    const sessionManager = this.daemonState.getSessionManager();
+    const base = (sessionUuid: string | undefined) =>
+      sessionUuid ? resolveToolSelectionBaseSessionUuid(sessionUuid, sessionManager) : undefined;
+    const holderBase = base(holder);
+    const callerSessions = [
+      route.sessionUuid,
+      this.getSessionUuid(args),
+      this.getDeviceLabelSession(args),
+      this.resolveImplicitAutolockSession(socketSessionId, args),
+      this.daemonState
+        .getDevicePool()
+        .resolveOwnedDeviceSessionForMcpSession?.(socketSessionId, deviceId),
+    ];
+    if (callerSessions.some((sessionUuid) => base(sessionUuid) === holderBase)) {
+      return route;
+    }
+    return { ...route, executionKey: `${route.executionKey}${MCP_FORWARD_READ_LANE_SUFFIX}` };
+  }
+
+  private getDeviceLabelSession(args: unknown): string | undefined {
+    const baseSessionUuid = this.getSessionUuid(args);
+    const record = args as Record<string, unknown> | undefined;
+    return baseSessionUuid && typeof record?.device === "string" && record.device.length > 0
+      ? this.resolveDeviceLabelSession(baseSessionUuid, record.device)
+      : undefined;
+  }
+
+  private isDeviceReadToolCall(toolName: string, args: unknown): boolean {
+    try {
+      return this.deviceReadToolCallClassifier(toolName, args);
+    } catch (error) {
+      // An argument set the classifier cannot read is not proven a read: keep the control lane.
+      logger.debug(`[McpForward] read classification failed for ${toolName}: ${error}`);
+      return false;
+    }
+  }
+
+  /** The session holding a device: its live owner, or its autolock holder. */
+  private getDeviceHolderSession(deviceId: string): string | undefined {
+    if (!this.daemonState.isInitialized()) {
+      return undefined;
+    }
+    try {
+      return (
+        this.getSessionForDevice(deviceId) ??
+        this.daemonState.getDevicePool().getDevice?.(deviceId)?.autolockSessionId ??
+        undefined
+      );
+    } catch (error) {
+      // Without a proven holder the call keeps the control lane, as before #10969.
+      logger.debug(`[McpForward] holder lookup failed for ${deviceId}: ${error}`);
+      return undefined;
+    }
   }
 
   private getAdmittedMcpForwardRoute(
@@ -6893,6 +7077,7 @@ export class UnixSocketServer {
         // `liveDeadlineRegistry` instead of only the frozen snapshot forwarded
         // through `INTERNAL_MCP_REQUEST_TIMEOUT_PARAM` (issue #6222 P1 reopen).
         const liveDeadlineKey = this.idGenerator.next();
+        this.forwardedCallKeys.set(request, liveDeadlineKey);
         registerLiveDeadline(liveDeadlineKey, deadline);
         let cleanup = () => unregisterLiveDeadline(liveDeadlineKey);
 

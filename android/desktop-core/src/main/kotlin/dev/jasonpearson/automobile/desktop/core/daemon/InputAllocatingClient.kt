@@ -33,8 +33,11 @@ class InputAllocatingClient(
   override fun callTool(name: String, arguments: JsonObject): JsonElement {
     val deviceId = (arguments["deviceId"] as? JsonPrimitive)?.takeIf { it.isString }?.content
     // A tool call without a device id targets no particular device, so there is nothing to
-    // allocate.
-    if (deviceId == null) return delegate.callTool(name, arguments)
+    // allocate. A read (observe, SELECT) only watches: it neither takes the device nor names a
+    // session, and the daemon serves it sessionless (#10968).
+    if (deviceId == null || isDeviceReadCall(name, arguments)) {
+      return delegate.callTool(name, arguments)
+    }
     if (!allocation.awaitInputAllowed(deviceId)) {
       throw McpConnectionException(INPUT_NOT_ALLOCATED_ERROR)
     }

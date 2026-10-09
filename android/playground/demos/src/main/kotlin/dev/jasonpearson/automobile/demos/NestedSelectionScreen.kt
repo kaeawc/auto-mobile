@@ -11,11 +11,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,6 +28,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileTextField
 import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 
 private val CartNames = listOf("cart_A", "cart_B")
@@ -73,7 +73,7 @@ fun NestedSelectionDemoScreen(onNavigateBack: () -> Unit) {
         modifier = Modifier.semantics { testTag = "selection_status" },
       )
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(
+        AutoMobileContentButton(
           onClick = {
             rows.getValue("cart_A").reverse()
             status = "status: reversed cart_A"
@@ -82,7 +82,7 @@ fun NestedSelectionDemoScreen(onNavigateBack: () -> Unit) {
         ) {
           Text("Reverse A")
         }
-        Button(
+        AutoMobileContentButton(
           onClick = {
             rows.getValue("cart_A").remove("item_42")
             status = "status: dropped cart_A/item_42"
@@ -105,13 +105,13 @@ fun NestedSelectionDemoScreen(onNavigateBack: () -> Unit) {
               modifier = Modifier.fillMaxWidth().semantics { testTag = item },
               horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-              OutlinedTextField(
+              AutoMobileTextField(
                 value = quantities["$cart/$item"] ?: "",
                 onValueChange = { quantities["$cart/$item"] = it },
                 label = { Text("$item qty") },
                 modifier = Modifier.height(64.dp).weight(1f).semantics { testTag = "quantity" },
               )
-              Button(
+              AutoMobileContentButton(
                 onClick = {
                   rows.getValue(cart).remove(item)
                   status = "status: removed $cart/$item"

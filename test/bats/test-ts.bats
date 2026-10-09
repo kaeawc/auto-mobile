@@ -53,6 +53,9 @@ write_junit_report_with_lines() {
 }
 
 setup() {
+  # scripts/test-ts.sh resolves ROOT with pwd -P; a checkout reached through a
+  # symlink (macOS /tmp -> /private/tmp) makes $PWD differ from what it prints.
+  ROOT_PHYS="$(pwd -P)"
   # The lane derives its per-test timeout and worker count from the runner's
   # OS, so a macOS CI runner (RUNNER_OS=macOS: --timeout 20000) must not leak
   # into stubbed invocations; tests that need an OS set RUNNER_OS themselves.
@@ -61,6 +64,9 @@ setup() {
   # orchestrator) may export; every test that depends on them sets them explicitly.
   unset AUTOMOBILE_UNIT_TEST_CHUNK_FILES AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE \
     AUTOMOBILE_UNIT_SHARED_PROCESS AUTOMOBILE_UNIT_SHARED_FILE_COUNT
+  # The portable watchdog's TERM-to-KILL grace is 2s in production; every
+  # timeout test would pay it, so tests shrink it (the escalation still runs).
+  export AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS=0.2
   STUB_BIN="$(mktemp -d)"
   REAL_BUN="$(command -v bun)"
   export REAL_BUN
@@ -94,7 +100,20 @@ EOF
 #!/usr/bin/env bash
 printf '%s\n' "${UNAME_S:-Linux}"
 EOF
-  chmod +x "$STUB_BIN/nproc" "$STUB_BIN/sysctl" "$STUB_BIN/uname"
+  # Lane discovery walks the real tree (~2000 unit files) in a bash loop on every
+  # invocation, ~0.5s each. Tests that do not assert on the real file set get a
+  # fixed 12-file list; anything but the discovery query reaches the real find.
+  REAL_FIND="$(command -v find)"
+  export REAL_FIND
+  cat > "$STUB_BIN/find" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == "test -type f -name *.test.ts -print" && -z "${STUB_REAL_DISCOVERY:-}" ]]; then
+  for ((i = 0; i < 12; i += 1)); do printf 'test/fixture%02d.test.ts\n' "$i"; done
+  exit 0
+fi
+exec "$REAL_FIND" "$@"
+EOF
+  chmod +x "$STUB_BIN/nproc" "$STUB_BIN/sysctl" "$STUB_BIN/uname" "$STUB_BIN/find"
   cat > "$STUB_BIN/git" <<'EOF'
 #!/usr/bin/env bash
 printf '%b' "${TIMING_CHANGED_FILES:-}"
@@ -1170,6 +1189,8 @@ EOF
 }
 
 @test "optional Bun flags classify normalized test target spellings" {
+  # Classifies the real tree's lanes, so it needs the real discovery.
+  export STUB_REAL_DISCOVERY=1
   run_lane unit --changed ./test/contracts/runAll.integration.test.ts
   [ "$status" -eq 2 ]
   [[ "$output" == *"No unit test paths were selected."* ]]
@@ -2243,7 +2264,7 @@ EOF
     AUTOMOBILE_UNIT_TEST_WORKERS=2 bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
   [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
-  expected="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts"
+  expected="test --isolate --timeout 5000 --no-orphans --preload $ROOT_PHYS/test/setup/fileTimingProbe.ts"
   for shard in 0 1; do
     args="$expected"
     for ((i = shard; i < 12; i += 2)); do args+=" $(printf 'test/fixture%02d.test.ts' "$i")"; done
@@ -2262,14 +2283,14 @@ EOF
   # One summary follows the three test invocations.
   [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 4 ]
   for chunk in 0 1 2; do
-    expected="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-chunk-$chunk.xml"
+    expected="test --isolate --timeout 5000 --no-orphans --preload $ROOT_PHYS/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-chunk-$chunk.xml"
     for ((i = chunk * 5; i < (chunk + 1) * 5 && i < 12; i += 1)); do
       expected+=" $(printf 'test/fixture%02d.test.ts' "$i")"
     done
     [ "$(sed -n "$((chunk + 1))p" "$BUN_ARGS_FILE")" = "$expected" ]
     [ -s "$reports/shard-0-chunk-$chunk.xml" ]
   done
-  timing="$PWD/scratch/test-ts-unit-shards/timing-shard-0.ndjson"
+  timing="$ROOT_PHYS/scratch/test-ts-unit-shards/timing-shard-0.ndjson"
   [ "$(grep -Fxc "true|$timing|$timing" "$record")" -eq 3 ]
   [ "$(wc -l < "$timing")" -eq 12 ]
   for ((i = 0; i < 12; i += 1)); do
@@ -2308,14 +2329,14 @@ EOF
 @test "one watchdog bounds the complete chunk sequence rather than each fresh invocation" {
   stub_chunk_discovery
   record="$BATS_TEST_TMPDIR/chunks"
-  # Each invocation fits the 2s deadline (1.5s); their 4.5s sequence cannot. A
+  # Each invocation fits the 1s deadline (0.8s); their 4.5s sequence cannot. A
   # per-invocation watchdog would let all three finish and exit 0, so the 124
   # below proves the one deadline spans the whole sequence. The margins are
   # wide so a loaded runner's slow startup or late watchdog wake-up does not
   # change which side of the deadline each invocation lands on.
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 STUB_CHUNK_RECORD="$record" \
-    STUB_BUN_SLEEP_SECONDS=1.5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=2 \
+    STUB_BUN_SLEEP_SECONDS=0.8 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
   # The fake chunk only creates the record once it starts. On a loaded runner
@@ -2325,6 +2346,35 @@ EOF
   if [ -e "$record" ]; then started="$(wc -l < "$record" | tr -d ' ')"; fi
   [ "$started" -lt 3 ]
   [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
+}
+
+@test "a chunk deadline spent before the shard launches still leaves a non-empty watchdog snapshot (#11019)" {
+  # Discovery runs after the lane-wide deadline starts; a slow find (loaded
+  # runner) can consume the whole 1s budget, so the shard exits 124 before its
+  # watchdog ever runs. The snapshot must still exist and say why.
+  cat > "$STUB_BIN/find" <<'EOF'
+#!/usr/bin/env bash
+sleep 1.3
+for ((i = 0; i < 12; i += 1)); do printf 'test/fixture%02d.test.ts\n' "$i"; done
+EOF
+  chmod +x "$STUB_BIN/find"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 124 ]
+  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
+  grep -Fq "deadline" scratch/test-ts-unit-shards/watchdog-shard-0.txt
+}
+
+@test "a retried watchdog timeout keeps attempt 1's snapshot and writes a fresh non-empty one (#11019)" {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    STUB_BUN_SLEEP_SECONDS=5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"RETRY: unit shard 0"* ]]
+  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.attempt-1.txt ]
+  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
+  [ -z "$(ls scratch/test-ts-unit-shards | grep -F '.tmp.' || true)" ]
 }
 
 @test "chunk size rejects invalid values just like worker count before invoking Bun" {
@@ -2360,8 +2410,8 @@ fixture_list() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"test-ts: unit lane shared_files=5 isolated_files=7"* ]]
   [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 4 ]
-  shared="test --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile"
-  isolated="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile"
+  shared="test --timeout 5000 --no-orphans --preload $ROOT_PHYS/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile"
+  isolated="test --isolate --timeout 5000 --no-orphans --preload $ROOT_PHYS/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile"
   # Shared files lead the round-robin, so both groups split evenly: 3+2 and 4+3.
   grep -Fxq "$shared $reports/shard-0-shared.xml$(fixture_list 1 5 11)" "$BUN_ARGS_FILE"
   grep -Fxq "$isolated $reports/shard-0.xml$(fixture_list 3 6 9)" "$BUN_ARGS_FILE"
@@ -2384,7 +2434,7 @@ fixture_list() {
     AUTOMOBILE_UNIT_SHARED_PROCESS=0 bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
   [[ "$output" == *"test-ts: unit lane shared_files=0 isolated_files=12"* ]]
-  expected="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts"
+  expected="test --isolate --timeout 5000 --no-orphans --preload $ROOT_PHYS/test/setup/fileTimingProbe.ts"
   [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
   grep -Fxq "$expected$(fixture_list 0 2 4 6 8 10)" "$BUN_ARGS_FILE"
   grep -Fxq "$expected$(fixture_list 1 3 5 7 9 11)" "$BUN_ARGS_FILE"
@@ -2412,7 +2462,7 @@ fixture_list() {
     STUB_GROUP_LABEL_RECORD="$labels" bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
   [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 7 ]
-  flags="--timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-chunk"
+  flags="--timeout 5000 --no-orphans --preload $ROOT_PHYS/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-chunk"
   [ "$(sed -n 1p "$BUN_ARGS_FILE")" = "test $flags-0.xml$(fixture_list 1 2)" ]
   [ "$(sed -n 2p "$BUN_ARGS_FILE")" = "test $flags-1.xml$(fixture_list 5 8)" ]
   [ "$(sed -n 3p "$BUN_ARGS_FILE")" = "test $flags-2.xml$(fixture_list 11)" ]
@@ -2425,12 +2475,12 @@ fixture_list() {
 @test "one watchdog bounds the shared and isolated groups of a shard together" {
   stub_chunk_discovery
   write_shared_allowlist
-  # Each group fits the 2s deadline (1.5s); the pair cannot. See the chunk
+  # Each group fits the 1s deadline (0.8s); the pair cannot. See the chunk
   # watchdog test above for the margins.
   # Retries are off so the shard's single attempt is what the isolated count sees.
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     AUTOMOBILE_UNIT_SHARD_RETRIES=0 \
-    STUB_BUN_SLEEP_SECONDS=1.5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=2 \
+    STUB_BUN_SLEEP_SECONDS=0.8 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
   [ "$(grep -c -- '--isolate' "$BUN_ARGS_FILE")" -le 1 ]
@@ -2446,13 +2496,13 @@ fixture_list() {
     AUTOMOBILE_UNIT_JUNIT_DIR="$reports" bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
   [[ "$output" == *"test-ts: unit shard 0 isolated chunk 2: 2 of 12 files"* ]]
-  flags="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-iso"
+  flags="test --isolate --timeout 5000 --no-orphans --preload $ROOT_PHYS/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-iso"
   [ "$(sed -n 1p "$BUN_ARGS_FILE")" = "$flags-0.xml$(fixture_list 0 1 2 3 4)" ]
   [ "$(sed -n 2p "$BUN_ARGS_FILE")" = "$flags-1.xml$(fixture_list 5 6 7 8 9)" ]
   [ "$(sed -n 3p "$BUN_ARGS_FILE")" = "$flags-2.xml$(fixture_list 10 11)" ]
   [ ! -e "$reports/shard-0.xml" ]
   # All chunks share the shard's timing log and watchdog environment.
-  timing="$PWD/scratch/test-ts-unit-shards/timing-shard-0.ndjson"
+  timing="$ROOT_PHYS/scratch/test-ts-unit-shards/timing-shard-0.ndjson"
   [ "$(grep -Fxc "true|$timing|$timing" "$record")" -eq 3 ]
   # The timing gate globs *.xml, so every chunk report is read.
   run "$REAL_BUN" run scripts/lib/junit-testcase-timings.ts "$reports"/*.xml
@@ -2469,8 +2519,8 @@ fixture_list() {
     bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
   [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 4 ]
-  isolated="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-iso"
-  [ "$(sed -n 1p "$BUN_ARGS_FILE")" = "test --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-shared.xml$(fixture_list 1 2 5 8 11)" ]
+  isolated="test --isolate --timeout 5000 --no-orphans --preload $ROOT_PHYS/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-iso"
+  [ "$(sed -n 1p "$BUN_ARGS_FILE")" = "test --timeout 5000 --no-orphans --preload $ROOT_PHYS/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-shared.xml$(fixture_list 1 2 5 8 11)" ]
   [ "$(sed -n 2p "$BUN_ARGS_FILE")" = "$isolated-0.xml$(fixture_list 0 3 4)" ]
   [ "$(sed -n 3p "$BUN_ARGS_FILE")" = "$isolated-1.xml$(fixture_list 6 7 9)" ]
   [ "$(sed -n 4p "$BUN_ARGS_FILE")" = "$isolated-2.xml$(fixture_list 10)" ]
@@ -2491,7 +2541,7 @@ fixture_list() {
     fi
     [ "$status" -eq 0 ]
     [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 1 ]
-    expected="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0.xml$(fixture_list 0 1 2 3 4 5 6 7 8 9 10 11)"
+    expected="test --isolate --timeout 5000 --no-orphans --preload $ROOT_PHYS/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0.xml$(fixture_list 0 1 2 3 4 5 6 7 8 9 10 11)"
     [ "$(sed -n 1p "$BUN_ARGS_FILE")" = "$expected" ]
   done
 }
@@ -2524,7 +2574,7 @@ fixture_list() {
   # See the chunk watchdog test above for the margins.
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=5 AUTOMOBILE_UNIT_SHARD_RETRIES=0 STUB_CHUNK_RECORD="$record" \
-    STUB_BUN_SLEEP_SECONDS=1.5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=2 \
+    STUB_BUN_SLEEP_SECONDS=0.8 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
   started=0

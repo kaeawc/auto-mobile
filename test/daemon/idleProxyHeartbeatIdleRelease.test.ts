@@ -26,6 +26,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -197,7 +198,20 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
           }
         }
       },
-      toolResultFor: (tool) => (tool === "getAndroid" ? deviceStartResult(SESSION) : undefined),
+      toolResultFor: (tool, params) => {
+        if (tool === "getAndroid") {
+          return deviceStartResult(SESSION);
+        }
+        // The daemon echoes the session it routed an admitted control call to (#10974); a read
+        // (observe) is watching and carries no echo.
+        const routed =
+          tool === "observe"
+            ? undefined
+            : typeof params.sessionUuid === "string"
+              ? params.sessionUuid
+              : (pool.getDevice(DEVICE.deviceId)?.sessionId ?? undefined);
+        return withRoutedSessionMeta({ content: [{ type: "text", text: "ok" }] }, routed);
+      },
       onCallDaemonMethod: async (method, params) => {
         if (method !== "daemon/heartbeat") {
           return;
@@ -338,10 +352,10 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the idle dea
     const until = timer.now() + SESSION_IDLE_TIMEOUT_MS * 3;
     while (timer.now() < until) {
       await idleFor(SESSION_IDLE_TIMEOUT_MS / 2);
-      await proxy.callTool("observe", { platform: "android" });
+      await proxy.callTool("pressButton", { platform: "android", button: "back" });
     }
     const lastCallAt = timer.now();
-    expect(forwarded.at(-1)).toMatchObject({ tool: "observe", sessionUuid: undefined });
+    expect(forwarded.at(-1)).toMatchObject({ tool: "pressButton", sessionUuid: undefined });
     expect(isReleased()).toBe(false);
     expect(manager.getSession(SESSION)!.lastUsedAt).toBe(lastCallAt);
 

@@ -22,7 +22,7 @@ export interface OverlayShowOptions {
   timeoutMs?: number;
   /** Android logical display; omitted for the default display. Android only. */
   displayId?: number;
-  /** Android only: start a same-id show fresh instead of replacing the overlay in place. */
+  /** Start a same-id show fresh instead of replacing the overlay in place. */
   reset?: boolean;
 }
 

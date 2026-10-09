@@ -1,0 +1,116 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "components": {
+      "c1": {
+        "root": {
+          "type": "column",
+          "children": [
+            {
+              "type": "use",
+              "component": "c2"
+            }
+          ]
+        }
+      },
+      "c2": {
+        "root": {
+          "type": "column",
+          "children": [
+            {
+              "type": "use",
+              "component": "c3"
+            }
+          ]
+        }
+      },
+      "c3": {
+        "root": {
+          "type": "column",
+          "children": [
+            {
+              "type": "use",
+              "component": "c4"
+            }
+          ]
+        }
+      },
+      "c4": {
+        "root": {
+          "type": "column",
+          "children": [
+            {
+              "type": "use",
+              "component": "c5"
+            }
+          ]
+        }
+      },
+      "c5": {
+        "root": {
+          "type": "column",
+          "children": [
+            {
+              "type": "use",
+              "component": "c6"
+            }
+          ]
+        }
+      },
+      "c6": {
+        "root": {
+          "type": "column",
+          "children": [
+            {
+              "type": "use",
+              "component": "c7"
+            }
+          ]
+        }
+      },
+      "c7": {
+        "root": {
+          "type": "column",
+          "children": [
+            {
+              "type": "use",
+              "component": "c8"
+            }
+          ]
+        }
+      },
+      "c8": {
+        "root": {
+          "type": "column",
+          "children": [
+            {
+              "type": "use",
+              "component": "c9"
+            }
+          ]
+        }
+      },
+      "c9": {
+        "root": {
+          "type": "spacer"
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "use",
+          "component": "c1"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0] (use c1) → components.c1.root.children[0] (use c2) → components.c2.root.children[0] (use c3) → components.c3.root.children[0] (use c4) → components.c4.root.children[0] (use c5) → components.c5.root.children[0] (use c6) → components.c6.root.children[0] (use c7) → components.c7.root.children[0] (use c8) → components.c8.root.children[0]",
+  "expectedMessage": "Component nesting depth limit exceeded"
+}

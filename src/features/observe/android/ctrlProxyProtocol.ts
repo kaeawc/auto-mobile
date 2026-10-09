@@ -75,6 +75,8 @@ export interface RequestScreenshotMessage {
   type: "request_screenshot";
   requestId: string;
   displayId?: number;
+  /** Hide CtrlProxy's overlay for this capture only; sent only under {@link SCREENSHOT_HIDE_OVERLAY_CAPABILITY}. */
+  hideOverlays?: boolean;
 }
 
 // =============================================================================
@@ -502,6 +504,8 @@ export interface OverlayStatusEntry {
   pages: Record<string, number>;
   /** Highest `overlay_event` sequence the device allocated for this overlay; no rewind. */
   lastSequence: number;
+  /** True while the overlay's app is not in front: hidden, state kept, back with the app. */
+  suspended?: boolean;
 }
 
 /**
@@ -940,6 +944,15 @@ export const OVERLAY_WINDOW_METADATA_CAPABILITY = "overlay_window_metadata_v1";
  */
 export const SDK_CAPABILITIES_USER_ID_CAPABILITY = "sdk_capabilities_user_id_v1";
 
+/**
+ * Advertised by a device agent whose `request_screenshot` honours `hideOverlays` (#9305): it hides
+ * its own overlay window, waits for a rendered frame, captures and restores, all in that one
+ * request, and answers with `overlaysHidden`. The iOS overlay agent advertises the same string for
+ * its `hide_for_capture` handshake. An older agent ignores the field and captures with the overlay
+ * showing.
+ */
+export const SCREENSHOT_HIDE_OVERLAY_CAPABILITY = "screenshot_hide_overlay_v1";
+
 /** Capability flags in the handshake that are never sent as wire requests. */
 export const ANDROID_CAPABILITY_FLAGS = [
   "node_selector_actions",
@@ -956,6 +969,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   NETWORK_MOCK_RULES_REPORT_CAPABILITY,
   OVERLAY_WINDOW_METADATA_CAPABILITY,
   SDK_CAPABILITIES_USER_ID_CAPABILITY,
+  SCREENSHOT_HIDE_OVERLAY_CAPABILITY,
 ] as const;
 
 /** The supportedCommands list is authoritative for every request when this marker is present. */
@@ -1229,11 +1243,16 @@ export const ctrlProxyRequests = {
     return { type: "set_hierarchy_interval", intervalMs: args.intervalMs };
   },
 
-  requestScreenshot(args: { requestId: string; displayId?: number }): RequestScreenshotMessage {
+  requestScreenshot(args: {
+    requestId: string;
+    displayId?: number;
+    hideOverlays?: boolean;
+  }): RequestScreenshotMessage {
     return {
       type: "request_screenshot",
       requestId: args.requestId,
       ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
+      ...(args.hideOverlays === true ? { hideOverlays: true } : {}),
     };
   },
 

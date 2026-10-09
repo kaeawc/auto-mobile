@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Daemon } from "../../src/daemon/daemon";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { cleanupDaemonFilesSync } from "../../src/daemon/daemonFiles";
 import { SOCKET_PATH } from "../../src/daemon/constants";
 import { getDaemonSocketPathsByName } from "../../src/daemon/socketPaths";
@@ -15,6 +16,8 @@ describe("daemon auxiliary socket exit cleanup", () => {
   let directory: string;
 
   afterEach(() => {
+    // Constructing a Daemon initializes the process-wide DaemonState; do not leak it to later files.
+    DaemonState.getInstance().reset();
     testOverrides.auxSocketDir = previousAuxDir;
     if (directory) {
       rmSync(directory, { recursive: true, force: true });

@@ -5,7 +5,7 @@ import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/sessionLivenes
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import {
   SessionManager,
   getDefaultSessionHeartbeatTimeoutMs,
@@ -1911,25 +1911,29 @@ describe("SessionManager", () => {
       expect(retrieved).toBeNull();
     });
 
-    test("expires a session before accepting a request that arrives after its deadline", async () => {
+    test("refuses a request that arrives after its deadline while earlier work holds the veto, without releasing (#10956)", async () => {
       const released: string[] = [];
-      sessionManager.setActiveSessionExecutionChecker(
-        (_sessionId, startedAtOrBefore) => startedAtOrBefore === undefined,
-      );
+      // Earlier work stays in flight, whichever execution a query excludes.
+      sessionManager.setActiveSessionExecutionChecker(() => true);
       sessionManager.onSessionRelease((sessionId) => released.push(sessionId));
       await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
       fakeTimer.advanceTime(1001);
 
-      // Existing work keeps an expired session assigned, but a new request must
-      // not use that protection to revive the session after its deadline.
+      // Existing work keeps an expired session assigned, and a routing lookup with no
+      // execution respects that veto rather than releasing under the running call.
       expect(sessionManager.getSession("session-1")).not.toBeNull();
-      // The UUID was issued, so the refusal reports its idle release, not "never issued" (#10832).
-      await expect(sessionManager.getOrCreateSession("session-1")).rejects.toThrow(
-        "is terminal after lazy-expiry",
-      );
+      expect(sessionManager.getSessionForNewExecution("session-1")).not.toBeNull();
+      // A new request that began after the deadline is refused; it does not revive the session
+      // and does not release it under the earlier work either.
+      await expect(
+        sessionManager.getOrCreateSession("session-1", undefined, undefined, {
+          executionId: "late",
+          startTime: fakeTimer.now(),
+        }),
+      ).rejects.toThrow("expired before this execution began while earlier work is still active");
 
-      expect(released).toEqual(["session-1"]);
-      expect(sessionManager.getActiveSessionCount()).toBe(0);
+      expect(released).toEqual([]);
+      expect(sessionManager.getActiveSessionCount()).toBe(1);
     });
 
     test("keeps an expired session unavailable while its teardown restores device state", async () => {
@@ -2586,6 +2590,45 @@ describe("SessionManager", () => {
     });
   });
 
+  describe("acquisition device cleanup (#11041)", () => {
+    test("does not count as cleanup for the live holder, but quarantines the device once it is released", async () => {
+      const timer = new FakeTimer();
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const stop = Promise.withResolvers<void>();
+      try {
+        await manager.createSession("session-1", "emulator-5554", "android");
+        manager.registerAcquisitionDeviceCleanup("emulator-5554", stop.promise);
+        expect(manager.hasDeviceCleanupInProgress("emulator-5554")).toBe(false);
+
+        await manager.releaseSession("session-1");
+        expect(manager.hasDeviceCleanupInProgress("emulator-5554")).toBe(true);
+
+        stop.resolve();
+        await manager.drainPendingDeviceCleanups(50);
+        await Promise.resolve();
+        expect(manager.hasDeviceCleanupInProgress("emulator-5554")).toBe(false);
+      } finally {
+        stop.resolve();
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("is waited on by the shutdown drain", async () => {
+      const timer = new FakeTimer();
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const stop = Promise.withResolvers<void>();
+      try {
+        manager.registerAcquisitionDeviceCleanup("emulator-5554", stop.promise);
+        const drain = manager.drainPendingDeviceCleanups(50);
+        timer.advanceTime(50);
+        await expect(drain).resolves.toBe(false);
+      } finally {
+        stop.resolve();
+        manager.stopCleanupTimer();
+      }
+    });
+  });
+
   test("drains pending device cleanups with a bounded wait", async () => {
     const timer = new FakeTimer();
     const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -3189,7 +3232,7 @@ describe("SessionManager", () => {
   });
 
   describe("durable heartbeat ownership rollback", () => {
-    test("a failed heartbeat preserves an already received heartbeat", async () => {
+    test("a heartbeat after the first one writes nothing and renews the lease (#11079)", async () => {
       const persistence = new FakeDeviceSessionPersistence();
       const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
       const write = spyOn(persistence, "recordActivity");
@@ -3208,7 +3251,6 @@ describe("SessionManager", () => {
           expiresAt: session.expiresAt,
           hasReceivedHeartbeat: true,
           ownership: "owned",
-          awaitingOwnerSince: undefined,
         };
         const stored = { ...(await persistence.getSession!(session.sessionId)) };
         write.mockImplementationOnce(async () => {
@@ -3216,10 +3258,10 @@ describe("SessionManager", () => {
         });
         fakeTimer.advanceTime(10);
         manager.recordHeartbeat(session.sessionId);
-        await drainUntil(() => session.lastHeartbeat === before.lastHeartbeat, {
-          description: "received heartbeat rollback",
-        });
-        expect(session).toMatchObject(before);
+        await drainMicrotasks(10);
+        // No persisted field changed, so the failing write is never reached.
+        expect(write).toHaveBeenCalledTimes(1);
+        expect(session).toMatchObject({ ...before, lastHeartbeat: before.lastHeartbeat + 10 });
         expect(await persistence.getSession!(session.sessionId)).toEqual(stored);
       } finally {
         write.mockRestore();
@@ -3227,85 +3269,117 @@ describe("SessionManager", () => {
       }
     });
 
-    test.each(["heartbeat", "reclaim"] as const)(
-      "%s restores all liveness fields after one failed write and allows a successful retry",
-      async (operation) => {
-        const persistence = new FakeDeviceSessionPersistence();
-        const write = spyOn(persistence, "recordActivity");
-        const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
-        try {
-          const session = await manager.createSession(
-            "rollback-owner",
-            "emulator-5554",
-            "android",
-            60_000,
-            1_000,
-            undefined,
-            undefined,
-            "awaiting-owner",
-          );
-          const before = {
-            lastUsedAt: session.lastUsedAt,
-            lastHeartbeat: session.lastHeartbeat,
-            expiresAt: session.expiresAt,
-            hasReceivedHeartbeat: session.hasReceivedHeartbeat,
-            ownership: session.ownership,
-            awaitingOwnerSince: session.awaitingOwnerSince,
-          };
-          const storedBefore = { ...(await persistence.getSession!(session.sessionId)) };
-          write.mockImplementationOnce(async () => {
-            throw new Error("one activity write failed");
-          });
-          fakeTimer.advanceTime(10);
-          if (operation === "heartbeat") {
-            manager.recordHeartbeat(session.sessionId);
-            await drainUntil(() => session.lastHeartbeat === before.lastHeartbeat, {
-              description: "failed heartbeat timestamp rollback",
-            });
-          } else {
-            await expect(manager.getOrCreateSession(session.sessionId)).rejects.toBeInstanceOf(
-              SessionActivityPersistenceError,
-            );
-          }
-          expect(write).toHaveBeenCalledTimes(1);
-          expect(await persistence.getSession!(session.sessionId)).toEqual(storedBefore);
-          expect(session).toMatchObject(before);
-          expect(session.activityGeneration).toBe(1);
+    test("a failed heartbeat write keeps the acknowledged liveness and the next heartbeat stores it (#11079)", async () => {
+      const persistence = new FakeDeviceSessionPersistence();
+      const write = spyOn(persistence, "recordActivity");
+      const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
+      try {
+        const session = await manager.createSession(
+          "kept-owner",
+          "emulator-5554",
+          "android",
+          60_000,
+          1_000,
+          undefined,
+          undefined,
+          "awaiting-owner",
+        );
+        const storedBefore = { ...(await persistence.getSession!(session.sessionId)) };
+        write.mockImplementationOnce(async () => {
+          throw new Error("one activity write failed");
+        });
+        fakeTimer.advanceTime(10);
+        manager.recordHeartbeat(session.sessionId);
+        await drainMicrotasks(10);
+        expect(write).toHaveBeenCalledTimes(1);
+        expect(await persistence.getSession!(session.sessionId)).toEqual(storedBefore);
+        const acknowledged = {
+          lastUsedAt: 0,
+          expiresAt: 60_000,
+          lastHeartbeat: 10,
+          hasReceivedHeartbeat: true,
+          ownership: "owned",
+          awaitingOwnerSince: undefined,
+        };
+        expect(session).toMatchObject(acknowledged);
 
-          fakeTimer.advanceTime(10);
-          if (operation === "heartbeat") {
-            manager.recordHeartbeat(session.sessionId);
-            await drainMicrotasks(10);
-          } else {
-            await expect(manager.getOrCreateSession(session.sessionId)).resolves.toBe(session);
-          }
-          expect(write).toHaveBeenCalledTimes(2);
-          // A heartbeat proves liveness only; a reclaim is tool activity (#10656).
-          const activity =
-            operation === "heartbeat"
-              ? { lastUsedAt: 0, expiresAt: 60_000 }
-              : { lastUsedAt: 20, expiresAt: 60_020 };
-          expect(session).toMatchObject({
-            ...activity,
-            lastHeartbeat: 20,
-            hasReceivedHeartbeat: operation === "heartbeat",
-            ownership: "owned",
-            awaitingOwnerSince: undefined,
-            activityGeneration: 2,
-          });
-          expect(await persistence.getSession!(session.sessionId)).toMatchObject({
-            last_used_at_ms: activity.lastUsedAt,
-            expires_at_ms: activity.expiresAt,
-            has_received_heartbeat: operation === "heartbeat" ? 1 : 0,
-          });
-        } finally {
-          write.mockRestore();
-          manager.stopCleanupTimer();
-        }
-      },
-    );
+        fakeTimer.advanceTime(10);
+        manager.recordHeartbeat(session.sessionId);
+        await drainMicrotasks(10);
+        expect(write).toHaveBeenCalledTimes(2);
+        expect(session).toMatchObject({ ...acknowledged, lastHeartbeat: 20 });
+        expect(await persistence.getSession!(session.sessionId)).toMatchObject({
+          last_used_at_ms: 0,
+          expires_at_ms: 60_000,
+          has_received_heartbeat: 1,
+        });
+      } finally {
+        write.mockRestore();
+        manager.stopCleanupTimer();
+      }
+    });
 
-    test("failed first heartbeat still expires under missing-first-heartbeat grace", async () => {
+    test("reclaim restores all liveness fields after one failed write and allows a successful retry", async () => {
+      const persistence = new FakeDeviceSessionPersistence();
+      const write = spyOn(persistence, "recordActivity");
+      const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
+      try {
+        const session = await manager.createSession(
+          "rollback-owner",
+          "emulator-5554",
+          "android",
+          60_000,
+          1_000,
+          undefined,
+          undefined,
+          "awaiting-owner",
+        );
+        const before = {
+          lastUsedAt: session.lastUsedAt,
+          lastHeartbeat: session.lastHeartbeat,
+          expiresAt: session.expiresAt,
+          hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+          ownership: session.ownership,
+          awaitingOwnerSince: session.awaitingOwnerSince,
+        };
+        const storedBefore = { ...(await persistence.getSession!(session.sessionId)) };
+        write.mockImplementationOnce(async () => {
+          throw new Error("one activity write failed");
+        });
+        fakeTimer.advanceTime(10);
+        await expect(manager.getOrCreateSession(session.sessionId)).rejects.toBeInstanceOf(
+          SessionActivityPersistenceError,
+        );
+        expect(write).toHaveBeenCalledTimes(1);
+        expect(await persistence.getSession!(session.sessionId)).toEqual(storedBefore);
+        expect(session).toMatchObject(before);
+        expect(session.activityGeneration).toBe(1);
+
+        fakeTimer.advanceTime(10);
+        await expect(manager.getOrCreateSession(session.sessionId)).resolves.toBe(session);
+        expect(write).toHaveBeenCalledTimes(2);
+        // A reclaim is tool activity (#10656).
+        const activity = { lastUsedAt: 20, expiresAt: 60_020 };
+        expect(session).toMatchObject({
+          ...activity,
+          lastHeartbeat: 20,
+          hasReceivedHeartbeat: false,
+          ownership: "owned",
+          awaitingOwnerSince: undefined,
+          activityGeneration: 2,
+        });
+        expect(await persistence.getSession!(session.sessionId)).toMatchObject({
+          last_used_at_ms: activity.lastUsedAt,
+          expires_at_ms: activity.expiresAt,
+          has_received_heartbeat: 0,
+        });
+      } finally {
+        write.mockRestore();
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("a failed first-heartbeat write does not expire under missing-first-heartbeat grace (#11079)", async () => {
       const persistence = new FakeDeviceSessionPersistence();
       const write = spyOn(persistence, "recordActivity");
       const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
@@ -3321,9 +3395,7 @@ describe("SessionManager", () => {
         });
         fakeTimer.advanceTime(10);
         manager.recordHeartbeat(session.sessionId);
-        await drainUntil(() => session.lastHeartbeat === 0, {
-          description: "failed heartbeat rollback",
-        });
+        await drainMicrotasks(10);
         const reaped: string[] = [];
         const monitor = new SessionHeartbeatMonitor(
           manager,
@@ -3336,12 +3408,14 @@ describe("SessionManager", () => {
         );
         fakeTimer.advanceTime(491);
         await monitor.tick();
-        expect(reaped).toEqual(["missing-first-heartbeat"]);
+        // The heartbeat arrived and was acknowledged; only its row is unstored.
+        expect(reaped).toEqual([]);
         expect(session).toMatchObject({
-          hasReceivedHeartbeat: false,
+          lastHeartbeat: 10,
+          hasReceivedHeartbeat: true,
           ownership: "owned",
-          awaitingOwnerSince: undefined,
         });
+        expect(session.awaitingOwnerSince).toBeUndefined();
         expect(await persistence.getSession!(session.sessionId)).toMatchObject({
           has_received_heartbeat: 0,
         });
@@ -3351,56 +3425,46 @@ describe("SessionManager", () => {
       }
     });
 
-    test.each(["heartbeat", "reclaim"] as const)(
-      "failed %s still expires under awaiting-owner timeout",
-      async (operation) => {
-        const persistence = new FakeDeviceSessionPersistence();
-        const write = spyOn(persistence, "recordActivity");
-        const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
-        try {
-          const session = await manager.createSession(
-            "awaiting-heartbeat",
-            "emulator-5554",
-            "android",
-            60_000,
-            1_000,
-            undefined,
-            undefined,
-            "awaiting-owner",
-          );
-          write.mockImplementationOnce(async () => {
-            throw new Error("one activity write failed");
-          });
-          fakeTimer.advanceTime(10);
-          if (operation === "heartbeat") {
-            manager.recordHeartbeat(session.sessionId);
-            await drainUntil(() => session.lastHeartbeat === 0, {
-              description: "failed heartbeat rollback",
-            });
-          } else {
-            await expect(manager.getOrCreateSession(session.sessionId)).rejects.toBeInstanceOf(
-              SessionActivityPersistenceError,
-            );
-          }
-          const reaped: string[] = [];
-          const monitor = new SessionHeartbeatMonitor(
-            manager,
-            () => false,
-            async (_id, reason) => {
-              reaped.push(reason);
-            },
-            fakeTimer,
-            { graceMs: 20_000 },
-          );
-          fakeTimer.advanceTime(991 + SUSPECT_GRACE_MS);
-          await monitor.tick();
-          expect(reaped).toEqual(["rehydration-owner-timeout"]);
-        } finally {
-          write.mockRestore();
-          manager.stopCleanupTimer();
-        }
-      },
-    );
+    test("failed reclaim still expires under awaiting-owner timeout", async () => {
+      const persistence = new FakeDeviceSessionPersistence();
+      const write = spyOn(persistence, "recordActivity");
+      const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
+      try {
+        const session = await manager.createSession(
+          "awaiting-heartbeat",
+          "emulator-5554",
+          "android",
+          60_000,
+          1_000,
+          undefined,
+          undefined,
+          "awaiting-owner",
+        );
+        write.mockImplementationOnce(async () => {
+          throw new Error("one activity write failed");
+        });
+        fakeTimer.advanceTime(10);
+        await expect(manager.getOrCreateSession(session.sessionId)).rejects.toBeInstanceOf(
+          SessionActivityPersistenceError,
+        );
+        const reaped: string[] = [];
+        const monitor = new SessionHeartbeatMonitor(
+          manager,
+          () => false,
+          async (_id, reason) => {
+            reaped.push(reason);
+          },
+          fakeTimer,
+          { graceMs: 20_000 },
+        );
+        fakeTimer.advanceTime(991 + SUSPECT_GRACE_MS);
+        await monitor.tick();
+        expect(reaped).toEqual(["rehydration-owner-timeout"]);
+      } finally {
+        write.mockRestore();
+        manager.stopCleanupTimer();
+      }
+    });
 
     test.each(["heartbeat", "reclaim"] as const)(
       "successful %s preserves the current ownership and persistence contract",
@@ -3451,88 +3515,76 @@ describe("SessionManager", () => {
       },
     );
 
-    test.each(["heartbeat", "reclaim"] as const)(
-      "older failed %s cannot revert a newer heartbeat still in flight",
-      async (older) => {
-        const firstStarted = Promise.withResolvers<void>();
-        const failFirst = Promise.withResolvers<void>();
-        const secondStarted = Promise.withResolvers<void>();
-        const finishSecond = Promise.withResolvers<void>();
-        const persistence = new FakeDeviceSessionPersistence();
-        const recordActivity = persistence.recordActivity.bind(persistence);
-        const write = spyOn(persistence, "recordActivity");
-        const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
-        try {
-          const session = await manager.createSession(
-            "pending-owner",
-            "emulator-5554",
-            "android",
-            60_000,
-            1_000,
-            undefined,
-            undefined,
-            "awaiting-owner",
-          );
-          write
-            .mockImplementationOnce(async () => {
-              firstStarted.resolve();
-              await failFirst.promise;
-              throw new Error("older activity write failed");
-            })
-            .mockImplementationOnce(async (sessionId, update) => {
-              secondStarted.resolve();
-              await finishSecond.promise;
-              await recordActivity(sessionId, update);
-            });
-          fakeTimer.advanceTime(10);
-          const firstRefresh =
-            older === "reclaim" ? manager.getOrCreateSession(session.sessionId) : undefined;
-          if (older === "heartbeat") {
-            manager.recordHeartbeat(session.sessionId);
-          }
-          await firstStarted.promise;
-          fakeTimer.advanceTime(10);
-          manager.recordHeartbeat(session.sessionId);
-          await secondStarted.promise;
-          failFirst.resolve();
-          if (firstRefresh) {
-            await expect(firstRefresh).rejects.toBeInstanceOf(SessionActivityPersistenceError);
-          }
-          await drainMicrotasks(10);
-          // Only the older reclaim was tool activity; its in-memory refresh is not reverted
-          // because a newer write superseded it. Heartbeats never move the idle clocks (#10656).
-          const activity =
-            older === "reclaim"
-              ? { lastUsedAt: 10, expiresAt: 60_010 }
-              : { lastUsedAt: 0, expiresAt: 60_000 };
-          const latest = {
-            ...activity,
-            lastHeartbeat: 20,
-            hasReceivedHeartbeat: true,
-            ownership: "owned",
-            awaitingOwnerSince: undefined,
-            activityGeneration: 2,
-          };
-          expect(session).toMatchObject(latest);
-          expect(await persistence.getSession!(session.sessionId)).toMatchObject({
-            last_used_at_ms: 0,
-            has_received_heartbeat: 0,
+    test("older failed reclaim cannot revert a newer heartbeat still in flight", async () => {
+      const firstStarted = Promise.withResolvers<void>();
+      const failFirst = Promise.withResolvers<void>();
+      const secondStarted = Promise.withResolvers<void>();
+      const finishSecond = Promise.withResolvers<void>();
+      const persistence = new FakeDeviceSessionPersistence();
+      const recordActivity = persistence.recordActivity.bind(persistence);
+      const write = spyOn(persistence, "recordActivity");
+      const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
+      try {
+        const session = await manager.createSession(
+          "pending-owner",
+          "emulator-5554",
+          "android",
+          60_000,
+          1_000,
+          undefined,
+          undefined,
+          "awaiting-owner",
+        );
+        write
+          .mockImplementationOnce(async () => {
+            firstStarted.resolve();
+            await failFirst.promise;
+            throw new Error("older activity write failed");
+          })
+          .mockImplementationOnce(async (sessionId, update) => {
+            secondStarted.resolve();
+            await finishSecond.promise;
+            await recordActivity(sessionId, update);
           });
-          finishSecond.resolve();
-          await drainMicrotasks(10);
-          expect(session).toMatchObject(latest);
-          expect(await persistence.getSession!(session.sessionId)).toMatchObject({
-            last_used_at_ms: activity.lastUsedAt,
-            has_received_heartbeat: 1,
-          });
-        } finally {
-          failFirst.resolve();
-          finishSecond.resolve();
-          write.mockRestore();
-          manager.stopCleanupTimer();
-        }
-      },
-    );
+        fakeTimer.advanceTime(10);
+        const firstRefresh = manager.getOrCreateSession(session.sessionId);
+        await firstStarted.promise;
+        fakeTimer.advanceTime(10);
+        manager.recordHeartbeat(session.sessionId);
+        await secondStarted.promise;
+        failFirst.resolve();
+        await expect(firstRefresh).rejects.toBeInstanceOf(SessionActivityPersistenceError);
+        await drainMicrotasks(10);
+        // The older reclaim was tool activity; its in-memory refresh is not reverted because a
+        // newer write superseded it. Heartbeats never move the idle clocks (#10656).
+        const activity = { lastUsedAt: 10, expiresAt: 60_010 };
+        const latest = {
+          ...activity,
+          lastHeartbeat: 20,
+          hasReceivedHeartbeat: true,
+          ownership: "owned",
+          awaitingOwnerSince: undefined,
+          activityGeneration: 2,
+        };
+        expect(session).toMatchObject(latest);
+        expect(await persistence.getSession!(session.sessionId)).toMatchObject({
+          last_used_at_ms: 0,
+          has_received_heartbeat: 0,
+        });
+        finishSecond.resolve();
+        await drainMicrotasks(10);
+        expect(session).toMatchObject(latest);
+        expect(await persistence.getSession!(session.sessionId)).toMatchObject({
+          last_used_at_ms: activity.lastUsedAt,
+          has_received_heartbeat: 1,
+        });
+      } finally {
+        failFirst.resolve();
+        finishSecond.resolve();
+        write.mockRestore();
+        manager.stopCleanupTimer();
+      }
+    });
 
     test.each([
       ["heartbeat", "heartbeat"],
@@ -3611,7 +3663,7 @@ describe("SessionManager", () => {
 
   // Cache updates and reads record no activity (#10703), so only the heartbeat write remains.
   test.each(["heartbeat"] as const)(
-    "rolls back failed fire-and-forget %s activity",
+    "keeps the acknowledged lease when a fire-and-forget %s write fails (#11079)",
     async (operation) => {
       const timer = new FakeTimer();
       const writeStarted = Promise.withResolvers<void>();
@@ -3642,10 +3694,11 @@ describe("SessionManager", () => {
         await Promise.resolve();
         await Promise.resolve();
         await Promise.resolve();
-        expect(session).toMatchObject(before);
+        // Liveness only: the idle clocks are untouched and the lease keeps the heartbeat.
+        expect(session).toMatchObject({ ...before, lastHeartbeat: before.lastHeartbeat + 10 });
         if (operation === "heartbeat") {
-          expect(session.hasReceivedHeartbeat).toBe(false);
-          expect(session.ownership).toBe("awaiting-owner");
+          expect(session.hasReceivedHeartbeat).toBe(true);
+          expect(session.ownership).toBe("owned");
         }
       } finally {
         manager.stopCleanupTimer();

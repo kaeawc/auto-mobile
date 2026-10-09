@@ -19,9 +19,10 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
-`identifyInteractions`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
+`identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
 `mockNetwork`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
-`postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`, `recordSteps`, `removeKeyValue`,
+`postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
+`reconcileDeviceResources`, `recordSteps`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
 `setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setUIState`, `shake`, `snapshotOf`,
@@ -593,7 +594,12 @@ The `prototype` tool, on Android and iOS simulators (formerly `overlay`, which r
 deprecated alias for one release) is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is
 `show`, `dismiss`, `status`, `inspect`, or `awaitEvent`. `show` requires a full `spec` (id,
-window, optional state, root) and always renders the whole spec. `dismiss`
+window, optional state, root) and always renders the whole spec. Instead of an inline
+`spec`, `show` accepts `specPath`, the absolute path of a local JSON file with the same spec
+(exactly one of the two): the daemon reads it, refuses a file over the spec byte limit (1 MiB)
+before reading it, validates it like an inline spec, and names the file in every error.
+The path is never sent to the device. A spec holds up to 2000 nodes, and a `repeat` up to
+128 items. `dismiss`
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
 percentage from 0 to 100, default 100; show the spec again to change it.
 
@@ -1060,9 +1066,15 @@ element conditions. `identifyInteractions.layer` analyzes only that layer's
 elements. `dragAndDrop.layer` scopes both the `source` and the `target`
 drop-target resolution; `swipeOn.layer` scopes `container`, auto-target, and
 `lookFor` resolution; `pinchOn.layer` scopes `container` and auto-target resolution.
-The device cannot hide its own overlay for a capture, so an `observe` screenshot
-or crop taken with `layer: "app"` while an overlay is showing still includes the
-overlay; the result says so with `screenshotIncludesOverlay: true`. Navigation-graph
+With `layer: "app"`, an Android CtrlProxy that advertises
+`screenshot_hide_overlay_v1` hides its overlay for the `observe` capture: it hides
+the window, waits for a rendered frame, captures and restores, all on the device in
+one request, so a cancelled observe never leaves the overlay hidden. While an
+overlay is showing, the result then reports `screenshotIncludesOverlay: false`; a
+capture that cannot confirm the hide fails instead of falling back to ADB. Older
+CtrlProxy builds, iOS, and `deviceId` reads (which capture through ADB) still
+include the overlay in the screenshot or crop, and the result says so with
+`screenshotIncludesOverlay: true`. Navigation-graph
 screen identity always uses the app's windows only, so showing, paging, or
 dismissing an overlay records no navigation.
 
@@ -1301,6 +1313,7 @@ subtree, or the whole active-window tree when owner-less.
 | ♻️ <code>appLifecycle</code>                                                                     | State-preserving background-process kill for saved-state restoration tests (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 🔏 <code>inspectPackageSigning</code>                                                            | Android: fresh read of a package's presence (`installed`, `absent`, `unknown`) for one user and its SHA-256 signing certificates, including the complete signer set and rotation history. Never cached.                                                                                                                                                                                                                                                                                                                                                                                   |
 | 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded platform-qualified user_files, or media_library. Default-enabled for every storage target; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                            |
 | 🧾 <code>resetAppLogs</code>                                                                     | Resets explicitly named app-container log files and their rotated siblings on the session device, with per-path outcomes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -1349,6 +1362,43 @@ erases every app's Keychain, regardless of `appId`.
 `installApp.artifactPath` is the host path to an `.apk`, `.app`, or `.ipa`.
 `uninstallApp.keepData` retains app data after uninstall on Android (default
 false; Android only).
+
+Opt-in signing guards (Android only; iOS rejects them). `installApp` and `uninstallApp` accept
+`expectedSigningSha256`, the complete signer set (SHA-256 of every signing certificate,
+64 hex characters, colons optional, see `inspectPackageSigning`). Before anything destructive
+the tool reads the installed package fresh for the user it will mutate and refuses with a
+`SigningGuardError` carrying `reason` (`mismatch`, `absent`, `presence-unknown`,
+`signing-unavailable`) when the signer set differs, the lookup is inconclusive, or the signers
+cannot be read; the device is unchanged in every case. Matching is exact set equality on the
+current signers: one signer of a multi-signer package never satisfies a larger expected set, and
+a rotated package matches its current signer, not its history. For `installApp` the guard applies
+to a copy being replaced (checked on the target user, or on another user holding the shared
+package); a package that is not installed passes with `signingGuard.status`
+`no-existing-package`. For `uninstallApp` an absent package refuses (`absent`). A guarded
+`uninstallApp` confirms removal with a fresh presence read: `removalVerification` is `absent` on
+success, and `installed` or `unknown` (lookup failed) make `success` false. `installApp`
+`allowDestructiveRecovery: false` fails an `INSTALL_FAILED_VERSION_DOWNGRADE` instead of
+uninstalling and reinstalling (default true). AutoMobile serializes its own Android installs and
+uninstalls per device, so a guarded check-then-mutate cannot interleave with another AutoMobile
+mutation; package changes made outside AutoMobile (adb in a terminal, another tool) are not
+visible to that lock, so hold the device exclusively when that matters.
+
+`inspectPackageSigning` (Android) takes `appId` and an optional `userId`; when omitted the
+user is resolved the way `uninstallApp` does and reported as `userId` and `userSource`. Each
+call reads the device (`dumpsys package`, `pm path`, and the installed base APK's signing
+block); nothing is cached, and `observation` records `fresh: true`, `observedAt`, the scope,
+and the device `apiLevel`. `presence` is `installed`, `absent`, or `unknown`: `absent` requires
+PackageManager to report no such package or `installed=false` for that user, and a failed,
+timed-out, malformed or cancelled lookup is `unknown`, never `absent`. `signing` is either
+`{status: "available", scheme, signerSha256, signers, history?}` or
+`{status: "unavailable", reason}`. `signerSha256` is the complete sorted signer set (a
+multi-signer package lists every signer; all of them form the identity). Signers are chosen as
+PackageManager would for the device API level: v3.1, then v3, then v2. For a rotated package
+`history` is the certificate lineage, oldest first with the current signer last, copied from the
+installed APK without re-verifying its signatures. JAR (v1)-only APKs, ZIP64 APKs, and a v3.1
+package on a device whose API level cannot be read report `unavailable`. The signing read pulls
+the installed base APK to a host temp file and removes it afterwards. It does not use CtrlProxy,
+so helper version does not affect the result.
 
 `openLink.acceptOpenAlert` automatically taps Open on an iOS system
 "Open in <app>?" alert. On Android, `chooserAppPackage` selects the exact package
@@ -1613,6 +1663,7 @@ Devicectl-only simulator features such as orientation, per-display screenshots, 
 | 🤖 <code>getAndroid</code> / 🍎 <code>getApple</code>                          | Finds or recovers an Android AVD or iOS Simulator for automation; Android identity includes API level and OS version when known.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 🧱 <code>provisionDevice</code>                                                | Provisions an exact virtual-device identity, with optional resource configuration before automation readiness.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ⚙️ <code>setDeviceResources</code>                                             | Configures selected device resources and returns verified, unsupported, or unknown state; omitted settings stay unchanged. Omitted from discovery by default: select it with `setToolEnabled` (case-sensitive `setDeviceResources`) or `--enable-tool setDeviceResources`; direct calls by name remain available.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 🧭 <code>reconcileDeviceResources</code>                                       | Compares an iOS Simulator with a requested resource map (workload profile) and reports typed drift: `missingRequested`, `ownedExtra`, `unsupported`, `commandFailure`. Report-only by default; `repair: true` applies only the drifted delta, re-reads, and fails closed. Omitted from discovery by default: select it with `setToolEnabled` (case-sensitive `reconcileDeviceResources`) or `--enable-tool reconcileDeviceResources`; direct calls by name remain available.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 🔧 <code>setActiveDevice</code>                                                | Sets the active device. Optional session `display` pins a panel key/role; `null` clears, omission preserves. Explicit display beats pin, then focus/posture. Pins clear on release/rebind; direct mode unsupported.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ❌ <code>killDevice</code> / 🧹 <code>deleteDevice</code>                      | Stops a device, or stops and permanently deletes it. Both accept `force: true`, which drops every AVD-name comparison for a wedged Android emulator — the emulator-console confirmation and the platform kill's own re-discovery check — and acts on whatever occupies the serial; it does not bypass serial selection, nor the refusals raised when the pooled entry was retired and replaced mid-action, or when no booted target can be identified at all. Both also refuse a device another session holds (`device_owned_by_other_session`) unless the caller is the holder; `force: true` overrides that refusal on any platform. See [Device ownership](using/device-ownership.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 📸 <code>deviceSnapshot</code>                                                 | Captures or restores a device snapshot. Android VM restores in daemon mode return the new deviceSessionUuid and supersede the previous device-session epoch.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -1848,16 +1899,62 @@ and an independent `observed` full-platform resource snapshot after configuratio
 including unrequested groups. No read path yields `unsupported` with a reason;
 failed reads yield `unknown`. Explicit opposite enabled/disabled states set
 `success: false` and name the resources in `observationContradictions`, using the
-existing MCP error response (provisioning retains the device/session). Unknown or
-unsupported observations do not add failures. Existing mutation fields retain
+existing MCP error response (Android provisioning retains the device/session). Unknown or
+unsupported observations do not add `success: false` to the result; for `provisionDevice` on an iOS
+Simulator they still fail provisioning with `resource_profile_unproven` and `resourceDrift` (no
+session is bound). Existing mutation fields retain
 their shape and meaning. Observation uses at most half the remaining resource deadline and shares the abort
-signal; exhausted reads report `unknown`, and provisioning replay refreshes it.
+signal; exhausted reads report `unknown`, and a repeated `provisionDevice` call refreshes it.
 Identical package and launchctl reads are reused only within one observation.
 Cancellation after mutation carries the completed result on the propagated error
 as `deviceResourceResult` (including any restore receipt). Non-abort observation errors are
 logged and omit `observed` while retaining the mutation result.
 
-`provisionDevice.operationId` is a caller-generated idempotency key.
+`reconcileDeviceResources` targets a booted iOS Simulator and returns its incarnation
+`identity` (UDID, runtime, device type), the `profileFingerprint` of the requested map,
+`drift` found before any repair, `remainingDrift`, the final independent `observed`
+snapshot, and, after a repair, the `applied` delta result. `success` is true only when
+every requested resource is observed in its requested state and no owned extra remains.
+`releaseOwnedExtras: true` (with `repair`) re-enables services AutoMobile disabled
+earlier that the profile omits; services AutoMobile never changed are never touched.
+
+The iOS catalog (`automobile:devices/images/ios`, `provisioningCatalog.deviceTypes[]`) adds
+`runtimeCompatibility` per model: `knowledge: "known"` with inclusive normalized
+`minRuntimeVersion`/`maxRuntimeVersion` (`null` is an unbounded maximum) and
+`compatibleRuntimeIds` (installed, available runtimes inside the bounds; empty is an authoritative
+"none"), or `knowledge: "unknown"` with a `reason` when CoreSimulator evidence is missing or
+malformed (it says nothing about which runtimes work). Exact iOS `provisionDevice` checks the
+requested pair against the same evidence before any creation side effect and fails a proven
+mismatch (or an unavailable runtime) with non-retryable `runtime_incompatible`; its
+`runtimeCompatibility` diagnostic carries the requested pair, known `bounds`, and installed
+`compatibleRuntimes`. Unknown evidence or failed discovery does not block creation. The requested
+runtime or model is never substituted.
+
+`provisionDevice` takes no idempotency key and keeps no per-request record: every call runs its own
+lifecycle. A concurrent call for the same exact device waits on that device's lifecycle lease and then
+adopts the device (or is refused by session ownership), so retrying never creates a second device.
+`provisionDevice` error responses for daemon handoff (`daemon_handoff_interrupted`), caller
+cancellation (`request_cancelled`), readiness failures, and cleanup failures (`boundary`
+`readiness_failure` / `cleanup_failure`) carry a top-level `recovery` snapshot (`schemaVersion: 2`) next
+to the existing `error` and `lifecycle` fields. `boundary` names where the call failed; `phaseReached` is
+the last lifecycle phase the request recorded; `device` is the exact identity (`stableId`,
+`runtimeDeviceId`) with `ownership` (`created_by_request`, `adopted`, or `unknown` when the request never
+observed which); a display name alone never authorizes destructive recovery. `outcomes` reports
+independent facts: `deviceCreation` (`created`, `adopted`, `not_created`, `unknown`) and `settlement`
+(cancellation: `settling` or `settled` within the bounded 5 s wait). `cleanup.status` is `unnecessary`,
+`pending`, `failed_device_retained`, `reported_complete_unverified` (a successful destroy is not verified
+absence), or `unknown`. `originalError` preserves the provisioning cause. Select the recovery from
+`nextAction.action`: `retry` (a fresh call; honor `retryAfterMs` when the cancelled work is still
+settling or cleanup is pending, and `automaticRetrySafe: false` while cleanup is pending),
+`reacquire_retained_device` (the created device still exists; retrying with the same device adopts it
+without creating another), `perform_cleanup` (cleanup failed and the device is retained; use the exact
+identity), or `obtain_further_evidence` (inventory first, also used when a readiness or cleanup failure is
+not marked retryable, and when an iOS simulator create was still unsettled at rollback so the outcome is
+`retained` with no `device` identity and `deviceCreation: unknown`; `automaticRetrySafe: false`). Missing
+evidence stays `unknown`; the snapshot is stamped with `freshness.observedAtMs` and daemon build, and
+a response that is lost in transit leaves the caller without it. Gathering it reads only in-memory
+state and does not extend the request deadline.
+
 `deleteDevice.operationId` is a caller-generated idempotency and diagnostic
 correlation ID. `verifyAbsence` requires a complete inventory observation proving
 durable absence. `cancellationPolicy: "cancel-on-request-abort"` cancels accepted teardown when

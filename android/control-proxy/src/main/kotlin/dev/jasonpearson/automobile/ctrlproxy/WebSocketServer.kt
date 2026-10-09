@@ -351,6 +351,10 @@ class WebSocketServer(
     // overlayOpaque, so the host can tell how much of the app the overlay hides. Older APKs never
     // send them and the host falls back to bounds.
     add("overlay_window_metadata_v1")
+    // request_screenshot honours hideOverlays: the interactive overlay is hidden, a frame confirms
+    // it, the capture runs and the overlay is restored, all in that one request (#9305). Older APKs
+    // ignore the field, so hosts keep reporting that an app-layer screenshot includes the overlay.
+    add("screenshot_hide_overlay_v1")
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for
     // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.

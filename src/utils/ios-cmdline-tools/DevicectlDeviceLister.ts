@@ -725,3 +725,17 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     return this.lastGood.devices;
   }
 }
+
+let sharedDevicectlDeviceLister: DevicectlDeviceLister | null = null;
+
+/**
+ * Process-wide physical-device lister (#11063). Every discovery path — the
+ * device-manager singleton, per-session readiness scans, and tool handlers —
+ * shares one TTL cache, one in-flight `devicectl` sweep, and one last-good
+ * retention window, so a burst of callers spawns one process and a single
+ * devicectl blip cannot drop an iPhone from one path while another keeps it.
+ */
+export function getSharedDevicectlDeviceLister(): DevicectlDeviceLister {
+  sharedDevicectlDeviceLister ??= new DevicectlDeviceLister();
+  return sharedDevicectlDeviceLister;
+}

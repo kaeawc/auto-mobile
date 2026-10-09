@@ -29,6 +29,19 @@ final class OverlaySessionTests: XCTestCase {
         XCTAssertEqual(session.run([emit]).map(\.sequence), [3])
     }
 
+    func testLastSequenceIsTheShownIdsLedgerEntryForInspect() throws {
+        var session = OverlaySession()
+        let emit = try action(#"{"type":"emit","name":"tap"}"#)
+        XCTAssertEqual(session.lastSequence, 0)
+        try session.show(textSpec(id: "a"))
+        XCTAssertEqual(session.lastSequence, 0)
+        _ = session.run([emit])
+        _ = session.run([emit])
+        XCTAssertEqual(session.lastSequence, 2)
+        try session.show(textSpec(id: "b"))
+        XCTAssertEqual(session.lastSequence, 0)
+    }
+
     func testSequencesSurviveShowingAnotherIdInBetween() throws {
         var session = OverlaySession()
         let emit = try action(#"{"type":"emit","name":"tap"}"#)

@@ -21,6 +21,51 @@ enum GestureApplicationTarget: Equatable {
         }
         return tracked == pinnedBundleId ? .keepPinned : .rebind(bundleId: tracked)
     }
+
+    /// Short log label: `keepPinned` or `rebind`.
+    var logLabel: String {
+        switch self {
+        case .keepPinned: "keepPinned"
+        case .rebind: "rebind"
+        }
+    }
+}
+
+/// The app the runner pinned: the one launched through `request_launch_app` or injected with its
+/// bundle id at startup (`CtrlProxy.setApplication(_:bundleId:)`), and only that app.
+///
+/// A gesture on a different tracked app must not pin it. Before this type, the `XCUICoordinate`
+/// fallback for a rebound app stored that app as the pinned one, so after a single fallback every
+/// later gesture on an app launched with `simctl launch` resolved to `.keepPinned` and never
+/// reached the synthesized route again (#10858: `launchApp` Playground, `simctl launch`
+/// Settings, then a swipe on Settings logged `trackedApp=com.apple.Preferences` and still waited
+/// about 24 s in `xcuitestGesture`). Only `pin(_:)` (launch), `inject(bundleId:)` (startup app: pins
+/// its bundle id, or clears the pin when none is known) and `clear()` change it; resolving a
+/// target never does. A startup app that is never pinned would take the unpinned route on every
+/// gesture and build a fresh `XCUIApplication` each time (#10995).
+struct GesturePinnedApplication: Equatable {
+    private(set) var bundleId: String?
+
+    mutating func pin(_ bundleId: String) {
+        self.bundleId = bundleId
+    }
+
+    /// An application handed to the performer from outside: pinned when its bundle id is known.
+    mutating func inject(bundleId: String?) {
+        if let bundleId {
+            pin(bundleId)
+        } else {
+            clear()
+        }
+    }
+
+    mutating func clear() {
+        bundleId = nil
+    }
+
+    func target(trackedBundleId: String?) -> GestureApplicationTarget {
+        GestureApplicationTarget.resolve(pinnedBundleId: bundleId, trackedBundleId: trackedBundleId)
+    }
 }
 
 /// How a tap or swipe reaches the screen.
@@ -40,6 +85,22 @@ enum GestureDeliveryRoute: Equatable {
     /// `UIInterfaceOrientation` raw value.
     case synthesizedEventRecord(interfaceOrientation: Int)
 
+    /// Why a gesture kept the `XCUICoordinate` path; logged so a simulator run can tell a stale
+    /// tracker (`pinnedApp`) from a missing or unusable observation of the foreground app.
+    enum Fallback: String, Equatable {
+        case pinnedApp
+        case forcedStrategy
+        case noObservation
+        case invalidSize
+        case multiPanel
+        case unknownRotation
+    }
+
+    struct Decision: Equatable {
+        let route: GestureDeliveryRoute
+        let fallback: Fallback?
+    }
+
     /// Synthesizes only when every condition proves an observed point is a screen point:
     /// the foreground app was not pinned by the runner, no strategy was forced, and the cached
     /// observation of that app is a full-screen, single-panel frame with a known rotation.
@@ -51,16 +112,70 @@ enum GestureDeliveryRoute: Equatable {
     )
         -> Self
     {
-        guard case .rebind = target,
-              forced == nil,
-              let geometry,
-              geometry.app.isValid,
-              geometry.screen.isValid,
-              !hasMultiPanelMismatch(app: geometry.app, screen: geometry.screen),
-              let orientation = DeviceRotation.gestureInterfaceOrientationRawValue(rotation: geometry.rotation)
-        else {
-            return .xcuiCoordinate
+        decide(target: target, forced: forced, geometry: geometry).route
+    }
+
+    static func decide(
+        target: GestureApplicationTarget,
+        forced: TapCoordinateStrategy?,
+        geometry: GestureCoordinateGeometry?
+    )
+        -> Decision
+    {
+        let fallback: Fallback
+        if case .keepPinned = target {
+            fallback = .pinnedApp
+        } else if forced != nil {
+            fallback = .forcedStrategy
+        } else if let geometry {
+            if !geometry.app.isValid || !geometry.screen.isValid {
+                fallback = .invalidSize
+            } else if hasMultiPanelMismatch(app: geometry.app, screen: geometry.screen) {
+                fallback = .multiPanel
+            } else if let orientation = DeviceRotation
+                .gestureInterfaceOrientationRawValue(rotation: geometry.rotation)
+            {
+                return Decision(route: .synthesizedEventRecord(interfaceOrientation: orientation), fallback: nil)
+            } else {
+                fallback = .unknownRotation
+            }
+        } else {
+            fallback = .noObservation
         }
-        return .synthesizedEventRecord(interfaceOrientation: orientation)
+        return Decision(route: .xcuiCoordinate, fallback: fallback)
+    }
+}
+
+/// The gesture a route decision is for. `GestureDeliveryRoute.decide` takes the same inputs for
+/// every kind (#10858: drag and pinch hit the same app-lookup and idle-wait stalls as tap and
+/// swipe), so the kind only labels the `gesture_route` log line.
+enum GestureKind: String, CaseIterable, Equatable {
+    case tap
+    case swipe
+    case drag
+    case pinch
+}
+
+/// Pure construction of the app-free drag event path, so the timing semantics are testable on
+/// the host. The synthesized record presses for `press`, moves for `move`, then rests at the end
+/// point for `hold` before lifting, the same press, drag and hold the `XCUICoordinate` drag has.
+enum UnpinnedGestureSynthesis {
+    /// Non-finite or negative durations become 0, matching the event helper's own clamp.
+    static func drag(
+        start: GesturePoint, end: GesturePoint, press: TimeInterval, move: TimeInterval, hold: TimeInterval,
+        displayId: UInt64, interfaceOrientation: Int
+    )
+        -> DisplayTouch
+    {
+        func clamp(_ value: TimeInterval) -> TimeInterval { value.isFinite && value > 0 ? value : 0 }
+        return DisplayTouch(
+            start: start, end: end, pressDuration: clamp(press), moveDuration: clamp(move),
+            holdDuration: clamp(hold), displayId: displayId, interfaceOrientation: interfaceOrientation
+        )
+    }
+
+    /// The main display's id from a display inventory; nil when none is marked main.
+    static func mainDisplayId(screens: [TapDiagnostics.DisplayScreen]) -> UInt64? {
+        screens.first(where: { $0.isMain })?.displayId
     }
 }

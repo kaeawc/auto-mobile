@@ -29,6 +29,7 @@ import { createTimestampedId } from "../utils/IdGenerator";
 import { combineAbortSignals, runOutsideRequestContext } from "../utils/AbortContext";
 import { ResourceRegistry } from "./resourceRegistry";
 import {
+  FINISHED_VIDEO_RECORDING_STATUSES,
   VideoRecordingRepository,
   type VideoRecordingRecord,
 } from "../db/videoRecordingRepository";
@@ -279,6 +280,12 @@ export function fenceVideoRecordingStartsForIncarnationChange(
 const autoStopTimers = new Map<string, { timer: Timer; handle: NodeJS.Timeout }>();
 const highlightSessions = new Map<string, VideoRecordingHighlightSession>();
 const highlightSessionsByDeviceId = new Map<string, string>();
+/**
+ * Who started each single-file recording, held in memory so session release can name the
+ * recordings it is about to finalize without a database read (#10958). Entries for recordings
+ * that are no longer active are pruned on every read and write.
+ */
+const recordingOwners = new Map<string, { ownerSessionUuid?: string; deviceId: string }>();
 const stoppingVideoRecordings = new Map<string, Promise<StopVideoRecordingResult>>();
 const recordingDisplaySessions = new Map<string, RecordingDisplaySession>();
 
@@ -531,6 +538,7 @@ function resetVideoRecordingManagerState(): void {
     timer.clearTimeout(handle);
   }
   autoStopTimers.clear();
+  recordingOwners.clear();
   for (const { timer, handle } of inProgressSizeMonitors.values()) {
     timer.clearInterval(handle);
   }
@@ -768,7 +776,7 @@ async function runRetentionSweepWithDependencies(
 
   const cutoffMs = now().getTime() - retentionPolicy.ttlMs;
   const recordings = await recordingRepository.listRecordings({
-    status: ["completed", "interrupted"],
+    status: FINISHED_VIDEO_RECORDING_STATUSES,
   });
 
   const prunedRecordingIds: string[] = [];
@@ -1280,6 +1288,11 @@ export async function startVideoRecording(
       ownerSessionUuid: request.ownerSessionUuid,
     });
     start.abortSignal.throwIfAborted();
+    pruneRecordingOwners();
+    recordingOwners.set(active.recordingId, {
+      ownerSessionUuid: request.ownerSessionUuid,
+      deviceId: request.device.deviceId,
+    });
 
     if (recordingDisplay && active.recordedPanel) {
       beginRecordingDisplaySession(
@@ -1588,6 +1601,39 @@ export async function forceStopVideoRecording(recordingId: string): Promise<void
   await videoRecorderService.forceStopRecording(recordingId);
 }
 
+/**
+ * Gives up on a recording whose finalize exceeded its cap (#10957): force-stops the capture so
+ * the device is free, then marks a row still `recording` as `incomplete` (keeping whatever
+ * reached the host). A row the slow stop has since finished is left as it is.
+ */
+export async function markVideoRecordingIncomplete(recordingId: string): Promise<void> {
+  const deps = await getVideoRecordingDependencies();
+  try {
+    await deps.videoRecorderService.forceStopRecording(recordingId);
+  } catch (error) {
+    // The capture may already be gone; the row below still has to leave the "recording" state.
+    logger.warn(
+      `[VideoRecording] Force-stop of ${recordingId} failed: ${errorMessage(error)}`,
+      error,
+    );
+  }
+  clearAutoStop(recordingId);
+  clearInProgressSizeCap(recordingId);
+  const record = await deps.recordingRepository.getRecording(recordingId);
+  if (!record || record.status !== "recording") {
+    return;
+  }
+  const endedAt = deps.now().toISOString();
+  await deps.recordingRepository.updateRecording(recordingId, {
+    status: "incomplete",
+    endedAt,
+    lastAccessedAt: endedAt,
+    sizeBytes: await deps.statFileSize(record.filePath),
+    durationMs: calculateDurationMs(record.startedAt, endedAt),
+  });
+  await notifyVideoRecordingResources([recordingId]);
+}
+
 export async function recordVideoRecordingHighlightAdded(
   device: BootedDevice,
   highlight: VideoRecordingHighlightInput,
@@ -1620,12 +1666,37 @@ export function listOwnedActiveVideoRecordingIds(): string[] {
   return moduleDependencies?.videoRecorderService.listActiveRecordingIds() ?? [];
 }
 
+function pruneRecordingOwners(): void {
+  const active = new Set(listOwnedActiveVideoRecordingIds());
+  for (const recordingId of recordingOwners.keys()) {
+    if (!active.has(recordingId)) {
+      recordingOwners.delete(recordingId);
+    }
+  }
+}
+
+/**
+ * Active single-file recordings a daemon session started on a device, from memory only;
+ * `undefined` selects owner-less ones. These are the recordings its release will finalize.
+ */
+export function listActiveVideoRecordingIdsForOwner(
+  ownerSessionUuid: string | undefined,
+  deviceId: string,
+): string[] {
+  pruneRecordingOwners();
+  return [...recordingOwners]
+    .filter(
+      ([, owner]) => owner.ownerSessionUuid === ownerSessionUuid && owner.deviceId === deviceId,
+    )
+    .map(([recordingId]) => recordingId);
+}
+
 export async function listVideoRecordings(
   scope: { ownerSessionUuid?: string } = {},
 ): Promise<VideoRecordingMetadata[]> {
   const { recordingRepository } = await getVideoRecordingDependencies();
   const recordings = await recordingRepository.listRecordings({
-    status: ["completed", "interrupted"],
+    status: FINISHED_VIDEO_RECORDING_STATUSES,
     orderByLastAccessed: "desc",
     ownerSessionUuid: scope.ownerSessionUuid,
   });
@@ -1697,7 +1768,7 @@ export async function lookupLatestVideoRecording(
 ): Promise<LatestVideoRecordingLookup> {
   const deps = await getVideoRecordingDependencies();
   const query = {
-    status: ["completed", "interrupted"] as VideoRecordingRecord["status"][],
+    status: FINISHED_VIDEO_RECORDING_STATUSES,
     orderByStartedAt: "desc" as const,
     ownerSessionUuid: scope.ownerSessionUuid,
   };
@@ -1782,7 +1853,7 @@ async function enforceArchiveLimit(
   const maxSizeBytes = Math.max(0, Math.floor(maxArchiveSizeMb * 1024 * 1024));
   const { recordingRepository } = deps;
   const recordings = await recordingRepository.listRecordings({
-    status: ["completed", "interrupted"],
+    status: FINISHED_VIDEO_RECORDING_STATUSES,
     orderByLastAccessed: "asc",
   });
 

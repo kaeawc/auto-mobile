@@ -149,6 +149,11 @@ export interface ViewHierarchyResult {
   accessibilityTool?: boolean;
   /** Structured reasons why this Android snapshot is partial or unavailable. */
   truncationReasons?: string[];
+  /**
+   * True only while an AutoMobile overlay exists but is hidden because the app it was shown over
+   * is not in front (Android, #10261). Absent otherwise and from older APKs.
+   */
+  overlaySuspended?: boolean;
   /** Present when CtrlProxy is reconnecting and the hierarchy is temporarily unavailable. */
   ctrlProxyReconnect?: CtrlProxyReconnectStatus;
 }

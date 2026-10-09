@@ -1,6 +1,7 @@
 import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
 import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
+import type { ObserverReleaseSource } from "../../src/daemon/observerReleaseBroadcast";
 import { describe, it, expect, beforeAll, beforeEach, afterEach, spyOn } from "bun:test";
 import { Socket } from "node:net";
 import {
@@ -59,8 +60,9 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
   constructor(
     timer: FakeTimer,
     authenticator: StreamSocketAuthenticator = { authorize: () => {} },
+    observerReleases?: ObserverReleaseSource,
   ) {
-    super("/fake/path/test.sock", timer, authenticator);
+    super("/fake/path/test.sock", timer, authenticator, observerReleases);
     this.setDeviceSessionResolver(this.sessionResolver);
   }
 
@@ -4570,6 +4572,68 @@ streamSubscribeAuthCases("observation-stream", (timer, authenticator) => {
       return connected;
     },
   };
+});
+
+it("a released or expired observer's subscriptions and storage observers end with SESSION_ENDED (#11076)", async () => {
+  const timer = new FakeTimer();
+  const listeners = new Set<(sessionId: string) => void>();
+  const server = new TestableDeviceDataStreamSocketServer(timer, undefined, {
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  });
+  await server.startFake();
+  const storage: Array<{ deviceId: string | null; subscribe: boolean }> = [];
+  server.setOnStorageSubscriptionRequested(async ({ deviceId, subscribe }) => {
+    storage.push({ deviceId, subscribe });
+  });
+  const observer = new FakeSocket();
+  const other = new FakeSocket();
+  for (const [socket, sessionUuid] of [
+    [observer, "observer"],
+    [other, "other"],
+  ] as const) {
+    await server.processLineForTest(socket, JSON.stringify({ command: "subscribe", sessionUuid }));
+  }
+  await server.processLineForTest(
+    observer,
+    JSON.stringify({
+      command: "subscribe_storage",
+      sessionUuid: "observer",
+      deviceId: "emulator-5554",
+      packageName: "com.example.app",
+      fileName: "prefs.xml",
+    }),
+  );
+  expect(server.getSubscriberCount()).toBe(2);
+  observer.resetWrittenData();
+
+  for (const listener of listeners) {
+    listener("observer");
+  }
+  for (let i = 0; i < 10; i++) {
+    await Promise.resolve();
+  }
+
+  expect(observer.getWrittenMessages()).toEqual([
+    {
+      type: "error",
+      success: false,
+      code: "SESSION_ENDED",
+      error: "Observation stream ended: session_ended",
+    },
+  ]);
+  expect(server.getSubscriberCount()).toBe(1);
+  expect(storage).toEqual([
+    { deviceId: "emulator-5554", subscribe: true },
+    { deviceId: "emulator-5554", subscribe: false },
+  ]);
+  expect(server.revokeIdentity("other")).toBe(1);
+  expect(server.getSubscriberCount()).toBe(0);
+
+  await server.closeFake();
+  expect(listeners.size).toBe(0);
 });
 
 it("registered observer request_observation passes both auth layers on unowned and held devices (#10830)", async () => {

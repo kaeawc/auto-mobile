@@ -23,21 +23,26 @@ const LARGE_FRAME_BYTES = 3_300_000;
 class SizedFiles extends FakeFileSystem {
   readonly entries = new Map<string, { size: number; mtimeMs: number; isFile(): boolean }>();
   readonly unlinked: string[] = [];
+  /** The retention inventory builds paths with node:path, so Windows hands back backslashes. */
+  private static key(path: string): string {
+    return path.replace(/\\/g, "/");
+  }
   add(path: string, size: number, mtimeMs: number): void {
     this.setFile(path, "frame");
-    this.entries.set(path, { size, mtimeMs, isFile: () => true });
+    this.entries.set(SizedFiles.key(path), { size, mtimeMs, isFile: () => true });
   }
   async lstat(path: string) {
-    const entry = this.entries.get(path);
+    const entry = this.entries.get(SizedFiles.key(path));
     if (!entry) {
       throw Object.assign(new Error("vanished"), { code: "ENOENT" });
     }
     return entry;
   }
   override async unlink(path: string) {
-    await super.unlink(path);
-    this.entries.delete(path);
-    this.unlinked.push(path);
+    const key = SizedFiles.key(path);
+    await super.unlink(key);
+    this.entries.delete(key);
+    this.unlinked.push(key);
   }
   bytes(): number {
     return [...this.entries.values()].reduce((total, entry) => total + entry.size, 0);

@@ -93,6 +93,29 @@ describe("the conflict refusal carries the owner's hold to the challenger", () =
     });
   });
 
+  test("#10972: the socket client carries a not-found answer's release reason and idle flag", () => {
+    const idle = daemonResponseError({
+      id: "1",
+      type: "mcp_response",
+      success: false,
+      error: "Session not found: s",
+      code: DAEMON_SESSION_NOT_FOUND_CODE,
+      releaseReason: "cleanup-expired",
+      idle: true,
+    });
+    expect(idle).toMatchObject({ releaseReason: "cleanup-expired", idle: true });
+    const lapsed = daemonResponseError({
+      id: "2",
+      type: "mcp_response",
+      success: false,
+      error: "Session not found: s",
+      code: DAEMON_SESSION_NOT_FOUND_CODE,
+      releaseReason: "heartbeat-timeout",
+    });
+    expect(lapsed).toMatchObject({ releaseReason: "heartbeat-timeout" });
+    expect(lapsed).not.toHaveProperty("idle");
+  });
+
   test("the socket client attaches a well-formed hold to the conflict error, and only to it", () => {
     const liveness = { state: "live", remainingMs: 3_000, holdRemainingMs: 7_000 };
     const conflict = daemonResponseError({

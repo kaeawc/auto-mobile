@@ -127,6 +127,7 @@ async function harness(
   const emissions: Array<(data: Buffer) => void> = [];
   let lifecycleListeners = 0;
   const releaseListeners = new Set<(sessionId: string) => void>();
+  const observerListeners = new Set<(sessionId: string) => void>();
   let resolveCalls = 0;
   const server = new TestServer(
     {
@@ -152,6 +153,14 @@ async function harness(
           releaseListeners.add(cb);
           return () => {
             releaseListeners.delete(cb);
+          };
+        },
+      },
+      observerReleases: {
+        subscribe: (cb) => {
+          observerListeners.add(cb);
+          return () => {
+            observerListeners.delete(cb);
           };
         },
       },
@@ -239,6 +248,12 @@ async function harness(
         cb(id);
       }
     },
+    observerGone: (id: string) => {
+      for (const cb of observerListeners) {
+        cb(id);
+      }
+    },
+    observerListenerCount: () => observerListeners.size,
     lifecycleListenerCount: () => lifecycleListeners,
     emit: () =>
       emissions[0](
@@ -256,6 +271,28 @@ function terminal(socket: FakeSocket, reason: string): void {
   expect(messages(socket).at(-1)?.error).toStartWith("Video stream ended:");
   expect(socket.destroyed).toBe(true);
 }
+
+describe("observer registrations that end (#11076)", () => {
+  test("a released or expired observer's viewer stream ends with session_ended", async () => {
+    const h = await harness({ owner: "b" });
+    const socket = await h.subscribe("a");
+    expect(messages(socket).at(-1)).toMatchObject({ success: true, subscriptionKind: "viewer" });
+
+    // The observer registry no longer admits "a"; no device owner changed.
+    h.state.live.delete("a");
+    h.observerGone("a");
+
+    terminal(socket, "session_ended");
+    expect(h.server.subscriberCount(device.deviceId)).toBe(0);
+  });
+
+  test("close unsubscribes from observer releases", async () => {
+    const h = await harness();
+    expect(h.observerListenerCount()).toBe(1);
+    await h.server.close();
+    expect(h.observerListenerCount()).toBe(0);
+  });
+});
 
 describe("viewer subscriptions (moved from real-socket ownership tests)", () => {
   test("shutdown bounds a non-reading connection without finish or peer FIN", async () => {
@@ -1038,6 +1075,33 @@ test("admitted viewer survives owner release, ends on removal and re-subscribes"
   h.state.owner = "other";
   const again = await h.subscribe("a");
   expect(messages(again)[0]).toMatchObject({ success: true, subscriptionKind: "viewer" });
+});
+test("ownership churn never interrupts a viewer's frames or the shared capture (#8902)", async () => {
+  const h = await harness({ owner: "b" });
+  const owner = await h.subscribe("b");
+  const viewer = await h.subscribe("a");
+  const frames = () => binary(viewer).length;
+  for (const next of ["c", null, "b", null]) {
+    h.state.owner = next;
+    h.ownership.changed();
+    const before = frames();
+    h.emit();
+    expect(frames()).toBeGreaterThan(before);
+    expect(viewer.destroyed).toBe(false);
+  }
+  // The owner's own identity ending leaves the viewer on the same shared capture.
+  h.state.live.delete("b");
+  h.released("b");
+  h.ownership.changed();
+  terminal(owner, "session_ended");
+  const before = frames();
+  h.emit();
+  expect(frames()).toBeGreaterThan(before);
+  expect(h.sources).toHaveLength(1);
+  expect(h.sources[0].stopped).toBe(false);
+  expect(h.server.subscriberCount(device.deviceId)).toBe(1);
+  h.lifecycle.deviceRemoved(device.deviceId);
+  terminal(viewer, "device_removed");
 });
 test.each([
   { owner: "a", joiner: "b", authOff: false, kind: "viewer", reconfigure: false },

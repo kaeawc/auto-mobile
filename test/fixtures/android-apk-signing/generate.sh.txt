@@ -1,0 +1,12 @@
+set -e
+AS=~/Library/Android/sdk/build-tools/35.0.1/apksigner
+K() { echo --ks $1.jks --ks-pass pass:android --key-pass pass:android; }
+J="java --enable-native-access=ALL-UNNAMED -jar $HOME/Library/Android/sdk/build-tools/35.0.1/lib/apksigner.jar"
+$J sign $(K a) --min-sdk-version 24 --out single-a.apk base.apk
+$J sign $(K b) --min-sdk-version 24 --out single-b.apk base.apk
+$J sign $(K a) --next-signer $(K b) --min-sdk-version 24 --v3-signing-enabled false --out multi-ab.apk base.apk
+$J sign $(K a) --min-sdk-version 28 --v1-signing-enabled false --out v3-only-a.apk base.apk
+$J rotate --out lin-ab --old-signer $(K a) --new-signer $(K b)
+$J sign $(K a) --next-signer $(K b) --lineage lin-ab --min-sdk-version 28 --v1-signing-enabled false --out rotated-b-from-a.apk base.apk
+$J sign $(K a) --min-sdk-version 24 --v2-signing-enabled false --v3-signing-enabled false --out v1-only-a.apk base.apk
+for f in single-a single-b multi-ab v3-only-a rotated-b-from-a v1-only-a; do echo "== $f"; $J verify -v --print-certs $f.apk 2>&1 | grep -v WARNING; done

@@ -26,7 +26,7 @@ import { SessionToolSelectionService } from "../../src/features/toolSelection/Se
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { McpTestFixture, precompileMcpOutputSchemas } from "../fixtures/mcpTestFixture";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
-import { compileJsonSchema } from "../helpers/jsonSchemaCompile";
+import { compileAjv2020, compileJsonSchema } from "../helpers/jsonSchemaCompile";
 import { initializeCliTools } from "../../src/cli/cliToolRegistration";
 import { registerToolSelectionTools } from "../../src/server/toolSelectionTools";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
@@ -134,6 +134,38 @@ describe("overlay MCP tool", () => {
     expect(result.response.isError).toBe(true);
     expect(result.payload.error).toContain(message);
     expect(client.getOverlayHistory()).toEqual([]);
+  });
+
+  test("a spec with components is expanded on the host before it is sent (#11053)", async () => {
+    const authored = {
+      id: "panel",
+      window: { placement: { type: "fullscreen" as const } },
+      components: { greeting: { root: { type: "text", text: "Hello {props.name}" } } },
+      root: { type: "use", component: "greeting", props: { name: "Ada" } },
+    };
+    const { payload } = await call({ action: "show", spec: authored });
+    expect(payload.success).toBe(true);
+    expect(client.getOverlayHistory()).toEqual([
+      {
+        method: "show",
+        spec: {
+          id: "panel",
+          window: { placement: { type: "fullscreen" } },
+          root: { type: "text", text: "Hello Ada" },
+        },
+        timeoutMs: 5000,
+        perf: undefined,
+      },
+    ]);
+    const missing = await call({
+      action: "show",
+      spec: { ...authored, root: { type: "use", component: "greeting" } },
+    });
+    expect(missing.payload.error).toContain(
+      "Invalid overlay at spec.root.props: Missing component prop",
+    );
+    expect(missing.payload.error).not.toContain("invalid_union_discriminator");
+    expect(client.getOverlayHistory()).toHaveLength(1);
   });
 
   test("a same-id show is forwarded as a show and keeps one shown entry", async () => {
@@ -904,7 +936,7 @@ describe("overlay MCP tool", () => {
     [{ action: "show", spec }, "launchApp with overlay: true"],
     [{ action: "dismiss", all: true }, "launchApp with overlay: true"],
     [{ action: "awaitEvent", id: "panel" }, "launchApp with overlay: true"],
-    [{ action: "show", spec, reset: true }, "reset is Android only"],
+    [{ action: "show", spec, reset: true }, "launchApp with overlay: true"],
   ])("iOS %o without an injected agent never reaches CtrlProxy", async (input, guidance) => {
     const { response, payload } = await call(input, { ...device, platform: "ios" });
     expect(response.isError).toBe(true);
@@ -1065,6 +1097,26 @@ describe("overlay CLI and advertised schema registration", () => {
     expect(ToolRegistry.getTool("highlight")!.defaultEnabled).toBe(false);
     expect(definition.name).toBe("prototype");
     expect(definition.outputSchema).toBeDefined();
+  });
+  test("the advertised spec accepts a components map and use nodes in any child slot", () => {
+    const validate = compileAjv2020(definition.inputSchema);
+    const show = (spec: unknown) => validate({ action: "show", spec });
+    const authored = {
+      id: "panel",
+      window: { placement: { type: "fullscreen" } },
+      components: { row: { root: { type: "text", text: "{props.label}" } } },
+      root: {
+        type: "column",
+        children: [{ type: "use", component: "row", props: { label: "A" } }],
+      },
+    };
+    expect(show(authored)).toBe(true);
+    expect(show({ ...authored, components: { row: { root: authored.root, extra: 1 } } })).toBe(
+      false,
+    );
+    expect(show({ ...authored, root: { type: "use", component: "row", props: { a: [1] } } })).toBe(
+      false,
+    );
   });
   test("the advertised theme objects reject empty objects like the validator does", () => {
     type Node = { minProperties?: number; properties: Record<string, Node> };

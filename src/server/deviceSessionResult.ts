@@ -3,6 +3,7 @@ import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
 import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
+import { DEVICE_CLEANUP_IN_PROGRESS_CODE } from "../daemon/deviceAcquisitionRefusals";
 
 /**
  * The tools that acquire a device and mint a device session, returning its
@@ -151,6 +152,32 @@ export function declaresDeviceSessionSuspect(result: unknown): boolean {
     "code" in error &&
     error.code === DAEMON_SESSION_SUSPECT_CODE
   );
+}
+
+/**
+ * Whether `name` binds a device and so can be refused while the device's previous session is still
+ * cleaning up (#10960): the acquisition tools plus `setActiveDevice`. Only these are safe to
+ * re-forward on that refusal, because a refused bind never reached a device.
+ */
+export function isDeviceBindingTool(name: string): boolean {
+  return name === "setActiveDevice" || isDeviceSessionAcquisitionTool(name);
+}
+
+/** The retry hint of a typed `device_cleanup_in_progress` refusal result, when it is one. */
+export function readDeviceCleanupInProgressRefusal(
+  result: unknown,
+): { retryAfterMs?: number } | undefined {
+  if (!result || typeof result !== "object" || !("isError" in result) || result.isError !== true) {
+    return undefined;
+  }
+  const payload = readToolEnvelopePayload(result)?.payload;
+  if (!payload || payload.code !== DEVICE_CLEANUP_IN_PROGRESS_CODE) {
+    return undefined;
+  }
+  const { retryAfterMs } = payload;
+  return typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs) && retryAfterMs >= 0
+    ? { retryAfterMs }
+    : {};
 }
 
 /** The session a suspect refusal names and how long the daemon keeps it reserved. */

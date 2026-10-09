@@ -155,6 +155,7 @@ describe("CtrlProxy command support", () => {
         "get_sdk_capabilities",
         "network_mock_rules_report_v1",
         "sdk_capabilities_user_id_v1",
+        "screenshot_hide_overlay_v1",
         "ime_clear_field_v1",
         "ime_password_commit_v1",
         "put_overlay_asset",

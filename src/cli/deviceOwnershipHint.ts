@@ -1,4 +1,8 @@
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../daemon/inputDeviceOwnership";
+import {
+  DEVICE_CLEANUP_IN_PROGRESS_CODE,
+  DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+} from "../daemon/deviceAcquisitionRefusals";
 
 /** Tools that stop a device and therefore accept `force` to override a held-device refusal. */
 const FORCE_OVERRIDE_TOOLS: ReadonlySet<string> = new Set(["killDevice", "deleteDevice"]);
@@ -22,7 +26,20 @@ function refusalCode(payload: unknown): unknown {
  * other failure.
  */
 export function cliDeviceOwnershipHint(payload: unknown, toolName: string): string | undefined {
-  if (refusalCode(payload) !== DEVICE_OWNED_BY_OTHER_SESSION_CODE) {
+  const code = refusalCode(payload);
+  if (code === DEVICE_CLEANUP_IN_PROGRESS_CODE) {
+    return (
+      "Hint: the device's previous session is still finishing its cleanup. Re-run the command " +
+      "after the retryAfterMs in the error has passed; nothing else needs to change."
+    );
+  }
+  if (code === DEVICE_OWNED_BY_OTHER_DAEMON_CODE) {
+    return (
+      "Hint: another AutoMobile daemon on this host is using the device. Re-run after it " +
+      "releases the device, or pass another deviceId."
+    );
+  }
+  if (code !== DEVICE_OWNED_BY_OTHER_SESSION_CODE) {
     return undefined;
   }
   const forceHint = FORCE_OVERRIDE_TOOLS.has(toolName)

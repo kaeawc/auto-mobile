@@ -220,7 +220,7 @@ describe("TestRecordingSocketServer authorization (issue #4752)", () => {
     const calls: Array<{ sessionUuid?: string; deviceId?: string }> = [];
     const server = new TestableServer(undefined, undefined, recordingAuthenticator(calls));
     await expect(server.invoke({ command: "status" })).rejects.toThrow(/rejected session/);
-    expect(calls).toEqual([{ sessionUuid: undefined, deviceId: undefined }]);
+    expect(calls).toEqual([{ sessionUuid: undefined, deviceId: undefined, admitViewer: true }]);
   });
 
   test("a live session passes the gate; status then returns the (empty) recording state", async () => {
@@ -228,7 +228,43 @@ describe("TestRecordingSocketServer authorization (issue #4752)", () => {
     const server = new TestableServer(undefined, undefined, recordingAuthenticator(calls));
     const response = await server.invoke({ command: "status", sessionUuid: "live" });
     expect(response.success).toBe(true);
-    expect(calls).toEqual([{ sessionUuid: "live", deviceId: undefined }]);
+    expect(calls).toEqual([{ sessionUuid: "live", deviceId: undefined, admitViewer: true }]);
+  });
+
+  // #10970: status is a read, so a live session that does not hold the device may watch it.
+  describe("on a device another session holds", () => {
+    const sessions = new Set(["owner", "viewer"]);
+    const authenticator = new SessionScopedStreamAuthenticator(
+      () => ({
+        getSession: (sessionUuid: string) => (sessions.has(sessionUuid) ? {} : null),
+        getSessionForDevice: (deviceId: string) => (deviceId === "emu-held" ? "owner" : null),
+        getDeviceLabels: () => undefined,
+      }),
+      "testRecording",
+      {},
+    );
+
+    test("status from a live non-owner is admitted", async () => {
+      const server = new TestableServer(undefined, undefined, authenticator);
+      const response = await server.invoke({
+        command: "status",
+        sessionUuid: "viewer",
+        deviceId: "emu-held",
+      });
+      expect(response.success).toBe(true);
+    });
+
+    test("start from a live non-owner is still refused", async () => {
+      const server = new TestableServer(undefined, undefined, authenticator);
+      await expect(
+        server.invoke({
+          command: "start",
+          sessionUuid: "viewer",
+          deviceId: "emu-held",
+          platform: "android",
+        }),
+      ).rejects.toThrow(/bound to a different daemon session/);
+    });
   });
 });
 

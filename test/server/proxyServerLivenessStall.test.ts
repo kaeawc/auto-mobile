@@ -23,6 +23,22 @@ afterEach(() => {
   isAvailableSpy = null;
 });
 
+/**
+ * Advance the clock until `pending` settles: a call that names a handed-over session first asks
+ * the daemon to resume it and waits up to one heartbeat timeout for the answer (#10989).
+ */
+async function settle<T>(timer: FakeTimer, pending: Promise<T>): Promise<T> {
+  let done = false;
+  const tracked = pending.finally(() => {
+    done = true;
+  });
+  tracked.catch(() => {});
+  for (let elapsed = 0; elapsed < 20_000 && !done; elapsed += 250) {
+    await timer.advanceTimeAsync(250);
+  }
+  return tracked;
+}
+
 /** A proxy server behind an MCP client, with a daemon that stops answering heartbeats on demand. */
 async function connectStallingHarness(loggingLevel?: LoggingLevel) {
   isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -131,11 +147,15 @@ describe("proxy server liveness stall reporting", () => {
         },
       });
 
-      // The next tool call for the session returns the same structured error.
-      const result = await client.callTool({
-        name: "observe",
-        arguments: { sessionUuid: "session-1" },
-      });
+      // The next tool call for the session asks the daemon, which still does not answer, and
+      // returns the same structured error.
+      const result = await settle(
+        timer,
+        client.callTool({
+          name: "observe",
+          arguments: { sessionUuid: "session-1" },
+        }),
+      );
       expect(result.isError).toBe(true);
       const text = (result.content as Array<{ type: string; text: string }>)[0].text;
       expect(JSON.parse(text)).toEqual(
@@ -160,10 +180,13 @@ describe("proxy server liveness stall reporting", () => {
       await timer.advanceTimeAsync(19_000);
 
       expect(notifications).toEqual([]);
-      const result = await client.callTool({
-        name: "observe",
-        arguments: { sessionUuid: "session-1" },
-      });
+      const result = await settle(
+        timer,
+        client.callTool({
+          name: "observe",
+          arguments: { sessionUuid: "session-1" },
+        }),
+      );
       expect(result.isError).toBe(true);
       const text = (result.content as Array<{ type: string; text: string }>)[0].text;
       expect(JSON.parse(text).error.code).toBe("daemon_stalled");

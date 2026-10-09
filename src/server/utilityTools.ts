@@ -838,6 +838,11 @@ const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocal
   );
 };
 
+/** A call with no set field reads (#10965); fontScale, density, theme or reset is control. */
+function isDisplayConfigRead(args: DisplayConfigArgs): boolean {
+  return !displayConfigArgsAreSet(args);
+}
+
 const displayConfigHandler = async (device: BootedDevice, args: DisplayConfigArgs) => {
   const displayConfig = new DisplayConfig(device);
   const result = displayConfigArgsAreSet(args)
@@ -1053,7 +1058,7 @@ export function registerUtilityTools(
     "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only (via `simctl ui appearance`); physical iOS devices are unsupported. On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance.",
     displayConfigSchema,
     displayConfigHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, deviceReadOnly: isDisplayConfigRead },
   );
 
   ToolRegistry.registerDeviceAware(

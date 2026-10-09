@@ -194,6 +194,34 @@ final class OverlayComponentsTests: XCTestCase {
         XCTAssertFalse(root.blocksPage(state: session.state, pages: session.pages), "snackbar only")
     }
 
+    /// #10899: the scroll container around a dialog's tall content is named after the dialog.
+    func testDialogContentIsNamedByDescriptionThenTitleThenText() throws {
+        let dialog = try XCTUnwrap(fixture("material-app-bar-dialog-pickers").root.children?[11])
+        XCTAssertEqual(dialog.dialogContentLabel(title: "Edit alarm", text: "Set the time and date."), "Edit alarm")
+        XCTAssertEqual(dialog.dialogContentLabel(title: "", text: "Set the time and date."), "Set the time and date.")
+        XCTAssertEqual(dialog.dialogContentLabel(title: "", text: nil), "")
+        let described = try spec("""
+        {"id":"d","window":{"placement":{"type":"fullscreen"}},
+         "root":{"type":"dialog","title":"T","contentDescription":"Alarm editor"}}
+        """).root
+        XCTAssertEqual(described.dialogContentLabel(title: "T", text: nil), "Alarm editor")
+    }
+
+    func testAnOpenDialogCollapsesThePageLayerAndClosingItRestoresTheContainer() throws {
+        // #10899: the page and anchor layers are collapsed (children removed from the tree), not
+        // only accessibilityHidden, which the XCUITest snapshot ignored; otherwise each layer is
+        // its own container so a lone node keeps its own frame (#10898).
+        var session = try shown("material-app-bar-dialog-pickers")
+        let root = try XCTUnwrap(session.spec?.root)
+        XCTAssertEqual(root.layerAccessibility(state: session.state, pages: session.pages), .container)
+        _ = try session.activate(.node(XCTUnwrap(root.children?[9])))
+        XCTAssertEqual(root.layerAccessibility(state: session.state, pages: session.pages), .collapsed)
+        _ = try session.simulateTap(identifier: "edit.confirm").get()
+        XCTAssertEqual(
+            root.layerAccessibility(state: session.state, pages: session.pages), .container, "snackbar only"
+        )
+    }
+
     func testDialogDismissAndScrimCloseWithoutTheConfirmActions() throws {
         var session = OverlaySession()
         try session.show(spec("""
@@ -319,7 +347,7 @@ final class OverlayComponentsTests: XCTestCase {
         XCTAssertEqual(OverlayTime.hour12(of: 0), 12)
         XCTAssertEqual(OverlayTime.hour12(of: 12), 12)
         XCTAssertEqual(OverlayTime.hour12(of: 15), 3)
-        for hour in 0..<24 {
+        for hour in 0 ..< 24 {
             let back = OverlayTime.hour24(hour12: OverlayTime.hour12(of: hour), pm: OverlayTime.isPM(hour: hour))
             XCTAssertEqual(back, hour)
         }

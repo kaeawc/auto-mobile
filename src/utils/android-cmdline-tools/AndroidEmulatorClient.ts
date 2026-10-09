@@ -2125,6 +2125,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         }));
       perf.endOperation("adbDeviceScan");
       this.invalidateInventorySerials(devices, options);
+      if (!options.devices) {
+        this.evictDepartedDeviceInfo(devices);
+      }
       const runningDevices: BootedDevice[] = [];
 
       // Add local emulator devices
@@ -2370,6 +2373,34 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   }
 
   /**
+   * Model/ABI cache key. Physical devices key by serial; emulators also require
+   * the resolved AVD name because a new AVD may reuse the same emulator serial
+   * (an empty name is unresolved and never cached).
+   */
+  private deviceInfoCacheKey(deviceId: string, avdName?: string): string | undefined {
+    if (avdName === undefined) {
+      return deviceId;
+    }
+    return avdName ? `${deviceId}\0${avdName}` : undefined;
+  }
+
+  /**
+   * Drop model/ABI entries for serials absent from a full ADB listing, so a
+   * device that later reuses the serial (emulator port, TCP address) is probed
+   * afresh instead of inheriting its predecessor's metadata (#11063).
+   */
+  private evictDepartedDeviceInfo(devices: BootedDevice[]): void {
+    const present = new Set(devices.map((device) => device.deviceId));
+    for (const cache of [this.modelNameCache, this.architectureCache]) {
+      for (const key of [...cache.keys()]) {
+        if (!present.has(key.split("\0", 1)[0]!)) {
+          cache.delete(key);
+        }
+      }
+    }
+  }
+
+  /**
    * Physical models are cached per serial; emulator models also require the
    * resolved AVD name because a new AVD may reuse the same emulator serial.
    */
@@ -2380,12 +2411,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     signal?: AbortSignal,
     avdName?: string,
   ): Promise<string | undefined> {
-    const cacheKey =
-      avdName === undefined
-        ? device.deviceId
-        : avdName
-          ? `${device.deviceId}\0${avdName}`
-          : undefined;
+    const cacheKey = this.deviceInfoCacheKey(device.deviceId, avdName);
     const cachedModel = cacheKey ? this.modelNameCache.get(cacheKey) : undefined;
     if (cachedModel) {
       logger.debug(`Got model name for ${device.deviceId}: "${cachedModel}" (cached)`);
@@ -2545,6 +2571,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       infoTimeoutMs,
       skipNameEnrichment,
       signal,
+      avdName.name,
     );
   }
 
@@ -2587,16 +2614,18 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   }
 
   /**
-   * Resolve a booted device's CPU ABI from the runtime and cache it per serial
-   * to avoid repeated ADB calls.
+   * Resolve a booted device's CPU ABI from the runtime and cache it (keyed like
+   * the model cache) to avoid repeated ADB calls.
    */
   private async resolvePhysicalDeviceArchitecture(
     device: BootedDevice,
     infoTimeoutMs: number,
     skipNameEnrichment: boolean,
     signal?: AbortSignal,
+    avdName?: string,
   ): Promise<string | undefined> {
-    const cachedArchitecture = this.architectureCache.get(device.deviceId);
+    const cacheKey = this.deviceInfoCacheKey(device.deviceId, avdName);
+    const cachedArchitecture = cacheKey ? this.architectureCache.get(cacheKey) : undefined;
     if (cachedArchitecture) {
       logger.debug(`Got CPU architecture for ${device.deviceId}: "${cachedArchitecture}" (cached)`);
       return cachedArchitecture;
@@ -2619,7 +2648,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         logger.debug(`No CPU architecture found for ${device.deviceId}`);
         return undefined;
       }
-      this.architectureCache.set(device.deviceId, architecture);
+      if (cacheKey) {
+        this.architectureCache.set(cacheKey, architecture);
+      }
       logger.debug(`Got CPU architecture for ${device.deviceId}: "${architecture}"`);
       return architecture;
     } catch (error) {

@@ -4,6 +4,7 @@ import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { DaemonClient } from "../../src/daemon/client";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -281,6 +282,15 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         throw new Error(`initial routing probe ${index} failed`, { cause: error });
       }
     }
+    // #10974: the daemon echoes the session it routed an admitted control call to.
+    const routed = await proxy.callTool("routingProbe", {
+      deviceId: devices[0].deviceId,
+      keepScreenAwake: false,
+    });
+    expect(routedSessionUuidFromResult(routed)).toBe(
+      pool.resolveAutolockSessionForMcpSession("client", "android"),
+    );
+    received.pop();
     // A replacement socket must recover both acquisitions before selector routing.
     socketSessionId = "replacement-client";
     client.emitConnectionClosed();

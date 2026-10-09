@@ -431,6 +431,12 @@ export interface RegisteredTool {
   acceptsPlanLockNamespace?: boolean;
   outputSchema?: any;
   appUiResourceUri?: string;
+  /**
+   * Registered `deviceReadOnly: true` for every call: the tool only watches a device. Advertised
+   * as `_meta["automobile/deviceReadOnly"]` so a proxy can forward such reads without a session
+   * (#10971). A tool whose classification depends on its args (sqlQuery) is not marked.
+   */
+  deviceReadOnly?: boolean;
 }
 
 /**
@@ -931,6 +937,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
 
     const readOnly = isDeviceReadOnlyCall(options, args);
+    if (readOnly && execution) {
+      // A read is not use of the session it runs under, so it is never echoed as routed (#10974).
+      executionTracker.markDeviceReadCall(execution.executionId);
+    }
     // A sessionless read-only call that would land on a held device watches it through the
     // read-only path: no readiness, pin or settings work on the holder's device (#10830).
     const watchedDeviceId = await this.heldDeviceToWatch({
@@ -2624,6 +2634,7 @@ export class ToolRegistryClass {
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,
       appUiResourceUri: options.appUiResourceUri,
+      deviceReadOnly: options.deviceReadOnly === true,
     });
   }
 
@@ -2967,6 +2978,7 @@ export class ToolRegistryClass {
           "automobile/debugOnly"?: boolean;
           "automobile/embeddedSdkOnly"?: boolean;
           "automobile/planOnly"?: boolean;
+          "automobile/deviceReadOnly"?: boolean;
           ui?: { resourceUri: string };
         };
       } = {
@@ -2999,6 +3011,10 @@ export class ToolRegistryClass {
       }
       if (tool.embeddedSdkOnly) {
         definition._meta = { ...definition._meta, "automobile/embeddedSdkOnly": true };
+      }
+      // Read/control classification for the proxy (#10971) — additive; other clients ignore it.
+      if (tool.deviceReadOnly) {
+        definition._meta = { ...definition._meta, "automobile/deviceReadOnly": true };
       }
       // MCP Apps UI pointer (issue #4669) — additive; non-Apps hosts ignore it.
       if (tool.appUiResourceUri) {

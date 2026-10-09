@@ -25,6 +25,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { executionTracker } from "./executionTracker";
+import { withAdmittedSessionEcho } from "./routedSessionEcho";
 import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
@@ -1297,6 +1298,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       requestDeadlineMs;
     // A release vetoed by this call is bounded by the call's own deadline (#10712).
     executionTracker.setExecutionDeadline(execution.id, getRequestDeadlineMs);
+    // The daemon echoes the session it routed an admitted, non-read call to, so a proxy credits
+    // exactly that session instead of guessing it from a selector (#10974). Read before the
+    // execution ends.
+    const withRoutedSession = <T>(result: T): T =>
+      daemonMode ? withAdmittedSessionEcho(result, execution.id) : result;
     let executionEnded = false;
     const endExecutionOnce = (): void => {
       if (!executionEnded) {
@@ -1637,7 +1643,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       if (acquiredSessionUuid && sessionToolBinding.bind(sessionId, acquiredSessionUuid)) {
         ToolRegistry.notifyToolListChanged();
       }
-      return response;
+      return withRoutedSession(response);
     } catch (error) {
       if (error instanceof DaemonSessionCreationRejectedError) {
         const shutdown = daemonShuttingDownMcpOutcome();
@@ -1704,10 +1710,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // The SDK's request-handler result alias is narrower than its exported
       // CallToolResult type, though this text-only error result satisfies the
       // protocol schema.
-      return shapeToolCallError(textState.timeoutError(error) ?? error, {
-        toolName: name,
-        source: "MCP",
-      }) as McpToolCallResult;
+      // An admitted call that then failed still used its session (#10824).
+      return withRoutedSession(
+        shapeToolCallError(textState.timeoutError(error) ?? error, {
+          toolName: name,
+          source: "MCP",
+        }) as McpToolCallResult,
+      );
     } finally {
       try {
         cleanupAcquisitionRelease?.();

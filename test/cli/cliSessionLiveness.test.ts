@@ -868,6 +868,8 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
           livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
           livenessOwnerToken: "old-mcp-token",
           claimLivenessOwnership: true,
+          reportIdleRelease: true,
+          reportDaemonInstance: true,
         },
       });
 

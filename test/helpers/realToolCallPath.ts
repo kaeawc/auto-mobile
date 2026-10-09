@@ -6,6 +6,7 @@ import {
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
 import { executionTracker } from "../../src/server/executionTracker";
+import { withAdmittedSessionEcho } from "../../src/server/routedSessionEcho";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
@@ -133,7 +134,7 @@ export class RealToolCallPath {
     const sessionUuid = typeof args.sessionUuid === "string" ? args.sessionUuid : undefined;
     const execution = executionTracker.startExecution(name, undefined, sessionUuid);
     try {
-      return await tool.handler(
+      const result = await tool.handler(
         {
           ...args,
           [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
@@ -142,6 +143,8 @@ export class RealToolCallPath {
         undefined,
         execution.abortController.signal,
       );
+      // The daemon's tool-call entry echoes the session the call was admitted under (#10974).
+      return withAdmittedSessionEcho(result, execution.id);
     } finally {
       executionTracker.endExecution(execution.id);
     }

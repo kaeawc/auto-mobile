@@ -130,6 +130,11 @@ describe("proxy liveness stalls (#10053)", () => {
   let hangHeartbeats: number;
   /** The scripted daemon swallows every heartbeat before this proxy-clock time (a slow wake-up). */
   let hangUntil: number;
+  /**
+   * The next heartbeats the scripted daemon answers only after this many ms (#10973): the daemon
+   * accepts them, but later than the proxy's request timeout.
+   */
+  let lateAnswers: { count: number; delayMs: number };
   /** Sessions whose heartbeats the scripted daemon never answers. */
   let hangSessions: Set<string>;
   /** How many more `observe` calls the daemon refuses with its suspect-session error. */
@@ -178,6 +183,18 @@ describe("proxy liveness stalls (#10053)", () => {
           return;
         }
         heartbeatsSeen += 1;
+        if (lateAnswers.count > 0) {
+          lateAnswers.count -= 1;
+          await new Promise<void>((resolve) => baseTimer.setTimeout(resolve, lateAnswers.delayMs));
+          const late = await handleDaemonRequest(
+            { id: "request-late", type: "daemon_request", method, params },
+            daemonStateFor(sessionManager),
+          );
+          if (!late.success) {
+            throw Object.assign(new Error(late.error), { code: late.code });
+          }
+          return late.result ?? {};
+        }
         if (hangSessions.has(params.sessionId)) {
           return new Promise<void>(() => {});
         }
@@ -282,6 +299,7 @@ describe("proxy liveness stalls (#10053)", () => {
     hangHeartbeats = 0;
     hangSessions = new Set();
     hangUntil = 0;
+    lateAnswers = { count: 0, delayMs: 0 };
     hangObserveFor = undefined;
     clientsCreated = 0;
     androidAcquisitionSession = "android-session";
@@ -416,6 +434,47 @@ describe("proxy liveness stalls (#10053)", () => {
         ).toBe(true);
       },
     );
+
+    // #10973 (owner decision 2026-10-09): a late ack counts as recovered.
+    test("a heartbeat the daemon accepts late, inside the recovery budget, cancels the handover", async () => {
+      const proxy = createProxy(2_000);
+      await acquire(proxy, "getAndroid");
+      await baseTimer.advanceTimeAsync(2_000);
+      // A 6 s blackout: the next periodic heartbeat is accepted 6 s late, past its request
+      // timeout, and every recovery attempt sent meanwhile goes unanswered.
+      lateAnswers = { count: 1, delayMs: 6_000 };
+      hangHeartbeats = Number.POSITIVE_INFINITY;
+      const owner = () => sessionManager.getSession("android-session")?.lastOwnerHeartbeat;
+      const ownerHeartbeatBefore = owner();
+
+      // Past the budget recovery started from (the last ack plus lease plus grace), so without the
+      // late ack every attempt has gone unanswered and the session would have been handed over.
+      await baseTimer.advanceTimeAsync(LEASE_MS + SUSPECT_GRACE_MS + 1_000);
+      // The daemon renewed the lease when it accepted the late heartbeat.
+      expect(owner()).toBeGreaterThan(ownerHeartbeatBefore ?? 0);
+      hangHeartbeats = 0;
+      await baseTimer.advanceTimeAsync(LEASE_MS + SUSPECT_GRACE_MS);
+
+      expect(handovers).toEqual([]);
+      expect(sessionManager.getSession("android-session")).toBeTruthy();
+      await expect(proxy.callTool("observe", { sessionUuid: "android-session" })).resolves.toEqual(
+        OBSERVED,
+      );
+    });
+
+    test("with no acknowledgement inside the budget the handover still proceeds", async () => {
+      const proxy = createProxy(2_000);
+      await acquire(proxy, "getAndroid");
+      await baseTimer.advanceTimeAsync(2_000);
+      // Accepted only after recovery has run out: too late to count.
+      lateAnswers = { count: 1, delayMs: LEASE_MS + SUSPECT_GRACE_MS };
+      hangHeartbeats = Number.POSITIVE_INFINITY;
+
+      await advanceUntilHandover();
+
+      expect(handovers).toHaveLength(1);
+      expect(handovers[0]).toMatchObject({ code: "daemon_stalled" });
+    });
 
     test("recovery never starts or restarts the daemon even when auto-start is on and the daemon is down", async () => {
       const proxy = createProxy(2_000, true);

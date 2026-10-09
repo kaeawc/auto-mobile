@@ -7,6 +7,33 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 
 describe("ExecutionTracker", function () {
+  test("#10974: the session a call used is its admitted session, never a read's or a refused call's", () => {
+    const tracker = new ExecutionTracker(
+      new FakeTimer(),
+      new FakeIdGenerator(["control", "holder", "read", "refused", "inventory"]),
+    );
+    const control = tracker.startExecution("rotate", undefined, "session-a");
+    tracker.markSessionAdmitted(control.id);
+    const holder = tracker.startExecution("rotate");
+    tracker.setResolvedAutolockSessionUuid(holder.id, "session-b");
+    tracker.markSessionAdmitted(holder.id);
+    const read = tracker.startExecution("observe", undefined, "session-a");
+    tracker.markSessionAdmitted(read.id);
+    tracker.markDeviceReadCall(read.id);
+    const refused = tracker.startExecution("rotate", undefined, "session-a");
+    const inventory = tracker.startExecution("listDevices", undefined, "session-a");
+    tracker.markSessionAdmitted(inventory.id);
+    tracker.markReadOnlySessionAccess(inventory.id);
+
+    expect(tracker.getAdmittedSessionUse(control.id)).toBe("session-a");
+    expect(tracker.getAdmittedSessionUse(holder.id)).toBe("session-b");
+    expect(tracker.getAdmittedSessionUse(read.id)).toBeUndefined();
+    expect(tracker.getAdmittedSessionUse(refused.id)).toBeUndefined();
+    expect(tracker.getAdmittedSessionUse(inventory.id)).toBeUndefined();
+    tracker.endExecution(control.id);
+    expect(tracker.getAdmittedSessionUse(control.id)).toBeUndefined();
+  });
+
   test("an acquisition cancels only the sessionless device use recorded on that device (#10829)", () => {
     const tracker = new ExecutionTracker(
       new FakeTimer(),

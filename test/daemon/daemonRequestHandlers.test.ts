@@ -336,6 +336,34 @@ describe("handleDaemonRequest", () => {
     expect(idleReleaseAt(live)).toBeGreaterThanOrEqual(expiresAt);
   });
 
+  test("#10972: a CLI-policy heartbeat that asks reports the idle release instant too", async () => {
+    const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+    const state = new FakeDaemonState(sessionManager, devicePool);
+    const sessionId = "cli-idle-report-session";
+    await sessionManager.createSession(sessionId, "emulator-5554", "android");
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        livenessPolicy: "cli",
+        idleTimeoutMs: 600_000,
+        reportIdleRelease: true,
+      }),
+      state,
+    );
+
+    const live = sessionManager.getSession(sessionId)!;
+    expect(response).toEqual({
+      success: true,
+      result: {
+        sessionId,
+        livenessPolicy: "cli-idle",
+        idleTimeoutMs: live.heartbeatTimeoutMs,
+        idleReleaseAt: idleReleaseAt(live),
+      },
+    });
+  });
+
   test("#10989: a heartbeat that asks reports which daemon process acknowledged it", async () => {
     const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
     const state = Object.assign(new FakeDaemonState(sessionManager, devicePool), {

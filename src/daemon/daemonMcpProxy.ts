@@ -68,11 +68,11 @@ import {
   readDeviceSessionSuspectRefusal,
   type DeviceSessionSuspectRefusal,
   getDeviceIdFromResult,
-  getDevicePlatformFromResult,
   getDeviceSessionIdFromResult,
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
 } from "../server/deviceSessionResult";
+import { routedSessionUuidFromResult } from "../server/routedSessionMeta";
 import {
   toolSelectionProfileUuidFromResponse,
   SET_TOOL_ENABLED_TOOL_NAME,
@@ -156,6 +156,11 @@ const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 // released they must be able to discover the stable target for an explicit
 // getAndroid/getApple reacquisition (#7144).
 const SESSIONLESS_DEVICE_DISCOVERY_TOOLS = ["listDevices", "listDeviceImages"] as const;
+/**
+ * A tool definition's read classification, generated from the tool's `deviceReadOnly`
+ * registration (#10971): the tool only watches a device, which never requires a session.
+ */
+const DEVICE_READ_ONLY_META_KEY = "automobile/deviceReadOnly";
 
 export function isDeviceInventoryTool(name: unknown): boolean {
   return (
@@ -231,6 +236,14 @@ function isSuspectRefusalRetryable(
 }
 
 /** A `daemon_stalled` / `proxy_stalled` handover recorded for one session (#10053). */
+/** The daemon's idle-release instant for a session, as one heartbeat ack reported it (#10823). */
+interface DaemonIdleReport {
+  /** Epoch-ms instant the daemon would idle-release the session. */
+  releaseAt: number;
+  /** Proxy-clock time the ack carrying it arrived. */
+  reportedAt: number;
+}
+
 interface StallHandoverRecord {
   handover: LivenessHandover;
   delivered: boolean;
@@ -1152,6 +1165,11 @@ export class DaemonMcpProxy {
    * keeper keeps retrying the claim, and the leash only starts once a tool call needs the session.
    */
   private initialSessionAwaitingFirstCall = false;
+  /**
+   * The terminally released binding whose release a tool call has already been told about
+   * (#10971). From then on, read-only tools are forwarded without a session.
+   */
+  private releaseSurfacedFor: string | undefined;
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
   private readonly livenessRecovery: LivenessRecovery;
   /** The call-wait bound of the current stretch of liveness recovery (#10508). */
@@ -1166,14 +1184,9 @@ export class DaemonMcpProxy {
    * from its own environment, so this - not `boundSessionReplayTtlMs` - decides while the daemon
    * answers. Absent for a daemon that reports nothing.
    */
-  private readonly daemonIdleReleaseAt = new Map<string, number>();
+  private readonly daemonIdleReports = new Map<string, DaemonIdleReport>();
   /** Device each held session runs on, learned from acquisition results and explicit calls. */
   private readonly sessionDeviceIds = new Map<string, string>();
-  /**
-   * Platform of each session, learned from acquisition results, so a call routed by a `platform`
-   * selector can tell which of this proxy's sessions it reached (#10692).
-   */
-  private readonly sessionPlatforms = new Map<string, "android" | "ios">();
   /**
    * Handovers per affected session. A tool call that names the session first attempts an
    * observation-only resume and returns the structured error only when the daemon still does not
@@ -3586,11 +3599,11 @@ export class DaemonMcpProxy {
     // An omitted `sessionUuid` on the control tool means the connection profile,
     // not the proxy's retained device-routing session. Preserve that distinction
     // after a device has been bound.
-    const {
-      forwardedArgs: routedArgs,
-      allowReleasedSession,
-      usesDeviceSelector,
-    } = this.prepareToolRoutingArgs(name, callerArgs, isSessionAcquisition);
+    const { forwardedArgs: routedArgs, allowReleasedSession } = this.prepareToolRoutingArgs(
+      name,
+      callerArgs,
+      isSessionAcquisition,
+    );
     const forwardedArgs = this.withAcceptanceConfiguration(routedArgs);
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
@@ -3609,7 +3622,7 @@ export class DaemonMcpProxy {
     let registeredClient: DaemonClientLike | undefined;
     const trackedSessionUuids = this.beginSessionCall(
       name,
-      this.sessionsUsedByCall(forwardedSessionUuid, usesDeviceSelector, callerArgs),
+      this.sessionsUsedByCall(forwardedSessionUuid),
     );
     let callReachedSession = true;
     try {
@@ -3655,6 +3668,7 @@ export class DaemonMcpProxy {
         signal,
         label: `Daemon tool ${name}`,
       });
+      this.creditRoutedSession(forwardedSessionUuid, result);
       if (result?.isError) {
         // Provisioning retains its usable device session when optional resource
         // configuration fails. Own that result-minted session before returning
@@ -3742,12 +3756,11 @@ export class DaemonMcpProxy {
   ): {
     forwardedArgs: Record<string, unknown>;
     allowReleasedSession: boolean;
-    usesDeviceSelector: boolean;
   } {
     const isTerminalSessionlessDiscovery =
       this.terminalBoundSession !== undefined &&
       this.sessionUuidFromArgs(callerArgs) === undefined &&
-      isDeviceInventoryTool(name);
+      (isDeviceInventoryTool(name) || this.isSessionlessReadAfterRelease(name));
     const usesDeviceSelector =
       this.toolTargetsDevice(name) &&
       this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice");
@@ -3765,8 +3778,31 @@ export class DaemonMcpProxy {
       forwardedArgs,
       allowReleasedSession:
         isSessionAcquisition || isTerminalSessionlessDiscovery || canUseSurvivingSession,
-      usesDeviceSelector,
     };
+  }
+
+  /**
+   * Read-only access never requires a session (owner decision 2026-10-09, #10971). After the
+   * binding is released and one call has been told so, a read-only tool that names no session is
+   * forwarded without one: the daemon serves it on its read-only device path. Control tools keep
+   * the fence and its reacquire guidance, as does a liveness handover, which every call reports
+   * until the harness acts on it.
+   */
+  private isSessionlessReadAfterRelease(name: string): boolean {
+    const terminal = this.terminalBoundSession;
+    return (
+      terminal !== undefined &&
+      this.releaseSurfacedFor === terminal.sessionUuid &&
+      !this.stallHandovers.has(terminal.sessionUuid) &&
+      this.isDeviceReadOnlyTool(name)
+    );
+  }
+
+  private isDeviceReadOnlyTool(name: string): boolean {
+    const definition =
+      this.cachedTools?.find((tool) => tool.name === name) ??
+      this.staticToolDefinitionsProvider().find((tool) => tool.name === name);
+    return definition?._meta?.[DEVICE_READ_ONLY_META_KEY] === true;
   }
 
   private toolTargetsDevice(name: string): boolean {
@@ -3811,7 +3847,6 @@ export class DaemonMcpProxy {
     const sessionUuid = getDeviceSessionIdFromResult(result);
     if (sessionUuid) {
       this.throwIfSessionReleasedSince(sessionUuid, releaseEpoch);
-      this.rememberSessionPlatform(sessionUuid, result);
       this.rememberSessionUuid(
         name,
         { sessionUuid, deviceId: getDeviceIdFromResult(result) },
@@ -3940,6 +3975,8 @@ export class DaemonMcpProxy {
       !terminal.fromResultMint ||
       this.stallHandovers.has(terminal.sessionUuid) ||
       (explicitSessionUuid !== undefined && explicitSessionUuid === terminal.sessionUuid);
+    // The agent has now been told about this release; later reads go through without a session.
+    this.releaseSurfacedFor = terminal.sessionUuid;
     if (callerReferencedTerminal) {
       throw this.boundSessionExpiredError(explicitSessionUuid);
     }
@@ -4038,26 +4075,32 @@ export class DaemonMcpProxy {
     }
     const releaseAt = (ack as { idleReleaseAt?: unknown } | null | undefined)?.idleReleaseAt;
     if (typeof releaseAt === "number" && Number.isFinite(releaseAt)) {
-      this.daemonIdleReleaseAt.set(sessionUuid, releaseAt);
+      this.daemonIdleReports.set(sessionUuid, { releaseAt, reportedAt: this.timer.now() });
     } else {
-      this.daemonIdleReleaseAt.delete(sessionUuid);
+      this.daemonIdleReports.delete(sessionUuid);
     }
   }
 
   /**
-   * The daemon is authoritative for idle release: while it answers heartbeats and its last report
-   * puts the idle release in the future, the proxy's own idle clock (its environment, its call
-   * bookkeeping) must not retire the session. With no recent ack or no report, the daemon is
-   * unreachable or silent and the local clock is the fallback (#10823).
+   * The daemon is authoritative for idle release (#10823, #10972): the proxy's own idle clock (its
+   * environment, its call bookkeeping) only stands in for a daemon that reports nothing. Once the
+   * daemon has reported an idle-release instant, the local window never retires the session on its
+   * own. It is kept:
+   * - while liveness recovery runs for it: a missed ack is not evidence of idleness;
+   * - while the reported instant is in the future, however long ago the last ack arrived;
+   * - while the report predates its instant: a tool call since then (inside the daemon's grace)
+   *   may have moved it, so only a heartbeat answered at or after the instant proves it passed.
+   * A not-found answer or a release notification ends the session through their own paths.
    */
   private daemonKeepsSessionInUse(sessionUuid: string): boolean {
-    const releaseAt = this.daemonIdleReleaseAt.get(sessionUuid);
-    const ackedAt = this.livenessAcks.get(sessionUuid);
-    if (releaseAt === undefined || ackedAt === undefined) {
+    if (this.livenessRecovery.isRecovering(sessionUuid)) {
+      return true;
+    }
+    const report = this.daemonIdleReports.get(sessionUuid);
+    if (report === undefined) {
       return false;
     }
-    const now = this.timer.now();
-    return now - ackedAt < this.heartbeatLeashMs && now < releaseAt;
+    return this.timer.now() < report.releaseAt || report.reportedAt < report.releaseAt;
   }
 
   private hasSessionCallInFlight(sessionUuid: string): boolean {
@@ -4082,48 +4125,28 @@ export class DaemonMcpProxy {
     return sessionUuids;
   }
 
-  /** The sessions a forwarded call uses: the one it names, or the ones its device selector reaches. */
-  private sessionsUsedByCall(
-    forwardedSessionUuid: string | undefined,
-    usesDeviceSelector: boolean,
-    callerArgs: Record<string, unknown>,
-  ): string[] {
-    if (forwardedSessionUuid !== undefined) {
-      return [forwardedSessionUuid];
-    }
-    return usesDeviceSelector ? this.sessionsReachedBySelector(callerArgs) : [];
+  /**
+   * The session a forwarded call names, when it names one. A call routed by a `deviceId`/`platform`
+   * selector carries no session UUID: the daemon resolves it and echoes the session it routed to
+   * in the result, which {@link creditRoutedSession} credits (#10974).
+   */
+  private sessionsUsedByCall(forwardedSessionUuid: string | undefined): string[] {
+    return forwardedSessionUuid !== undefined ? [forwardedSessionUuid] : [];
   }
 
   /**
-   * The sessions a call routed by a `deviceId`/`platform` selector reaches (#10692). Such a call
-   * carries no session UUID: the daemon resolves the selector among the sessions this proxy owns.
-   * A session matches when its recorded device (or platform) is the one selected; when nothing is
-   * recorded for the only live session, that session is the one the daemon can reach.
+   * Credit the session the daemon says it routed a call without a session UUID to and admitted
+   * (#10974): exactly that session, when it is one this proxy still holds. The daemon omits the
+   * echo for reads, refused calls and sessionless calls, so those credit nothing.
    */
-  private sessionsReachedBySelector(args: Record<string, unknown>): string[] {
-    const live = [
-      ...(this.boundSessionUuid !== undefined && !this.terminalBoundSession
-        ? [this.boundSessionUuid]
-        : []),
-      ...this.otherHeldSessions.keys(),
-    ];
-    const selected = (sessionUuid: string): boolean | undefined => {
-      if (typeof args.deviceId === "string") {
-        const deviceId = this.sessionDeviceIds.get(sessionUuid);
-        return deviceId === undefined ? undefined : deviceId === args.deviceId;
-      }
-      const platform = this.sessionPlatforms.get(sessionUuid);
-      return platform === undefined ? undefined : platform === args.platform;
-    };
-    const matches = live.filter((sessionUuid) => selected(sessionUuid) === true);
-    if (matches.length > 0) {
-      return matches;
+  private creditRoutedSession(forwardedSessionUuid: string | undefined, result: unknown): void {
+    if (forwardedSessionUuid !== undefined) {
+      return;
     }
-    // The daemon matches a selector by the device's stable identity, so a `deviceId` this proxy
-    // never recorded (a serial reassigned to the same device) still reaches the only live
-    // session; `reachedSession` keeps a call that reached nothing from counting as use (#10823).
-    const serialMayBeStale = typeof args.deviceId === "string";
-    return live.length === 1 && (serialMayBeStale || selected(live[0]) === undefined) ? live : [];
+    const routed = routedSessionUuidFromResult(result);
+    if (routed !== undefined && this.isHeldSession(routed)) {
+      this.creditSessionUse(routed);
+    }
   }
 
   /**
@@ -4145,9 +4168,13 @@ export class DaemonMcpProxy {
     } else {
       this.sessionCallsInFlight.delete(sessionUuid);
     }
-    if (!reachedSession) {
-      return;
+    if (reachedSession) {
+      this.creditSessionUse(sessionUuid);
     }
+  }
+
+  /** Restart a session's idle window now: a tool call used it. */
+  private creditSessionUse(sessionUuid: string): void {
     const now = this.timer.now();
     if (sessionUuid === this.boundSessionUuid && !this.terminalBoundSession) {
       this.boundSessionUuidAt = now;
@@ -4457,9 +4484,6 @@ export class DaemonMcpProxy {
     this.claimableSessions.add(sessionId);
     this.ownedDeviceSessions.add(sessionId);
     this.rememberSessionDevice(sessionId, session.deviceId);
-    if (session.platform) {
-      this.sessionPlatforms.set(sessionId, session.platform);
-    }
     // Resuming is not use: the held session's idle clock is the daemon's last tool use (#10656).
     this.otherHeldSessions.set(sessionId, { claimSent: false, lastUsedAt: session.lastUsedAt });
     return true;
@@ -4506,11 +4530,12 @@ export class DaemonMcpProxy {
       return;
     }
     try {
-      await this.client.callDaemonMethod(
+      const ack = await this.client.callDaemonMethod(
         DAEMON_HEARTBEAT_METHOD,
-        this.boundSessionHeartbeatParams(sessionUuid, true),
+        this.boundSessionHeartbeatParams(sessionUuid, true, true),
       );
       if (this.boundSessionUuid === sessionUuid && !this.terminalBoundSession) {
+        this.noteDaemonIdleEvidence(sessionUuid, ack);
         this.livenessOwnershipClaimSent = true;
         // A heartbeat ack proves liveness, not use: it must not refresh the replay lease (#10656).
         this.livenessAcks.set(sessionUuid, this.timer.now());
@@ -4767,10 +4792,13 @@ export class DaemonMcpProxy {
         }
         await this.ensureConnected();
         attemptedClient = this.requireClient();
-        await attemptedClient.callDaemonMethod(
+        const ack = await attemptedClient.callDaemonMethod(
           DAEMON_HEARTBEAT_METHOD,
-          this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership),
+          this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership, true),
         );
+        if (this.isHeldSession(sessionUuid)) {
+          this.noteDaemonIdleEvidence(sessionUuid, ack);
+        }
       });
     } catch (error) {
       if (attemptedClient && error instanceof DaemonUnavailableError) {
@@ -5324,6 +5352,8 @@ export class DaemonMcpProxy {
         );
         if (sent && isCurrent()) {
           this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
+        } else if (sent && this.otherHeldSessions.get(sessionUuid) === held) {
+          this.noteLateHeartbeatAck(sessionUuid);
         }
       });
     } catch (error) {
@@ -5419,6 +5449,17 @@ export class DaemonMcpProxy {
       return false;
     }
     return !isLivenessOwnershipLostError(error);
+  }
+
+  /**
+   * A heartbeat the keeper had given up on was acknowledged after all (#10973). While the session
+   * is being recovered that acknowledgement is liveness evidence: the daemon renewed the lease, so
+   * recovery ends instead of handing the session over. Outside recovery it changes nothing.
+   */
+  private noteLateHeartbeatAck(sessionUuid: string): void {
+    if (this.livenessRecovery.isRecovering(sessionUuid)) {
+      this.livenessAcks.set(sessionUuid, this.timer.now());
+    }
   }
 
   private recordHeldSessionHeartbeatSuccess(
@@ -5525,11 +5566,10 @@ export class DaemonMcpProxy {
    */
   private forgetSessionLivenessState(sessionUuid: string, keepHandover = false): void {
     this.livenessAcks.delete(sessionUuid);
-    this.daemonIdleReleaseAt.delete(sessionUuid);
+    this.daemonIdleReports.delete(sessionUuid);
     this.livenessConflictLogged.delete(sessionUuid);
     if (!keepHandover) {
       this.sessionDeviceIds.delete(sessionUuid);
-      this.sessionPlatforms.delete(sessionUuid);
       this.stallHandovers.delete(sessionUuid);
     }
   }
@@ -5564,26 +5604,42 @@ export class DaemonMcpProxy {
     if (!sessionUuid || !this.latestBindingClaimable() || this.closing) {
       return;
     }
-    if (this.isBoundSessionReplayExpired()) {
-      // Backstop for a missed session-released notification (#10702): an idle binding is retired
-      // here, so the keeper stops instead of heartbeating it until the next call arrives.
-      this.fenceBoundSessionUuid(sessionUuid, "replay-lease-expired");
-      return;
-    }
     if (this.latestBindingNotFound === sessionUuid) {
       // The daemon answered that it does not know this session; heartbeating it again cannot help.
+      this.retireIdleLatestBinding(sessionUuid);
       return;
     }
+    // Heartbeat first, then judge idleness (#10972): the judgement uses this tick's report, and a
+    // session the daemon already released answers not-found with its own reason, which the agent
+    // then sees instead of the proxy's.
     // A caller that explicitly schedules heartbeats beyond the lease cannot
     // maintain daemon ownership by cadence. Preserve that opt-out's prior
     // single-flight behavior (used by replay-lease tests).
-    if (this.heartbeatIntervalMs >= this.heartbeatLeashMs) {
-      await this.sendBoundSessionHeartbeat();
-      return;
+    try {
+      if (this.heartbeatIntervalMs >= this.heartbeatLeashMs) {
+        await this.sendBoundSessionHeartbeat();
+      } else {
+        await this.heartbeatWithStallDetection(sessionUuid, (isCurrent) =>
+          this.sendBoundSessionHeartbeat(isCurrent),
+        );
+      }
+    } finally {
+      this.retireIdleLatestBinding(sessionUuid);
     }
-    await this.heartbeatWithStallDetection(sessionUuid, (isCurrent) =>
-      this.sendBoundSessionHeartbeat(isCurrent),
-    );
+  }
+
+  /**
+   * Backstop for a missed session-released notification (#10702): an idle binding is retired here,
+   * so the keeper stops instead of heartbeating it until the next call arrives.
+   */
+  private retireIdleLatestBinding(sessionUuid: string): void {
+    if (
+      this.boundSessionUuid === sessionUuid &&
+      !this.terminalBoundSession &&
+      this.isBoundSessionReplayExpired()
+    ) {
+      this.fenceBoundSessionUuid(sessionUuid, "replay-lease-expired");
+    }
   }
 
   private async sendBoundSessionHeartbeat(isCurrent: () => boolean = () => true): Promise<void> {
@@ -5638,6 +5694,15 @@ export class DaemonMcpProxy {
    */
   private stopHeartbeatingUnknownLatestBinding(sessionUuid: string, releaseReason?: string): void {
     if (this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
+      return;
+    }
+    // A not-found answer is no idle report: the daemon's instant no longer describes the session.
+    this.daemonIdleReports.delete(sessionUuid);
+    if (releaseReason) {
+      // The daemon recorded why it released the session, so it is not a replacement daemon that
+      // may still restore it: fence with the daemon's reason, which a missed release notification
+      // would have carried (#10972).
+      this.fenceBoundSessionUuid(sessionUuid, releaseReason);
       return;
     }
     if (this.latestBindingNotFound !== sessionUuid) {
@@ -5736,7 +5801,11 @@ export class DaemonMcpProxy {
     claimLivenessOwnership: boolean,
     isCurrent: () => boolean,
   ): void {
-    if (!isCurrent() || this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
+    if (this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
+      return;
+    }
+    if (!isCurrent()) {
+      this.noteLateHeartbeatAck(sessionUuid);
       return;
     }
     if (claimLivenessOwnership) {
@@ -5915,7 +5984,6 @@ export class DaemonMcpProxy {
     }
     this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
     this.rememberSessionDevice(mintedSessionUuid, getDeviceIdFromResult(result));
-    this.rememberSessionPlatform(mintedSessionUuid, result);
     // A prior binding's keeper must not outlive the rebind to a fresh session.
     // (A terminal fence already stopped it; this covers re-acquiring over a live
     // binding.)
@@ -5957,14 +6025,6 @@ export class DaemonMcpProxy {
     // can arrive while it is in flight, fence and clear the binding, and make
     // this acquisition result stale before it reaches the caller.
     this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
-  }
-
-  /** Learn a session's platform so a `platform` selector can be matched to it (#10692). */
-  private rememberSessionPlatform(sessionUuid: string, result: unknown): void {
-    const platform = getDevicePlatformFromResult(result);
-    if (platform) {
-      this.sessionPlatforms.set(sessionUuid, platform);
-    }
   }
 
   /** Learn which device a session runs on so a liveness handover can name it (#10053). */
@@ -6471,9 +6531,8 @@ export class DaemonMcpProxy {
     this.clearBoundSessionUuid();
     this.otherHeldSessions.clear();
     this.livenessAcks.clear();
-    this.daemonIdleReleaseAt.clear();
+    this.daemonIdleReports.clear();
     this.sessionDeviceIds.clear();
-    this.sessionPlatforms.clear();
     this.stallHandovers.clear();
     this.resumedStallNotices.clear();
     this.pendingSessionLosses.clear();

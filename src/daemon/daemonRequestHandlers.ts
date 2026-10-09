@@ -543,14 +543,11 @@ async function handleHeartbeat(
     // reflect this invocation's override (issue #6870 review). The manager
     // re-validates and bounds it.
     manager.adoptCliLivenessPolicy?.(sessionId, heartbeatParams.idleTimeoutMs);
-    return {
-      success: true,
-      result: {
-        sessionId,
-        livenessPolicy: "cli-idle",
-        idleTimeoutMs: manager.getSession(sessionId)?.heartbeatTimeoutMs,
-      },
-    };
+    // Reports the idle instant like every other ack when asked (#10972).
+    return heartbeatAck(manager, sessionId, ackReport, {
+      livenessPolicy: "cli-idle",
+      idleTimeoutMs: manager.getSession(sessionId)?.heartbeatTimeoutMs,
+    });
   }
   if (
     heartbeatParams?.livenessPolicy === HEARTBEAT_SESSION_LIVENESS_POLICY ||

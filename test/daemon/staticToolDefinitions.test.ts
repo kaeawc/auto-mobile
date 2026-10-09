@@ -53,7 +53,10 @@ describe("getStaticToolDefinitions", () => {
   test("preserves _meta (the MCP Apps UI pointer) for tools that carry it", () => {
     const observe = getStaticToolDefinitions().find((tool) => tool.name === "observe");
     expect(observe).toBeDefined();
-    expect(observe!._meta).toEqual({ ui: { resourceUri: "ui://automobile/observe" } });
+    expect(observe!._meta).toEqual({
+      ui: { resourceUri: "ui://automobile/observe" },
+      "automobile/deviceReadOnly": true,
+    });
   });
 
   test("synthesizes _meta.anthropic/alwaysLoad when AUTOMOBILE_ALWAYS_LOAD_TOOLS=true", () => {
@@ -66,6 +69,7 @@ describe("getStaticToolDefinitions", () => {
     const observe = tools.find((tool) => tool.name === "observe");
     expect(observe!._meta).toEqual({
       ui: { resourceUri: "ui://automobile/observe" },
+      "automobile/deviceReadOnly": true,
       "anthropic/alwaysLoad": true,
     });
   });
@@ -77,6 +81,20 @@ describe("getStaticToolDefinitions", () => {
     // A tool with no other _meta carries none at all.
     const accessibility = tools.find((tool) => tool.name === "accessibility");
     expect(accessibility!._meta).toBeUndefined();
+  });
+
+  test("#10971: device-read tools carry the read classification; control and mixed tools do not", () => {
+    const readOnly = (name: string) =>
+      getStaticToolDefinitions().find((tool) => tool.name === name)?._meta?.[
+        "automobile/deviceReadOnly"
+      ] === true;
+    for (const name of ["observe", "snapshotOf", "listApps", "getDeviceState"]) {
+      expect(readOnly(name)).toBe(true);
+    }
+    // sqlQuery is read-only only for some statements, so it keeps the session fence.
+    for (const name of ["tapOn", "pressButton", "identifyInteractions", "sqlQuery"]) {
+      expect(readOnly(name)).toBe(false);
+    }
   });
 
   test("every definition carries a name and an input schema", () => {

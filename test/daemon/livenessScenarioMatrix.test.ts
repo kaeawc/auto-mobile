@@ -1,3 +1,4 @@
+import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { decideOwnershipChange } from "../../src/daemon/streamSubscriptionPolicy";
@@ -677,6 +678,27 @@ describe("selector-routed calls (#10821)", () => {
     expect(IDLE_REASONS).toContain(scenario.releaseOf(provisioned)?.reason!);
     expect(scenario.reaped).toEqual([]);
     expectFreed(DEVICE_A);
+  });
+});
+
+describe("the daemon echoes the session a call used (#10974)", () => {
+  test("a holder's deviceId control call echoes its session; a read of the same device echoes none", async () => {
+    scenario = await LivenessScenario.start({ devices: [DEVICE_A] });
+    const session = await scenario.acquire(DEVICE_A);
+
+    const control = await scenario.daemonToolCallWith(
+      { deviceId: DEVICE_A, orientation: "portrait" },
+      "rotate",
+      scenario.proxyConnection,
+    );
+    const read = await scenario.daemonToolCallWith(
+      { deviceId: DEVICE_A },
+      "observe",
+      scenario.proxyConnection,
+    );
+
+    expect(routedSessionUuidFromResult(control)).toBe(session);
+    expect(routedSessionUuidFromResult(read)).toBeUndefined();
   });
 });
 

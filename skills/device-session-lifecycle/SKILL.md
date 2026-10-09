@@ -434,7 +434,11 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
    regresses silently to "never released". (#10655 H1/H3, #10656, #10658, #10657,
    #10667). Later instances: a selector-routed call that did not count as use
    (#10692), a client rebind that undid the idle release (#10693), and the
-   deadline stamped at call start rather than call end (#10694)
+   deadline stamped at call start rather than call end (#10694). The proxy
+   never infers which session a selector call used: the daemon echoes the
+   session it routed an admitted control call to in result
+   `_meta["automobile/routedSessionUuid"]` (omitted for reads and refused
+   calls), and the proxy credits exactly that one (#10974)
 
 ## 4. Hunting procedure
 

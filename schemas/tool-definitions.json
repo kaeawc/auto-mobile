@@ -2457,7 +2457,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3068,6 +3069,9 @@
       },
       "required": ["message"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3176,7 +3180,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3265,6 +3270,9 @@
       },
       "required": ["scope", "key"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3681,6 +3689,9 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -7257,6 +7268,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -7296,7 +7310,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -14484,6 +14499,7 @@
       }
     },
     "_meta": {
+      "automobile/deviceReadOnly": true,
       "ui": {
         "resourceUri": "ui://automobile/observe"
       }
@@ -29932,6 +29948,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {

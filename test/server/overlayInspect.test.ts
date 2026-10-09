@@ -43,6 +43,7 @@ const reported = (lastSequence: number) => ({
 
 describe("overlay inspect (#10494)", () => {
   let client: FakeCtrlProxy;
+  let fakeTimer: FakeTimer;
   let restore: () => void;
   let unsubscribe: () => void;
   let releaseSession: (sessionUuid: string, deviceId?: string) => void = () => {};
@@ -50,6 +51,7 @@ describe("overlay inspect (#10494)", () => {
   beforeEach(() => {
     restore = preserveToolRegistry();
     const timer = new FakeTimer();
+    fakeTimer = timer;
     client = new FakeCtrlProxy(timer);
     client.setSupportedCommands(["overlay_window_options_v1", "overlay_persistence_replay_v1"]);
     const lifecycle: OverlayEventLifecycle = {
@@ -234,6 +236,28 @@ describe("overlay inspect (#10494)", () => {
     expect((await call({ action: "inspect" })).overlays).toMatchObject([
       { id: "proto", persistent: false },
     ]);
+  });
+
+  test("a suspended overlay is reported in status, cleared on return, and warns when awaited", async () => {
+    client.setInspectReply({ success: true, overlays: [{ ...reported(1), suspended: true }] });
+    expect((await call({ action: "inspect" })).overlays).toMatchObject([
+      { id: "proto", suspended: true },
+    ]);
+    expect((await call({ action: "status" })).overlays).toMatchObject([
+      { id: "proto", suspended: true },
+    ]);
+    const waiting = call({ action: "awaitEvent", id: "proto", timeoutMs: 10 });
+    fakeTimer.advanceTime(10);
+    const waited = await waiting;
+    expect(waited.timedOut).toBe(true);
+    expect(waited.warning).toContain("hidden because the app it was shown over is not in front");
+
+    client.setInspectReply({ success: true, overlays: [reported(1)] });
+    const visible = await call({ action: "inspect" });
+    expect(visible.overlays?.[0]).not.toHaveProperty("suspended");
+    const again = call({ action: "awaitEvent", id: "proto", timeoutMs: 10 });
+    fakeTimer.advanceTime(10);
+    expect((await again).warning).toBeUndefined();
   });
 
   test("an empty report clears an overlay the device no longer shows", async () => {

@@ -1,4 +1,5 @@
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
+import { OVERLAY_SUSPENDED_REASON } from "../overlay/overlaySuspended";
 import { ActionableError } from "../../models/ActionableError";
 import type { Element } from "../../models/Element";
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
@@ -351,9 +352,8 @@ const NO_OVERLAY_SHOWING =
   "Show the overlay first, or omit layer to search the whole screen.";
 
 const OVERLAY_SUSPENDED =
-  'layer "overlay" was requested, but the AutoMobile overlay is hidden because the app it was ' +
-  "shown over is not in front. Bring that app back to the foreground (the overlay returns with " +
-  "its state), or omit layer.";
+  `layer "overlay" was requested, but ${OVERLAY_SUSPENDED_REASON}. ` +
+  "Bring that app back to the foreground (the overlay returns with its state), or omit layer.";
 
 /** The refusal for `layer: "overlay"` with no overlay window in the capture. */
 function noOverlayMessage(hierarchy: ViewHierarchyResult | undefined): string {

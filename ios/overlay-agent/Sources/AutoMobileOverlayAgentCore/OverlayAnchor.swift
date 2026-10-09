@@ -39,12 +39,14 @@ extension OverlayRect {
 /// Where a `sheet` placement sits in the overlay window: full width, `height` tall (200 pt when the
 /// spec sets none, never taller than the window), against the top or bottom edge. Android clips
 /// everything outside a sheet window, so the anchor layer is clipped to this rectangle (#10912).
+/// A bottom sheet raised by the keyboard (`OverlayKeyboardLift`) moves up by `lift`, never past the
+/// top of the window; a top sheet ignores it.
 enum OverlaySheetFrame {
     static let defaultHeight = 200.0
 
-    static func rect(containerWidth: Double, containerHeight: Double, edge: String?, height: Double?) -> OverlayRect {
+    static func rect(containerWidth: Double, containerHeight: Double, edge: String?, height: Double?, lift: Double = 0) -> OverlayRect {
         let sheetHeight = Swift.min(Swift.max(height ?? defaultHeight, 0), containerHeight)
-        let y = edge == "top" ? 0 : containerHeight - sheetHeight
+        let y = edge == "top" ? 0 : Swift.max(containerHeight - sheetHeight - Swift.max(lift, 0), 0)
         return OverlayRect(x: 0, y: y, width: containerWidth, height: sheetHeight)
     }
 }

@@ -34,6 +34,9 @@ final class PassthroughWindow: UIWindow {
         if model?.windowOrigin != origin {
             model?.windowOrigin = origin
         }
+        if model?.windowSize != bounds.size {
+            model?.windowSize = bounds.size
+        }
     }
 
     /// Where this window's own (0, 0) is on screen, in points: anchors are screen coordinates.
@@ -50,6 +53,7 @@ final class OverlayAgent {
     private var server: OverlayServer?
     private var layers: OverlayLayersViewController?
     private var sceneObserver: NSObjectProtocol?
+    private var keyboardObservers: [NSObjectProtocol] = []
     private var sessionObserver: AnyCancellable?
     /// App windows' own `accessibilityElementsHidden` while the overlay covers them.
     private var hiddenBeforeCovering: [ObjectIdentifier: Bool] = [:]
@@ -95,8 +99,34 @@ final class OverlayAgent {
         sessionObserver = model.$session.sink { [weak self] session in
             self?.updateAccessibility(session: session)
         }
+        observeKeyboard()
         server.start()
         self.server = server
+    }
+
+    // MARK: Keyboard
+
+    /// Tracks the app's software keyboard so a bottom sheet can sit above it. The agent runs in the
+    /// app's process, so these are the notifications of the keyboard the app shows.
+    private func observeKeyboard() {
+        let center = NotificationCenter.default
+        keyboardObservers = [
+            center.addObserver(
+                forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main
+            ) { [weak self] note in
+                let info = note.userInfo
+                let frame = (info?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+                let duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue
+                MainActor.assumeIsolated { self?.model.setKeyboard(frame: frame, duration: duration) }
+            },
+            center.addObserver(
+                forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
+            ) { [weak self] note in
+                let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?
+                    .doubleValue
+                MainActor.assumeIsolated { self?.model.setKeyboard(frame: nil, duration: duration) }
+            },
+        ]
     }
 
     // MARK: Window
@@ -251,7 +281,9 @@ final class OverlayAgent {
                 if let id = message["id"] as? String { model.removeAsset(id) }
                 result(true)
             case "get_overlay_status":
-                result(true, extra: ["status": model.status()])
+                var status = model.status()
+                status["visible"] = window?.isHidden == false
+                result(true, extra: ["status": status])
             case OverlayAgentProtocol.hideForCaptureRequest:
                 hideForCapture(
                     deadlineMs: OverlayCaptureHold
@@ -479,9 +511,11 @@ struct OverlayRootView: View {
         .environment(\.overlayTypography, OverlayTypography(theme: model.spec?.theme?.typography))
         .environment(\.overlayShapes, OverlayShapes(theme: model.spec?.theme?.shapes))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Bars and cutouts are the spec's job (safeAreaPadding); the keyboard still pushes a
-        // sheet or bottom-floating overlay up so its text field stays visible.
+        // Bars and cutouts are the spec's job (safeAreaPadding). A bottom sheet is raised by the
+        // keyboard frame itself (`keyboardLift`), so SwiftUI's keyboard avoidance is off for it
+        // and cannot lift it twice; a bottom-floating overlay still gets SwiftUI's push.
         .ignoresSafeArea(.container)
+        .ignoresSafeArea(.keyboard, edges: liftsForKeyboard ? .all : [])
     }
 
     /// The spec's anchored nodes, above its tree and below its modals, as Android's anchor layer.
@@ -494,7 +528,27 @@ struct OverlayRootView: View {
             ),
             model: model,
             sheet: placement.type == "sheet"
-                ? OverlayAnchorLayer.Sheet(edge: placement.edge, height: placement.height) : nil
+                ? OverlayAnchorLayer.Sheet(edge: placement.edge, height: placement.height, lift: keyboardLift)
+                : nil
+        )
+        .animation(keyboardLiftDuration.map { .easeInOut(duration: $0) }, value: keyboardLift)
+    }
+
+    private var liftsForKeyboard: Bool {
+        let placement = model.spec?.window.placement
+        return OverlayKeyboardLift.appliesTo(placementType: placement?.type ?? "", edge: placement?.edge)
+    }
+
+    /// How far the bottom sheet is raised and how long the move takes: the keyboard's own duration,
+    /// or instant under spec `motion: "none"` or Reduce Motion.
+    private var keyboardLift: Double {
+        model.keyboardLift
+    }
+
+    private var keyboardLiftDuration: Double? {
+        OverlayKeyboardLift.animationDuration(
+            keyboardDuration: model.keyboardDuration,
+            motion: OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
         )
     }
 
@@ -517,6 +571,9 @@ struct OverlayRootView: View {
                 .frame(height: placement.height ?? OverlaySheetFrame.defaultHeight)
                 .reportFrame(key: "content", model: model)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: edge)
+                // The sheet's frame is reported from inside, so its touch rect follows the lift.
+                .padding(.bottom, keyboardLift)
+                .animation(keyboardLiftDuration.map { .easeInOut(duration: $0) }, value: keyboardLift)
         case "floating":
             root
                 .offset(x: placement.offset?.x ?? 0, y: placement.offset?.y ?? 0)

@@ -156,6 +156,108 @@ describe("prototype tool on an iOS simulator", () => {
     },
   );
 
+  describe("inspect", () => {
+    const agentStatus = (overrides: Record<string, unknown> = {}) => ({
+      status: {
+        shown: true,
+        id: "panel",
+        pages: { pager: 1 },
+        state: { name: "typed" },
+        lastSequence: 4,
+        visible: true,
+        assets: [],
+        ...overrides,
+      },
+    });
+
+    test("maps the agent's status to the Android inspect shape without suspended or dropped events", async () => {
+      agent.queueReplies(agentStatus());
+      const { response, payload } = await call({ action: "inspect" });
+      expect(response.isError).toBeFalsy();
+      expect(agent.requests.map((request) => request.type)).toEqual(["get_overlay_status"]);
+      expect(payload.success).toBe(true);
+      expect(payload.overlays).toMatchObject([
+        {
+          id: "panel",
+          persistent: false,
+          adopted: true,
+          state: { name: "typed" },
+          pages: { pager: 1 },
+          lastSequence: 4,
+        },
+      ]);
+      expect(payload).not.toHaveProperty("deviceDroppedEvents");
+      expect(payload.overlays?.[0]).not.toHaveProperty("suspended");
+    });
+
+    test("adopts an overlay shown before a session release so status and awaitEvent see it", async () => {
+      agent.queueReplies(agentStatus());
+      await call({ action: "inspect" });
+      const status = await call({ action: "status" });
+      expect(status.payload.overlays?.map((entry) => entry.id)).toEqual(["panel"]);
+      expect(agent.requests.map((request) => request.type)).toEqual(["get_overlay_status"]);
+    });
+
+    test("an agent showing nothing drops the overlay the host still lists", async () => {
+      await call({ action: "show", spec: { ...spec, root: { type: "text", text: "x" } } });
+      expect((await call({ action: "status" })).payload.overlays).toHaveLength(1);
+      agent.queueReplies(agentStatus({ shown: false, id: null, pages: {}, state: {} }));
+      const { payload } = await call({ action: "inspect" });
+      expect(payload.success).toBe(true);
+      expect(payload.overlays).toEqual([]);
+    });
+
+    test("an agent without overlay_inspect_v1 is refused with a relaunch hint and nothing is sent", async () => {
+      connections.agents.set(
+        simulator.deviceId,
+        new FakeOverlayAgentClient({
+          agentVersion: "0.0.9",
+          protocolVersion: 1,
+          capabilities: ["show_overlay", "get_overlay_status"],
+        }),
+      );
+      const { response, payload } = await call({ action: "inspect" });
+      expect(response.isError).toBe(true);
+      expect(payload.error).toContain("overlay_inspect_v1");
+      expect(payload.error).toContain("launchApp overlay: true");
+      expect(connections.agents.get(simulator.deviceId)).toBeDefined();
+      expect(
+        (connections.agents.get(simulator.deviceId) as FakeOverlayAgentClient).requests,
+      ).toEqual([]);
+    });
+
+    test("a failed status request or malformed status is reported, not adopted", async () => {
+      agent.queueReplies({ success: false, error: "boom" });
+      expect((await call({ action: "inspect" })).payload).toMatchObject({
+        success: false,
+        error: "boom",
+      });
+      agent.queueReplies({ status: { shown: true } });
+      expect((await call({ action: "inspect" })).payload.error).toContain("malformed");
+    });
+  });
+
+  test('window.layer "app" is accepted and ignored on iOS, with no warning', async () => {
+    const layered = { ...spec, window: { ...spec.window, layer: "app" as const } };
+    const { response, payload } = await call({
+      action: "show",
+      spec: layered,
+      assets: [{ id: "logo", path: "/img/logo.png" }],
+    });
+    expect(response.isError).toBeFalsy();
+    expect(payload.success).toBe(true);
+    expect(payload.warning).toBeUndefined();
+    expect(types()).toEqual(["put_overlay_asset", "show_overlay"]);
+  });
+
+  test('window.persistence "device" is still refused on iOS before any agent request', async () => {
+    const persistent = { ...spec, window: { ...spec.window, persistence: "device" as const } };
+    const { response, payload } = await call({ action: "show", spec: persistent });
+    expect(response.isError).toBe(true);
+    expect(payload.error).toContain('window.persistence "device" is Android only');
+    expect(agent.requests).toEqual([]);
+  });
+
   test("reset is forwarded to the agent only when true", async () => {
     await call({ action: "show", spec });
     await call({ action: "show", spec, reset: false });

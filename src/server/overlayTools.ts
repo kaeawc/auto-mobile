@@ -30,6 +30,7 @@ import {
 } from "../features/overlay/OverlayTransport";
 import type { OverlayEventSource } from "../features/overlay/OverlayEventCoordinator";
 import {
+  IOS_OVERLAY_INSPECT_CAPABILITY,
   IosOverlayTransport,
   noOverlayAgentConnections,
   overlayAgentNotConnectedMessage,
@@ -528,7 +529,7 @@ type OverlayClient = AndroidOverlayClient;
 interface OverlayTarget {
   transport: OverlayTransport;
   android?: AndroidOverlayTransport;
-  ios?: Pick<IosOverlayTransport, "supportsCapability">;
+  ios?: Pick<IosOverlayTransport, "supportsCapability" | "status">;
 }
 export interface OverlayToolDependencies {
   /** Reads local files named by `assets`; tests inject an in-memory reader. */
@@ -1463,10 +1464,12 @@ async function inspectDevice(
   timeoutMs: number | undefined,
 ): Promise<OverlayOutput> {
   const { store, events } = dependencies;
-  // overlayPlatformError refuses inspect off Android, so only Android reaches here.
   const client = target.android;
   if (!client) {
-    throw new ActionableError("inspect is Android only.");
+    if (target.ios) {
+      return inspectIosAgent({ store, events }, target, target.ios, scope);
+    }
+    throw new ActionableError("inspect needs an Android device or an iOS simulator agent.");
   }
   // The device drains its offline ring from onClientConnected, which the capability probe below can
   // trigger by connecting, so the capture must be listening before the first operation.
@@ -1503,6 +1506,61 @@ async function inspectDevice(
     ...statusOutput(store, events, scope),
     deviceDroppedEvents: result.droppedEvents ?? 0,
   };
+}
+
+const iosAgentStatusSchema = z.object({
+  shown: z.boolean(),
+  id: z.string().min(1).nullable(),
+  pages: z.record(z.string(), z.number().int().nonnegative()).default({}),
+  state: stateInput,
+  lastSequence: z.number().int().nonnegative(),
+});
+
+/**
+ * iOS inspect: the injected agent holds at most one overlay and dies with the app, so its status
+ * is the whole report. There is no offline event buffer to replay, no persistence and no
+ * foreground suspension, so the reported overlay carries no `suspended` and the result no
+ * `deviceDroppedEvents`. An agent without overlay_inspect_v1 reports no sequence; it is refused
+ * with a relaunch hint rather than adopted with a guessed one.
+ */
+async function inspectIosAgent(
+  dependencies: Pick<OverlayHandlerDependencies, "store" | "events">,
+  target: OverlayTarget,
+  ios: NonNullable<OverlayTarget["ios"]>,
+  scope: OverlayScope,
+): Promise<OverlayOutput> {
+  const { store, events } = dependencies;
+  if (!ios.supportsCapability(IOS_OVERLAY_INSPECT_CAPABILITY)) {
+    return {
+      success: false,
+      error: new ActionableError(
+        `inspect: the connected overlay agent does not advertise ${IOS_OVERLAY_INSPECT_CAPABILITY}; relaunch the app with launchApp overlay: true to load the agent built for this AutoMobile version.`,
+      ).message,
+    };
+  }
+  let reply: Awaited<ReturnType<typeof ios.status>>;
+  try {
+    reply = await ios.status();
+  } catch (error) {
+    logger.warn("[overlay] iOS inspect request failed", error);
+    return { success: false, error: toActionableError(error, "Overlay inspect failed").message };
+  }
+  if (!reply.success) {
+    return { success: false, error: reply.error ?? "Overlay inspect failed" };
+  }
+  const status = iosAgentStatusSchema.safeParse(reply.status);
+  if (!status.success) {
+    logger.warn("[overlay] Malformed iOS agent status in inspect reply", status.error);
+    return {
+      success: false,
+      error: "Overlay inspect failed: the agent returned a malformed status.",
+    };
+  }
+  const { shown, id, pages, state, lastSequence } = status.data;
+  const reported =
+    shown && id !== null ? [{ id, persistent: false, state, pages, lastSequence }] : [];
+  adoptReportedOverlays(store, events, overlayEventSource(target.transport), scope, reported, []);
+  return { success: true, ...statusOutput(store, events, scope) };
 }
 
 function statusOutput(
@@ -1582,7 +1640,7 @@ async function waitForOverlayEvent(
 
 /**
  * Inputs only CtrlProxy can honour, refused before any device request. iOS simulators run the
- * injected overlay agent: no display and no inspect.
+ * injected overlay agent: no display.
  */
 function overlayPlatformError(
   device: BootedDevice,
@@ -1596,18 +1654,15 @@ function overlayPlatformError(
       "Overlays need an Android device or an iOS simulator. Target one with deviceId or sessionUuid.",
     );
   }
-  if (args.action === "inspect") {
-    return new ActionableError("inspect is Android only; omit it on iOS.");
-  }
   if (args.display !== undefined) {
     return new ActionableError("display is Android only; omit display on iOS.");
   }
   if (args.spec !== undefined) {
     const options = requestedOverlayWindowOptions(args.spec as OverlaySpec);
-    if (options.appLayer || options.devicePersistence) {
-      return new ActionableError(
-        'window.layer "app" and window.persistence "device" are Android only; omit them on iOS.',
-      );
+    // window.layer "app" is accepted and ignored on iOS, silently (owner decision 2026-10-09): the
+    // agent's window level is fixed, so one spec runs on both platforms.
+    if (options.devicePersistence) {
+      return new ActionableError('window.persistence "device" is Android only; omit it on iOS.');
     }
   }
   return undefined;
@@ -1906,7 +1961,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
   };
   ToolRegistry.registerDeviceAware(
     PROTOTYPE_TOOL_NAME,
-    'Show (always a full spec), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which overlays it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, awaitEvent; sizes are points). A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/toggle/increment/decrement/dismiss. Sizes and anchors use dp (points on iOS). A node\'s anchor {type:"element",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the overlay excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:"bounds",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session overlay is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer "overlay" calls fail saying so) and it returns with the app; a device-persistent overlay is not tied to an app. Status makes no device request, marks an overlay suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1. A device-persistent overlay keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising overlay_persistence_replay_v1 and is refused otherwise.',
+    'Show (always a full spec), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which overlays it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, inspect, awaitEvent; sizes are points). A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/toggle/increment/decrement/dismiss. Sizes and anchors use dp (points on iOS). A node\'s anchor {type:"element",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the overlay excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:"bounds",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session overlay is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer "overlay" calls fail saying so) and it returns with the app; a device-persistent overlay is not tied to an app. Status makes no device request, marks an overlay suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1. A device-persistent overlay keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising overlay_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (overlay_inspect_v1) for the one overlay it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent.',
     overlaySchema,
     handler,
     { defaultEnabled: false, outputSchema: overlayOutputSchema },

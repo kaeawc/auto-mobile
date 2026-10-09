@@ -57,6 +57,12 @@ export const noOverlayAgentConnections: OverlayAgentConnections = { get: () => u
  */
 export { SCREENSHOT_HIDE_OVERLAY_CAPABILITY };
 
+/**
+ * Capability the agent advertises when `get_overlay_status` also reports `lastSequence`, which
+ * `inspect` adopts. An older agent answers status without it, so inspect is refused on one.
+ */
+export const IOS_OVERLAY_INSPECT_CAPABILITY = "overlay_inspect_v1";
+
 /** The agent restores the overlay by itself after this long, even if the host never asks. */
 export const DEFAULT_CAPTURE_HIDE_DEADLINE_MS = 1500;
 

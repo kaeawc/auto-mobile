@@ -69,6 +69,12 @@ struct OverlaySession {
         spec != nil
     }
 
+    /// The last event sequence issued for the shown overlay's id (0 before its first event), which
+    /// `get_overlay_status` reports so a host inspecting the agent can resume past it.
+    var lastSequence: Int {
+        spec.flatMap { sequences[$0.id] } ?? 0
+    }
+
     /// A show of the overlay already on screen replaces it in place: its spec state is
     /// authoritative and each pager that survives keeps its page, matched by id and clamped to the
     /// new page count. Any other show, or one with `reset`, starts fresh: the spec's own state and

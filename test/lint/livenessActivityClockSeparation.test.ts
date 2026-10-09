@@ -127,7 +127,11 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     "SessionManager.isSessionExpiredForNewExecution",
   ],
   "src/daemon/sessionHoldDiagnostics.ts": ["idleReleaseAt", "vetoedIdleReleaseAt"],
-  "src/daemon/daemonMcpProxy.ts": ["DaemonMcpProxy.evictAbandonedHeldSessions"],
+  "src/daemon/daemonMcpProxy.ts": [
+    "DaemonMcpProxy.evictAbandonedHeldSessions",
+    // The replay-lease TTL (#10656): a heartbeat ack must not keep a dead binding replayable.
+    "DaemonMcpProxy.isBoundSessionReplayExpired",
+  ],
 };
 
 /** Rule 5: lease judgements read only liveness clocks. */

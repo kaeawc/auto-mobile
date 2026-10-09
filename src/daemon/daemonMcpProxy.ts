@@ -5324,6 +5324,8 @@ export class DaemonMcpProxy {
         );
         if (sent && isCurrent()) {
           this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
+        } else if (sent && this.otherHeldSessions.get(sessionUuid) === held) {
+          this.noteLateHeartbeatAck(sessionUuid);
         }
       });
     } catch (error) {
@@ -5419,6 +5421,17 @@ export class DaemonMcpProxy {
       return false;
     }
     return !isLivenessOwnershipLostError(error);
+  }
+
+  /**
+   * A heartbeat the keeper had given up on was acknowledged after all (#10973). While the session
+   * is being recovered that acknowledgement is liveness evidence: the daemon renewed the lease, so
+   * recovery ends instead of handing the session over. Outside recovery it changes nothing.
+   */
+  private noteLateHeartbeatAck(sessionUuid: string): void {
+    if (this.livenessRecovery.isRecovering(sessionUuid)) {
+      this.livenessAcks.set(sessionUuid, this.timer.now());
+    }
   }
 
   private recordHeldSessionHeartbeatSuccess(
@@ -5736,7 +5749,11 @@ export class DaemonMcpProxy {
     claimLivenessOwnership: boolean,
     isCurrent: () => boolean,
   ): void {
-    if (!isCurrent() || this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
+    if (this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
+      return;
+    }
+    if (!isCurrent()) {
+      this.noteLateHeartbeatAck(sessionUuid);
       return;
     }
     if (claimLivenessOwnership) {

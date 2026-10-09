@@ -442,6 +442,24 @@ describe("recovery review fixes (PR 10115)", () => {
     expect(h.handovers[0].sessions.map((s) => s.sessionUuid)).toEqual(["b"]);
   });
 
+  test("#10973: an acknowledgement arriving while attempts go unanswered ends recovery, with no handover", async () => {
+    const acknowledgedAt: Record<string, number> = {};
+    const h = harness({ outcomeFor: () => "hang", acknowledgedAt });
+    h.timer.setCurrentTime(6_000);
+    h.recovery.begin("a", DAEMON_STALLED_CODE);
+    // The heartbeat the keeper gave up on is acknowledged late, during the first attempt's slot.
+    await h.timer.advanceTimeAsync(1_000);
+    acknowledgedAt.a = h.timer.now();
+    await h.timer.advanceTimeAsync(40_000);
+
+    expect(h.handovers).toEqual([]);
+    expect(h.attempts.map((a) => a.attempt)).toEqual([1]);
+    expect(h.recovered).toEqual([
+      { sessionUuid: "a", code: DAEMON_STALLED_CODE, attempts: 1, late: false },
+    ]);
+    expect(h.recovery.isRecovering("a")).toBe(false);
+  });
+
   test("F5: no handover at all when every failed session has since been acknowledged", async () => {
     const h = harness({ outcomeFor: () => "unreachable", acknowledgedAt: { a: 1_000_000 } });
     h.recovery.begin("a", DAEMON_STALLED_CODE);

@@ -512,11 +512,24 @@ export class LivenessRecovery {
           outcome,
           restoredAfterLapse,
           deviceAtStart,
-        })
+        }) ||
+        this.recoveredByLateAck(sessionUuid, code, attempt, lastAckBefore, restoredAfterLapse)
       ) {
         return;
       }
       await this.waitForSlotEnd(startedAt + attempt * slotMs, attempt);
+    }
+    const restoredAfterLapse = startedAt - lastAckBefore > this.deps.leaseMs;
+    if (
+      this.recoveredByLateAck(
+        sessionUuid,
+        code,
+        LIVENESS_RECOVERY_ATTEMPTS,
+        lastAckBefore,
+        restoredAfterLapse,
+      )
+    ) {
+      return;
     }
     // No attempt got an answer. A daemon that does not answer is stalled, whatever stalled the
     // proxy first; only an answer from the daemon proves a session lost.
@@ -527,6 +540,26 @@ export class LivenessRecovery {
       attempts: LIVENESS_RECOVERY_ATTEMPTS,
       deviceAtStart,
     });
+  }
+
+  /**
+   * A heartbeat acknowledgement arrived after recovery started, even one answering a request whose
+   * time slot had already run out (#10973): the daemon renewed the lease, so the session is
+   * recovered (owner decision 2026-10-09, matching the daemon's own stall forgiveness). Its
+   * recovery ends here and the keeper resumes the normal cadence.
+   */
+  private recoveredByLateAck(
+    sessionUuid: string,
+    code: LivenessStallCode,
+    attempts: number,
+    lastAckBefore: number,
+    restoredAfterLapse: boolean,
+  ): boolean {
+    if (!this.deps.hasAcknowledgedSince(sessionUuid, lastAckBefore)) {
+      return false;
+    }
+    this.deps.onRecovered({ sessionUuid, code, attempts, restoredAfterLapse });
+    return true;
   }
 
   /** Act on an attempt's outcome; true when recovery for the session is over. */

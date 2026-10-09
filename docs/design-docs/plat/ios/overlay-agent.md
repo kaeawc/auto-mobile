@@ -100,6 +100,31 @@ is simulator-only and device launches will fail to load it.
   separate accessibility service involved.
 - Android reaches any app through CtrlProxy; iOS reaches only apps launched with the agent.
 
+## Anchors
+
+Node anchors (#9316) work as on [Android](../android/overlay-ux.md#anchors), in points.
+The host resolves each element anchor once at show against a fresh hierarchy of the app
+alone (the agent's own window, found by its dismiss control, is excluded) and sends it as
+a bounds anchor. iOS hierarchy bounds are already points, the unit iOS spec sizes use, so
+no density conversion happens; the result's `anchors[].boundsPx` and `bounds` carry the
+same point values. The host sends anchors only to an agent whose handshake advertises
+`overlay_anchor_v1`, and refuses the show otherwise (relaunch with `launchApp
+{ overlay: true }` to load the current agent). The agent refuses an element anchor that
+reaches it unresolved.
+
+The agent draws anchored nodes in a window-level layer above the spec tree (above its
+modal, for a node inside a dialog), so a parent neither reserves a slot for one nor clips
+it, and its touch target and accessibility frame are where it is drawn. The layer places
+a node at its anchor's screen rectangle less the layer's own screen origin: the overlay
+window's screen origin plus the layer's position in the window. For a fullscreen overlay
+the layer sits in the content area below the dismiss bar, so anchors are shifted up by the
+bar and an anchor under the bar is clipped. `cover` sizes the node to the bounds, ignoring
+authored width and height; the edges keep the node's size, align that edge and centre it
+on the other axis; `start` and `end` follow the layout direction; `offset` applies last,
+in screen axes. Only the root of a floating overlay may be anchored, as on Android; with
+no window to move, the layer places the anchored root itself and the rest of the screen
+stays touchable. Anchors are resolved once and do not follow later scrolling.
+
 ## Material components
 
 The agent draws every component node of the shared vocabulary (#10439) with SwiftUI and

@@ -408,6 +408,8 @@ final class OverlayNode: Decodable {
     /// The `visibleWhen` enter/exit: `none`, `fade`, `expand` or `slide`; absent is fade + expand.
     let transition: String?
     let safeAreaPadding: SafeAreaPadding?
+    /// Screen placement resolved by the host (#9316); see `OverlayAnchor`.
+    let anchor: OverlayAnchor?
     let children: [OverlayNode]?
     let child: OverlayNode?
     let text: String?

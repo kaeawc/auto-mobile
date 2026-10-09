@@ -721,9 +721,12 @@ anchor with `{ "type": "bounds", "bounds", "alignment", "offset"? }`, keeping it
 alignment and offset. A bounds anchor may also be authored with `alignment` (default
 `cover`) and `offset`. The renderer refuses an element anchor that reaches it
 unresolved. A host only sends anchors to a CtrlProxy advertising `overlay_anchor_v1`;
-older APKs decode and ignore them, so the host refuses the show there. Anchors are
-Android only, and element anchors resolve against the default display (another
-`display` is refused).
+older APKs decode and ignore them, so the host refuses the show there. Element anchors
+resolve against the default display (another `display` is refused). On an iOS simulator
+the injected overlay agent positions anchors too, advertising the same
+`overlay_anchor_v1` capability in its handshake; there, hierarchy bounds and spec sizes
+are both points, so nothing is converted (see the
+[iOS overlay agent](../ios/overlay-agent.md#anchors)).
 
 The renderer lays an anchored node at its screen rectangle by subtracting the window's
 screen origin and the node's own position inside the window (cutout, system bars, the

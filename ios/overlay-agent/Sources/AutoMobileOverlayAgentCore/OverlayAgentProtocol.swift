@@ -11,14 +11,20 @@ enum OverlayAgentProtocol {
     static let protocolVersion = 1
     /// Agent build version, reported for diagnostics.
     static let agentVersion = "0.1.0"
-    /// Request types this agent handles. Same-id `show_overlay` replaces the shown overlay.
+    /// Request types this agent handles, then the spec features it renders. Same-id `show_overlay`
+    /// replaces the shown overlay.
     static let capabilities = [
         "show_overlay",
         "dismiss_overlay",
         "put_overlay_asset",
         "remove_overlay_asset",
         "get_overlay_status",
+        anchorCapability,
     ]
+    /// Positions `{type: "bounds"}` node anchors (#9316). The host refuses anchors on an agent that
+    /// does not advertise it, which would draw the node at its normal position. Same name as the
+    /// CtrlProxy capability.
+    static let anchorCapability = "overlay_anchor_v1"
     static let portEnvironmentKey = "AUTOMOBILE_OVERLAY_PORT"
     static let tokenEnvironmentKey = "AUTOMOBILE_OVERLAY_TOKEN"
     /// Shortest token the agent accepts, so a stray or empty value cannot open the server.

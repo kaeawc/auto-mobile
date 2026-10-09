@@ -11,7 +11,7 @@ const BASELINE_DENSITY_DPI = 160;
 
 type ElementAnchor = Extract<OverlayAnchor, { type: "element" }>;
 
-/** Screen-space dp bounds, the unit every overlay spec size uses. */
+/** Screen-space bounds in the unit every overlay spec size uses: dp on Android, points on iOS. */
 export interface OverlayDpBounds {
   x: number;
   y: number;
@@ -24,9 +24,12 @@ export interface ResolvedOverlayAnchor {
   /** The anchored node's spec path, spelled as validation errors spell it (`root.children[0]`). */
   path: string;
   alignment: ElementAnchor["alignment"];
-  /** The app element's screen bounds in px, as `observe` reports them. */
+  /**
+   * The app element's screen bounds as `observe` reports them: px on Android, points on iOS (the
+   * field keeps its Android name).
+   */
   boundsPx: ElementBounds;
-  /** The same bounds in dp, converted once with the capture's display density. */
+  /** The same bounds in spec units: dp converted once with the capture's density, or iOS points. */
   bounds: OverlayDpBounds;
 }
 
@@ -38,10 +41,19 @@ export interface OverlayAnchorResolution {
   hierarchyUpdatedAt?: number;
 }
 
+/**
+ * The unit of the capture's bounds. Android hierarchies are px and convert to dp with the capture's
+ * density; iOS hierarchies are already points, the unit iOS spec sizes use, so they convert to
+ * nothing.
+ */
+export type OverlayAnchorBoundsUnit = "px" | "points";
+
 /** The capture an element anchor is resolved against. */
 export interface OverlayAnchorCapture {
   hierarchy: ViewHierarchyResult;
   updatedAt?: number;
+  /** Defaults to `px` (Android). */
+  boundsUnit?: OverlayAnchorBoundsUnit;
 }
 
 type Raw = Record<string, unknown>;
@@ -155,6 +167,31 @@ function dpBounds(bounds: ElementBounds, densityDpi: number): OverlayDpBounds {
   };
 }
 
+function pointBounds(bounds: ElementBounds): OverlayDpBounds {
+  return {
+    x: bounds.left,
+    y: bounds.top,
+    width: bounds.right - bounds.left,
+    height: bounds.bottom - bounds.top,
+  };
+}
+
+/** Converts a capture's element bounds into spec units, refusing a px capture without a density. */
+function specUnitConverter(
+  capture: OverlayAnchorCapture,
+): (bounds: ElementBounds) => OverlayDpBounds {
+  if (capture.boundsUnit === "points") {
+    return pointBounds;
+  }
+  const density = capture.hierarchy.density;
+  if (typeof density !== "number" || !Number.isFinite(density) || density <= 0) {
+    throw new ActionableError(
+      "Element anchors need the display density, and the device's hierarchy did not report one. Nothing was shown. Use a bounds anchor in dp instead.",
+    );
+  }
+  return (bounds) => dpBounds(bounds, density);
+}
+
 /**
  * A floating window is only as large as its content and moves onto its anchored root, so an anchor
  * anywhere below the root would be laid out outside the window and clipped. Fullscreen and sheet
@@ -179,10 +216,11 @@ export function hasElementAnchors(spec: OverlaySpec): boolean {
 
 /**
  * Resolves every element anchor against the app's hierarchy (AutoMobile's own overlay windows are
- * excluded) and converts its px bounds to dp once, with the capture's display density. A missing,
- * ambiguous, empty or off-screen element throws before anything is shown. The returned spec is a
- * copy in which each element anchor is a bounds anchor keeping its alignment and offset; the input
- * is not mutated, and a spec without element anchors is returned as the same object.
+ * excluded) and converts its bounds to spec units once: Android px to dp with the capture's display
+ * density, iOS points unchanged. A missing, ambiguous, empty or off-screen element throws before
+ * anything is shown. The returned spec is a copy in which each element anchor is a bounds anchor
+ * keeping its alignment and offset; the input is not mutated, and a spec without element anchors is
+ * returned as the same object.
  */
 export function resolveOverlayAnchors(
   spec: OverlaySpec,
@@ -191,12 +229,7 @@ export function resolveOverlayAnchors(
   if (!hasElementAnchors(spec)) {
     return { spec, anchors: [] };
   }
-  const density = capture.hierarchy.density;
-  if (typeof density !== "number" || !Number.isFinite(density) || density <= 0) {
-    throw new ActionableError(
-      "Element anchors need the display density, and the device's hierarchy did not report one. Nothing was shown. Use a bounds anchor in dp instead.",
-    );
-  }
+  const toSpecUnits = specUnitConverter(capture);
   const app = scopeHierarchyToLayer(capture.hierarchy, "app");
   const nodes = new SearchableHierarchy().project(app);
   const copy = structuredClone(spec);
@@ -205,7 +238,7 @@ export function resolveOverlayAnchors(
       return [];
     }
     const boundsPx = resolveElement({ path, anchor }, app, nodes);
-    const bounds = dpBounds(boundsPx, density);
+    const bounds = toSpecUnits(boundsPx);
     node.anchor = {
       type: "bounds",
       bounds,

@@ -115,6 +115,10 @@ struct NodeView: View {
     @ObservedObject var model: OverlayModel
     /// Dialogs and snackbars draw nothing in place; `OverlayModalLayer` draws them with this set.
     var presentedAsModal = false
+    /// Anchored nodes draw nothing in place; `OverlayAnchorLayer` draws them with this set (#10803).
+    var anchorPlaced = false
+    /// A `cover` anchor's size, which replaces the authored width and height.
+    var coverSize: CGSize?
     @Environment(\.pagerContext) private var pager
     @Environment(\.overlayPalette) private var palette
     @Environment(\.overlayTypography) private var typography
@@ -127,7 +131,7 @@ struct NodeView: View {
         let motion = OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
         let transition = node.visibleWhen == nil ? .instant : motion.visibility(transition: node.transition)
         Group {
-            if isVisible, presentedAsModal || !overlayModalTypes.contains(node.type) {
+            if isVisible, presentedAsModal || !overlayModalTypes.contains(node.type), drawnHere {
                 styled(content).transition(transition.swiftUITransition)
             }
         }
@@ -143,6 +147,11 @@ struct NodeView: View {
 
     private var layoutSignature: [String] {
         node.containerLayoutSignature(state: model.state) { model.holds($0) }
+    }
+
+    /// An anchored node is drawn by its window's anchor layer, never in its parent's slot.
+    private var drawnHere: Bool {
+        node.anchor == nil || anchorPlaced || presentedAsModal
     }
 
     private var isVisible: Bool {
@@ -494,8 +503,8 @@ struct NodeView: View {
                 trailing: (padding?.end ?? 0) + insets.right
             ))
             .modifier(SizeModifier(
-                width: style?.width,
-                height: style?.height,
+                width: coverSize.map { .points($0.width) } ?? style?.width,
+                height: coverSize.map { .points($0.height) } ?? style?.height,
                 alignment: contentAlignment,
                 fillsByDefault: node.type == "spacer"
             ))

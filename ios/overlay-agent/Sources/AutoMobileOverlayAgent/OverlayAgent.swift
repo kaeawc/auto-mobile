@@ -29,6 +29,15 @@ final class PassthroughWindow: UIWindow {
         if model?.safeInsets != safeAreaInsets {
             model?.safeInsets = safeAreaInsets
         }
+        let origin = screenOrigin
+        if model?.windowOrigin != origin {
+            model?.windowOrigin = origin
+        }
+    }
+
+    /// Where this window's own (0, 0) is on screen, in points: anchors are screen coordinates.
+    var screenOrigin: CGPoint {
+        convert(CGPoint.zero, to: screen.coordinateSpace)
     }
 }
 
@@ -142,6 +151,7 @@ final class OverlayAgent {
         window.rootViewController = host
         window.isHidden = false
         model.safeInsets = window.safeAreaInsets
+        model.windowOrigin = window.screenOrigin
         self.window = window
     }
 
@@ -179,6 +189,11 @@ final class OverlayAgent {
                 }
             case "show_overlay":
                 let spec = try decode(OverlaySpec.self, message["spec"])
+                // The host resolves element anchors to bounds (#9316); drawing one that it did not
+                // would silently misplace the node, so the show is refused and nothing changes.
+                if let path = spec.root.unresolvedAnchorPath() {
+                    return result(false, "\(path): Element anchors must be resolved to bounds by the host; update the AutoMobile host")
+                }
                 model.show(spec, reset: message["reset"] as? Bool == true)
                 warnAboutFontAssets(for: spec)
                 result(true, extra: missingAssetsExtra())
@@ -261,6 +276,7 @@ struct OverlayRootView: View {
                         // taller than that area neither pushes the bar up nor moves the spec.
                         Color.clear
                             .overlay { placed(spec).opacity(Double(spec.window.opacity ?? 100) / 100) }
+                            .overlay { anchorLayer(spec).opacity(Double(spec.window.opacity ?? 100) / 100) }
                             .overlay {
                                 OverlayModalLayer(model: model)
                                     .opacity(Double(spec.window.opacity ?? 100) / 100)
@@ -269,6 +285,8 @@ struct OverlayRootView: View {
                     }
                 } else {
                     placed(spec)
+                        .opacity(Double(spec.window.opacity ?? 100) / 100)
+                    anchorLayer(spec)
                         .opacity(Double(spec.window.opacity ?? 100) / 100)
                     OverlayModalLayer(model: model)
                         .opacity(Double(spec.window.opacity ?? 100) / 100)
@@ -290,11 +308,21 @@ struct OverlayRootView: View {
         .ignoresSafeArea(.container)
     }
 
+    /// The spec's anchored nodes, above its tree and below its modals, as Android's anchor layer.
+    private func anchorLayer(_ spec: OverlaySpec) -> some View {
+        OverlayAnchorLayer(entries: spec.root.windowAnchorLayer(state: model.state, pages: model.pages), model: model)
+    }
+
     @ViewBuilder
     private func placed(_ spec: OverlaySpec) -> some View {
         let placement = spec.window.placement
         let root = NodeView(node: spec.root, model: model)
+        // There is no window to move onto an anchored root: the anchor layer places it, and an
+        // empty sheet or floating slot must not catch touches meant for the app.
+        let rootAnchored = spec.root.anchor != nil
         switch placement.type {
+        case "sheet" where rootAnchored, "floating" where rootAnchored:
+            EmptyView()
         case "sheet":
             let edge: Alignment = placement.edge == "top" ? .top : .bottom
             root

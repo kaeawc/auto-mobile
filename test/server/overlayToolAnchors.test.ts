@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   OVERLAY_ANCHOR_CAPABILITY,
   OVERLAY_DISPLAY_CAPABILITY,
@@ -8,14 +8,21 @@ import type {
   HierarchyCaptureRequest,
   HierarchySnapshot,
 } from "../../src/features/observe/HierarchyCapture";
-import type { BootedDevice } from "../../src/models";
+import { CtrlProxyHierarchy } from "../../src/features/observe/ios/CtrlProxyHierarchy";
+import type { HierarchyDelegateContext } from "../../src/features/observe/ios/types";
+import type { BootedDevice, ViewHierarchyResult } from "../../src/models";
 import { overlayOutputSchema, registerOverlayTools } from "../../src/server/overlayTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
+import {
+  FAKE_OVERLAY_AGENT_CAPABILITIES,
+  FakeOverlayAgentClient,
+} from "../fakes/FakeOverlayAgentClient";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { iosFloatingOverlayOverSettings } from "../fixtures/observe/iosOverlayWindow";
 import { capturedFloatingCoverHierarchy } from "../helpers/overlayWindowCapture";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -231,13 +238,190 @@ describe("prototype show with anchors (#9316)", () => {
     expect(client.getOverlayHistory()).toEqual([]);
     expect(hierarchy.requests).toEqual([]);
   });
+});
 
-  test("anchors are refused on iOS rather than drawn unanchored", async () => {
-    const payload = await call(
-      { action: "show", spec: anchoredSpec({ elementId: "button_elevated" }) },
-      ios,
+/** Serves the captured iPhone 17 Settings hierarchy with the injected agent's window above it. */
+class CapturedIosHierarchy implements HierarchyCapture {
+  readonly requests: HierarchyCaptureRequest[] = [];
+  constructor(private readonly hierarchy: ViewHierarchyResult) {}
+  async capture(request: HierarchyCaptureRequest): Promise<HierarchySnapshot> {
+    this.requests.push(request);
+    return {
+      captureId: "captured-ios",
+      platform: "ios",
+      requestedFreshness: request.freshness,
+      updatedAt: IOS_UPDATED_AT,
+      receivedAt: 0,
+      hierarchy: this.hierarchy,
+      nodes: [],
+    };
+  }
+}
+
+const IOS_UPDATED_AT = 1791385231063;
+
+describe("prototype show with anchors on an iOS simulator (#9316)", () => {
+  let converted: ViewHierarchyResult;
+  let agent: FakeOverlayAgentClient;
+  let hierarchy: CapturedIosHierarchy;
+  let restore: () => void;
+  let unsubscribe: () => void;
+
+  beforeAll(() => {
+    converted = new CtrlProxyHierarchy({} as HierarchyDelegateContext).convertToViewHierarchyResult(
+      iosFloatingOverlayOverSettings(),
     );
+  });
+  beforeEach(() => {
+    restore = preserveToolRegistry();
+    const timer = new FakeTimer();
+    agent = new FakeOverlayAgentClient({
+      agentVersion: "0.1.0",
+      protocolVersion: 1,
+      capabilities: [...FAKE_OVERLAY_AGENT_CAPABILITIES, OVERLAY_ANCHOR_CAPABILITY],
+    });
+    hierarchy = new CapturedIosHierarchy(converted);
+    unsubscribe = registerOverlayTools({
+      clientFactory: () => {
+        throw new Error("an iOS show must not reach CtrlProxy");
+      },
+      agentConnections: { get: (deviceId) => (deviceId === ios.deviceId ? agent : undefined) },
+      clock: timer,
+      timer,
+      cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
+      anchorHierarchyCaptureFactory: () => hierarchy,
+    });
+  });
+  afterEach(() => {
+    unsubscribe();
+    restore();
+  });
+
+  async function call(input: unknown) {
+    const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(ios, input);
+    return overlayOutputSchema.parse(response.structuredContent);
+  }
+  const shows = () => agent.requests.filter((request) => request.type === "show_overlay");
+
+  test("an element anchor is sent to the agent as the element's point bounds, unconverted", async () => {
+    const spec = {
+      id: "cover",
+      window: { placement: { type: "fullscreen" } },
+      root: {
+        type: "column",
+        children: [
+          { type: "text", text: "Header" },
+          {
+            type: "box",
+            children: [],
+            style: { background: "#80FF0000" },
+            anchor: {
+              type: "element",
+              selector: { elementId: "com.apple.settings.general" },
+              alignment: "cover",
+            },
+          },
+        ],
+      },
+    };
+    const payload = await call({ action: "show", spec });
+    expect(payload.success).toBe(true);
+    expect(hierarchy.requests.map((request) => request.freshness)).toEqual(["fresh"]);
+    const bounds = { x: 16, y: 380, width: 370, height: 52 };
+    expect(shows()).toHaveLength(1);
+    const sent = shows()[0].body as { spec: { root: { children: { anchor?: unknown }[] } } };
+    expect(sent.spec.root.children[1].anchor).toEqual({
+      type: "bounds",
+      bounds,
+      alignment: "cover",
+    });
+    expect(payload.anchors).toEqual([
+      {
+        path: "root.children[1]",
+        alignment: "cover",
+        boundsPx: { left: 16, top: 380, right: 386, bottom: 432 },
+        bounds,
+      },
+    ]);
+    expect(payload.hierarchyUpdatedAt).toBe(IOS_UPDATED_AT);
+  });
+
+  test("a floating root anchored to an app element keeps alignment and offset", async () => {
+    const spec = anchoredSpec({ text: "General" });
+    spec.root.anchor = {
+      type: "element",
+      selector: { text: "General" },
+      alignment: "bottom",
+      offset: { x: 0, y: 8 },
+    } as never;
+    const payload = await call({ action: "show", spec });
+    expect(payload.success).toBe(true);
+    expect((shows()[0].body as { spec: { root: { anchor: unknown } } }).spec.root.anchor).toEqual({
+      type: "bounds",
+      bounds: { x: 16, y: 380, width: 370, height: 52 },
+      alignment: "bottom",
+      offset: { x: 0, y: 8 },
+    });
+  });
+
+  test("the agent's own controls are not anchor targets and nothing is sent", async () => {
+    const payload = await call({
+      action: "show",
+      spec: anchoredSpec({ elementId: "automobile-overlay-dismiss" }),
+    });
     expect(payload.success).toBe(false);
-    expect(payload.error).toContain("anchor is Android only");
+    expect(payload.error).toContain("Only the app is searched");
+    expect(shows()).toEqual([]);
+  });
+
+  test("an agent without anchor support is refused before anything is captured or sent", async () => {
+    agent = new FakeOverlayAgentClient();
+    unsubscribe();
+    const timer = new FakeTimer();
+    unsubscribe = registerOverlayTools({
+      agentConnections: { get: () => agent },
+      clock: timer,
+      timer,
+      cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
+      anchorHierarchyCaptureFactory: () => hierarchy,
+    });
+    const bounds = {
+      ...anchoredSpec({}),
+      root: {
+        type: "box",
+        children: [],
+        anchor: { type: "bounds", bounds: { x: 0, y: 0, width: 10, height: 10 } },
+      },
+    };
+    for (const spec of [anchoredSpec({ elementId: "com.apple.settings.general" }), bounds]) {
+      const payload = await call({ action: "show", spec });
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain(
+        `iOS overlay agent does not advertise ${OVERLAY_ANCHOR_CAPABILITY}`,
+      );
+      expect(payload.error).toContain("launchApp overlay: true");
+    }
+    expect(hierarchy.requests).toEqual([]);
+    expect(agent.requests).toEqual([]);
+  });
+
+  test("a floating window refuses an anchor below its root, as on Android", async () => {
+    const spec = {
+      ...anchoredSpec({}),
+      root: {
+        type: "column",
+        children: [
+          {
+            type: "box",
+            children: [],
+            anchor: { type: "bounds", bounds: { x: 0, y: 0, width: 1, height: 1 } },
+          },
+        ],
+      },
+    };
+    const payload = await call({ action: "show", spec });
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain("in a floating window only the root node can be anchored");
+    expect(shows()).toEqual([]);
   });
 });

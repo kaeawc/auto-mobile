@@ -7,6 +7,8 @@ import UIKit
 final class OverlayModel: ObservableObject {
     @Published private(set) var session = OverlaySession()
     @Published var safeInsets = UIEdgeInsets.zero
+    /// The overlay window's own (0, 0) on screen, in points; anchors are screen coordinates.
+    @Published var windowOrigin = CGPoint.zero
     var assets: [String: UIImage] = [:]
 
     /// Window-space rects that accept touches; everything else passes through to the app.

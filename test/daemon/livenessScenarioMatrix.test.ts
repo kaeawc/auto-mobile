@@ -643,6 +643,39 @@ describe("host sleep longer than the idle window (#10661)", () => {
   }
 });
 
+describe("daemon event-loop stall: the ticks arrive late (#10662)", () => {
+  // Far past the 10 s heartbeat lease and its suspect grace, well inside the idle window.
+  const STALL_MS = SUSPECT_GRACE_MS + 20_000;
+
+  test("a stall past the lease keeps a live owner's session: the lost time is the daemon's", async () => {
+    scenario = await LivenessScenario.start();
+    const session = await scenario.acquire();
+    await scenario.idle(5_000);
+    await scenario.toolCall(session);
+
+    scenario.lateTicks(STALL_MS);
+    await scenario.idle(SCAN_MS + KEEPER_INTERVAL_MS);
+
+    expectHeld(session);
+    expect(scenario.releases).toEqual([]);
+  });
+
+  test("an owner that is really gone is still freed after the stall, by heartbeat timeout", async () => {
+    scenario = await LivenessScenario.start();
+    const session = await scenario.acquire();
+    await scenario.idle(5_000);
+    await scenario.toolCall(session);
+    await scenario.closeTransport();
+
+    scenario.lateTicks(STALL_MS);
+    const releasedAt = await scenario.idleUntilReleased(session, 3 * RELEASE_SLACK_MS);
+
+    expect(releasedAt).toBeDefined();
+    expect(scenario.releaseOf(session)?.reason).toMatch(/heartbeat-timeout|owner-disconnect/);
+    expectFreed();
+  });
+});
+
 describe("second proxy names a session another proxy owns", () => {
   test("the owner keeps the session and its token; the challenger stops claiming after the leash (#10664)", async () => {
     scenario = await LivenessScenario.start();

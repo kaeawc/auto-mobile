@@ -563,6 +563,16 @@ export class LivenessScenario {
   }
 
   /**
+   * The daemon's event loop is blocked for `ms` (a long GC, a synchronous DB call): the wall AND
+   * monotonic clocks run on, no timer fires, so the monitor scan and the owner's queued keeper
+   * heartbeats all come due at once and are delivered late on the next advance (#10662). The lost
+   * time is the daemon's, not the owner's, so the monitor must forgive it.
+   */
+  lateTicks(ms: number): void {
+    this.timer.setCurrentTime(this.timer.now() + ms);
+  }
+
+  /**
    * The host sleeps: the wall clock jumps, the monotonic clock stands still (#10699), and no timer
    * fires until the next advance.
    */

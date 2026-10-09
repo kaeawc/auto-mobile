@@ -4998,7 +4998,7 @@ export class DevicePool {
     const timeoutMs =
       recoveryDeadline === undefined
         ? this.DEVICE_WAIT_TIMEOUT_MS
-        : Math.max(0, recoveryDeadline - this.timer.now());
+        : Math.max(0, recoveryDeadline - this.recoveryNow());
     // Include the deadline attempt: attempt one runs immediately, before any sleep.
     const maxAttempts = Math.max(
       1,
@@ -5093,7 +5093,7 @@ export class DevicePool {
             this.DEVICE_WAIT_INTERVAL_MS,
             recoveryDeadline === undefined
               ? this.DEVICE_WAIT_INTERVAL_MS
-              : Math.max(0, recoveryDeadline - this.timer.now()),
+              : Math.max(0, recoveryDeadline - this.recoveryNow()),
           ),
         shouldRetry: (error) =>
           error instanceof DevicePoolError &&
@@ -5184,7 +5184,7 @@ export class DevicePool {
     if (
       incident &&
       target.restartRecoveryDeadlineMs !== undefined &&
-      this.timer.now() < target.restartRecoveryDeadlineMs &&
+      this.recoveryNow() < target.restartRecoveryDeadlineMs &&
       this.getDevicesMatchingRecoveryTarget(target).length === 0
     ) {
       throw this.recoveryAssignmentError(sessionId, target, incident);
@@ -5195,12 +5195,20 @@ export class DevicePool {
     return incident;
   }
 
+  /**
+   * "Now" for comparing against a recovery target's restart deadline, which derives from session
+   * stamps (`released_at_ms`, `expires_at_ms`) on the session clock (#11105).
+   */
+  private recoveryNow(): number {
+    return this.sessionManager.sessionNow();
+  }
+
   private recoveryAssignmentError(
     sessionId: string,
     target: SessionRecoveryTarget,
     incident?: EmulatorLossIncident,
   ): ActionableError {
-    const now = this.timer.now();
+    const now = this.recoveryNow();
     if (target.restartRecoveryDeadlineMs !== undefined && now < target.restartRecoveryDeadlineMs) {
       return new SessionRecoveryAssignmentError({
         sessionUuid: sessionId,
@@ -5243,7 +5251,7 @@ export class DevicePool {
     if (
       target.platform !== "android" ||
       target.restartRecoveryDeadlineMs === undefined ||
-      this.timer.now() >= target.restartRecoveryDeadlineMs
+      this.recoveryNow() >= target.restartRecoveryDeadlineMs
     ) {
       return undefined;
     }
@@ -5770,7 +5778,7 @@ export class DevicePool {
   ): Promise<DevicePoolRefreshResult> {
     if (
       target.restartRecoveryDeadlineMs === undefined ||
-      this.timer.now() >= target.restartRecoveryDeadlineMs
+      this.recoveryNow() >= target.restartRecoveryDeadlineMs
     ) {
       return this.refreshDevicesInternal(false);
     }
@@ -8210,7 +8218,7 @@ export class DevicePool {
       if (transportIdentityUnresolved) {
         if (
           target.restartRecoveryDeadlineMs === undefined ||
-          this.timer.now() < target.restartRecoveryDeadlineMs
+          this.recoveryNow() < target.restartRecoveryDeadlineMs
         ) {
           return new DevicePoolError("Recovery target identity is unresolved", true);
         }
@@ -8220,7 +8228,7 @@ export class DevicePool {
       }
       if (
         target.restartRecoveryDeadlineMs !== undefined &&
-        this.timer.now() < target.restartRecoveryDeadlineMs
+        this.recoveryNow() < target.restartRecoveryDeadlineMs
       ) {
         return new DevicePoolError("Recovery target is restarting", true);
       }

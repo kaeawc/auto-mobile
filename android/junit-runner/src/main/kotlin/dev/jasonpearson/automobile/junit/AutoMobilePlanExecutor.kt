@@ -495,7 +495,10 @@ internal object AutoMobilePlanExecutor {
         attemptSessionUuid = UUID.randomUUID().toString()
         continue
       }
-      if (attempt > maxRetries || !(parsed.retryable || isTransientError(errorMessage))) {
+      if (
+        attempt > maxRetries ||
+          !(parsed.retryable || parsed.acquireNewSession || isTransientError(errorMessage))
+      ) {
         break
       }
 
@@ -905,6 +908,12 @@ internal object AutoMobilePlanExecutor {
     val retryable =
       errorObject?.get("retryable") == JsonPrimitive(true) ||
         parsed["retryable"] == JsonPrimitive(true)
+    // A terminal-session refusal says `retryable: false` for its UUID and `nextAction:
+    // acquire_new_session` (#11098); a retry here always runs under a fresh session UUID.
+    val acquireNewSession =
+      ((errorObject?.get("nextAction") ?: parsed["nextAction"]) as? JsonPrimitive)
+        ?.takeIf { it.isString }
+        ?.content == ACQUIRE_NEW_SESSION_NEXT_ACTION
     if (isError || parsed.containsKey("error") || !success) {
       // The typed `code` (never the message) is what clients match on.
       val code =
@@ -924,6 +933,7 @@ internal object AutoMobilePlanExecutor {
             JsonPrimitive(false) -> false
             else -> null
           },
+        acquireNewSession = acquireNewSession,
       )
     }
     return ParsedToolResult(true, "")
@@ -1215,6 +1225,12 @@ internal object AutoMobilePlanExecutor {
       )
     }
 
+  /**
+   * `nextAction` of a terminal-session refusal: acquire a new session, never retry the UUID
+   * (#11098).
+   */
+  internal const val ACQUIRE_NEW_SESSION_NEXT_ACTION = "acquire_new_session"
+
   /** Typed code for a device-mutating call refused because another session holds it (#10783). */
   internal const val DEVICE_OWNED_BY_OTHER_SESSION_CODE = "device_owned_by_other_session"
 
@@ -1309,5 +1325,7 @@ internal object AutoMobilePlanExecutor {
      * when it did not say.
      */
     val sessionHeld: Boolean? = null,
+    /** The refusal named a terminal session UUID and told the client to acquire a new one. */
+    val acquireNewSession: Boolean = false,
   )
 }

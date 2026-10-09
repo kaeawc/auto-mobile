@@ -134,6 +134,8 @@ describe("terminal persisted recovery MCP transport", () => {
         message: TERMINAL_DIAGNOSTIC,
         sessionUuid: SESSION_UUID,
         reason: "identity-recovery-target-busy",
+        retryable: false,
+        nextAction: "acquire_new_session",
       },
     });
     expect(assignments).toBe(1);

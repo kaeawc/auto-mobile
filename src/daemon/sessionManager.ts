@@ -540,6 +540,8 @@ export interface SessionReleaseSnapshot {
   releaseReason: string;
   releasedAtMs: number;
   terminal: boolean;
+  /** PID of the other daemon that claimed the device, when the terminal reason names one (#11098). */
+  ownerPid?: number;
   heartbeat: {
     lastHeartbeatMs: number;
     hasReceivedHeartbeat: boolean;
@@ -886,7 +888,8 @@ function recoveryFailureDetail(
 type SessionRecoveryIdentityLoss = Pick<
   SessionRecoveryIdentityLossError,
   "sessionUuid" | "target" | "reason" | "terminalReleaseReason"
->;
+> &
+  Partial<Pick<SessionRecoveryIdentityLossError, "ownerPid">>;
 
 function isSessionRecoveryFailureReason(reason: unknown): reason is SessionRecoveryFailureReason {
   return (
@@ -3311,7 +3314,8 @@ export class SessionManager {
   private async terminalizePersistedRecoveryFailure(
     sessionId: string,
     persisted: DeviceSession,
-    error: Pick<SessionRecoveryIdentityLossError, "terminalReleaseReason">,
+    error: Pick<SessionRecoveryIdentityLossError, "terminalReleaseReason"> &
+      Partial<Pick<SessionRecoveryIdentityLossError, "ownerPid">>,
   ): Promise<void> {
     const releasedAtMs = this.sessionNow();
     await this.persistTerminalReleaseIfNeeded({
@@ -3320,6 +3324,7 @@ export class SessionManager {
       releaseReason: error.terminalReleaseReason,
       releasedAtMs,
       terminal: true,
+      ...(error.ownerPid === undefined ? {} : { ownerPid: error.ownerPid }),
       heartbeat: {
         lastHeartbeatMs: persisted.last_used_at_ms,
         hasReceivedHeartbeat: persisted.has_received_heartbeat === 1,

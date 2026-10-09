@@ -428,7 +428,8 @@ describe("device loss MCP outcome", () => {
           "No heartbeat for 11000 ms (limit 10000 ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).",
         sessionUuid: "device-session-a",
         reason: "heartbeat-timeout",
-        retryable: true,
+        retryable: false,
+        nextAction: "acquire_new_session",
         recovery: {
           action: "acquire_replacement_session",
           tools: ["getAndroid", "getApple"],

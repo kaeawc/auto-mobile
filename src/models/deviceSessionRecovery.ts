@@ -13,3 +13,10 @@
  * `test/server/deviceSessionRecoveryTools.test.ts`.
  */
 export const DEVICE_SESSION_RECOVERY_TOOLS = ["getAndroid", "getApple"] as const;
+
+/**
+ * `nextAction` on a terminal-session refusal (`session_ownership_lost`, `no_active_device_session`):
+ * the named session UUID is gone for good, so the client must acquire a NEW session rather than
+ * retry the UUID. Such a refusal carries `retryable: false` for the UUID (#11098).
+ */
+export const ACQUIRE_NEW_SESSION_NEXT_ACTION = "acquire_new_session" as const;

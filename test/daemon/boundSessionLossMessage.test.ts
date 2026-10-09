@@ -3,6 +3,7 @@ import {
   BOUND_SESSION_LOSS_CODE,
   boundSessionLossMessage,
   releasedSessionNotFoundFields,
+  sanitizeBoundSessionLoss,
 } from "../../src/daemon/types";
 
 function loss(reason: string) {
@@ -72,5 +73,31 @@ describe("releasedSessionNotFoundFields (#10832)", () => {
 
   test("a never-issued session adds nothing", () => {
     expect(releasedSessionNotFoundFields(undefined)).toEqual({});
+  });
+});
+
+describe("sanitizeBoundSessionLoss release.ownerPid (#11098)", () => {
+  const release = (extra: Record<string, unknown>) => ({
+    ...loss("identity-recovery-owned-by-other-daemon"),
+    release: {
+      sessionId: "s-1",
+      deviceId: "emulator-5554",
+      releaseReason: "identity-recovery-owned-by-other-daemon",
+      releasedAtMs: 2,
+      terminal: true,
+      heartbeat: { lastHeartbeatMs: 1, hasReceivedHeartbeat: true, timeoutMs: 20_000, ageMs: 1 },
+      ...extra,
+    },
+  });
+
+  test("keeps an integer ownerPid", () => {
+    expect(sanitizeBoundSessionLoss(release({ ownerPid: 4242 }))?.release?.ownerPid).toBe(4242);
+  });
+
+  test("drops a non-integer ownerPid and omits it when absent", () => {
+    expect(sanitizeBoundSessionLoss(release({ ownerPid: "4242" }))?.release).not.toHaveProperty(
+      "ownerPid",
+    );
+    expect(sanitizeBoundSessionLoss(release({}))?.release).not.toHaveProperty("ownerPid");
   });
 });

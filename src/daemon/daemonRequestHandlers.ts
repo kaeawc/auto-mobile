@@ -123,6 +123,8 @@ export interface DaemonStateAccess {
     recordSessionClientName?(sessionId: string, clientName: string): void;
     /** What bounds an in-flight call's idle-release veto, for `idleReleaseAt` (#10671). */
     getIdleReleaseExecutionVeto?(sessionId: string): { latestDeadlineMs?: number } | undefined;
+    /** Converts a session-clock instant to wall-clock epoch ms for reporting (#11105). */
+    sessionClockToWall?(sessionClockMs: number): number;
     getDeviceLabels(sessionId: string): DeviceLabelMap | undefined;
     releaseSession(sessionId: string): Promise<string | null>;
   };
@@ -617,10 +619,10 @@ function heartbeatAck(
   const idle =
     report.idleRelease && session
       ? {
-          idleReleaseAt: vetoedIdleReleaseAt(
-            session,
-            manager.getIdleReleaseExecutionVeto?.(sessionId),
-          ),
+          idleReleaseAt:
+            manager.sessionClockToWall?.(
+              vetoedIdleReleaseAt(session, manager.getIdleReleaseExecutionVeto?.(sessionId)),
+            ) ?? vetoedIdleReleaseAt(session, manager.getIdleReleaseExecutionVeto?.(sessionId)),
         }
       : {};
   return { success: true, result: { sessionId, ...extra, ...idle, ...instance } };
@@ -833,6 +835,7 @@ export async function handleSessionInfo(
         session,
         executions.getActiveDeviceSessionExecutionCount(sessionId),
         manager.getIdleReleaseExecutionVeto?.(sessionId),
+        (ms) => manager.sessionClockToWall?.(ms) ?? ms,
       ),
       ...livenessInfo(manager.getSessionLeaseState?.(sessionId)),
       ...(isSessionReleasing(manager, sessionId, session) ? { releasing: true } : {}),
@@ -881,6 +884,7 @@ export async function handleActiveSessions(
                 session,
                 executions.getActiveDeviceSessionExecutionCount(session.sessionId),
                 manager.getIdleReleaseExecutionVeto?.(session.sessionId),
+                (ms) => manager.sessionClockToWall?.(ms) ?? ms,
               ),
               ...(isSessionReleasing(manager, session.sessionId, session)
                 ? { releasing: true }

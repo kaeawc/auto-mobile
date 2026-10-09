@@ -127,15 +127,25 @@ export function vetoedIdleReleaseAt(
   );
 }
 
+/** Converts an instant on the session clock to wall-clock epoch ms (#11105). */
+export type SessionClockToWall = (sessionClockMs: number) => number;
+
+/**
+ * The reported instants are epoch ms, but a session stamps them on the steady session clock; a
+ * wall-clock step makes the two differ. `toWall` converts at this boundary (wall now + (instant -
+ * session now)) so the daemon stays authoritative for the value and clients read it as epoch ms.
+ */
 export function sessionHoldDiagnostics(
   session: SessionHoldSnapshot,
   activeExecutions: number,
   veto?: IdleReleaseExecutionVeto,
+  toWall: SessionClockToWall = (ms) => ms,
 ): SessionHoldDiagnostics {
   return {
-    lastToolActivityAt: session.lastUsedAt,
-    lastOwnerHeartbeatAt: session.lastOwnerHeartbeat ?? null,
-    idleReleaseAt: vetoedIdleReleaseAt(session, veto),
+    lastToolActivityAt: toWall(session.lastUsedAt),
+    lastOwnerHeartbeatAt:
+      session.lastOwnerHeartbeat === undefined ? null : toWall(session.lastOwnerHeartbeat),
+    idleReleaseAt: toWall(vetoedIdleReleaseAt(session, veto)),
     holderKind: classifySessionHolderKind(session),
     activeExecutions,
   };

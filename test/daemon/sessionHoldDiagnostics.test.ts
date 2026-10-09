@@ -184,6 +184,29 @@ describe("session hold diagnostics through the daemon surfaces", () => {
     expect(before?.lastOwnerHeartbeatAt).toBeNull();
   });
 
+  test("reported instants stay wall-clock epoch ms across a wall-clock step (#11105)", async () => {
+    const session = await manager.createSession(SESSION, DEVICE, "android");
+    const state = stateFor(manager);
+    const remainingMs = session.expiresAt - timer.now();
+    timer.stepWallClock(-3_600_000);
+
+    const info = (
+      await handleDaemonRequest(request("daemon/sessionInfo", { sessionId: SESSION }), state)
+    ).result;
+    const heartbeat = (
+      await handleDaemonRequest(
+        request("daemon/heartbeat", { sessionId: SESSION, reportIdleRelease: true }),
+        state,
+      )
+    ).result;
+
+    // The idle window still has `remainingMs` to run, measured from the (stepped) wall clock.
+    expect(info?.idleReleaseAt).toBe(timer.now() + remainingMs);
+    // The heartbeat is an owner heartbeat, which adds the suspect grace.
+    expect(heartbeat?.idleReleaseAt).toBe(timer.now() + remainingMs + SUSPECT_GRACE_MS);
+    expect(info?.lastToolActivityAt).toBe(session.lastUsedAt - 3_600_000);
+  });
+
   test("registering a client name on an existing session names its holder", async () => {
     await manager.createSession(SESSION, DEVICE, "android");
     const state = stateFor(manager, new ObserverSessionRegistry(timer));

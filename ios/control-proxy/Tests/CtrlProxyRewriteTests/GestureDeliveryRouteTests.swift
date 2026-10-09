@@ -119,8 +119,11 @@ final class GestureDeliveryRouteTests: XCTestCase {
             (nil, nil, .noObservation),
             (geometry(), .legacy, .forcedStrategy),
             (geometry(app: GestureSize(width: 0, height: 0)), nil, .invalidSize),
-            (geometry(app: GestureSize(width: 600, height: 700), screen: GestureSize(width: 1024, height: 1366)),
-             nil, .multiPanel),
+            (
+                geometry(app: GestureSize(width: 600, height: 700), screen: GestureSize(width: 1024, height: 1366)),
+                nil,
+                .multiPanel
+            ),
             (geometry(rotation: nil), nil, .unknownRotation),
         ]
         for (candidate, forced, fallback) in cases {

@@ -19039,6 +19039,11 @@
                           "minimum": 0,
                           "maximum": 1
                         },
+                        "pressScale": {
+                          "type": "number",
+                          "minimum": 0.5,
+                          "maximum": 1
+                        },
                         "alignment": {
                           "type": "string",
                           "enum": [

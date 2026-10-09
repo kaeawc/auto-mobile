@@ -291,8 +291,7 @@ struct NodeView: View {
         interpolateOverlayText(text ?? "", state: model.state, pager: pagerPosition)
     }
 
-    @ViewBuilder
-    private var iconView: some View {
+    @ViewBuilder private var iconView: some View {
         let symbol = sfSymbols[node.name ?? ""] ?? "questionmark.square"
         if accessibilityLabelOverride == nil {
             OverlayGlyph(symbol: symbol)
@@ -519,7 +518,7 @@ struct NodeView: View {
             )
             .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
             .opacity(style?.alpha ?? 1)
-            .modifier(TapModifier(actions: handlesOwnTap ? nil : node.onTap, model: model))
+            .modifier(TapModifier(actions: handlesOwnTap ? nil : node.onTap, model: model, style: style))
             .modifier(IdentifierModifier(
                 identifier: node.testTag ?? node.id,
                 label: accessibilityLabelOverride,
@@ -604,14 +603,26 @@ private struct SizeModifier: ViewModifier {
 private struct TapModifier: ViewModifier {
     let actions: [OverlayAction]?
     let model: OverlayModel
+    let style: Style?
+
+    @GestureState private var pressed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         if let actions {
+            let scale = style?.scale(pressed: pressed) ?? 1
             // Whole padded frame is tappable, with a 44 pt minimum target (Android bug #10435).
             content
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
+                // Scales the drawn node only; Reduce Motion snaps instead of springing.
+                .scaleEffect(scale)
+                .animation(reduceMotion ? nil : .spring(duration: 0.2), value: scale)
                 .onTapGesture { model.run(actions) }
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0, maximumDistance: 10)
+                        .updating($pressed) { _, state, _ in state = true }
+                )
                 .accessibilityAddTraits(.isButton)
         } else {
             content

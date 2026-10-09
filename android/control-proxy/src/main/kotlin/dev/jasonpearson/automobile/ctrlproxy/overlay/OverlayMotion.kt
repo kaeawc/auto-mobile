@@ -8,19 +8,26 @@ import android.provider.Settings
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandIn
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 
 /**
  * Whether overlay state changes (visibility, page) animate. Off by default so previews and direct
@@ -93,3 +100,19 @@ internal fun overlayExitTransition(transition: String?): ExitTransition =
  */
 internal fun Modifier.overlayAnimateSize(enabled: Boolean): Modifier =
   if (enabled) animateContentSize() else this
+
+/**
+ * Scales a node to [scale] while [source] reports a press. The scale animates with a spring when
+ * motion is on and snaps otherwise (`motion: "none"` or animator duration scale 0), so a press held
+ * for a screenshot is deterministic.
+ */
+@Composable
+internal fun Modifier.overlayPressScale(source: InteractionSource, scale: Float): Modifier {
+  val pressed by source.collectIsPressedAsState()
+  val spec = if (LocalOverlayMotion.current) spring<Float>() else snap()
+  val current by animateFloatAsState(if (pressed) scale else 1f, spec, label = "overlayPressScale")
+  return graphicsLayer {
+    scaleX = current
+    scaleY = current
+  }
+}

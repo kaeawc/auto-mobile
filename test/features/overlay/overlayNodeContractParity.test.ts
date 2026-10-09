@@ -90,6 +90,20 @@ describe("overlay node contract parity", () => {
     }
   });
 
+  test("pressScale accepts 0.5-1 and rejects the same out-of-range values in both validators", () => {
+    for (const [pressScale, ok] of [
+      [0.5, true],
+      [0.9, true],
+      [1, true],
+      [0.49, false],
+      [1.01, false],
+    ] as const) {
+      const candidate = spec({ type: "text", text: "t", style: { pressScale } });
+      expect(validateOverlaySpec(candidate).success).toBe(ok);
+      expect(overlaySpecSchema.safeParse(candidate).success).toBe(ok);
+    }
+  });
+
   test.each(["switch", "checkbox", "button"])("%s accepts transition in both validators", (t) => {
     const node = t === "button" ? { type: t, label: "Go" } : { type: t, stateKey: "on" };
     const candidate = spec({ ...node, transition: "fade" }, { on: false });

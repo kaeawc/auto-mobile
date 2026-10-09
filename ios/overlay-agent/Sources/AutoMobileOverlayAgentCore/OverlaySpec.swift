@@ -93,6 +93,7 @@ struct OverlaySpec: Decodable {
         theme = try container.decodeIfPresent(OverlayTheme.self, forKey: .theme)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         let raw = try container.decode(JSONValue.self, forKey: .root)
+        try OverlayLimits.guardTree(raw)
         root = try JSONDecoder().decode(OverlayNode.self, from: JSONEncoder().encode(OverlayRepeat.expand(raw)))
     }
 }

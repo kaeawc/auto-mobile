@@ -54,7 +54,12 @@ import type {
   OverlayResult,
   OverlayStatusEntry,
 } from "../features/observe/android/ctrlProxyProtocol";
-import { overlaySpecSchema, type OverlaySpec } from "../features/overlay/overlaySpec";
+import {
+  MAX_OVERLAY_SPEC_BYTES,
+  overlaySpecSchema,
+  type OverlaySpec,
+} from "../features/overlay/overlaySpec";
+import { readOverlaySpecFile } from "../features/overlay/overlaySpecFile";
 import { validateOverlaySpec } from "../features/overlay/overlayValidation";
 import {
   hasElementAnchors,
@@ -157,7 +162,8 @@ requireNonEmptyThemeObjects(advertisedSpec);
 const specDetailsSchema = specZ.object({ spec: overlaySpecSchema });
 const stateDetailsSchema = overlaySpecSchema.pick({ state: true });
 
-function specError(spec: unknown): string | undefined {
+/** The first problem with an authored spec as `{path, text}`; `text` includes Zod's allowed values. */
+function specProblem(spec: unknown): { path: string; text: string } | undefined {
   const validated = validateOverlaySpec(spec);
   if (validated.success) {
     return undefined;
@@ -172,7 +178,15 @@ function specError(spec: unknown): string | undefined {
   const details = /limit|depth|budget/i.test(message)
     ? undefined
     : specDetailsSchema.safeParse(external);
-  return `Invalid overlay at spec.${path}: ${message}${details && !details.success ? `; ${details.error.message}` : ""}`;
+  return {
+    path,
+    text: `${message}${details && !details.success ? `; ${details.error.message}` : ""}`,
+  };
+}
+
+function specError(spec: unknown): string | undefined {
+  const problem = specProblem(spec);
+  return problem && `Invalid overlay at spec.${problem.path}: ${problem.text}`;
 }
 
 const specInput = withJsonSchemaOverride(
@@ -246,6 +260,13 @@ export const overlaySchema = addDeviceTargetingToSchema(
         .describe(
           'Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source "device", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative. window.layer "app" and window.persistence "device" need a CtrlProxy advertising overlay_window_options_v1.',
         ),
+      specPath: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          `show only: instead of spec, an absolute path of a local JSON file holding the same spec (up to ${MAX_OVERLAY_SPEC_BYTES} bytes) that the daemon reads and validates like an inline spec; the path is never sent to the device. Exactly one of spec or specPath. Use it for a spec a script generated, instead of pasting the JSON into the call.`,
+        ),
       display: z
         .string()
         .optional()
@@ -294,6 +315,7 @@ export const overlaySchema = addDeviceTargetingToSchema(
 ).superRefine((value, ctx) => {
   const fields = [
     "spec",
+    "specPath",
     "id",
     "all",
     "display",
@@ -304,7 +326,7 @@ export const overlaySchema = addDeviceTargetingToSchema(
     "assets",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
-    show: ["spec", "display", "reset", "assets"],
+    show: ["spec", "specPath", "display", "reset", "assets"],
     dismiss: ["id", "all"],
     status: [],
     inspect: [],
@@ -322,8 +344,15 @@ export const overlaySchema = addDeviceTargetingToSchema(
   if (value.action === "awaitEvent") {
     validateAwaitEventInput(value, ctx);
   }
-  if (value.action === "show" && value.spec === undefined) {
-    ctx.addIssue({ code: "custom", path: ["spec"], message: "show requires spec" });
+  if (value.action === "show" && (value.spec === undefined) === (value.specPath === undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["spec"],
+      message:
+        value.spec === undefined
+          ? "show requires exactly one of spec or specPath"
+          : "show takes either spec or specPath, not both",
+    });
   }
   if (value.action === "dismiss" && (value.id === undefined) === (value.all === undefined)) {
     ctx.addIssue({
@@ -1873,6 +1902,37 @@ function overlayRegistrationDisposer(host: OverlayHost): () => void {
   return dispose;
 }
 
+/** Parses the caller's arguments after the daemon's internal routing fields are removed. */
+function parseOverlayInput(input: unknown) {
+  const external: Record<string, unknown> =
+    input && typeof input === "object" && !Array.isArray(input) ? { ...input } : {};
+  deleteInternalToolParams(external);
+  return overlaySchema.safeParse(external);
+}
+
+/**
+ * A show with `specPath` becomes a show with the file's spec, validated like an inline one, before
+ * anything else looks at the arguments; the path goes no further than this function.
+ */
+async function withSpecFromPath(
+  args: z.infer<typeof overlaySchema>,
+  reader: OverlayAssetFileReader,
+): Promise<{ args: z.infer<typeof overlaySchema> } | { error: string }> {
+  if (args.action !== "show" || args.specPath === undefined) {
+    return { args };
+  }
+  const { specPath, ...rest } = args;
+  const read = await readOverlaySpecFile(specPath, reader);
+  if ("error" in read) {
+    return read;
+  }
+  const problem = specProblem(read.json);
+  if (problem) {
+    return { error: `specPath ${specPath}: ${problem.path}: ${problem.text}` };
+  }
+  return { args: { ...rest, spec: read.json } };
+}
+
 export function registerOverlayTools(dependencies: OverlayToolDependencies = {}): () => void {
   const host = overlayHostFor(dependencies);
   // Replacing a registration that used a different host makes that host's state obsolete.
@@ -1906,17 +1966,22 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
     signal?: AbortSignal,
   ) => {
     host.ensureLifecycle();
-    const external: Record<string, unknown> =
-      input && typeof input === "object" && !Array.isArray(input) ? { ...input } : {};
-    deleteInternalToolParams(external);
-    const parsed = overlaySchema.safeParse(external);
+    const parsed = parseOverlayInput(input);
     if (!parsed.success) {
       return responseFor({
         success: false,
         error: `Invalid overlay input: ${parsed.error.message}`,
       });
     }
-    const args = parsed.data;
+    // Only a specPath show awaits here: other calls keep their timing against FakeTimer.
+    const loaded =
+      parsed.data.action === "show" && parsed.data.specPath !== undefined
+        ? await withSpecFromPath(parsed.data, assetReaders.assetFileReader)
+        : { args: parsed.data };
+    if ("error" in loaded) {
+      return responseFor({ success: false, error: loaded.error });
+    }
+    const args = loaded.args;
     const platformError = overlayPlatformError(device, args);
     if (platformError) {
       return responseFor({ success: false, error: platformError.message });
@@ -1966,7 +2031,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
   };
   ToolRegistry.registerDeviceAware(
     PROTOTYPE_TOOL_NAME,
-    'Show (always a full spec), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which overlays it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, inspect, awaitEvent; sizes are points). A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/toggle/increment/decrement/dismiss. Sizes and anchors use dp (points on iOS). A node\'s anchor {type:"element",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the overlay excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:"bounds",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session overlay is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer "overlay" calls fail saying so) and it returns with the app; a device-persistent overlay is not tied to an app. Status makes no device request, marks an overlay suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1. A device-persistent overlay keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising overlay_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (overlay_inspect_v1) for the one overlay it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>.',
+    'Show (always a full spec, inline as spec or from a local JSON file as specPath), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which overlays it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, inspect, awaitEvent; sizes are points). A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/toggle/increment/decrement/dismiss. Sizes and anchors use dp (points on iOS). A node\'s anchor {type:"element",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the overlay excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:"bounds",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session overlay is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer "overlay" calls fail saying so) and it returns with the app; a device-persistent overlay is not tied to an app. Status makes no device request, marks an overlay suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1. A device-persistent overlay keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising overlay_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (overlay_inspect_v1) for the one overlay it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>.',
     overlaySchema,
     handler,
     {

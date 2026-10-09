@@ -1,9 +1,9 @@
 {
   "limits": {
-    "MAX_OVERLAY_NODES": 500,
+    "MAX_OVERLAY_NODES": 2000,
     "MAX_OVERLAY_DEPTH": 24,
     "MAX_OVERLAY_IMAGES": 32,
-    "MAX_OVERLAY_SPEC_BYTES": 262144,
+    "MAX_OVERLAY_SPEC_BYTES": 1048576,
     "MAX_OVERLAY_EMIT_PAYLOAD_BYTES": 4096,
     "MAX_OVERLAY_EMIT_PAYLOAD_DEPTH": 24,
     "MAX_OVERLAY_SELECTOR_DEPTH": 8,
@@ -7297,7 +7297,7 @@
               }
             },
             "min": 1,
-            "max": 32,
+            "max": 128,
             "unique": false
           },
           "optional": false

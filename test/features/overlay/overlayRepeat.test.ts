@@ -51,9 +51,9 @@ describe("repeatErrors", () => {
   test("expansion multiplies the template, not the container", () => {
     const items = Array.from({ length: 10 }, (_, n) => ({ n }));
     const spacers = (count: number) => Array.from({ length: count }, () => ({ type: "spacer" }));
-    // 1 container + 10 * 49 = 491 nodes fits; 10 * 50 = 500 + 1 does not.
-    expect(repeatErrors(spec(list(spacers(49), items)))).toBeUndefined();
-    expect(repeatErrors(spec(list(spacers(50), items)))).toEqual({
+    // 1 container + 10 * 49 = 1991 nodes fits; 10 * 200 = 2000 + 1 does not.
+    expect(repeatErrors(spec(list(spacers(199), items)))).toBeUndefined();
+    expect(repeatErrors(spec(list(spacers(200), items)))).toEqual({
       path: "root.repeat",
       message: "Expanded node limit exceeded",
     });

@@ -101,6 +101,9 @@ screenshots and video recording all see the overlay the same way they see app UI
   described below.
 - **SpringBoard and system UI are not covered**, so the home screen cannot host an overlay.
 - Overlays disappear when the app exits or is relaunched without the agent.
+- **Structural limits are re-checked.** The agent does not validate a spec, but it refuses one
+  whose expanded tree passes the node (2000), depth (24) or `repeat` item (128) limit of
+  `schemas/overlay-spec-contract.json` before expanding it (#11049).
 
 ## Entry point: `launchApp { overlay: true }`
 

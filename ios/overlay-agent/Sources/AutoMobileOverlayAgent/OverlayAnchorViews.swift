@@ -12,6 +12,8 @@ struct OverlayAnchorLayer: View {
     struct Sheet: Equatable {
         let edge: String?
         let height: Double?
+        /// Points the keyboard raises a bottom sheet; the clip and anchors move with it.
+        var lift: Double = 0
     }
 
     let entries: [OverlayAnchoredNode]
@@ -27,7 +29,7 @@ struct OverlayAnchorLayer: View {
                 let region = sheet.map {
                     OverlaySheetFrame.rect(
                         containerWidth: frame.width, containerHeight: frame.height,
-                        edge: $0.edge, height: $0.height
+                        edge: $0.edge, height: $0.height, lift: $0.lift
                     )
                 } ?? OverlayRect(x: 0, y: 0, width: frame.width, height: frame.height)
                 let clip = sheet == nil ? nil : CGRect(

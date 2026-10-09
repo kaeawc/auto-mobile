@@ -24,6 +24,7 @@ enum OverlayAgentProtocol {
         hideForCaptureRequest,
         restoreAfterCaptureRequest,
         screenshotHideCapability,
+        inspectCapability,
     ]
     /// A same-id `show_overlay` replaces the overlay in place keeping pager pages, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -43,6 +44,10 @@ enum OverlayAgentProtocol {
     static let restoreAfterCaptureRequest = "restore_after_capture"
     /// Advertised when both capture requests are handled; same name as the CtrlProxy capability.
     static let screenshotHideCapability = "screenshot_hide_overlay_v1"
+    /// `get_overlay_status` replies with `status.lastSequence` and `status.visible` besides the
+    /// state, which is what the host's `inspect` adopts. An older agent answers status without
+    /// them, so the host refuses `inspect` unless this is advertised.
+    static let inspectCapability = "overlay_inspect_v1"
     static let portEnvironmentKey = "AUTOMOBILE_OVERLAY_PORT"
     static let tokenEnvironmentKey = "AUTOMOBILE_OVERLAY_TOKEN"
     /// Shortest token the agent accepts, so a stray or empty value cannot open the server.

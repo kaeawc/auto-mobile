@@ -107,6 +107,15 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       ) {
         return;
       }
+      // The injected iOS agent's status reply, likewise not a tool argument.
+      if (
+        file === "overlayTools.ts" &&
+        receiver.type === "Identifier" &&
+        receiver.name === "iosAgentStatusSchema" &&
+        first?.type === "MemberExpression"
+      ) {
+        return;
+      }
       if (!first || first.type === "SpreadElement" || !isClean(first)) {
         offenders.push(`${file}:${source.slice(0, node.start).split("\n").length}`);
       }

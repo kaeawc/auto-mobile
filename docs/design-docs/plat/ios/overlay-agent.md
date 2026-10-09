@@ -17,33 +17,32 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 
 ## Feature support
 
-| Feature                                                                  | iOS simulator                                                                     |
-| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| `show`, `dismiss`, `status`, `awaitEvent`; fullscreen, floating, sheet   | Supported                                                                         |
-| Replace in place, and `reset: true` to start fresh                       | Supported (`overlay_show_in_place_v1`)                                            |
-| Element and bounds anchors                                               | Supported, in points (`overlay_anchor_v1`); see [Anchors](#anchors)               |
-| `pressScale`, motion, `visibleWhen`, state and actions, assets and fonts | Supported                                                                         |
-| Material component nodes, dialog, snackbar, pickers                      | Supported; see [Material components](#material-components)                        |
-| Overlay hidden from `layer: "app"` observe screenshots (`target`)        | Supported (#10943, #10988); the host restores it after capture                    |
-| `display` selector                                                       | Refused: a simulator has one screen                                               |
-| `window.layer: "app"`                                                    | Refused: the window level is fixed at alert + 1 (see open decision 3)             |
-| `window.persistence: "device"`                                           | Refused: the agent lives in the app process and dies with it                      |
-| `inspect`                                                                | Refused (open decision 1)                                                         |
-| Idle TTL and dismissal on host disconnect                                | Supported; see [Expiry](#expiry). Reasons `user`, `agent`, `ttl`, `disconnect`    |
-| Bottom sheet lifting above the keyboard                                  | Not implemented or verified (open decision 2)                                     |
-| Foreground scoping to the shown-over app                                 | Not needed: the agent lives in the app, so backgrounding the app hides its window |
+| Feature                                                                  | iOS simulator                                                                                           |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `show`, `dismiss`, `status`, `awaitEvent`; fullscreen, floating, sheet   | Supported                                                                                               |
+| Replace in place, and `reset: true` to start fresh                       | Supported (`overlay_show_in_place_v1`)                                                                  |
+| Element and bounds anchors                                               | Supported, in points (`overlay_anchor_v1`); see [Anchors](#anchors)                                     |
+| `pressScale`, motion, `visibleWhen`, state and actions, assets and fonts | Supported                                                                                               |
+| Material component nodes, dialog, snackbar, pickers                      | Supported; see [Material components](#material-components)                                              |
+| Overlay hidden from `layer: "app"` observe screenshots (`target`)        | Supported (#10943, #10988); the host restores it after capture                                          |
+| `display` selector                                                       | Refused: a simulator has one screen                                                                     |
+| `window.layer: "app"`                                                    | Accepted and ignored, silently: the window level is fixed at alert + 1 (decision 3)                     |
+| `window.persistence: "device"`                                           | Refused: the agent lives in the app process and dies with it                                            |
+| `inspect`                                                                | Supported (`overlay_inspect_v1`); see [Inspect](#inspect)                                               |
+| Idle TTL and dismissal on host disconnect                                | Supported; see [Expiry](#expiry). Reasons `user`, `agent`, `ttl`, `disconnect`                          |
+| Bottom sheet lifting above the keyboard                                  | Supported, not yet device-verified; see [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard) |
+| Foreground scoping to the shown-over app                                 | Not needed: the agent lives in the app, so backgrounding the app hides its window                       |
 
 ## Open decisions
 
-These are undecided; the table above describes today's code, and nothing here promises a behaviour.
+All of these are decided (2026-10-09); the table above describes the code, and the open item is simulator verification.
 
-1. **`inspect`.** Keep it refused, or map it to the agent's `get_overlay_status` and adopt the
-   result into the host store. The agent dies with the app, so there is little to adopt beyond
-   `status`.
-2. **Keyboard handling for sheets.** Rely on UIKit and SwiftUI keyboard avoidance, or match
-   Android by lifting the sheet with keyboard-frame notifications. Needs a simulator check first.
-3. **`window.layer: "app"`.** Keep refusing it, or accept and ignore it with a warning so one
-   spec runs on both platforms.
+1. Decided 2026-10-09: `inspect` maps to the agent's `get_overlay_status` (see [Inspect](#inspect)).
+2. Decided 2026-10-09: a bottom sheet lifts above the keyboard from keyboard-frame notifications
+   (see [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)). Still open: a simulator
+   check.
+3. Decided 2026-10-09: `window.layer: "app"` is accepted and ignored silently on iOS, with no
+   warning, so one spec runs on both platforms. The overlay stays at window level alert + 1.
 
 ## Expiry
 
@@ -154,13 +153,49 @@ is simulator-only and device launches will fail to load it.
   `reset: true` starts it fresh (the agent advertises `overlay_show_in_place_v1`, and the host refuses
   `reset` on an older agent). For a variant
   carousel, compose the spec yourself and `show` it.
-- No `display` selector, no `window.layer: "app"` and no `window.persistence: "device"`; the host
-  refuses them. See [Feature support](#feature-support).
-- No `inspect` and no keyboard lift for sheets (open decisions above). Idle TTL and disconnect
+- No `display` selector and no `window.persistence: "device"`; the host refuses them.
+  `window.layer: "app"` is accepted and ignored. See [Feature support](#feature-support).
+- `inspect` reports the one overlay the agent shows, with no `suspended` and no
+  `deviceDroppedEvents` (nothing is persisted or buffered offline). Idle TTL and disconnect
   dismissal match Android; see [Expiry](#expiry).
 - Rendering is SwiftUI in the app's process rather than Compose in CtrlProxy, so there is no
   separate accessibility service involved.
 - Android reaches any app through CtrlProxy; iOS reaches only apps launched with the agent.
+
+## Inspect
+
+`inspect` (#10494 on Android) asks the device which overlays it shows and adopts them into the host's
+`status` and `awaitEvent` state, for use after a session release or daemon restart. On iOS the host
+sends `get_overlay_status` and adopts its reply. The agent holds at most one overlay and dies with the
+app, so the report is that one overlay: `id`, `state`, `pages` and `lastSequence` (the agent's event
+ledger for the id, so the host resumes past it), with `persistent: false`. The agent also replies
+`visible`, whether its window is on screen, which the host does not surface. There is no `suspended`
+(the overlay lives in the app, so backgrounding the app hides its window), no offline event replay
+and no `deviceDroppedEvents`. An overlay the host lists that the agent no longer shows is dropped.
+
+The agent advertises `overlay_inspect_v1` for the `lastSequence` and `visible` fields. The host
+refuses `inspect` on an agent without it, before sending anything, and asks to relaunch with
+`launchApp { overlay: true }` to load the current agent.
+
+## Bottom sheet and the keyboard
+
+Owner decision 2026-10-09, matching [Android](../android/overlay-ux.md#bottom-sheet-and-the-keyboard-10262):
+a `sheet` with `edge: "bottom"` (or no edge) moves above the software keyboard while it is shown and
+returns to the screen edge when it hides. Fullscreen, floating and top sheets never move.
+
+- **Source.** The agent runs in the app's process, so `keyboardWillChangeFrame` and
+  `keyboardWillHide` are the notifications of the keyboard the app shows. The lift is how far the
+  keyboard's end frame reaches into the overlay window (`OverlayKeyboardLift.amount`, in the
+  UIKit-free core), 0 for a hardware keyboard or a hidden one, and never more than the window.
+- **No double lift.** SwiftUI's own keyboard avoidance is turned off for a bottom sheet, so only
+  this lift moves it; floating overlays keep SwiftUI's push.
+- **Touch and clip.** The sheet's content is padded up by the lift inside its full-window frame, so
+  its reported touch rect moves with it, and the anchor layer's clip region is computed with the same
+  lift (`OverlaySheetFrame.rect(lift:)`), so anchored nodes and their touch targets stay in sync.
+- **Motion.** The move animates over the keyboard's own duration, with an ease-in-out curve (UIKit's
+  private keyboard curve is not public API). It is instant under spec `motion: "none"` or Reduce
+  Motion (`OverlayKeyboardLift.animationDuration`).
+- **Not yet verified on a simulator.** No simulator was driven for this change.
 
 ## Anchors
 

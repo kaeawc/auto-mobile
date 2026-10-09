@@ -9,7 +9,32 @@ final class OverlayModel: ObservableObject {
     @Published var safeInsets = UIEdgeInsets.zero
     /// The overlay window's own (0, 0) on screen, in points; anchors are screen coordinates.
     @Published var windowOrigin = CGPoint.zero
+    /// The overlay window's size in points, for placing a sheet against the keyboard.
+    @Published var windowSize = CGSize.zero
+    /// The software keyboard's frame in screen points, nil while hidden, and the duration its
+    /// show or hide animates over (UIKit keyboard notifications).
+    @Published private(set) var keyboardFrame: CGRect?
+    private(set) var keyboardDuration: Double?
     var assets: [String: UIImage] = [:]
+
+    func setKeyboard(frame: CGRect?, duration: Double?) {
+        keyboardDuration = duration
+        keyboardFrame = frame
+    }
+
+    /// Points a bottom sheet is raised above the keyboard; 0 for every other placement.
+    var keyboardLift: Double {
+        let placement = spec?.window.placement
+        return OverlayKeyboardLift.amount(
+            placementType: placement?.type ?? "",
+            edge: placement?.edge,
+            keyboardFrame: keyboardFrame.map {
+                OverlayRect(x: $0.minX, y: $0.minY, width: $0.width, height: $0.height)
+            },
+            windowOriginY: windowOrigin.y,
+            windowHeight: windowSize.height
+        )
+    }
 
     /// Window-space rects that accept touches; everything else passes through to the app.
     var hitRects: [String: CGRect] = [:]
@@ -205,6 +230,7 @@ final class OverlayModel: ObservableObject {
             "pages": pages,
             "state": JSONValue.object(state).foundationObject,
             "assets": assets.keys.sorted(),
+            "lastSequence": session.lastSequence,
         ]
     }
 

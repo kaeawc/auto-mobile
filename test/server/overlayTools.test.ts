@@ -904,7 +904,7 @@ describe("overlay MCP tool", () => {
     [{ action: "show", spec }, "launchApp with overlay: true"],
     [{ action: "dismiss", all: true }, "launchApp with overlay: true"],
     [{ action: "awaitEvent", id: "panel" }, "launchApp with overlay: true"],
-    [{ action: "show", spec, reset: true }, "reset is Android only"],
+    [{ action: "show", spec, reset: true }, "launchApp with overlay: true"],
   ])("iOS %o without an injected agent never reaches CtrlProxy", async (input, guidance) => {
     const { response, payload } = await call(input, { ...device, platform: "ios" });
     expect(response.isError).toBe(true);

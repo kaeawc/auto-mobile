@@ -93,7 +93,9 @@ is simulator-only and device launches will fail to load it.
 ## Differences from Android
 
 - `prototype` on iOS has no `showVariants` and no `update` action (removed by owner decision).
-  Showing a spec with an id that is already shown updates it in place. For a variant
+  Showing a spec with an id that is already shown updates it in place, keeping each pager's page;
+  `reset: true` starts it fresh (the agent advertises `overlay_show_in_place_v1`, and the host refuses
+  `reset` on an older agent). For a variant
   carousel, compose the spec yourself and `show` it.
 - No `display` selector; a simulator has a single screen.
 - Rendering is SwiftUI in the app's process rather than Compose in CtrlProxy, so there is no

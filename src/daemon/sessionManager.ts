@@ -1212,6 +1212,11 @@ export class SessionManager {
   /** Crash-safe sidecar of terminal releases whose row write has not landed (#10959). */
   private terminalReleaseJournal: TerminalReleaseJournal = new NoopTerminalReleaseJournal();
   /**
+   * The owning daemon's id, stamped on every persisted active row so a peer daemon sharing the
+   * database can tell this daemon's live rows from a dead predecessor's (#11114).
+   */
+  private daemonSessionId: string | undefined;
+  /**
    * Terminal releases a previous daemon recorded but never persisted. Until its row write lands, a
    * listed UUID reads as terminally released, so nothing can revive it.
    */
@@ -1366,6 +1371,11 @@ export class SessionManager {
   /** Retry delays for terminal release writes that failed after their deadline (#10959). */
   setTerminalReleaseRetryBackoff(backoff: BackoffPolicy): void {
     this.terminalReleaseRetryBackoff = backoff;
+  }
+
+  /** Attach the owning daemon's id; every later active-row write is stamped with it (#11114). */
+  attachDaemonSessionId(daemonSessionId: string): void {
+    this.daemonSessionId = daemonSessionId;
   }
 
   /**
@@ -7844,7 +7854,7 @@ export class SessionManager {
       source: session.persistenceMetadata?.source ?? "session-manager",
       autolockEnabled: session.persistenceMetadata?.autolockEnabled,
       mcpSessionId: session.persistenceMetadata?.mcpSessionId,
-      daemonSessionId: session.persistenceMetadata?.daemonSessionId,
+      daemonSessionId: this.daemonSessionId ?? session.persistenceMetadata?.daemonSessionId,
       createdAtMs: session.createdAt,
       lastUsedAtMs: session.lastUsedAt,
       expiresAtMs: session.expiresAt,

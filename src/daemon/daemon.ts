@@ -681,6 +681,7 @@ export class Daemon {
     });
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
+    this.sessionManager.attachDaemonSessionId(this.daemonSessionId);
     this.observerSessionRegistry = new ObserverSessionRegistry(
       this.timer,
       undefined,

@@ -1,6 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { decideOwnershipChange } from "../../src/daemon/streamSubscriptionPolicy";
+import { LIVE_OWNER_HANDOFF_ALLOWANCE_MS } from "../../src/daemon/proxyLivenessRecovery";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
+import { UNSETTLED_EXECUTION_VETO_CEILING_MS } from "../../src/daemon/unsettledExecutionVeto";
 import { OWNER_DISCONNECT_GRACE_MS } from "../../src/daemon/ownerDisconnectRelease";
 import {
   AUTOLOCK_WINDOW_MS,
@@ -34,6 +37,12 @@ const DEVICE_A = "emulator-5554";
 const DEVICE_B = "emulator-5556";
 
 let scenario: LivenessScenario;
+
+// The first scenario pays for module-level one-time costs (database template, Daemon module graph);
+// beforeAll is outside the per-test budget, and the first row would otherwise sit at ~70 ms of 100.
+beforeAll(async () => {
+  await (await LivenessScenario.start()).stop();
+});
 
 afterEach(async () => {
   await scenario.stop();
@@ -143,6 +152,138 @@ describe("live stdio proxy", () => {
     expect(releasedAt).toBeLessThanOrEqual(settledAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
     expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
     expectFreed();
+  });
+});
+
+describe("the daemon's idle instant outranks the proxy's own idle clock (#10823)", () => {
+  test("a call the proxy never saw restarts the daemon's window: the session outlives the proxy's own window, then the daemon's window frees it", async () => {
+    scenario = await LivenessScenario.start();
+    const acquiredAt = scenario.timer.now();
+    const session = await scenario.acquire();
+
+    // A call on the proxy's own daemon connection that bypasses the proxy (another path on the
+    // same host, e.g. a tool call replayed by the host): the daemon sees use, the proxy does not.
+    await scenario.idle(IDLE_WINDOW_MS - 20_000);
+    await scenario.daemonToolCallWith(
+      { sessionUuid: session },
+      "observe",
+      scenario.proxyConnection,
+    );
+    const usedAt = scenario.timer.now();
+
+    // Held side: past the proxy's own window (it last saw use at acquisition) the proxy keeps
+    // heartbeating, because the daemon's heartbeat acks report the later idle instant.
+    expect(scenario.timer.now() - acquiredAt).toBeLessThan(IDLE_WINDOW_MS);
+    expect(await scenario.idleWhileHeld(session, usedAt + IDLE_WINDOW_MS - 15_000, 5_000)).toBe(
+      undefined,
+    );
+    expect(scenario.timer.now() - acquiredAt).toBeGreaterThan(IDLE_WINDOW_MS);
+    expectHeld(session);
+
+    // Released side: the daemon's window, counted from the unseen call, still frees it.
+    const releasedAt = await scenario.idleUntilReleased(session, 15_000 + RELEASE_SLACK_MS);
+    expect(releasedAt).toBeGreaterThan(usedAt + IDLE_WINDOW_MS);
+    expect(releasedAt).toBeLessThanOrEqual(usedAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
+    // The probe above may itself have been the lazy expiry; let the pool's unbind settle.
+    await scenario.idle(1_000);
+    expectFreed();
+  });
+});
+
+describe("daemon release wiring (#10975)", () => {
+  test("an idle expiry stops the recordings the session owns on its device", async () => {
+    scenario = await LivenessScenario.start();
+    const session = await scenario.acquire();
+
+    // Held side: nothing is stopped while the session is held and used.
+    await scenario.idle(30_000);
+    await scenario.toolCall(session);
+    expect(scenario.sessionRecordingStops).toEqual([]);
+
+    // Released side: the window ends, the release stops the recording on the freed device.
+    expect(
+      await scenario.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS),
+    ).toBeDefined();
+    expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
+    expect(scenario.sessionRecordingStops).toEqual([{ sessionId: session, deviceId: DEVICE_A }]);
+    expectFreed();
+  });
+
+  test("a silent owner's release stops the recordings the session owns on its device", async () => {
+    scenario = await LivenessScenario.start();
+    const session = await scenario.acquire();
+    await scenario.idle(30_000);
+    expect(scenario.sessionRecordingStops).toEqual([]);
+
+    scenario.dropHeartbeats = true;
+    expect(
+      await scenario.idleUntilReleased(session, NO_HEARTBEAT_BUDGET_MS + RELEASE_SLACK_MS),
+    ).toBeDefined();
+    expect(scenario.sessionRecordingStops).toEqual([{ sessionId: session, deviceId: DEVICE_A }]);
+    expectFreed();
+  });
+
+  test("a late terminal release of an idle-released session leaves its successor's pin and hold alone (#10825)", async () => {
+    scenario = await LivenessScenario.start();
+    const first = await scenario.acquire();
+    const captured = scenario.daemon.manager.getSession(first)!;
+    expect(
+      await scenario.idleUntilReleased(first, IDLE_WINDOW_MS + RELEASE_SLACK_MS),
+    ).toBeDefined();
+    await scenario.idle(1_000);
+
+    // The device passes to a new owner, who pins it.
+    const second = await scenario.acquire();
+    expect(second).not.toBe(first);
+    DeviceSessionManager.getInstance().setExplicitDevicePin({
+      deviceId: DEVICE_A,
+      name: DEVICE_A,
+      platform: "android",
+    });
+
+    try {
+      // Held side: a killDevice-style terminal release of the FIRST session arrives late.
+      await scenario.daemon.manager.releaseSessionIfOwned(
+        first,
+        captured,
+        DEVICE_A,
+        "device-killed",
+      );
+      expect(DeviceSessionManager.getInstance().getExplicitDevicePin()?.deviceId).toBe(DEVICE_A);
+      expectHeld(second);
+
+      // Released side: the successor's own idle release does clear its pin.
+      expect(
+        await scenario.idleUntilReleased(second, IDLE_WINDOW_MS + RELEASE_SLACK_MS),
+      ).toBeDefined();
+      expect(DeviceSessionManager.getInstance().getExplicitDevicePin()).toBeUndefined();
+    } finally {
+      DeviceSessionManager.getInstance().clearExplicitDevicePin(DEVICE_A);
+    }
+  });
+
+  test("a call that never settles holds the session past the idle window; when the veto ceiling lets the expiry through, the call is aborted and the device freed (#10820)", async () => {
+    scenario = await LivenessScenario.start();
+    const session = await scenario.acquire();
+    const call = scenario.startLongCall(session);
+
+    // Held side: in flight past the idle window the call is never aborted.
+    expect(await scenario.idleWhileHeld(session, 3 * IDLE_WINDOW_MS, 60_000)).toBe(undefined);
+    expectHeld(session);
+    expect(scenario.abortedCalls).toEqual([]);
+
+    // Released side: past the ceiling the expiry overrides it and aborts what it overrode.
+    const releasedAt = await scenario.idleWhileHeld(
+      session,
+      scenario.timer.now() + UNSETTLED_EXECUTION_VETO_CEILING_MS + 2 * IDLE_WINDOW_MS,
+      300_000,
+    );
+    expect(releasedAt).toBeDefined();
+    expect(scenario.abortedCalls).toEqual([session]);
+    expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
+    expectFreed();
+    await call.settle();
   });
 });
 
@@ -487,8 +628,14 @@ describe("second proxy names a session another proxy owns", () => {
     await scenario.idle(30_000);
     expect(scenario.daemon.manager.getSession(session)?.livenessOwnerToken).toBe(OWNER_TOKEN);
     expectHeld(session);
+    // The owner keeps using the session so the idle window never ends this scenario.
+    await scenario.toolCall(session);
 
-    // Released side: the challenger gives up claiming; its heartbeats for the session stop.
+    // Released side: the daemon reports the live owner's hold with each refusal (the harness now
+    // carries ack payloads like the real client), so the challenger waits out the handoff
+    // allowance and then gives up claiming; its heartbeats for the session stop.
+    await scenario.idle(LIVE_OWNER_HANDOFF_ALLOWANCE_MS + 2 * KEEPER_INTERVAL_MS);
+    await scenario.toolCall(session);
     const before = scenario.heartbeatsByToken.get("challenger-owner") ?? 0;
     expect(before).toBeGreaterThan(0);
     await scenario.idle(60_000);
@@ -552,6 +699,7 @@ describe("another session names a device the agent holds", () => {
     // of the window; the holder is untouched and still drives its own device.
     const driven = () => scenario.driven.filter((run) => run.deviceId === DEVICE_A).length;
     const drivenBefore = driven();
+    const readinessBefore = scenario.readinessTouches;
     for (let attempt = 0; attempt < 8; attempt++) {
       await scenario.idle(10_000);
       const foreign = await rejection(
@@ -566,6 +714,8 @@ describe("another session names a device the agent holds", () => {
       );
       expect(sessionless?.message).toContain("held by another session");
     }
+    // Refused calls never touched the device: the refusal comes before readiness (#10828).
+    expect(scenario.readinessTouches).toBe(readinessBefore);
     expect(driven()).toBe(drivenBefore);
     expectHeld(holder, DEVICE_A);
     expectHeld(intruder, DEVICE_B);

@@ -544,7 +544,13 @@ export interface SendKeysInputKey {
     timeoutMs?: number,
     frameContext?: string,
     modifiers?: readonly InputKeyModifier[],
-  ): Promise<{ success: boolean; error?: string; verified?: boolean; warning?: string }>;
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    errorCode?: string;
+    verified?: boolean;
+    warning?: string;
+  }>;
 }
 
 interface ImeCommitRouting {

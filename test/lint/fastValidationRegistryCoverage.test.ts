@@ -6,6 +6,8 @@ import { loadJobSteps, stepNamed } from "../helpers/workflowSteps";
 // Every exclusion names the job that checks the real tree. Keep this next to
 // the guard so a new registry entry requires an explicit CI coverage decision.
 const EXCLUDED_WITH_REASON: Readonly<Record<string, string>> = {
+  "ctrl-proxy-xcodegen-drift":
+    "PR ios-xcode-build: xcodegen-drift-check.sh --all on macOS (XcodeGen has no Linux build; this entry skips off-host)",
   "node-format": "PR fast-validation Check formatting step: bun run format:check",
   lychee:
     "merge.yml validate-documentation-links: online links; PR fast-validation runs lychee-offline",

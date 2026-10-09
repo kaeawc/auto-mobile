@@ -61,29 +61,35 @@ describe("optimizeSourceMap", () => {
     }
     const map: SourceMap = { sources: ["index.ts"], mappings: "AAAA" };
     expect(optimizeSourceMap(map).map).toBe(map);
-    expect(optimizeSourceMap(map, { stripSources: true }).map).toBe(map);
   });
 
-  test("strip deletes the key and preserves every other field without mutating input", () => {
+  test("strip nulls one entry per source and preserves every other field without mutating input", () => {
     const before = JSON.stringify(original);
-    const expected = { ...original };
-    delete expected.sourcesContent;
+    const expected = { ...original, sourcesContent: [null, null, null] };
     for (const includeDependencySources of [true, false]) {
       const { map, trimmedCount } = optimizeSourceMap(original, {
         stripSources: true,
         includeDependencySources,
       });
-      expect(Object.hasOwn(map, "sourcesContent")).toBe(false);
       expect(JSON.stringify(map)).toBe(JSON.stringify(expected));
       expect(trimmedCount).toBe(3);
     }
     expect(JSON.stringify(original)).toBe(before);
-    expect(
-      Object.hasOwn(
-        optimizeSourceMap({ ...original, sourcesContent: null }, { stripSources: true }).map,
-        "sourcesContent",
-      ),
-    ).toBe(false);
+  });
+
+  test("strip always yields an array as long as sources (Bun rejects anything else)", () => {
+    for (const sourcesContent of [undefined, null, "source text", [], ["only one"]]) {
+      const { map, trimmedCount } = optimizeSourceMap(
+        { ...original, sourcesContent },
+        { stripSources: true },
+      );
+      expect(map.sourcesContent).toEqual([null, null, null]);
+      expect(trimmedCount).toBe(
+        sourcesContent === "source text" ? 0 : (sourcesContent?.length ?? 0),
+      );
+    }
+    const noSources: SourceMap = { mappings: "AAAA" } as unknown as SourceMap;
+    expect(optimizeSourceMap(noSources, { stripSources: true }).map).toBe(noSources);
   });
 
   test("trimmed counts only populated content and repeated optimization is idempotent", () => {

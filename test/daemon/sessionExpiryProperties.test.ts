@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import {
   AUTOLOCK_IDLE_WINDOW_MS,
   DEFAULT_IDLE_WINDOWS_MS,
@@ -51,8 +51,8 @@ const ORDER_SEED_B = 2;
  * 200 seeds per property, in chunks small enough that each test stays well inside the 100 ms
  * per-test budget (a schedule replays in well under a millisecond; order checks replay twice).
  */
-const SEEDS_PER_CHUNK = 20;
-const CHUNKS_PER_PROPERTY = 10;
+const SEEDS_PER_CHUNK = 10;
+const CHUNKS_PER_PROPERTY = 20;
 
 const ALIVE_WITH_DISCONTINUITIES: ScheduleProfile = {
   horizonWindows: 4,
@@ -374,6 +374,29 @@ function propertyTests(
 }
 
 describe("session expiry properties under clock discontinuities (#10670)", () => {
+  // Whichever chunk runs first in a process pays the module and JIT warm-up, and CI re-times an
+  // over-budget test in isolation where it always runs cold (#10841). beforeAll is excluded from
+  // per-test time, so replay one seed of every profile here instead of billing it to a chunk.
+  beforeAll(async () => {
+    const profiles = [
+      ALIVE_WITH_DISCONTINUITIES,
+      STEADY_WITH_OWNER_EXIT,
+      AUTOLOCK_OWNER_EXIT,
+      RELEASES_OF_EVERY_KIND,
+      RESTARTS_LIVE_OWNER,
+      RESTARTS_DEAD_OWNER,
+      LATE_TICKS_ONLY,
+      SHORT_SLEEPS,
+      LONG_STALLS,
+      STEADY_LIVE_OWNER,
+      SLEEPS_AND_STALLS,
+      SHORT_STALLS,
+    ];
+    for (const profile of profiles) {
+      await runSchedule(generateSchedule(1, profile), ORDER_SEED_A);
+    }
+  });
+
   test("the generator is deterministic per seed", () => {
     expect(generateSchedule(7, ALIVE_WITH_DISCONTINUITIES)).toEqual(
       generateSchedule(7, ALIVE_WITH_DISCONTINUITIES),
@@ -420,8 +443,8 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
     7_000,
     RELEASES_OF_EVERY_KIND,
     releaseFreesTheDevice,
-    8,
-    12,
+    16,
+    6,
   );
 
   propertyTests(
@@ -430,8 +453,8 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
     RESTARTS_LIVE_OWNER,
     async (schedule) =>
       (await noEarlyRelease(schedule)) ?? (await idleReleasedDespiteHeartbeats(schedule)),
-    8,
-    6,
+    16,
+    3,
   );
 
   propertyTests(
@@ -439,8 +462,8 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
     8_500,
     RESTARTS_DEAD_OWNER,
     exitedOwnerReleased,
-    6,
-    8,
+    12,
+    4,
   );
 
   propertyTests(
@@ -448,8 +471,8 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
     6_000,
     LATE_TICKS_ONLY,
     orderIndependent,
-    8,
-    10,
+    16,
+    5,
   );
 
   propertyTests(

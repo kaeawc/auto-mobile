@@ -29,6 +29,10 @@ version: 2.1
 # (~150 macOS minutes at ~200 credits/min); paid overflow is ~$0.12-0.24/min.
 # With path filtering on PRs and an explicit post-merge trigger, only relevant
 # pushes reach the macOS lanes; everything else costs a few Linux seconds.
+# Concurrency is the other ceiling: the Free plan runs 1 macOS job at a time
+# (pricing page; the open-source credits page says 2 per organization), versus 5
+# on GitHub-hosted. docs/design-docs/ci/circleci-macos-migration.md (#10887) has
+# the sourced numbers and what the full macOS move would cost.
 
 setup: true
 
@@ -87,8 +91,13 @@ jobs:
           # revalidate. Keep this in sync with `filter-ios` in pull_request.yml.
           # The run-prototype-simulator lines gate the advisory "Prototype Simulator"
           # (overlay agent smoke) workflow on its own inputs: the overlay agent, its
-          # smoke script and driver, and the TypeScript the driver imports. Comments
-          # cannot go inside the mapping block itself; the orb reads every line.
+          # smoke script and driver, and the TypeScript the driver imports.
+          # run-ios-integration / run-webrtc (#10887) are the glob-for-glob regex
+          # translations of pull_request.yml's filter-native-integration and
+          # filter-webrtc lists (plus continue_config.yml itself);
+          # test/scripts/circleciMacosMigrationPolicy.test.ts fails on any drift.
+          # Comments cannot go inside the mapping block itself; the orb reads
+          # every line.
           mapping: |
             ios/.* run-ios true
             scripts/ios/.* run-ios true
@@ -104,6 +113,61 @@ jobs:
             src/utils/SystemTimer\.ts run-prototype-simulator true
             test/bats/overlay-agent-smoke\.bats run-prototype-simulator true
             \.circleci/continue_config\.yml run-prototype-simulator true
+            src/index\.ts run-ios-integration true
+            src/processLifecycle\.ts run-ios-integration true
+            src/server/.* run-ios-integration true
+            src/daemon/.* run-ios-integration true
+            src/features/observe/.* run-ios-integration true
+            src/features/action/.* run-ios-integration true
+            src/features/navigation/.* run-ios-integration true
+            src/features/(.*/)?ios/.* run-ios-integration true
+            src/utils/IOSCtrlProxy[^/]* run-ios-integration true
+            src/utils/Ios[^/]* run-ios-integration true
+            src/utils/ios-[^/]*/.* run-ios-integration true
+            src/ctrlProxy/.* run-ios-integration true
+            src/utils/Device[^/]* run-ios-integration true
+            src/utils/device[^/]* run-ios-integration true
+            src/devices/.* run-ios-integration true
+            src/devices/requireBootedDevice\.ts run-ios-integration true
+            src/utils/plan/.* run-ios-integration true
+            src/utils/planUtils\.ts run-ios-integration true
+            src/models/.* run-ios-integration true
+            schemas/.* run-ios-integration true
+            ios/.* run-ios-integration true
+            scripts/ios/.* run-ios-integration true
+            scripts/ci/.* run-ios-integration true
+            \.github/actions/ios-simulator-bring-up/.* run-ios-integration true
+            \.github/workflows/pull_request\.yml run-ios-integration true
+            bunfig\.toml run-ios-integration true
+            test/setup/.* run-ios-integration true
+            test/integration/iosVideoRecordingStartStop\.integration\.test\.ts run-ios-integration true
+            test/helpers/iosVideoRecordingSessionCleanup\.ts run-ios-integration true
+            test/helpers/sessionOwnershipHeartbeat\.ts run-ios-integration true
+            test/features/navigation/iosNavigationGraphWorkflow\.test\.ts run-ios-integration true
+            package\.json run-ios-integration true
+            bun\.lock run-ios-integration true
+            \.circleci/continue_config\.yml run-ios-integration true
+            src/features/webrtc/.* run-webrtc true
+            src/features/screen-stream/.* run-webrtc true
+            src/server/webrtcStreamManager\.ts run-webrtc true
+            src/daemon/webrtc[^/]* run-webrtc true
+            src/daemon/videoStreamSocket[^/]* run-webrtc true
+            src/daemon/videoStreamFraming\.ts run-webrtc true
+            src/daemon/daemonFiles\.ts run-webrtc true
+            src/daemon/socketServer/.* run-webrtc true
+            examples/mediamtx/.* run-webrtc true
+            test/integration/mediamtxWebRtcPublisher\.integration\.test\.ts run-webrtc true
+            test/integration/webrtcDeviceCapture\.integration\.test\.ts run-webrtc true
+            test/helpers/captureStageTimeline\.ts run-webrtc true
+            test/helpers/whepSubscriptionRecovery\.ts run-webrtc true
+            test/helpers/webrtcDeviceCaptureHelpers\.ts run-webrtc true
+            test/bats/mediamtx-webrtc-integration\.bats run-webrtc true
+            scripts/webrtc/.* run-webrtc true
+            android/video-server/.* run-webrtc true
+            ios/screen-capture/.* run-webrtc true
+            \.github/workflows/pull_request\.yml run-webrtc true
+            \.github/workflows/merge\.yml run-webrtc true
+            \.circleci/continue_config\.yml run-webrtc true
       - path-filtering/generate-config
       - continuation/continue:
           configuration_path: /tmp/generated-config.yml

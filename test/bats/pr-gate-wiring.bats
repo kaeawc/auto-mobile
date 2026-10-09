@@ -133,6 +133,20 @@ wiring_requires_yq() {
   [[ "$(yq -r '.jobs."detect-changes".outputs.shell_changed' "$WF")" == *"steps.filter-shell.outputs.shell"* ]]
 }
 
+@test "host :junit-runner:test runs in exactly one PR job (#10892)" {
+  wiring_requires_yq
+  # gradle-task-run invocations only; the emulator suites drive the same task
+  # against a booted device through the android-emulator action's script.
+  run yq -r '
+    .jobs[]
+    | select([.steps[]? | select(.uses == "./.github/actions/gradle-task-run" and ((.with."gradle-tasks" // "") | test("(^| ):junit-runner:test( |$)")))] | length > 0)
+    | key
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "junit-runner-unit-tests" ]
+  [[ "$(yq -r '.jobs."junit-runner-unit-tests".name' "$WF")" == "Run JUnit Runner Unit Tests" ]]
+}
+
 @test "Android emulator compile smoke includes test-source compilation" {
   block="$(job_block android-emulator-compile-smoke)"
   [[ -n "$block" ]]

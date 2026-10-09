@@ -73,7 +73,16 @@ interface OverlayForegroundScope {
 
   /** The overlay ended (or is not app-scoped): forget the anchor and any suspension. */
   fun release()
+
+  /** The anchor and suspension now, so a show the host rejects can put them back. */
+  fun capture(): OverlayForegroundState = OverlayForegroundState(null, false)
+
+  /** Put back what [capture] returned: a rejected show keeps the previous window's scoping. */
+  fun restore(state: OverlayForegroundState) = Unit
 }
+
+/** An opaque snapshot of foreground scoping taken by [OverlayForegroundScope.capture]. */
+data class OverlayForegroundState(val anchor: String?, val suspended: Boolean)
 
 object NoOverlayForegroundScope : OverlayForegroundScope {
   override val suspended = false
@@ -121,6 +130,17 @@ class OverlayForegroundTracker(
       cancelPending()
       anchor = null
       suspended = false
+    }
+  }
+
+  override fun capture(): OverlayForegroundState =
+    synchronized(lock) { OverlayForegroundState(anchor, suspended) }
+
+  override fun restore(state: OverlayForegroundState) {
+    synchronized(lock) {
+      cancelPending()
+      anchor = state.anchor
+      suspended = state.suspended
     }
   }
 

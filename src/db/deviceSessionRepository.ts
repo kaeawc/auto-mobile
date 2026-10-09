@@ -400,7 +400,8 @@ export class DeviceSessionRepository {
    * as fatal so the daemon exits/backs off instead of starting with broken
    * session state (issue #2784). Do not add a local catch — the caller owns the
    * fatal/backoff decision. Active sessions owned by a daemon in
-   * `liveDaemonSessionIds` are peer-owned and must remain untouched.
+   * `liveDaemonSessionIds` are peer-owned and must remain untouched, as are legacy
+   * NULL-owner rows while any peer is live.
    */
   async markStaleActiveSessionsExpired(
     currentDaemonSessionId: string,
@@ -410,6 +411,7 @@ export class DeviceSessionRepository {
   ): Promise<void> {
     const db = await this.getDb();
     const liveDaemonSessionIdList = Array.from(liveDaemonSessionIds);
+    const hasLivePeer = liveDaemonSessionIdList.some((id) => id !== currentDaemonSessionId);
     await db
       .updateTable("device_sessions")
       .set({
@@ -426,7 +428,9 @@ export class DeviceSessionRepository {
           liveDaemonSessionIdList.length === 0
             ? nonCurrentOwner
             : eb.and([nonCurrentOwner, eb("daemon_session_id", "not in", liveDaemonSessionIdList)]);
-        return eb.or([eb("daemon_session_id", "is", null), deadOwner]);
+        // A NULL owner is a legacy row written before every upsert stamped its daemon (#11114):
+        // it may belong to a live peer, so it is only reclaimed when no peer is live.
+        return hasLivePeer ? deadOwner : eb.or([eb("daemon_session_id", "is", null), deadOwner]);
       })
       .execute();
   }

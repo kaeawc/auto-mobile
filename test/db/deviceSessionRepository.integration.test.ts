@@ -615,6 +615,44 @@ describe("DeviceSessionRepository", () => {
     });
   });
 
+  test("keeps a legacy NULL-owner session while a peer daemon is live (#11114)", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "legacy-null-owner",
+      deviceId: "emulator-5554",
+      platform: "android",
+      source: "session-manager",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: false,
+    });
+
+    // The current daemon's own id in the live set is not a peer.
+    await repo.markStaleActiveSessionsExpired(
+      "current-daemon",
+      4000,
+      "daemon-restart",
+      new Set(["current-daemon", "live-peer-daemon"]),
+    );
+    expect(await repo.getSession("legacy-null-owner")).toMatchObject({
+      status: "active",
+      released_at_ms: null,
+    });
+
+    await repo.markStaleActiveSessionsExpired(
+      "current-daemon",
+      5000,
+      "daemon-restart",
+      new Set(["current-daemon"]),
+    );
+    expect(await repo.getSession("legacy-null-owner")).toMatchObject({
+      status: "expired",
+      release_reason: "daemon-restart",
+    });
+  });
+
   test("expires a dead predecessor's session as recoverable after daemon restart", async () => {
     await repo.upsertActiveSession({
       sessionUuid: "dead-predecessor-session",

@@ -13,6 +13,17 @@ import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalRelea
 
 const FILE = "/data/terminal-release-intents.jsonl";
 
+/** A read-only view of the shared fake that ignores its read failure (a later daemon). */
+class FakeReadable extends FakeTerminalReleaseJournalFileSystem {
+  constructor(private readonly backing: FakeTerminalReleaseJournalFileSystem) {
+    super();
+  }
+
+  override readText(filePath: string): string | undefined {
+    return this.backing.files.get(filePath);
+  }
+}
+
 function line(sessionId: string, reason: string, at: number): string {
   return `${JSON.stringify({ sessionId, reason, at })}\n`;
 }
@@ -132,6 +143,33 @@ describe("FileTerminalReleaseJournal (#10959)", () => {
       // The next append starts on a clean line.
       journal.record({ sessionId: "d", reason: "explicit-release", at: 3 });
       expect(new FileTerminalReleaseJournal(FILE, fs).loadUnconfirmed()).toHaveLength(3);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("an unreadable journal is never compacted; it appends and retries the read (#11114)", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    fs.files.set(FILE, line("predecessor", "heartbeat-timeout", 1));
+    fs.failReads = Object.assign(new Error("EIO"), { code: "EIO" });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const journal = new FileTerminalReleaseJournal(FILE, fs);
+      expect(journal.loadUnconfirmed()).toEqual([]);
+      journal.record({ sessionId: "mine", reason: "explicit-release", at: 2 });
+      journal.resolve("mine", "explicit-release");
+
+      // Nothing was rewritten or removed from the empty cache: the predecessor intent survives.
+      expect(fs.replaces).toBe(0);
+      expect(new FileTerminalReleaseJournal(FILE, new FakeReadable(fs)).loadUnconfirmed()).toEqual([
+        { sessionId: "predecessor", reason: "heartbeat-timeout", at: 1 },
+      ]);
+
+      // Once the file reads again, the same journal recovers the predecessor intent.
+      fs.failReads = undefined;
+      expect(journal.loadUnconfirmed()).toEqual([
+        { sessionId: "predecessor", reason: "heartbeat-timeout", at: 1 },
+      ]);
     } finally {
       warn.mockRestore();
     }

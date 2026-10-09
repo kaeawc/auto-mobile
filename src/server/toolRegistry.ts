@@ -19,6 +19,7 @@ import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import {
   DeviceSessionManager,
   type ConnectedPlatformScan,
+  isScanAuthoritativeFor,
   type DeviceReadinessLevel,
 } from "../devices/DeviceSessionManager";
 import { ActionableError, BootedDevice, SomePlatform, type ViewHierarchyResult } from "../models";
@@ -1345,7 +1346,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     ) {
       return explicitPin;
     }
-    if (scan.scanned[explicitPin.platform]) {
+    if (isScanAuthoritativeFor(scan, explicitPin)) {
       deviceSessionManager.clearExplicitDevicePin(explicitPin.deviceId);
       return undefined;
     }

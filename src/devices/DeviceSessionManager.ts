@@ -24,6 +24,11 @@ import {
   defaultAdbClientFactory,
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import {
+  getSharedDevicectlDeviceLister,
+  type IosPhysicalDeviceLister,
+} from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
+import { type DiscoverySource, discoverySourceFor } from "../utils/discoverySource";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { Window as WindowImpl } from "../features/observe/Window";
 import type { Window } from "../features/observe/interfaces/Window";
@@ -123,6 +128,11 @@ export interface DeviceClientProvider {
   getSimctl(): SimCtlClient | undefined;
   getAndroidEmulator(): AndroidEmulatorClient | undefined;
   getDeviceUtils(): PlatformDeviceManager;
+  /**
+   * Connected physical iOS device discovery for readiness scans (#11063).
+   * Optional: a provider without one leaves the `ios-physical` source unscanned.
+   */
+  getIosPhysicalDeviceLister?(): IosPhysicalDeviceLister | undefined;
   getAndroidCtrlProxyManager(device: BootedDevice): CtrlProxyManager;
   getAndroidCtrlProxyClient(device: BootedDevice): AndroidCtrlProxy;
   getIOSCtrlProxyManager(device: BootedDevice): CtrlProxyIosManager;
@@ -180,6 +190,12 @@ export class DefaultDeviceClientProvider implements DeviceClientProvider {
       );
     }
     return this._deviceUtils;
+  }
+
+  getIosPhysicalDeviceLister(): IosPhysicalDeviceLister {
+    // Shared with every MultiPlatformDeviceManager so readiness scans reuse the
+    // devicectl cache and last-good retention instead of spawning their own.
+    return getSharedDevicectlDeviceLister();
   }
 
   getAndroidCtrlProxyManager(device: BootedDevice): CtrlProxyManager {
@@ -322,7 +338,25 @@ export interface DeviceSessionManager {
 
 export interface ConnectedPlatformScan {
   devices: BootedDevice[];
+  /** A platform is scanned when at least one of its discovery sources completed. */
   scanned: Record<Platform, boolean>;
+  /**
+   * Per-source completeness (#11063). iOS has two independent sources, so a
+   * pinned device's absence is authoritative only when its own source
+   * completed. Absent for producers that report platforms only.
+   */
+  scannedSources?: Partial<Record<DiscoverySource, boolean>>;
+}
+
+/**
+ * True when `scan` completed the discovery source that would have observed
+ * `device`, so the device's absence from `scan.devices` proves it is gone.
+ */
+export function isScanAuthoritativeFor(scan: ConnectedPlatformScan, device: BootedDevice): boolean {
+  if (!scan.scannedSources) {
+    return scan.scanned[device.platform];
+  }
+  return scan.scannedSources[discoverySourceFor(device.platform, device.deviceId)] === true;
 }
 
 export type DeviceReadinessLevel = "booted" | "automationReady";
@@ -540,7 +574,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
     signal?: AbortSignal,
   ): Promise<ConnectedPlatformScan> {
     const devices: BootedDevice[] = [];
-    const scanned = { android: false, ios: false };
+    const scannedSources: Record<DiscoverySource, boolean> = {
+      android: false,
+      "ios-simulator": false,
+      "ios-physical": false,
+    };
     const perf = createGlobalPerformanceTracker();
 
     try {
@@ -549,29 +587,79 @@ export class DeviceSessionManager implements DeviceSessionManager {
       const androidDevices = await this.adb.getBootedAndroidDevices({ signal });
       perf.endOperation("androidDeviceScan");
       devices.push(...androidDevices);
-      scanned.android = true;
+      scannedSources.android = true;
     } catch (error) {
       perf.endOperation("androidDeviceScan");
       signal?.throwIfAborted();
       logger.warn(`Failed to detect Android devices: ${error}`);
     }
 
-    try {
-      // Check for iOS devices/simulators via xcrun simctl
-      if (this.simctl) {
-        perf.startOperation("iosSimulatorScan");
-        const iosDevices = await this.simctl.getBootedSimulators(undefined, signal);
-        perf.endOperation("iosSimulatorScan");
-        devices.push(...iosDevices);
-        scanned.ios = true;
-      }
-    } catch (error) {
-      perf.endOperation("iosSimulatorScan");
-      signal?.throwIfAborted();
-      logger.warn(`Failed to detect iOS devices: ${error}`);
-    }
+    const [simulators, physical] = await Promise.all([
+      this.scanBootedSimulators(perf, signal),
+      this.scanPhysicalIosDevices(),
+    ]);
+    signal?.throwIfAborted();
+    // Simulator entries win on overlap: they carry richer runtime metadata.
+    const seen = new Set(simulators.devices.map((device) => device.deviceId));
+    devices.push(
+      ...simulators.devices,
+      ...physical.devices.filter((device) => !seen.has(device.deviceId)),
+    );
+    scannedSources["ios-simulator"] = simulators.complete;
+    scannedSources["ios-physical"] = physical.complete;
 
-    return { devices, scanned };
+    return {
+      devices,
+      scanned: {
+        android: scannedSources.android,
+        ios: scannedSources["ios-simulator"] || scannedSources["ios-physical"],
+      },
+      scannedSources,
+    };
+  }
+
+  /**
+   * Booted simulators via the checked listing: a failed `simctl` call leaves
+   * the source unscanned rather than reading as "no simulators" (#11063).
+   */
+  private async scanBootedSimulators(
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
+    signal?: AbortSignal,
+  ): Promise<{ devices: BootedDevice[]; complete: boolean }> {
+    if (!this.simctl) {
+      return { devices: [], complete: false };
+    }
+    perf.startOperation("iosSimulatorScan");
+    try {
+      const devices = await this.simctl.getBootedSimulatorsChecked(undefined, signal);
+      return { devices, complete: true };
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(`Failed to detect iOS simulators: ${error}`);
+      return { devices: [], complete: false };
+    } finally {
+      perf.endOperation("iosSimulatorScan");
+    }
+  }
+
+  /**
+   * Connected physical iOS devices via the shared devicectl lister. Retained
+   * devices from an incomplete listing still resolve, but the source counts as
+   * scanned only when devicectl reported a complete listing (#11063).
+   */
+  private async scanPhysicalIosDevices(): Promise<{ devices: BootedDevice[]; complete: boolean }> {
+    const lister = this.provider.getIosPhysicalDeviceLister?.();
+    if (!lister) {
+      return { devices: [], complete: false };
+    }
+    try {
+      const discovery = await lister.listConnectedDevices();
+      return { devices: discovery.devices, complete: discovery.complete };
+    } catch (error) {
+      // The lister contract is non-throwing; a misbehaving one must not fail the scan.
+      logger.warn(`Failed to detect physical iOS devices: ${errorMessage(error)}`);
+      return { devices: [], complete: false };
+    }
   }
 
   /**
@@ -592,8 +680,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
     // Detect all connected devices
     const result = await this.getReadinessScan(options);
-    const { devices: connectedPlatforms, scanned } = this.normalizeReadinessScan(result);
-    this.reconcileReadinessPin(connectedPlatforms, scanned);
+    const scan = this.normalizeReadinessScan(result);
+    const connectedPlatforms = scan.devices;
+    this.reconcileReadinessPin(scan);
     logger.info(`Found ${connectedPlatforms.length} connectedPlatform devices`);
     const androidDevices = connectedPlatforms.filter((device) => device.platform === "android");
     logger.info(`Found ${androidDevices.length} android devices`);
@@ -769,15 +858,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
       : this.detectConnectedPlatformsWithStatus(options?.signal);
   }
 
-  private reconcileReadinessPin(
-    connectedPlatforms: BootedDevice[],
-    scanned: ConnectedPlatformScan["scanned"],
-  ): void {
+  private reconcileReadinessPin(scan: ConnectedPlatformScan): void {
     const pinnedDevice = this.explicitDevicePin;
     if (
       pinnedDevice &&
-      scanned[pinnedDevice.platform] &&
-      !connectedPlatforms.some(
+      isScanAuthoritativeFor(scan, pinnedDevice) &&
+      !scan.devices.some(
         (device) =>
           device.deviceId === pinnedDevice.deviceId && device.platform === pinnedDevice.platform,
       )

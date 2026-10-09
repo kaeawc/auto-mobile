@@ -164,7 +164,10 @@ tools/calls serialize per `device:<id>`; a `deviceReadOnly` call from a caller t
 hold a held device runs on that device's read lane (`device:<id>:read`) instead, so a watcher
 never waits behind the holder's in-flight control call (#10969). Reads serialize among
 themselves; control calls, the holder's own reads and reads of a free device (which may run
-readiness) stay on the control lane. Read-only tools: `observe`, `snapshotOf`, `listApps`, `getDeviceState`,
+readiness) stay on the control lane.
+A `deviceReadOnly` call whose `sessionUuid` names no device session this
+daemon issued (the IDE injects its observer session UUID into every call) is
+handled as sessionless rather than refused as unissued (#10968). Read-only tools: `observe`, `snapshotOf`, `listApps`, `getDeviceState`,
 `getNetworkGraph`, `getPreference`, `listDataStores`, `getDataStore`, and
 `sqlQuery` when `isReadOnlySqlQuery` accepts the statement (a write, or anything
 the classifier cannot prove read-only, needs the holder). The classifier lexes the

@@ -194,6 +194,74 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     expect(audited).toEqual([{ name: "readProbe", deviceId: free.deviceId }]);
   });
 
+  // #10968: the IDE injects its observer session UUID into every call. That UUID is not a device
+  // session this daemon issued, so a read carrying it is sessionless rather than refused.
+  test("a read naming an unissued (observer) session watches a held device sessionlessly", async () => {
+    await call("readProbe", { sessionUuid: "observer-session", deviceId: held.deviceId });
+
+    expect(reads).toEqual([{ deviceId: held.deviceId, readPath: true, sessionUuid: undefined }]);
+    expectNoReadiness();
+    expect(sessionManager.getSession("observer-session")).toBeNull();
+  });
+
+  test("a read naming an unissued (observer) session runs on a free device without a session", async () => {
+    await call("readProbe", { sessionUuid: "observer-session", deviceId: free.deviceId });
+
+    expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
+    expect(audited).toEqual([{ name: "readProbe", deviceId: free.deviceId }]);
+    expect(sessionManager.getSession("observer-session")).toBeNull();
+    expect(sessionManager.getSessionForDevice(free.deviceId)).toBeNull();
+  });
+
+  test("an observer-session read of a tool with its own device read uses it on a free device", async () => {
+    const resolved: string[] = [];
+    ToolRegistry.registerDeviceAware(
+      "observeProbe",
+      "Observe-like probe",
+      z.object({}).passthrough(),
+      async (device: BootedDevice, args: Record<string, unknown>) => {
+        reads.push({
+          deviceId: device.deviceId,
+          readPath: isSessionlessDeviceRead(),
+          sessionUuid: args.sessionUuid,
+        });
+        return { success: true };
+      },
+      {
+        deviceReadOnly: true,
+        sessionlessDeviceRead: {
+          resolve: async (deviceId: string) => {
+            resolved.push(deviceId);
+            return free;
+          },
+          assertAuthorized: () => {},
+        },
+      },
+    );
+
+    await call("observeProbe", { sessionUuid: "observer-session", deviceId: free.deviceId });
+
+    expect(resolved).toEqual([free.deviceId]);
+    expect(reads).toEqual([{ deviceId: free.deviceId, readPath: true, sessionUuid: undefined }]);
+    expectNoReadiness();
+  });
+
+  test("a control call naming an unissued session is still refused as unissued", async () => {
+    ToolRegistry.registerDeviceAware(
+      "controlProbe",
+      "Control probe",
+      z.object({}).passthrough(),
+      async () => ({ success: true }),
+    );
+    const error = await outcome("controlProbe", {
+      sessionUuid: "observer-session",
+      deviceId: free.deviceId,
+    });
+
+    expect((error as Error).message).toContain("observer-session");
+    expect(audited).toEqual([]);
+  });
+
   describe("registered read tools", () => {
     beforeEach(() => {
       serverConfig.setEmbeddedSdkEnabled(true);

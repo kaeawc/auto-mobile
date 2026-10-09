@@ -41,7 +41,7 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { logger, type Logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import { PLAN_AUTO_RELEASE_REASON } from "../daemon/sessionManager";
+import { PLAN_AUTO_RELEASE_REASON, UnissuedSessionError } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
 import { assertInputRequesterHoldsDevice, TOOL_CALL_REMEDY } from "../daemon/inputDeviceOwnership";
 import {
@@ -748,6 +748,35 @@ function foreignDeviceRead(
   return assignedDevice && assignedDevice !== providedDeviceId ? providedDeviceId : undefined;
 }
 
+/**
+ * Whether `sessionUuid` names no device session this daemon issued (#10968): not live, not
+ * terminal and not a recoverable persisted row. Admission is read-only, so it never refreshes or
+ * claims a session. A terminal session keeps its typed error for the caller.
+ */
+async function isUnissuedDeviceSession(
+  sessionUuid: string,
+  execution: { executionId: string; startTime: number } | undefined,
+): Promise<boolean> {
+  if (!DaemonState.getInstance().isInitialized()) {
+    return false;
+  }
+  const sessionManager = DaemonState.getInstance().getSessionManager();
+  if (sessionManager.getSession(sessionUuid)) {
+    return false;
+  }
+  try {
+    await sessionManager.admitIssuedSessionForAutomation(sessionUuid, execution, {
+      access: "read-only",
+    });
+    return false;
+  } catch (error) {
+    if (error instanceof UnissuedSessionError) {
+      return true;
+    }
+    throw error;
+  }
+}
+
 /** A device another session holds: a live owner, or an autolock holder. */
 function isDeviceHeld(deviceId: string): boolean {
   const daemonState = DaemonState.getInstance();
@@ -940,6 +969,24 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     if (readOnly && execution) {
       // A read is not use of the session it runs under, so it is never echoed as routed (#10974).
       executionTracker.markDeviceReadCall(execution.executionId);
+    }
+    if (
+      readOnly &&
+      sessionUuid &&
+      shouldResolveDevice &&
+      (await isUnissuedDeviceSession(sessionUuid, execution))
+    ) {
+      // Read-only access never requires a session (#10968): a read carrying an id this daemon
+      // never issued as a device session (an IDE observer session) runs as a sessionless read.
+      logger.info(
+        `[ToolRegistry] ${name}: ${sessionUuid} is not a device session; reading sessionlessly`,
+      );
+      sessionUuid = undefined;
+      delete args.sessionUuid;
+      if (options.sessionlessDeviceRead && providedDeviceId) {
+        // The same contract as a sessionless `observe {deviceId}`: no session, no readiness.
+        return resolveSessionlessDeviceRead(input, options.sessionlessDeviceRead, providedDeviceId);
+      }
     }
     // A sessionless read-only call that would land on a held device watches it through the
     // read-only path: no readiness, pin or settings work on the holder's device (#10830).

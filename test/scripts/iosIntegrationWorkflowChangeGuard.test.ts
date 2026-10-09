@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { load } from "js-yaml";
 import { loadJobSteps, loadWorkflow } from "../helpers/workflowSteps";
+
+const repoRoot = join(import.meta.dir, "../..");
+const CIRCLE_CONTINUE = ".circleci/continue_config.yml";
 
 const WORKFLOW = ".github/workflows/pull_request.yml";
 const NIGHTLY_WORKFLOW = ".github/workflows/nightly.yml";
@@ -41,10 +47,16 @@ describe("Fast Validation independence from XCTestRunner", () => {
     ).toBe(false);
   });
 
-  test("runs the XCTestRunner simulator workflow nightly", () => {
-    const job = loadWorkflow(NIGHTLY_WORKFLOW).jobs?.["xctestrunner-simulator-tests"];
-    expect(job?.uses).toBe(`./${XCTESTRUNNER_WORKFLOW}`);
-    expect(job?.if).toBeUndefined();
+  test("runs the XCTestRunner simulator lane nightly on CircleCI, not hosted GitHub (#11010)", () => {
+    expect(loadWorkflow(NIGHTLY_WORKFLOW).jobs?.["xctestrunner-simulator-tests"]).toBeUndefined();
+    const circle = load(readFileSync(join(repoRoot, CIRCLE_CONTINUE), "utf8")) as {
+      jobs?: Record<string, unknown>;
+      workflows?: Record<string, { when?: string; jobs?: unknown[] }>;
+    };
+    expect(circle.jobs?.["xctestrunner-simulator-tests"]).toBeDefined();
+    const nightly = circle.workflows?.["nightly-macos"];
+    expect(nightly?.when).toBe("<< pipeline.parameters.run-nightly-macos >>");
+    expect(JSON.stringify(nightly?.jobs?.[0])).toContain("xctestrunner-simulator-tests");
   });
 
   test("keeps the advisory XCTestRunner job out of every job's needs", () => {

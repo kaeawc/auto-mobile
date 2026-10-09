@@ -355,8 +355,10 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
   never share a simulator between parallel runners or jobs.
 - Re-run CI on the latest main base before merge; stale-base runs can mask a
   temporary main-red window.
-- The nightly advisory `XCTestRunner Thread Sanitizer` job in `nightly.yml`
-  uses `continue-on-error`, has no dependents and needs no simulator. It catches
+- The nightly advisory `XCTestRunner Thread Sanitizer` job runs on CircleCI's
+  `nightly-macos` workflow (`.circleci/continue_config.yml`, #11010); its
+  `terminal` requirement means no later job depends on its result, and it needs
+  no simulator. It catches
   #6061-style hangs with exit 124 naming the last started test, using the same
   simulator-free filter as `prepush-ios.sh` via
   `scripts/ios/xctestrunner_test_filter.sh`. Run locally with

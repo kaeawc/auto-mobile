@@ -1,63 +1,67 @@
 version: 2.1
 
 # Continuation config for the CircleCI macOS/iOS lanes. Reached from
-# .circleci/config.yml (the setup pipeline) when path filtering set `run-ios` or
-# `run-prototype-simulator`, or the post-merge coverage trigger set
-# `run-swift-coverage-main`. See its header
-# for the why, the budget, and the REQUIRED dynamic-config project setting.
+# .circleci/config.yml (the setup pipeline). See its header for the why and the
+# REQUIRED dynamic-config project setting, and
+# docs/design-docs/ci/macos-capacity-plan.md for where every macOS job runs.
 #
-# Scope: ios-swift-packages and ios-xcode-build mirror the same-named jobs in
-# .github/workflows/pull_request.yml — the ones feeding the required "iOS Build"
-# gate. ios-playground-tests mirrors the design-system Playground tests that used
-# to run on GitHub Actions; they were moved here to free a concurrent macOS slot
-# on GitHub (throughput) and stay advisory (simulator tests must not gate merges,
-# per repo policy), so this job's CircleCI check is NOT a required status check.
-# All jobs call the SAME repo scripts, so build logic stays single-sourced.
+# CircleCI runs ONE macOS job at a time for this organization (#11010), so this
+# file holds exactly three kinds of work:
 #
-# prototype-simulator (the "Prototype Simulator" check) is the overlay agent's
-# per-runtime simulator smoke test, moved here from GitHub Actions. It is advisory
-# like ios-playground-tests: keep it OFF the branch-protection required list.
+# 1. Pull requests: only `ios-playground-tests` (advisory Playground design-system
+#    tests), gated on `run-ios`. Every other PR macOS job runs in exactly one place
+#    on GitHub Actions (self-hosted Mac pools for same-repo PRs, hosted macos-26
+#    for forks), so there are no CircleCI PR mirrors of required jobs.
+# 2. Post-merge (`run-main-ios`, `run-main-desktop`, `run-swift-coverage-main`): the
+#    macOS work merge.yml used to own. Path filtering on main sets the first two;
+#    each job first asks scripts/ci/circleci-main-superseded.sh whether a newer
+#    main commit touches the same path group and halts if so, so a merge burst
+#    costs one macOS run for the latest relevant SHA.
+# 3. Nightly (`run-nightly-macos`, set by a scheduled pipeline): the macOS jobs
+#    nightly.yml used to own, chained most-valuable-first with `terminal`
+#    requirements so a failure never skips the rest.
 #
 # Signing: the scripts only sign when IOS_SIGNING_ENABLED / MACOS_SIGNING_ENABLED
-# are "true" (derived from cert-secret presence). No secrets are configured on
-# CircleCI, so these build unsigned — correct for a simulator build+test lane.
+# are "true". No secrets are configured on CircleCI, so everything builds unsigned.
 # The `ios` executor pins both flags to "false" so a project-level environment
-# variable added later can never turn signing on in a pull-request lane. Signing
-# belongs only in a restricted context attached to main/tag-filtered workflows
-# (#10887, docs/design-docs/ci/circleci-macos-migration.md); no workflow in this
-# file references a context.
+# variable added later can never turn signing on. Release/signing workflows stay
+# on GitHub (#10887, docs/design-docs/ci/circleci-macos-migration.md); no workflow
+# in this file references a context.
 #
-# #10887 migration mirrors (job `name:`s match the GitHub job names so the status
-# reads `ci/circleci: <GitHub name>`): "Build Root SPM Package" and "iOS Device
-# Capture to WHEP". They run ALONGSIDE the GitHub jobs until the owner flips the
-# gates; see the migration doc. XCTestRunner Simulator Tests is deliberately NOT
-# mirrored: GitHub runs it nightly and on PRs only with the `run-ios-sim` label
-# (#10895), so a PR-triggered CircleCI run would re-add the cost that was cut.
+# Prototype Simulator moved to the GitHub self-hosted heavy lane (#11011) and iOS
+# Device Capture to WHEP to a Namespace macOS runner (#11012); neither has a
+# CircleCI copy.
 
 parameters:
   run-ios:
     type: boolean
     default: false
-  # Set by path filtering in config.yml from the same paths as pull_request.yml's
-  # filter-webrtc (iOS Device Capture to WHEP). The GitHub label/title/body opt-ins
-  # are invisible to CircleCI path filtering.
-  run-webrtc:
-    type: boolean
-    default: false
   run-swift-coverage-main:
     type: boolean
     default: false
-  # Set by path filtering in config.yml when the overlay agent's smoke inputs change.
-  run-prototype-simulator:
+  # Post-merge path groups, set from .circleci/main-macos-paths.txt on main.
+  run-main-ios:
+    type: boolean
+    default: false
+  run-main-desktop:
+    type: boolean
+    default: false
+  # Set by the nightly scheduled pipeline (owner-configured trigger).
+  run-nightly-macos:
     type: boolean
     default: false
 
 executors:
   ios:
+    parameters:
+      xcode:
+        type: string
+        default: "26.5"
+        description: "CircleCI Xcode image tag (26.5 matches the PR toolchain floor)."
     macos:
-      # Match the Xcode pinned by pull_request.yml. Verify the exact image is
-      # offered at https://circleci.com/developer/machine/image/xcode and adjust.
-      xcode: "26.5"
+      # Verify a tag is offered at
+      # https://circleci.com/developer/machine/image/xcode before adding it.
+      xcode: << parameters.xcode >>
     # m4pro.medium is the ONLY macOS class available on the Free plan (all
     # Free-plan macOS jobs run on it since 2025-11-10) and it is ~200 credits/min.
     # Apple-silicon classes take NO `macos.` prefix (that prefix is only on the
@@ -68,6 +72,8 @@ executors:
       GIT_LFS_SKIP_SMUDGE: "1"
       IOS_SIGNING_ENABLED: "false"
       MACOS_SIGNING_ENABLED: "false"
+      # scripts/test-ts.sh keys its macOS worker defaults off the runner OS name.
+      RUNNER_OS: macOS
 
 commands:
   # CircleCI's native `checkout` ignores GIT_LFS_SKIP_SMUDGE (git-lfs does not
@@ -149,73 +155,50 @@ commands:
           name: "Globally Install AutoMobile"
           command: bun add -g .
 
-jobs:
-  ios-swift-packages:
-    executor: ios
+  # Post-merge coalescing (#11010): halt (successfully) when a newer main commit
+  # changes the same path group, because that commit's pipeline runs this job on
+  # a tree that contains ours. Any doubt runs the job.
+  halt_if_superseded_on_main:
+    parameters:
+      path-group:
+        type: string
     steps:
-      - checkout_without_lfs
-      - restore_spm_cache
       - run:
-          name: "Report toolchain"
-          command: xcodebuild -version && swift --version
-      - run:
-          name: "Resolve Swift package dependencies"
+          name: "Skip when a newer main commit supersedes this one"
           command: |
-            for package in ios/screen-capture ios/network-filter ios/highlight-core ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
-              (cd "${package}" && swift package resolve)
-            done
-      # Part of the required "iOS Build" roll-up on GitHub, so the CircleCI mirror
-      # must enforce it too before it can feed that gate (#10887).
-      - run:
-          name: "Check iOS SDK public API baseline"
-          command: |
-            if ! bash scripts/ios/api-dump.sh --check; then
-              echo "Update the iOS SDK API baseline: scripts/ios/api-dump.sh > ios/auto-mobile-sdk/api/auto-mobile-sdk.api" >&2
-              exit 1
+            if bash scripts/ci/circleci-main-superseded.sh "<< parameters.path-group >>"; then
+              circleci-agent step halt
             fi
-      - run:
-          name: "Build Swift packages"
-          command: ./scripts/ios/swift-build.sh
-      - run:
-          name: "Test Swift packages"
-          command: ./scripts/ios/swift-test.sh
-      - save_cache:
-          key: spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
-          paths:
-            - ~/Library/Caches/org.swift.swiftpm
-            - ios/auto-mobile-sdk/.build
-            - ios/control-proxy/.build
-            - ios/screen-capture/.build
-            - ios/XCTestRunner/.build
 
-  ios-xcode-build:
-    executor: ios
+  install_xcodegen:
     steps:
-      - checkout_without_lfs
       - run:
           name: "Install XcodeGen"
           # CircleCI's macOS image has a non-writable /usr/local/share, which the
           # script's default prefix can't create. The script honors an override,
           # so install into $HOME/.local and persist that on PATH (via CircleCI's
-          # $BASH_ENV) for the drift-check and build steps that follow.
+          # $BASH_ENV) for the steps that follow.
           command: |
             export XCODEGEN_PREFIX="${HOME}/.local"
             ./scripts/ios/install-xcodegen.sh
             echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
-      - run:
-          name: "Check XcodeGen project drift"
-          command: ./scripts/ios/xcodegen-drift-check.sh --all
-      - run:
-          name: "Ensure iOS Simulator runtime"
-          command: ./scripts/ios/ensure-simulator-runtime.sh
-      - run:
-          name: "Build Xcode projects (iOS Simulator)"
-          command: ./scripts/ios/xcode-build.sh
 
-  # Design-system Playground tests (colour/contrast/typography/shape, #5102),
-  # moved off GitHub Actions to free a concurrent macOS slot there. Simulator
-  # tests are advisory (must not gate merges), so this job's status check must
-  # stay OFF the branch-protection required list.
+  install_bats:
+    steps:
+      - run:
+          name: "Install BATS and ShellCheck"
+          command: |
+            command -v bats >/dev/null 2>&1 || brew install bats-core
+            command -v shellcheck >/dev/null 2>&1 || brew install shellcheck
+            bats --version
+            shellcheck --version | awk '/^version:/ { print "shellcheck " $2 }'
+
+jobs:
+  # ── Pull requests ───────────────────────────────────────────────────────────
+  # Design-system Playground tests (colour/contrast/typography/shape, #5102): the
+  # ONE PR simulator job on CircleCI (#11010). Simulator tests are advisory (must
+  # not gate merges), so this job's status check must stay OFF the
+  # branch-protection required list.
   ios-playground-tests:
     executor: ios
     steps:
@@ -227,6 +210,84 @@ jobs:
       - run:
           name: "Run Playground tests"
           command: ./scripts/ios/xcode-test.sh Playground
+
+  # ── Post-merge (formerly merge.yml) and nightly sweeps ──────────────────────
+  # Generate + drift-check + build every XcodeGen project. Post-merge it replaces
+  # merge.yml's "Generate Xcode Projects" and "Build Xcode Projects"; nightly it is
+  # the "Build Xcode Projects Sweep" for each Xcode image.
+  ios-xcode-build:
+    parameters:
+      xcode:
+        type: string
+        default: "26.5"
+      superseded-path-group:
+        type: string
+        default: ""
+        description: "Main path group for halt_if_superseded_on_main; empty skips the check."
+    executor:
+      name: ios
+      xcode: << parameters.xcode >>
+    steps:
+      - checkout_without_lfs
+      - when:
+          condition: << parameters.superseded-path-group >>
+          steps:
+            - halt_if_superseded_on_main:
+                path-group: << parameters.superseded-path-group >>
+      - restore_spm_cache
+      - install_xcodegen
+      - run:
+          name: "Generate Xcode Projects (fails on committed-project drift)"
+          command: ./scripts/ios/xcodegen-drift-check.sh --all
+      - run:
+          name: "Ensure iOS Simulator runtime"
+          command: ./scripts/ios/ensure-simulator-runtime.sh
+      - run:
+          name: "Resolve Xcode project Swift package dependencies"
+          command: |
+            for package in ios/highlight-core ios/auto-mobile-sdk ios/control-proxy; do
+              (cd "${package}" && swift package resolve)
+            done
+      - run:
+          name: "Build Xcode Projects"
+          command: |
+            export AUTOMOBILE_XCODE_DERIVED_DATA="${HOME}/automobile-derived-data-xcode-build"
+            SECONDS=0
+            ./scripts/ios/xcode-build.sh
+            echo "build took ${SECONDS}s"
+
+  # Build Desktop App (macOS leg), formerly merge.yml's dormant matrix leg. Gated on
+  # desktop-app/desktop-core changes on main.
+  desktop-app-macos:
+    executor: ios
+    steps:
+      - checkout_without_lfs
+      - halt_if_superseded_on_main:
+          path-group: run-main-desktop
+      - run:
+          name: "Select JDK 21"
+          command: |
+            if ! jdk_home="$(/usr/libexec/java_home -v 21 2>/dev/null)" || [[ -z "${jdk_home}" ]]; then
+              brew install --cask temurin@21
+              jdk_home="$(/usr/libexec/java_home -v 21)"
+            fi
+            echo "export JAVA_HOME=\"${jdk_home}\"" >> "${BASH_ENV}"
+            echo "export PATH=\"${jdk_home}/bin:\${PATH}\"" >> "${BASH_ENV}"
+      - run:
+          name: "Install Android SDK command-line tools"
+          # The android/ Gradle build configures Android modules, so AGP needs an
+          # SDK root with accepted licenses; it downloads missing platforms itself.
+          command: |
+            command -v sdkmanager >/dev/null 2>&1 || brew install --cask android-commandlinetools
+            sdk_root="${HOME}/android-sdk"
+            mkdir -p "${sdk_root}"
+            yes | sdkmanager --sdk_root="${sdk_root}" --licenses > /dev/null || true
+            echo "export ANDROID_HOME=\"${sdk_root}\"" >> "${BASH_ENV}"
+            echo "export ANDROID_SDK_ROOT=\"${sdk_root}\"" >> "${BASH_ENV}"
+      - run:
+          name: "Build Desktop App"
+          no_output_timeout: 20m
+          command: cd android && ../scripts/ci/run-gradle-with-retry.sh -- ./gradlew :desktop-app:build -x test
 
   swift-code-coverage:
     executor: ios
@@ -242,218 +303,372 @@ jobs:
       - store_artifacts:
           path: coverage/swift-coverage-badge.json
 
-  # "Prototype Simulator": per-runtime smoke test for the iOS overlay agent (#10569).
-  # Injection depends on simulator dyld behaviour and each runtime's Swift runtime, so
-  # a new Xcode or runtime can break it silently. Each matrix leg boots ONE fresh
-  # simulator, used serially and deleted afterwards. Advisory: simulator tests must not
-  # gate merges, so this check stays OFF the required list.
-  # Run locally on a Mac: bash scripts/ios/overlay-agent-smoke.sh 26
-  prototype-simulator:
+  # ── Nightly (formerly nightly.yml) ──────────────────────────────────────────
+  # "Swift Packages Sweep": every Swift package, built and tested on one Xcode image.
+  ios-swift-packages:
     parameters:
-      ios:
+      xcode:
         type: string
-        description: "iOS runtime version passed to overlay-agent-smoke.sh (26 matches 26.x)."
-    executor: ios
+        default: "26.5"
+    executor:
+      name: ios
+      xcode: << parameters.xcode >>
     steps:
       - checkout_without_lfs
+      - restore_spm_cache
       - run:
           name: "Report toolchain"
-          command: xcodebuild -version && xcrun simctl list runtimes iOS
-      - install_bun
+          command: xcodebuild -version && swift --version
       - run:
-          name: "Install dependencies"
-          command: bash scripts/ci/install-bun-deps.sh
+          name: "Resolve Swift package dependencies"
+          command: |
+            for package in ios/screen-capture ios/network-filter ios/highlight-core ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
+              (cd "${package}" && swift package resolve)
+            done
       - run:
-          name: "Ensure iOS Simulator runtime"
-          command: ./scripts/ios/ensure-simulator-runtime.sh
+          name: "Build Swift packages"
+          command: ./scripts/ios/swift-build.sh
       - run:
-          name: "Run overlay agent smoke test (iOS << parameters.ios >>)"
-          # Exit 3 (runtime missing) fails the leg: the image is expected to ship the
-          # runtime, so a vanished runtime is an image change worth seeing.
-          command: bash scripts/ios/overlay-agent-smoke.sh "<< parameters.ios >>"
-          no_output_timeout: 20m
-      - store_artifacts:
-          path: scratch/overlay-agent-smoke
-          destination: overlay-agent-smoke-ios-<< parameters.ios >>
+          name: "Test Swift packages"
+          command: ./scripts/ios/swift-test.sh
+      - save_cache:
+          key: spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
+          paths:
+            - ~/Library/Caches/org.swift.swiftpm
+            - ios/auto-mobile-sdk/.build
+            - ios/control-proxy/.build
+            - ios/screen-capture/.build
+            - ios/XCTestRunner/.build
 
-  # Mirror of pull_request.yml → "Build Root SPM Package" (GitHub: 20 min cap).
-  # The root manifest declares swift-tools-version 6.3, so it needs Xcode 26.5.
-  ios-spm-root-package-build:
+  # Advisory diagnostic: no simulator. #6061 exposed a lock-order hang only under
+  # TSan; the script bounds hangs as well as reports.
+  # Run locally: bash scripts/ci/xctestrunner-tsan.sh
+  xctestrunner-tsan:
     executor: ios
     steps:
       - checkout_without_lfs
       - restore_spm_cache
       - run:
-          name: "Resolve root Swift package dependencies"
-          command: swift package resolve
-          no_output_timeout: 10m
+          name: "Resolve XCTestRunner Swift package dependencies"
+          command: cd ios/XCTestRunner && swift package resolve
       - run:
-          name: "Build root Package.swift"
-          command: |
-            SECONDS=0
-            swift build -c release 2>&1
-            echo "build took ${SECONDS}s"
-          no_output_timeout: 15m
+          name: "Run XCTestRunner Thread Sanitizer"
+          no_output_timeout: 35m
+          environment:
+            XCTESTRUNNER_TSAN_TIMEOUT_SECONDS: "1800"
+          command: bash scripts/ci/xctestrunner-tsan.sh
+      - store_artifacts:
+          path: scratch/xctestrunner-tsan
+          destination: xctestrunner-tsan
 
-  # Mirror of pull_request.yml → "iOS Device Capture to WHEP" (GitHub: 35 min cap).
-  # The capture loop, retry and reap logic stay identical to GitHub's step.
-  ios-device-webrtc:
+  macos-bats-tests:
     executor: ios
     steps:
       - checkout_without_lfs
-      - setup_auto_mobile_npm_package
+      - install_bats
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: bash scripts/ci/install-bun-deps.sh
+      - run:
+          name: "Run BATS Unit Tests"
+          environment:
+            AUTOMOBILE_BATS_MAX_FILE_SECONDS: "240"
+            AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "420"
+          command: scripts/ci/run-bats.sh unit
+
+  macos-bats-integration-tests:
+    executor: ios
+    steps:
+      - checkout_without_lfs
+      - install_bats
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: bash scripts/ci/install-bun-deps.sh
+      - run:
+          name: "Run BATS Integration Tests"
+          command: scripts/ci/run-bats.sh integration
+
+  macos-node-unit-tests:
+    executor: ios
+    steps:
+      - checkout_without_lfs
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: bash scripts/ci/install-bun-deps.sh
+      - run:
+          name: "Run complete unit lane"
+          no_output_timeout: 15m
+          environment:
+            AUTOMOBILE_TEST_MODE: "true"
+            AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+            # Leaves one macOS core available for the complete unit lane.
+            AUTOMOBILE_UNIT_TEST_WORKERS: "2"
+            AUTOMOBILE_UNIT_TEST_CHUNK_FILES: "100"
+            AUTOMOBILE_UNIT_JUNIT_DIR: scratch/timing-unit-reports
+          command: bash scripts/test-ts.sh unit
+      - store_artifacts:
+          path: scratch/test-ts-unit-shards
+          destination: node-unit-test-diagnostics/test-ts-unit-shards
+      - store_artifacts:
+          path: scratch/timing-unit-reports
+          destination: node-unit-test-diagnostics/timing-unit-reports
+
+  macos-node-host-integration-tests:
+    executor: ios
+    steps:
+      - checkout_without_lfs
+      - install_bun
+      - run:
+          name: "Install Bun dependencies"
+          command: bash scripts/ci/install-bun-deps.sh
+      - run:
+          name: "Run host integration lane"
+          no_output_timeout: 15m
+          environment:
+            AUTOMOBILE_TEST_MODE: "true"
+            AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "900"
+          command: bash scripts/test-ts.sh integration
+      - run:
+          name: "Run stress lane"
+          environment:
+            AUTOMOBILE_TEST_MODE: "true"
+            AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "300"
+          command: bash scripts/test-ts.sh stress
+
+  # XCTestRunner Simulator Tests, nightly home (#10895). The PR `run-ios-sim` label
+  # opt-in keeps using .github/workflows/xctestrunner-simulator-tests.yml; this job
+  # runs the same scripts serially (CircleCI has no background steps), and
+  # test/scripts/circleciMacosMigrationPolicy.test.ts keeps the selected test list
+  # and daemon environment identical to that workflow. One simulator per job:
+  # the main sim is shut down before the odd-width iPhone 15 boots.
+  xctestrunner-simulator-tests:
+    executor: ios
+    environment:
+      AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS: "240"
+      AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS: "150000"
+      AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "60000"
+      AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA: "/tmp/automobile-ctrl-proxy"
+      AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD: "true"
+    steps:
+      - checkout_without_lfs
+      - restore_spm_cache
+      - run:
+          name: "Point daemon logs and the test database at the workspace"
+          command: |
+            mkdir -p "${PWD}/ci-logs/daemon-logs" "${HOME}/auto-mobile-video-recording-db"
+            echo "export AUTOMOBILE_LOG_DIR=\"${PWD}/ci-logs/daemon-logs\"" >> "${BASH_ENV}"
       - run:
           name: "Ensure iOS Simulator runtime"
           command: ./scripts/ios/ensure-simulator-runtime.sh
+      - install_xcodegen
       - run:
-          name: "Build iOS capture prerequisites"
-          no_output_timeout: 20m
-          command: |
-            brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
-            test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" || brew install --cask google-chrome
-            (cd ios/screen-capture && swift package resolve)
-            SECONDS=0
-            (cd ios/screen-capture && swift build)
-            echo "build took ${SECONDS}s"
+          name: "Install ffmpeg"
+          command: brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+      - setup_auto_mobile_npm_package
       - run:
-          name: "Boot and activate iOS Simulator"
+          name: "Check CtrlProxy XcodeGen Project Drift"
+          command: ./scripts/ios/xcodegen-drift-check.sh --ctrl-proxy
+      - run:
+          name: "Resolve CtrlProxy Swift package dependencies"
+          command: cd ios/control-proxy && swift package resolve
+      - run:
+          name: "Boot iOS Simulator for CtrlProxy UI tests (Xcode 26.5)"
           no_output_timeout: 12m
           command: |
-            result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000)"
+            ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+            result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000 --min-os-version "${ios_version}" --max-os-version "${ios_version}")"
             simulator_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
             if [[ -z "${simulator_udid}" || "${simulator_udid}" == "null" ]]; then
               echo "AutoMobile product boot returned no deviceId." >&2
               exit 1
             fi
-            echo "export AUTOMOBILE_IOS_SIMULATOR_UDID=\"${simulator_udid}\"" >> "${BASH_ENV}"
-            if pgrep -x Simulator >/dev/null; then
-              killall Simulator
-              for _ in {1..30}; do
-                pgrep -x Simulator >/dev/null || break
-                sleep 1
-              done
-              if pgrep -x Simulator >/dev/null; then
-                echo "Simulator.app did not exit before activation." >&2
-                exit 1
-              fi
-            fi
-            open -a Simulator --args -CurrentDeviceUDID "${simulator_udid}"
-            helper_path="${PWD}/ios/screen-capture/.build/debug/screen-capture-helper"
-            simulator_name="$(xcrun simctl list devices --json | jq -r --arg udid "${simulator_udid}" \
-              '[.devices[][] | select(.udid == $udid) | .name] | first // empty')"
-            if [[ -z "${simulator_name}" ]]; then
-              echo "Could not resolve the selected Simulator name." >&2
-              exit 1
-            fi
-            simulator_window_ready=0
-            for _ in {1..30}; do
-              simulator_windows="$("${helper_path}" --list-simulators 2>/dev/null || true)"
-              if printf '%s' "${simulator_windows}" | jq -e --arg name "${simulator_name}" \
-                '.windows | map(select((.title // "") | ascii_downcase | contains($name | ascii_downcase))) | length == 1' \
-                >/dev/null; then
-                simulator_window_ready=1
-                break
-              fi
-              sleep 1
-            done
-            if [[ "${simulator_window_ready}" != "1" ]]; then
-              echo "Selected Simulator window did not become discoverable by ScreenCaptureKit." >&2
-              exit 1
-            fi
+            echo "export SIMULATOR_UDID=\"${simulator_udid}\"" >> "${BASH_ENV}"
       - run:
-          name: "Run iOS device capture integration"
-          no_output_timeout: 20m
-          environment:
-            AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION: "1"
-            AUTOMOBILE_WEBRTC_DEVICE_PLATFORM: ios
-            AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS: "15000"
+          name: "Build CtrlProxy iOS for Testing"
           command: |
-            set -uo pipefail
-            export AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER="${PWD}/ios/screen-capture/.build/debug/screen-capture-helper"
+            SECONDS=0
+            ./scripts/ios/ctrl-proxy-build-for-testing.sh
+            echo "build took ${SECONDS}s"
+      - run:
+          name: "Pin Source-Built CtrlProxy Runner Integrity"
+          command: |
+            runner_binary="/tmp/automobile-ctrl-proxy/Build/Products/Debug-iphonesimulator/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest/CtrlProxyUITests"
+            if [[ ! -f "${runner_binary}" ]]; then
+              echo "Source-built CtrlProxy xctest executable not found: ${runner_binary}" >&2
+              exit 1
+            fi
+            runner_sha256="$(shasum -a 256 "${runner_binary}" | awk '{print $1}')"
+            if [[ ! "${runner_sha256}" =~ ^[a-f0-9]{64}$ ]]; then
+              echo "Unable to compute a valid CtrlProxy xctest SHA256" >&2
+              exit 1
+            fi
+            {
+              echo "export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=${runner_sha256}"
+              echo "export AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=xctest"
+            } >> "${BASH_ENV}"
+      - run:
+          name: "Run selected CtrlProxy iOS tests (Xcode 26.5)"
+          no_output_timeout: 8m
+          command: |
+            if [[ ! "${SIMULATOR_UDID}" =~ ^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$ ]]; then
+              echo "Invalid simulator UDID" >&2
+              exit 1
+            fi
+            XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
+            xcodebuild test-without-building \
+              -xctestrun "${XCTESTRUN}" \
+              -destination "id=${SIMULATOR_UDID}" \
+              -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests \
+              -only-testing:CtrlProxyUITests/RotationOrientationTests \
+              -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree \
+              -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testScreenshotCapturesScreenAfterTrackedAppTerminates \
+              -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testPressKeyForwardDeleteRemovesFollowingCharacter \
+              -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testPressKeyForwardDeleteAtEndOfTextFailsClosed
+      - run:
+          name: "Ensure AutoMobile daemon ready (Xcode 26.5)"
+          environment:
+            AUTOMOBILE_DAEMON_DEBUG: "1"
+            AUTOMOBILE_DAEMON_EMBEDDED_SDK: "1"
+            AUTOMOBILE_ENABLED_TOOLS: "videoRecording,navigateTo,getNavigationGraph,explore"
+          command: |
+            export AUTOMOBILE_DB_DIR="${HOME}/auto-mobile-video-recording-db"
+            echo "export AUTOMOBILE_DB_DIR=\"${AUTOMOBILE_DB_DIR}\"" >> "${BASH_ENV}"
+            echo 'export PATH="${HOME}/.bun/bin:${PATH}"' >> "${BASH_ENV}"
+            ./scripts/ci/ensure-daemon-ready.sh
+      - run:
+          name: "Warm up iOS CtrlProxy (Xcode 26.5)"
+          no_output_timeout: 12m
+          command: ./scripts/ci/ensure-ctrl-proxy-ready.sh
+      - run:
+          name: "Run videoRecording MP4 integration test"
+          no_output_timeout: 10m
+          environment:
+            AUTOMOBILE_ENABLED_TOOLS: "videoRecording,navigateTo,getNavigationGraph,explore"
+          command: ./scripts/ios/video-recording-start-stop-integration.sh
+      - run:
+          name: "Run iOS navigation graph Simulator workflow"
+          no_output_timeout: 5m
+          environment:
+            AUTOMOBILE_ENABLED_TOOLS: "videoRecording,navigateTo,getNavigationGraph,explore"
+          command: ./scripts/ios/navigation-graph-sdk-event-integration.sh "${SIMULATOR_UDID}"
+      - run:
+          name: "Stop AutoMobile daemon before odd-width boot"
+          command: |
             source ./scripts/ios/run_with_timeout.sh
-
-            reap_before_retry() {
-              pkill -f "index.js --daemon-mode" 2>/dev/null || true
-              pkill -x mediamtx 2>/dev/null || true
-              pkill -f "remote-debugging-port=9222" 2>/dev/null || true
-              sleep 2
-              pkill -KILL -x mediamtx 2>/dev/null || true
-              pkill -KILL -f "index.js --daemon-mode" 2>/dev/null || true
-              if [ -n "${AUTOMOBILE_IOS_SIMULATOR_UDID:-}" ]; then
-                if ! run_with_timeout 10 xcrun simctl bootstatus "${AUTOMOBILE_IOS_SIMULATOR_UDID}" -b >/dev/null 2>&1; then
-                  echo "Simulator did not report booted within 10s after cleanup; skipping reboot (best-effort re-verify only, #7605)." >&2
-                fi
-              fi
-              for _ in $(seq 1 15); do
-                lsof -nP -iTCP:8889 -sTCP:LISTEN >/dev/null 2>&1 || return 0
-                sleep 1
-              done
-              echo "Port 8889 still bound after cleanup; skipping retry to avoid a guaranteed conflict." >&2
-              return 1
-            }
-
-            attempts=2
-            for attempt in $(seq 1 "${attempts}"); do
-              echo "iOS device capture integration (attempt ${attempt}/${attempts})"
-              bun run test:integration:webrtc-device && rc=0 || rc=$?
-              if [ "${rc}" -eq 0 ]; then
-                if [ "${attempt}" -gt 1 ]; then
-                  echo "iOS device capture passed on retry (transient ScreenCaptureKit flake)."
-                fi
-                exit 0
-              fi
-              echo "iOS device capture attempt ${attempt} failed (exit ${rc})."
-              if [ "${attempt}" -lt "${attempts}" ]; then
-                echo "Reaping MediaMTX / daemon / Chrome before one retry."
-                reap_before_retry || exit 1
-              fi
-            done
-            echo "iOS device capture failed after ${attempts} attempts."
-            exit 1
+            run_with_timeout 20 auto-mobile --daemon stop || true
       - run:
-          name: "Explain WebRTC device results"
-          when: always
-          command: bash scripts/webrtc/explain-device-results.sh ios || true
-      - run:
-          name: "Collect screen-capture-helper crash reports"
-          when: always
-          command: bash scripts/webrtc/collect-helper-crash-reports.sh scratch/webrtc-device-integration || true
+          name: "Run odd-width CtrlProxy screenshot test (iPhone 15)"
+          no_output_timeout: 15m
+          command: |
+            bash ./scripts/ios/shutdown-main-simulator.sh "${SIMULATOR_UDID}"
+            ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+            result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000 --name "iPhone 15" --min-os-version "${ios_version}" --max-os-version "${ios_version}")"
+            odd_width_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
+            if [[ -z "${odd_width_udid}" || "${odd_width_udid}" == "null" ]]; then
+              echo "AutoMobile product boot returned no iPhone 15 deviceId." >&2
+              exit 1
+            fi
+            trap 'xcrun simctl shutdown "${odd_width_udid}" >/dev/null 2>&1 || true' EXIT
+            simulator_device_type="$(
+              xcrun simctl list devices --json |
+                jq -r --arg udid "${odd_width_udid}" '.devices[][] | select(.udid == $udid) | .deviceTypeIdentifier'
+            )"
+            if [[ "${simulator_device_type}" != "com.apple.CoreSimulator.SimDeviceType.iPhone-15" ]]; then
+              echo "Expected iPhone 15 for odd-width screenshot coverage; got '${simulator_device_type:-unknown}'." >&2
+              exit 1
+            fi
+            XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
+            xcodebuild test-without-building \
+              -xctestrun "${XCTESTRUN}" \
+              -destination "id=${odd_width_udid}" \
+              -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testScreenshotMatchesNativeDimensionsOnOddWidthDevice
       - store_artifacts:
-          path: scratch/webrtc-device-integration
-          destination: ios-webrtc-device-artifacts
+          path: ci-logs/daemon-logs
+          destination: automobile-daemon-logs-xctestrunner
 
 workflows:
+  # PR path: exactly one macOS job (#11010). When `run-ios` is false (no iOS
+  # changes) the workflow has no jobs and no macOS executor is used.
   ios-macos:
-    # Gate the whole workflow on the parameter path-filtering set. When false
-    # (no iOS changes) the workflow has no jobs and no macOS executor is used.
     when: << pipeline.parameters.run-ios >>
     jobs:
-      - ios-swift-packages
-      - ios-xcode-build
       - ios-playground-tests
-      - ios-spm-root-package-build:
-          name: "Build Root SPM Package"
 
-  # #10887 mirror gated on its own GitHub path filter. No contexts: this runs
-  # on fork PRs, which must never see secrets.
-  ios-webrtc-macos:
-    when: << pipeline.parameters.run-webrtc >>
+  # ── Post-merge (main only; replaces merge.yml's macOS jobs) ─────────────────
+  main-ios-macos:
+    when: << pipeline.parameters.run-main-ios >>
     jobs:
-      - ios-device-webrtc:
-          name: "iOS Device Capture to WHEP"
+      - ios-xcode-build:
+          name: "Build Xcode Projects (main)"
+          superseded-path-group: run-main-ios
+          filters:
+            branches:
+              only: main
+
+  main-desktop-macos:
+    when: << pipeline.parameters.run-main-desktop >>
+    jobs:
+      - desktop-app-macos:
+          name: "Build Desktop App (macos)"
+          filters:
+            branches:
+              only: main
 
   swift-coverage-main:
     when: << pipeline.parameters.run-swift-coverage-main >>
     jobs:
       - swift-code-coverage
 
-  prototype-simulator:
-    when: << pipeline.parameters.run-prototype-simulator >>
+  # ── Nightly (replaces nightly.yml's hosted macOS jobs) ──────────────────────
+  # With one macOS slot the jobs run one at a time anyway; the `terminal` chain
+  # fixes the order (most valuable first) and lets every job run whatever the
+  # previous one's outcome. Xcode 26.5 sweeps come last because every iOS PR
+  # already builds that toolchain.
+  nightly-macos:
+    when: << pipeline.parameters.run-nightly-macos >>
     jobs:
-      - prototype-simulator:
-          name: "Prototype Simulator iOS << matrix.ios >>"
-          matrix:
-            parameters:
-              # One leg per iOS runtime. Add a version here (e.g. "27") once the
-              # `ios` executor's Xcode image ships that runtime.
-              ios: ["26"]
+      - xctestrunner-simulator-tests:
+          name: "XCTestRunner Simulator Tests"
+      - ios-swift-packages:
+          name: "Swift Packages Sweep (Xcode 26.6)"
+          xcode: "26.6"
+          requires:
+            - "XCTestRunner Simulator Tests": terminal
+      - ios-xcode-build:
+          name: "Build Xcode Projects Sweep (Xcode 26.6)"
+          xcode: "26.6"
+          requires:
+            - "Swift Packages Sweep (Xcode 26.6)": terminal
+      - macos-node-unit-tests:
+          name: "macOS Node Unit Tests"
+          requires:
+            - "Build Xcode Projects Sweep (Xcode 26.6)": terminal
+      - macos-node-host-integration-tests:
+          name: "macOS Node Host Integration Tests"
+          requires:
+            - "macOS Node Unit Tests": terminal
+      - macos-bats-tests:
+          name: "macOS BATS Shell Tests"
+          requires:
+            - "macOS Node Host Integration Tests": terminal
+      - macos-bats-integration-tests:
+          name: "macOS BATS Integration Tests"
+          requires:
+            - "macOS BATS Shell Tests": terminal
+      - xctestrunner-tsan:
+          name: "XCTestRunner Thread Sanitizer"
+          requires:
+            - "macOS BATS Integration Tests": terminal
+      - ios-swift-packages:
+          name: "Swift Packages Sweep (Xcode 26.5)"
+          xcode: "26.5"
+          requires:
+            - "XCTestRunner Thread Sanitizer": terminal
+      - ios-xcode-build:
+          name: "Build Xcode Projects Sweep (Xcode 26.5)"
+          xcode: "26.5"
+          requires:
+            - "Swift Packages Sweep (Xcode 26.5)": terminal

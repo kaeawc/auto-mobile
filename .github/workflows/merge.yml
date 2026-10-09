@@ -14,7 +14,9 @@ permissions:
   packages: write
 
 jobs:
-  # Hosted macOS was removed from On Merge (#8583); macOS post-merge coverage is tracked for CircleCI.
+  # On Merge schedules no macOS job (#8583, #11010). Post-merge macOS work (Build
+  # Xcode Projects, Build Desktop App macOS, Swift coverage) runs on CircleCI, path-
+  # gated and coalesced per merge burst: .circleci/config.yml detect-main-macos-changes.
   build-desktop-core:
     name: "Build Desktop Core Module"
     runs-on: ubuntu-latest
@@ -152,41 +154,12 @@ jobs:
           name: ide-plugin-test-results
           path: android/ide-plugin/build/reports/tests/test/
 
-  build-desktop-app:
-    name: "Build Desktop App (${{ matrix.os }})"
-    # Disabled: desktop app merge validation is expensive and not required for release/docs publishing.
-    if: ${{ false }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    defaults:
-      run:
-        working-directory: android
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: ./.github/actions/gradle-task-run
-        with:
-          gradle-tasks: ":desktop-app:build -x test"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}-${{ matrix.os }}"
-          reuse-configuration-cache: true
-          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-          malloc-replacement: ${{ runner.os == 'Linux' && 'jemalloc' || 'none' }}
-
   desktop-app-unit-tests:
     name: "Run Desktop App Unit Tests"
     # Disabled with desktop app merge cleanup.
     if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: build-desktop-app
     defaults:
       run:
         working-directory: android
@@ -821,100 +794,6 @@ jobs:
           path: scratch/netstat-capture/
           if-no-files-found: ignore
           retention-days: 14
-
-  # =============================================================================
-  # iOS Build and Test Jobs
-  # =============================================================================
-
-  ios-xcodegen:
-    name: "Generate Xcode Projects"
-    # Disabled with iOS merge cleanup.
-    if: ${{ false }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    strategy:
-      matrix:
-        runner: [macos-26]
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Install XcodeGen"
-        run: ./scripts/ios/install-xcodegen.sh
-
-      - name: "Generate Xcode Projects"
-        run: ./scripts/ios/xcodegen-generate.sh
-
-  ios-xcode-build:
-    name: "Build Xcode Projects (${{ matrix.config.name }})"
-    runs-on: ${{ matrix.config.runner }}
-    timeout-minutes: 45
-    needs: ios-xcodegen
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-          - { name: "Xcode 26", runner: "macos-26", xcode: "26.5" }
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Select Xcode ${{ matrix.config.xcode }}"
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ matrix.config.xcode }}
-
-      - name: "Cache Xcode Swift package dependencies"
-        uses: actions/cache@v4
-        id: cache-xcode-spm
-        with:
-          path: |
-            ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm/cache
-          key: ${{ runner.os }}-spm-merge-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
-          restore-keys: |
-            ${{ runner.os }}-spm-merge-xcode-build-${{ matrix.config.xcode }}-
-
-      - name: "Cache Xcode DerivedData"
-        uses: actions/cache@v4
-        id: cache-xcode-derived-data
-        with:
-          path: |
-            ${{ runner.temp }}/automobile-derived-data-merge-xcode-build/Build
-            ${{ runner.temp }}/automobile-derived-data-merge-xcode-build/ModuleCache.noindex
-          key: ${{ runner.os }}-derived-merge-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('ios/**/*.swift', 'ios/**/*.m', 'ios/**/*.mm', 'ios/**/*.h', 'ios/**/*.c', 'ios/**/*.cpp', 'ios/**/*.xcconfig', 'ios/**/*.plist', 'ios/**/*.entitlements', 'ios/**/*.storyboard', 'ios/**/*.xib', 'ios/**/*.xcassets/**', 'ios/**/*.strings', 'ios/**/*.ttf', 'ios/**/*.otf', 'ios/**/*.xcprivacy', 'ios/**/*.pbxproj', 'ios/**/*.xcscheme', 'ios/**/project.yml', 'ios/**/Package.swift', 'ios/**/Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-derived-merge-xcode-build-${{ matrix.config.xcode }}-
-
-      - name: "Ensure iOS Simulator runtime"
-        uses: ./.github/actions/ensure-ios-simulator-runtime
-
-      - name: "Install XcodeGen"
-        run: ./scripts/ios/install-xcodegen.sh
-
-      - name: "Generate Xcode Projects"
-        run: ./scripts/ios/xcodegen-generate.sh
-
-      - name: "Resolve Xcode project Swift package dependencies"
-        shell: bash
-        run: |
-          for package in ios/highlight-core ios/auto-mobile-sdk ios/control-proxy; do
-            (cd "${package}" && swift package resolve)
-          done
-
-      - name: "Build Xcode Projects"
-        env:
-          AUTOMOBILE_XCODE_DERIVED_DATA: "${{ runner.temp }}/automobile-derived-data-merge-xcode-build"
-        run: |
-          echo "Swift package cache hit: ${{ steps.cache-xcode-spm.outputs.cache-hit }}"
-          echo "DerivedData cache hit: ${{ steps.cache-xcode-derived-data.outputs.cache-hit }}"
-          SECONDS=0
-          ./scripts/ios/xcode-build.sh
-          echo "build took ${SECONDS}s"
 
   # =============================================================================
   # Android Build and Test Jobs

@@ -300,21 +300,20 @@ wiring_requires_yq() {
   [ "$output" = "windows-latest" ]
 }
 
-@test "nightly preserves the moved macOS portable test lanes" {
-  local workflow=".github/workflows/nightly.yml"
-  local bats_unit bats_integration unit host
-  bats_unit="$(job_block macos-bats-tests "$workflow")"
-  bats_integration="$(job_block macos-bats-integration-tests "$workflow")"
-  unit="$(job_block macos-node-unit-tests "$workflow")"
-  host="$(job_block macos-node-host-integration-tests "$workflow")"
-
-  for block in "$bats_unit" "$bats_integration" "$unit" "$host"; do
-    [[ "$block" == *"runs-on: macos-latest"* ]]
-    [[ "$block" == *"scripts/ci/install-bun-deps.sh"* ]]
+@test "nightly macOS portable test lanes run on CircleCI, not hosted GitHub (#11010)" {
+  wiring_requires_yq
+  local circle=".circleci/continue_config.yml"
+  local job host
+  for job in macos-bats-tests macos-bats-integration-tests macos-node-unit-tests macos-node-host-integration-tests; do
+    [[ -z "$(job_block "$job" ".github/workflows/nightly.yml")" ]]
+    run yq -r ".jobs.\"${job}\".steps[].run.command // \"\"" "$circle"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"scripts/ci/install-bun-deps.sh"* ]]
   done
-  [[ "$bats_unit" == *"scripts/ci/run-bats.sh unit"* ]]
-  [[ "$bats_integration" == *"scripts/ci/run-bats.sh integration"* ]]
-  [[ "$unit" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$(yq -r '.jobs."macos-bats-tests".steps[].run.command // ""' "$circle")" == *"scripts/ci/run-bats.sh unit"* ]]
+  [[ "$(yq -r '.jobs."macos-bats-integration-tests".steps[].run.command // ""' "$circle")" == *"scripts/ci/run-bats.sh integration"* ]]
+  [[ "$(yq -r '.jobs."macos-node-unit-tests".steps[].run.command // ""' "$circle")" == *"bash scripts/test-ts.sh unit"* ]]
+  host="$(yq -r '.jobs."macos-node-host-integration-tests".steps[].run.command // ""' "$circle")"
   [[ "$host" == *"bash scripts/test-ts.sh integration"* ]]
   [[ "$host" == *"bash scripts/test-ts.sh stress"* ]]
 }
@@ -337,6 +336,19 @@ wiring_requires_yq() {
   [[ "$ios" == *"AUTOMOBILE_WEBRTC_DEVICE_PLATFORM: ios"* ]]
   [[ "$ios" == *"bun run test:integration:webrtc-device"* ]]
   [[ ! -e ".github/workflows/webrtc-device-integration.yml" ]]
+}
+
+@test "iOS WHEP capture runs on Namespace macOS for same-repo PRs with heavy-lane and fork fallbacks (#11012)" {
+  wiring_requires_yq
+  run yq -r '.jobs."ios-device-webrtc"."runs-on"' "$WF"
+  [ "$status" -eq 0 ]
+  local same="github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository"
+  [ "$output" = "\${{ (${same} && vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (${same} && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('[\"self-hosted\",\"automobile-mac-heavy\"]') || 'macos-26' }}" ]
+  run yq -r '.jobs."ios-device-webrtc"."timeout-minutes"' "$WF"
+  [ "$output" -le 30 ]
+  # No CircleCI copy (#11012).
+  run yq -r '.jobs | has("ios-device-webrtc")' .circleci/continue_config.yml
+  [ "$output" = "false" ]
 }
 
 @test "PR WebRTC device jobs share path and opt-in gating" {

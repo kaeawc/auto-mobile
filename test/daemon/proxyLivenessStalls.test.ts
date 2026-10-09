@@ -1680,9 +1680,8 @@ describe("proxy liveness stalls (#10053)", () => {
       await advanceUntilHandover();
       hangSessions.clear();
       expect(handovers[0]?.code).toBe("daemon_stalled");
-      await expect(
-        proxy.callTool("observe", { sessionUuid: "android-session" }),
-      ).rejects.toMatchObject({ reason: "daemon_stalled" });
+      // The daemon released the session before any call reached it (#10989: a call made while
+      // it still held the session would have resumed it).
       await sessionManager.releaseSession("android-session", "heartbeat-timeout");
 
       const error = await proxy.callTool("observe", { sessionUuid: "android-session" }).then(

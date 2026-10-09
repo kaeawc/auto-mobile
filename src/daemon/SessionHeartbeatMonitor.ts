@@ -1,4 +1,4 @@
-import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { Timer, defaultTimer, monotonicClockSemanticsDrift } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
@@ -17,7 +17,6 @@ import {
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   SUSPECT_GRACE_MS,
-  getSessionIdleTimeoutMs,
 } from "./sessionLivenessWindows";
 
 /**
@@ -75,11 +74,21 @@ export interface SessionHeartbeatMonitorConfig {
    * (`Timer.monotonicIncludesHostSleep`: Windows, Linux), so sleep and a daemon stall look alike.
    * A gap later than this is then judged to be host sleep, which counts toward idle, rather than
    * a stall, which is forgiven in full. A shorter sleep is still forgiven as a stall, so a session
-   * can be held for up to this much longer than its idle window after a short sleep. Default: the
-   * configured idle window ({@link getSessionIdleTimeoutMs}).
+   * can be held for up to this much longer than its idle window after a short sleep. Default:
+   * {@link MAX_CREDIBLE_DAEMON_STALL_MS}, independent of the idle window (#10962).
    */
   maxCredibleStallMs?: number;
+  /** The running Bun version the clock-semantics self-check compares (#10962); tests inject it. */
+  bunVersion?: string;
 }
+
+/**
+ * The longest gap a monotonic clock that runs through host sleep may show and still be forgiven
+ * as a stall of the daemon itself (#10962, owner decision 2026-10-09). Fixed rather than the idle
+ * window: with a 2-minute window a 90 s laptop sleep was forgiven, contradicting "host sleep
+ * counts toward idle", and a 60 s autolock window could be extended by up to 120 s.
+ */
+export const MAX_CREDIBLE_DAEMON_STALL_MS = 30_000;
 
 /** Timer jitter tolerated before a late scan is treated as a stall of the daemon itself. */
 export const DEFAULT_STALL_MARGIN_MS = 2_000;
@@ -130,6 +139,9 @@ export class SessionHeartbeatMonitor {
   private readonly defaultHeartbeatTimeoutMs: number;
   private readonly stallThresholdMs: number;
   private readonly maxCredibleStallMs: number;
+  private readonly bunVersionOverride: string | undefined;
+  /** The measured clock disagreed with `monotonicIncludesHostSleep`; warned once (#10962). */
+  private clockSemanticsDisagreementReported = false;
   /** Bounds how long active executions keep a stale session (#10663, shared policy #10712). */
   private readonly executionVeto: UnsettledExecutionVeto;
   /** When the previous scan finished (or the monitor started); undefined until started. */
@@ -180,7 +192,8 @@ export class SessionHeartbeatMonitor {
       ) ??
       getDefaultSessionHeartbeatTimeoutMs();
     this.stallThresholdMs = config.stallThresholdMs ?? DEFAULT_STALL_MARGIN_MS;
-    this.maxCredibleStallMs = config.maxCredibleStallMs ?? getSessionIdleTimeoutMs();
+    this.maxCredibleStallMs = config.maxCredibleStallMs ?? MAX_CREDIBLE_DAEMON_STALL_MS;
+    this.bunVersionOverride = config.bunVersion;
     this.executionVeto = new UnsettledExecutionVeto(executions, timer);
   }
 
@@ -188,6 +201,7 @@ export class SessionHeartbeatMonitor {
     if (this.lastScanSettledAt === undefined) {
       this.lastScanSettledAt = this.timer.now();
       this.lastScanSettledMonotonic = this.monotonicNow();
+      this.checkClockSemantics();
     }
     this.sessions.setStallProbe?.(() => this.forgiveStallIfLate());
     if (this.intervalHandle) {
@@ -268,12 +282,50 @@ export class SessionHeartbeatMonitor {
     const awakeMs = Math.min(wallMs, monotonic - this.lastScanSettledMonotonic);
     const lateMs = awakeMs - this.checkIntervalMs;
     const sleptMs = wallMs - awakeMs;
+    if (this.timer.monotonicIncludesHostSleep === true && sleptMs > this.stallThresholdMs) {
+      this.reportClockSemanticsDisagreement(sleptMs);
+    }
     // A clock that ran through host sleep reports sleep as lateness. Rather than forgive a laptop
     // sleep of any length as a daemon stall, lateness past the longest credible stall is sleep.
     if (this.timer.monotonicIncludesHostSleep === true && lateMs > this.maxCredibleStallMs) {
       return { lateMs: 0, sleptMs: sleptMs + lateMs };
     }
     return { lateMs, sleptMs };
+  }
+
+  private bunVersion(): string | undefined {
+    return this.bunVersionOverride ?? process.versions.bun;
+  }
+
+  /**
+   * Startup self-check (#10962): the platform table behind `monotonicIncludesHostSleep` was
+   * verified for one Bun release line. Warn when the running Bun is another one.
+   */
+  private checkClockSemantics(): void {
+    if (this.timer.monotonicIncludesHostSleep === undefined) {
+      return;
+    }
+    const drift = monotonicClockSemanticsDrift(this.bunVersion());
+    if (drift) {
+      logger.warn(`[SessionHeartbeatMonitor] ${drift}`);
+    }
+  }
+
+  /**
+   * Runtime self-check (#10962): the timer claims its monotonic clock runs through host sleep,
+   * yet the wall clock just ran ahead of it, which only a clock that pauses during sleep does.
+   */
+  private reportClockSemanticsDisagreement(sleptMs: number): void {
+    if (this.clockSemanticsDisagreementReported) {
+      return;
+    }
+    this.clockSemanticsDisagreementReported = true;
+    logger.warn(
+      `[SessionHeartbeatMonitor] The wall clock ran ${sleptMs}ms ahead of the monotonic clock, ` +
+        "which pauses during host sleep here, but this platform is configured as running through " +
+        `it (Bun ${this.bunVersion() ?? "unknown"}, ${process.platform}); host sleep may be ` +
+        "misjudged as a daemon stall. Update monotonicClockIncludesHostSleep (#10962).",
+    );
   }
 
   /**

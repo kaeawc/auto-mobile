@@ -107,6 +107,7 @@ import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../acces
 import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 import { unsupportedDisplayOptionMessage } from "../../observe/SessionDisplayContext";
 import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
+import { assessSwipeNavigation } from "./swipeNavigation";
 
 const DISPLAY_SWIPE_OPTIONS = [
   "lookFor",
@@ -1511,6 +1512,7 @@ export class SwipeOn extends BaseVisualChange {
       // A boomerang whose return leg failed has moved the content: observe it on iOS too.
       { ...options, observePartialApplication: true },
     );
+    this.annotateSwipeNavigation(result, previous);
     if (this.device.platform !== "android") {
       return result;
     }
@@ -1530,6 +1532,27 @@ export class SwipeOn extends BaseVisualChange {
       );
     }
     return result;
+  }
+
+  /** A swipe that opened a different screen (e.g. acted as a tap on a row) must not read as a scroll. */
+  private annotateSwipeNavigation(result: SwipeOnResult, previous: ObserveResult | null): void {
+    if (!result.success) {
+      return;
+    }
+    const assessment = assessSwipeNavigation(
+      previous,
+      result.observation,
+      { x: result.x1, y: result.y1 },
+      this.device.platform,
+    );
+    if (!assessment) {
+      return;
+    }
+    result.navigated = assessment.navigated;
+    if (assessment.warning) {
+      logger.warn(`[SwipeOn] ${assessment.warning}`);
+      result.warning = this.autoTargetSelector.mergeWarnings(result.warning, assessment.warning);
+    }
   }
 
   private unchangedSwipeWarning(result: SwipeOnResult, previous: ObserveResult | null): string {

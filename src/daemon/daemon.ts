@@ -3216,15 +3216,30 @@ export class Daemon {
       bootedDeviceIds,
       candidatePlatforms,
     );
+    // A held USB+Wi-Fi phone is keyed by its USB serial; after an unplug its
+    // still-attached Wi-Fi alias may be listed offline/authorizing (#11133).
+    const aliasOwners = new Map(
+      [...missingAndroidCandidateIds].flatMap((deviceId) =>
+        this.devicePool
+          .getAndroidTransportAliases(deviceId)
+          .map((alias): [string, string] => [alias, deviceId]),
+      ),
+    );
     try {
       const listedStates =
         missingAndroidCandidateIds.size > 0
-          ? await deviceManager.getAndroidListedDeviceStates(missingAndroidCandidateIds)
+          ? await deviceManager.getAndroidListedDeviceStates(
+              new Set([...missingAndroidCandidateIds, ...aliasOwners.keys()]),
+            )
           : new Map<string, string>();
+      const candidateStates = [...listedStates].map(([id, state]): [string, string] => [
+        aliasOwners.get(id) ?? id,
+        state,
+      ]);
       return {
-        listedNonDeviceIds: new Set(listedStates.keys()),
+        listedNonDeviceIds: new Set(candidateStates.map(([id]) => id)),
         offlineDeviceIds: new Set(
-          [...listedStates].filter(([, state]) => state === "offline").map(([id]) => id),
+          candidateStates.filter(([, state]) => state === "offline").map(([id]) => id),
         ),
       };
     } catch (error) {

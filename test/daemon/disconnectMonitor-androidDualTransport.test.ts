@@ -146,3 +146,25 @@ describe("disconnect monitor folds a re-ported wireless transport (#11133)", () 
     }
   });
 });
+
+describe("listed-state probe follows a held phone's alias serials (#11133)", () => {
+  test.each(["offline", "authorizing"])(
+    "USB unplugged while the Wi-Fi alias is %s keeps the session on the first sweep",
+    async (state) => {
+      const h = await harness([USB, WIFI]);
+      expect(h.canonical).toBe(USB);
+      h.manager.bootedDevices = [];
+      h.manager.androidListedDeviceStates = new Map([[WIFI, state]]);
+      try {
+        await h.monitor.run();
+        expect(h.cleanups).toEqual([]);
+        expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+        expect(h.pool.getDevice(USB)?.sessionId).toBe("owner");
+        // `offline` is held by the offline budget; other states keep the debounce.
+        expect(h.daemon.deviceDisconnectMisses.get(USB)).toBe(state === "offline" ? undefined : 1);
+      } finally {
+        await h.monitor.stop();
+      }
+    },
+  );
+});

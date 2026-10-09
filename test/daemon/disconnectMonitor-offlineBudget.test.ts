@@ -99,6 +99,7 @@ function offlineMonitorHarness(deviceId = EMULATOR, initialRow = ROWS.device) {
       retryDueDeferredSessionRecoveries: async () => {},
       reconcileDiscoveryObservation: async () => {},
       mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
+      getAndroidTransportAliases: (): string[] => [],
       getAllDevices: () => [device],
       isDeviceLeasedForAndroidStartup: () => false,
       releaseAdbServerResetCohortReservations: async () => {},

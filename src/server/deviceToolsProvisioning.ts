@@ -1,3 +1,4 @@
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { observeConfiguredDeviceResources } from "./deviceResourceTools";
 import { computeDeviceResourceDrift } from "../utils/deviceResourceDrift";
@@ -1366,6 +1367,14 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     const knownError = knownProvisionDeviceError(error);
     if (knownError) {
       return knownError;
+    }
+    if (error instanceof InputDeviceOwnedError) {
+      return new ProvisionDeviceError(
+        "device_owned_by_other_session",
+        `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
+        true,
+        { deviceId: error.deviceId },
+      );
     }
     if (error instanceof RunnerReadinessError) {
       const cause = error.diagnosticCause;

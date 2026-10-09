@@ -95,6 +95,7 @@ export type ProvisionDeviceFailureCode =
   | "cleanup_failed"
   | "creation_not_allowed"
   | "device_lost"
+  | "device_owned_by_other_session"
   | "device_offline"
   | "discovery_incomplete"
   | "identity_conflict"
@@ -111,6 +112,8 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   cleanup_failed: false,
   creation_not_allowed: false,
   device_lost: true,
+  // Transient: the holder can release the device, after which the same operation can succeed.
+  device_owned_by_other_session: true,
   device_offline: true,
   discovery_incomplete: true,
   identity_conflict: false,

@@ -1,5 +1,8 @@
 import { captureAutolockPolicy } from "./deviceAutolockPolicy";
-import { InputDeviceOwnedError } from "./inputDeviceOwnership";
+import {
+  deviceAlreadyAssignedToAnotherSessionError,
+  InputDeviceOwnedError,
+} from "./inputDeviceOwnership";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { logger } from "../utils/logger";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
@@ -429,10 +432,7 @@ export class DeviceAutolockManager {
       mcpSessionId &&
       this.mcpSessionAutolockMap.get(mcpSessionId) !== client.expectedSessionId
     ) {
-      throw new ActionableError(
-        `Device '${device.id}' is already assigned to another session. ` +
-          "Acquire a different device or wait for its owner to release it.",
-      );
+      throw deviceAlreadyAssignedToAnotherSessionError(device.id);
     }
     const session = device.sessionId
       ? this.pool.getSessionManager().getSession(device.sessionId)
@@ -441,10 +441,7 @@ export class DeviceAutolockManager {
       return undefined;
     }
     if (!this.isOwnedAutolockSession(device, session, mcpSessionId)) {
-      throw new ActionableError(
-        `Device '${device.id}' is already assigned to another session. ` +
-          "Acquire a different device or wait for its owner to release it.",
-      );
+      throw deviceAlreadyAssignedToAnotherSessionError(device.id);
     }
     return session;
   }

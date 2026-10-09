@@ -1,3 +1,4 @@
+import { deviceAlreadyAssignedToAnotherSessionError } from "../../src/daemon/inputDeviceOwnership";
 import { FakeDeviceResourceObserver } from "../fakes/FakeDeviceResourceObserver";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { warmedTests } from "../helpers/warmedTests";
@@ -6019,6 +6020,31 @@ describe("provisionDevice handler", () => {
       expect(timer.getSleepHistory()).toEqual([]);
     },
   );
+
+  test("a device held by another session is a typed retryable device_owned_by_other_session failure", async () => {
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        throw deviceAlreadyAssignedToAnotherSessionError("emulator-5554");
+      },
+    });
+
+    const response = JSON.parse(
+      await provisionResponseText(provisionTestArgs("android", "held-by-other-session")),
+    );
+
+    expect(response).toMatchObject({
+      error: {
+        code: "device_owned_by_other_session",
+        retryable: true,
+        deviceId: "emulator-5554",
+      },
+    });
+    expect(operationStore.failCodes).toEqual(["device_owned_by_other_session"]);
+  });
 
   test("preserves missing-device diagnostics and reuses the failed operation identity", async () => {
     deviceManager.setBootedDevices("android", [

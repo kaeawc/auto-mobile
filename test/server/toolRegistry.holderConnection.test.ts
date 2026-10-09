@@ -102,7 +102,7 @@ describe("deviceId-only calls from the holder's own connection (#10994)", () => 
     }
   });
 
-  test("the holder's observe {deviceId} runs as its session and extends the idle window", async () => {
+  test("the holder's observe {deviceId} runs as its session but does not extend the idle window (#10964)", async () => {
     const before = lastUsedAt();
     const expiresBefore = manager.getSession(HOLDER)!.expiresAt;
     timer.advanceTime(90_000);
@@ -111,11 +111,48 @@ describe("deviceId-only calls from the holder's own connection (#10994)", () => 
 
     expect(tools.runs).toEqual([{ name: "observe", deviceId: held.deviceId, sessionUuid: HOLDER }]);
     expect(tools.watcherResolutions).toBe(0);
-    expect(lastUsedAt()).toBe(before + 90_000);
-    expect(manager.getSession(HOLDER)!.expiresAt).toBeGreaterThan(expiresBefore);
+    // No read counts as activity, not even the owner's own (owner decision 2026-10-09).
+    expect(lastUsedAt()).toBe(before);
+    expect(manager.getSession(HOLDER)!.expiresAt).toBe(expiresBefore);
   });
 
-  test("another connection's read stays a watcher with no readiness and no credit; the holder's takes its session path", async () => {
+  test("the holder's observe {sessionUuid} does not extend the idle window either (#10964)", async () => {
+    const before = lastUsedAt();
+    const expiresBefore = manager.getSession(HOLDER)!.expiresAt;
+    timer.advanceTime(30_000);
+
+    await tools.call("observe", { sessionUuid: HOLDER });
+
+    expect(tools.runs).toEqual([{ name: "observe", deviceId: held.deviceId, sessionUuid: HOLDER }]);
+    expect(lastUsedAt()).toBe(before);
+    expect(manager.getSession(HOLDER)!.expiresAt).toBe(expiresBefore);
+  });
+
+  test("an owner that only observes every 30 s loses its device at the idle window (#10964)", async () => {
+    const expiresAt = manager.getSession(HOLDER)!.expiresAt;
+    while (timer.now() + 30_000 < expiresAt) {
+      timer.advanceTime(30_000);
+      await fromConnection(HOLDER_CONNECTION, "observe", { deviceId: held.deviceId });
+      expect(manager.getSession(HOLDER)!.expiresAt).toBe(expiresAt);
+    }
+    timer.setCurrentTime(expiresAt + 1);
+
+    expect(manager.getSessionForNewExecution(HOLDER)).toBeNull();
+  });
+
+  test("an owner that taps by deviceId every 30 s keeps its device past the idle window (#10964)", async () => {
+    const firstExpiry = manager.getSession(HOLDER)!.expiresAt;
+    for (let elapsed = 0; elapsed < 3 * 60_000; elapsed += 30_000) {
+      timer.advanceTime(30_000);
+      await fromConnection(HOLDER_CONNECTION, "tapOn", { deviceId: held.deviceId, text: "Next" });
+    }
+
+    expect(timer.now()).toBeGreaterThan(firstExpiry);
+    expect(manager.getSessionForNewExecution(HOLDER)).not.toBeNull();
+    expect(manager.getSession(HOLDER)!.expiresAt).toBeGreaterThan(timer.now());
+  });
+
+  test("another connection's read stays a watcher with no readiness; the holder's takes its session path; neither is credited", async () => {
     const before = lastUsedAt();
     timer.advanceTime(30_000);
 
@@ -133,7 +170,8 @@ describe("deviceId-only calls from the holder's own connection (#10994)", () => 
     ]);
     // Session readiness (already automationReady here), not the watcher's booted-list lookup.
     expect(tools.watcherResolutions).toBe(1);
-    expect(lastUsedAt()).toBe(before + 30_000);
+    // The holder's read is not use either (#10964).
+    expect(lastUsedAt()).toBe(before);
   });
 
   test("a sessionless call with no forwarded connection stays a watcher", async () => {

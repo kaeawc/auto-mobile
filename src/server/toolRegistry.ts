@@ -41,7 +41,11 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { logger, type Logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import { PLAN_AUTO_RELEASE_REASON, UnissuedSessionError } from "../daemon/sessionManager";
+import {
+  PLAN_AUTO_RELEASE_REASON,
+  UnissuedSessionError,
+  type Session,
+} from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
 import { assertInputRequesterHoldsDevice, TOOL_CALL_REMEDY } from "../daemon/inputDeviceOwnership";
 import {
@@ -749,29 +753,26 @@ function foreignDeviceRead(
 }
 
 /**
- * Whether `sessionUuid` names no device session this daemon issued (#10968): not live, not
- * terminal and not a recoverable persisted row. Admission is read-only, so it never refreshes or
- * claims a session. A terminal session keeps its typed error for the caller.
+ * Admit a read under its session without refreshing or claiming it (#10964): the live session, or
+ * null when the id names no live device session this daemon can route the read to (never issued,
+ * such as an IDE observer session (#10968), or not live) so the read runs sessionless. A terminal
+ * or suspect session keeps its typed error. Undefined when there is no daemon session manager.
  */
-async function isUnissuedDeviceSession(
+async function admitReadSession(
   sessionUuid: string,
   execution: { executionId: string; startTime: number } | undefined,
-): Promise<boolean> {
+): Promise<Session | null | undefined> {
   if (!DaemonState.getInstance().isInitialized()) {
-    return false;
-  }
-  const sessionManager = DaemonState.getInstance().getSessionManager();
-  if (sessionManager.getSession(sessionUuid)) {
-    return false;
+    return undefined;
   }
   try {
-    await sessionManager.admitIssuedSessionForAutomation(sessionUuid, execution, {
-      access: "read-only",
-    });
-    return false;
+    const session = await DaemonState.getInstance()
+      .getSessionManager()
+      .admitIssuedSessionForAutomation(sessionUuid, execution, { access: "read-only" });
+    return session?.assignedDevice ? session : null;
   } catch (error) {
     if (error instanceof UnissuedSessionError) {
-      return true;
+      return null;
     }
     throw error;
   }
@@ -970,16 +971,17 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // A read is not use of the session it runs under, so it is never echoed as routed (#10974).
       executionTracker.markDeviceReadCall(execution.executionId);
     }
-    if (
-      readOnly &&
-      sessionUuid &&
-      shouldResolveDevice &&
-      (await isUnissuedDeviceSession(sessionUuid, execution))
-    ) {
-      // Read-only access never requires a session (#10968): a read carrying an id this daemon
-      // never issued as a device session (an IDE observer session) runs as a sessionless read.
+    // A read is admitted read-only (#10964): it never refreshes or claims the session, and its end
+    // is not use. Only control calls extend a session's idle deadline.
+    const readSession =
+      readOnly && sessionUuid && shouldResolveDevice
+        ? await admitReadSession(sessionUuid, execution)
+        : undefined;
+    if (readSession === null) {
+      // Read-only access never requires a session (#10968): a read carrying an id that names no
+      // live device session (an IDE observer session) runs as a sessionless read.
       logger.info(
-        `[ToolRegistry] ${name}: ${sessionUuid} is not a device session; reading sessionlessly`,
+        `[ToolRegistry] ${name}: ${sessionUuid} is not a live device session; reading sessionlessly`,
       );
       sessionUuid = undefined;
       delete args.sessionUuid;
@@ -1037,12 +1039,11 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // A terminal ID keeps its durable TerminalSessionError. Only an ID that
       // was live during daemon restart can reach context creation without a
       // live session; never-issued IDs are rejected before assignment.
-      const admittedSession = await sessionManager.admitIssuedSessionForAutomation(
-        sessionUuid,
-        execution,
-      );
-      if (execution) {
-        // Only an admitted call's end is session use (#10824).
+      const admittedSession =
+        readSession ??
+        (await sessionManager.admitIssuedSessionForAutomation(sessionUuid, execution));
+      if (execution && !readSession) {
+        // Only an admitted control call's end is session use (#10824, #10964).
         executionTracker.markSessionAdmitted(execution.executionId);
       }
       assertSessionDeviceRouting(

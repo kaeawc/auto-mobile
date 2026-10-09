@@ -185,6 +185,10 @@ guarded by the pool's own owner check instead.
 
 Owner decisions 2026-10-08 (#10730) settle the viewing question: watching is
 allowed on any device, whichever session owns it, and watching is not use.
+Owner decision 2026-10-09 (#10964) extends that to the owner: no read counts as
+activity. A `deviceReadOnly` call naming a live session is admitted with
+`access: "read-only"` (no refresh, no `markSessionAdmitted`), so only control
+calls move `lastUsedAt`/`expiresAt`.
 Desktop input is use. The desktop and IDE clients register an observer session
 that allocates nothing, allocate a device with `setActiveDevice` on the first
 `input/*` to it, and send input under that session, so each input restarts the

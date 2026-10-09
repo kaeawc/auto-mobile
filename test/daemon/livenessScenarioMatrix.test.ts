@@ -165,9 +165,10 @@ describe("the daemon's idle instant outranks the proxy's own idle clock (#10823)
     // A call on the proxy's own daemon connection that bypasses the proxy (another path on the
     // same host, e.g. a tool call replayed by the host): the daemon sees use, the proxy does not.
     await scenario.idle(IDLE_WINDOW_MS - 20_000);
+    // A control call: no read counts as use (#10964).
     await scenario.daemonToolCallWith(
       { sessionUuid: session },
-      "observe",
+      "homeScreen",
       scenario.proxyConnection,
     );
     const usedAt = scenario.timer.now();
@@ -727,6 +728,33 @@ describe("the daemon echoes the session a call used (#10974)", () => {
 
     expect(routedSessionUuidFromResult(control)).toBe(session);
     expect(routedSessionUuidFromResult(read)).toBeUndefined();
+  });
+});
+
+describe("reads are not activity (#10964)", () => {
+  test("a session whose owner only observes by deviceId is freed one idle window after acquisition", async () => {
+    scenario = await LivenessScenario.start({ devices: [DEVICE_A] });
+    const acquiredAt = scenario.timer.now();
+    const provisioned = await scenario.provision(DEVICE_A);
+
+    // Held side: observing every 30 s inside the first window neither refreshes nor loses it.
+    for (let elapsed = 30_000; elapsed < IDLE_WINDOW_MS; elapsed += 30_000) {
+      await scenario.idle(30_000);
+      await scenario.selectorCall(DEVICE_A, "observe", {});
+    }
+    expectHeld(provisioned, DEVICE_A);
+
+    // Released side: the window ran from acquisition, not from the last observe.
+    const lastObserveAt = scenario.timer.now();
+    const releasedAt = await scenario.idleUntilReleased(
+      provisioned,
+      IDLE_WINDOW_MS + RELEASE_SLACK_MS,
+    );
+    expect(releasedAt).toBeDefined();
+    expect(releasedAt!).toBeLessThanOrEqual(acquiredAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(releasedAt!).toBeLessThan(lastObserveAt + IDLE_WINDOW_MS);
+    expect(IDLE_REASONS).toContain(scenario.releaseOf(provisioned)?.reason!);
+    expectFreed(DEVICE_A);
   });
 });
 

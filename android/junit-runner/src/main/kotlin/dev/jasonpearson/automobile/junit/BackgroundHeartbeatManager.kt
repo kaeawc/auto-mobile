@@ -14,6 +14,7 @@ internal class BackgroundHeartbeatManager(
   },
 ) {
   private val sessions = ConcurrentHashMap.newKeySet<String>()
+  private val losses = ConcurrentHashMap<String, DaemonSessionLoss>()
   @Volatile private var running = AtomicBoolean(false)
   private val startLock = Any()
   private val refCount = AtomicInteger(0)
@@ -37,6 +38,8 @@ internal class BackgroundHeartbeatManager(
   }
 
   fun addSession(sessionId: String) {
+    // A released UUID is terminal on the daemon (#11072): never heartbeat it again.
+    if (losses.containsKey(sessionId)) return
     synchronized(startLock) {
       sessions.add(sessionId)
       ensureRunning()
@@ -46,6 +49,9 @@ internal class BackgroundHeartbeatManager(
   fun removeSession(sessionId: String) {
     sessions.remove(sessionId)
   }
+
+  /** Why the daemon released [sessionId] while it was heartbeated, or null if it has not. */
+  fun sessionLoss(sessionId: String): DaemonSessionLoss? = losses[sessionId]
 
   // Called under startLock so holder changes and thread lifecycle stay together.
   private fun ensureRunning() {
@@ -76,8 +82,21 @@ internal class BackgroundHeartbeatManager(
       snapshot.forEach { sessionId ->
         try {
           sendHeartbeat(sessionId)
+        } catch (released: DaemonSessionReleasedException) {
+          // The daemon no longer holds this session (#11072): record why, so recovery fails fast
+          // with the daemon's reason instead of driving a device it lost, and stop heartbeating.
+          val loss =
+            DaemonSessionLoss(
+              sessionId,
+              released.releaseReason,
+              released.message ?: "Session not found",
+            )
+          losses[sessionId] = loss
+          sessions.remove(sessionId)
+          println("Warning: ${loss.describe()}; no longer heartbeating it")
         } catch (_: Exception) {
-          // Best-effort heartbeat; ignore failures
+          // A missed heartbeat is transient (daemon restarting, socket busy); the next tick
+          // retries.
         }
       }
 

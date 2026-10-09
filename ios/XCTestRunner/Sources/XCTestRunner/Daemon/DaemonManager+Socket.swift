@@ -146,7 +146,34 @@ extension DaemonManager {
         )
     }
 
-    private static func sendDaemonRequest(_ request: String, timeoutSeconds: TimeInterval) -> [String: Any]? {
+    /// Send one `daemon_request` for `method` to the daemon at `socketPath` and return its decoded
+    /// response line, or nil when the daemon is unreachable or the request could not be built.
+    static func sendDaemonMethod(
+        _ method: String,
+        params: [String: Any],
+        socketPath: String,
+        timeoutSeconds: TimeInterval
+    )
+        -> [String: Any]?
+    {
+        guard let requestLine = buildDaemonRequestLine(
+            id: UUID().uuidString,
+            method: method,
+            params: params,
+            clientVersion: resolveDaemonClientVersion()
+        ) else {
+            return nil
+        }
+        return sendDaemonRequest(requestLine, timeoutSeconds: timeoutSeconds, socketPath: socketPath)
+    }
+
+    private static func sendDaemonRequest(
+        _ request: String,
+        timeoutSeconds: TimeInterval,
+        socketPath: String = DaemonManager.socketPath
+    )
+        -> [String: Any]?
+    {
         let socketFd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard socketFd >= 0 else {
             print("[AutoMobile] Failed to create socket")

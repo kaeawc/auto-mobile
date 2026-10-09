@@ -557,6 +557,32 @@ internal object AutoMobilePlanExecutor {
 
   // ── Failure handling & recovery ───────────────────────────────────────────
 
+  /**
+   * The failure to report when the daemon released [sessionUuid] while the runner heartbeated it
+   * (#11072), or null while the session is still held. The daemon already freed the session, so
+   * there is nothing to release.
+   */
+  private fun sessionLossFailure(
+    sessionUuid: String?,
+    result: CommandResult,
+    errorMessage: String,
+    toolResults: List<ToolResultEntry>,
+    recoveryAttempted: Boolean,
+  ): InternalExecutionResult? {
+    val loss = sessionUuid?.let { DaemonHeartbeat.sessionLoss(it) } ?: return null
+    val reason = "AI recovery cannot continue: ${loss.describe()}"
+    System.err.println(reason)
+    return InternalExecutionResult(
+      success = false,
+      exitCode = result.exitCode,
+      output = result.output,
+      errorMessage = "$errorMessage\n$reason",
+      aiRecoveryAttempted = recoveryAttempted,
+      aiRecoverySuccessful = false,
+      toolResults = toolResults,
+    )
+  }
+
   private fun handleFailure(
     result: CommandResult,
     options: AutoMobilePlanExecutionOptions,
@@ -613,6 +639,18 @@ internal object AutoMobilePlanExecutor {
     // The failed attempt unregistered its session when executePlan returned; keep it heartbeating
     // while recovery's calls (which carry it) hold the device, or the daemon idle-releases it.
     val recoverySession = failedStepContext.sessionUuid
+    // The daemon already released the failed attempt's session (#11072): recovery would drive a
+    // device the runner no longer holds, so fail now with the daemon's reason.
+    sessionLossFailure(
+        recoverySession,
+        result,
+        errorMessage,
+        toolResults,
+        recoveryAttempted = false,
+      )
+      ?.let {
+        return it
+      }
     if (recoverySession != null) DaemonHeartbeat.registerSession(recoverySession)
     val recoveryOutcome =
       try {
@@ -622,6 +660,12 @@ internal object AutoMobilePlanExecutor {
         throw error
       } finally {
         if (recoverySession != null) DaemonHeartbeat.unregisterSession(recoverySession)
+      }
+
+    // Released while recovery ran: never resume on it, whatever recovery reported.
+    sessionLossFailure(recoverySession, result, errorMessage, toolResults, recoveryAttempted = true)
+      ?.let {
+        return it
       }
 
     if (!recoveryOutcome.success) {

@@ -79,6 +79,14 @@ const val HIDDEN_RELEASE_GRACE_MS = 10_000L
  */
 const val INPUT_ALLOCATION_TIMEOUT_MS = 10_000L
 
+/**
+ * How long heartbeats may keep failing for a reason other than the daemon answering "session not
+ * found" before a held device is treated as lost (#11072): the daemon's heartbeat lease plus its
+ * grace. A shorter blip (a connect error, a daemon briefly busy or restarting its socket) keeps the
+ * hold and retries on the next tick, since the daemon still holds the session.
+ */
+const val HEARTBEAT_LAPSE_MS = 8_000L
+
 /** A device a visible pane shows, and the platform `setActiveDevice` needs to allocate it. */
 data class DesktopDaemonSessionBinding(val deviceId: String, val platform: String)
 
@@ -269,6 +277,8 @@ fun rememberDesktopDaemonSession(
   activeRecordings: ActiveRecordingTracker = remember { ActiveRecordingTracker() },
   onDaemonRecovered: suspend () -> Boolean = { true },
   bindRetryBackoff: BindRetryBackoff = BindRetryBackoff.Default,
+  /** Monotonic milliseconds, for [HEARTBEAT_LAPSE_MS]; tests pass their virtual clock. */
+  monotonicClockMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ): DesktopDaemonSessionState {
   // Bumped to replace the session with a fresh one (#10659). Releasing a session is how a hold is
   // dropped, and a released UUID is terminal on the daemon, so the fresh one registers as an
@@ -473,6 +483,9 @@ fun rememberDesktopDaemonSession(
     // holds a device the user no longer drives (#10682 C3), or the daemon released its UUID
     // terminally so it can never bind again (C4).
     var rotateSession = false
+    // When a heartbeat last reached the daemon. Transient failures keep a held device until this is
+    // more than [HEARTBEAT_LAPSE_MS] old (#11072).
+    var lastHeartbeatOkAtMs = monotonicClockMs()
     while (isActive && bindingGeneration.get() == generation) {
       val registered = runCatching {
         bindingMutex.withLock {
@@ -604,9 +617,15 @@ fun rememberDesktopDaemonSession(
         .onFailure { error ->
           if (error is CancellationException) throw error
           lapse = error
-          LOG.warn("Desktop daemon session lapsed, re-registering: ${error.message}")
+          LOG.warn("Desktop daemon session heartbeat failed: ${error.message}")
         }
         .isSuccess
+      if (alive) lastHeartbeatOkAtMs = monotonicClockMs()
+      // Only the daemon's "session not found" means the session is gone. Any other failure (a
+      // connect error, a missing socket, a daemon still initializing) is retried on the next tick,
+      // and only a streak longer than the lease plus grace counts as a lapse (#11072).
+      val sessionGone = lapse is DaemonSessionNotFoundException
+      val lapsedPastLease = !alive && monotonicClockMs() - lastHeartbeatOkAtMs > HEARTBEAT_LAPSE_MS
       if (alive && failedBinds >= MAX_BIND_ATTEMPTS && bindErrorMessage != null) {
         if (bindErrorWaitTicks < 0) {
           val delayMs = bindRetryBackoff.delayMs(bindErrorRetries)
@@ -625,6 +644,10 @@ fun rememberDesktopDaemonSession(
         ticksWithBindError = 0
         bindErrorWaitTicks = -1
       }
+      if (!alive && bindingAcknowledged && target != null && !sessionGone && !lapsedPastLease) {
+        // A transient miss: the daemon still holds the session, so keep the device and retry.
+        continue
+      }
       if (!alive && bindingAcknowledged && target != null) {
         // The daemon no longer has this session's hold: it idle-released it after the idle window
         // (owner decision 2026-10-08), restarted, or expired the session. Drop back to watching
@@ -637,7 +660,13 @@ fun rememberDesktopDaemonSession(
         heldDevice.set(null)
         idleReleasedDeviceId = target.deviceId
         releaseReason =
-          SessionReleaseReason.fromDaemon((lapse as? DaemonSessionNotFoundException)?.releaseReason)
+          if (sessionGone) {
+            SessionReleaseReason.fromDaemon(
+              (lapse as? DaemonSessionNotFoundException)?.releaseReason,
+            )
+          } else {
+            SessionReleaseReason.HEARTBEAT_LAPSED
+          }
         inputDeviceId = null
         pendingRecoveryRefresh.set(true)
         sessionEpoch++

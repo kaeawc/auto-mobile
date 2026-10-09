@@ -251,6 +251,124 @@ class McpDaemonClientInputTest {
   }
 
   @Test
+  fun `session keep-alive ticks never run the lifecycle ensurer and carry a hang ceiling`() {
+    // #11072: the desktop heartbeat ran the lifecycle preflight every 2 s, so a tick started a
+    // daemon the user had stopped or restarted one of another version. Register and heartbeat
+    // must stay passive even when the ensurer would refuse (and so would also restart).
+    var lifecycleCalls = 0
+    val lifecycle =
+      object : DaemonLifecycleEnsurer {
+        override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult {
+          lifecycleCalls++
+          return DaemonLifecycleResult.Failure("daemon version mismatch")
+        }
+      }
+
+    TestDaemonSocket(
+        responses =
+          listOf(
+            SocketResponse(
+              """{ "accepted": true, "heartbeatTimeoutMs": 30000, "expiresAtMs": 1 }""",
+            ),
+            SocketResponse("""{ "ok": true }"""),
+            SocketResponse("""{ "ok": true }"""),
+          ),
+      )
+      .use { server ->
+        val session =
+          DesktopDaemonSession(
+            McpDaemonClient(
+              socketPathValue = server.socketPath.toString(),
+              daemonLifecycle = lifecycle,
+              sessionUuid = "desktop-session",
+            ),
+          )
+
+        session.ensureRegistered()
+        session.heartbeat()
+        session.heartbeat()
+
+        val requests = server.awaitRequests()
+        assertEquals(0, lifecycleCalls)
+        assertEquals(
+          listOf("daemon/registerSession", "daemon/heartbeat", "daemon/heartbeat"),
+          requests.map { it.method },
+        )
+        requests.forEach {
+          assertEquals(McpDaemonClient.SESSION_KEEPALIVE_TIMEOUT_MS, it.timeoutMs)
+        }
+      }
+  }
+
+  @Test
+  fun `a heartbeat with no daemon is a lapse and never starts one`() {
+    var lifecycleCalls = 0
+    val lifecycle =
+      object : DaemonLifecycleEnsurer {
+        override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult {
+          lifecycleCalls++
+          return DaemonLifecycleResult.Ready(restarted = false)
+        }
+      }
+    val session =
+      DesktopDaemonSession(
+        McpDaemonClient(
+          socketPathValue = "/tmp/am-no-daemon-${System.nanoTime()}.sock",
+          daemonLifecycle = lifecycle,
+          sessionUuid = "desktop-session",
+        ),
+      )
+
+    assertFailsWith<DaemonUnavailableException> { session.heartbeat() }
+    assertFailsWith<DaemonUnavailableException> { session.ensureRegistered() }
+
+    assertEquals(0, lifecycleCalls)
+    assertFalse(session.isRegistered.value)
+  }
+
+  @Test
+  fun `a heartbeat to a daemon that never replies fails at the keep-alive ceiling`() {
+    val socketDir = Files.createTempDirectory(Path.of("/tmp"), "am-hb-hang-")
+    val socketPath = socketDir.resolve("daemon.sock")
+    val server = ServerSocketChannel.open(StandardProtocolFamily.UNIX)
+    server.bind(UnixDomainSocketAddress.of(socketPath))
+    var accepted: java.nio.channels.SocketChannel? = null
+    val accepter = Thread {
+      try {
+        accepted = server.accept() // Hold the connection open and never reply.
+        while (!Thread.currentThread().isInterrupted) Thread.sleep(50)
+      } catch (_: Exception) {
+        // Server/channel closed by the test's cleanup: the hang is over.
+      }
+    }
+      .apply {
+        isDaemon = true
+        start()
+      }
+    try {
+      val client =
+        McpDaemonClient(
+          socketPathValue = socketPath.toString(),
+          daemonLifecycle =
+            object : DaemonLifecycleEnsurer {
+              override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult =
+                throw AssertionError("a heartbeat must not run the lifecycle ensurer")
+            },
+          sessionUuid = "desktop-session",
+          sessionKeepaliveTimeoutMs = 100,
+        )
+      val error = assertFailsWith<DaemonUnavailableException> { client.heartbeatSession() }
+      assertTrue(error.message.orEmpty().contains("timed out"))
+    } finally {
+      accepter.interrupt()
+      accepted?.close()
+      server.close()
+      Files.deleteIfExists(socketPath)
+      Files.deleteIfExists(socketDir)
+    }
+  }
+
+  @Test
   fun `bounded requests send their deadline as timeoutMs and unbounded tool calls omit it`() {
     TestDaemonSocket(
         responses =

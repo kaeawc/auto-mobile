@@ -98,7 +98,8 @@ class DesktopDaemonSessionCompositionTest {
       assertTrue(input(host, pixel.deviceId))
       repeat(2) { tick() }
 
-      transport.failNext("daemon/heartbeat")
+      transport.releasedSessions += "session-1"
+      transport.releaseReasons["session-1"] = ""
       tick()
       settle()
       repeat(40) { tick() }
@@ -118,6 +119,53 @@ class DesktopDaemonSessionCompositionTest {
       assertEquals(listOf("emulator-5554", "emulator-5554"), transport.boundDevices())
       assertEquals("emulator-5554", host.state().boundDeviceId)
       assertEquals(null, host.state().idleReleasedDeviceId)
+    }
+
+  @Test
+  fun `one transient heartbeat failure keeps the held device (#11072)`() = runComposeUiTest {
+    // A connect error or a daemon briefly unreachable is not a release: the daemon still holds
+    // the session, so dropping the device would hand it to another harness for nothing.
+    val transport = RecordingDaemonTransport()
+    val host = start(transport, listOf(pixel))
+    assertTrue(input(host, pixel.deviceId))
+    repeat(2) { tick() }
+
+    transport.failNext("daemon/heartbeat")
+    tick()
+    settle()
+    repeat(3) { tick() }
+
+    assertEquals(listOf("emulator-5554"), transport.boundDevices())
+    assertEquals(emptyList(), transport.sessionsFor("daemon/releaseSession"))
+    assertEquals("emulator-5554", host.state().boundDeviceId)
+    assertEquals(null, host.state().idleReleasedDeviceId)
+    assertEquals("session-1", host.state().sessionUuidProvider())
+  }
+
+  @Test
+  fun `heartbeat failures past the lease and grace drop the held device (#11072)`() =
+    runComposeUiTest {
+      val transport = RecordingDaemonTransport()
+      val host = start(transport, listOf(pixel))
+      assertTrue(input(host, pixel.deviceId))
+      repeat(2) { tick() }
+
+      transport.unavailable += "daemon/heartbeat"
+      // 8 s of failures (four ticks) is within the lease plus grace: still held.
+      repeat(4) { tick() }
+      assertEquals("emulator-5554", host.state().boundDeviceId)
+      assertEquals(null, host.state().idleReleasedDeviceId)
+
+      tick()
+      settle()
+      transport.unavailable -= "daemon/heartbeat"
+      repeat(2) { tick() }
+
+      assertEquals(listOf("emulator-5554"), transport.boundDevices())
+      assertEquals(null, host.state().boundDeviceId)
+      assertEquals("emulator-5554", host.state().idleReleasedDeviceId)
+      assertEquals(SessionReleaseReason.HEARTBEAT_LAPSED, host.state().releaseReason)
+      assertEquals("session-2", host.state().sessionUuidProvider())
     }
 
   @Test
@@ -813,7 +861,10 @@ class DesktopDaemonSessionCompositionTest {
     inputAllocationTimeoutMs: Long = INPUT_ALLOCATION_TIMEOUT_MS,
     bindRetryBackoff: BindRetryBackoff = BindRetryBackoff { BIND_ERROR_RETRY_MAX_DELAY_MS },
   ): Host {
-    val host = Host(transport, panes, visible, inputAllocationTimeoutMs, bindRetryBackoff)
+    val host =
+      Host(transport, panes, visible, inputAllocationTimeoutMs, bindRetryBackoff) {
+        mainClock.currentTime
+      }
     setContent { host.compose() }
     mainClock.autoAdvance = false
     mainClock.advanceTimeByFrame()
@@ -826,6 +877,7 @@ class DesktopDaemonSessionCompositionTest {
     visible: Boolean,
     private val inputAllocationTimeoutMs: Long,
     private val bindRetryBackoff: BindRetryBackoff,
+    private val clockMs: () -> Long,
   ) {
     val panes: MutableState<List<DesktopDaemonSessionBinding>> = mutableStateOf(panes)
     val visible: MutableState<Boolean> = mutableStateOf(visible)
@@ -844,6 +896,7 @@ class DesktopDaemonSessionCompositionTest {
           activeRecordings = recordings,
           inputAllocationTimeoutMs = inputAllocationTimeoutMs,
           bindRetryBackoff = bindRetryBackoff,
+          monotonicClockMs = clockMs,
           sessionFactory = {
             DesktopDaemonSession(
               McpDaemonClient(transport, sessionUuid = "session-${++sessionCounter}"),

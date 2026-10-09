@@ -242,6 +242,38 @@ describe("DeviceSessionManager", () => {
     expect(accessibilityManager.wasMethodCalled("setup")).toBe(true);
   });
 
+  // #10905: a call cancelled mid-readiness (another session acquired the device) kept going and
+  // installed CtrlProxy, pinned the current device and wrote settings on the new holder's device.
+  test("readiness cancelled during the CtrlProxy status check makes no device-mutating call", async () => {
+    const controller = new AbortController();
+    const accessibilityManager = new FakeCtrlProxyManager();
+    accessibilityManager.setInstalled(false);
+    accessibilityManager.setEnabled(false);
+    const isEnabled = accessibilityManager.isEnabled.bind(accessibilityManager);
+    accessibilityManager.isEnabled = async () => {
+      controller.abort(new Error("another session acquired the device"));
+      return await isEnabled();
+    };
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+        verifyServiceReady: () => Promise.resolve(true),
+      }),
+    });
+    const manager = createTestSessionManager(provider);
+
+    await expect(
+      manager.ensureDeviceReady("android", "device-1", { signal: controller.signal }),
+    ).rejects.toThrow("another session acquired the device");
+
+    expect(accessibilityManager.wasMethodCalled("setup")).toBe(false);
+    expect(accessibilityManager.wasMethodCalled("enable")).toBe(false);
+    expect(manager.getCurrentDevice()).toBeUndefined();
+  });
+
   test("verifyAndroidDevice rejects a failed CtrlProxy setup result", async () => {
     const accessibilityManager = new FakeCtrlProxyManager();
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {

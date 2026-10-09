@@ -1366,6 +1366,9 @@ export class SessionManager {
   private expiryReleaseExecutionCanceller: ExpiryReleaseExecutionCanceller = () => undefined;
   private deviceAcquisitionExecutionCanceller: DeviceAcquisitionExecutionCanceller = () =>
     undefined;
+  // Session ids whose acquisition cancellation waits for the pool to commit the create (#10905):
+  // a create can still be refused or rolled back after publish. Value: the device it published.
+  private readonly deferredAcquisitionCancellations = new Map<string, string | undefined>();
 
   // Idle window (heartbeats, no tool call): 2 minutes from the end of the last
   // tool call, env-overridable (see `./sessionLivenessWindows`).
@@ -1635,6 +1638,39 @@ export class SessionManager {
   }
 
   /**
+   * Hold the acquisition cancellation for `sessionId` until `settleDeviceAcquisitionCancellation`:
+   * the pool publishes a session before deciding whether the create commits (#10905).
+   */
+  deferDeviceAcquisitionCancellation(sessionId: string): void {
+    if (!this.deferredAcquisitionCancellations.has(sessionId)) {
+      this.deferredAcquisitionCancellations.set(sessionId, undefined);
+    }
+  }
+
+  /**
+   * End a deferral: a committed create cancels the sessionless calls on the device it published; a
+   * refused or rolled-back one cancels nothing, since the device ends up free (#10905).
+   */
+  settleDeviceAcquisitionCancellation(sessionId: string, committed: boolean): void {
+    if (!this.deferredAcquisitionCancellations.has(sessionId)) {
+      return;
+    }
+    const deviceId = this.deferredAcquisitionCancellations.get(sessionId);
+    this.deferredAcquisitionCancellations.delete(sessionId);
+    if (committed && deviceId !== undefined) {
+      this.deviceAcquisitionExecutionCanceller(deviceId, sessionId);
+    }
+  }
+
+  private cancelSessionlessUseOnAcquisition(deviceId: string, sessionId: string): void {
+    if (this.deferredAcquisitionCancellations.has(sessionId)) {
+      this.deferredAcquisitionCancellations.set(sessionId, deviceId);
+      return;
+    }
+    this.deviceAcquisitionExecutionCanceller(deviceId, sessionId);
+  }
+
+  /**
    * Register cleanup for a device a session stopped using without ending that
    * session. This intentionally excludes session-wide cleanup and transport
    * unbinding, which must remain attached to a real session release.
@@ -1771,7 +1807,7 @@ export class SessionManager {
     this.sessions.set(session.sessionId, session);
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
-    this.deviceAcquisitionExecutionCanceller(session.assignedDevice, session.sessionId);
+    this.cancelSessionlessUseOnAcquisition(session.assignedDevice, session.sessionId);
     // Generation only: publishing an owner changes entitlement, not the screen/connection.
     this.notifyDeviceOwnershipChange(session.assignedDevice);
     this.notifySessionCreated(session);
@@ -2908,7 +2944,7 @@ export class SessionManager {
     }
     this.deviceSessionMap.set(assignedDevice, existing.sessionId);
     if (assignedDevice !== previousDevice) {
-      this.deviceAcquisitionExecutionCanceller(assignedDevice, existing.sessionId);
+      this.cancelSessionlessUseOnAcquisition(assignedDevice, existing.sessionId);
     }
     // Full: different-serial rebinds switch runtimes; same-serial force explicitly
     // means a restarted runtime. Terminal-release recovery also forces this path.

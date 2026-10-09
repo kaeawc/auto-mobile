@@ -39,6 +39,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
   private lastOptions: DeviceReadyOptions | undefined;
   private lastEnsureDeviceReadyPlatform: SomePlatform | undefined;
   private lastEnsureDeviceReadyDeviceId: string | undefined;
+  private ensureDeviceReadyHook: ((signal?: AbortSignal) => Promise<void>) | undefined;
 
   /**
    * Configure the list of connected devices
@@ -113,6 +114,14 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
 
   setPlatformScanFailure(platform: Platform, shouldFail: boolean): void {
     this.failedPlatformScans[platform] = shouldFail;
+  }
+
+  /**
+   * Run `hook` inside ensureDeviceReady before it selects a device, standing in for slow readiness
+   * work. Like the real readiness, a call aborted meanwhile stops before pinning the device.
+   */
+  setEnsureDeviceReadyHook(hook: ((signal?: AbortSignal) => Promise<void>) | undefined): void {
+    this.ensureDeviceReadyHook = hook;
   }
 
   /**
@@ -244,6 +253,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     if (options?.getConnectedPlatforms) {
       await options.getConnectedPlatforms();
     }
+    await this.ensureDeviceReadyHook?.(options?.signal);
 
     if (this.simulateDisconnection) {
       throw new ActionableError("Device disconnected during verification");
@@ -305,6 +315,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
       throw new ActionableError("Window verification failed");
     }
 
+    options?.signal?.throwIfAborted();
     // Set as current device
     this.setCurrentDevice(selectedDevice, selectedDevice.platform);
 

@@ -705,9 +705,13 @@ export class DeviceSessionManager implements DeviceSessionManager {
       selectedDevice = await this.findOrStartDevice(resolvedPlatform, options);
     }
 
+    // A cancelled call (e.g. another session acquired the device, #10905) stops before each
+    // device-mutating step: the current-device pin and the settings writes.
+    options?.signal?.throwIfAborted();
     this.setCurrentDevice(selectedDevice, resolvedPlatform);
     if (deviceSource !== "current") {
       await applyAppearanceOnConnect(selectedDevice, this.appearanceOnConnectDependencies);
+      options?.signal?.throwIfAborted();
       await disableStylusHandwriting(selectedDevice, this.adbFactory);
     }
     logger.info(`[DeviceSessionManager] Using ${deviceSource} device: ${selectedDevice.deviceId}`);
@@ -1067,6 +1071,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
       const [isInstalled, isEnabled] = await perf.track("checkStatus", () =>
         Promise.all([manager.isInstalled(), manager.isEnabled()]),
       );
+      // Enabling or installing CtrlProxy mutates the device; a cancelled call stops here (#10905).
+      options?.signal?.throwIfAborted();
 
       state.needsSetup = false;
 
@@ -1121,13 +1127,15 @@ export class DeviceSessionManager implements DeviceSessionManager {
       }
 
       if (state.needsSetup || !isInstalled) {
+        options?.signal?.throwIfAborted();
         await this.setupAndroidService(deviceId, manager, accessibilityClient, perf, state);
       }
     } catch (error) {
       const errorMsg = errorMessage(error);
       logger.error(`[DeviceSessionManager] Failed to setup accessibility service: ${errorMsg}`);
-      // Rethrow ActionableErrors to preserve their specific error messages
-      if (error instanceof ActionableError) {
+      // Rethrow ActionableErrors to preserve their specific error messages, and cancellation so
+      // readiness does not go on to pin and configure the device (#10905).
+      if (error instanceof ActionableError || options?.signal?.aborted) {
         throw error;
       }
     } finally {

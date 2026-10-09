@@ -1019,14 +1019,19 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // Readiness acts on the device it selects (CtrlProxy setup, the current-device pin,
         // settings), so a call without a deviceId is checked against the device it would land
         // on first: a refused call leaves the holder's device untouched (#10828).
+        let readinessTarget = providedDeviceId;
         if (!providedDeviceId && !readOnly && DaemonState.getInstance().isInitialized()) {
-          assertToolCallerHoldsDevice(
-            name,
-            readOnly,
-            await predictReadinessTarget(platform, deviceSessionManager, getConnectedPlatforms),
-            sessionUuid,
-            autolockEnabled,
+          readinessTarget = await predictReadinessTarget(
+            platform,
+            deviceSessionManager,
+            getConnectedPlatforms,
           );
+        }
+        // Check and mark in one turn, before readiness: a session acquiring the target while
+        // readiness runs cancels this call, and readiness stops at its next device step (#10905).
+        assertToolCallerHoldsDevice(name, readOnly, readinessTarget, sessionUuid, autolockEnabled);
+        if (readinessTarget && execution && !sessionUuid && !readOnly) {
+          executionTracker.markSessionlessDeviceUse(execution.executionId, readinessTarget);
         }
         logger.info(
           `[ToolRegistry] ${name}: Resolving device for platform=${platform}, providedDeviceId=${providedDeviceId}`,
@@ -1041,6 +1046,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           signal,
           getConnectedPlatforms,
         });
+        if (readinessTarget && execution && readinessTarget !== device.deviceId) {
+          // Readiness settled elsewhere: the post-resolution check below marks that device.
+          executionTracker.unmarkSessionlessDeviceUse(execution.executionId, readinessTarget);
+        }
         // Discovery re-stamps observedAt; the serial/UDID stays stable until
         // the daemon's removal/release hooks invalidate this device.
         device = await hydrateDisplays(device, device.deviceId);

@@ -334,4 +334,66 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     expect(await call.outcome).toBeUndefined();
     expect(ran).toEqual([{ name: "rotate", deviceId: held.deviceId }]);
   });
+  /** Start a tracked call whose readiness parks until released; resolves once it is parked. */
+  async function startInReadiness(name: string, args: Record<string, unknown>) {
+    const release = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    devices.setEnsureDeviceReadyHook(async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    const outcome = tracked(name, args).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await entered.promise;
+    return { outcome, release: () => release.resolve() };
+  }
+
+  // #10905: the call was marked only after readiness, so an acquisition during a slow readiness
+  // cancelled nothing and readiness went on to pin and configure the new holder's device.
+  for (const [label, args] of [
+    ["an explicit deviceId", { deviceId: free.deviceId }],
+    ["the predicted target", {}],
+  ] as Array<[string, Record<string, unknown>]>) {
+    test(`a sessionless rotate inside readiness on ${label} is cancelled when a session acquires it`, async () => {
+      devices.setConnectedDevices([free]);
+      const call = await startInReadiness("rotate", {
+        orientation: "landscape",
+        platform: "android",
+        ...args,
+      });
+      await sessionManager.createSession("late-holder", free.deviceId, "android");
+      call.release();
+      const error = await call.outcome;
+
+      expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect((error as Error).message).toContain("acquired it while this call was in flight");
+      expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+      expect(ran).toEqual([]);
+    });
+  }
+
+  test("a call whose readiness settles on another device than predicted moves its mark", async () => {
+    const third: BootedDevice = { name: "Pixel C", deviceId: "emulator-5558", platform: "android" };
+    devices.setConnectedDevices([free]);
+    const readiness = await startInReadiness("rotate", {
+      orientation: "landscape",
+      platform: "android",
+    });
+    // Readiness lands on another device than the one predicted from the shared scan.
+    devices.setConnectedDevices([third]);
+    const release = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    gate = release.promise;
+    dispatched = () => entered.resolve();
+    readiness.release();
+    await entered.promise;
+
+    // The predicted device is no longer this call's: acquiring it cancels nothing.
+    await sessionManager.createSession("free-holder", free.deviceId, "android");
+    release.resolve();
+    expect(await readiness.outcome).toBeUndefined();
+    expect(ran).toEqual([{ name: "rotate", deviceId: third.deviceId }]);
+  });
 });

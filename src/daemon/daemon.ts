@@ -798,6 +798,9 @@ export class Daemon {
     this.sessionManager.setSessionExecutionDeadlineLookup((sessionId) =>
       this.latestSessionExecutionDeadlineMs(sessionId),
     );
+    this.sessionManager.setExpiryReleaseExecutionCanceller((sessionId, reason, query) =>
+      this.cancelExecutionsForExpiryRelease(sessionId, reason, query),
+    );
     this.sessionManager.onSessionCreated((session) => {
       NavigationGraphManager.clearReleasedSession(session.sessionId);
       this.setupNavigationGraphUpdateListener(
@@ -2648,6 +2651,30 @@ export class Daemon {
       .map((id) => executionTracker.getLatestSessionExecutionDeadlineMs(id))
       .filter((deadline): deadline is number => deadline !== undefined);
     return deadlines.length === 0 ? undefined : Math.max(...deadlines);
+  }
+
+  /**
+   * Abort what an idle-expiry release overrides (#10820), over the same session scope
+   * {@link hasActiveSessionExecution} counts as in flight. The tracker signals each abort before
+   * its first await, so the aborts land before the release that follows starts.
+   */
+  private cancelExecutionsForExpiryRelease(
+    sessionId: string,
+    reason: string,
+    query: ActiveSessionExecutionQuery,
+  ): void {
+    const executionSessionId =
+      resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
+    for (const id of new Set([sessionId, executionSessionId])) {
+      executionTracker
+        .cancelDeviceSessionExecutions(id, reason, { excludeExecutionId: query.excludeExecutionId })
+        .catch((error: unknown) => {
+          logger.warn(
+            `[Daemon] Failed to cancel executions of expired session ${id}: ${errorMessage(error)}`,
+            error,
+          );
+        });
+    }
   }
 
   private async tryRecoverCapturedDisconnectTarget(

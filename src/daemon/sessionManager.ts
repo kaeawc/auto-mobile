@@ -606,6 +606,16 @@ export type ActiveSessionExecutionChecker = (
  */
 export type SessionExecutionDeadlineLookup = (sessionId: string) => number | undefined;
 
+/**
+ * Aborts a session's in-flight executions before an idle-expiry release overrides them (#10820).
+ * Must signal the aborts synchronously: the expiry release starts in the same turn.
+ */
+export type ExpiryReleaseExecutionCanceller = (
+  sessionId: string,
+  reason: string,
+  query: ActiveSessionExecutionQuery,
+) => void;
+
 export type SessionDeviceUnboundCallback = (sessionId: string, deviceId: string) => void;
 
 interface PendingSessionCreation {
@@ -1306,6 +1316,8 @@ export class SessionManager {
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
   // No lookup means no known deadline: the veto falls back to the unsettled-execution ceiling.
   private sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup = () => undefined;
+  // No canceller means nothing to abort: only the daemon tracks executions (#10820).
+  private expiryReleaseExecutionCanceller: ExpiryReleaseExecutionCanceller = () => undefined;
 
   // Idle window (heartbeats, no tool call): 2 minutes from the end of the last
   // tool call, env-overridable (see `./sessionLivenessWindows`).
@@ -1555,6 +1567,15 @@ export class SessionManager {
    */
   setSessionExecutionDeadlineLookup(lookup: SessionExecutionDeadlineLookup): void {
     this.sessionExecutionDeadlineLookup = lookup;
+  }
+
+  /**
+   * How an idle-expiry release aborts the executions it overrides once their veto has run out, as
+   * the heartbeat reap and owner-disconnect paths already do (#9839, #10820). The daemon supplies
+   * the execution tracker.
+   */
+  setExpiryReleaseExecutionCanceller(canceller: ExpiryReleaseExecutionCanceller): void {
+    this.expiryReleaseExecutionCanceller = canceller;
   }
 
   /**
@@ -1906,13 +1927,11 @@ export class SessionManager {
         return null;
       }
       logger.info(`Session ${sessionId} has expired, releasing`);
-      const release = this.releaseSession(
-        sessionId,
-        this.expiredSessionReleaseReason(session, "lazy-expiry"),
-        true,
-        undefined,
-        { expiryOrigin: "lazy-expiry" },
-      );
+      const releaseReason = this.expiredSessionReleaseReason(session, "lazy-expiry");
+      this.cancelExecutionsOverriddenByExpiry(session, releaseReason, execution?.executionId);
+      const release = this.releaseSession(sessionId, releaseReason, true, undefined, {
+        expiryOrigin: "lazy-expiry",
+      });
       void this.getBarrier()
         .trackExisting(release)
         .catch((error) =>
@@ -6567,6 +6586,35 @@ export class SessionManager {
     return { latestDeadlineMs: this.sessionExecutionDeadlineLookup(sessionId) };
   }
 
+  /**
+   * An idle-expiry release overrides in-flight work only once that work's veto has run out
+   * (#10713). Abort it before the release starts so a call that never settles cannot keep driving
+   * the device after its next owner binds it (#10820). Nothing in flight, or a veto still holding
+   * (a lookup for a new execution can expire a session without consulting the veto), cancels
+   * nothing. Returns whether it cancelled.
+   */
+  private cancelExecutionsOverriddenByExpiry(
+    session: Session,
+    releaseReason: string,
+    excludeExecutionId?: string,
+  ): boolean {
+    const query: ActiveSessionExecutionQuery =
+      excludeExecutionId === undefined ? {} : { excludeExecutionId };
+    const hasActiveExecutions = this.activeSessionExecutionChecker(session.sessionId, query);
+    if (
+      !hasActiveExecutions ||
+      isReleaseVetoedByExecutions({
+        hasActiveExecutions,
+        now: this.timer.now(),
+        ...this.idleExecutionVetoBoundInput(session),
+      })
+    ) {
+      return false;
+    }
+    this.expiryReleaseExecutionCanceller(session.sessionId, releaseReason, query);
+    return true;
+  }
+
   /** Keep the heartbeat diagnostic when idle expiry wins the scan or lookup race (#10051). */
   private expiredSessionReleaseReason(
     session: Session,
@@ -6678,20 +6726,17 @@ export class SessionManager {
       if (!session) {
         continue;
       }
-      if (this.activeSessionExecutionChecker(sessionId)) {
+      const releaseReason = this.expiredSessionReleaseReason(session, "cleanup-expired");
+      if (this.cancelExecutionsOverriddenByExpiry(session, releaseReason)) {
         logger.warn(
           `Session ${sessionId} was kept past its idle deadline by executions that never ` +
-            `settled; releasing it anyway past their request deadline plus grace, or the ` +
-            `unsettled-execution ceiling when a call has no deadline`,
+            `settled; cancelling them and releasing it past their request deadline plus grace, ` +
+            `or the unsettled-execution ceiling when a call has no deadline`,
         );
       }
-      const release = this.releaseSession(
-        sessionId,
-        this.expiredSessionReleaseReason(session, "cleanup-expired"),
-        true,
-        undefined,
-        { expiryOrigin: "cleanup-expired" },
-      );
+      const release = this.releaseSession(sessionId, releaseReason, true, undefined, {
+        expiryOrigin: "cleanup-expired",
+      });
       void this.getBarrier()
         .trackExisting(release)
         .catch((error) =>

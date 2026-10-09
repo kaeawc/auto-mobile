@@ -334,6 +334,52 @@ describe("SessionHeartbeatMonitor", () => {
       expect(reaped).toEqual([{ sessionId: "s1", reason: "heartbeat-timeout" }]);
     });
 
+    it("judges an owned session on its owner's heartbeats, not other connections' tool calls (#11107)", async () => {
+      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000, 1_000);
+      expect(await sessionManager.claimLivenessOwnership("s1", "owner-token")).toBe("claimed");
+      sessionManager.recordHeartbeat("s1");
+      const reaped: Array<{ sessionId: string; reason: string }> = [];
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sessionId, reason) => {
+          reaped.push({ sessionId, reason });
+        },
+        timer,
+      );
+
+      // The owner stops heartbeating; tool calls keep stamping the activity heartbeat.
+      for (let elapsed = 0; elapsed <= 1_000 + SUSPECT_GRACE_MS; elapsed += 500) {
+        timer.advanceTime(500);
+        await sessionManager.getOrCreateSession("s1");
+      }
+      await monitor.tick();
+
+      expect(reaped).toEqual([{ sessionId: "s1", reason: "heartbeat-timeout" }]);
+    });
+
+    it("keeps the activity heartbeat fallback for a session no proxy owns", async () => {
+      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000, 1_000);
+      sessionManager.recordHeartbeat("s1");
+      const reaped: string[] = [];
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sessionId) => {
+          reaped.push(sessionId);
+        },
+        timer,
+      );
+
+      for (let elapsed = 0; elapsed <= 1_000 + SUSPECT_GRACE_MS; elapsed += 500) {
+        timer.advanceTime(500);
+        await sessionManager.getOrCreateSession("s1");
+      }
+      await monitor.tick();
+
+      expect(reaped).toEqual([]);
+    });
+
     it("does not reap a default-heartbeat session with recent activity before its first heartbeat", async () => {
       await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
       const reaped: string[] = [];

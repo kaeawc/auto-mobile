@@ -22,23 +22,31 @@ BASE_REF="${CTRL_PROXY_XCODEGEN_BASE_REF:-origin/main}"
 
 cd "${PROJECT_ROOT}"
 
-ctrl_proxy_changed() {
+# Prints the ios/control-proxy paths changed since the merge-base. An
+# unresolvable base prints a sentinel so the check runs instead of silently
+# skipping.
+changed_ctrl_proxy_paths() {
     local merge_base
     if ! merge_base="$(git merge-base "${BASE_REF}" HEAD 2>/dev/null)"; then
-        # No base to compare against: check rather than silently skip.
+        echo "(base ${BASE_REF} unresolved)"
         return 0
     fi
     # Committed branch changes plus staged/unstaged edits.
-    [ -n "$(git diff --name-only "${merge_base}" -- ios/control-proxy 2>/dev/null)" ]
+    git diff --name-only "${merge_base}" -- ios/control-proxy
 }
 
-if [ "${CTRL_PROXY_XCODEGEN_FORCE:-}" != "1" ] && ! ctrl_proxy_changed; then
-    echo "SKIP: ios/control-proxy is unchanged against ${BASE_REF}"
-    exit 0
+changed_paths=""
+if [ "${CTRL_PROXY_XCODEGEN_FORCE:-}" != "1" ]; then
+    changed_paths="$(changed_ctrl_proxy_paths)"
+    if [ -z "${changed_paths}" ]; then
+        echo "SKIP: ios/control-proxy is unchanged against ${BASE_REF}"
+        exit 0
+    fi
 fi
 
-if [ "$(installed_xcodegen_version)" != "${XCODEGEN_VERSION}" ]; then
-    echo "SKIP: XcodeGen ${XCODEGEN_VERSION} is not installed on this host (no Linux build); ios-xcode-build runs the drift check on macOS. Install: bash scripts/ios/install-xcodegen.sh"
+found_version="$(installed_xcodegen_version)"
+if [ "${found_version}" != "${XCODEGEN_VERSION}" ]; then
+    echo "SKIP: XcodeGen ${XCODEGEN_VERSION} is not installed on this host (found '${found_version:-none}'; no Linux build); ios-xcode-build runs the drift check on macOS. Install: bash scripts/ios/install-xcodegen.sh"
     exit 0
 fi
 

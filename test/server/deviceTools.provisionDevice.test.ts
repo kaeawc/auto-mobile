@@ -1,3 +1,4 @@
+import { provisionCancellationOutcomes } from "../../src/server/provisionCancellationOutcomes";
 import { deviceAlreadyAssignedToAnotherSessionError } from "../../src/daemon/inputDeviceOwnership";
 import { FakeDeviceResourceObserver } from "../fakes/FakeDeviceResourceObserver";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -4923,10 +4924,17 @@ describe("provisionDevice handler", () => {
     };
 
     const caller = new AbortController();
+    const published: unknown[] = [];
+    const awaited = provisionCancellationOutcomes
+      .await(args.operationId, 60_000, new FakeTimer())
+      .then((outcome) => published.push(outcome));
     const call = tool.handler(args, undefined, caller.signal);
     await Promise.resolve();
     caller.abort(new Error("client went away"));
     const response = await call;
+    await awaited;
+    // The socket layer's abandoned-request reply receives the same typed result (#11074).
+    expect(published).toEqual([response]);
     for (let attempt = 0; attempt < 10; attempt++) {
       await Promise.resolve();
     }

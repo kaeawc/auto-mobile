@@ -133,6 +133,11 @@ import {
   parseInputRequesterSessionUuid,
 } from "./inputDeviceOwnership";
 import { ToolRegistry } from "../server/toolRegistry";
+import { provisionCancellationOutcomes } from "../server/provisionCancellationOutcomes";
+import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../server/deviceTools";
+
+/** Slack after the handler's settlement wait for it to finish rollback and build its result. */
+const PROVISION_CANCELLATION_OUTCOME_GRACE_MS = 2_000;
 import { preferenceSetWarning, validateTypeForPlatform } from "../server/storageTools";
 import {
   clearAndroidKeyValueFileDirect,
@@ -2092,13 +2097,16 @@ export class UnixSocketServer {
           mcpRequest.dispose();
         }
       } catch (error) {
-        return this.mcpForwardFailureResponse({
+        const failure = this.mcpForwardFailureResponse({
           error,
           request,
           sessionId,
           ownerSocket,
           signal: activeRequestSignal,
         });
+        return (
+          (await this.provisionCancellationReply(request, failure, activeRequestSignal)) ?? failure
+        );
       }
     };
     // Admit through the socket's queue: same-lane requests keep arrival order, while an
@@ -2121,7 +2129,12 @@ export class UnixSocketServer {
           if (this.onFrameTrace) {
             this.traceFrame("admission_granted", request.id, deviceId);
           }
-          return this.runCancellableQueuedHandler(handler, cancellation.signal);
+          // A cancelled provisionDevice is answered by its handler (after a bounded wait for the
+          // typed cancellation result), not by this race, which would reply at once (#11074).
+          return this.runCancellableQueuedHandler(
+            handler,
+            this.isProvisionDeviceCall(request) ? undefined : cancellation.signal,
+          );
         },
         {
           timer: this.timer,
@@ -2154,6 +2167,39 @@ export class UnixSocketServer {
       error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
       daemonShuttingDown: daemonShuttingDownFailure(),
     };
+  }
+
+  /**
+   * `provisionDevice` finishes its rollback after a caller abort and builds a typed
+   * `request_cancelled` result with `recovery` evidence. Wait a bounded time for it so the reply to
+   * the abandoned request carries it instead of the generic abandonment error (#11074).
+   */
+  private isProvisionDeviceCall(request: DaemonRequest): boolean {
+    return request.method === "tools/call" && request.params?.name === "provisionDevice";
+  }
+
+  private async provisionCancellationReply(
+    request: DaemonRequest,
+    failure: DaemonResponse | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<DaemonResponse | undefined> {
+    const operationId = request.params?.arguments?.operationId;
+    if (
+      !failure ||
+      !this.isProvisionDeviceCall(request) ||
+      typeof operationId !== "string" ||
+      !(signal?.reason instanceof ClientRequestCancellation)
+    ) {
+      return undefined;
+    }
+    const outcome = await provisionCancellationOutcomes.await(
+      operationId,
+      PROVISION_DEVICE_SETTLEMENT_WAIT_MS + PROVISION_CANCELLATION_OUTCOME_GRACE_MS,
+      this.timer,
+    );
+    return outcome === undefined
+      ? undefined
+      : { id: request.id, type: "mcp_response", success: true, result: outcome };
   }
 
   private mcpForwardFailureResponse({

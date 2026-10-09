@@ -1,3 +1,4 @@
+import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { observeConfiguredDeviceResources } from "./deviceResourceTools";
@@ -318,7 +319,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
             `${errorMessage(error)}`,
           error,
         );
-        return createToolErrorResponse(
+        const cancelledResponse = createToolErrorResponse(
           "request_cancelled",
           cancelledOperation
             ? `provisionDevice request for operationId '${args.operationId}' was cancelled by ` +
@@ -335,6 +336,10 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
             }),
           },
         );
+        // The daemon answered the abandoned request already; hand it this result so that reply
+        // can carry the typed envelope and recovery evidence.
+        provisionCancellationOutcomes.publish(args.operationId, cancelledResponse);
+        return cancelledResponse;
       }
       logger.warn(
         `[DeviceTools] provisionDevice ${args.operationId} failed: ${errorMessage(error)}`,

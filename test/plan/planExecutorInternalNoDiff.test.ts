@@ -6,6 +6,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { DaemonState } from "../../src/daemon/daemonState";
+import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 
 /**
  * Regression guard for issue #3053 part 2: PlanExecutor must mark its tool-to-tool
@@ -15,9 +16,12 @@ import { DaemonState } from "../../src/daemon/daemonState";
  * finalize half is covered by toolRegistry.internalNoDiff.test.ts) and confirms
  * the marker does not disturb the success/error step logic.
  */
+type ToolRegistryDeviceSessionManager = (typeof ToolRegistry)["deviceSessionManager"];
+
 describe("PlanExecutor internal no-diff marker (#3053)", () => {
   let planExecutor: DefaultPlanExecutor;
   let capturedArgs: Record<string, unknown>[];
+  let originalDeviceSessionManager: ToolRegistryDeviceSessionManager;
 
   const schema = z.object({
     text: z.string().optional(),
@@ -30,11 +34,20 @@ describe("PlanExecutor internal no-diff marker (#3053)", () => {
     // These tests exercise the daemon-less direct path; an initialized DaemonState left by another
     // file would route sess-1 through a real SessionManager and its file-backed database.
     DaemonState.getInstance().reset();
+    // Resolve the device through a fake instead of the process-wide DeviceSessionManager singleton,
+    // whose connected-device cache and pins other files mutate.
+    const fakeDeviceSessionManager = new FakeDeviceSessionManager();
+    fakeDeviceSessionManager.setConnectedDevices([
+      { name: "Pixel A", deviceId: "emulator-5554", platform: "android" },
+    ]);
+    originalDeviceSessionManager = ToolRegistry["deviceSessionManager"];
+    ToolRegistry["deviceSessionManager"] = fakeDeviceSessionManager;
     planExecutor = new DefaultPlanExecutor();
     capturedArgs = [];
   });
 
   afterEach(() => {
+    ToolRegistry["deviceSessionManager"] = originalDeviceSessionManager;
     unregisterTemporaryTools("tapOn");
   });
 

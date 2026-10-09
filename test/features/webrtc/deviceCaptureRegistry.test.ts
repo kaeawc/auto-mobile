@@ -2,6 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import {
   createDeviceCaptureRegistry,
   captureHintsCompatible,
+  canRetainSharedCapture,
   stopStaleCapture,
   type CaptureHintField,
 } from "../../../src/features/webrtc/deviceCaptureRegistry";
@@ -1106,4 +1107,205 @@ test("optional capabilities forward resolved source identity and arguments", asy
   expect(h.sources[0].consumers.at(-1)).toBe(false);
   await a.stopStale!(true);
   expect(h.sources[0].staleStops).toEqual([true]);
+});
+
+describe("iOS shared capture frame-rate raise (#10711)", () => {
+  const sim = { deviceId: "SIM-UDID", platform: "ios", name: "iPhone" } as BootedDevice;
+  function iosHarness() {
+    const registry = createDeviceCaptureRegistry();
+    const sources: FakeSource[] = [];
+    const events: string[] = [];
+    const startGates = new Map<number, Promise<void>>();
+    let createGate: Promise<void> | null = null;
+    let failNextCreate = false;
+    const create = (options: H264CaptureSourceOptions) => {
+      const id = sources.length + 1;
+      events.push(`create${id}@${options.fps}`);
+      if (failNextCreate) {
+        failNextCreate = false;
+        throw new Error("encoder unavailable");
+      }
+      const source = new FakeSource(options);
+      source.startGate = startGates.get(id) ?? source.startGate;
+      const start = source.start.bind(source);
+      const stop = source.stop.bind(source);
+      source.start = async () => {
+        events.push(`start${id}`);
+        await start();
+      };
+      source.stop = async () => {
+        events.push(`stop${id}`);
+        await stop();
+      };
+      sources.push(source);
+      return createGate ? createGate.then(() => source) : source;
+    };
+    const join = (fps: number, kind: "relay" | "webrtc", received: Buffer[] = []) => {
+      const errors: Error[] = [];
+      const handle = registry.acquire({
+        device: sim,
+        create,
+        // The relay's own default rate is flexible; WebRTC's configured rate is binding.
+        flexibleHints: kind === "relay" ? ["fps"] : [],
+        options: {
+          device: sim,
+          fps,
+          onData: (chunk) => received.push(chunk),
+          onError: (error) => errors.push(error),
+        },
+      });
+      return { handle, received, errors };
+    };
+    return {
+      registry,
+      sources,
+      events,
+      join,
+      gateStart: (id: number, gate: Promise<void>) => startGates.set(id, gate),
+      gateCreate: (gate: Promise<void> | null) => (createGate = gate),
+      failNextCreate: () => (failNextCreate = true),
+    };
+  }
+  const frame = (marker: number) => Buffer.from([0, 0, 0, 1, 5, marker]);
+
+  test("relay then WebRTC shares one capture, restarted in place at the higher rate", async () => {
+    const h = iosHarness();
+    const relay = h.join(5, "relay");
+    await relay.handle.start();
+    const webrtc = h.join(15, "webrtc");
+    await webrtc.handle.start();
+    expect(h.events).toEqual(["create1@5", "start1", "stop1", "create2@15", "start2"]);
+    // A late frame from the replaced source is fenced; the replacement reaches both consumers.
+    h.sources[0].options.onData(frame(1));
+    h.sources[0].options.onError?.(new Error("replaced source teardown"));
+    h.sources[1].options.onData(frame(2));
+    expect(relay.received).toEqual([frame(2)]);
+    expect(webrtc.received).toEqual([frame(2)]);
+    expect([...relay.errors, ...webrtc.errors]).toEqual([]);
+    await webrtc.handle.stop();
+    // Rate is kept when the faster consumer leaves: no step-down restart.
+    expect(h.sources).toHaveLength(2);
+    expect(h.sources[1].stops).toBe(0);
+    h.sources[1].options.onData(frame(3));
+    expect(relay.received).toEqual([frame(2), frame(3)]);
+    await relay.handle.stop();
+    expect(h.sources.map((source) => source.stops)).toEqual([1, 1]);
+  });
+
+  test("a slower binding joiner shares the faster capture without a restart", async () => {
+    const h = iosHarness();
+    const webrtc = h.join(15, "webrtc");
+    await webrtc.handle.start();
+    const relay = h.join(5, "webrtc");
+    await relay.handle.start();
+    expect(h.events).toEqual(["create1@15", "start1"]);
+    expect(canRetainSharedCapture(relay.handle, { device: sim, onData: () => {}, fps: 10 })).toBe(
+      true,
+    );
+    expect(canRetainSharedCapture(relay.handle, { device: sim, onData: () => {}, fps: 30 })).toBe(
+      false,
+    );
+    await Promise.all([webrtc.handle.stop(), relay.handle.stop()]);
+    expect(h.sources[0].stops).toBe(1);
+  });
+
+  test("concurrent raises serialize into one live source at the highest rate", async () => {
+    const h = iosHarness();
+    const relay = h.join(5, "relay");
+    await relay.handle.start();
+    const stopGate = Promise.withResolvers<void>();
+    h.sources[0].stopGate = stopGate.promise;
+    const a = h.join(10, "webrtc");
+    const b = h.join(20, "webrtc");
+    const starts = [a.handle.start(), b.handle.start()];
+    await flush();
+    // Nothing is constructed while the outgoing source is still stopping.
+    expect(h.events).toEqual(["create1@5", "start1", "stop1"]);
+    stopGate.resolve();
+    await Promise.all(starts);
+    expect(h.events).toEqual(["create1@5", "start1", "stop1", "create2@20", "start2"]);
+    // A raise during the replacement's startup restarts once more, after it stops.
+    const startGate = Promise.withResolvers<void>();
+    h.gateStart(3, startGate.promise);
+    const c = h.join(30, "webrtc");
+    const d = h.join(25, "webrtc");
+    const joined = Promise.all([c.handle.start(), d.handle.start()]);
+    await flush();
+    expect(h.events.slice(5)).toEqual(["stop2", "create3@30", "start3"]);
+    const e = h.join(40, "webrtc");
+    const late = e.handle.start();
+    startGate.resolve();
+    await Promise.all([joined, late]);
+    expect(h.events.slice(5)).toEqual([
+      "stop2",
+      "create3@30",
+      "start3",
+      "stop3",
+      "create4@40",
+      "start4",
+    ]);
+    h.sources[3].options.onData(frame(9));
+    for (const consumer of [relay, a, b, c, d, e]) {
+      expect(consumer.received).toEqual([frame(9)]);
+    }
+    await Promise.all([relay, a, b, c, d, e].map((consumer) => consumer.handle.stop()));
+    expect(h.sources.map((source) => source.stops)).toEqual([1, 1, 1, 1]);
+  });
+
+  test("last consumer leaving mid-restart stops without constructing a replacement", async () => {
+    const h = iosHarness();
+    const relay = h.join(5, "relay");
+    await relay.handle.start();
+    const stopGate = Promise.withResolvers<void>();
+    h.sources[0].stopGate = stopGate.promise;
+    const webrtc = h.join(15, "webrtc");
+    const joining = webrtc.handle.start();
+    let released = false;
+    const leaving = Promise.all([relay.handle.stop(), webrtc.handle.stop()]).then(() => {
+      released = true;
+    });
+    await flush();
+    expect(released).toBe(false);
+    stopGate.resolve();
+    await Promise.all([joining, leaving]);
+    expect(h.events).toEqual(["create1@5", "start1", "stop1"]);
+    // A fresh acquisition starts cleanly afterwards.
+    const next = h.join(15, "webrtc");
+    await next.handle.start();
+    expect(h.events.slice(3)).toEqual(["create2@15", "start2"]);
+    await next.handle.stop();
+  });
+
+  test("a failed replacement notifies every consumer and rejects the joiner's start", async () => {
+    const h = iosHarness();
+    const relay = h.join(5, "relay");
+    await relay.handle.start();
+    h.failNextCreate();
+    const webrtc = h.join(15, "webrtc");
+    await expect(webrtc.handle.start()).rejects.toThrow("encoder unavailable");
+    expect(relay.errors.map((error) => error.message)).toEqual(["encoder unavailable"]);
+    expect(webrtc.errors.map((error) => error.message)).toEqual(["encoder unavailable"]);
+    // The entry is retired; the next acquisition constructs a fresh source.
+    const next = h.join(15, "webrtc");
+    await next.handle.start();
+    expect(h.sources).toHaveLength(2);
+    expect(h.sources[1].options.fps).toBe(15);
+    await Promise.all([relay.handle.stop(), webrtc.handle.stop(), next.handle.stop()]);
+  });
+
+  test("a raise before the creator starts replaces the unstarted source once", async () => {
+    const h = iosHarness();
+    const gate = Promise.withResolvers<void>();
+    h.gateCreate(gate.promise);
+    const relay = h.join(5, "relay");
+    const webrtc = h.join(15, "webrtc");
+    const starts = Promise.all([relay.handle.start(), webrtc.handle.start()]);
+    h.gateCreate(null);
+    gate.resolve();
+    await starts;
+    expect(h.events).toEqual(["create1@5", "stop1", "create2@15", "start2"]);
+    expect(h.sources[0].starts).toBe(0);
+    await Promise.all([relay.handle.stop(), webrtc.handle.stop()]);
+    expect(h.sources.map((source) => source.stops)).toEqual([1, 1]);
+  });
 });

@@ -714,6 +714,36 @@ function isDeviceHeld(deviceId: string): boolean {
   );
 }
 
+/**
+ * A deviceId-only call (no sessionUuid, no label) from the MCP connection that acquired the
+ * session holding that device runs as that session (#10994): admitted, readied and counted as use
+ * like a call naming it. The proxy omits the UUID for selector calls (#6807), so the daemon
+ * recognizes its holder by the forwarded connection id (`__mcpSessionId`, set only by the
+ * daemon's socket forward). Calls from any other connection keep the watcher/refusal paths.
+ */
+function adoptHolderConnectionSession(args: Record<string, unknown>): void {
+  if (
+    typeof args.deviceId !== "string" ||
+    args.sessionUuid !== undefined ||
+    args.device !== undefined ||
+    typeof args.__mcpSessionId !== "string" ||
+    !DaemonState.getInstance().isInitialized()
+  ) {
+    return;
+  }
+  const holderSessionUuid = DaemonState.getInstance()
+    .getDevicePool()
+    .resolveOwnedDeviceSessionForMcpSession(args.__mcpSessionId, args.deviceId);
+  if (!holderSessionUuid) {
+    return;
+  }
+  args.sessionUuid = holderSessionUuid;
+  if (typeof args.__executionId === "string") {
+    // Attribute the execution to the session: its end is use, and it vetoes release in flight.
+    executionTracker.setResolvedAutolockSessionUuid(args.__executionId, holderSessionUuid);
+  }
+}
+
 class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   private readonly defaultDeviceRead: SessionlessDeviceRead;
 
@@ -725,6 +755,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     this.defaultDeviceRead = sessionlessDeviceReadFor(deviceReadAccess);
   }
   async resolveExecutionTarget(input: ExecutionTargetInput): Promise<ExecutionTargetContext> {
+    adoptHolderConnectionSession(input.args);
     if (
       input.options.sessionlessDeviceRead &&
       getToolSelectionContext()?.explicitObserveDeviceRead &&

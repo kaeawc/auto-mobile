@@ -7573,6 +7573,30 @@ export class DevicePool {
     return this.autolockManager.resolveAutolockSessionForMcpSession(...args);
   }
 
+  /**
+   * The live device session that holds `deviceId` and that the MCP connection `mcpSessionId`
+   * acquired (or restored as its own), or undefined (#10994). A deviceId-only call from the
+   * holder's own connection is that session's use; any other caller is not the holder.
+   */
+  resolveOwnedDeviceSessionForMcpSession(
+    mcpSessionId: string | undefined,
+    deviceId: string,
+  ): string | undefined {
+    const acquired = mcpSessionId ? this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId) : null;
+    const device = acquired ? this.devices.get(deviceId) : undefined;
+    const session = device?.sessionId ? this.sessionManager.getSession(device.sessionId) : null;
+    if (
+      !device ||
+      !session ||
+      !acquired?.has(session.sessionId) ||
+      !this.isSessionAssignmentCurrent(device, session) ||
+      !this.sessionManager.isAdmittedForAutomation(session)
+    ) {
+      return undefined;
+    }
+    return session.sessionId;
+  }
+
   restoreAutolockSessionsForMcpSession(
     ...args: Parameters<DeviceAutolockManager["restoreAutolockSessionsForMcpSession"]>
   ): Promise<void> {

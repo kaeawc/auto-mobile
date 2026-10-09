@@ -78,6 +78,8 @@ export const AUTOLOCK_WINDOW_MS = 60_000;
 /** Microtask turns per fake-timer event so a keeper round trip settles before the next tick. */
 const TURNS_PER_EVENT = 32;
 const CONNECTION = "scenario-connection";
+/** The socket connection of a client with no stdio proxy in front (a `--cli` call, desktop, JUnit). */
+export const SOCKET_CLIENT_CONNECTION = "scenario-socket-client";
 export const OWNER_TOKEN = "scenario-proxy-owner";
 const PLATFORM = "android" as const;
 
@@ -286,8 +288,10 @@ export class LivenessScenario {
 
   /** The stdio proxy exactly as src/index.ts builds it: default lease, owner token, own keeper. */
   private createProxy(token = OWNER_TOKEN, initialSessionUuid?: string): DaemonMcpProxy {
+    // Each proxy is its own daemon socket connection.
+    const connection = token === OWNER_TOKEN ? CONNECTION : `scenario-connection:${token}`;
     const client = new FakeDaemonClient({
-      onCallTool: (tool, params) => this.runDeviceTool(tool, params),
+      onCallTool: (tool, params) => this.runDeviceTool(tool, params, connection),
       toolResultFor: (tool, params) => {
         if (!this.minted) {
           return undefined;
@@ -339,12 +343,16 @@ export class LivenessScenario {
    * directly (its readiness setup is the device boundary); every other tool runs the real
    * registration through the real ToolRegistry path.
    */
-  private async runDeviceTool(tool: string, params: Record<string, unknown>): Promise<unknown> {
+  private async runDeviceTool(
+    tool: string,
+    params: Record<string, unknown>,
+    connection: string,
+  ): Promise<unknown> {
     const { manager, pool } = this.daemon;
     if (tool === "getAndroid" || tool === "provisionDevice") {
       const deviceId = typeof params.deviceId === "string" ? params.deviceId : this.deviceIds[0]!;
       if (this.autolock && tool === "getAndroid") {
-        this.minted = await pool.autolockDevice(deviceId, PLATFORM, CONNECTION);
+        this.minted = await pool.autolockDevice(deviceId, PLATFORM, connection);
       } else {
         this.minted = `scenario-session-${++this.mintCount}`;
         await pool.bindOrReuseDeviceSession(
@@ -358,37 +366,35 @@ export class LivenessScenario {
           undefined,
           undefined,
           undefined,
-          CONNECTION,
+          connection,
         );
       }
       // Acquisition prepared the device, as getAndroid's readiness setup records.
       manager.setDeviceReadiness(this.minted, "automationReady");
       return undefined;
     }
-    return await this.tools.call(tool, this.resolveSelectorRoute(params));
+    return await this.tools.call(tool, await this.forwardFromConnection(params, connection));
   }
 
   /**
-   * The daemon resolves a selector-routed call (`deviceId`/`platform`, no `sessionUuid`) to one of
-   * the sessions the proxy says it owns before the tool runs (`DAEMON_OWNED_SESSIONS_PARAM`). This
-   * stands in for that resolution, which lives in the socket server: it picks the owned session
-   * bound to the selected device (or platform) and drops the proxy's routing marker.
+   * The socket server's forward of a selector-routed call (`deviceId`/`platform`, no
+   * `sessionUuid`): it restores this connection's ownership of the sessions the proxy declares
+   * (`DAEMON_OWNED_SESSIONS_PARAM`, `restoreSelectorSessions`), drops that marker and stamps the
+   * connection id (`withSocketSessionAutolockKey`). ToolRegistry then resolves the holder itself
+   * (#10994); nothing here picks the session.
    */
-  private resolveSelectorRoute(params: Record<string, unknown>): Record<string, unknown> {
+  private async forwardFromConnection(
+    params: Record<string, unknown>,
+    connection: string,
+  ): Promise<Record<string, unknown>> {
     const { [DAEMON_OWNED_SESSIONS_PARAM]: owned, ...rest } = params;
-    if (rest.sessionUuid !== undefined || !Array.isArray(owned)) {
-      return rest;
+    if (Array.isArray(owned)) {
+      await this.daemon.pool.restoreOwnedDeviceSessionsForMcpSession(
+        owned.filter((id): id is string => typeof id === "string"),
+        connection,
+      );
     }
-    const sessions = owned.flatMap((id) => {
-      const session = typeof id === "string" ? this.daemon.manager.getSession(id) : null;
-      return session ? [session] : [];
-    });
-    const reached = sessions.find((session) =>
-      typeof rest.deviceId === "string"
-        ? session.assignedDevice === rest.deviceId
-        : session.platform === rest.platform,
-    );
-    return reached ? { ...rest, sessionUuid: reached.sessionId } : rest;
+    return { ...rest, __mcpSessionId: connection };
   }
 
   daemonMethod(method: string, params: Record<string, unknown> = {}) {
@@ -445,12 +451,24 @@ export class LivenessScenario {
    * not apply, so the daemon's admission decides.
    */
   async daemonToolCall(sessionId: string, tool = "observe"): Promise<unknown> {
-    return await this.runDeviceTool(tool, { sessionUuid: sessionId });
+    return await this.runDeviceTool(tool, { sessionUuid: sessionId }, SOCKET_CLIENT_CONNECTION);
   }
 
-  /** A daemon-side tool call with exactly these arguments (no proxy in front, no routing markers). */
-  async daemonToolCallWith(args: Record<string, unknown>, tool = "observe"): Promise<unknown> {
-    return await this.runDeviceTool(tool, args);
+  /**
+   * A daemon-side tool call with exactly these arguments (no proxy in front, no routing markers),
+   * forwarded on `connection` (by default a socket client that acquired nothing).
+   */
+  async daemonToolCallWith(
+    args: Record<string, unknown>,
+    tool = "observe",
+    connection = SOCKET_CLIENT_CONNECTION,
+  ): Promise<unknown> {
+    return await this.runDeviceTool(tool, args, connection);
+  }
+
+  /** The stdio proxy's own daemon connection, for calls that bypass the proxy's argument rewrite. */
+  get proxyConnection(): string {
+    return CONNECTION;
   }
 
   /** A tool call that stays in flight until `settle()`. */

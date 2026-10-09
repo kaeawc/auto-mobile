@@ -102,15 +102,20 @@ fun OverlaySpecContent(
     val anchorLocals = remember { OverlayAnchorLocals() }
     CompositionLocalProvider(LocalOverlayAnchorLocals provides anchorLocals) {
       val fillsWindow = LocalOverlayFillsWindow.current
-      Box(
-        Modifier.semantics { testTagsAsResourceId = true }
-          .then(
-            if (fillsWindow) Modifier.fillWhenEmpty() else Modifier,
-          ),
-      ) {
-        RenderOverlayNode(root, interact, windowRoot = true)
-        OverlayAnchorLayer(layeredOverlayAnchors(root), interact)
-        modalOverlaySheets(root).forEach { node ->
+      Box(Modifier.semantics { testTagsAsResourceId = true }) {
+        val modals = modalOverlaySheets(root)
+        // An open dialog is modal: the page behind it leaves the accessibility tree, as it does
+        // on iOS and as touches already do. A snackbar or sheet does not block the page.
+        val pageBlocked = modals.any { it.role == "dialog" }
+        // The page box takes the fill: it is the root's parent and must measure the window.
+        Box(
+          Modifier.then(if (fillsWindow) Modifier.fillWhenEmpty() else Modifier)
+            .then(if (pageBlocked) Modifier.clearAndSetSemantics {} else Modifier),
+        ) {
+          RenderOverlayNode(root, interact, windowRoot = true)
+          OverlayAnchorLayer(layeredOverlayAnchors(root), interact)
+        }
+        modals.forEach { node ->
           key(node.identity) {
             RenderOverlayModal(node, interact)
             OverlayAnchorLayer(layeredOverlayAnchorsIn(node.children), interact)
@@ -158,7 +163,12 @@ internal class OverlayAnchorLocals {
 }
 
 /** What an anchored node takes from where it was authored: its locals and its ancestors' fade. */
-internal class CapturedAnchor(val locals: CompositionLocalContext, val fade: () -> Float)
+internal class CapturedAnchor(
+  val locals: CompositionLocalContext,
+  val fade: () -> Float,
+  /** The capture call site that wrote this entry; only it may remove the entry (#10913). */
+  val owner: Any = Unit,
+)
 
 private val LocalOverlayAnchorLocals = compositionLocalOf<OverlayAnchorLocals?> { null }
 
@@ -170,9 +180,16 @@ private fun CaptureAnchorLocals(identity: String) {
   val registry = LocalOverlayAnchorLocals.current ?: return
   // Written while composing, not in an effect: the layer composes after this in the same pass and
   // must not draw the node a frame with the wrong locals first.
+  val owner = remember { Any() }
   registry.byIdentity[identity] =
-    CapturedAnchor(currentCompositionLocalContext, LocalOverlayAnchorFade.current)
-  DisposableEffect(registry, identity) { onDispose { registry.byIdentity.remove(identity) } }
+    CapturedAnchor(currentCompositionLocalContext, LocalOverlayAnchorFade.current, owner)
+  DisposableEffect(registry, identity, owner) {
+    onDispose {
+      // A re-registration from another call site (the motion branch flipping) composes before
+      // this one disposes and has already replaced the entry: removing it would hide the node.
+      if (registry.byIdentity[identity]?.owner === owner) registry.byIdentity.remove(identity)
+    }
+  }
 }
 
 @Composable

@@ -309,11 +309,15 @@ range info over 0..1; an unbound one reports indeterminate progress.
 `dialog` and `snackbar` open while `openWhen` holds, like `bottomSheet` (an
 existing key must be boolean), and are drawn above the whole author tree inside
 the overlay window, never as a separate window. A dialog is modal: a scrim tap
-closes it, and so does either button. Closing writes `!equals` to the key and
+closes it, and so does either button. While it is open the page behind it is
+removed from the accessibility tree (`clearAndSetSemantics` on the page), so
+`observe` and screen readers see only the dialog, as on iOS and as touches
+already behave; a closed dialog leaves the page as it was. Closing writes `!equals` to the key and
 emits `change`; a button then runs its own `onTap`. Its title is its text, its
 `text` is a separate text node, `child` sits between the text and the buttons,
 and the buttons are tagged `<testTag>.confirm` and `<testTag>.dismiss`. A snackbar
-sits at the bottom of the window and is not modal. It stays until closed unless it
+sits at the bottom of the window and is not modal: the page stays in the
+accessibility tree. It stays until closed unless it
 sets `durationMs` (an integer, 1 to 600000): it then closes itself that long after it
 opens, by writing `!equals` to its `openWhen` key like any other close. The timer is
 wall-clock time, not scaled by the animator duration. Its `action`

@@ -31,6 +31,7 @@ android {
     sourceCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
     targetCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
   }
+  testOptions { unitTests { isIncludeAndroidResources = true } }
   buildFeatures {
     compose = true
     buildConfig = true
@@ -39,6 +40,8 @@ android {
 
 dependencies {
   implementation(libs.androidx.core)
+  // AppCompatActivity probe screen (AppCompatProbeActivity) for window-callback wrapping checks
+  implementation(libs.androidx.appcompat)
   implementation(libs.androidx.lifecycle.runtime)
   implementation(libs.androidx.startup)
   implementation(platform(libs.compose.bom))

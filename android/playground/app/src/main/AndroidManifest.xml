@@ -37,6 +37,12 @@
       </intent-filter>
     </activity>
 
+    <!-- Minimal AppCompatActivity screen: lets device checks cover AppCompat's own window callback. -->
+    <activity
+      android:name=".AppCompatProbeActivity"
+      android:exported="true"
+      android:theme="@style/Theme.AutoMobile.AppCompatProbe" />
+
     <!-- AndroidX Startup configuration -->
     <provider
       android:name="androidx.startup.InitializationProvider"

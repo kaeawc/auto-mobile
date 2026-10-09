@@ -1,3 +1,6 @@
 <resources>
     <string name="app_name">AutoMobile Playground</string>
+  <string name="appcompat_probe_button">AppCompat tap</string>
+  <string name="appcompat_probe_count_zero">Taps: 0</string>
+  <string name="appcompat_probe_count">Taps: %1$d</string>
 </resources>

@@ -124,6 +124,50 @@ struct SwiftUISemanticLinksDemo: View {
     }
 }
 
+/// Two owners, each carrying one visible "Terms of Service" link. Used to verify
+/// that `accessibilityLink` index selection resolves across distinct owning
+/// elements (index 0 is owner A's link, index 1 is owner B's link) and that a
+/// container-scoped request addresses each owner's own link.
+struct SwiftUISemanticLinksCrossOwnerDemo: View {
+    @State private var lastActivated = "None"
+    @Environment(\.autoMobileTheme) private var theme
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                SemanticLinksInstructions()
+
+                Text(ownerText(prefix: "Owner A: read the ", destination: .termsFirst))
+                    .font(theme.typography.bodyLarge)
+                    .accessibilityIdentifier("cross_owner_a")
+
+                Text(ownerText(prefix: "Owner B: also read the ", destination: .termsSecond))
+                    .font(theme.typography.bodyLarge)
+                    .accessibilityIdentifier("cross_owner_b")
+
+                SemanticLinksResult(lastActivated: lastActivated)
+            }
+            .padding()
+        }
+        .playgroundContent()
+        .navigationTitle("Semantic Links (Cross-Owner)")
+        .navigationBarTitleDisplayMode(.inline)
+        .environment(\.openURL, OpenURLAction { url in
+            if let destination = SemanticLinkDestination(url: url) {
+                lastActivated = destination.activationName
+            }
+            return .handled
+        })
+        .trackNavigation(destination: "SwiftUISemanticLinksCrossOwnerDemo")
+    }
+
+    private func ownerText(prefix: String, destination: SemanticLinkDestination) -> AttributedString {
+        var terms = AttributedString("Terms of Service")
+        terms.link = destination.url
+        return AttributedString(prefix) + terms + AttributedString(".")
+    }
+}
+
 struct UIKitSemanticLinksDemo: View {
     @State private var lastActivated = "None"
     @Environment(\.autoMobileTheme) private var theme

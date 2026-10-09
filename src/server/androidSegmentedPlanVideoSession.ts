@@ -235,6 +235,11 @@ export class AndroidSegmentedPlanVideoSession {
       : this.device.deviceId === device.deviceId;
   }
 
+  /** True when the daemon session `sessionUuid` owns this recording session on `deviceId`. */
+  isOwnedBy(sessionUuid: string, deviceId: string): boolean {
+    return this.ownerSessionUuid === sessionUuid && this.device.deviceId === deviceId;
+  }
+
   async startFirstSegment(): Promise<ActiveVideoRecording> {
     return this.startSegment();
   }

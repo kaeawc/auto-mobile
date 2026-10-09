@@ -185,7 +185,13 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
           deviceId: selected.deviceId,
         });
         const device = await this.deviceResolution.readyDevice(selected);
-        const result = await startTestRecording(device);
+        const result = await startTestRecording(
+          device,
+          undefined,
+          undefined,
+          undefined,
+          request.sessionUuid,
+        );
         return {
           success: true,
           recordingId: result.recordingId,

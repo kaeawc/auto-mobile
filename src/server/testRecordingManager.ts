@@ -47,6 +47,8 @@ interface RecordingSession {
   platform: Platform;
   startedAt: number;
   recorder: TestRecorder;
+  /** Daemon session that started the recording; undefined for an unowned (direct) start. */
+  ownerSessionUuid?: string;
 }
 
 const STOP_RECORDING_TIMEOUT_MS = 10_000;
@@ -81,6 +83,12 @@ export function getTestRecordingStatus(timer: Timer = defaultTimer): TestRecordi
     eventCount: activeRecording.recorder.stepCount,
     durationMs,
   };
+}
+
+/** Whether the daemon session `sessionUuid` owns the live test recording on `deviceId`. */
+export function isTestRecordingOwnedBy(sessionUuid: string, deviceId: string): boolean {
+  const session = activeRecording ?? startingRecording?.session ?? null;
+  return session?.ownerSessionUuid === sessionUuid && session.deviceId === deviceId;
 }
 
 const buildPlanFromSteps = (
@@ -136,10 +144,11 @@ export async function startTestRecording(
   timer: Timer = defaultTimer,
   idGenerator: IdGenerator = defaultIdGenerator,
   recorderFactory: RecorderFactory = (target) => new DualTrackRecorder(target),
+  ownerSessionUuid?: string,
 ): Promise<TestRecordingStartResult> {
   if (stoppingRecording) {
     await stoppingRecording.promise.catch(() => undefined);
-    return startTestRecording(device, timer, idGenerator, recorderFactory);
+    return startTestRecording(device, timer, idGenerator, recorderFactory, ownerSessionUuid);
   }
 
   if (activeRecording) {
@@ -186,6 +195,7 @@ export async function startTestRecording(
     platform: device.platform,
     startedAt,
     recorder: recorderFactory(device),
+    ownerSessionUuid,
   };
   const promise = Promise.resolve().then(async () => {
     try {

@@ -134,6 +134,15 @@ const segmentedSessions = (() => {
     ): Array<[string, AndroidSegmentedPlanVideoSession]> {
       return [...byHandle.entries()].filter(([, session]) => session.matchesDevice(device));
     },
+    /** Tracked sessions a daemon session owns on a device (used when that session is released). */
+    forOwner(
+      sessionUuid: string,
+      deviceId: string,
+    ): Array<[string, AndroidSegmentedPlanVideoSession]> {
+      return [...byHandle.entries()].filter(([, session]) =>
+        session.isOwnedBy(sessionUuid, deviceId),
+      );
+    },
     /**
      * Drop a session from the registry by identity (its handle is not known inside the
      * session). Wired to the session's `onFinalized` hook so an auto-stopped,
@@ -214,6 +223,36 @@ export async function stopSegmentedVideoRecordingsForDevice(
       logger.warn(
         `[VideoRecording] Failed to finalize segmented session ${handle} on ` +
           `device ${device.deviceId ?? device.name}: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+}
+
+/** Whether a daemon session owns a timer-driven segmented recording on the device. */
+export function hasSegmentedVideoRecordingsForOwner(
+  sessionUuid: string,
+  deviceId: string,
+): boolean {
+  return segmentedSessions.forOwner(sessionUuid, deviceId).length > 0;
+}
+
+/**
+ * Finalize the segmented sessions a released daemon session owns on a device, so their rotation
+ * timers stop and each segment is finalized. Failures are logged and never thrown: release must
+ * not be blocked by a recording that cannot be stopped.
+ */
+export async function stopSegmentedVideoRecordingsForOwner(
+  sessionUuid: string,
+  deviceId: string,
+): Promise<void> {
+  for (const [handle, session] of segmentedSessions.forOwner(sessionUuid, deviceId)) {
+    try {
+      await segmentedSessions.stopAndRemove(handle, session);
+    } catch (error) {
+      logger.warn(
+        `[VideoRecording] Failed to finalize segmented session ${handle} of released session ` +
+          `${sessionUuid} on device ${deviceId}: ${errorMessage(error)}`,
         error,
       );
     }

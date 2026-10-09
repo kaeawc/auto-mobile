@@ -254,9 +254,20 @@ const startTestRecordingResultSchema = z.object({
 });
 
 // Start test recording tool handler
-const startTestRecordingTool = async (device: BootedDevice): Promise<any> => {
+const startTestRecordingTool = async (
+  device: BootedDevice,
+  params?: { sessionUuid?: string },
+): Promise<any> => {
   try {
-    const result = await startTestRecording(device);
+    // The owning session is recorded so releasing it stops the recording instead of leaving it
+    // to capture the device's next owner.
+    const result = await startTestRecording(
+      device,
+      undefined,
+      undefined,
+      undefined,
+      params?.sessionUuid,
+    );
 
     return createStructuredToolResponse({
       success: true,

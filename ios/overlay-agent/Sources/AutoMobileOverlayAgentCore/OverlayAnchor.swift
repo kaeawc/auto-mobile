@@ -149,7 +149,9 @@ struct OverlayAnchor: Decodable, Equatable {
         rightToLeft: Bool,
         layerOriginX: Double,
         layerOriginY: Double
-    ) -> OverlayRect? {
+    )
+        -> OverlayRect?
+    {
         screenRect(nodeWidth: nodeWidth, nodeHeight: nodeHeight, rightToLeft: rightToLeft).map {
             OverlayRect(x: $0.x - layerOriginX, y: $0.y - layerOriginY, width: $0.width, height: $0.height)
         }
@@ -169,7 +171,15 @@ struct OverlayAnchoredNode {
 /// Roles that render their children inline through `NodeView`; other roles never draw children, so
 /// an anchored node below them is not listed (as Android's `OVERLAY_INLINE_CONTAINER_ROLES`, plus
 /// iOS's inline `bottomSheet`, which Android shows as a modal).
-private let overlayInlineContainerTypes: Set<String> = ["box", "row", "column", "scroll", "card", "pager", "bottomSheet"]
+private let overlayInlineContainerTypes: Set<String> = [
+    "box",
+    "row",
+    "column",
+    "scroll",
+    "card",
+    "pager",
+    "bottomSheet",
+]
 
 extension OverlayNode {
     /// Child nodes in tree order with their paths: `child`, else `children` (the spec contract).
@@ -203,7 +213,9 @@ extension OverlayNode {
         state: [String: JSONValue],
         pages: [String: Int],
         retainExiting: Bool = false
-    ) -> [OverlayAnchoredNode] {
+    )
+        -> [OverlayAnchoredNode]
+    {
         layeredAnchors(path: path, state: state, pages: pages, retainExiting: retainExiting, shown: true)
     }
 
@@ -213,7 +225,9 @@ extension OverlayNode {
         pages: [String: Int],
         retainExiting: Bool,
         shown: Bool
-    ) -> [OverlayAnchoredNode] {
+    )
+        -> [OverlayAnchoredNode]
+    {
         var shown = shown
         if shown, let visibleWhen, !visibleWhen.holds(state) {
             guard retainExiting, transition != "none" else { return [] }
@@ -239,7 +253,9 @@ extension OverlayNode {
         pages: [String: Int],
         retainExiting: Bool = false,
         ancestorsShown: Bool = true
-    ) -> [OverlayAnchoredNode] {
+    )
+        -> [OverlayAnchoredNode]
+    {
         entries.flatMap { entry -> [OverlayAnchoredNode] in
             let own = entry.node.anchor.map {
                 [OverlayAnchoredNode(node: entry.node, path: entry.path, anchor: $0, ancestorsShown: ancestorsShown)]
@@ -256,7 +272,9 @@ extension OverlayNode {
         state: [String: JSONValue],
         pages: [String: Int],
         retainExiting: Bool = false
-    ) -> [OverlayAnchoredNode] {
+    )
+        -> [OverlayAnchoredNode]
+    {
         let own = anchor.map { [OverlayAnchoredNode(node: self, path: "root", anchor: $0)] } ?? []
         return own + layeredAnchors(state: state, pages: pages, retainExiting: retainExiting)
     }

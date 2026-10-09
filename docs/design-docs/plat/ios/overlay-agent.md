@@ -35,7 +35,7 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 
 ## Open decisions
 
-These are undecided; the table above describes today's code, and nothing here promises a behaviour.
+All of these are decided (2026-10-09); the table above describes the code, and the open item is simulator verification.
 
 1. Decided 2026-10-09: `inspect` maps to the agent's `get_overlay_status` (see [Inspect](#inspect)).
 2. Decided 2026-10-09: a bottom sheet lifts above the keyboard from keyboard-frame notifications
@@ -43,7 +43,6 @@ These are undecided; the table above describes today's code, and nothing here pr
    check.
 3. Decided 2026-10-09: `window.layer: "app"` is accepted and ignored silently on iOS, with no
    warning, so one spec runs on both platforms. The overlay stays at window level alert + 1.
-   spec runs on both platforms.
 
 ## Expiry
 

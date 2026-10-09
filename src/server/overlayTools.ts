@@ -622,7 +622,7 @@ async function prepareWindowOptions(
   if (!options.appLayer && !options.devicePersistence) {
     return undefined;
   }
-  // overlayPlatformError refuses window options off Android, so only Android reaches here.
+  // overlayPlatformError refuses persistence off Android; layer "app" is ignored on iOS.
   if (!target.android) {
     return undefined;
   }

@@ -2,7 +2,9 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { forceStuckSessionRelease } from "../../src/daemon/releaseSessionAndDevice";
+import { STUCK_REAP_WARN_MS } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
+  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   SESSION_SETUP_DRAIN_TIMEOUT_MS,
   SessionManager,
@@ -35,6 +37,8 @@ const flush = async () => {
 /** Release writes can be parked, like a wedged SQLite write. */
 class ParkablePersistence extends FakeDeviceSessionPersistence {
   parkRelease: Promise<void> | undefined;
+  /** Release writes that fail outright before any is parked or lands. */
+  failReleases = 0;
   readonly releaseWrites: string[] = [];
 
   override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
@@ -48,6 +52,10 @@ class ParkablePersistence extends FakeDeviceSessionPersistence {
     reason: string,
   ): Promise<void> {
     this.releaseWrites.push(`${sessionUuid}:${status}:${reason}`);
+    if (this.failReleases > 0) {
+      this.failReleases--;
+      throw new Error("SQLITE_BUSY");
+    }
     await this.parkRelease;
     await super.markReleased(sessionUuid, status, releasedAtMs, reason);
   }
@@ -188,6 +196,56 @@ describe("a forced stuck release stops touching the device (#11058 item 1)", () 
       expect(h.manager.hasDeviceCleanupInProgress(first.deviceId)).toBe(false);
       expect(h.manager.getSessionForDevice(first.deviceId)).toBe("b");
       setupGate.resolve();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("the force threshold and its fence (#11058 item 2)", () => {
+  test("a release within its own worst case is never forced", () => {
+    expect(STUCK_REAP_WARN_MS).toBeGreaterThan(
+      SESSION_RELEASE_TEARDOWN_CAP_MS + 2 * SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+    );
+  });
+
+  test("forcing a release stuck in teardown persists its terminal fence", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      await bindShapedSession(h, "a");
+      void h.manager.releaseSession("a", "heartbeat-timeout");
+      await flush();
+      expect((await h.persistence.getSession!("a"))?.status).toBe("active");
+
+      h.manager.forceStuckRelease("a");
+      await flush();
+      // The stuck release never reached its write; the force wrote the fence itself.
+      expect((await h.persistence.getSession!("a"))?.status).toBe("expired");
+      h.keepAwake.gate.resolve();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a failed fence write falls back to the terminal-write retry", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      h.manager.setTerminalReleaseRetryBackoff({ delayForAttempt: () => 500 });
+      await bindShapedSession(h, "a");
+      void h.manager.releaseSession("a", "heartbeat-timeout");
+      await flush();
+      h.persistence.failReleases = 1;
+
+      h.manager.forceStuckRelease("a");
+      await flush();
+      expect((await h.persistence.getSession!("a"))?.status).toBe("active");
+
+      await h.timer.advanceTimeAsync(500);
+      await flush();
+      expect((await h.persistence.getSession!("a"))?.status).toBe("expired");
+      h.keepAwake.gate.resolve();
     } finally {
       warn.mockRestore();
     }

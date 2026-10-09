@@ -1741,22 +1741,11 @@ export class SessionManager {
 
   /**
    * A release forced while it waited to start (#10963): the device may already belong to the next
-   * owner, so no teardown may touch it. Only the fence the force raised is persisted.
+   * owner, so no teardown may touch it. The force itself persists the fence it raised (#11058).
    */
-  private async finishReleaseForcedBeforeStart(sessionId: string, session: Session): Promise<null> {
-    try {
-      const fence = this.terminalReleaseSnapshots.get(sessionId);
-      if (fence) {
-        await this.persistSessionRelease(fence).catch((error: unknown) => {
-          logger.warn(
-            `[SessionManager] Failed to persist forced release of ${sessionId}: ${errorMessage(error)}`,
-          );
-        });
-      }
-      return null;
-    } finally {
-      this.releasingSessions.delete(session);
-    }
+  private async finishReleaseForcedBeforeStart(session: Session): Promise<null> {
+    this.releasingSessions.delete(session);
+    return null;
   }
 
   /**
@@ -1800,11 +1789,15 @@ export class SessionManager {
         },
       });
     }
+    const fence = this.terminalReleaseSnapshots.get(sessionId)!;
     if (this.removeSession(sessionId, session)) {
       // The stuck release never reached its own notification: announce the release now so
       // proxies and stream servers stop treating the session as live.
-      this.notifySessionRelease(this.terminalReleaseSnapshots.get(sessionId)!);
+      this.notifySessionRelease(fence);
     }
+    // The stuck release may never reach its own write: persist the fence now (#11058), or a
+    // restart would admit the released UUID again.
+    this.persistForcedReleaseFence(fence);
     const settled = operation.promise.then(
       () => undefined,
       () => undefined,
@@ -1826,6 +1819,28 @@ export class SessionManager {
         `${deviceId} returns to the pool after at most ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms`,
     );
     return { deviceId, stage: operation.stage };
+  }
+
+  /**
+   * Write a forced release's terminal fence in the background, tracked by the shutdown drain. A
+   * write that fails falls back to the terminal-write retry (#10959); one that times out is
+   * already retried by the late-write tracker if it then fails.
+   */
+  private persistForcedReleaseFence(fence: SessionReleaseSnapshot): void {
+    const write = this.persistSessionRelease(fence).then(
+      () => undefined,
+      (error: unknown) => {
+        logger.warn(
+          `[SessionManager] Failed to persist the forced release of ${fence.sessionId}: ` +
+            errorMessage(error),
+        );
+        if (!(error instanceof SessionReleasePersistTimeoutError)) {
+          this.scheduleTerminalReleaseRetry(fence);
+        }
+      },
+    );
+    this.lateReleaseWrites.add(write);
+    void write.then(() => this.lateReleaseWrites.delete(write));
   }
 
   /**
@@ -3508,7 +3523,7 @@ export class SessionManager {
     };
     const run = () =>
       release.forced
-        ? this.finishReleaseForcedBeforeStart(sessionId, session)
+        ? this.finishReleaseForcedBeforeStart(session)
         : this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options, release);
     if (pendingRebind?.session === session) {
       release.stage = "awaiting-rebind";

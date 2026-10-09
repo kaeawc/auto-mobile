@@ -23,6 +23,7 @@ import {
 import { dropMcpRecording } from "../server/mcpRecordingManager";
 import { isToolUnavailableWireError } from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
+import type { RefusedOwnedSessionRestore } from "./devicePool";
 import { GestureOwnershipRegistry } from "./gestureOwnership";
 import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
 import { McpOverloadError, McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
@@ -132,6 +133,7 @@ import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSe
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   assertInputRequesterHoldsDevice,
+  deviceAlreadyAssignedToAnotherSessionError,
   InputDeviceOwnedError,
   parseInputRequesterSessionUuid,
 } from "./inputDeviceOwnership";
@@ -2890,16 +2892,40 @@ export class UnixSocketServer {
     // Restoration attaches only live sessions. It restores both explicit
     // acquisition ownership and autolock routing without reallocating a
     // released UUID.
-    await pool.restoreOwnedDeviceSessionsForMcpSession?.(
-      ids,
-      socketSessionId,
-      this.ownedSessionsOwnerToken(args),
-    );
+    const refused =
+      (await pool.restoreOwnedDeviceSessionsForMcpSession?.(
+        ids,
+        socketSessionId,
+        this.ownedSessionsOwnerToken(args),
+      )) ?? [];
     if (this.releaseBindingsIfSocketDisconnected(socketSessionId, ownerSocket, pool)) {
       return;
     }
     await pool.restoreAutolockSessionsForMcpSession?.(ids, socketSessionId);
     this.releaseBindingsIfSocketDisconnected(socketSessionId, ownerSocket, pool);
+    this.failIfCallTargetsRefusedRestore(args, refused);
+  }
+
+  /**
+   * A refused owned-session restore skips that session rather than failing an unrelated call
+   * (#11107): the call fails only when it targets the refused session or its device.
+   */
+  private failIfCallTargetsRefusedRestore(
+    args: unknown,
+    refused: readonly RefusedOwnedSessionRestore[],
+  ): void {
+    const record =
+      args && typeof args === "object" && !Array.isArray(args)
+        ? (args as Record<string, unknown>)
+        : {};
+    for (const { sessionId, deviceId, reason } of refused) {
+      logger.warn(
+        `[McpForward] skipped restoring owned session ${sessionId} on ${deviceId}: ${reason}`,
+      );
+      if (record.sessionUuid === sessionId || record.deviceId === deviceId) {
+        throw deviceAlreadyAssignedToAnotherSessionError(deviceId);
+      }
+    }
   }
 
   /** The restoring proxy's liveness owner token, when it sent one with its owned sessions. */

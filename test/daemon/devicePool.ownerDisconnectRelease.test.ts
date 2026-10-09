@@ -115,16 +115,23 @@ describe("DevicePool owner-disconnect release (#10503)", () => {
   });
 
   test("another connection cannot restore a live session its owner's connection still holds (#11107)", async () => {
-    await expect(
-      devicePool.restoreOwnedDeviceSessionsForMcpSession([OWNER_SESSION], NEW_CONNECTION),
-    ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
-    await expect(
-      devicePool.restoreOwnedDeviceSessionsForMcpSession(
+    const refusal = [
+      {
+        sessionId: OWNER_SESSION,
+        deviceId: expect.any(String),
+        reason: "owned-by-other-connection",
+      },
+    ];
+    expect(
+      await devicePool.restoreOwnedDeviceSessionsForMcpSession([OWNER_SESSION], NEW_CONNECTION),
+    ).toEqual(refusal);
+    expect(
+      await devicePool.restoreOwnedDeviceSessionsForMcpSession(
         [OWNER_SESSION],
         NEW_CONNECTION,
         "someone-elses-token",
       ),
-    ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+    ).toEqual(refusal);
 
     // The real owner's disconnect is not suppressed by a claimed duplicate owner.
     devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);

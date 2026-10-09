@@ -7371,7 +7371,9 @@ export class SessionManager {
   /** Reject a tool call against a suspect session; only its owner's heartbeat restores it. */
   private assertSessionNotSuspect(session: Session): void {
     if (this.isSessionSuspect(session)) {
-      const { remainingMs } = livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow()));
+      const { remainingMs } = livenessLeaseState(
+        sessionJudgedLeaseSnapshot(session, this.sessionNow()),
+      );
       throw new SessionSuspectError(session.sessionId, remainingMs);
     }
   }

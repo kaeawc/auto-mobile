@@ -85,6 +85,8 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
   let acquired: Array<typeof ANDROID>;
   /** The fake daemon refuses control calls (e.g. a non-holder on a held device). */
   let refuseControl: boolean;
+  /** The fake daemon is an older build that never echoes the routed session. */
+  let legacyDaemon: boolean;
 
   /** The session the daemon would route a call to and admit, as it resolves its selector. */
   function daemonRoutes(params: Record<string, unknown>): string | undefined {
@@ -130,6 +132,7 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
     timer = new FakeTimer();
     acquired = [];
     refuseControl = false;
+    legacyDaemon = false;
     client = new FakeDaemonClient({
       toolResultFor: (name, params) => {
         const device =
@@ -154,7 +157,7 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
         }
         return withRoutedSessionMeta(
           { content: [{ type: "text", text: "ok" }] },
-          name === "observe" ? undefined : daemonRoutes(params),
+          name === "observe" || legacyDaemon ? undefined : daemonRoutes(params),
         );
       },
     });
@@ -280,6 +283,46 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
       ).rejects.toThrow(/Call getAndroid or getApple/);
     }
     expect(client.callToolCalls.length).toBe(forwardedBefore + 3);
+  });
+
+  describe("#10964: the echo is the only credit once the daemon echoes", () => {
+    for (const [form, args] of [
+      ["explicit sessionUuid", { sessionUuid: ANDROID.sessionUuid }],
+      ["deviceId", { deviceId: ANDROID.deviceId }],
+    ] as const) {
+      test(`a ${form} observe does not extend the idle clock`, async () => {
+        await proxy.callTool("getAndroid", {});
+        // One control call shows this daemon echoes what it admitted.
+        await proxy.callTool(CONTROL, { ...CONTROL_ARGS, ...args });
+        const lastControlAt = timer.now();
+        await callEvery("observe", args, IDLE_WINDOW_MS / 4, IDLE_WINDOW_MS - INTERVAL_MS);
+        await timer.advanceTimeAsync(lastControlAt + IDLE_WINDOW_MS + INTERVAL_MS - timer.now());
+        expect(await nextTicksHeartbeat()).toEqual([]);
+      });
+    }
+
+    test("a tapOn naming the session extends the idle clock", async () => {
+      await proxy.callTool("getAndroid", {});
+      await callEvery(
+        CONTROL,
+        { ...CONTROL_ARGS, sessionUuid: ANDROID.sessionUuid },
+        IDLE_WINDOW_MS / 2,
+        IDLE_WINDOW_MS * 3,
+      );
+      expect(await nextTicksHeartbeat()).toEqual([ANDROID.sessionUuid]);
+    });
+
+    test("an older daemon that never echoes keeps crediting the session a call names", async () => {
+      legacyDaemon = true;
+      await proxy.callTool("getAndroid", {});
+      await callEvery(
+        "observe",
+        { sessionUuid: ANDROID.sessionUuid },
+        IDLE_WINDOW_MS / 2,
+        IDLE_WINDOW_MS * 3,
+      );
+      expect(await nextTicksHeartbeat()).toEqual([ANDROID.sessionUuid]);
+    });
   });
 
   describe("#10974: the proxy credits exactly the session the daemon echoes", () => {

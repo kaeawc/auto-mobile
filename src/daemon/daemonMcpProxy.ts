@@ -3728,7 +3728,7 @@ export class DaemonMcpProxy {
         signal,
         label: `Daemon tool ${name}`,
       });
-      this.creditRoutedSession(forwardedSessionUuid, result);
+      this.creditRoutedSession(result);
       if (result?.isError) {
         // Provisioning retains its usable device session when optional resource
         // configuration fails. Own that result-minted session before returning
@@ -4185,10 +4185,11 @@ export class DaemonMcpProxy {
     return sessionUuids;
   }
 
+  /** Set by the first routed-session echo; see {@link creditRoutedSession}. */
+  private daemonEchoesRoutedSession = false;
+
   /**
-   * The session a forwarded call names, when it names one. A call routed by a `deviceId`/`platform`
-   * selector carries no session UUID: the daemon resolves it and echoes the session it routed to
-   * in the result, which {@link creditRoutedSession} credits (#10974).
+   * The session a forwarded call names, when it names one. Naming a session is not use (#10964).
    */
   private sessionsUsedByCall(forwardedSessionUuid: string | undefined): string[] {
     return forwardedSessionUuid !== undefined ? [forwardedSessionUuid] : [];
@@ -4199,12 +4200,15 @@ export class DaemonMcpProxy {
    * (#10974): exactly that session, when it is one this proxy still holds. The daemon omits the
    * echo for reads, refused calls and sessionless calls, so those credit nothing.
    */
-  private creditRoutedSession(forwardedSessionUuid: string | undefined, result: unknown): void {
-    if (forwardedSessionUuid !== undefined) {
+  private creditRoutedSession(result: unknown): void {
+    const routed = routedSessionUuidFromResult(result);
+    if (routed === undefined) {
       return;
     }
-    const routed = routedSessionUuidFromResult(result);
-    if (routed !== undefined && this.isHeldSession(routed)) {
+    // The first echo proves the daemon reports use itself (it omits the echo for reads), so the
+    // proxy stops crediting by what a call named.
+    this.daemonEchoesRoutedSession = true;
+    if (this.isHeldSession(routed)) {
       this.creditSessionUse(routed);
     }
   }
@@ -4228,7 +4232,10 @@ export class DaemonMcpProxy {
     } else {
       this.sessionCallsInFlight.delete(sessionUuid);
     }
-    if (reachedSession) {
+    // Against a daemon that echoes the routed session the echo is the only credit: a read naming a
+    // session is watching, not use (#10964). A daemon that never echoes (an older build) cannot say
+    // what it admitted, so its calls keep crediting the session they named.
+    if (reachedSession && !this.daemonEchoesRoutedSession) {
       this.creditSessionUse(sessionUuid);
     }
   }
@@ -6179,8 +6186,14 @@ export class DaemonMcpProxy {
       this.boundSessionFromResultMint = false;
       this.livenessOwnershipClaimSent = false;
     }
+    // Re-binding the session that is already bound is not use once the daemon echoes admitted use:
+    // a read naming it must not restart the idle clock (#10964); the echo credits control calls.
+    const rebindsSameSession =
+      sessionUuid === this.boundSessionUuid && this.boundSessionUuidAt !== undefined;
     this.boundSessionUuid = sessionUuid;
-    this.boundSessionUuidAt = this.timer.now();
+    if (!(rebindsSameSession && this.daemonEchoesRoutedSession)) {
+      this.boundSessionUuidAt = this.timer.now();
+    }
     this.ownedDeviceSessions.add(sessionUuid);
     // A call reached the session, so the daemon knows it again: heartbeat it (#10702).
     this.latestBindingNotFound = undefined;

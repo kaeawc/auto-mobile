@@ -45,7 +45,7 @@ import { AndroidEmulatorClient } from "../utils/android-cmdline-tools/AndroidEmu
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { PlatformDeviceManager } from "../utils/interfaces/DeviceUtils";
 import { getDeviceCreationGate } from "./deviceCreationGate";
-import { createDefaultDeviceProvisioner } from "./deviceProvisioning";
+import { createDefaultDeviceProvisioner, type ProvisionedDevice } from "./deviceProvisioning";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import type { AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -1784,6 +1784,48 @@ export class DeviceSessionManager implements DeviceSessionManager {
     );
   }
 
+  private async rollBackCreatedIosOnFailure<T>(
+    getCreated: () => ProvisionedDevice | undefined,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      const created = getCreated();
+      if (created) {
+        await this.rollBackCreatedIosSimulator(created, error);
+      }
+      throw error;
+    }
+  }
+
+  /** Deletes a simulator this request created and then failed to bind, boot or verify. */
+  private async rollBackCreatedIosSimulator(
+    created: { name: string; deviceId?: string },
+    failure: unknown,
+  ): Promise<void> {
+    if (!created.deviceId) {
+      logger.warn(
+        `[DeviceSessionManager] Cannot roll back created iOS simulator '${created.name}': no UDID.`,
+      );
+      return;
+    }
+    logger.warn(
+      `[DeviceSessionManager] Rolling back created iOS simulator '${created.name}' ` +
+        `(${created.deviceId}) after failure: ${errorMessage(failure)}`,
+    );
+    // Cancellation cleanup must not inherit an already-aborted request signal.
+    const cleanupSignal = new AbortController().signal;
+    await this.simctl!.deleteSimulator(created.deviceId, { signal: cleanupSignal }).catch(
+      (deleteError) => {
+        logger.warn(
+          `[DeviceSessionManager] Failed to roll back created iOS simulator ` +
+            `'${created.name}' (${created.deviceId}): ${errorMessage(deleteError)}`,
+        );
+      },
+    );
+  }
+
   /**
    * Find an available iOS device or start a simulator
    */
@@ -1810,6 +1852,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         );
         const deadlineMs = this.runnerReadinessTimer.now() + 300_000;
         let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
+        let created: ProvisionedDevice | undefined;
         try {
           const provisioner = createDefaultDeviceProvisioner(() => this.simctl, {
             reserveBeforeCreate: async (identity) => {
@@ -1820,12 +1863,20 @@ export class DeviceSessionManager implements DeviceSessionManager {
               return lifecycleLease.signal;
             },
             bindAfterCreate: async (device) => {
+              created = device;
               await this.bindCreatedIosReadinessIdentity(lifecycleLease, device);
             },
           });
-          const provisioned = await provisioner.provision({ platform: "ios" }, options?.signal);
-          this.assertCreatedIosReservation(lifecycleLease, provisioned);
-          return await this.runWithLifecycleLease(lifecycleLease, options, async (signal) => {
+          // simctl may already have created it: a failed identity bind must not orphan it (#11100).
+          const { provisioned, lease } = await this.rollBackCreatedIosOnFailure(
+            () => created,
+            async () => {
+              const device = await provisioner.provision({ platform: "ios" }, options?.signal);
+              this.assertCreatedIosReservation(lifecycleLease, device);
+              return { provisioned: device, lease: lifecycleLease };
+            },
+          );
+          return await this.runWithLifecycleLease(lease, options, async (signal) => {
             perf.startOperation("bootSimulator");
             const createdDevice = await runWithAbortSignal(
               signal,
@@ -1845,20 +1896,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
             perf.endOperation("verifyDevice");
             return createdDevice;
           }).catch(async (error) => {
-            logger.warn(
-              `[DeviceSessionManager] Rolling back created iOS simulator '${provisioned.name}' ` +
-                `(${provisioned.deviceId}) after boot/verify failure: ${errorMessage(error)}`,
-            );
-            // Cancellation cleanup must not inherit an already-aborted request signal.
-            const cleanupSignal = new AbortController().signal;
-            await this.simctl!.deleteSimulator(provisioned.deviceId!, {
-              signal: cleanupSignal,
-            }).catch((deleteError) => {
-              logger.warn(
-                `[DeviceSessionManager] Failed to roll back created iOS simulator ` +
-                  `'${provisioned.name}' (${provisioned.deviceId}): ${errorMessage(deleteError)}`,
-              );
-            });
+            await this.rollBackCreatedIosSimulator(provisioned, error);
             throw toActionableError(
               error,
               `Failed to boot/verify created iOS simulator '${provisioned.name}' (${provisioned.deviceId})`,

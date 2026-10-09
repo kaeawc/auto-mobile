@@ -24,6 +24,11 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+import {
+  resetVideoRecordingManagerDependencies,
+  setVideoRecordingManagerDependencies,
+} from "../../src/server/videoRecordingManager";
 
 isolateToolRegistry();
 
@@ -93,6 +98,7 @@ describe("startDevice --create-if-missing wiring", () => {
     clearDirectSessionDevices();
     setDeviceManager(null);
     PlatformDeviceManagerFactory.reset();
+    resetVideoRecordingManagerDependencies();
   });
 
   async function callStartDevice(args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -191,5 +197,94 @@ describe("startDevice --create-if-missing wiring", () => {
     ).toBe(true);
     expect(fakeGate.calls).toEqual([undefined]);
     expect(fakeProvisioner.requests).toHaveLength(1);
+  });
+  /** Teardown dependencies the rollback reaches; without them it falls through to real I/O. */
+  async function useFakeTeardown(platform: "android" | "ios"): Promise<void> {
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: { listActiveRecordingIds: () => [] } as never,
+      recordingRepository: new FakeVideoRecordingRepository() as never,
+      configRepository: {} as never,
+      highlightClient: {} as never,
+      timer: new FakeTimer(),
+      now: () => new Date(0),
+    });
+    setDeviceToolsDependencies({
+      avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
+      clearInstalledAppsForDevice: async () => {},
+    });
+    stopKilledDevices(platform);
+  }
+
+  function stopKilledDevices(platform: "android" | "ios"): void {
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device) => {
+      await originalKillDevice(device);
+      fakeDeviceUtils.setBootedDevices(platform, []);
+    };
+  }
+
+  it("deletes the AVD it created when the cold boot fails (#11100)", async () => {
+    fakeGate.setAllowed(true);
+    const created = {
+      platform: "android" as const,
+      name: "AutoMobile-android-34-abcd1234",
+      deviceType: "system-images;android-34;google_apis;arm64-v8a",
+      runtime: "android-34",
+    };
+    setDeviceToolsDependencies({
+      deviceProvisionerFactory: () => ({
+        provision: async (criteria, _signal, identityHooks) => {
+          fakeProvisioner.requests.push(criteria);
+          await identityHooks?.reserveBeforeCreate(created);
+          fakeDeviceUtils.setDeviceImages("android", [
+            { name: created.name, platform: "android", isRunning: false },
+          ]);
+          await identityHooks?.bindAfterCreate(created);
+          return created;
+        },
+      }),
+    });
+    fakeDeviceUtils.setWaitForDeviceReadyError(new Error("emulator never became ready"));
+    await useFakeTeardown("android");
+
+    await expect(callStartDevice({ platform: "android", createIfMissing: true })).rejects.toThrow(
+      /emulator never became ready/,
+    );
+
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain(
+      `destroyDevice:android:${created.name}`,
+    );
+    expect(await fakeDeviceUtils.listDeviceImages("android")).toEqual([]);
+  });
+
+  it("deletes the simulator it created when its boot fails (#11100)", async () => {
+    fakeGate.setAllowed(true);
+    const created = {
+      platform: "ios" as const,
+      name: "AutoMobile-iPhone-17-abcd1234",
+      deviceId: "CREATED-UDID",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+      runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+    };
+    setDeviceToolsDependencies({
+      deviceProvisionerFactory: () => ({
+        provision: async (criteria, _signal, identityHooks) => {
+          fakeProvisioner.requests.push(criteria);
+          await identityHooks?.reserveBeforeCreate(created);
+          fakeDeviceUtils.setDeviceImages("ios", [{ ...created, isRunning: false }]);
+          await identityHooks?.bindAfterCreate(created);
+          return created;
+        },
+      }),
+    });
+    fakeDeviceUtils.setWaitForDeviceReadyError(new Error("simulator never became ready"));
+    await useFakeTeardown("ios");
+
+    await expect(callStartDevice({ platform: "ios", createIfMissing: true })).rejects.toThrow(
+      /simulator never became ready/,
+    );
+
+    expect(fakeDeviceUtils.getExecutedOperations()).toContain("destroyDevice:ios:CREATED-UDID");
+    expect(await fakeDeviceUtils.listDeviceImages("ios")).toEqual([]);
   });
 });

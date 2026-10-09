@@ -380,6 +380,18 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
     deadline plus 10 s, 30 minutes without a deadline): a call that never
     settles must not pin a device (#10663, #10712).
 
+17. **Ownership is cooperative; reads are free, control is owned** (owner
+    decisions 2026-10-09, #10982). Do not add requester checks or tokens to
+    `daemon/releaseSession`, `daemon/activeSessions` or
+    `ide/setSessionToolEnabled`. A read never needs a session and never counts
+    as activity (#10964); on a held device it is connect-only, on its own lane
+    (#10969). Streams need only an observer registration, which is not a session.
+    A recording stops and finalizes on its session's release, about 120 s at most
+    (#10957), owner-less ones on acquisition (#10961), artifacts stay fetchable
+    by id (#10958). Retryable acquisition refusals are typed:
+    `device_cleanup_in_progress` (#10960), `device_owned_by_other_daemon`. The CLI
+    idle default stays 2 minutes. Details: `docs/using/device-ownership.md`.
+
 ## 3. Recurring bug classes → where to look first
 
 1. **Release/teardown asymmetry** — acquire is centralized, release is bolted

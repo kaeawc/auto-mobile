@@ -13,11 +13,15 @@ const IDLE_MS = 10 * 60_000;
 
 class FakeOrphanPort implements PrivateDaemonOrphanPort {
   ppid = 1;
+  launcher = 4242;
   clients = 0;
   sessions = 0;
   shutdowns: string[] = [];
   parentPid(): number {
     return this.ppid;
+  }
+  launcherPid(): number {
+    return this.launcher;
   }
   clientCount(): number {
     return this.clients;
@@ -55,6 +59,14 @@ describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
     expect(watchdog.check()).toBe(true);
     expect(port.shutdowns).toHaveLength(1);
     expect(watchdog.check()).toBe(false);
+  });
+
+  test("shuts down when a Linux subreaper (ppid not 1) adopts the daemon", () => {
+    port.ppid = 777;
+    expect(watchdog.check()).toBe(false);
+    timer.setCurrentTime(IDLE_MS);
+    expect(watchdog.check()).toBe(true);
+    expect(port.shutdowns).toHaveLength(1);
   });
 
   test("never shuts down while the launching parent is alive", () => {

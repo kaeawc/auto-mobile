@@ -226,6 +226,9 @@ proxy stops heartbeating the binding even if it missed the daemon's release
 notification, and it also stops when the daemon answers a heartbeat with
 `daemon_session_not_found`; a call that names the released session is told to
 call `getAndroid` or `getApple`, which works on the same transport (#10702).
+A session held from the CLI keeps its own 2-minute default idle window
+(`AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS`); the owner chose not to raise it
+(2026-10-09, #10982), and `--cli help` prints the same value.
 `session-info` reports `lastUsedAt` as the last tool activity
 and `expiresAt` as the idle deadline. When a session's device restarts, the daemon
 waits up to three minutes for it to come back. Tool calls that start, wait on, or

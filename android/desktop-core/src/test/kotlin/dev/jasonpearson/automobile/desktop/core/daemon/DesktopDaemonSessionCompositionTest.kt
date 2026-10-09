@@ -297,16 +297,52 @@ class DesktopDaemonSessionCompositionTest {
       assertEquals(MAX_BIND_ATTEMPTS, transport.boundDevices().size)
 
       // Past the cadence: exactly one more attempt, which fails and keeps the error surfaced.
-      repeat(BIND_ERROR_RETRY_INTERVAL_MS.toInt() / HEARTBEAT_MS.toInt()) { tick() }
+      repeat(BIND_ERROR_RETRY_MAX_DELAY_MS.toInt() / HEARTBEAT_MS.toInt()) { tick() }
       assertEquals(MAX_BIND_ATTEMPTS + 1, transport.boundDevices().size)
       assertEquals("Device 'emulator-5554' not found in device pool", host.state().bindErrorMessage)
 
       // The device comes back: the next cadence attempt binds and clears the error.
       transport.unrelatedBindFailures = 0
-      repeat(BIND_ERROR_RETRY_INTERVAL_MS.toInt() / HEARTBEAT_MS.toInt() + 2) { tick() }
+      repeat(BIND_ERROR_RETRY_MAX_DELAY_MS.toInt() / HEARTBEAT_MS.toInt() + 2) { tick() }
       assertEquals("emulator-5554", host.state().boundDeviceId)
       assertEquals(null, host.state().bindErrorMessage)
     }
+
+  @Test
+  fun `automatic bind error retries follow the injected backoff`() = runComposeUiTest {
+    val requested = mutableListOf<Int>()
+    val delays = listOf(4_000L, 8_000L, 30_000L)
+    val transport = RecordingDaemonTransport().apply { unrelatedBindFailures = 99 }
+    val host =
+      start(
+        transport,
+        listOf(pixel),
+        bindRetryBackoff =
+          BindRetryBackoff { retry ->
+            requested += retry
+            delays[minOf(retry, delays.lastIndex)]
+          },
+      )
+    assertFalse(input(host, pixel.deviceId))
+    repeat(2) { tick() }
+    val surfaced = transport.boundDevices().size
+    assertEquals(MAX_BIND_ATTEMPTS, surfaced)
+
+    // Each wait follows the injected delay: 4s (2 ticks), then 8s (4 ticks), then 30s.
+    val attemptTicks = mutableListOf<Int>()
+    var seen = surfaced
+    repeat(26) { index ->
+      tick()
+      if (transport.boundDevices().size > seen) {
+        seen = transport.boundDevices().size
+        attemptTicks += index
+      }
+    }
+    assertEquals(3, attemptTicks.size)
+    val gaps = attemptTicks.zipWithNext { a, b -> b - a }
+    assertTrue(gaps[0] < gaps[1], "waits should grow with the injected delays: $gaps")
+    assertEquals(listOf(0, 1, 2), requested.take(3))
+  }
 
   @Test
   fun `a surfaced bind error clears itself once a re-bind after a lapse succeeds`() =
@@ -757,8 +793,9 @@ class DesktopDaemonSessionCompositionTest {
     panes: List<DesktopDaemonSessionBinding>,
     visible: Boolean = true,
     inputAllocationTimeoutMs: Long = INPUT_ALLOCATION_TIMEOUT_MS,
+    bindRetryBackoff: BindRetryBackoff = BindRetryBackoff { BIND_ERROR_RETRY_MAX_DELAY_MS },
   ): Host {
-    val host = Host(transport, panes, visible, inputAllocationTimeoutMs)
+    val host = Host(transport, panes, visible, inputAllocationTimeoutMs, bindRetryBackoff)
     setContent { host.compose() }
     mainClock.autoAdvance = false
     mainClock.advanceTimeByFrame()
@@ -770,6 +807,7 @@ class DesktopDaemonSessionCompositionTest {
     panes: List<DesktopDaemonSessionBinding>,
     visible: Boolean,
     private val inputAllocationTimeoutMs: Long,
+    private val bindRetryBackoff: BindRetryBackoff,
   ) {
     val panes: MutableState<List<DesktopDaemonSessionBinding>> = mutableStateOf(panes)
     val visible: MutableState<Boolean> = mutableStateOf(visible)
@@ -785,6 +823,7 @@ class DesktopDaemonSessionCompositionTest {
           panes = panes,
           hostVisible = visible.value,
           inputAllocationTimeoutMs = inputAllocationTimeoutMs,
+          bindRetryBackoff = bindRetryBackoff,
           sessionFactory = {
             DesktopDaemonSession(
               McpDaemonClient(transport, sessionUuid = "session-${++sessionCounter}"),

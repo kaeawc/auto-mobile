@@ -193,6 +193,19 @@ keeps running for the remaining subscribers. Recordings are a separate concern a
 on release. Policy lives in `src/daemon/streamSubscriptionPolicy.ts`; tests in
 `test/daemon/*StreamSocketServer.viewerSubscription.test.ts`.
 
+Observer scope and cooperative ownership (owner decisions 2026-10-09, #10982):
+streams (`subscribe`, `request_observation`, video and WebRTC viewing) keep
+requiring the lightweight observer registration above, which is never a session;
+tools need nothing for read-only work. Ownership is a cooperative guard, not a
+local security boundary: `daemon/activeSessions` (`includeSessions`),
+`daemon/releaseSession` and `ide/setSessionToolEnabled` take no requester check on
+purpose, and no token gating is to be added. Reads are not activity, not even the
+owner's (#10964); a read on a held device is connect-only, on its own lane (#10969).
+A recording stops and finalizes on its session's release, capped near 120 s (#10957),
+and an owner-less one stops on acquisition (#10961). Acquisition refusals that can
+clear on their own are typed and retryable: `device_cleanup_in_progress` (#10960)
+and `device_owned_by_other_daemon`. See `docs/using/device-ownership.md`.
+
 Open owner question: is non-persistence acceptable? Clients must register again
 after daemon restart. (Resolved question: watching is allowed on any device and
 control stays with the owner, per the 2026-10-08 decision above; the viewer grant

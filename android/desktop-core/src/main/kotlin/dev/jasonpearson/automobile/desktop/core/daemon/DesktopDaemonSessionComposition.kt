@@ -42,13 +42,27 @@ private const val HEARTBEAT_INTERVAL_MS = 2_000L
 internal const val MAX_BIND_ATTEMPTS = 3
 
 /**
- * Cadence of the automatic single re-attempt while a bind error is surfaced and the pane stays open
- * (#10716), so a device that comes back needs no manual Retry. Slow on purpose: the error already
- * burned [MAX_BIND_ATTEMPTS] attempts, and each retry is a daemon round trip.
+ * Ceiling of the delay before the automatic single re-attempt while a bind error is surfaced and
+ * the pane stays open (#10716), so a device that comes back needs no manual Retry. Slow on purpose:
+ * the error already burned [MAX_BIND_ATTEMPTS] attempts, and each retry is a daemon round trip.
  */
-internal const val BIND_ERROR_RETRY_INTERVAL_MS = 30_000L
-private const val BIND_ERROR_RETRY_TICKS =
-  (BIND_ERROR_RETRY_INTERVAL_MS / HEARTBEAT_INTERVAL_MS).toInt()
+internal const val BIND_ERROR_RETRY_MAX_DELAY_MS = 30_000L
+
+/**
+ * Delay before the [retry]th (0-based) automatic re-attempt of a surfaced bind error (#10832). The
+ * default backs off exponentially with jitter up to [BIND_ERROR_RETRY_MAX_DELAY_MS]; tests inject a
+ * deterministic one.
+ */
+fun interface BindRetryBackoff {
+  fun delayMs(retry: Int): Long
+
+  companion object {
+    val Default = BindRetryBackoff { retry ->
+      RetryPolicy(initialDelayMs = 5_000L, maxDelayMs = BIND_ERROR_RETRY_MAX_DELAY_MS)
+        .delayBeforeRetryMs(retry)
+    }
+  }
+}
 
 /**
  * How long the host (the desktop window, the IDE tool window) may stay hidden before the session
@@ -249,6 +263,7 @@ fun rememberDesktopDaemonSession(
   hiddenReleaseGraceMs: Long = HIDDEN_RELEASE_GRACE_MS,
   inputAllocationTimeoutMs: Long = INPUT_ALLOCATION_TIMEOUT_MS,
   onDaemonRecovered: suspend () -> Boolean = { true },
+  bindRetryBackoff: BindRetryBackoff = BindRetryBackoff.Default,
 ): DesktopDaemonSessionState {
   // Bumped to replace the session with a fresh one (#10659). Releasing a session is how a hold is
   // dropped, and a released UUID is terminal on the daemon, so the fresh one registers as an
@@ -435,6 +450,10 @@ fun rememberDesktopDaemonSession(
     // more bind attempt (#10716). Counted in ticks, not wall time, so tests drive it with the
     // virtual clock.
     var ticksWithBindError = 0
+    // Automatic re-attempts spent on this error (the backoff index), and the tick count the current
+    // wait needs (-1 until chosen). Both reset once a bind succeeds.
+    var bindErrorRetries = 0
+    var bindErrorWaitTicks = -1
     if (carried != null) {
       bindErrorMessage = carried.second
       bindErrorDeviceId = carried.first
@@ -461,6 +480,7 @@ fun rememberDesktopDaemonSession(
                   result.success -> {
                     bindingAcknowledged = true
                     failedBinds = 0
+                    bindErrorRetries = 0
                     // A later bind succeeding (the device came back) clears a surfaced bind error
                     // without a Retry click.
                     bindErrorMessage = null
@@ -577,14 +597,22 @@ fun rememberDesktopDaemonSession(
         }
         .isSuccess
       if (alive && failedBinds >= MAX_BIND_ATTEMPTS && bindErrorMessage != null) {
+        if (bindErrorWaitTicks < 0) {
+          val delayMs = bindRetryBackoff.delayMs(bindErrorRetries)
+          bindErrorWaitTicks =
+            ((delayMs + HEARTBEAT_INTERVAL_MS - 1) / HEARTBEAT_INTERVAL_MS).toInt()
+        }
         ticksWithBindError++
-        if (ticksWithBindError >= BIND_ERROR_RETRY_TICKS) {
+        if (ticksWithBindError >= bindErrorWaitTicks) {
           // One attempt: a failure puts the count straight back to the cap and keeps the message.
           ticksWithBindError = 0
+          bindErrorWaitTicks = -1
+          bindErrorRetries++
           failedBinds = MAX_BIND_ATTEMPTS - 1
         }
       } else {
         ticksWithBindError = 0
+        bindErrorWaitTicks = -1
       }
       if (!alive && bindingAcknowledged && target != null) {
         // The daemon no longer has this session's hold: it idle-released it after the idle window
@@ -610,6 +638,7 @@ fun rememberDesktopDaemonSession(
         // A surfaced bind error is retried once the session re-registers after a lapse (a daemon
         // restart may have brought the device back); a success clears it.
         if (failedBinds >= MAX_BIND_ATTEMPTS) failedBinds = 0
+        bindErrorRetries = 0
       }
     }
   }

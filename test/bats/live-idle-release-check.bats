@@ -354,6 +354,17 @@ run_check() {
   [[ "${output}" == *"FAIL selector"* ]]
 }
 
+@test "all: a failing scenario does not hide the scenarios after it" {
+  FAKE_SELECTOR_NOT_CREDITED=1 run_check --scenario all
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"PASS idle"* ]]
+  [[ "${output}" == *"FAIL selector"* ]]
+  [[ "${output}" == *"PASS stream"* ]]
+  [[ "${output}" == *"FAILED scenarios: selector"* ]]
+  [[ "${output}" != *"all requested scenarios passed"* ]]
+  grep -qx -- "--daemon stop --port 3920 --strict-port" "${FAKE}/daemon.calls"
+}
+
 @test "provision: a provisionDevice session is driven by deviceId and stays held" {
   run_check --scenario provision
   [ "${status}" -eq 0 ]

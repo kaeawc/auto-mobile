@@ -7689,11 +7689,9 @@ export class SessionManager {
     if (session.livenessPolicy === "cli-idle") {
       return false;
     }
-    // A session whose owner has been heartbeating is held a further suspect
-    // window past its deadline (#10051), so an owner that missed a beat can
-    // still restore it.
-    const idleDeadline = session.expiresAt + suspectGraceMsFor(session);
-    if (this.sessionNow() <= idleDeadline) {
+    // The idle deadline is exactly the idle window after the last control call: the suspect
+    // grace (#10051) belongs to the heartbeat lease only, never to idleness (#11107).
+    if (this.sessionNow() <= session.expiresAt) {
       return false;
     }
     return !isReleaseVetoedByExecutions({
@@ -7715,7 +7713,7 @@ export class SessionManager {
     latestDeadlineMs: number | undefined;
   } {
     return {
-      vetoedSince: session.expiresAt + suspectGraceMsFor(session),
+      vetoedSince: session.expiresAt,
       latestDeadlineMs: this.sessionExecutionDeadlineLookup(session.sessionId),
     };
   }
@@ -7779,7 +7777,7 @@ export class SessionManager {
     if (execution === undefined) {
       return this.isSessionExpired(session);
     }
-    if (this.sessionNow() <= session.expiresAt + suspectGraceMsFor(session)) {
+    if (this.sessionNow() <= session.expiresAt) {
       return false;
     }
     return execution.startTime > session.expiresAt;

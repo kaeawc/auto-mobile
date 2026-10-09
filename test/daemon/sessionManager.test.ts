@@ -3216,14 +3216,14 @@ describe("SessionManager", () => {
   });
 
   describe("recordHeartbeat", () => {
-    test("holds a heartbeating session only through the suspect grace past its custom timeout", async () => {
+    test("releases a heartbeating session exactly at its idle deadline, with no suspect grace (#11107)", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android", 5000);
       fakeTimer.advanceTime(4000);
 
-      // A heartbeat does not extend the idle deadline (#10656), but a heartbeating session
-      // past its deadline is held for the suspect grace window (#10051) before release.
+      // A heartbeat does not extend the idle deadline (#10656), and the suspect grace (#10051)
+      // belongs to the heartbeat lease only: idleness releases exactly at the deadline.
       sessionManager.recordHeartbeat("session-1");
-      fakeTimer.advanceTime(1000 + SUSPECT_GRACE_MS);
+      fakeTimer.advanceTime(1000);
       expect(sessionManager.getSession("session-1")).not.toBeNull();
 
       fakeTimer.advanceTime(1);

@@ -402,9 +402,10 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
     test("host sleep shorter than the idle window still counts toward it, never granting a fresh window (#10699)", async () => {
       // The issue's probe: 60s window, last tool call at 1s, the host sleeps from 40s. Every sleep
-      // length releases at the first judgement past the window plus grace from the last tool call
-      // (at wake, when wake is already past it), so a shorter sleep never holds the device longer.
-      const releaseAfterToolMs = 60_000 + SUSPECT_GRACE_MS;
+      // length releases at the first judgement past the window from the last tool call (at wake,
+      // when wake is already past it), so a shorter sleep never holds the device longer. The
+      // suspect grace extends only the heartbeat lease, never idleness (#11107).
+      const releaseAfterToolMs = 60_000;
       for (const sleepMs of [15_000, 50_000, 65_000, 75_000, 79_000, 81_000, 200_000]) {
         timer = new FakeTimer();
         sessionManager.stopCleanupTimer();
@@ -436,7 +437,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
         }
 
         const due = 1_000 + releaseAfterToolMs;
-        // Kept until the window plus grace, released at the first judgement past it.
+        // Kept until the window, released at the first judgement past it.
         expect({ sleepMs, releasedAt }).toEqual({
           sleepMs,
           releasedAt:

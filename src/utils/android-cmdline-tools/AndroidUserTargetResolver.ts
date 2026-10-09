@@ -1,4 +1,4 @@
-import type { AdbExecutor } from "./interfaces/AdbExecutor";
+import type { AdbExecutor, ForegroundApp } from "./interfaces/AdbExecutor";
 import { classifyAndroidUser, type AndroidUser } from "../../models/AndroidUser";
 import { isPackageInstalledForUser } from "./isPackageInstalledForUser";
 import { logger } from "../logger";
@@ -13,6 +13,13 @@ export type UserTargetSource =
 export interface ResolvedUserTarget<Source extends string = UserTargetSource> {
   userId: number;
   source: Source;
+  /**
+   * The foreground app the resolver already read while choosing the user (`null` when it was
+   * read but unreadable or absent). Present only when the request set `includeForegroundApp`
+   * and a read happened; absent for explicit or current-user targets, so a caller must read it
+   * itself in that case.
+   */
+  foregroundApp?: ForegroundApp | null;
 }
 
 export interface UserTargetRequest<InstalledOnly extends boolean = false> {
@@ -22,6 +29,11 @@ export interface UserTargetRequest<InstalledOnly extends boolean = false> {
   currentUser?: boolean;
   /** Restrict background package targeting to installed running users on multi-user devices. */
   installedOnly?: InstalledOnly;
+  /**
+   * Also return the foreground app the package-targeting read already fetched, so the caller
+   * need not repeat that dumpsys. Only set when that read happened.
+   */
+  includeForegroundApp?: boolean;
   signal?: AbortSignal;
 }
 
@@ -82,19 +94,31 @@ export class AndroidUserTargetResolver {
       }
     }
 
-    if (request.packageName) {
-      const foreground = await this.adb.getForegroundApp(request.signal);
-      if (foreground?.packageName === request.packageName) {
-        return { userId: foreground.userId, source: "foregroundPackage" };
-      }
+    const foregroundRead = request.packageName ? await this.readForeground(request) : undefined;
+    if (foregroundRead?.match) {
+      return foregroundRead.match;
     }
 
     const allUsers = await this.adb.listUsers(request.signal);
     const users = await this.installedCandidates(request, allUsers);
-    if (users !== allUsers && users.length === 1) {
-      return { userId: users[0].userId, source: "installedUser" };
+    const target: ResolvedUserTarget<UserTargetSource | "installedUser"> =
+      users !== allUsers && users.length === 1
+        ? { userId: users[0].userId, source: "installedUser" }
+        : this.selectDefaultUser(users, allUsers);
+    return { ...target, ...foregroundRead?.extra };
+  }
+
+  /** Reads the foreground app once; `match` is the resolved target when it is the requested package. */
+  private async readForeground(request: UserTargetRequest<boolean>): Promise<{
+    match?: ResolvedUserTarget;
+    extra?: { foregroundApp: ForegroundApp | null };
+  }> {
+    const foreground = await this.adb.getForegroundApp(request.signal);
+    const extra = request.includeForegroundApp ? { foregroundApp: foreground } : undefined;
+    if (foreground && foreground.packageName === request.packageName) {
+      return { match: { userId: foreground.userId, source: "foregroundPackage", ...extra } };
     }
-    return this.selectDefaultUser(users, allUsers);
+    return { extra };
   }
 
   private selectDefaultUser(users: AndroidUser[], allUsers: AndroidUser[]): ResolvedUserTarget {

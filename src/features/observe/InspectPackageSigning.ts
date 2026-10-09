@@ -62,7 +62,16 @@ export class AdbPullApkFetcher implements ApkFetcher {
         signal,
       );
       const handle = await fs.open(localPath, "r");
-      const size = (await handle.stat()).size;
+      let size: number;
+      try {
+        size = (await handle.stat()).size;
+      } catch (error) {
+        // The caller only ever gets `dispose` on success: close the handle here (#11058).
+        await handle.close().catch((closeError: unknown) => {
+          logger.warn(`Failed to close pulled APK ${localPath}: ${errorMessage(closeError)}`);
+        });
+        throw error;
+      }
       return {
         source: {
           size,

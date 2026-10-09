@@ -53,6 +53,35 @@ describe("withAndroidPackageMutationLock", () => {
     expect(started).toBe(false);
   });
 
+  test("a caller cancelled while queued is answered at once and frees its slot (#11058)", async () => {
+    const gate = deferred();
+    const holder = withAndroidPackageMutationLock("d4", undefined, () => gate.promise);
+    const controller = new AbortController();
+    let started = false;
+    let outcome = "pending";
+    void withAndroidPackageMutationLock("d4", controller.signal, async () => {
+      started = true;
+    }).then(
+      () => {
+        outcome = "resolved";
+      },
+      () => {
+        outcome = "rejected";
+      },
+    );
+    controller.abort();
+    for (let index = 0; index < 20; index++) {
+      await Promise.resolve();
+    }
+    // Rejected while the holder still runs, not when the lock reaches it.
+    expect(outcome).toBe("rejected");
+    gate.resolve();
+    await holder;
+    // The abandoned slot is released as soon as it comes up, so the next caller runs.
+    expect(await withAndroidPackageMutationLock("d4", undefined, async () => "next")).toBe("next");
+    expect(started).toBe(false);
+  });
+
   test("a failed mutation releases the lock", async () => {
     await expect(
       withAndroidPackageMutationLock("d3", undefined, async () => {

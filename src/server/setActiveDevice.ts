@@ -15,6 +15,7 @@ import {
   resolveDirectSessionDevice,
 } from "./directSessionDeviceRegistry";
 import { prepareSessionDisplayPin } from "./sessionDisplayPin";
+import { deviceAssignedToOtherSessionError } from "../daemon/inputDeviceOwnership";
 
 export interface SetActiveDeviceArgs {
   deviceId: string;
@@ -78,9 +79,7 @@ function assertDeviceOwner(input: {
     device.sessionId !== sessionUuid &&
     sessions.getSession(device.sessionId)
   ) {
-    throw new ActionableError(
-      `Device '${device.id}' is already assigned to session ${device.sessionId}`,
-    );
+    throw deviceAssignedToOtherSessionError(device.id, device.sessionId, sessionUuid);
   }
 }
 
@@ -107,9 +106,7 @@ async function bindRequestedDevice(input: {
     true,
   );
   if (boundSession !== args.sessionUuid) {
-    throw new ActionableError(
-      `Device '${args.deviceId}' is already assigned to session ${boundSession}`,
-    );
+    throw deviceAssignedToOtherSessionError(args.deviceId, boundSession, args.sessionUuid);
   }
   sessions.setDeviceReadiness(args.sessionUuid, "booted");
 }

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { BOUND_SESSION_LOSS_CODE, boundSessionLossMessage } from "../../src/daemon/types";
+import {
+  BOUND_SESSION_LOSS_CODE,
+  boundSessionLossMessage,
+  releasedSessionNotFoundFields,
+} from "../../src/daemon/types";
 
 function loss(reason: string) {
   return { code: BOUND_SESSION_LOSS_CODE, sessionUuid: "s-1", reason } as const;
@@ -48,5 +52,25 @@ describe("boundSessionLossMessage (#10661)", () => {
       "Device session s-1 is no longer active (explicit-release). " +
         "Acquire a new device session before continuing.",
     );
+  });
+});
+
+describe("releasedSessionNotFoundFields (#10832)", () => {
+  test.each(["lazy-expiry", "cleanup-expired", "cli-idle-timeout"])(
+    "%s is flagged as an idle release",
+    (reason) => {
+      expect(releasedSessionNotFoundFields(reason)).toEqual({ releaseReason: reason, idle: true });
+    },
+  );
+
+  test.each(["heartbeat-timeout", "explicit-release", "owner-disconnected", "daemon-shutdown"])(
+    "%s carries its reason without the idle flag",
+    (reason) => {
+      expect(releasedSessionNotFoundFields(reason)).toEqual({ releaseReason: reason });
+    },
+  );
+
+  test("a never-issued session adds nothing", () => {
+    expect(releasedSessionNotFoundFields(undefined)).toEqual({});
   });
 });

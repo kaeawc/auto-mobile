@@ -32,16 +32,38 @@ export class InputDeviceOwnedError extends ActionableError {
     readonly deviceId: string,
     requesterSessionUuid: string | undefined,
     remedy = INPUT_REMEDY,
+    /** Replaces the composed message where a caller's existing wording must stay stable. */
+    message?: string,
   ) {
     super(
-      `${action} refused: device '${deviceId}' is held by another session. ` +
-        (requesterSessionUuid
-          ? `Session ${requesterSessionUuid} does not hold it; `
-          : "The request carried no sessionUuid; ") +
-        remedy,
+      message ??
+        `${action} refused: device '${deviceId}' is held by another session. ` +
+          (requesterSessionUuid
+            ? `Session ${requesterSessionUuid} does not hold it; `
+            : "The request carried no sessionUuid; ") +
+          remedy,
     );
     this.name = "InputDeviceOwnedError";
   }
+}
+
+/**
+ * The `setActiveDevice`/pool-bind refusal for a device another live session holds, typed with
+ * {@link DEVICE_OWNED_BY_OTHER_SESSION_CODE} (#10832). The message keeps its long-standing wording
+ * so clients that still match the text keep working; new clients match the code.
+ */
+export function deviceAssignedToOtherSessionError(
+  deviceId: string,
+  holderSessionUuid: string,
+  requesterSessionUuid: string | undefined,
+): InputDeviceOwnedError {
+  return new InputDeviceOwnedError(
+    "setActiveDevice",
+    deviceId,
+    requesterSessionUuid,
+    undefined,
+    `Device '${deviceId}' is already assigned to session ${holderSessionUuid}`,
+  );
 }
 
 /** Throws {@link InputDeviceOwnedError} unless the requester may drive the device. */

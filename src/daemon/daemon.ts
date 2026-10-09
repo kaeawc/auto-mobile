@@ -62,7 +62,12 @@ import {
   ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
-import { DaemonOptions, PidFileData, type AuxiliaryDaemonSocketName } from "./types";
+import {
+  DaemonOptions,
+  PidFileData,
+  releasedSessionNotFoundFields,
+  type AuxiliaryDaemonSocketName,
+} from "./types";
 import { DeviceForwardLeaseIdleReleaser } from "./deviceForwardLeaseIdleReleaser";
 import {
   getAcceptedAuxSocketConnectionCount,
@@ -1411,7 +1416,7 @@ export class Daemon {
       res.end(
         JSON.stringify({
           error: `Session not found: ${sessionId}`,
-          ...(releaseReason ? { releaseReason } : {}),
+          ...releasedSessionNotFoundFields(releaseReason),
         }),
       );
       return;

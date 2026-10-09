@@ -1084,6 +1084,72 @@ describe("SessionManager", () => {
       }
     });
 
+    // #10832: an idle-released UUID was issued; it must read as released, not as never issued.
+    test.each(["lazy-expiry", "cleanup-expired"])(
+      "an explicit UUID idle-released by %s gets the ownership-lost release, not not-found",
+      async (releaseReason) => {
+        fakeTimer.advanceTime(5_000);
+        const persisted = persistedRecoverySession({
+          status: "expired",
+          expires_at_ms: 1_000,
+          released_at_ms: 2_000,
+          last_used_at_ms: 500,
+          release_reason: releaseReason,
+        });
+        const written: string[] = [];
+        const persistence: DeviceSessionPersistence = {
+          async getSession() {
+            return persisted;
+          },
+          async upsertActiveSession() {},
+          async recordActivity() {},
+          async markReleased(_sessionUuid, _status, _releasedAtMs, reason) {
+            written.push(reason);
+          },
+        };
+        const manager = new SessionManager(fakeTimer, persistence);
+        let assignments = 0;
+        const devicePool: SessionDeviceAssigner = {
+          async assignDeviceToSession(): Promise<string> {
+            assignments++;
+            return "emulator-5556";
+          },
+        };
+
+        try {
+          for (const attempt of [
+            () =>
+              manager.getOrCreateSession(
+                "persisted-session",
+                devicePool,
+                "android",
+                undefined,
+                true,
+              ),
+            () => manager.admitIssuedSessionForAutomation("persisted-session"),
+          ]) {
+            const error = await attempt().then(
+              () => undefined,
+              (caught: unknown) => caught,
+            );
+            expect(error).toBeInstanceOf(TerminalSessionError);
+            expect((error as TerminalSessionError).release).toMatchObject({
+              sessionId: "persisted-session",
+              deviceId: "emulator-5554",
+              releaseReason,
+              releasedAtMs: 2_000,
+              terminal: false,
+            });
+          }
+          expect(assignments).toBe(0);
+          // The recorded idle reason is kept, not overwritten by terminalization.
+          expect(written).toEqual([]);
+        } finally {
+          manager.stopCleanupTimer();
+        }
+      },
+    );
+
     test("rejects an on-demand recovery past the retention window", async () => {
       const persisted = persistedRecoverySession({
         released_at_ms: -DEVICE_SESSION_RETENTION_MAX_AGE_MS - 1,
@@ -1857,7 +1923,10 @@ describe("SessionManager", () => {
       // Existing work keeps an expired session assigned, but a new request must
       // not use that protection to revive the session after its deadline.
       expect(sessionManager.getSession("session-1")).not.toBeNull();
-      await expect(sessionManager.getOrCreateSession("session-1")).rejects.toThrow("not found");
+      // The UUID was issued, so the refusal reports its idle release, not "never issued" (#10832).
+      await expect(sessionManager.getOrCreateSession("session-1")).rejects.toThrow(
+        "is terminal after lazy-expiry",
+      );
 
       expect(released).toEqual(["session-1"]);
       expect(sessionManager.getActiveSessionCount()).toBe(0);

@@ -25,6 +25,19 @@ class McpDaemonClientSetActiveDeviceTest {
   }
 
   @Test
+  fun `a typed ownership refusal is held by another session whatever its message`() {
+    val payload = buildJsonObject {
+      put("success", false)
+      put("error", "setActiveDevice refused: device 'emulator-5554' is held by another session.")
+      put("code", "device_owned_by_other_session")
+      put("deviceId", "emulator-5554")
+      put("retryable", false)
+    }
+      .toString()
+    assertEquals(SetActiveDeviceRefusal.HELD_BY_ANOTHER_SESSION, bind(errorText(payload)).refusal)
+  }
+
+  @Test
   fun `the pool's bind conflict with a trailing period is held by another session`() {
     val result =
       bind(errorText("Error: Device 'emulator-5554' is already assigned to session abc-123."))

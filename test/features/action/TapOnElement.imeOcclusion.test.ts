@@ -37,7 +37,7 @@ import type {
   HierarchyDelegateContext,
 } from "../../../src/features/observe/android/types";
 import * as skeletonProjection from "../../../src/features/observe/output/SkeletonProjection";
-import retainedKeyboard from "../../fixtures/observe/ios-ipad-keyboard.json";
+import retainedKeyboard from "../../fixtures/observe-output/ios-ipad-keyboard/observe-keyboard-up.json";
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 
 const capturedImeHierarchy = () =>
@@ -727,11 +727,11 @@ describe("retained iPad keyboard with observe capture provenance", () => {
 });
 
 function capturedIpadKeyboard(): ViewHierarchyResult {
-  const hierarchy = structuredClone(retainedKeyboard) as ViewHierarchyResult;
+  const hierarchy = structuredClone(retainedKeyboard.viewHierarchy) as ViewHierarchyResult;
   // Synthetic app sibling deliberately shares Q's label, bounds and absent native ID.
   // It follows the keyboard so a bounds-only match would wrongly exempt it.
   hierarchy.hierarchy.node = [
-    ...retainedKeyboard.hierarchy.node.map((node) => structuredClone(node)),
+    ...retainedKeyboard.viewHierarchy.hierarchy.node.map((node) => structuredClone(node)),
     {
       className: "UIButton",
       clickable: "true",

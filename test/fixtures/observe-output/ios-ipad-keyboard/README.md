@@ -1,6 +1,6 @@
 # iPad keyboard capture
 
-`ios-ipad-keyboard.json` is a minimized, sanitized extract of an iOS 26.5 iPad
+`observe-keyboard-up.json` is a minimized, sanitized extract of an iOS 26.5 iPad
 observation from 2026-10-08. It retains the application's root class and bounds,
 the `UIKeyboard → UIView("UIKeyboardLayoutStar Preview")` ancestry, and four
 keyboard controls with their original classes, bounds, labels and selector IDs.

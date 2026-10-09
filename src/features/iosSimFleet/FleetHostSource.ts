@@ -3,6 +3,7 @@ import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
+import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { PS_SNAPSHOT_ARGS, parsePsSnapshot } from "./psSnapshot";
 import { SIMCTL_LIST_DEVICES_ARGS, parseSimctlInventory } from "./simctlInventory";
 import type {
@@ -62,6 +63,8 @@ export class CommandFleetHostSource implements FleetHostSource {
     private readonly executor: HostCommandExecutor,
     private readonly timer: Timer,
     private readonly os: HostOsInfo = nodeHostOsInfo,
+    /** The canonical simctl reader; the inventory is read through it, not a second `xcrun` path. */
+    private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(null),
   ) {}
 
   async readHostSnapshot(options: FleetReadOptions = {}): Promise<HostSnapshot> {
@@ -80,10 +83,11 @@ export class CommandFleetHostSource implements FleetHostSource {
   }
 
   async readInventory(options: FleetReadOptions = {}): Promise<SimulatorInventoryEntry[]> {
-    const result = await this.executor.executeCommand("xcrun", SIMCTL_LIST_DEVICES_ARGS, {
-      signal: options.signal,
-      timeoutMs: options.timeoutMs,
-    });
+    const result = await this.simctl.executeCommandArgs(
+      [...SIMCTL_LIST_DEVICES_ARGS],
+      options.timeoutMs,
+      options.signal,
+    );
     return parseSimctlInventory(result.stdout);
   }
 

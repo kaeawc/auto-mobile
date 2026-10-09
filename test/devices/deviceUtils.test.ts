@@ -8,6 +8,10 @@ import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import type { VirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
+import type {
+  IosBootInstrumentation,
+  IosBootRequest,
+} from "../../src/features/iosSimFleet/IosBootInstrumentation";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { IosPhysicalDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { logger } from "../../src/utils/logger";
@@ -649,6 +653,44 @@ describe("MultiPlatformDeviceManager", () => {
     await expect(manager.startDevice(device)).rejects.toThrow(
       /iPhone 17 Pro.*UDID|UDID.*iPhone 17 Pro/,
     );
+  });
+
+  test("startDevice boots an iOS simulator through the injected boot instrumentation with the requested profile", async () => {
+    const started: Array<{ udid: string; timeoutMs: number | undefined }> = [];
+    const fakeSimctl = {
+      isAvailable: async () => true,
+      getBootedSimulators: async () => [],
+      getBootedSimulatorsChecked: async () => [],
+      isSimulatorRunning: async () => false,
+      startSimulator: async (udid: string, timeoutMs?: number) => {
+        started.push({ udid, timeoutMs });
+        return {} as never;
+      },
+    } as unknown as SimCtlClient;
+    const requests: IosBootRequest[] = [];
+    const instrumentation: IosBootInstrumentation = {
+      run: async (request, boot) => {
+        requests.push(request);
+        return boot(1234);
+      },
+    };
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      fakeSimctl,
+      null,
+    ).withIosBootInstrumentation(instrumentation);
+    const resourceProfile = { resources: { location: "disabled" as const } };
+
+    await manager.startDevice(
+      { name: "iPhone", platform: "ios", isRunning: false, deviceId: "UDID-1", runtimeId: "rt" },
+      60_000,
+      { resourceProfile },
+    );
+
+    expect(requests).toEqual([
+      { udid: "UDID-1", runtime: "rt", profile: resourceProfile, timeoutMs: 60_000 },
+    ]);
+    expect(started).toEqual([{ udid: "UDID-1", timeoutMs: 1234 }]);
   });
 
   test("startDevice validates a missing UDID before probing simctl running-state, even when a same-named simulator is already booted (#6414)", async () => {

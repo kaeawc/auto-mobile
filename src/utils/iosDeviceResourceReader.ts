@@ -5,6 +5,7 @@ import type { DeviceResourceStatus } from "../models/DeviceResource";
 import type { RequestedDeviceResourceState } from "../models/DeviceResourceConfiguration";
 import type { DeviceResourceObservationRequest } from "./deviceResourceObserver";
 import { SimCtlClient, type SimCtl } from "./ios-cmdline-tools/SimCtlClient";
+import { parseSimctlDeviceList } from "./ios-cmdline-tools/simctlDeviceList";
 import { PlistClient, type PlistReader } from "./ios-cmdline-tools/PlistClient";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { errorMessage } from "./describeUnknownError";
@@ -261,7 +262,7 @@ export class IosDeviceResourceReader implements SimulatorResourceIdentityReader 
     request: DeviceResourceObservationRequest,
   ): Promise<DeviceInventory> {
     return deviceInventorySchema.parse(
-      JSON.parse(await this.execute(request, ["list", "devices", "--json"])),
+      parseSimctlDeviceList(await this.execute(request, ["list", "devices", "--json"])),
     );
   }
 

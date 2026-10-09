@@ -412,9 +412,12 @@ struct NodeView: View {
         model.toggle(key, then: node.onTap ?? [])
     }
 
-    /// One element per switch, like a switch list row: a button with the toggle trait, the label
-    /// and an on/off value. The track is drawn in SwiftUI; a `Toggle` hosts a `UISwitch` whose own
-    /// elements XCUITest listed beside the combined one (#10899).
+    /// One element per switch, shaped exactly like a list row with a trailing switch: the button
+    /// is the element, named by its label text, with the toggle trait and an on/off value. The
+    /// track is drawn in SwiftUI; a `Toggle` hosts a `UISwitch` whose own elements XCUITest listed
+    /// beside the combined one. `accessibilityElement(children: .ignore)` on the button wrapped it
+    /// in a second element: XCUITest listed the button (tappable, untagged) and the wrapper (the
+    /// testTag, label and value, not tappable) at the same bounds (#10899).
     private var switchView: some View {
         Button(action: toggleBound) {
             HStack(spacing: 8) {
@@ -427,8 +430,6 @@ struct NodeView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(node.label ?? "")
         .accessibilityValue(isOn ? "1" : "0")
         .accessibilityAddTraits(.isToggle)
     }

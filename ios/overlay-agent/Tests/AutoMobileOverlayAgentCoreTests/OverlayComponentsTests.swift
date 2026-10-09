@@ -194,6 +194,19 @@ final class OverlayComponentsTests: XCTestCase {
         XCTAssertFalse(root.blocksPage(state: session.state, pages: session.pages), "snackbar only")
     }
 
+    /// #10899: the scroll container around a dialog's tall content is named after the dialog.
+    func testDialogContentIsNamedByDescriptionThenTitleThenText() throws {
+        let dialog = try XCTUnwrap(fixture("material-app-bar-dialog-pickers").root.children?[11])
+        XCTAssertEqual(dialog.dialogContentLabel(title: "Edit alarm", text: "Set the time and date."), "Edit alarm")
+        XCTAssertEqual(dialog.dialogContentLabel(title: "", text: "Set the time and date."), "Set the time and date.")
+        XCTAssertEqual(dialog.dialogContentLabel(title: "", text: nil), "")
+        let described = try spec("""
+        {"id":"d","window":{"placement":{"type":"fullscreen"}},
+         "root":{"type":"dialog","title":"T","contentDescription":"Alarm editor"}}
+        """).root
+        XCTAssertEqual(described.dialogContentLabel(title: "T", text: nil), "Alarm editor")
+    }
+
     func testAnOpenDialogCollapsesThePageLayerAndClosingItRestoresTheContainer() throws {
         // #10899: the page and anchor layers are collapsed (children removed from the tree), not
         // only accessibilityHidden, which the XCUITest snapshot ignored; otherwise each layer is

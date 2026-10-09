@@ -300,7 +300,9 @@ test("observer fake records requests and returns an independent configured snaps
 
 for (const platform of ["android", "ios"] as const) {
   test(`${platform} discovery failure is logged unknown for supported groups`, async () => {
-    const { observer, request, adb, simctl } = setup(platform);
+    const { observer, request, adb, simctl, timer } = setup(platform);
+    // iOS inventory reads back off between bounded retries.
+    timer.enableAutoAdvance();
     adb.onCommand = () => {
       throw new Error("permission denied");
     };

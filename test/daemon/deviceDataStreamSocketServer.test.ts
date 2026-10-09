@@ -61,8 +61,9 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
     timer: FakeTimer,
     authenticator: StreamSocketAuthenticator = { authorize: () => {} },
     observerReleases?: ObserverReleaseSource,
+    sessionReleases?: ObserverReleaseSource,
   ) {
-    super("/fake/path/test.sock", timer, authenticator, observerReleases);
+    super("/fake/path/test.sock", timer, authenticator, observerReleases, sessionReleases);
     this.setDeviceSessionResolver(this.sessionResolver);
   }
 
@@ -4634,6 +4635,114 @@ it("a released or expired observer's subscriptions and storage observers end wit
 
   await server.closeFake();
   expect(listeners.size).toBe(0);
+});
+
+describe("device-session release ends observation streams (#11130)", () => {
+  function createReleaseHarness() {
+    const timer = new FakeTimer();
+    const sessions = new Set(["session-a"]);
+    const owners = new Map<string, string>([["emulator-5554", "session-a"]]);
+    const listeners = new Set<(sessionId: string) => void>();
+    const silent = { subscribe: () => () => {} };
+    const server = new TestableDeviceDataStreamSocketServer(
+      timer,
+      new SessionScopedStreamAuthenticator(
+        () => ({
+          getSession: (uuid: string) => (sessions.has(uuid) ? {} : null),
+          getDeviceLabels: () => undefined,
+          getSessionForDevice: (deviceId: string) => owners.get(deviceId) ?? null,
+        }),
+        "observationStream",
+        {},
+      ),
+      silent,
+      {
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+    );
+    const giveDeviceToB = () => {
+      sessions.delete("session-a");
+      sessions.add("session-b");
+      owners.set("emulator-5554", "session-b");
+    };
+    const emitRelease = (sessionId: string) => {
+      for (const listener of listeners) {
+        listener(sessionId);
+      }
+    };
+    return { server, giveDeviceToB, emitRelease, listeners };
+  }
+
+  async function subscribeA(server: TestableDeviceDataStreamSocketServer): Promise<FakeSocket> {
+    const socket = new FakeSocket();
+    server.sessionResolver.bind("emulator-5554", "device-epoch-1");
+    await server.processLineForTest(
+      socket,
+      JSON.stringify({
+        id: "sub",
+        command: "subscribe",
+        sessionUuid: "session-a",
+        deviceSessionUuid: "device-epoch-1",
+      }),
+    );
+    expect(server.getSubscriberCount()).toBe(1);
+    socket.resetWrittenData();
+    return socket;
+  }
+
+  const hierarchy = { hierarchy: { text: "B's screen" }, updatedAt: 2 } as ViewHierarchyResult;
+
+  it("closes A's socket on release so B's frames never reach it", async () => {
+    const { server, giveDeviceToB, emitRelease, listeners } = createReleaseHarness();
+    await server.startFake();
+    const socketA = await subscribeA(server);
+
+    giveDeviceToB();
+    emitRelease("session-a");
+    server.pushHierarchyUpdate("emulator-5554", hierarchy);
+
+    expect(socketA.getWrittenMessages()).toEqual([
+      {
+        type: "error",
+        success: false,
+        code: "SESSION_ENDED",
+        error: "Observation stream ended: session_ended",
+      },
+    ]);
+    expect(socketA.destroyed).toBe(true);
+    expect(server.getSubscriberCount()).toBe(0);
+    expect(server.hasSubscriberForDevice("emulator-5554")).toBe(false);
+
+    await server.closeFake();
+    expect(listeners.size).toBe(0);
+  });
+
+  it("re-checks identity before pushing and stops counting a stale subscriber", async () => {
+    const { server, giveDeviceToB } = createReleaseHarness();
+    await server.startFake();
+    const socketA = await subscribeA(server);
+
+    // No release event reaches the server: the pre-push re-check alone must fence A.
+    giveDeviceToB();
+    expect(server.hasSubscriberForDevice("emulator-5554")).toBe(false);
+    server.pushStorageUpdate("emulator-5554", {
+      packageName: "com.example",
+      fileName: "prefs.xml",
+      key: "token",
+      value: "b",
+      valueType: "STRING",
+      timestamp: 3,
+    });
+
+    const types = socketA.getWrittenMessages<{ type: string; code?: string }>();
+    expect(types.map((message) => message.code ?? message.type)).toEqual(["SESSION_ENDED"]);
+    expect(socketA.destroyed).toBe(true);
+    expect(server.getSubscriberCount()).toBe(0);
+    await server.closeFake();
+  });
 });
 
 it("registered observer request_observation passes both auth layers on unowned and held devices (#10830)", async () => {

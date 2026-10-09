@@ -44,12 +44,12 @@ final class OverlayCaptureHoldTests: XCTestCase {
 
     func testOverlappingHoldsShowOnlyWhenTheLastIsReleased() {
         var hold = makeHold()
-        let a = hold.hide(deadlineMs: 1500)
-        let b = hold.hide(deadlineMs: 1500)
-        XCTAssertNotEqual(a.token, b.token)
-        XCTAssertEqual(hold.restore(token: a.token), .init(released: true, shouldShow: false))
+        let holdA = hold.hide(deadlineMs: 1500)
+        let holdB = hold.hide(deadlineMs: 1500)
+        XCTAssertNotEqual(holdA.token, holdB.token)
+        XCTAssertEqual(hold.restore(token: holdA.token), .init(released: true, shouldShow: false))
         XCTAssertTrue(hold.isHiding, "capture B is still running")
-        XCTAssertEqual(hold.restore(token: b.token), .init(released: true, shouldShow: true))
+        XCTAssertEqual(hold.restore(token: holdB.token), .init(released: true, shouldShow: true))
         XCTAssertFalse(hold.isHiding)
     }
 
@@ -68,13 +68,13 @@ final class OverlayCaptureHoldTests: XCTestCase {
 
     func testRestoreOfAnExpiredTokenReportsNotReleased() {
         var hold = makeHold()
-        let a = hold.hide(deadlineMs: 1000)
-        let b = hold.hide(deadlineMs: 5000)
+        let holdA = hold.hide(deadlineMs: 1000)
+        let holdB = hold.hide(deadlineMs: 5000)
         time += 1
-        XCTAssertFalse(hold.expire(a))
-        XCTAssertEqual(hold.restore(token: a.token), .init(released: false, shouldShow: false))
+        XCTAssertFalse(hold.expire(holdA))
+        XCTAssertEqual(hold.restore(token: holdA.token), .init(released: false, shouldShow: false))
         XCTAssertTrue(hold.isHiding, "B's hold is untouched")
-        XCTAssertTrue(hold.restore(token: b.token).shouldShow)
+        XCTAssertTrue(hold.restore(token: holdB.token).shouldShow)
     }
 
     func testRestoreWithoutTokenReleasesEveryHold() {

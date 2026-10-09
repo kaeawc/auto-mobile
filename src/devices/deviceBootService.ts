@@ -42,10 +42,10 @@ import type { StableVirtualDeviceIdentity } from "./virtualDeviceLifecycleCoordi
 import {
   getVirtualDeviceLifecycleCoordinator,
   InMemoryVirtualDeviceLifecycleCoordinator,
+  selectorLifecycleIdentity,
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleLease,
 } from "./virtualDeviceLifecycleCoordinator";
-import { stableStringify } from "../utils/stableStringify";
 import {
   defaultDisplayInventoryProvider,
   hydrateRequiredDisplayInventories,
@@ -473,19 +473,7 @@ export class DeviceBootService {
     };
     if (!context.lifecycleLease && !this.dependencies.onIdentityResolved) {
       context.lifecycleLease = await this.lifecycleCoordinator.reserve(
-        {
-          kind: "selector",
-          platform: request.platform,
-          selector: stableStringify({
-            deviceId: request.deviceId,
-            name: request.name,
-            minOsVersion: request.minOsVersion,
-            maxOsVersion: request.maxOsVersion,
-            formFactor: request.formFactor,
-            requires: request.requires,
-            screenSize: request.screenSize,
-          }),
-        },
+        selectorLifecycleIdentity(request.platform, request),
         {
           operation: "start",
           deadlineMs: context.deadlineMs,

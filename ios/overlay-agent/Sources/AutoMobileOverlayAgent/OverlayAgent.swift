@@ -307,7 +307,7 @@ final class OverlayAgent {
     /// is dismissed (`reason: disconnect`) and its assets dropped, as on Android.
     private func clientCountChanged(_ count: Int) {
         connectedClients = count
-        if count == 0 { model.hostDisconnected() }
+        if count < 1 { model.hostDisconnected() }
     }
 
     // MARK: Hide for capture

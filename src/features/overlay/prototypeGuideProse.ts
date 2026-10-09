@@ -61,6 +61,10 @@ Grammar:
   (button, fab, segmentedButton options, topAppBar, dialog, snackbar), condition operands
   (\`equals\`/\`notEquals\` strings), \`setState.value\` and \`emit.name\`. \`emit.payload\` is not bound.
   Anything else, including a \`{key}\` state placeholder and other braces, is left untouched.
+- State keys bind too: \`stateKey\`, \`hourKey\`/\`minuteKey\`, a list item's trailing \`stateKey\`,
+  \`openWhen.key\`, condition \`key\`s and the \`key\` of \`setState\`, \`toggle\`, \`increment\` and
+  \`decrement\`, so \`"key": "liked_{item.id}"\` gives each row its own state. Every bound key must
+  be a literal state key and, like any key, be initialised in \`state\` with the type it binds.
 - A string that is exactly one placeholder keeps the item field's own type (so
   \`equals: "{item.id}"\` matches a numeric state value when \`id\` is a number); inside a longer
   string it renders as text.
@@ -71,6 +75,8 @@ Rejected (same paths in TypeScript and Kotlin):
 - a template that contains another \`repeat\` or a \`pager\`
 - \`repeat\` on a leaf node
 - an \`emit.name\` that binds to an empty string for any item
+- a state key that binds to an invalid key for some item (fails at \`<container>.repeat.items[i]\`),
+  or a state-key placeholder outside every template
 - an expanded tree that exceeds the node or image limit (fails at the container's \`repeat\`);
   depth is unaffected because instances are siblings
 `;

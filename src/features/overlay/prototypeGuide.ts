@@ -41,6 +41,9 @@ function describeRule(rule: Rule): string {
       return (rule.values ?? []).join("|");
     case "ref":
       return rule.name ?? "ref";
+    case "boundKey":
+      // A state key; inside a repeat template it may also hold placeholders (see Lists).
+      return "key";
     case "array":
       return describeArray(rule);
     case "choice":

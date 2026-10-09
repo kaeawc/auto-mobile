@@ -631,7 +631,11 @@ list is a `column` with `repeat` whose single child is the row template).
   `dialog.text`, `dialog.confirm`/`dismiss` (`label` and `onTap`), `snackbar.text` and
   `snackbar.action` (`label` and `onTap`); in condition operands (`equals` and
   `notEquals` strings in `visibleWhen`, `styleWhen[].when` and nested `all`/`any`/
-  `not`), in `setState.value` and in `emit.name`. Anything else, including a
+  `not`), in `setState.value` and in `emit.name`; and in every state key (#11051):
+  `stateKey`, `timePicker` `hourKey`/`minuteKey`, a `listItem` trailing `stateKey`,
+  `openWhen.key`, condition `key`s and the `key` of `setState`, `toggle`, `increment`
+  and `decrement`, so `"key": "liked_{item.id}"` gives every row its own state.
+  Anything else, including a
   `{key}` state placeholder, other braces, and the container's own fields, is not a
   repeat placeholder and is untouched. Inside a template `{index}` shadows a state
   key named `index`. A string that is exactly one placeholder keeps the item's own
@@ -646,6 +650,13 @@ list is a `column` with `repeat` whose single child is the row template).
   contain another `repeat` (`root.children[0].repeat`) or a `pager`
   (`root.children[0]`); `repeat` on a leaf node is an unknown property; an `emit.name`
   that binds to an empty string for any item fails at the name (`root.children[0].onTap[0].name`).
+  A bound state key must be a literal key (`^[A-Za-z_][A-Za-z0-9_]{0,63}$`) for every
+  item; one that is not fails at that item (`root.repeat.items[1]`, message
+  `Bound state key "liked_b-c" is invalid`). A state-key
+  placeholder outside every template fails at the key (`State key placeholder outside a
+  repeat template`). A bound key missing from `state` behaves exactly like a literal
+  missing key: the type checks run once per item and fail at the key, naming the item
+  (`Toggle requires a boolean state key (repeat item 1)`).
 - Limits count the expanded tree. `MAX_OVERLAY_NODES` and `MAX_OVERLAY_IMAGES` are
   checked against every instance, and an overflow fails at the container's
   `repeat` (for example `root.children[2].repeat`, `Expanded node limit exceeded`).

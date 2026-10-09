@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import contract from "../../../schemas/overlay-spec-contract.json";
+import { BOUND_STATE_KEY_PATTERN } from "./overlayTemplate";
 export const { MAX_OVERLAY_SPEC_BYTES, MAX_OVERLAY_EMIT_PAYLOAD_BYTES } = contract.limits;
 export type OverlayJson =
   | null
@@ -69,7 +70,8 @@ const selectorSchema = z
     container: containerSchema.optional(),
   })
   .strict();
-const stateKeySchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
+// State-key fields also take repeat placeholders such as `liked_{item.id}` (#11051).
+const stateKeySchema = z.string().regex(BOUND_STATE_KEY_PATTERN);
 const scalarSchema = z.union([z.string(), z.number().finite(), z.boolean()]);
 export type OverlayCondition =
   | { key: string; equals: string | number | boolean }
@@ -92,9 +94,7 @@ const conditionSchema: z.ZodType<OverlayCondition> = z.lazy(
       z.object({ not: conditionSchema }).strict(),
     ])),
 );
-const sheetConditionSchema = z
-  .object({ key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/), equals: z.boolean() })
-  .strict();
+const sheetConditionSchema = z.object({ key: stateKeySchema, equals: z.boolean() }).strict();
 const safeAreaPaddingSchema = z
   .object({
     edges: z
@@ -370,27 +370,27 @@ export const actionSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.enum(["setState"]),
-      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      key: stateKeySchema,
       value: z.union([z.string(), z.number().finite(), z.boolean()]),
     })
     .strict(),
   z
     .object({
       type: z.enum(["toggle"]),
-      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      key: stateKeySchema,
     })
     .strict(),
   z
     .object({
       type: z.enum(["increment"]),
-      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      key: stateKeySchema,
       by: z.number().finite().optional(),
     })
     .strict(),
   z
     .object({
       type: z.enum(["decrement"]),
-      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      key: stateKeySchema,
       by: z.number().finite().optional(),
     })
     .strict(),
@@ -451,7 +451,7 @@ const textFieldBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["textField"]),
-    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    stateKey: stateKeySchema,
     placeholder: z.string().optional(),
   })
   .strict();
@@ -459,7 +459,7 @@ const switchBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["switch"]),
-    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    stateKey: stateKeySchema,
     label: z.string().min(1).optional(),
   })
   .strict();
@@ -467,7 +467,7 @@ const checkboxBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["checkbox"]),
-    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    stateKey: stateKeySchema,
     label: z.string().min(1).optional(),
   })
   .strict();
@@ -484,7 +484,7 @@ const radioGroupBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["radioGroup"]),
-    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    stateKey: stateKeySchema,
     options: z
       .array(z.object({ value: z.string().min(1), label: z.string().min(1) }).strict())
       .min(2)
@@ -495,13 +495,13 @@ const listItemTrailingSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.enum(["switch"]),
-      stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      stateKey: stateKeySchema,
     })
     .strict(),
   z
     .object({
       type: z.enum(["checkbox"]),
-      stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      stateKey: stateKeySchema,
     })
     .strict(),
   z.object({ type: z.enum(["icon"]), name: iconNameSchema }).strict(),
@@ -520,7 +520,7 @@ const sliderBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["slider"]),
-    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    stateKey: stateKeySchema,
     label: z.string().min(1).optional(),
     min: z.number().finite(),
     max: z.number().finite(),
@@ -533,10 +533,7 @@ const chipBaseSchema = z
     type: z.enum(["chip"]),
     label: z.string().min(1),
     variant: z.enum(["assist", "filter", "input", "suggestion"]).optional(),
-    stateKey: z
-      .string()
-      .regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/)
-      .optional(),
+    stateKey: stateKeySchema.optional(),
   })
   .strict();
 const cardBaseSchema = z
@@ -546,7 +543,7 @@ const cardBaseSchema = z
     variant: z.enum(["filled", "elevated", "outlined"]).optional(),
   })
   .strict();
-const stateKeyFieldSchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
+const stateKeyFieldSchema = stateKeySchema;
 const actionListSchema = z.array(actionSchema).min(1).max(32);
 // An icon-only control in a top app bar: the icon, its accessible label and its tap.
 const appBarActionSchema = z
@@ -663,10 +660,7 @@ const tabBarBaseSchema = z
     type: z.enum(["tabBar"]),
     items: z.array(itemSchema).min(1).max(32),
     pager: z.string().min(1).optional(),
-    stateKey: z
-      .string()
-      .regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/)
-      .optional(),
+    stateKey: stateKeySchema.optional(),
     scrollable: z.boolean().optional(),
   })
   .strict();
@@ -676,10 +670,7 @@ const bottomNavBaseSchema = z
     type: z.enum(["bottomNav"]),
     items: z.array(itemSchema).min(2).max(5),
     pager: z.string().min(1).optional(),
-    stateKey: z
-      .string()
-      .regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/)
-      .optional(),
+    stateKey: stateKeySchema.optional(),
   })
   .strict();
 const bottomSheetBaseSchema = z

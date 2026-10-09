@@ -163,6 +163,19 @@ class OverlaySpecTest {
   }
 
   @Test
+  fun `bound state keys take placeholders and reject any other brace text`() {
+    for (key in listOf("liked", "liked_{item.id}", "{index}_{props.k}", "9_{item.id}")) assertTrue(
+      OverlayRepeatTemplate.isBoundKey(key),
+      key,
+    )
+    for (key in
+      listOf("9a", "", "liked_{item}", "liked-{item.id}", "liked_{item.id", "{}")) assertFalse(
+      OverlayRepeatTemplate.isBoundKey(key),
+      key,
+    )
+  }
+
+  @Test
   fun `raw byte limit includes whitespace and accepts its exact boundary`() {
     val input = validJson.getValue(valid.first())
     val padding =

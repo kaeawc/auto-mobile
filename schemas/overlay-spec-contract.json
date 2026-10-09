@@ -104,7 +104,7 @@
       "fields": {
         "key": {
           "rule": {
-            "kind": "key"
+            "kind": "boundKey"
           },
           "optional": true
         },
@@ -174,7 +174,7 @@
       "fields": {
         "key": {
           "rule": {
-            "kind": "key"
+            "kind": "boundKey"
           },
           "optional": false
         },
@@ -1071,7 +1071,7 @@
             },
             "key": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             },
@@ -1095,7 +1095,7 @@
             },
             "key": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             }
@@ -1113,7 +1113,7 @@
             },
             "key": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             },
@@ -1150,7 +1150,7 @@
             },
             "key": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             },
@@ -1987,7 +1987,7 @@
             },
             "stateKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             },
@@ -2091,7 +2091,7 @@
             },
             "stateKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             },
@@ -2194,7 +2194,7 @@
             },
             "stateKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             },
@@ -2408,7 +2408,7 @@
             },
             "stateKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             },
@@ -2635,7 +2635,7 @@
             },
             "stateKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             },
@@ -2772,7 +2772,7 @@
             },
             "stateKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": true
             }
@@ -3195,7 +3195,7 @@
             },
             "stateKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             },
@@ -3631,7 +3631,7 @@
             },
             "stateKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": true
             },
@@ -3993,13 +3993,13 @@
             },
             "hourKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             },
             "minuteKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             },
@@ -4102,7 +4102,7 @@
             },
             "stateKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             }
@@ -4426,7 +4426,7 @@
             },
             "stateKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": true
             },
@@ -4549,7 +4549,7 @@
             },
             "stateKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": true
             }
@@ -7239,7 +7239,7 @@
             },
             "stateKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             }
@@ -7257,7 +7257,7 @@
             },
             "stateKey": {
               "rule": {
-                "kind": "key"
+                "kind": "boundKey"
               },
               "optional": false
             }

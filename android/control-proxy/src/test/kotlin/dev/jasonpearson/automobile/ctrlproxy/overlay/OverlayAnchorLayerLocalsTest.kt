@@ -130,4 +130,30 @@ class OverlayAnchorLayerLocalsTest {
 
     assertEquals(0, count("child"))
   }
+
+  @Test
+  fun `an anchored child keeps rendering when the animator scale flips motion on`() {
+    setDurationScale(0f)
+    show(hideableParent(), shown)
+    assertEquals(1, count("child"))
+
+    // The visibleWhen parent now renders through AnimatedVisibility: its capture composes before
+    // the plain branch's capture disposes, which used to remove the fresh registration (#10913).
+    setDurationScale(1f)
+    compose.mainClock.advanceTimeBy(2_000)
+
+    assertEquals(1, count("child"))
+  }
+
+  @Test
+  fun `an anchored child keeps rendering when the animator scale flips motion off`() {
+    setDurationScale(1f)
+    show(hideableParent(), shown)
+    assertEquals(1, count("child"))
+
+    setDurationScale(0f)
+    compose.mainClock.advanceTimeBy(2_000)
+
+    assertEquals(1, count("child"))
+  }
 }

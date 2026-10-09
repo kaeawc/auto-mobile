@@ -158,7 +158,12 @@ internal class OverlayAnchorLocals {
 }
 
 /** What an anchored node takes from where it was authored: its locals and its ancestors' fade. */
-internal class CapturedAnchor(val locals: CompositionLocalContext, val fade: () -> Float)
+internal class CapturedAnchor(
+  val locals: CompositionLocalContext,
+  val fade: () -> Float,
+  /** The capture call site that wrote this entry; only it may remove the entry (#10913). */
+  val owner: Any = Unit,
+)
 
 private val LocalOverlayAnchorLocals = compositionLocalOf<OverlayAnchorLocals?> { null }
 
@@ -170,9 +175,16 @@ private fun CaptureAnchorLocals(identity: String) {
   val registry = LocalOverlayAnchorLocals.current ?: return
   // Written while composing, not in an effect: the layer composes after this in the same pass and
   // must not draw the node a frame with the wrong locals first.
+  val owner = remember { Any() }
   registry.byIdentity[identity] =
-    CapturedAnchor(currentCompositionLocalContext, LocalOverlayAnchorFade.current)
-  DisposableEffect(registry, identity) { onDispose { registry.byIdentity.remove(identity) } }
+    CapturedAnchor(currentCompositionLocalContext, LocalOverlayAnchorFade.current, owner)
+  DisposableEffect(registry, identity, owner) {
+    onDispose {
+      // A re-registration from another call site (the motion branch flipping) composes before
+      // this one disposes and has already replaced the entry: removing it would hide the node.
+      if (registry.byIdentity[identity]?.owner === owner) registry.byIdentity.remove(identity)
+    }
+  }
 }
 
 @Composable

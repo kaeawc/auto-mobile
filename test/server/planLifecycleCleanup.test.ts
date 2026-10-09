@@ -91,6 +91,8 @@ describe("executePlan cleans every acquired device before release", () => {
   let log: FakeLogger;
   let timer: FakeTimer;
   let poolTimer: FakeTimer;
+  /** Sessions whose release rejects, before or after the session manager removes them. */
+  let releaseFaults: Map<string, "before-removal" | "after-removal">;
   const restores: Array<() => void> = [];
   const lifecycle = new DefaultPlanLifecycleManager();
 
@@ -124,10 +126,21 @@ describe("executePlan cleans every acquired device before release", () => {
     await pool.initializeWithDevices(devices);
     DaemonState.getInstance().initialize(sessionManager, pool);
     const releaseSession = sessionManager.releaseSession.bind(sessionManager);
-    const release = spyOn(sessionManager, "releaseSession").mockImplementation((id, reason) => {
-      events.push(`session-release:${id}`);
-      return releaseSession(id, reason);
-    });
+    releaseFaults = new Map();
+    const release = spyOn(sessionManager, "releaseSession").mockImplementation(
+      async (id, reason) => {
+        events.push(`session-release:${id}`);
+        const fault = releaseFaults.get(id);
+        if (fault === "before-removal") {
+          throw new Error(`injected release failure for ${id}`);
+        }
+        const result = await releaseSession(id, reason);
+        if (fault === "after-removal") {
+          throw new Error(`injected post-removal release failure for ${id}`);
+        }
+        return result;
+      },
+    );
     const free = spyOn(pool, "releaseDevice").mockImplementation(async (id) => {
       events.push(`release:${id}`);
     });
@@ -283,6 +296,40 @@ describe("executePlan cleans every acquired device before release", () => {
       expect(withReportedSessionHold(failedResult, { sessionUuid: "base" })).not.toHaveProperty(
         "sessionHeld",
       );
+    });
+  });
+
+  describe("auto-release frees every session independently (#11091)", () => {
+    test("a failed derived release does not keep the other sessions on their devices", async () => {
+      await acquire(devices.slice(0, 3));
+      releaseFaults.set("base:B", "before-removal");
+
+      await lifecycle.afterExecution(input({ args: {} }));
+
+      expect(sessionManager.getSession("base:B")).not.toBeNull();
+      for (const id of ["base", "base:C"]) {
+        expect(sessionManager.getSession(id)).toBeNull();
+      }
+      expect(events).toContain("release:device-A");
+      expect(events).toContain("release:device-C");
+      expect(events).not.toContain("release:device-B");
+      expect(
+        log
+          .at("warn")
+          .some((entry) => entry.message.includes("Failed to release label session base:B")),
+      ).toBe(true);
+    });
+
+    test("a base release rejecting after removal still frees its pool slot", async () => {
+      await acquire(devices.slice(0, 2));
+      releaseFaults.set("base", "after-removal");
+
+      await lifecycle.afterExecution(input({ args: {} }));
+
+      expect(sessionManager.getSession("base")).toBeNull();
+      expect(sessionManager.getSession("base:B")).toBeNull();
+      expect(events).toContain("release:device-A");
+      expect(events).toContain("release:device-B");
     });
   });
 

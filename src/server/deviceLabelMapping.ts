@@ -255,17 +255,30 @@ export const releaseDeviceLabelSessions = async (baseSessionUuid: string): Promi
       continue;
     }
     const deviceId = session.assignedDevice;
-    // Await the release so its central onSessionRelease cleanup (CtrlProxy binding +
-    // build-context/detector) completes BEFORE the device is returned to the pool and
-    // possibly reassigned — otherwise hierarchy/nav broadcasts during the release get
-    // recorded under the ended session's uuid. Mirrors the base-session path (#4984).
-    await releaseSessionAndDevice(
-      sessionManager,
-      devicePool,
-      deviceId,
-      sessionUuid,
-      PLAN_AUTO_RELEASE_REASON,
-    );
+    try {
+      // Await the release so its central onSessionRelease cleanup (CtrlProxy binding +
+      // build-context/detector) completes BEFORE the device is returned to the pool and
+      // possibly reassigned — otherwise hierarchy/nav broadcasts during the release get
+      // recorded under the ended session's uuid. Mirrors the base-session path (#4984).
+      await releaseSessionAndDevice(
+        sessionManager,
+        devicePool,
+        deviceId,
+        sessionUuid,
+        PLAN_AUTO_RELEASE_REASON,
+      );
+    } catch (error) {
+      // Each label session is released on its own: one failed release must not leave the
+      // remaining sessions holding their devices (#11091). releaseSessionAndDevice already
+      // freed the device when the session was removed before the rejection.
+      logger.warn(
+        `[DeviceLabelMap] Failed to release label session ${sessionUuid} on ${deviceId} for base ${baseSessionUuid}`,
+        error,
+      );
+      if (sessionManager.hasSession(sessionUuid)) {
+        continue;
+      }
+    }
     released.push(sessionUuid);
   }
 

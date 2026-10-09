@@ -46,8 +46,11 @@ import {
   PLAN_AUTO_RELEASE_REASON,
   UnissuedSessionError,
   type Session,
+  type SessionManager,
 } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
+import type { DevicePool } from "../daemon/devicePool";
+import { releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
 import { assertInputRequesterHoldsDevice, TOOL_CALL_REMEDY } from "../daemon/inputDeviceOwnership";
 import {
   defaultDeviceObservationAccess,
@@ -2093,49 +2096,77 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       DaemonState.getInstance().isInitialized() &&
       !this.holdsFailedPlanSessionForRecovery(input, baseSessionUuid ?? sessionUuid)
     ) {
-      try {
-        const sessionManager = DaemonState.getInstance().getSessionManager();
-        const devicePool = DaemonState.getInstance().getDevicePool();
-        const releaseSessionUuid = baseSessionUuid ?? sessionUuid;
-        // Track exactly which sessions this release actually frees so the
-        // server-side transport binding is torn down for each (issue #4611 Gap
-        // D) — coupled to the REAL release, never cleared optimistically.
-        const releasedSessionUuids: string[] = [];
-        if (releaseSessionUuid) {
-          releasedSessionUuids.push(...(await releaseDeviceLabelSessions(releaseSessionUuid)));
-        }
+      const sessionManager = DaemonState.getInstance().getSessionManager();
+      const devicePool = DaemonState.getInstance().getDevicePool();
+      const releaseSessionUuid = baseSessionUuid ?? sessionUuid;
+      // Track exactly which sessions this release actually frees so the
+      // server-side transport binding is torn down for each (issue #4611 Gap
+      // D) — coupled to the REAL release, never cleared optimistically. Each
+      // derived session and the base are released independently, so one failed
+      // release cannot leave the others holding their devices (#11091).
+      const releasedSessionUuids = await releaseDeviceLabelSessions(releaseSessionUuid);
+      if (await this.releasePlanBaseSession(sessionManager, devicePool, releaseSessionUuid)) {
+        releasedSessionUuids.push(releaseSessionUuid);
+      }
 
-        const session = releaseSessionUuid ? sessionManager.getSession(releaseSessionUuid) : null;
-        if (session) {
-          const deviceId = session.assignedDevice;
-          // Await the release so its onSessionRelease callbacks (CtrlProxy binding +
-          // detector cleanup) complete — and any rejection is caught by this try —
-          // before the device is freed (#4984).
-          await sessionManager.releaseSession(session.sessionId, PLAN_AUTO_RELEASE_REASON);
-          await devicePool.releaseDevice(deviceId, session.sessionId);
-          NavigationGraphManager.releaseSession(releaseSessionUuid);
-          // CtrlProxy client binding + detector cleanup for the released session is
-          // handled centrally in the daemon's onSessionRelease hook (#4984), which
-          // covers every release path and each derived label session on its device.
-          RealObserveScreen.clearCache(deviceId);
-          releasedSessionUuids.push(releaseSessionUuid);
-          logger.info(
-            `Auto-released session ${session.sessionId} and freed device ${deviceId} after executePlan`,
-          );
-        }
-
-        // Clear the per-transport SessionToolBinding for every freed session so a
-        // later sessionless tools/list or tools/call stops enforcing a released
-        // profile (issue #4611 Gap D). Best-effort: the handler swallows its own
-        // failures, but the release itself has already succeeded regardless.
-        for (const releasedUuid of releasedSessionUuids) {
+      // Clear the per-transport SessionToolBinding for every freed session so a
+      // later sessionless tools/list or tools/call stops enforcing a released
+      // profile (issue #4611 Gap D). Best-effort: the handler swallows its own
+      // failures, but the release itself has already succeeded regardless.
+      for (const releasedUuid of releasedSessionUuids) {
+        try {
           sessionBindingReleaseHandler?.onSessionReleased(releasedUuid);
           await sessionToolSelectionService?.deleteSession?.(releasedUuid);
+        } catch (bindingError) {
+          logger.warn(
+            `[PlanLifecycle] Failed to clear the tool binding of released session ${releasedUuid}`,
+            bindingError,
+          );
         }
-      } catch (releaseError) {
-        logger.warn(`Failed to auto-release session ${sessionUuid}: ${releaseError}`);
       }
     }
+  }
+
+  /**
+   * Release a finished plan's base session and free its device. `releaseSessionAndDevice` returns
+   * the pool slot even when the session release rejects after the session was removed, so a gone
+   * session never leaves its device assigned (#11091). Returns whether the session is gone.
+   */
+  private async releasePlanBaseSession(
+    sessionManager: SessionManager,
+    devicePool: DevicePool,
+    releaseSessionUuid: string,
+  ): Promise<boolean> {
+    const session = sessionManager.getSession(releaseSessionUuid);
+    if (!session) {
+      return false;
+    }
+    const deviceId = session.assignedDevice;
+    try {
+      // Await the release so its onSessionRelease callbacks (CtrlProxy binding +
+      // detector cleanup) complete before the device is freed (#4984).
+      await releaseSessionAndDevice(
+        sessionManager,
+        devicePool,
+        deviceId,
+        session.sessionId,
+        PLAN_AUTO_RELEASE_REASON,
+      );
+      logger.info(
+        `Auto-released session ${session.sessionId} and freed device ${deviceId} after executePlan`,
+      );
+    } catch (releaseError) {
+      logger.warn(`Failed to auto-release session ${releaseSessionUuid}: ${releaseError}`);
+      if (sessionManager.hasSession(releaseSessionUuid)) {
+        return false;
+      }
+    }
+    NavigationGraphManager.releaseSession(releaseSessionUuid);
+    // CtrlProxy client binding + detector cleanup for the released session is
+    // handled centrally in the daemon's onSessionRelease hook (#4984), which
+    // covers every release path and each derived label session on its device.
+    RealObserveScreen.clearCache(deviceId);
+    return true;
   }
 }
 

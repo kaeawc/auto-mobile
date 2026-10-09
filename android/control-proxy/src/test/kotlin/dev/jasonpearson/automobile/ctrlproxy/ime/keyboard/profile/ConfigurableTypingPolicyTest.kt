@@ -94,7 +94,7 @@ class ConfigurableTypingPolicyTest {
   }
 
   @Test
-  fun `gboard composes words and commits whole emoji graphemes`() {
+  fun `composing profile composes words and commits whole emoji graphemes`() {
     val cases =
       listOf(
         "👨‍👩‍👧" to listOf<ImeOp>(ImeOp.CommitText("👨‍👩‍👧")),
@@ -161,7 +161,7 @@ class ConfigurableTypingPolicyTest {
       val expected =
         if (operations.size >= 2) listOf(ImeOp.BeginBatchEdit) + operations + ImeOp.EndBatchEdit
         else operations
-      val ops = policy(KeyboardProfiles.GBOARD).onText(input, editor.snapshot())
+      val ops = policy(COMPOSING_PROFILE).onText(input, editor.snapshot())
       assertEquals(input, expected, ops)
       editor.apply(ops)
       assertEquals(input, editor.text)
@@ -220,8 +220,8 @@ class ConfigurableTypingPolicyTest {
   }
 
   @Test
-  fun `gboard composes a word and finishes it at a separator`() {
-    val policy = policy(KeyboardProfiles.GBOARD)
+  fun `composing profile composes a word and finishes it at a separator`() {
+    val policy = policy(COMPOSING_PROFILE)
     val editor = FakeEditor()
 
     type(policy, editor, "hel")
@@ -252,8 +252,8 @@ class ConfigurableTypingPolicyTest {
   }
 
   @Test
-  fun `gboard keeps hi there text and clears composition when input ends`() {
-    val policy = policy(KeyboardProfiles.GBOARD)
+  fun `composing profile keeps hi there text and clears composition when input ends`() {
+    val policy = policy(COMPOSING_PROFILE)
     val editor = FakeEditor()
 
     type(policy, editor, "hi there")
@@ -268,7 +268,7 @@ class ConfigurableTypingPolicyTest {
 
   @Test
   fun `backspace shrinks composing text and clears the empty span`() {
-    val policy = policy(KeyboardProfiles.GBOARD)
+    val policy = policy(COMPOSING_PROFILE)
     val editor = FakeEditor()
     type(policy, editor, "ab")
 
@@ -297,8 +297,8 @@ class ConfigurableTypingPolicyTest {
   }
 
   @Test
-  fun `gboard backspace reopens remaining committed word`() {
-    val policy = policy(KeyboardProfiles.GBOARD)
+  fun `composing profile backspace reopens remaining committed word`() {
+    val policy = policy(COMPOSING_PROFILE)
     val editor = FakeEditor()
     type(policy, editor, "hello ")
     assertEquals(-1, editor.composingStart)
@@ -314,12 +314,12 @@ class ConfigurableTypingPolicyTest {
   }
 
   @Test
-  fun `samsung and gboard recompose word under moved cursor while direct does not`() {
+  fun `samsung recomposes word under moved cursor while gboard and direct do not`() {
     val editor = FakeEditor("hello world")
     editor.setSelection(8)
     val snapshot = editor.snapshot()
 
-    listOf(KeyboardProfiles.SAMSUNG, KeyboardProfiles.GBOARD).forEach { profile ->
+    listOf(KeyboardProfiles.SAMSUNG, COMPOSING_PROFILE).forEach { profile ->
       val recomposedEditor = FakeEditor("hello world")
       recomposedEditor.setSelection(8)
       val ops = policy(profile).onSelectionChanged(recomposedEditor.snapshot())
@@ -331,6 +331,7 @@ class ConfigurableTypingPolicyTest {
     }
 
     assertTrue(policy(KeyboardProfiles.DIRECT).onSelectionChanged(snapshot).isEmpty())
+    assertTrue(policy(KeyboardProfiles.GBOARD).onSelectionChanged(snapshot).isEmpty())
   }
 
   @Test
@@ -354,8 +355,8 @@ class ConfigurableTypingPolicyTest {
   }
 
   @Test
-  fun `gboard inserts into a recomposed word at the moved caret`() {
-    val policy = policy(KeyboardProfiles.GBOARD)
+  fun `composing profile inserts into a recomposed word at the moved caret`() {
+    val policy = policy(COMPOSING_PROFILE)
     val editor = FakeEditor("hello world")
     editor.setSelection(8)
     editor.apply(policy.onSelectionChanged(editor.snapshot()))
@@ -382,7 +383,7 @@ class ConfigurableTypingPolicyTest {
   // selection echo for the previous grapheme arrives; each call must insert after the last one.
   @Test
   fun `consecutive inserts into a recomposed word ignore a stale snapshot caret`() {
-    for (profile in listOf(KeyboardProfiles.GBOARD, KeyboardProfiles.SAMSUNG)) {
+    for (profile in listOf(COMPOSING_PROFILE, KeyboardProfiles.SAMSUNG)) {
       val policy = policy(profile)
       val editor = FakeEditor("hello world")
       editor.setSelection(8)
@@ -398,7 +399,7 @@ class ConfigurableTypingPolicyTest {
 
   @Test
   fun `stale composing echoes after an automation finish do not recompose`() {
-    val policy = policy(KeyboardProfiles.GBOARD)
+    val policy = policy(COMPOSING_PROFILE)
     val editor = FakeEditor()
     val echoes = mutableListOf<TextSnapshot>()
     "abc"
@@ -487,7 +488,7 @@ class ConfigurableTypingPolicyTest {
 
   @Test
   fun `enter finishes a composing word before the action`() {
-    val policy = policy(KeyboardProfiles.GBOARD)
+    val policy = policy(COMPOSING_PROFILE)
     val editor = FakeEditor()
     type(policy, editor, "hello")
 
@@ -532,7 +533,7 @@ class ConfigurableTypingPolicyTest {
 
   @Test
   fun `composition backspace removes a complete supplementary letter`() {
-    val policy = policy(KeyboardProfiles.GBOARD)
+    val policy = policy(COMPOSING_PROFILE)
     val editor = FakeEditor()
     type(policy, editor, "a\uD801\uDC00")
 
@@ -578,7 +579,7 @@ class ConfigurableTypingPolicyTest {
 
   @Test
   fun `finish input clears composing text and internal buffer`() {
-    val policy = policy(KeyboardProfiles.GBOARD)
+    val policy = policy(COMPOSING_PROFILE)
     val editor = FakeEditor()
     type(policy, editor, "old")
 
@@ -599,6 +600,18 @@ class ConfigurableTypingPolicyTest {
     assertNull(KeyboardProfiles.byId("nonexistent"))
     assertEquals(KeyboardProfiles.GBOARD, KeyboardProfiles.DEFAULT)
   }
+
+  // The pre-#7495 GBOARD behavior: word composing, cursor-move recompose and batched edits. Real
+  // Gboard does none of that, but the policy mechanics still need coverage.
+  private val COMPOSING_PROFILE =
+    KeyboardProfiles.SAMSUNG.copy(
+      id = "composing",
+      behavior =
+        KeyboardProfiles.SAMSUNG.behavior.copy(
+          enterStrategy = EnterStrategy.KEY_EVENT,
+          batchEdits = true,
+        ),
+    )
 
   private fun policy(profile: KeyboardProfile) = ConfigurableTypingPolicy(profile.behavior)
 

@@ -23,10 +23,9 @@ import { CREATED_DEVICE_NAME_PREFIX } from "./deviceCreationGate";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
 import {
-  compareSimctlVersions,
-  decodeSimctlVersion,
-  parseSimctlVersion,
-} from "../utils/ios-cmdline-tools/simctlVersion";
+  evaluateRuntimeCompatibility,
+  hasRuntimeRangeMetadata,
+} from "../utils/ios-cmdline-tools/runtimeCompatibility";
 import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVersion";
 import { compareStrictNumericVersions } from "../utils/deviceMatcher";
 
@@ -204,28 +203,10 @@ export function pickIosDeviceType(
 }
 
 function deviceTypeSupportsRuntime(deviceType: AppleDeviceType, runtimeVersion: string): boolean {
-  const hasRangeMetadata =
-    deviceType.minRuntimeVersionString !== undefined ||
-    deviceType.maxRuntimeVersionString !== undefined ||
-    deviceType.minRuntimeVersion !== 0 ||
-    deviceType.maxRuntimeVersion !== 0;
-  if (!hasRangeMetadata) {
-    return true;
-  }
-  const runtime = parseSimctlVersion(runtimeVersion);
-  const min =
-    parseSimctlVersion(deviceType.minRuntimeVersionString) ??
-    decodeSimctlVersion(deviceType.minRuntimeVersion);
-  const max =
-    parseSimctlVersion(deviceType.maxRuntimeVersionString) ??
-    decodeSimctlVersion(deviceType.maxRuntimeVersion);
-  return (
-    runtime !== undefined &&
-    min !== undefined &&
-    max !== undefined &&
-    compareSimctlVersions(runtime, min) >= 0 &&
-    compareSimctlVersions(runtime, max) <= 0
-  );
+  const { status } = evaluateRuntimeCompatibility(deviceType, runtimeVersion);
+  // Legacy output with no range metadata at all stays selectable; malformed
+  // metadata or an unparsable runtime version is still rejected here.
+  return status === "supported" || (status === "unknown" && !hasRuntimeRangeMetadata(deviceType));
 }
 
 function noCompatibleIosDeviceTypeError(

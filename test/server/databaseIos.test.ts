@@ -59,6 +59,8 @@ describe("iOS database inspection server integration", function () {
       "com.example.app",
       "/app/Documents/app.db",
       "SELECT id, payload FROM notes",
+      undefined,
+      true,
     );
     const payload = JSON.parse(response.content[0].text);
     expect(payload).toEqual({

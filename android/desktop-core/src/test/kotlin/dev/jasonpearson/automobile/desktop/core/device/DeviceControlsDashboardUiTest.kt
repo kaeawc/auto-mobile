@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.device
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
@@ -11,7 +12,11 @@ import dev.jasonpearson.automobile.desktop.core.daemon.FakeAppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeVideoRecordingActions
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeVideoRecordingConfigClient
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeWebRtcStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingActions
+import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingArtifact
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfig
+import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingStopResult
+import kotlin.test.assertEquals
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
@@ -167,6 +172,104 @@ class DeviceControlsDashboardUiTest {
 
     onNodeWithText("Record").performClick()
     waitUntil(timeoutMillis = ACTION_TIMEOUT_MS) { actions.isRecording }
+  }
+
+  @Test
+  fun `a release stops the recording and the dashboard offers its artifact (#10978)`() =
+    runComposeUiTest {
+      val actions = FakeVideoRecordingActions().apply { failsDeviceStopWhenIdle = true }
+      val released = mutableStateOf<String?>(null)
+      setContent {
+        MaterialTheme {
+          DeviceControlsDashboard(
+            appearanceClient = FakeAppearanceClient(),
+            recordingActions = actions,
+            recordingConfigClient = FakeVideoRecordingConfigClient(),
+            streamClient = FakeWebRtcStreamClient(),
+            activeDeviceId = "emulator-5554",
+            releasedDeviceId = released.value,
+          )
+        }
+      }
+      onNodeWithText("Record").performClick()
+      waitUntil(timeoutMillis = ACTION_TIMEOUT_MS) { actions.isRecording }
+
+      actions.simulateRelease()
+      released.value = "emulator-5554"
+
+      waitUntil(timeoutMillis = ACTION_TIMEOUT_MS) {
+        runCatching { onNodeWithText("Record").assertIsDisplayed() }.isSuccess
+      }
+      onNodeWithText("Stopped by release", substring = true).assertIsDisplayed()
+      // The fetch went by recording id, never by device.
+      assertEquals(listOf<Pair<String?, String?>>(null to "rec-emulator-5554-1"), actions.stopCalls)
+    }
+
+  @Test
+  fun `stop after switching devices stops by recording id and allocates nothing (#10978)`() =
+    runComposeUiTest {
+      val actions = FakeVideoRecordingActions().apply { failsDeviceStopWhenIdle = true }
+      val selected = mutableStateOf("emulator-5554")
+      setContent {
+        MaterialTheme {
+          DeviceControlsDashboard(
+            appearanceClient = FakeAppearanceClient(),
+            recordingActions = actions,
+            recordingConfigClient = FakeVideoRecordingConfigClient(),
+            streamClient = FakeWebRtcStreamClient(),
+            activeDeviceId = selected.value,
+          )
+        }
+      }
+      onNodeWithText("Record").performClick()
+      waitUntil(timeoutMillis = ACTION_TIMEOUT_MS) { actions.isRecording }
+      actions.simulateRelease()
+      selected.value = "emulator-5556"
+      waitForIdle()
+
+      onNodeWithText("Stop").performClick()
+
+      waitUntil(timeoutMillis = ACTION_TIMEOUT_MS) {
+        runCatching { onNodeWithText("Record").assertIsDisplayed() }.isSuccess
+      }
+      assertEquals(listOf<Pair<String?, String?>>(null to "rec-emulator-5554-1"), actions.stopCalls)
+    }
+
+  @Test
+  fun `a failed stop does not leave the button stuck on Stop (#10978)`() = runComposeUiTest {
+    val actions =
+      object : VideoRecordingActions {
+        override fun startRecording(deviceId: String) =
+          listOf(VideoRecordingArtifact("rec-1", "/tmp/rec-1.mp4", 0, "rec-1"))
+
+        override fun stopRecording(
+          deviceId: String,
+          recordingId: String?,
+          ownerSessionUuid: String?,
+        ): VideoRecordingStopResult = error("No active video recording found for device.")
+      }
+    setContent {
+      MaterialTheme {
+        DeviceControlsDashboard(
+          appearanceClient = FakeAppearanceClient(),
+          recordingActions = actions,
+          recordingConfigClient = FakeVideoRecordingConfigClient(),
+          streamClient = FakeWebRtcStreamClient(),
+          activeDeviceId = "emulator-5554",
+        )
+      }
+    }
+    onNodeWithText("Record").performClick()
+    waitUntil(timeoutMillis = ACTION_TIMEOUT_MS) {
+      runCatching { onNodeWithText("Stop").assertIsDisplayed() }.isSuccess
+    }
+
+    onNodeWithText("Stop").performClick()
+
+    waitUntil(timeoutMillis = ACTION_TIMEOUT_MS) {
+      runCatching { onNodeWithText("Record").assertIsDisplayed() }.isSuccess
+    }
+    onNodeWithText("No active video recording found for device.").assertIsDisplayed()
   }
 
   @Test

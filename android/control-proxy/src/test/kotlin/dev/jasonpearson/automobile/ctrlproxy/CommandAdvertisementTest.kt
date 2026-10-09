@@ -35,6 +35,7 @@ class CommandAdvertisementTest {
       "overlay_show_in_place_v1",
       "overlay_anchor_v1",
       "overlay_window_metadata_v1",
+      "screenshot_hide_overlay_v1",
       "full_command_set_v1",
       "request_id_echo_v1",
     )
@@ -63,6 +64,7 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("inspect_overlays"))
       assertTrue(commands.contains("network_mock_rules_report_v1"))
       assertTrue(commands.contains("overlay_window_metadata_v1"))
+      assertTrue(commands.contains("screenshot_hide_overlay_v1"))
       assertTrue(commands.contains("sdk_capabilities_user_id_v1"))
       assertEquals(commands.size, commands.toSet().size)
       assertTrue(commands.all { it in sealedRequestTypes || it in knownFlags })

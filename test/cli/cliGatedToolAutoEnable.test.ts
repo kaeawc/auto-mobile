@@ -125,8 +125,6 @@ describe("CLI transparently enables gated tools", () => {
 
     await runCliCommand([
       "provisionDevice",
-      "--operationId",
-      "00000000-0000-4000-8000-000000000abc",
       "--device",
       JSON.stringify({
         platform: "android",

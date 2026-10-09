@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repeatErrors, repeatFieldReferences } from "../../../src/features/overlay/overlayRepeat";
+import { BOUND_STATE_KEY_PATTERN } from "../../../src/features/overlay/overlayTemplate";
 import { validateOverlaySpec } from "../../../src/features/overlay/overlayValidation";
 
 const spec = (root: unknown) => ({
@@ -51,9 +52,9 @@ describe("repeatErrors", () => {
   test("expansion multiplies the template, not the container", () => {
     const items = Array.from({ length: 10 }, (_, n) => ({ n }));
     const spacers = (count: number) => Array.from({ length: count }, () => ({ type: "spacer" }));
-    // 1 container + 10 * 49 = 491 nodes fits; 10 * 50 = 500 + 1 does not.
-    expect(repeatErrors(spec(list(spacers(49), items)))).toBeUndefined();
-    expect(repeatErrors(spec(list(spacers(50), items)))).toEqual({
+    // 1 container + 10 * 49 = 1991 nodes fits; 10 * 200 = 2000 + 1 does not.
+    expect(repeatErrors(spec(list(spacers(199), items)))).toBeUndefined();
+    expect(repeatErrors(spec(list(spacers(200), items)))).toEqual({
       path: "root.repeat",
       message: "Expanded node limit exceeded",
     });
@@ -181,4 +182,56 @@ test("the documented repeat snippet is a valid spec root", () => {
   const snippet = section.split("```json\n")[1].split("```")[0];
   const result = validateOverlaySpec({ ...spec(JSON.parse(snippet)), state: { picked: "a" } });
   expect(result.success).toBe(true);
+});
+
+describe("bound state keys (#11051)", () => {
+  test("take placeholders and reject any other brace text, as Kotlin isBoundKey does", () => {
+    for (const key of ["liked", "liked_{item.id}", "{index}_{props.k}", "9_{item.id}"]) {
+      expect(BOUND_STATE_KEY_PATTERN.test(key)).toBe(true);
+    }
+    for (const key of ["9a", "", "liked_{item}", "liked-{item.id}", "liked_{item.id", "{}"]) {
+      expect(BOUND_STATE_KEY_PATTERN.test(key)).toBe(false);
+    }
+  });
+  const toggle = (key: string) => ({
+    type: "text",
+    text: "Like",
+    onTap: [{ type: "toggle", key }],
+  });
+  const keyed = (key: string, items: unknown[], state: Record<string, unknown>) => ({
+    ...spec(list([toggle(key)], items)),
+    state,
+  });
+  test("a key bound per item is type-checked per item and names the item", () => {
+    const state = { liked_a: false, liked_b: true };
+    expect(
+      validateOverlaySpec(keyed("liked_{item.id}", [{ id: "a" }, { id: "b" }], state)),
+    ).toMatchObject({
+      success: true,
+    });
+    expect(
+      validateOverlaySpec(keyed("liked_{item.id}", [{ id: "a" }, { id: "c" }], state)),
+    ).toEqual({
+      success: false,
+      error: {
+        path: "root.children[0].onTap[0].key",
+        message: "Toggle requires a boolean state key (repeat item 1)",
+      },
+    });
+  });
+  test("a key that binds to an invalid key fails at the item", () => {
+    expect(repeatErrors(keyed("k{index}_{item.id}", [{ id: "a" }, { id: 1.5 }], {}))).toEqual({
+      path: "root.repeat.items[1]",
+      message: 'Bound state key "k1_1.5" is invalid',
+    });
+  });
+  test("a placeholder for another alias or outside every template is not a key", () => {
+    expect(repeatErrors(keyed("liked_{row.id}", [{ id: "a" }], {}))?.path).toBe(
+      "root.children[0].onTap[0].key",
+    );
+    expect(repeatErrors(spec(toggle("liked_{item.id}")))).toEqual({
+      path: "root.onTap[0].key",
+      message: "State key placeholder outside a repeat template",
+    });
+  });
 });

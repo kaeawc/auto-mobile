@@ -15,6 +15,7 @@ export class FakeSimctl implements ISimCtl {
   private currentDevice: BootedDevice | null = null;
   private availableSimulators: DeviceInfo[] = [];
   private bootedSimulators: BootedDevice[] = [];
+  private bootedSimulatorsError: Error | null = null;
   private deviceInfoMap: Map<string, AppleDevice | null> = new Map();
   private deviceTypes: AppleDeviceType[] = [];
   private runtimes: AppleDeviceRuntime[] = [];
@@ -58,6 +59,14 @@ export class FakeSimctl implements ISimCtl {
    */
   setBootedSimulators(simulators: BootedDevice[]): void {
     this.bootedSimulators = simulators;
+  }
+
+  /**
+   * Make booted-simulator discovery fail: the checked listing rethrows it and the
+   * unchecked one swallows it into `[]`, as `SimCtlClient` does.
+   */
+  setBootedSimulatorsError(error: Error | null): void {
+    this.bootedSimulatorsError = error;
   }
 
   /**
@@ -237,6 +246,14 @@ export class FakeSimctl implements ISimCtl {
 
   async getBootedSimulators(): Promise<BootedDevice[]> {
     this.recordCall("getBootedSimulators", {});
+    return this.bootedSimulatorsError ? [] : this.bootedSimulators;
+  }
+
+  async getBootedSimulatorsChecked(): Promise<BootedDevice[]> {
+    this.recordCall("getBootedSimulatorsChecked", {});
+    if (this.bootedSimulatorsError) {
+      throw this.bootedSimulatorsError;
+    }
     return this.bootedSimulators;
   }
 

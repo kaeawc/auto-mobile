@@ -63,9 +63,9 @@ function allJobSteps(workflow: WorkflowDefinition): JobStep[] {
 
 describe("workflow cache paths", () => {
   for (const workflow of [
+    // nightly.yml lost its macOS (SwiftPM-caching) jobs to CircleCI in #11010.
     ".github/workflows/pull_request.yml",
     ".github/workflows/merge.yml",
-    ".github/workflows/nightly.yml",
   ]) {
     test(`${workflow} excludes SwiftPM build and package resolution state`, () => {
       const { cacheStepCount, entries } = loadWorkflowCachePaths(workflow);

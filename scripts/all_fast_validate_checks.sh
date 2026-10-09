@@ -41,6 +41,7 @@ add_check "test-as-any-ratchet" "bash \"$PROJECT_ROOT/scripts/test-as-any-baseli
 add_check "node-format" "bun --cwd \"$PROJECT_ROOT\" run format:check" "format,typescript" "Check Node TypeScript formatting"
 add_check "yaml" "bun \"$PROJECT_ROOT/scripts/validate-yaml.ts\"" "config,yaml" "Validate test plan YAML files"
 add_check "ctrl-proxy-project-sources" "\"$PROJECT_ROOT/scripts/check-ctrl-proxy-project-sources.sh\"" "config,ios" "Check CtrlProxy Swift sources are in its Xcode project"
+add_check "ctrl-proxy-xcodegen-drift" "\"$PROJECT_ROOT/scripts/ios/check-ctrl-proxy-xcodegen-drift.sh\"" "config,ios" "Check CtrlProxy.xcodeproj matches XcodeGen output when ios/control-proxy changes (skips without pinned XcodeGen)"
 add_check "schema-copy-drift" "bun \"$PROJECT_ROOT/scripts/check-schema-copy-drift.ts\"" "config,schema" "Detect drift between the canonical and Android copies of test-plan.schema.json"
 add_check "tool-definitions" "bun \"$PROJECT_ROOT/scripts/generate-tool-definitions.ts\" --check" "config,typescript" "Keep schemas/tool-definitions.json in sync with the live tool registry"
 add_check "bun-version-coherence" "bun \"$PROJECT_ROOT/scripts/check-bun-version-coherence.ts\"" "config,dependencies" "Keep Bun versions aligned across package, workflows, Docker, and local development"

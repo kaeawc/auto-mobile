@@ -108,13 +108,14 @@ describe("DefaultFileDownloader downloadWithNodeHttp (end to end, real socket)",
     responseObserver.onFirstResponseByte = markFirstByteReceived;
 
     try {
-      // Bun's `node:http` client surfaces a real mid-body socket close as
-      // "socket connection was closed unexpectedly" rather than Node's
-      // `ERR_STREAM_PREMATURE_CLOSE` "Premature close" text; match both so
-      // this test asserts the underlying condition (an unterminated
-      // response body) rather than one runtime's exact wording.
+      // The runtimes word a real mid-body socket close differently: Node's
+      // `ERR_STREAM_PREMATURE_CLOSE` "Premature close", Bun 1.3's "socket
+      // connection was closed unexpectedly", and Bun 1.4's http "aborted" (the
+      // message Node's http emits for an aborted response). Match all three so
+      // this test asserts the underlying condition (an unterminated response
+      // body) rather than one runtime's exact wording.
       await expect(downloader.download(url, destination)).rejects.toThrow(
-        /premature close|closed unexpectedly/i,
+        /premature close|closed unexpectedly|\baborted\b/i,
       );
       expect(await fs.readFile(destination)).toEqual(existingPayload);
       expect(

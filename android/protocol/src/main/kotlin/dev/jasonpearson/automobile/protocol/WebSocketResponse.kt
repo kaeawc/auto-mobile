@@ -321,6 +321,12 @@ data class ScreenshotResult(
   val screenshotEncodeDurationMs: Long? = null,
   val screenshotByteLength: Int? = null,
   val screenshotBase64Length: Int? = null,
+  /**
+   * Answers a request that carried `hideOverlays`: true when the image contains no CtrlProxy
+   * interactive overlay (none was showing, or it was hidden and a frame confirmed it gone), false
+   * when the hide could not be confirmed before capture. Absent for requests without the flag.
+   */
+  val overlaysHidden: Boolean? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -759,6 +765,11 @@ data class OverlayStatusEntry(
   val state: Map<String, OverlayScalar>,
   val pages: Map<String, Int> = emptyMap(),
   val lastSequence: Long,
+  /**
+   * True while the overlay's app is not in front: the window is hidden and untouchable, its state
+   * kept, and it returns with the app. Omitted when false and by older APKs.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val suspended: Boolean = false,
 )
 
 @Serializable

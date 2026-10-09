@@ -5,18 +5,11 @@ import { loadJobs } from "../helpers/workflowSteps";
 
 const WORKFLOW = ".github/workflows/merge.yml";
 
-// These jobs retain macOS configuration while explicitly disabled. ios-xcode-build
-// is blocked by its disabled ios-xcodegen dependency, but lacks its own guard.
-const MACOS_EXCEPTIONS = new Set(["build-desktop-app", "ios-xcodegen", "ios-xcode-build"]);
-
-describe("On Merge hosted macOS removal (#8583)", () => {
-  test("schedules no hosted macOS runner outside the named dormant jobs", () => {
+describe("On Merge hosted macOS removal (#8583, #11010)", () => {
+  test("schedules no macOS runner; post-merge macOS work runs on CircleCI", () => {
     const jobs = loadJobs(WORKFLOW);
     const offenders = Object.entries(jobs)
-      .filter(([id, job]) => {
-        if (MACOS_EXCEPTIONS.has(id)) {
-          return false;
-        }
+      .filter(([, job]) => {
         const runsOn = JSON.stringify(job["runs-on"] ?? "");
         const matrix = JSON.stringify(job.strategy?.matrix ?? {});
         return /macos/i.test(runsOn) || /macos-(?:latest|\d+)/i.test(matrix);
@@ -24,14 +17,8 @@ describe("On Merge hosted macOS removal (#8583)", () => {
       .map(([id]) => id);
 
     expect(offenders).toEqual([]);
-    for (const id of MACOS_EXCEPTIONS) {
-      expect(jobs[id], `${id} must remain present`).toBeDefined();
-      if (id === "ios-xcode-build") {
-        expect(jobs[id]?.needs).toBe("ios-xcodegen");
-        expect(jobs["ios-xcodegen"]?.if).toBe("${{ false }}");
-      } else {
-        expect(jobs[id]?.if).toBe("${{ false }}");
-      }
+    for (const id of ["build-desktop-app", "ios-xcodegen", "ios-xcode-build"]) {
+      expect(jobs[id], `${id} moved to CircleCI (#11010)`).toBeUndefined();
     }
   });
 

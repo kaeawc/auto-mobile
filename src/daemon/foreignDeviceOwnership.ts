@@ -62,15 +62,19 @@ export interface ForeignDeviceOwnership {
 type LockOwner = Pick<LockContent, "pid" | "token">;
 
 export interface DeviceOwnershipFileSource {
-  /** This process's CtrlProxy forwarding lease file for the device (#10485). */
-  leasePath(deviceId: string): string;
+  /**
+   * This process's CtrlProxy forwarding lease file for the device (#10485); undefined for a
+   * platform without one (iOS).
+   */
+  leasePath(deviceId: string): string | undefined;
   /** The allocation claim file for the device; creating its directory is left to `tryAcquire`. */
   claimPath(deviceId: string): string;
   /**
    * The coordination-directory claim file 0.0.84 daemons write (#10707). Read-only: a newer
    * daemon still honours it so it does not take a device an older daemon claimed (#10708).
+   * Undefined for a platform 0.0.84 never claimed (iOS).
    */
-  legacyClaimPath(deviceId: string): string;
+  legacyClaimPath(deviceId: string): string | undefined;
   read(path: string): LockContent | undefined;
   isProcessRunning(pid: number): boolean;
   tryAcquire(path: string, owner: { pid: number; ownerToken: string; metadata?: string }): boolean;
@@ -164,6 +168,41 @@ const defaultDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
   },
   takeOver: (path, observed, owner) => takeOverExclusiveLock(path, observed, owner),
   release: (path, owner) => releaseExclusiveLock(path, owner.pid, owner.ownerToken),
+};
+
+/**
+ * The scope iOS simulator claims live under (#10980). A simulator set belongs to the user's
+ * CoreSimulator, not to an adb server or a coordination directory, so every daemon on the host
+ * contends for one claim per UDID.
+ */
+export const IOS_SIMULATOR_CLAIM_SCOPE = "ios-simulators";
+
+/** Where an iOS simulator's allocation claim lives, keyed by its UDID (#10980). */
+export function iosDeviceAllocationClaimPath(
+  udid: string,
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir?: string,
+): string {
+  return join(
+    getAdbServerScopedAutoMobileDir(
+      IOS_SIMULATOR_CLAIM_SCOPE,
+      DEVICE_ALLOCATION_CLAIM_SUBDIR,
+      env,
+      homeDir,
+    ),
+    ctrlProxyForwardLeaseFileName(udid),
+  );
+}
+
+/**
+ * The iOS file source (#10980): only the allocation claim. iOS has no CtrlProxy forwarding lease
+ * file and no 0.0.84-format claim to honour.
+ */
+export const iosDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
+  ...defaultDeviceOwnershipFileSource,
+  leasePath: () => undefined,
+  claimPath: (udid) => iosDeviceAllocationClaimPath(udid),
+  legacyClaimPath: () => undefined,
 };
 
 /**
@@ -297,7 +336,7 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     return path === undefined ? undefined : this.evaluateOwner(path, deviceId, "claim");
   }
 
-  private resolvePath(resolve: () => string, deviceId: string): string | undefined {
+  private resolvePath(resolve: () => string | undefined, deviceId: string): string | undefined {
     try {
       return resolve();
     } catch (error) {

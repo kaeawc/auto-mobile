@@ -4,10 +4,13 @@ import { isSessionReleasing } from "./sessionReleaseState";
 import { isTokenOwnedOrClaimPending, lookupReleasedSessionReason } from "./daemonRequestHandlers";
 import {
   cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
+  forceStuckSessionRelease,
   releaseSessionAndDevice,
 } from "./releaseSessionAndDevice";
 import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
+import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
+import { sweepStaleAppearanceConfigs } from "./appearanceConfigStartupSweep";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
 import { republishOwnedIdentity } from "./identityRecovery";
 import {
@@ -75,11 +78,14 @@ import {
 } from "./socketServer/BaseSocketServer";
 import { readDeviceLeaseActivity } from "./deviceLeaseActivity";
 import { daemonDeviceLeaseActivitySources } from "./deviceLeaseActivitySources";
+import { writePrivateDaemonOrphanExitRecord } from "./privateDaemonOrphanExitRecord";
 import {
   PrivateDaemonOrphanWatchdog,
   isHarnessPrivateDaemon,
+  resolveLauncherPid,
   resolvePrivateDaemonOrphanIdleMs,
 } from "./privateDaemonOrphanWatchdog";
+import { PROCESS_ENTRY_PARENT_PID } from "./processEntry";
 import {
   resolveCtrlProxyForwardLeaseIdleMs,
   setCtrlProxyForwardLeaseOwnerSocketPath,
@@ -112,10 +118,17 @@ import {
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { announceSessionRelease } from "./announceSessionRelease";
+import { clearSessionAppearanceConfig } from "../server/appearanceManager";
+import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { NetworkState } from "../server/NetworkState";
 import { registerNetworkStateSessionCleanup } from "../server/networkStateSessionCleanup";
 import { registerPerformanceMonitorSessionCleanup } from "../server/performanceMonitorSessionCleanup";
-import { registerRecordingSessionCleanup } from "../server/recordingSessionCleanup";
+import {
+  createOwnerlessRecordingAcquisitionCleanup,
+  takeRecordingIdsFinalizedByRelease,
+  registerRecordingSessionCleanup,
+} from "../server/recordingSessionCleanup";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   awaitInFlightMigrations,
@@ -211,6 +224,7 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { DeviceSessionRepository } from "../db/deviceSessionRepository";
+import { createDaemonTerminalReleaseJournal } from "./terminalReleaseJournal";
 import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
 import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
@@ -220,6 +234,7 @@ import {
   startAppearanceSyncScheduler,
   syncAppearanceForDevice,
   stopAppearanceSyncScheduler,
+  type AppearanceSyncTarget,
 } from "./AppearanceSyncScheduler";
 import {
   startPerformanceMonitor,
@@ -338,7 +353,10 @@ function toBootedDevice(pooledDevice: PooledDevice): BootedDevice {
  * own clock (host fallback inside the adb client, as the action paths do); iOS keeps the host
  * floor (issue #9895).
  */
-function createDaemonObservationExecutor(requestStart: number) {
+function createDaemonObservationExecutor(
+  requestStart: number,
+  isViewerRead: (pooledDevice: PooledDevice) => boolean,
+) {
   return createPooledObservationExecutor({
     hostRequestStartMs: requestStart,
     readAndroidDeviceClockMs: async (pooledDevice: PooledDevice, signal: AbortSignal) =>
@@ -353,6 +371,15 @@ function createDaemonObservationExecutor(requestStart: number) {
         minTimestamp,
         signal,
       }),
+    // A watcher of a held device gets the `observe` tool's deviceId read (#10967): connect-only,
+    // never the session pipeline's service rebind or CtrlProxy setup on the holder's device.
+    viewerRead: {
+      applies: isViewerRead,
+      observe: (pooledDevice: PooledDevice, signal: AbortSignal) =>
+        new RealObserveScreen(toBootedDevice(pooledDevice), undefined, {
+          deviceReadOnly: true,
+        }).executeDeviceRead(signal, "none"),
+    },
   });
 }
 
@@ -648,7 +675,18 @@ export class Daemon {
     });
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
-    this.observerSessionRegistry = new ObserverSessionRegistry(this.timer);
+    this.observerSessionRegistry = new ObserverSessionRegistry(
+      this.timer,
+      undefined,
+      (sessionId) => {
+        // An observer's per-session appearance config (#10976) dies with the observer.
+        clearSessionAppearanceConfig(sessionId).catch((error: unknown) => {
+          logger.warn(`[Appearance] Failed to drop config of observer ${sessionId}`, error);
+        });
+        // So do the viewer streams its registration admitted (#11076).
+        ObserverReleaseBroadcaster.emit(sessionId);
+      },
+    );
     this.configureSessionLifecycleCallbacks();
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     const recoveryConfiguration = parseDeviceRecoveryPolicy(recoveryPolicyEnvironment);
@@ -801,10 +839,13 @@ export class Daemon {
     );
     // A sessionless call admitted while the device was free must not keep driving it for the new
     // holder (#10829). The call performing the acquisition is spared.
+    // A sessionless recording on the device is stopped and finalized the same way (#10961).
+    const stopOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(this.sessionManager);
     this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
       executionTracker.cancelSessionlessDeviceUse(deviceId, {
         excludeExecutionId: getToolSelectionContext()?.execution?.executionId,
       });
+      stopOwnerlessRecordings(deviceId);
     });
     this.sessionManager.onSessionCreated((session) => {
       NavigationGraphManager.clearReleasedSession(session.sessionId);
@@ -819,6 +860,7 @@ export class Daemon {
             name: device.id,
             platform: "android",
             incarnation: device.incarnation,
+            sessionKey: resolveAppearanceSessionKey(session.sessionId),
           });
         }
       }
@@ -870,14 +912,52 @@ export class Daemon {
     // for every released key — base and derived `${base}:${label}` alike; the
     // proxy matches its bound (base) UUID by exact equality (issue #4610).
     this.sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason, snapshot) => {
+      // Name the recordings this release is finalizing so the previous owner can fetch them
+      // (#10958); the recording cleanup captured them when the release began.
+      announceSessionRelease(
+        {
+          takeRecordingIds: takeRecordingIdsFinalizedByRelease,
+          emit: (...args) => SessionReleaseBroadcaster.emit(...args),
+        },
+        {
+          fallbacks: this.shutdownFallbackReleaseNotifications,
+          announced: this.shutdownReleaseNotifications,
+        },
+        sessionId,
+        releaseReason,
+        snapshot,
+      );
       if (this.shutdownFallbackReleaseNotifications?.has(sessionId)) {
         return;
       }
-      if (releaseReason === "daemon-shutdown") {
-        this.shutdownReleaseNotifications?.add(sessionId);
+      // A session that is gone for good takes its appearance config with it (#10976). A derived
+      // `${base}:${label}` session stores none, so its release clears nothing.
+      if (snapshot.terminal) {
+        clearSessionAppearanceConfig(sessionId).catch((error: unknown) => {
+          logger.warn(`[Appearance] Failed to drop config of released session ${sessionId}`, error);
+        });
       }
-      SessionReleaseBroadcaster.emit(sessionId, releaseReason, snapshot);
     });
+  }
+
+  /** Devices host appearance sync may touch, each tagged with the session whose config applies. */
+  private getAppearanceSyncTargets(): AppearanceSyncTarget[] {
+    return this.devicePool
+      .getAllDevices()
+      .filter(
+        (device) =>
+          device.platform === "android" &&
+          this.passiveWorkPolicy.allows("android", "appearance-sync", device.id),
+      )
+      .map((device) => ({
+        deviceId: device.id,
+        name: device.id,
+        platform: "android",
+        incarnation: device.incarnation,
+        sessionKey: resolveAppearanceSessionKey(
+          this.sessionManager.getSessionForDevice(device.id) ?? undefined,
+        ),
+      }));
   }
 
   private applyRuntimeOptions(options: DaemonOptions): void {
@@ -1016,6 +1096,10 @@ export class Daemon {
         }),
       );
 
+      // Adopt terminal releases a crashed predecessor never persisted (#10959) before any
+      // listener can admit a session; startup rehydration writes their rows.
+      this.sessionManager.attachTerminalReleaseJournal(createDaemonTerminalReleaseJournal());
+
       this.warmAndroidAvdProvenanceCache();
       // iOS device-type profiles are memoized per SimCtlClient and populated inline
       // during its simulator inventory; there is no process-wide profile cache to warm.
@@ -1046,9 +1130,10 @@ export class Daemon {
       startupBenchmark.endPhase("deviceDiscovery");
 
       try {
-        await startupBenchmark.runPhase("sessionRehydration", () =>
+        const rehydration = await startupBenchmark.runPhase("sessionRehydration", () =>
           this.sessionManager.rehydratePersistedSessions(this.devicePool),
         );
+        await sweepStaleAppearanceConfigs(rehydration, this.sessionManager);
       } catch (error) {
         logger.warn(`[Daemon] Session rehydration failed; continuing startup: ${error}`);
       }
@@ -1146,20 +1231,7 @@ export class Daemon {
     startupBenchmark.endPhase("auxiliarySocketServerStart");
 
     startAppearanceSyncScheduler({
-      getTargets: () =>
-        this.devicePool
-          .getAllDevices()
-          .filter(
-            (device) =>
-              device.platform === "android" &&
-              this.passiveWorkPolicy.allows("android", "appearance-sync", device.id),
-          )
-          .map((device) => ({
-            deviceId: device.id,
-            name: device.id,
-            platform: "android",
-            incarnation: device.incarnation,
-          })),
+      getTargets: () => this.getAppearanceSyncTargets(),
       isEnabled: () => this.passiveWorkPolicy.isAppearanceSyncEnabled(),
     });
     startPerformanceMonitor();
@@ -2212,7 +2284,9 @@ export class Daemon {
       const requestStart = this.timer.now();
       return runObservationRequestBatch(
         pooledDevices,
-        createDaemonObservationExecutor(requestStart),
+        createDaemonObservationExecutor(requestStart, (pooledDevice) =>
+          this.isHeldByAnotherSession(pooledDevice.id, sessionUuid),
+        ),
         {
           timer: this.timer,
           signal,
@@ -2229,6 +2303,22 @@ export class Daemon {
 
     // Wire up navigation graph updates to stream to IDE plugins
     this.setupNavigationGraphStreamListener(server);
+  }
+
+  /**
+   * Whether a device is held by a session other than the requester's (a derived
+   * `${base}:${label}` session counts as its base). Such a requester only watches it (#10967).
+   */
+  private isHeldByAnotherSession(deviceId: string, requesterSessionUuid?: string): boolean {
+    const holder =
+      this.sessionManager.getSessionForDevice(deviceId) ??
+      this.devicePool.getDevice(deviceId)?.sessionId;
+    if (!holder) {
+      return false;
+    }
+    const base = (sessionUuid: string | undefined) =>
+      resolveToolSelectionBaseSessionUuid(sessionUuid, this.sessionManager);
+    return base(holder) !== base(requesterSessionUuid?.trim() || undefined);
   }
 
   /**
@@ -2557,6 +2647,11 @@ export class Daemon {
         await this.cancelAndReleaseSession(sessionId, reason);
       },
       this.timer,
+      {
+        // A reap stuck past its deadline frees the device; the session stays fenced (#10963).
+        forceStuckRelease: (sessionId) =>
+          forceStuckSessionRelease(this.sessionManager, this.devicePool, sessionId),
+      },
     );
     this.heartbeatMonitor.start();
   }
@@ -2598,9 +2693,12 @@ export class Daemon {
     if (process.platform === "win32" || !isHarnessPrivateDaemon(SOCKET_PATH, DEFAULT_SOCKET_PATH)) {
       return;
     }
+    // Captured at process entry, not here: the launcher may have exited by now (#11041).
+    const launcherPid = resolveLauncherPid(PROCESS_ENTRY_PARENT_PID);
     this.orphanWatchdog = new PrivateDaemonOrphanWatchdog(
       {
         parentPid: () => process.ppid,
+        launcherPid: () => launcherPid,
         clientCount: () =>
           (this.socketServer?.getClientConnectionCount() ?? 0) +
           getLiveAuxSocketConnectionCount() +
@@ -2611,6 +2709,11 @@ export class Daemon {
           this.httpRequestsSeen,
         liveSessionCount: () => this.sessionManager.getAllSessions().length,
         shutdown: () => {
+          // A client that auto-starts the replacement without --port must rebind this port (#11074).
+          writePrivateDaemonOrphanExitRecord(SOCKET_PATH, {
+            port: this.port,
+            exitedAtMs: this.timer.now(),
+          });
           setImmediate(() => process.kill(process.pid, "SIGTERM"));
         },
       },

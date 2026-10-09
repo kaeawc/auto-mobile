@@ -1246,6 +1246,9 @@ export async function syncInstalledAppResourceRegistry(): Promise<boolean> {
     devices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("either");
   } catch (error) {
     logger.warn(`[AppResources] Failed to get booted devices: ${error}`);
+    // An unobservable device list says nothing about which devices disappeared: keep the registry
+    // and every device's installed-apps cache rather than treating all of them as gone.
+    return false;
   }
 
   if (generation !== installedAppResourceRegistryGeneration) {

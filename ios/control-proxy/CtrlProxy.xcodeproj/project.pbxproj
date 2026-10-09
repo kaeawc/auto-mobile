@@ -91,6 +91,7 @@
 		5F6904A6FF02C9CC22D39F54 /* StorageInspecting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88A9C5EE38B7D10962649CC0 /* StorageInspecting.swift */; };
 		609499C757945D63D4011AC5 /* ObservedAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB9DF4A4DBB37DC5084A1E80 /* ObservedAppState.swift */; };
 		60DE7AD55CC8391B01371ACC /* RequestRemovePreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D080A36B99C83DCA108ABE3 /* RequestRemovePreference.swift */; };
+		60EE8BE3EDF9910DF3DC8A81 /* GestureApplicationTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0676CCEF8FB65FCD3040064 /* GestureApplicationTarget.swift */; };
 		61CAF0D2C5ED2794968FEB50 /* ServerListening.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E3B4AB77576629153CC8D2E /* ServerListening.swift */; };
 		6245459246F0CB3FE08D6BDA /* ObjCExceptionCatcher.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		6248CB79A874598B50760139 /* StorageFilesResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B475196DA4F97669F3560ED /* StorageFilesResponse.swift */; };
@@ -240,7 +241,6 @@
 		FD5572AE62EC8753E10C303D /* RequestSwipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FDC4CB9F9745BB1BF5B4641 /* RequestSwipe.swift */; };
 		FD7D4B0C94D5E03D56F0FD31 /* WebSocketServerLoopbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE082F641352BEE72B8837D5 /* WebSocketServerLoopbackTests.swift */; };
 		FDE8DFD325AF94C838839E56 /* SdkHighlightOutcome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF6BFF065F9DB523A393ACB /* SdkHighlightOutcome.swift */; };
-		A10858B1B2C3D4E5F6071829 /* GestureApplicationTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10858A1B2C3D4E5F6071829 /* GestureApplicationTarget.swift */; };
 		FE2B638771DF9A162DB3A5E7 /* GestureCoordinateStrategy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D9DAC14857950CC4666D2E /* GestureCoordinateStrategy.swift */; };
 		FE946F379A2863607B9B209F /* SdkCapabilitiesResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E32A6E418A2A1CC37E9FAE0 /* SdkCapabilitiesResponse.swift */; };
 /* End PBXBuildFile section */
@@ -400,7 +400,6 @@
 		70A2F1DCB1D420472C7005A1 /* CurrentFocusResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrentFocusResponse.swift; sourceTree = "<group>"; };
 		71A512A13F483EE16888F6EA /* CommandHandler+SdkTrigger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CommandHandler+SdkTrigger.swift"; sourceTree = "<group>"; };
 		7366D3444D35815F837642AA /* HingeAngleSetting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HingeAngleSetting.swift; sourceTree = "<group>"; };
-		A10858A1B2C3D4E5F6071829 /* GestureApplicationTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureApplicationTarget.swift; sourceTree = "<group>"; };
 		73D9DAC14857950CC4666D2E /* GestureCoordinateStrategy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureCoordinateStrategy.swift; sourceTree = "<group>"; };
 		754597427372B30B2E66A93D /* TapDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapDiagnostics.swift; sourceTree = "<group>"; };
 		76D1AFB114A68CF3595A65DB /* SdkGestureInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkGestureInfo.swift; sourceTree = "<group>"; };
@@ -501,6 +500,7 @@
 		DCDAF8EC4DC718D7EB961451 /* AppStateExpectation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateExpectation.swift; sourceTree = "<group>"; };
 		DD7279227112665E843CF54D /* TimeProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeProvider.swift; sourceTree = "<group>"; };
 		DF22C1D3B8693A321680EC6B /* RequestSetText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestSetText.swift; sourceTree = "<group>"; };
+		E0676CCEF8FB65FCD3040064 /* GestureApplicationTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureApplicationTarget.swift; sourceTree = "<group>"; };
 		E149258ED6D95022384DDF77 /* CommandHandling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandHandling.swift; sourceTree = "<group>"; };
 		E15ABE6E93844614BC85C368 /* SdkHierarchyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyClient.swift; sourceTree = "<group>"; };
 		E1C0DDBC340209721D727B86 /* StructuralHasher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuralHasher.swift; sourceTree = "<group>"; };
@@ -600,7 +600,7 @@
 				E662BDE02C14A797054A0E68 /* ForegroundTracker.swift */,
 				B4C11720F03CD9C25F3DD639 /* FrameContext.swift */,
 				4DC5EA945DA4BBD9F94DE5C4 /* FrameContextRecording.swift */,
-				A10858A1B2C3D4E5F6071829 /* GestureApplicationTarget.swift */,
+				E0676CCEF8FB65FCD3040064 /* GestureApplicationTarget.swift */,
 				73D9DAC14857950CC4666D2E /* GestureCoordinateStrategy.swift */,
 				1EF253DD5B8287EC007EF32E /* GesturePerformer.swift */,
 				EB5DF139FFDF4B2DF4FB3606 /* GesturePerforming.swift */,
@@ -1084,7 +1084,7 @@
 				9E6205C7381BF3BFAEA410B6 /* ForegroundTracker.swift in Sources */,
 				F9CD02DB784D4A38A648A5C8 /* FrameContext.swift in Sources */,
 				B4796FE77239E8BCD99C06D6 /* FrameContextRecording.swift in Sources */,
-				A10858B1B2C3D4E5F6071829 /* GestureApplicationTarget.swift in Sources */,
+				60EE8BE3EDF9910DF3DC8A81 /* GestureApplicationTarget.swift in Sources */,
 				FE2B638771DF9A162DB3A5E7 /* GestureCoordinateStrategy.swift in Sources */,
 				39684D6799F70EB63A85E3AB /* GesturePerformer.swift in Sources */,
 				F542BC7033C2C730F49861EE /* GesturePerforming.swift in Sources */,

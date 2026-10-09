@@ -3,7 +3,9 @@ import {
   DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS,
   PrivateDaemonOrphanWatchdog,
   HARNESS_PRIVATE_DAEMON_ENV,
+  DAEMON_LAUNCHER_PID_ENV,
   isHarnessPrivateDaemon,
+  resolveLauncherPid,
   resolvePrivateDaemonOrphanIdleMs,
   type PrivateDaemonOrphanPort,
 } from "../../src/daemon/privateDaemonOrphanWatchdog";
@@ -13,11 +15,15 @@ const IDLE_MS = 10 * 60_000;
 
 class FakeOrphanPort implements PrivateDaemonOrphanPort {
   ppid = 1;
+  launcher = 4242;
   clients = 0;
   sessions = 0;
   shutdowns: string[] = [];
   parentPid(): number {
     return this.ppid;
+  }
+  launcherPid(): number {
+    return this.launcher;
   }
   clientCount(): number {
     return this.clients;
@@ -55,6 +61,14 @@ describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
     expect(watchdog.check()).toBe(true);
     expect(port.shutdowns).toHaveLength(1);
     expect(watchdog.check()).toBe(false);
+  });
+
+  test("shuts down when a Linux subreaper (ppid not 1) adopts the daemon", () => {
+    port.ppid = 777;
+    expect(watchdog.check()).toBe(false);
+    timer.setCurrentTime(IDLE_MS);
+    expect(watchdog.check()).toBe(true);
+    expect(port.shutdowns).toHaveLength(1);
   });
 
   test("never shuts down while the launching parent is alive", () => {
@@ -153,5 +167,19 @@ describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
     disabled.start();
     await timer.advanceTimeAsync(IDLE_MS * 10);
     expect(port.shutdowns).toEqual([]);
+  });
+});
+
+describe("resolveLauncherPid (#11041)", () => {
+  test("uses the parent pid captured at process entry by default", () => {
+    expect(resolveLauncherPid(4242, {})).toBe(4242);
+  });
+
+  test("a launcher-provided pid wins over a late-read subreaper pid", () => {
+    expect(resolveLauncherPid(777, { [DAEMON_LAUNCHER_PID_ENV]: "4242" })).toBe(4242);
+  });
+
+  test.each(["", "abc", "0", "1", "-5", "12.5"])("ignores invalid launcher pid %p", (value) => {
+    expect(resolveLauncherPid(4242, { [DAEMON_LAUNCHER_PID_ENV]: value })).toBe(4242);
   });
 });

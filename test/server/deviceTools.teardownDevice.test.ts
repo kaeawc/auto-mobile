@@ -49,7 +49,6 @@ import {
   setSegmentedSessionRecordingDependencies,
   setSegmentedSessionTimer,
 } from "../../src/server/videoRecordingTools";
-import type { ProvisionDeviceOperationStore } from "../../src/db/provisionDeviceOperationRepository";
 import type {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
@@ -3573,14 +3572,6 @@ describe("deleteDevice handler", () => {
     });
     manager.setDeviceImages("android", [device]);
     let provisionCalls = 0;
-    const provisionOperationStore: ProvisionDeviceOperationStore = {
-      begin: async () => ({ started: true, reconcileExistingConfiguration: false }),
-      markDeviceCreationStarted: async () => true,
-      recordLifecycleOutcome: async () => true,
-      extend: async () => true,
-      complete: async () => true,
-      fail: async () => true,
-    };
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => ({
         provision: async (provisionRequest) => {
@@ -3596,14 +3587,12 @@ describe("deleteDevice handler", () => {
           };
         },
       }),
-      provisionDeviceOperationStoreFactory: () => provisionOperationStore,
     });
     registerDeviceTools();
 
     const teardown = teardownTool().handler(request("android", device.name, device.name));
     await destroyStarted;
     const provision = provisionDeviceTool().handler({
-      operationId: "12e6f783-b794-47b8-b8a1-8619677820f0",
       device: {
         platform: "android",
         name: device.name,
@@ -3646,14 +3635,6 @@ describe("deleteDevice handler", () => {
     });
     manager.setDeviceImages("ios", [device]);
     let provisionCalls = 0;
-    const provisionOperationStore: ProvisionDeviceOperationStore = {
-      begin: async () => ({ started: true, reconcileExistingConfiguration: false }),
-      markDeviceCreationStarted: async () => true,
-      recordLifecycleOutcome: async () => true,
-      extend: async () => true,
-      complete: async () => true,
-      fail: async () => true,
-    };
     setDeviceToolsDependencies({
       exactDeviceProvisionerFactory: () => ({
         provision: async (provisionRequest) => {
@@ -3665,14 +3646,12 @@ describe("deleteDevice handler", () => {
           };
         },
       }),
-      provisionDeviceOperationStoreFactory: () => provisionOperationStore,
     });
     registerDeviceTools();
 
     const teardown = teardownTool().handler(request("ios", device.deviceId!, device.name));
     await destroyStarted;
     const provision = provisionDeviceTool().handler({
-      operationId: "72e6f783-b794-47b8-b8a1-8619677820f0",
       device: {
         platform: "ios",
         name: device.name,

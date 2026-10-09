@@ -39,13 +39,22 @@ const KEYED_JSON_CONFIG_TABLES = {
   }
 >;
 
+/**
+ * A config store. Every method addresses the single global row unless a `key` names another row
+ * (the appearance config is per session, #10976).
+ */
 export interface ConfigRepository<TConfig> {
-  getConfig(): Promise<TConfig | null>;
-  setConfig(config: TConfig): Promise<void>;
-  clearConfig(): Promise<void>;
+  getConfig(key?: string): Promise<TConfig | null>;
+  setConfig(config: TConfig, key?: string): Promise<void>;
+  clearConfig(key?: string): Promise<void>;
 }
 
-export class KeyedJsonConfigRepository<TConfig> implements ConfigRepository<TConfig> {
+/** A config store whose rows can be enumerated by key prefix (per-session appearance rows). */
+export interface KeyedConfigRepository<TConfig> extends ConfigRepository<TConfig> {
+  listKeys(prefix: string): Promise<string[]>;
+}
+
+export class KeyedJsonConfigRepository<TConfig> implements KeyedConfigRepository<TConfig> {
   private readonly tableName: KeyedJsonConfigTableName;
   private readonly loggerTag: string;
   private readonly db: Kysely<Database> | null;
@@ -66,12 +75,12 @@ export class KeyedJsonConfigRepository<TConfig> implements ConfigRepository<TCon
     return this.db ?? getDatabase();
   }
 
-  async getConfig(): Promise<TConfig | null> {
+  async getConfig(key: string = CONFIG_KEY): Promise<TConfig | null> {
     const db = await this.getDb();
     const row = await db
       .selectFrom(this.tableName)
       .select(["config_json"])
-      .where("key", "=", CONFIG_KEY)
+      .where("key", "=", key)
       .executeTakeFirst();
 
     if (!row) {
@@ -86,12 +95,12 @@ export class KeyedJsonConfigRepository<TConfig> implements ConfigRepository<TCon
     }
   }
 
-  async setConfig(config: TConfig): Promise<void> {
+  async setConfig(config: TConfig, key: string = CONFIG_KEY): Promise<void> {
     const db = await this.getDb();
     const now = new Date().toISOString();
 
     const payload = {
-      key: CONFIG_KEY,
+      key,
       config_json: JSON.stringify(config),
       updated_at: now,
     };
@@ -110,16 +119,22 @@ export class KeyedJsonConfigRepository<TConfig> implements ConfigRepository<TCon
       .execute();
   }
 
-  async clearConfig(): Promise<void> {
+  async clearConfig(key: string = CONFIG_KEY): Promise<void> {
     const db = await this.getDb();
-    await db.deleteFrom(this.tableName).where("key", "=", CONFIG_KEY).execute();
+    await db.deleteFrom(this.tableName).where("key", "=", key).execute();
+  }
+
+  async listKeys(prefix: string): Promise<string[]> {
+    const db = await this.getDb();
+    const rows = await db.selectFrom(this.tableName).select(["key"]).execute();
+    return rows.map((row) => row.key).filter((key) => key.startsWith(prefix));
   }
 }
 
 function createConfigRepository<TConfig>(
   key: keyof typeof KEYED_JSON_CONFIG_TABLES,
   db?: Kysely<Database>,
-): ConfigRepository<TConfig> {
+): KeyedConfigRepository<TConfig> {
   return new KeyedJsonConfigRepository<TConfig>({
     ...KEYED_JSON_CONFIG_TABLES[key],
     db,
@@ -128,7 +143,7 @@ function createConfigRepository<TConfig>(
 
 export function createAppearanceConfigRepository(
   db?: Kysely<Database>,
-): ConfigRepository<AppearanceConfig> {
+): KeyedConfigRepository<AppearanceConfig> {
   return createConfigRepository<AppearanceConfig>("appearance", db);
 }
 

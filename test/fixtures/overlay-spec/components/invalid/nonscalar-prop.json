@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "components": {
+      "t": {
+        "root": {
+          "type": "text",
+          "text": "{props.a}"
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "use",
+          "component": "t",
+          "props": {
+            "a": ["x"]
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].props.a",
+  "expectedMessage": "Component prop must be a string, number or boolean"
+}

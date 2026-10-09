@@ -7,6 +7,7 @@ import {
 } from "../features/webrtc/deviceCaptureRegistry";
 import { SocketServerSingleton } from "./socketServerSingleton";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { ObserverReleaseBroadcaster, type ObserverReleaseSource } from "./observerReleaseBroadcast";
 import {
   decideLifecycleEvent,
   decideOwnershipChange,
@@ -109,6 +110,8 @@ export interface VideoStreamSocketServerDependencies {
   deviceLifecycle?: () => StreamDeviceLifecycleEvents | null;
   /** Also covers device-less viewer sessions, whose release changes no device owner. */
   sessionReleases?: { subscribe(callback: (sessionId: string) => void): () => void };
+  /** Released or expired observer registrations, which change no device owner (#11076). */
+  observerReleases?: ObserverReleaseSource;
   /** Maximum time a subscriber may wait for outbound drain. */
   outboundStallTimeoutMs?: number;
 }
@@ -351,6 +354,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   private removeDeviceRemovedListener: (() => void) | null = null;
   private removeIdentityChangedListener: (() => void) | null = null;
   private removeSessionReleaseListener: (() => void) | null = null;
+  private removeObserverReleaseListener: (() => void) | null = null;
   private removeOwnershipListener: (() => void) | null = null;
   private readonly outboundStalls = new Map<
     Socket,
@@ -403,13 +407,16 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       this.deps.ownershipChanges?.()?.onDeviceOwnershipChange((deviceId) => {
         this.reauthorizeSubscribers(deviceId);
       }) ?? null;
+    // A viewer may watch a device other than its session's bound device, or have no binding.
+    const reauthorizeAll = () => {
+      for (const deviceId of this.captures.keys()) {
+        this.reauthorizeSubscribers(deviceId);
+      }
+    };
     this.removeSessionReleaseListener =
-      this.deps.sessionReleases?.subscribe(() => {
-        // A viewer may watch a device other than its session's bound device, or have no binding.
-        for (const deviceId of this.captures.keys()) {
-          this.reauthorizeSubscribers(deviceId);
-        }
-      }) ?? null;
+      this.deps.sessionReleases?.subscribe(reauthorizeAll) ?? null;
+    this.removeObserverReleaseListener =
+      this.deps.observerReleases?.subscribe(reauthorizeAll) ?? null;
     this.subscribeDeviceLifecycle();
   }
 
@@ -446,6 +453,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     this.removeOwnershipListener = null;
     this.removeSessionReleaseListener?.();
     this.removeSessionReleaseListener = null;
+    this.removeObserverReleaseListener?.();
+    this.removeObserverReleaseListener = null;
     this.removeDeviceRestoredListener?.();
     this.removeDeviceRestoredListener = null;
     this.removeDeviceRemovedListener?.();
@@ -1827,6 +1836,7 @@ function defaultDependencies(): VideoStreamSocketServerDependencies {
     },
     deviceLifecycle: getDaemonStreamDeviceLifecycleEmitter,
     sessionReleases: SessionReleaseBroadcaster,
+    observerReleases: ObserverReleaseBroadcaster,
     resolveDevice: defaultResolveDevice,
     createCaptureSource: async (options) => {
       // Resolved once per stream, off the frame path. A null jar means the Android source falls

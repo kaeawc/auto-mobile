@@ -136,6 +136,75 @@ describe("criteria allocation rollback on thrown errors", () => {
     }
   });
 
+  describe("device-acquisition cancellation settles with the whole allocation (#10929)", () => {
+    let cancelled: Array<[string, string]>;
+
+    beforeEach(() => {
+      cancelled = [];
+      manager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
+        cancelled.push([deviceId, sessionId]);
+      });
+    });
+
+    const failThirdCreate = (): ReturnType<typeof spyOn> => {
+      const upsert = persistence.upsertActiveSession.bind(persistence);
+      return spyOn(persistence, "upsertActiveSession").mockImplementation(async (record) => {
+        if (record.sessionUuid === "plan:c") {
+          throw new Error("third session persistence rejected");
+        }
+        await upsert(record);
+      });
+    };
+
+    test("a rolled-back criteria allocation cancels nothing on earlier devices", async () => {
+      const create = failThirdCreate();
+      try {
+        await expect(pool.assignMultipleDevicesByCriteria(requests, 10_000)).rejects.toThrow(
+          "third session persistence rejected",
+        );
+      } finally {
+        create.mockRestore();
+      }
+      expectReleased(["a", "b", "c"]);
+      expect(cancelled).toEqual([]);
+    });
+
+    test("a rolled-back plain allocation cancels nothing on earlier devices", async () => {
+      const create = failThirdCreate();
+      try {
+        await expect(
+          pool.assignMultipleDevices(["plan:a", "plan:b", "plan:c"], 10_000, "android"),
+        ).rejects.toThrow("third session persistence rejected");
+      } finally {
+        create.mockRestore();
+      }
+      expectReleased(["a", "b", "c"]);
+      expect(cancelled).toEqual([]);
+    });
+
+    test("a committed criteria allocation cancels each device's sessionless work once", async () => {
+      await pool.assignMultipleDevicesByCriteria(requests, 10_000);
+      expect(cancelled.slice().sort()).toEqual([
+        ["device-a", "plan:a"],
+        ["device-b", "plan:b"],
+        ["device-c", "plan:c"],
+      ]);
+    });
+
+    test("a committed plain allocation cancels each device's sessionless work once", async () => {
+      await pool.assignMultipleDevices(["plan:a", "plan:b"], 10_000, "android");
+      expect(cancelled.length).toBe(2);
+      expect(new Set(cancelled.map(([, sessionId]) => sessionId))).toEqual(
+        new Set(["plan:a", "plan:b"]),
+      );
+    });
+
+    test("a single-device bind still cancels as soon as its create commits", async () => {
+      await pool.bindOrReuseDeviceSession("solo", "device-a", "android");
+      expect(cancelled).toEqual([["device-a", "solo"]]);
+    });
+  });
+
   test("a live session whose held device misses its criteria fails fast and is preserved", async () => {
     await pool.bindOrReuseDeviceSession("plan:a", "device-a", "android");
     const heldSession = manager.getSession("plan:a");

@@ -1,5 +1,9 @@
+import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { observeConfiguredDeviceResources } from "./deviceResourceTools";
+import { computeDeviceResourceDrift } from "../utils/deviceResourceDrift";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ProgressCallback } from "./toolRegistry";
@@ -20,12 +24,15 @@ import { isUnresolvedAndroidEmulatorName } from "../devices/deviceIdentityEviden
 import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
 import { McpSessionRecoveryInProgressError } from "../daemon/devicePool";
+import {
+  buildProvisionDeviceRecoveryEvidence,
+  type ProvisionDeviceFailureBoundary,
+  type ProvisionDeviceRecoveryEvidence,
+  type ProvisionDeviceRecoveryInput,
+} from "./provisionDeviceRecoveryEvidence";
 import { getCurrentBuildIdentity } from "../daemon/buildIdentity";
 import { DAEMON_VERSION } from "../daemon/constants";
-import {
-  DAEMON_HANDOFF_INTERRUPTED_ERROR_CODE,
-  DaemonHandoffInterruptionError,
-} from "../daemon/daemonHandoffInterruption";
+import { DaemonHandoffInterruptionError } from "../daemon/daemonHandoffInterruption";
 import {
   DeviceBootService,
   DeviceBootTimeoutError,
@@ -48,29 +55,20 @@ import {
   type ExactDeviceProvisioner,
   ProvisionDeviceError,
 } from "../devices/exactDeviceProvisioning";
-import {
-  ProvisionDeviceOperationConflictError,
-  ProvisionDeviceOperationFailedError,
-  ProvisionDeviceOperationInProgressError,
-  ProvisionDeviceOperationSupersededError,
-  type ProvisionDeviceLifecycleOutcome,
-  type ProvisionDeviceOperationBeginResult,
-  type ProvisionDeviceOperationStore,
-} from "../db/provisionDeviceOperationRepository";
+import type { ProvisionDeviceLifecycleOutcome } from "../devices/provisionDeviceLifecycle";
 import { type VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
 import { DeviceTeardownService } from "../devices/deviceTeardownService";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
 import { classifyDisplayCutout } from "../utils/displayCutout";
 import {
-  ActiveProvisionDeviceOperation,
-  assertProvisionDeviceOperationAdmitted,
+  type ActiveProvisionDeviceRequest,
+  activeProvisionDeviceRequests,
   attachProvisionDeviceLifecycle,
-  awaitProvisionDeviceOperationBegin,
+  cancelProvisionDeviceRequest,
   cancelUnownedColdBoot,
   clearColdBootShutdownMarker,
   createProvisionDeviceResponse,
   createToolErrorResponse,
-  FinalizedProvisionDeviceCompletionError,
   findExactProvisionedBootedDevice,
   getDeviceToolsDependencies,
   initializedDevicePool,
@@ -81,20 +79,13 @@ import {
   lifecycleForProvisionResponseError,
   lifecycleStateForCleanup,
   parseProvisionDeviceArgs,
-  PROVISION_DEVICE_FINALIZATION_TTL_REFRESH_MS,
-  PROVISION_DEVICE_OPERATION_TTL_MS,
-  PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
   PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
-  PROVISION_DEVICE_TTL_REFRESH_WAIT_MS,
   ProvisionDeviceCleanup,
   provisionDeviceDeadlineMs,
-  provisionDeviceFingerprint,
   provisionDeviceSchema,
   ProvisionDeviceRollbackError,
-  provisionDeviceTimeoutError,
   publishWarmDeviceReady,
   RecordProvisionDeviceLifecycle,
-  releaseProvisionDeviceWaiter,
   reserveStableDeviceLifecycle,
   rethrowDeviceLifecycleReservationFailure,
   runOperationWithinDeadline,
@@ -105,8 +96,7 @@ import {
   TeardownToolResponse,
   validatePooledDeviceMapping,
   waitForProvisionDeviceSettlement,
-  waitForSharedOperation,
-  activeProvisionDeviceOperations,
+  waitForProvisionDeviceRequest,
 } from "./deviceTools";
 import type { DeviceToolsDependencies, ProvisionDeviceArgs, StartDeviceArgs } from "./deviceTools";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
@@ -126,11 +116,6 @@ type ProvisioningHooks = {
       collectCancellationSettlement?: (settlement: Promise<void>) => void;
     },
   ) => Promise<string>;
-  recordAcquiredSessionReadiness: (
-    daemonState: DaemonState,
-    sessionId: string,
-    achievedReadiness: DeviceReadinessLevel,
-  ) => void;
   ensureCtrlProxyReady: (request: RunnerReadinessRequest) => Promise<void>;
   executeDeleteDevice: (
     args: TeardownDeviceArgs,
@@ -144,9 +129,17 @@ type ProvisioningHooks = {
 type ProvisionCleanupOptions = {
   lifecycleLease: VirtualDeviceLifecycleLease | undefined;
   pendingMutationSettlement?: Promise<unknown>;
+  /** Absolute rollback deadline already anchored by the caller (e.g. iOS identity discovery). */
+  rollbackDeadlineMs?: number;
   recordLifecycle?: RecordProvisionDeviceLifecycle;
   lifecycleDevice?: NonNullable<ProvisionDeviceLifecycleOutcome["device"]>;
 };
+
+/** Where a failed provision's rollback should aim; `unresolved` never means absent. */
+type ProvisionRollbackTarget =
+  | { kind: "device"; device: DeviceInfo }
+  | { kind: "absent" }
+  | { kind: "unresolved" };
 
 type ProvisionBootOptions = {
   provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>;
@@ -155,7 +148,7 @@ type ProvisionBootOptions = {
   lifecycleLease: VirtualDeviceLifecycleLease;
   signal: AbortSignal | undefined;
   settlementState: ProvisionSettlementState;
-  onBooted: (device: BootedDevice) => Promise<void>;
+  onBooted: (device: BootedDevice) => void;
 };
 
 type ProvisionSettlementState = {
@@ -174,12 +167,7 @@ type ProvisionBootResult = {
 };
 
 export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
-  const {
-    bindBootedDeviceSession,
-    recordAcquiredSessionReadiness,
-    ensureCtrlProxyReady,
-    executeDeleteDevice,
-  } = hooks;
+  const { bindBootedDeviceSession, ensureCtrlProxyReady, executeDeleteDevice } = hooks;
   const provisionDeviceHandler = async (
     input: ProvisionDeviceArgs,
     _progress?: ProgressCallback,
@@ -203,983 +191,222 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       logger.warn(`[DeviceTools] ${message}`, error);
       return createToolErrorResponse("invalid_arguments", message);
     }
-    const fingerprint = provisionDeviceFingerprint(args);
-    const active = activeProvisionDeviceOperations.get(args.operationId);
-    if (active) {
-      if (active.fingerprint !== fingerprint) {
-        return createToolErrorResponse(
-          "operation_conflict",
-          `operationId '${args.operationId}' is already running with a different provisionDevice request.`,
-        );
-      }
-      active.waiters += 1;
-      return await awaitSharedProvisionDeviceOperation(args, active, signal);
-    }
-
-    const sharedController = new AbortController();
-    const promise = executeProvisionDevice(args, fingerprint, sharedController.signal);
-    const operation: ActiveProvisionDeviceOperation = {
-      fingerprint,
-      promise,
-      controller: sharedController,
-      waiters: 1,
+    // Every call runs its own lifecycle (#11065). A concurrent request for the
+    // same exact device waits on the device lifecycle lease and then adopts the
+    // device or is refused by session ownership; nothing is replayed.
+    const controller = new AbortController();
+    const lifecycleEvidence: ActiveProvisionDeviceRequest["lifecycleEvidence"] = {};
+    const promise = executeProvisionDevice(args, controller.signal, lifecycleEvidence);
+    const request: ActiveProvisionDeviceRequest = { promise, controller, lifecycleEvidence };
+    activeProvisionDeviceRequests.add(request);
+    const retire = (): void => {
+      activeProvisionDeviceRequests.delete(request);
     };
-    activeProvisionDeviceOperations.set(args.operationId, operation);
-    void promise.then(
-      () => {
-        if (activeProvisionDeviceOperations.get(args.operationId)?.promise === promise) {
-          activeProvisionDeviceOperations.delete(args.operationId);
-        }
-      },
-      () => {
-        if (activeProvisionDeviceOperations.get(args.operationId)?.promise === promise) {
-          activeProvisionDeviceOperations.delete(args.operationId);
-        }
-      },
-    );
-    return await awaitSharedProvisionDeviceOperation(args, operation, signal);
+    void promise.then(retire, retire);
+    return await awaitProvisionDeviceRequest(args, request, signal);
   };
 
-  async function awaitSharedProvisionDeviceOperation(
+  function describeProvisionRequest(args: ProvisionDeviceArgs): string {
+    return `${args.device.platform} '${args.device.name}'`;
+  }
+
+  async function awaitProvisionDeviceRequest(
     args: ProvisionDeviceArgs,
-    operation: ActiveProvisionDeviceOperation,
+    request: ActiveProvisionDeviceRequest,
     signal: AbortSignal | undefined,
   ) {
     try {
-      const result = await waitForSharedOperation(operation.promise, signal);
-      releaseProvisionDeviceWaiter(args.operationId, operation);
+      const result = await waitForProvisionDeviceRequest(request.promise, signal);
       return createProvisionDeviceResponse(result);
     } catch (error) {
-      const cancelledOperation = releaseProvisionDeviceWaiter(args.operationId, operation, error);
       if (error instanceof DaemonHandoffInterruptionError) {
-        if (cancelledOperation) {
-          // The replacement daemon may replay this operation immediately.
-          // Wait until the fenced attempt has persisted its retryable terminal
-          // state, so replay cannot observe a stale "running" row.
-          await operation.promise.catch((error) => {
-            // Handoff already reports interruption; this wait only fences terminal persistence.
+        if (cancelProvisionDeviceRequest(request, error)) {
+          // Let the cancelled lifecycle unwind (rollback, lease release) so the
+          // recovery evidence reports what it left behind.
+          await request.promise.catch((error) => {
+            // Handoff already reports interruption; this wait only lets rollback settle.
             logger.debug(`Provision handoff settlement rejected: ${errorMessage(error)}`);
           });
         }
         logger.warn(
-          `[DeviceTools] provisionDevice ${args.operationId} interrupted by daemon handoff: ${errorMessage(error)}`,
+          `[DeviceTools] provisionDevice ${describeProvisionRequest(args)} interrupted by daemon handoff: ${errorMessage(error)}`,
           error,
         );
-        return provisionDeviceErrorResponse(error, args.operationId);
+        return provisionDeviceErrorResponse(
+          error,
+          provisionDeviceRecovery("daemon_handoff", request, {
+            originalError: { code: error.code, message: error.message },
+          }),
+        );
       }
       if (isProvisionDeviceCallerAbort(error, signal)) {
+        cancelProvisionDeviceRequest(request, error);
         const settled = await waitForProvisionDeviceSettlement(
-          operation.promise,
+          request.promise,
           getDeviceToolsDependencies().timer,
           PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
         );
         if (!settled) {
           logger.warn(
-            `[DeviceTools] provisionDevice ${args.operationId} caller cancellation stopped waiting for operation settlement.`,
+            `[DeviceTools] provisionDevice ${describeProvisionRequest(args)} caller cancellation stopped waiting for its lifecycle to settle.`,
           );
         }
         // The caller went away, which is not a provisioning failure: report it
-        // with a code of its own, and say whether the operation was retained
-        // for other callers (so its result can be collected by re-issuing the
-        // same operationId) or was cancelled with this caller.
+        // with a code of its own. The lifecycle is cancelled with its caller.
         logger.warn(
-          `[DeviceTools] provisionDevice ${args.operationId} caller cancelled the request ` +
-            `(operation ${cancelledOperation ? "cancelled" : "retained for other callers"}): ` +
+          `[DeviceTools] provisionDevice ${describeProvisionRequest(args)} caller cancelled the request: ` +
             `${errorMessage(error)}`,
           error,
         );
-        return createToolErrorResponse(
+        const cancelledResponse = createToolErrorResponse(
           "request_cancelled",
-          cancelledOperation
-            ? `provisionDevice request for operationId '${args.operationId}' was cancelled by ` +
-                "the caller; no other caller was waiting, so the operation was cancelled too."
-            : `provisionDevice request for operationId '${args.operationId}' was cancelled by ` +
-                "the caller; the operation continued for other callers and its result can be collected by " +
-                "re-issuing the same operationId.",
-          { operationId: args.operationId, operationContinues: !cancelledOperation },
+          "provisionDevice request was cancelled by the caller; its provisioning work was cancelled too.",
+          {
+            recovery: provisionDeviceRecovery("caller_cancellation", request, {
+              settled,
+              retryAfterMs: PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
+            }),
+          },
         );
+        // The daemon answered the abandoned request already; hand it this result so that reply
+        // can carry the typed envelope and recovery evidence.
+        if (args.__mcpLiveDeadlineKey) {
+          provisionCancellationOutcomes.publish(args.__mcpLiveDeadlineKey, cancelledResponse);
+        }
+        return cancelledResponse;
       }
       logger.warn(
-        `[DeviceTools] provisionDevice ${args.operationId} failed: ${errorMessage(error)}`,
+        `[DeviceTools] provisionDevice ${describeProvisionRequest(args)} failed: ${errorMessage(error)}`,
         error,
       );
-      return provisionDeviceErrorResponse(error, args.operationId);
+      return provisionDeviceErrorResponse(error, failureBoundaryRecovery(error, request));
     }
   }
 
-  async function executeProvisionDevice(
-    args: ProvisionDeviceArgs,
-    fingerprint: string,
-    signal: AbortSignal | undefined,
-  ): Promise<Record<string, unknown>> {
-    const deps = getDeviceToolsDependencies();
-    const store = deps.provisionDeviceOperationStoreFactory();
-    const nowMs = deps.timer.now();
-    // Fence for every write this attempt makes to the operation row: an
-    // attempt that is superseded (its row reclaimed by a retry or by the
-    // expiry sweep) must not stamp its result over the attempt that replaced
-    // it.
-    const attemptId = deps.idGenerator.next();
-    const recordLifecycle: RecordProvisionDeviceLifecycle = async (lifecycle) => {
-      if (!(await store.recordLifecycleOutcome(args.operationId, attemptId, lifecycle))) {
-        throw new ProvisionDeviceOperationSupersededError(args.operationId);
-      }
-    };
-    // ONE absolute deadline for the whole request, anchored here and sliced
-    // across every phase below. A replay runs up to three phases (waiting for
-    // the stable-device lifecycle lease, revalidating the live session, then
-    // re-running the lifecycle); computing a fresh `timer.now() + timeoutMs`
-    // per phase re-granted the budget already burned by the previous one, so
-    // one request could occupy ~3x its own timeoutMs -- past the operation
-    // row's TTL and past the daemon's queued-request deadline, which only the
-    // `reserveRollbackTime` form respects.
-    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
-    const begin = store.begin(
-      args.operationId,
-      fingerprint,
-      attemptId,
-      nowMs,
-      nowMs + PROVISION_DEVICE_OPERATION_TTL_MS,
-    );
-    let admissionAbandoned = false;
-    let admissionError: unknown;
-
-    const lifecycle = begin.then(async (operation) => {
-      if (admissionAbandoned || deps.timer.now() >= totalDeadlineMs) {
-        retireLateProvisionDeviceOperationBegin(
-          store,
-          args,
-          attemptId,
-          operation,
-          admissionError ?? provisionDeviceTimeoutError("starting provision operation"),
-        );
-        throw admissionError ?? provisionDeviceTimeoutError("starting provision operation");
-      }
-      return await runAdmittedProvisionOperation(args, deps, operation, {
-        store,
-        attemptId,
-        recordLifecycle,
-        totalDeadlineMs,
-        signal,
-      });
+  /** Readiness and cleanup failures carry the same evidence envelope as the other boundaries. */
+  function failureBoundaryRecovery(
+    error: unknown,
+    request: ActiveProvisionDeviceRequest,
+  ): ProvisionDeviceRecoveryEvidence | undefined {
+    if (recoveryFromError(error)) {
+      return undefined;
+    }
+    const lifecycle = lifecycleForProvisionResponseError(error);
+    const boundary = failureBoundaryFor(error, lifecycle);
+    if (!boundary) {
+      return undefined;
+    }
+    const failure = error instanceof ProvisionDeviceRollbackError ? error.provisionFailure : error;
+    const { code, retryable } = failureCodeAndRetryability(failure);
+    const { ownership } = request.lifecycleEvidence;
+    return buildProvisionDeviceRecoveryEvidence({
+      boundary,
+      nowMs: getDeviceToolsDependencies().timer.now(),
+      daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
+      // A rollback error's own lifecycle is newer than the last one recorded.
+      lifecycle: lifecycle ?? request.lifecycleEvidence.lifecycle,
+      ...(ownership ? { ownership } : {}),
+      originalError: { code, message: errorMessage(failure) },
+      ...(retryable !== undefined ? { retryable } : {}),
     });
-    void lifecycle.catch((error) => {
-      // The admission waiter reports failure; this observer handles a late retired attempt.
-      logger.debug(`Provision lifecycle rejection observed: ${errorMessage(error)}`);
-    });
-
-    let admissionConfirmed = false;
-    try {
-      await awaitProvisionDeviceOperationBegin(deps.timer, totalDeadlineMs, signal, begin);
-      admissionConfirmed = true;
-      return await lifecycle;
-    } catch (error) {
-      if (!admissionConfirmed) {
-        // A storage call that ignores its deadline can still admit this attempt
-        // after the caller has received its timeout. The continuation retires
-        // that late claim under the same attempt fence before it can reach any
-        // device mutation; a newer retry safely wins over that finalizer.
-        admissionAbandoned = true;
-        admissionError = error;
-      }
-      throw error;
-    }
   }
 
-  async function runAdmittedProvisionOperation(
-    args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
-    operation: ProvisionDeviceOperationBeginResult,
-    {
-      store,
-      attemptId,
-      recordLifecycle,
-      totalDeadlineMs,
-      signal,
-    }: {
-      store: ProvisionDeviceOperationStore;
-      attemptId: string;
-      recordLifecycle: RecordProvisionDeviceLifecycle;
-      totalDeadlineMs: number;
-      signal: AbortSignal | undefined;
-    },
-  ): Promise<Record<string, unknown>> {
-    // In-progress and durable-terminal rows are observational queries, not
-    // permission to enter the lifecycle. Throw before the catch below so this
-    // attempt never stamps over the row it only queried.
-    assertProvisionDeviceOperationAdmitted(operation, args.operationId);
-    try {
-      if (
-        !operation.started &&
-        (await canReplayCompletedProvisionDeviceOperation(
-          args,
-          deps,
-          operation.result,
-          totalDeadlineMs,
-          signal,
-        ))
-      ) {
-        const replayResult = backfillProvisionDeviceCutout(args, operation.result);
-        // Unconditionally, even when the persisted result is byte-for-byte what
-        // we are about to return: begin() moved this row to the EXCLUSIVE
-        // non-terminal `replaying` status, so returning without completing it
-        // would leave the claim held and make every later identical call report
-        // operation_in_progress until the row's TTL (~30m) expires. Re-storing
-        // an identical result is harmless; leaving the claim open is not.
-        await completeProvisionDeviceOperation(store, args.operationId, attemptId, replayResult, {
-          args: args,
-          timer: deps.timer,
-          totalDeadlineMs: totalDeadlineMs,
-          signal: signal,
-        });
-        return replayResult;
-      }
-      if (!operation.started) {
-        await releaseErroredProvisionDeviceSession(operation.result);
-
-        // Sessions are daemon-local and are expired during daemon startup. A
-        // replay of a completed boot operation therefore runs the idempotent
-        // lifecycle again to bind a live session before reporting readiness.
-        const rebound = await runProvisionDeviceLifecycle(
-          args,
-          deps,
-          operation.reconcileExistingConfiguration,
-          () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
-          { recordLifecycle: recordLifecycle, totalDeadlineMs: totalDeadlineMs, signal: signal },
-        );
-        const refreshed = preserveProvisionDeviceOwnership(operation.result, rebound);
-        await completeProvisionDeviceOperation(store, args.operationId, attemptId, refreshed, {
-          args: args,
-          timer: deps.timer,
-          totalDeadlineMs: totalDeadlineMs,
-          signal: signal,
-        });
-        return refreshed;
-      }
-
-      const result = await runProvisionDeviceLifecycle(
-        args,
-        deps,
-        operation.reconcileExistingConfiguration,
-        () => markProvisionDeviceCreationStarted(store, args.operationId, attemptId),
-        { recordLifecycle: recordLifecycle, totalDeadlineMs: totalDeadlineMs, signal: signal },
-      );
-      await completeProvisionDeviceOperation(store, args.operationId, attemptId, result, {
-        args: args,
-        timer: deps.timer,
-        totalDeadlineMs: totalDeadlineMs,
-        signal: signal,
-      });
-      return result;
-    } catch (error) {
-      if (error instanceof FinalizedProvisionDeviceCompletionError) {
-        // Completion failures start an observed finalizer below. Do not await
-        // or duplicate its failure write here; either can share the stalled
-        // persistence boundary that made completion fail.
-        throw error.completionError;
-      }
-      if (error instanceof McpSessionRecoveryInProgressError) {
-        // Transient by construction ("cannot remap until recovery finishes"),
-        // so the client is told to retry. A retry only works if this attempt's
-        // row is terminal: an admitted attempt owns a "running" row, and
-        // leaving it running would make every retry report
-        // operation_in_progress for the whole operation TTL (~30m) with
-        // nothing executing. A replay (started === false) owns an exclusive
-        // "replaying" row, so it must be failed too or every retry would report
-        // operation_in_progress for the rest of the TTL; store.fail() reverts a
-        // replaying row to "succeeded" with its result intact, so this cannot
-        // destroy a valid completed result.
-        logger.warn(
-          `[DeviceTools] provisionDevice ${args.operationId} deferred by MCP session ` +
-            `recovery: ${errorMessage(error)}`,
-          error,
-        );
-        await persistFailedProvisionDeviceOperation(
-          store,
-          args,
-          attemptId,
-          PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE,
-          {
-            message: errorMessage(error),
-            options: undefined,
-            timer: deps.timer,
-            totalDeadlineMs: totalDeadlineMs,
-            signal: signal,
-          },
-        );
-        throw error;
-      }
-      if (error instanceof DaemonHandoffInterruptionError) {
-        logger.warn(
-          `[DeviceTools] provisionDevice ${args.operationId} interrupted by daemon handoff: ${errorMessage(error)}`,
-          error,
-        );
-        await persistFailedProvisionDeviceOperation(
-          store,
-          args,
-          attemptId,
-          DAEMON_HANDOFF_INTERRUPTED_ERROR_CODE,
-          {
-            message: errorMessage(error),
-            options: undefined,
-            timer: deps.timer,
-            totalDeadlineMs: totalDeadlineMs,
-            signal: signal,
-          },
-        );
-        throw error;
-      }
-      if (error instanceof ProvisionDeviceOperationSupersededError) {
-        // The row belongs to a newer attempt now; stamping this attempt's
-        // failure on it would fail an operation that is still running.
-        throw error;
-      }
-      const provisionError = toProvisionDeviceError(args, error);
-      await persistFailedProvisionDeviceOperation(store, args, attemptId, provisionError.code, {
-        message: provisionError.message,
-        options: {
-          clearCreationStarted:
-            error instanceof ProvisionDeviceRollbackError && error.cleanup.status === "succeeded",
-        },
-        timer: deps.timer,
-        totalDeadlineMs: totalDeadlineMs,
-        signal: signal,
-      });
-      throw provisionError;
+  function failureCodeAndRetryability(failure: unknown): { code: string; retryable?: boolean } {
+    if (failure instanceof ProvisionDeviceError) {
+      return { code: failure.code, retryable: failure.retryable };
     }
+    return { code: "platform_command_failed" };
   }
 
-  const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-    typeof value === "object" && value !== null && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : undefined;
-
-  interface PersistedProvisionDevice {
-    name: string;
-    platform: "android" | "ios";
-    deviceId?: string;
-  }
-
-  function getPersistedProvisionDevice(
-    result: Record<string, unknown>,
-  ): PersistedProvisionDevice | undefined {
-    const deviceRecord = asRecord(result.device);
-    if (!deviceRecord) {
-      return undefined;
+  function failureBoundaryFor(
+    error: unknown,
+    lifecycle: ProvisionDeviceLifecycleOutcome | undefined,
+  ): ProvisionDeviceFailureBoundary | undefined {
+    if (error instanceof ProvisionDeviceRollbackError && error.cleanup.status !== "succeeded") {
+      return "cleanup_failure";
     }
-    if (typeof deviceRecord.name !== "string") {
-      return undefined;
-    }
-    if (deviceRecord.platform !== "android" && deviceRecord.platform !== "ios") {
-      return undefined;
-    }
-    const runtimeRecord = asRecord(deviceRecord.runtime);
-    const identityRecord = asRecord(deviceRecord.identity);
-    const runtimeDeviceId =
-      typeof runtimeRecord?.deviceId === "string" ? runtimeRecord.deviceId : undefined;
-    const stableId =
-      typeof identityRecord?.stableId === "string" ? identityRecord.stableId : undefined;
-    return {
-      name: deviceRecord.name,
-      platform: deviceRecord.platform,
-      deviceId: runtimeDeviceId ?? stableId,
-    };
-  }
-
-  function backfillProvisionDeviceCutout(
-    args: ProvisionDeviceArgs,
-    result: Record<string, unknown>,
-  ): Record<string, unknown> {
-    const displayCutout = classifyDisplayCutout(args.device.platform, args.device.spec.deviceType);
-    const resolvedSpec = result.resolvedSpec;
-    const resolvedSpecRecord =
-      typeof resolvedSpec === "object" && resolvedSpec !== null && !Array.isArray(resolvedSpec)
-        ? (resolvedSpec as Record<string, unknown>)
-        : undefined;
-    const resolvedDisplayCutout = resolvedSpecRecord?.displayCutout;
-    const hasTopLevelCutout = typeof result.displayCutout === "string";
-    const hasResolvedCutout = typeof resolvedDisplayCutout === "string";
-    if (hasTopLevelCutout && hasResolvedCutout) {
-      return result;
-    }
-    return {
-      ...result,
-      displayCutout: hasTopLevelCutout ? result.displayCutout : displayCutout,
-      resolvedSpec: {
-        ...(resolvedSpecRecord ?? args.device.spec),
-        displayCutout: hasResolvedCutout ? resolvedDisplayCutout : displayCutout,
-      },
-    };
-  }
-
-  async function reserveProvisionDeviceReplayLifecycle(
-    args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
-    result: Record<string, unknown>,
-    totalDeadlineMs: number,
-    signal: AbortSignal | undefined,
-  ): Promise<VirtualDeviceLifecycleLease | undefined> {
-    const device = getPersistedProvisionDevice(result);
-    const stableId = device?.platform === "android" ? device.name : device?.deviceId;
-    if (!device || !stableId) {
-      return undefined;
-    }
-    return await reserveStableDeviceLifecycle(
-      { platform: device.platform, stableId },
-      {
-        platform: device.platform,
-        name: device.name,
-        deviceId: device.deviceId ?? stableId,
-      },
-      deps.timer,
-      totalDeadlineMs,
-      {
-        requestAbortSignal: signal,
-        timeoutError: (detail) =>
-          new ProvisionDeviceError(
-            "timeout",
-            `Timed out replaying provisioned ${device.platform} device '${device.name}': ${detail}.`,
-          ),
-        operation: "provision",
-        coordinator: deps.lifecycleCoordinator,
-      },
-    );
-  }
-
-  async function canReplayCompletedProvisionDeviceOperation(
-    args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
-    result: Record<string, unknown>,
-    totalDeadlineMs: number,
-    signal: AbortSignal | undefined,
-  ): Promise<boolean> {
-    const replayLease = await reserveProvisionDeviceReplayLifecycle(
-      args,
-      deps,
-      result,
-      totalDeadlineMs,
-      signal,
-    );
-    const replaySignal = replayLease
-      ? signal
-        ? AbortSignal.any([signal, replayLease.signal])
-        : replayLease.signal
-      : signal;
-    try {
-      return (
-        !args.boot ||
-        (await revalidateProvisionDeviceReplay(args, deps, result, totalDeadlineMs, replaySignal))
-      );
-    } finally {
-      replayLease?.release();
-    }
-  }
-
-  async function revalidateLiveProvisionDeviceSession(
-    args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
-    result: Record<string, unknown>,
-    totalDeadlineMs: number,
-    signal: AbortSignal | undefined,
-  ): Promise<boolean> {
-    const liveSession = getLiveProvisionDeviceSession(result);
-    if (!liveSession) {
-      return false;
-    }
-    // A replay can re-establish readiness for a persisted session whose cache
-    // was lost during daemon recovery. Keep that setup, its live-session
-    // recheck, and the readiness record in one device transaction: a tool that
-    // resolves the session concurrently must join this marker rather than see
-    // an unrecorded level after CtrlProxy setup and start a second reset/setup.
-    return await trackDeviceAcquisitionReadiness(
-      deviceReadinessLockKey(liveSession.device.platform, liveSession.device.deviceId),
-      async () => {
-        if (args.resources) {
-          result.resources = await applyProvisionDeviceResources(
-            args,
-            deps,
-            liveSession.device,
-            totalDeadlineMs,
-            signal,
-          );
-        }
-        if (args.readiness === "automation") {
-          const perf = createPerformanceTracker(true);
-          perf.serial("provisionDeviceReplay");
-          try {
-            await ensureProvisionDeviceReadiness(
-              args,
-              deps,
-              liveSession.device,
-              `platform=${args.device.platform} name=${args.device.name}`,
-              { totalDeadlineMs: totalDeadlineMs, perf: perf, signal: signal },
-            );
-          } finally {
-            perf.end();
-          }
-        }
-        const revalidatedSession = getPersistedProvisionDeviceSession(result);
-        if (!revalidatedSession || !getLiveProvisionDeviceSession(result)) {
-          return false;
-        }
-        const daemonState = DaemonState.getInstance();
-        recordAcquiredSessionReadiness(
-          daemonState,
-          revalidatedSession.sessionId,
-          resolveProvisionDeviceAchievedReadiness(args.readiness),
-        );
-        await daemonState
-          .getDevicePool()
-          .attachAutolockSessionToMcpSession(revalidatedSession.sessionId, args.__mcpSessionId);
-        return true;
-      },
-    );
-  }
-
-  async function revalidateProvisionDeviceReplay(
-    args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
-    result: Record<string, unknown>,
-    totalDeadlineMs: number,
-    signal: AbortSignal | undefined,
-  ): Promise<boolean> {
-    try {
-      return await revalidateLiveProvisionDeviceSession(
-        args,
-        deps,
-        result,
-        totalDeadlineMs,
-        signal,
-      );
-    } catch (error) {
-      // A transport routing conflict does not invalidate the healthy device session.
-      if (error instanceof McpSessionRecoveryInProgressError) {
-        throw error;
-      }
-      await releaseProvisionDeviceSession(result, "provision-device-replay-validation-failed");
-      throw error;
-    }
-  }
-
-  function getLiveProvisionDeviceSession(
-    result: Record<string, unknown>,
-  ): { device: BootedDevice } | undefined {
-    const persistedSession = getPersistedProvisionDeviceSession(result);
-    const daemonState = DaemonState.getInstance();
-    if (!persistedSession || !daemonState.isInitialized()) {
-      return undefined;
-    }
-
-    const session = daemonState.getSessionManager().getSession(persistedSession.sessionId);
-    const pooledDevice = daemonState
-      .getDevicePool()
-      .getDeviceForSession(persistedSession.sessionId);
-    if (
-      session?.assignedDevice === persistedSession.deviceId &&
-      session.platform === persistedSession.platform &&
-      pooledDevice?.id === persistedSession.deviceId &&
-      pooledDevice.platform === persistedSession.platform &&
-      pooledDevice.status === "busy"
-    ) {
-      return { device: persistedSession.device };
+    // A rollback that removed the device is a provisioning failure with a clean
+    // cleanup, so it is classified by the failure that triggered it.
+    const readiness =
+      (error instanceof ProvisionDeviceError && error.diagnostics.readinessPhase) ||
+      lifecycle?.reason?.readinessPhase ||
+      lifecycle?.phase === "readiness";
+    if (readiness || error instanceof ProvisionDeviceRollbackError) {
+      return "readiness_failure";
     }
     return undefined;
   }
 
-  function getPersistedProvisionDeviceSession(
-    result: Record<string, unknown>,
-  ):
-    | { sessionId: string; deviceId: string; platform: "android" | "ios"; device: BootedDevice }
-    | undefined {
-    if (typeof result.sessionId !== "string") {
-      return undefined;
-    }
-    const device = getPersistedProvisionDevice(result);
-    if (!device?.deviceId) {
-      return undefined;
-    }
-    const persistedDevice: BootedDevice = {
-      name: device.name,
-      platform: device.platform,
-      deviceId: device.deviceId,
-    };
-    return {
-      sessionId: result.sessionId,
-      deviceId: device.deviceId,
-      platform: device.platform,
-      device: persistedDevice,
-    };
+  function provisionDeviceRecovery(
+    boundary: ProvisionDeviceFailureBoundary,
+    request: ActiveProvisionDeviceRequest,
+    extra: Pick<ProvisionDeviceRecoveryInput, "settled" | "originalError" | "retryAfterMs">,
+  ): ProvisionDeviceRecoveryEvidence {
+    return buildProvisionDeviceRecoveryEvidence({
+      boundary,
+      nowMs: getDeviceToolsDependencies().timer.now(),
+      daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
+      lifecycle: request.lifecycleEvidence.lifecycle,
+      ...(request.lifecycleEvidence.ownership
+        ? { ownership: request.lifecycleEvidence.ownership }
+        : {}),
+      ...extra,
+    });
   }
 
-  async function releaseErroredProvisionDeviceSession(
-    result: Record<string, unknown>,
-  ): Promise<void> {
-    const persistedSession = getPersistedProvisionDeviceSession(result);
-    const daemonState = DaemonState.getInstance();
-    if (!persistedSession || !daemonState.isInitialized()) {
-      return;
-    }
-    const pooledDevice = daemonState
-      .getDevicePool()
-      .getDeviceForSession(persistedSession.sessionId);
-    if (pooledDevice?.status !== "error") {
-      return;
-    }
-    await releaseProvisionDeviceSession(result, "provision-device-errored-replay");
-  }
-
-  async function completeProvisionDeviceOperation(
-    store: ProvisionDeviceOperationStore,
-    operationId: string,
-    attemptId: string,
-    result: Record<string, unknown>,
-    {
-      args,
-      timer,
-      totalDeadlineMs,
-      signal,
-    }: {
-      args: ProvisionDeviceArgs;
-      timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
-      totalDeadlineMs: number;
-      signal: AbortSignal | undefined;
-    },
-  ): Promise<void> {
+  async function executeProvisionDevice(
+    args: ProvisionDeviceArgs,
+    signal: AbortSignal | undefined,
+    lifecycleEvidence: ActiveProvisionDeviceRequest["lifecycleEvidence"],
+  ): Promise<Record<string, unknown>> {
+    const deps = getDeviceToolsDependencies();
+    const recordLifecycle: RecordProvisionDeviceLifecycle = (lifecycle) => {
+      lifecycleEvidence.lifecycle = lifecycle;
+      if (lifecycle.phase === "created" || lifecycle.phase === "adopted") {
+        lifecycleEvidence.ownership =
+          lifecycle.phase === "created" ? "created_by_request" : "adopted";
+      }
+    };
+    // ONE absolute deadline for the whole request, anchored here and sliced
+    // across every phase below (lifecycle lease wait, provisioning, boot,
+    // readiness), clamped so rollback still fits inside the daemon's queued
+    // request deadline (the `reserveRollbackTime` form).
+    const totalDeadlineMs = provisionDeviceDeadlineMs(args, deps.timer, true);
     try {
-      await runOperationWithinDeadline(
-        timer,
+      return await runProvisionDeviceLifecycle(args, deps, {
+        recordLifecycle,
         totalDeadlineMs,
         signal,
-        () => provisionDeviceTimeoutError("persisting the final operation result"),
-        async () => {
-          if (!(await store.complete(operationId, attemptId, result))) {
-            throw new ProvisionDeviceOperationSupersededError(operationId);
-          }
-        },
-      );
-    } catch (error) {
-      const superseded = error instanceof ProvisionDeviceOperationSupersededError;
-      logger.warn(
-        `[DeviceTools] provisionDevice ${operationId} could not persist its result: ` +
-          `${errorMessage(error)}`,
-        error,
-      );
-      const finalization = finalizeFailedProvisionDeviceCompletion(store, args, attemptId, result, {
-        completionError: error,
-        superseded: superseded,
-        timer: timer,
       });
-      try {
-        await runOperationWithinDeadline(
-          timer,
-          totalDeadlineMs,
-          signal,
-          () => provisionDeviceTimeoutError("finalizing failed operation completion"),
-          async () => await finalization,
-        );
-      } catch (finalizationError) {
-        // Cleanup remains observed by finalizeFailedProvisionDeviceCompletion;
-        // crossing the request deadline only detaches this wait.
-        logger.debug(
-          `[DeviceTools] Deferred provisionDevice ${operationId} completion cleanup: ` +
-            `${errorMessage(finalizationError)}`,
-        );
-      }
-      throw new FinalizedProvisionDeviceCompletionError(error);
-    }
-  }
-
-  function retireLateProvisionDeviceOperationBegin(
-    store: ProvisionDeviceOperationStore,
-    args: ProvisionDeviceArgs,
-    attemptId: string,
-    operation: ProvisionDeviceOperationBeginResult,
-    admissionError: unknown,
-  ): void {
-    if ("inProgress" in operation) {
-      return;
-    }
-    const provisionError = toProvisionDeviceError(args, admissionError);
-    void store
-      .fail(args.operationId, attemptId, provisionError.code, provisionError.message)
-      .then((retired) => {
-        if (!retired) {
-          logger.debug(
-            `[DeviceTools] Late provisionDevice ${args.operationId} admission was superseded before finalization.`,
-          );
-        }
-      })
-      .catch((error: unknown) => {
+    } catch (error) {
+      if (
+        error instanceof McpSessionRecoveryInProgressError ||
+        error instanceof DaemonHandoffInterruptionError
+      ) {
+        // Transient by construction: the device stays viable and a retry
+        // re-runs the lifecycle, adopting it under the lifecycle lease.
         logger.warn(
-          `[DeviceTools] Failed to retire late provisionDevice ${args.operationId} admission: ` +
-            `${errorMessage(error)}`,
+          `[DeviceTools] provisionDevice ${describeProvisionRequest(args)} interrupted: ${errorMessage(error)}`,
           error,
         );
-      });
-  }
-
-  async function persistFailedProvisionDeviceOperation(
-    store: ProvisionDeviceOperationStore,
-    args: ProvisionDeviceArgs,
-    attemptId: string,
-    errorCode: string,
-    {
-      message,
-      options,
-      timer,
-      totalDeadlineMs,
-      signal,
-    }: {
-      message: string;
-      options:
-        | {
-            clearCreationStarted?: boolean;
-          }
-        | undefined;
-      timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
-      totalDeadlineMs: number;
-      signal: AbortSignal | undefined;
-    },
-  ): Promise<void> {
-    // Start the fenced write even if no budget remains. A late settlement can
-    // only update its own attempt, while skipping it entirely leaves a running
-    // operation row that no retry may reclaim until TTL expiry.
-    const persistence = store.fail(args.operationId, attemptId, errorCode, message, options);
-    void persistence.catch((error: unknown) => {
-      logger.warn(
-        `[DeviceTools] Deferred provisionDevice ${args.operationId} failure persistence failed: ` +
-          `${errorMessage(error)}`,
-        error,
-      );
-    });
-    try {
-      await runProvisionDeviceWithinDeadline(
-        timer,
-        totalDeadlineMs,
-        signal,
-        "persisting failed operation result",
-        async () => await persistence,
-      );
-    } catch (error) {
-      // The caller receives the original provisioning failure. Persistence stays
-      // observed and fenced in the background rather than extending that error
-      // past the single request deadline.
-      logger.debug(
-        `[DeviceTools] Deferred provisionDevice ${args.operationId} failure persistence: ` +
-          `${errorMessage(error)}`,
-      );
-    }
-  }
-
-  async function finalizeFailedProvisionDeviceCompletion(
-    store: ProvisionDeviceOperationStore,
-    args: ProvisionDeviceArgs,
-    attemptId: string,
-    result: Record<string, unknown>,
-    {
-      completionError,
-      superseded,
-      timer,
-    }: {
-      completionError: unknown;
-      superseded: boolean;
-      timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
-    },
-  ): Promise<void> {
-    // A failed replay returns its row to succeeded when fail() settles. Release
-    // the session first so no caller can claim that replay-visible old result
-    // while the session it names is still being torn down.
-    const ttlRefresh = superseded
-      ? undefined
-      : keepProvisionDeviceOperationAlive(store, args.operationId, attemptId, timer);
-    try {
-      if (ttlRefresh) {
-        if (
-          !(await waitForProvisionDeviceSettlement(
-            ttlRefresh.ready,
-            timer,
-            PROVISION_DEVICE_TTL_REFRESH_WAIT_MS,
-          ))
-        ) {
-          logger.warn(
-            `[DeviceTools] provisionDevice ${args.operationId} TTL refresh did not settle before session release.`,
-          );
-        }
+        throw error;
       }
-      await releaseProvisionDeviceSession(
-        result,
-        superseded
-          ? "provision-device-operation-superseded"
-          : "provision-device-persistence-failed",
-      );
-    } catch (error) {
-      logger.warn(
-        `[DeviceTools] Deferred provisionDevice ${args.operationId} session release failed: ` +
-          `${errorMessage(error)}`,
-        error,
-      );
-    } finally {
-      if (ttlRefresh) {
-        if (
-          !(await waitForProvisionDeviceSettlement(
-            ttlRefresh.stop(),
-            timer,
-            PROVISION_DEVICE_TTL_REFRESH_WAIT_MS,
-          ))
-        ) {
-          logger.warn(
-            `[DeviceTools] provisionDevice ${args.operationId} TTL refresh did not settle after session release.`,
-          );
-        }
-      }
+      throw toProvisionDeviceError(args, error);
     }
-
-    if (superseded) {
-      return;
-    }
-
-    const provisionError = toProvisionDeviceError(args, completionError);
-    try {
-      await store.fail(args.operationId, attemptId, provisionError.code, provisionError.message);
-    } catch (error) {
-      logger.warn(
-        `[DeviceTools] Deferred provisionDevice ${args.operationId} operation failure persistence failed: ` +
-          `${errorMessage(error)}`,
-        error,
-      );
-    }
-  }
-
-  function keepProvisionDeviceOperationAlive(
-    store: ProvisionDeviceOperationStore,
-    operationId: string,
-    attemptId: string,
-    timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
-  ): { ready: Promise<void>; stop: () => Promise<void> } {
-    let stopped = false;
-    let timeout: NodeJS.Timeout | undefined;
-    let inFlight: Promise<void> | undefined;
-    const extend = (): void => {
-      if (inFlight) {
-        return;
-      }
-      const refresh = store
-        .extend(operationId, attemptId, timer.now() + PROVISION_DEVICE_OPERATION_TTL_MS)
-        .then((extended) => {
-          if (!extended) {
-            logger.debug(
-              `[DeviceTools] provisionDevice ${operationId} finalization TTL refresh was superseded.`,
-            );
-          }
-        })
-        .catch((error: unknown) => {
-          logger.warn(
-            `[DeviceTools] Failed to refresh provisionDevice ${operationId} finalization TTL: ` +
-              `${errorMessage(error)}`,
-            error,
-          );
-        });
-      inFlight = refresh.finally(() => {
-        inFlight = undefined;
-      });
-    };
-    const schedule = (): void => {
-      timeout = timer.setTimeout(() => {
-        if (stopped) {
-          return;
-        }
-        extend();
-        schedule();
-      }, PROVISION_DEVICE_FINALIZATION_TTL_REFRESH_MS);
-    };
-    extend();
-    const ready = inFlight ?? Promise.resolve();
-    schedule();
-    return {
-      ready,
-      stop: () => {
-        stopped = true;
-        if (timeout) {
-          timer.clearTimeout(timeout);
-        }
-        return inFlight ?? Promise.resolve();
-      },
-    };
-  }
-
-  /**
-   * Record that this attempt is about to create the device. A false return
-   * means the row was taken over by a newer attempt, so this one must abort
-   * before creating anything rather than provisioning behind its replacement.
-   */
-  async function markProvisionDeviceCreationStarted(
-    store: ProvisionDeviceOperationStore,
-    operationId: string,
-    attemptId: string,
-  ): Promise<void> {
-    if (!(await store.markDeviceCreationStarted(operationId, attemptId))) {
-      throw new ProvisionDeviceOperationSupersededError(operationId);
-    }
-  }
-
-  async function releaseProvisionDeviceSession(
-    result: Record<string, unknown>,
-    reason: string,
-  ): Promise<void> {
-    const persistedSession = getPersistedProvisionDeviceSession(result);
-    const daemonState = DaemonState.getInstance();
-    if (!persistedSession || !daemonState.isInitialized()) {
-      return;
-    }
-    const sessionManager = daemonState.getSessionManager();
-    const session = sessionManager.getSession(persistedSession.sessionId);
-    if (
-      session?.assignedDevice !== persistedSession.deviceId ||
-      session.platform !== persistedSession.platform
-    ) {
-      return;
-    }
-    try {
-      const releasedDeviceId = await sessionManager.releaseSession(
-        persistedSession.sessionId,
-        reason,
-      );
-      if (releasedDeviceId === persistedSession.deviceId) {
-        await daemonState
-          .getDevicePool()
-          .releaseDevice(releasedDeviceId, persistedSession.sessionId);
-      }
-    } catch (error) {
-      logger.warn(
-        `[DeviceTools] Failed to release provisionDevice session ${persistedSession.sessionId}: ${error}`,
-      );
-    }
-  }
-
-  /**
-   * Creation ownership accumulates across the attempts of one operation. The
-   * first attempt's `created` must survive a rebind that merely re-adopts the
-   * device it created, and a rebind that genuinely re-created a device that
-   * disappeared between attempts must claim ownership instead of inheriting the
-   * first attempt's `adopted` — a caller that only deletes what AutoMobile
-   * created would otherwise leak it.
-   */
-  function preserveProvisionDeviceOwnership(
-    persisted: Record<string, unknown>,
-    refreshed: Record<string, unknown>,
-  ): Record<string, unknown> {
-    const created = persisted.created === true || refreshed.created === true;
-    return {
-      ...refreshed,
-      created,
-      adopted: !created,
-    };
   }
 
   function toProvisionDeviceError(args: ProvisionDeviceArgs, error: unknown): ProvisionDeviceError {
     const knownError = knownProvisionDeviceError(error);
     if (knownError) {
       return knownError;
+    }
+    if (error instanceof InputDeviceOwnedError) {
+      return new ProvisionDeviceError(
+        "device_owned_by_other_session",
+        `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
+        true,
+        { deviceId: error.deviceId },
+      );
     }
     if (error instanceof RunnerReadinessError) {
       const cause = error.diagnosticCause;
@@ -1265,7 +492,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       const failureRecord = failure as Record<string, unknown>;
       return {
         status: "failed",
-        operationId: cleanupArgs.operationId,
         target: cleanupArgs.target,
         failure: {
           code: typeof failureRecord.code === "string" ? failureRecord.code : "operation_failed",
@@ -1280,7 +506,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     if (isTeardownFailure(response)) {
       return {
         status: "failed",
-        operationId: cleanupArgs.operationId,
         target: cleanupArgs.target,
         failure: {
           code: "operation_failed",
@@ -1291,7 +516,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     }
     return {
       status: "succeeded",
-      operationId: cleanupArgs.operationId,
       target: cleanupArgs.target,
       state: typeof payload?.state === "string" ? payload.state : "destroyed",
     };
@@ -1421,7 +645,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
   ): ProvisionDeviceRollbackError {
     return new ProvisionDeviceRollbackError(provisionFailure, {
       status: "failed",
-      operationId: cleanupArgs.operationId,
       target: cleanupArgs.target,
       failure: { code, phase: "precondition", message },
     });
@@ -1429,13 +652,11 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
 
   function unresolvedProvisionCleanup(
     args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
     createdDevice: DeviceInfo,
     provisionFailure: ProvisionDeviceError,
   ): ProvisionDeviceRollbackError {
     return new ProvisionDeviceRollbackError(provisionFailure, {
       status: "failed",
-      operationId: deps.idGenerator.next(),
       target: {
         platform: createdDevice.platform,
         isVirtual: true,
@@ -1463,7 +684,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       cleanup: {
         status: lifecycleCleanupStatus(rollbackError.cleanup),
         reason: provisionFailure.code === "timeout" ? "readiness_timeout" : "provisioning_failure",
-        operationId: rollbackError.cleanup.operationId,
       },
     };
   }
@@ -1478,13 +698,13 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       pendingMutationSettlement,
       recordLifecycle,
       lifecycleDevice,
+      rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
     }: ProvisionCleanupOptions,
   ): Promise<ProvisionDeviceRollbackError> {
-    const rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
     const stableId =
       createdDevice.platform === "android" ? createdDevice.name : createdDevice.deviceId;
     if (!stableId) {
-      return unresolvedProvisionCleanup(args, deps, createdDevice, provisionFailure);
+      return unresolvedProvisionCleanup(args, createdDevice, provisionFailure);
     }
     const cleanupArgs: TeardownDeviceArgs = {
       operationId: deps.idGenerator.next(),
@@ -1505,7 +725,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         return rollbackError;
       }
       const lifecycle = provisionCleanupLifecycle(rollbackError, lifecycleDevice, provisionFailure);
-      await recordLifecycle(lifecycle);
+      recordLifecycle(lifecycle);
       if (
         lifecycle.state === "removed" &&
         lifecycleDevice.platform === "android" &&
@@ -1604,7 +824,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       return await finalizeCleanup(
         new ProvisionDeviceRollbackError(provisionFailure, {
           status: "failed",
-          operationId: cleanupArgs.operationId,
           target: cleanupArgs.target,
           failure: {
             code: "lifecycle_reservation_lost",
@@ -1653,66 +872,171 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
    * `onBeforeCreate` only fires once the provisioner has established that no
    * matching simulator existed, so a match found now is the one this operation
    * created — the iOS equivalent of Android's name-keyed fallback target.
+   *
+   * A `simctl create` still in flight can land after a discovery that ran too
+   * early, so discovery waits for that mutation to settle first, and both the
+   * wait and the discovery are bounded by the rollback deadline. Only a
+   * completed discovery that runs after the mutation settled may report
+   * `absent`; anything else is `unresolved` (#11064).
    */
   async function resolveCreatedIosProvisionDeviceRollbackTarget(
     args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
     deviceManager: PlatformDeviceManager,
-  ): Promise<DeviceInfo | undefined> {
+    pendingMutationSettlement: Promise<unknown> | undefined,
+    rollbackDeadlineMs: number,
+  ): Promise<ProvisionRollbackTarget> {
+    if (
+      pendingMutationSettlement &&
+      !(await provisionMutationSettledWithinRollbackBudget(
+        deps,
+        pendingMutationSettlement,
+        rollbackDeadlineMs,
+      ))
+    ) {
+      logger.warn(
+        `[DeviceTools] Cannot roll back iOS simulator '${args.device.name}': its creation did not settle within the rollback budget.`,
+      );
+      return { kind: "unresolved" };
+    }
     try {
-      const discovery = await deviceManager.getDeviceImagesDetailed("ios", {
-        bypassIosDeviceListCache: true,
-      });
+      const discovery = await runOperationWithinDeadline(
+        deps.timer,
+        rollbackDeadlineMs,
+        undefined,
+        () => new Error("iOS rollback identity discovery exceeded the rollback budget"),
+        async (deadlineSignal) =>
+          await deviceManager.getDeviceImagesDetailed("ios", {
+            bypassIosDeviceListCache: true,
+            signal: deadlineSignal,
+          }),
+      );
       if (!discovery.succeededPlatforms.has("ios")) {
         logger.warn(
           `[DeviceTools] Cannot roll back iOS simulator '${args.device.name}': identity discovery did not complete.`,
         );
-        return undefined;
+        return { kind: "unresolved" };
       }
-      return findExactIosProvisionDeviceCandidate(args, discovery.devices);
+      const device = findExactIosProvisionDeviceCandidate(args, discovery.devices);
+      return device ? { kind: "device", device } : { kind: "absent" };
     } catch (error) {
       logger.warn(
         `[DeviceTools] Failed to resolve the iOS rollback target for '${args.device.name}': ${errorMessage(error)}`,
         error,
       );
-      return undefined;
+      return { kind: "unresolved" };
     }
   }
 
   async function resolveProvisionDeviceRollbackTarget(
     args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
     deviceManager: PlatformDeviceManager,
-    provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined,
-    creationStarted: boolean,
-    observedRuntimeDevice: BootedDevice | undefined,
-  ): Promise<DeviceInfo | undefined> {
+    {
+      provisioned,
+      creationStarted,
+      observedRuntimeDevice,
+      pendingMutationSettlement,
+      rollbackDeadlineMs,
+    }: {
+      provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
+      creationStarted: boolean;
+      observedRuntimeDevice: BootedDevice | undefined;
+      pendingMutationSettlement: Promise<unknown> | undefined;
+      rollbackDeadlineMs: number;
+    },
+  ): Promise<ProvisionRollbackTarget> {
     if (!provisioned?.created && !creationStarted) {
-      return undefined;
+      return { kind: "absent" };
     }
-    const createdDevice =
-      provisioned?.device ??
-      (args.device.platform === "android"
-        ? { name: args.device.name, platform: "android" as const, isRunning: false }
-        : await resolveCreatedIosProvisionDeviceRollbackTarget(args, deviceManager));
-    if (!createdDevice || !observedRuntimeDevice?.deviceId) {
-      return createdDevice;
+    const target: ProvisionRollbackTarget = provisioned
+      ? { kind: "device", device: provisioned.device }
+      : args.device.platform === "android"
+        ? {
+            kind: "device",
+            device: { name: args.device.name, platform: "android" as const, isRunning: false },
+          }
+        : await resolveCreatedIosProvisionDeviceRollbackTarget(
+            args,
+            deps,
+            deviceManager,
+            pendingMutationSettlement,
+            rollbackDeadlineMs,
+          );
+    if (target.kind !== "device" || !observedRuntimeDevice?.deviceId) {
+      return target;
     }
-    return { ...createdDevice, deviceId: observedRuntimeDevice.deviceId };
+    return {
+      kind: "device",
+      device: { ...target.device, deviceId: observedRuntimeDevice.deviceId },
+    };
   }
 
-  async function throwProvisionWithoutCreatedDevice(
+  /**
+   * A simulator may exist that this operation created, but its identity is
+   * unknown: record it retained with unknown ownership (never
+   * `no_device_created`) and keep the lifecycle lease until the creating
+   * mutation settles, so no other operation can claim the name underneath it.
+   */
+  function throwProvisionWithUnresolvedCreatedDevice(
+    args: ProvisionDeviceArgs,
     provisionFailure: ProvisionDeviceError,
-    preserveRetryability: boolean,
+    {
+      provisioned,
+      takeLifecycleLease,
+      pendingMutationSettlement,
+      recordLifecycle,
+    }: {
+      provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
+      takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined;
+      pendingMutationSettlement: Promise<unknown> | undefined;
+      recordLifecycle: RecordProvisionDeviceLifecycle;
+    },
+  ): never {
+    retainPendingProvisionMutationLifecycle(
+      args,
+      provisioned,
+      takeLifecycleLease,
+      pendingMutationSettlement,
+    );
+    const rollbackError = new ProvisionDeviceRollbackError(provisionFailure, {
+      status: "failed",
+      target: {
+        platform: args.device.platform,
+        isVirtual: true,
+        stableId: args.device.deviceId ?? args.device.name,
+        stableName: args.device.name,
+      },
+      failure: {
+        code: "target_identity_unresolved",
+        phase: "precondition",
+        message:
+          "A device may have been created, but its exact identity could not be resolved within the rollback budget; it was not removed.",
+      },
+    });
+    const lifecycle: ProvisionDeviceLifecycleOutcome = {
+      state: "retained",
+      phase: "cleanup",
+      reason: provisionDeviceLifecycleReason(provisionFailure),
+      cleanup: {
+        status: "failed",
+        reason: "target_identity_unresolved",
+      },
+    };
+    recordLifecycle(lifecycle);
+    throw attachProvisionDeviceLifecycle(rollbackError, lifecycle);
+  }
+
+  function throwProvisionWithoutCreatedDevice(
+    provisionFailure: ProvisionDeviceError,
     recordLifecycle: RecordProvisionDeviceLifecycle,
-  ): Promise<never> {
-    if (preserveRetryability) {
-      throw provisionFailure;
-    }
+  ): never {
     const lifecycle: ProvisionDeviceLifecycleOutcome = {
       state: "no_device_created",
       phase: "provisioning",
       reason: provisionDeviceLifecycleReason(provisionFailure),
     };
-    await recordLifecycle(lifecycle);
+    recordLifecycle(lifecycle);
     throw attachProvisionDeviceLifecycle(provisionFailure, lifecycle);
   }
 
@@ -1729,7 +1053,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       pendingMutationSettlement,
       recordLifecycle,
       observedRuntimeDevice,
-      preserveRetryability,
     }: {
       creationStarted: boolean;
       takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined;
@@ -1738,7 +1061,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       pendingMutationSettlement: Promise<unknown> | undefined;
       recordLifecycle: RecordProvisionDeviceLifecycle;
       observedRuntimeDevice: BootedDevice | undefined;
-      preserveRetryability: boolean;
     },
   ): Promise<never> {
     if (
@@ -1758,21 +1080,27 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       );
       throw error;
     }
-    const createdDevice = await resolveProvisionDeviceRollbackTarget(
-      args,
-      deviceManager,
+    const rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
+    const target = await resolveProvisionDeviceRollbackTarget(args, deps, deviceManager, {
       provisioned,
       creationStarted,
       observedRuntimeDevice,
-    );
+      pendingMutationSettlement,
+      rollbackDeadlineMs,
+    });
     const provisionFailure = toProvisionDeviceError(args, error);
-    if (!createdDevice) {
-      return await throwProvisionWithoutCreatedDevice(
-        provisionFailure,
-        preserveRetryability,
+    if (target.kind === "unresolved") {
+      return throwProvisionWithUnresolvedCreatedDevice(args, provisionFailure, {
+        provisioned,
+        takeLifecycleLease,
+        pendingMutationSettlement,
         recordLifecycle,
-      );
+      });
     }
+    if (target.kind === "absent") {
+      return throwProvisionWithoutCreatedDevice(provisionFailure, recordLifecycle);
+    }
+    const createdDevice = target.device;
     // A destructive teardown of this AVD must not race the emulator process the
     // failed attempt is still killing.
     await unownedColdBootSettlement;
@@ -1781,20 +1109,19 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       createdDevice,
       observedRuntimeDevice,
     );
-    if (!preserveRetryability) {
-      await recordLifecycle({
-        state: "cleanup_in_progress",
-        phase: "cleanup",
-        device: lifecycleDevice,
-        reason: provisionDeviceLifecycleReason(provisionFailure),
-        cleanup: { status: "in_progress", reason: "readiness_timeout" },
-      });
-    }
+    recordLifecycle({
+      state: "cleanup_in_progress",
+      phase: "cleanup",
+      device: lifecycleDevice,
+      reason: provisionDeviceLifecycleReason(provisionFailure),
+      cleanup: { status: "in_progress", reason: "readiness_timeout" },
+    });
     throw await cleanupFailedProvisionDevice(args, deps, createdDevice, provisionFailure, {
       lifecycleLease: takeLifecycleLease(),
       pendingMutationSettlement: pendingMutationSettlement,
-      recordLifecycle: preserveRetryability ? undefined : recordLifecycle,
-      lifecycleDevice: preserveRetryability ? undefined : lifecycleDevice,
+      recordLifecycle: recordLifecycle,
+      lifecycleDevice: lifecycleDevice,
+      rollbackDeadlineMs: rollbackDeadlineMs,
     });
   }
 
@@ -1937,8 +1264,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
   async function runProvisionDeviceLifecycle(
     args: ProvisionDeviceArgs,
     deps: DeviceToolsDependencies,
-    reconcileExistingConfiguration: boolean,
-    markDeviceCreationStarted: () => Promise<void>,
     {
       recordLifecycle,
       totalDeadlineMs,
@@ -1955,7 +1280,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
     let provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
     let observedRuntimeDevice: BootedDevice | undefined;
-    let creationStarted = reconcileExistingConfiguration;
+    let creationStarted = false;
     const settlementState: ProvisionSettlementState = { bindingSettlements: [] };
     const notifyResourcesChangedBestEffort = () => {
       void deps.notifyResourcesChanged().catch((error: unknown) => {
@@ -2013,9 +1338,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         deps.timer,
         {
           totalDeadlineMs: totalDeadlineMs,
-          reconcileExistingConfiguration: reconcileExistingConfiguration,
-          markDeviceCreationStarted: async () => {
-            await markDeviceCreationStarted();
+          markDeviceCreationStarted: () => {
             creationStarted = true;
           },
           lifecycleLease: lifecycleLease,
@@ -2025,8 +1348,8 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
           signal: signal,
         },
       );
-      const createdByOperation = reconcileExistingConfiguration || provisioned.created;
-      await recordLifecycle(prebootProvisionDeviceLifecycle(args, provisioned));
+      const createdByRequest = provisioned.created;
+      recordLifecycle(prebootProvisionDeviceLifecycle(args, provisioned));
       if (!args.boot) {
         if (provisioned.created) {
           // Device creation is committed. Do not make its response or rollback
@@ -2034,7 +1357,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
           notifyResourcesChangedBestEffort();
         }
         perf.end();
-        return buildProvisionDeviceResult(args, provisioned, createdByOperation, perf, undefined);
+        return buildProvisionDeviceResult(args, provisioned, createdByRequest, perf, undefined);
       }
       // Ambient scope (only under --debug-perf) so the emulator/simctl boot
       // commands attribute their time into this provisioning tree. Capture the
@@ -2050,9 +1373,9 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
           lifecycleLease: bootLifecycleLease,
           signal: signal,
           settlementState: settlementState,
-          onBooted: async (device) => {
+          onBooted: (device) => {
             observedRuntimeDevice = device;
-            await recordLifecycle({
+            recordLifecycle({
               state: "created_not_ready",
               phase: "readiness",
               device: provisionDeviceLifecycleIdentity(args, provisionedDevice.device, device),
@@ -2068,7 +1391,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         notifyResourcesChangedBestEffort();
       }
       perf.end();
-      return buildProvisionDeviceResult(args, provisioned, createdByOperation, perf, booted);
+      return buildProvisionDeviceResult(args, provisioned, createdByRequest, perf, booted);
     } catch (error) {
       perf.end();
       return await rethrowFailedProvisionDeviceLifecycle(args, deps, deviceManager, provisioned, {
@@ -2083,7 +1406,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         pendingMutationSettlement: settlementState.exactProvisioning,
         recordLifecycle: recordLifecycle,
         observedRuntimeDevice: observedRuntimeDevice,
-        preserveRetryability: signal?.aborted === true,
       });
     } finally {
       releaseProvisionLifecycleReservations(settlementState, () => lifecycleLease);
@@ -2128,15 +1450,13 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     timer: Timer,
     {
       totalDeadlineMs,
-      reconcileExistingConfiguration,
       markDeviceCreationStarted,
       lifecycleLease,
       collectPendingSettlement,
       signal,
     }: {
       totalDeadlineMs: number;
-      reconcileExistingConfiguration: boolean;
-      markDeviceCreationStarted: () => Promise<void>;
+      markDeviceCreationStarted: () => void;
       lifecycleLease: VirtualDeviceLifecycleLease;
       collectPendingSettlement: (settlement: Promise<unknown>) => void;
       signal: AbortSignal | undefined;
@@ -2160,7 +1480,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
               name: args.device.name,
               ...(args.device.deviceId === undefined ? {} : { deviceId: args.device.deviceId }),
               spec: args.device.spec,
-              reconcileExistingConfiguration,
               onBeforeCreate: markDeviceCreationStarted,
               lifecycleLease,
               deadlineMs: totalDeadlineMs,
@@ -2375,7 +1694,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       perf.endOperation("bootDevice");
       assertProvisionIosBootIdentity(args, provisioned, boot);
       validatePooledDeviceMapping(boot.device, requestedIdentity);
-      await onBooted(boot.device);
+      onBooted(boot.device);
       readinessReservation = await runProvisionDeviceWithinDeadline(
         deps.timer,
         totalDeadlineMs,
@@ -2502,11 +1821,54 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       deadlineMs: resourceDeadlineMs,
       signal,
     });
-    return observeConfiguredDeviceResources(deps, configured, {
+    const verified = await observeConfiguredDeviceResources(deps, configured, {
       device,
       deadlineMs: resourceDeadlineMs,
       signal,
     });
+    assertSimulatorProfileProven(args, device, verified);
+    return verified;
+  }
+
+  /**
+   * iOS Simulator workload profiles are all-or-nothing (#6695): when any requested
+   * entry cannot be proven applied after the write and independent re-read, fail
+   * provisioning before readiness and session binding. The thrown error flows through
+   * the normal failed-provision lifecycle, which rolls back a device this operation
+   * created, releases the lifecycle lease and never binds a session. Overrides already
+   * written to an adopted simulator are left in place (recorded as AutoMobile-owned).
+   */
+  function assertSimulatorProfileProven(
+    args: ProvisionDeviceArgs,
+    device: BootedDevice,
+    result: DeviceResourceConfigurationResult,
+  ): void {
+    if (device.platform !== "ios" || resolveIosDeviceKind(device) !== "simulator") {
+      return;
+    }
+    // The independent re-read wins only by direct contradiction: an observed
+    // unknown/unsupported (a failed or timed-out read) never overrides a state the
+    // controller proved, so a transient read error cannot fail provisioning.
+    const states = mergeProvenResourceStates(result.resources, result.observed?.resources);
+    const drift = computeDeviceResourceDrift(result.requested, states);
+    if (drift.length === 0 && result.success) {
+      return;
+    }
+    const detail = drift.length
+      ? drift
+          .map(
+            (entry) =>
+              `${entry.resource} (${entry.kind}: expected ${entry.expected}, observed ${entry.observed.state})`,
+          )
+          .join(", ")
+      : "resource configuration did not report success";
+    throw new ProvisionDeviceError(
+      "resource_profile_unproven",
+      `Requested resource profile could not be proven applied on iOS simulator '${args.device.name}'; no session was bound. Unproven: ${detail}. Overrides already written to an adopted simulator remain; run reconcileDeviceResources with repair, or setDeviceResources, to change them.`,
+      // Only unreadable evidence (every entry a command failure) is worth retrying.
+      drift.length > 0 && drift.every((entry) => entry.kind === "commandFailure"),
+      { resourceDrift: drift, deviceId: device.deviceId },
+    );
   }
 
   async function reserveProvisionDeviceReadiness(
@@ -2566,7 +1928,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
   function buildProvisionDeviceResult(
     args: ProvisionDeviceArgs,
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>,
-    createdByOperation: boolean,
+    createdByRequest: boolean,
     perf: ReturnType<typeof createPerformanceTracker>,
     booted:
       | {
@@ -2594,7 +1956,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         : undefined,
     });
     return {
-      operationId: args.operationId,
       ...(booted?.resources ? { resources: booted.resources } : {}),
       device: projectProvisionedDevice(description),
       requestedSpec: args.device.spec,
@@ -2602,9 +1963,9 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       displayCutout:
         provisioned.resolvedSpec.displayCutout ??
         classifyDisplayCutout(args.device.platform, provisioned.resolvedSpec.deviceType),
-      created: createdByOperation,
-      adopted: !createdByOperation,
-      lifecycleState: booted ? "ready" : createdByOperation ? "created" : "adopted",
+      created: createdByRequest,
+      adopted: !createdByRequest,
+      lifecycleState: booted ? "ready" : createdByRequest ? "created" : "adopted",
       readiness: {
         mode: args.readiness,
         status: booted
@@ -2618,15 +1979,26 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     };
   }
 
-  function provisionDeviceErrorResponse(error: unknown, operationId: string) {
+  function recoveryField(recovery: ProvisionDeviceRecoveryEvidence | undefined) {
+    return recovery ? { recovery } : {};
+  }
+
+  function recoveryFromError(error: unknown): ProvisionDeviceRecoveryEvidence | undefined {
+    return error instanceof ProvisionDeviceError ? error.diagnostics.recovery : undefined;
+  }
+
+  function provisionDeviceErrorResponse(
+    error: unknown,
+    recovery?: ProvisionDeviceRecoveryEvidence,
+  ) {
     const lifecycle = lifecycleForProvisionResponseError(error);
-    const operationOutcome = {
-      operationId,
+    const requestOutcome = {
       ...(lifecycle ? { lifecycle } : {}),
+      ...recoveryField(recovery ?? recoveryFromError(error)),
     };
     if (error instanceof DaemonHandoffInterruptionError) {
       return createToolErrorResponse(error.code, error.message, {
-        ...operationOutcome,
+        ...requestOutcome,
         error: {
           code: error.code,
           message: error.message,
@@ -2636,7 +2008,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     }
     if (error instanceof ProvisionDeviceRollbackError) {
       return createToolErrorResponse(error.code, error.message, {
-        ...operationOutcome,
+        ...requestOutcome,
         error: {
           code: error.code,
           message: error.message,
@@ -2652,7 +2024,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     }
     if (error instanceof ProvisionDeviceError) {
       return createToolErrorResponse(error.code, error.message, {
-        ...operationOutcome,
+        ...requestOutcome,
         error: {
           code: error.code,
           message: error.message,
@@ -2661,31 +2033,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         },
       });
     }
-    if (error instanceof ProvisionDeviceOperationConflictError) {
-      return createToolErrorResponse("operation_conflict", error.message, operationOutcome);
-    }
-    if (error instanceof ProvisionDeviceOperationFailedError) {
-      return createToolErrorResponse(error.errorCode, error.message, {
-        ...operationOutcome,
-        error: {
-          code: error.errorCode,
-          message: error.message,
-          retryable: error.lifecycle.reason?.retryable ?? false,
-          ...provisionDeviceLifecycleDiagnosticFields(error.lifecycle.reason),
-        },
-      });
-    }
-    if (error instanceof ProvisionDeviceOperationInProgressError) {
-      return createToolErrorResponse("operation_in_progress", error.message, operationOutcome);
-    }
-    if (error instanceof ProvisionDeviceOperationSupersededError) {
-      return createToolErrorResponse("operation_superseded", error.message, operationOutcome);
-    }
-    return createToolErrorResponse(
-      "platform_command_failed",
-      errorMessage(error),
-      operationOutcome,
-    );
+    return createToolErrorResponse("platform_command_failed", errorMessage(error), requestOutcome);
   }
 
   function provisionDeviceDiagnosticFields(error: ProvisionDeviceError) {
@@ -2696,24 +2044,30 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       ...(diagnostics.attempt !== undefined ? { attempt: diagnostics.attempt } : {}),
       ...(diagnostics.incidentId ? { incidentId: diagnostics.incidentId } : {}),
       ...(diagnostics.deviceId ? { deviceId: diagnostics.deviceId } : {}),
+      ...(diagnostics.resourceDrift ? { resourceDrift: diagnostics.resourceDrift } : {}),
+      ...(diagnostics.runtimeCompatibility
+        ? { runtimeCompatibility: diagnostics.runtimeCompatibility }
+        : {}),
       daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
     };
   }
 
-  function provisionDeviceLifecycleDiagnosticFields(
-    reason: ProvisionDeviceLifecycleOutcome["reason"],
-  ) {
-    if (!reason) {
-      return {};
+  function mergeProvenResourceStates(
+    controller: DeviceResourceConfigurationResult["resources"],
+    observed: DeviceResourceConfigurationResult["resources"] | undefined,
+  ): DeviceResourceConfigurationResult["resources"] {
+    const merged = { ...controller };
+    for (const [resource, status] of Object.entries(observed ?? {}) as [
+      keyof typeof merged,
+      NonNullable<(typeof merged)[keyof typeof merged]>,
+    ][]) {
+      const proven = merged[resource];
+      const unreadable = status.state === "unknown" || status.state === "unsupported";
+      if (!(unreadable && proven && proven.state !== "unknown" && proven.state !== "unsupported")) {
+        merged[resource] = status;
+      }
     }
-    return {
-      ...(reason.providerCode ? { providerCode: reason.providerCode } : {}),
-      ...(reason.readinessPhase ? { readinessPhase: reason.readinessPhase } : {}),
-      ...(reason.attempt !== undefined ? { attempt: reason.attempt } : {}),
-      ...(reason.incidentId ? { incidentId: reason.incidentId } : {}),
-      ...(reason.deviceId ? { deviceId: reason.deviceId } : {}),
-      ...(reason.daemonBuild ? { daemonBuild: reason.daemonBuild } : {}),
-    };
+    return merged;
   }
 
   return (input: ProvisionDeviceArgs, progress?: ProgressCallback, signal?: AbortSignal) =>

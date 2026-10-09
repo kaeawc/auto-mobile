@@ -1,0 +1,32 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "components": {
+      "t": {
+        "root": {
+          "type": "text",
+          "text": "{props.a} {props.b}"
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "use",
+          "component": "t",
+          "props": {
+            "a": "x"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].props",
+  "expectedMessage": "Missing component prop \"b\""
+}

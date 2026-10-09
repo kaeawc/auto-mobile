@@ -47,6 +47,11 @@ sealed interface DevicePickerUiState {
     val bootingIds: Set<String> = emptySet(),
     /** Per-device boot failure message; presence marks a card as retryable. */
     val bootErrors: Map<String, String> = emptyMap(),
+    /**
+     * Ids of booting devices waiting for the previous session's cleanup to finish (#10960); their
+     * card reads "Finishing previous session…" until the start is retried.
+     */
+    val finishingPreviousSessionIds: Set<String> = emptySet(),
     /** Nonblocking discovery warning: devices may be missing or retained from an older snapshot. */
     val inventoryError: String? = null,
   ) : DevicePickerUiState
@@ -124,6 +129,7 @@ class DevicePickerViewModel(
   // only the device LIST, never these.
   private var bootingIds: Set<String> = emptySet()
   private var bootErrors: Map<String, String> = emptyMap()
+  private var finishingPreviousSessionIds: Set<String> = emptySet()
   private var selectedIds: Set<String> = emptySet()
   private var filters: PickerFilters = PickerFilters()
 
@@ -393,6 +399,7 @@ class DevicePickerViewModel(
         selectedIds = selectedIds,
         bootingIds = bootingIds,
         bootErrors = bootErrors,
+        finishingPreviousSessionIds = finishingPreviousSessionIds,
         inventoryError =
           inventoryError
             ?: if (devices.any { it.inventoryUncertain })
@@ -455,6 +462,7 @@ class DevicePickerViewModel(
         selectedIds = selectedIds,
         bootingIds = bootingIds,
         bootErrors = bootErrors,
+        finishingPreviousSessionIds = finishingPreviousSessionIds,
       )
     }
   }
@@ -480,7 +488,13 @@ class DevicePickerViewModel(
     syncState()
     scope.launch {
       try {
-        val result = bootController.boot(device)
+        val result =
+          bootController.boot(device) { finishing ->
+            finishingPreviousSessionIds =
+              if (finishing) finishingPreviousSessionIds + deviceId
+              else finishingPreviousSessionIds - deviceId
+            syncState()
+          }
         val runtimeDeviceId = result.getOrNull()
         if (runtimeDeviceId != null) {
           reloadAfterBoot(device, runtimeDeviceId)
@@ -492,6 +506,7 @@ class DevicePickerViewModel(
         }
       } finally {
         inFlightBootIds = inFlightBootIds - deviceId
+        finishingPreviousSessionIds = finishingPreviousSessionIds - deviceId
       }
     }
   }

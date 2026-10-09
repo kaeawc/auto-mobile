@@ -1,0 +1,4 @@
+--------- beginning of main
+10-09 05:55:07.094  2936  2936 I DVIC    : plain #14 finishComposingText()=true sel=3..3 comp=-1..-1 text=[hello world]
+10-09 05:55:08.454  2936  2936 I DVIC    : plain #15 commitText('x',1)=true sel=4..4 comp=-1..-1 text=[helxlo world]
+10-09 05:55:09.527  2936  2936 I DVIC    : plain #16 commitText('x',1)=true sel=5..5 comp=-1..-1 text=[helxxlo world]

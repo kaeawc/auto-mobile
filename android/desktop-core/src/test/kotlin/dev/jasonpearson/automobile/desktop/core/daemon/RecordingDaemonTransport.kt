@@ -48,6 +48,9 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
    */
   val releaseReasons: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
 
+  /** Methods that fail like an unreachable daemon on every call until removed (#11072). */
+  val unavailable: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
   fun failNext(key: String) {
     failures.add(key)
   }
@@ -81,7 +84,7 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
         answer
       }
     }
-    if (failures.remove(key)) {
+    if (failures.remove(key) || key in unavailable) {
       return DaemonResponse(
         id = request.id,
         type = "mcp_response",

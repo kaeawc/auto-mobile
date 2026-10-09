@@ -6,7 +6,7 @@ import { basename } from "node:path";
 
 export const udid = "12345678-1234-1234-1234-123456789ABC";
 export const label = "com.apple.PosterBoard";
-const runtime = "com.apple.CoreSimulator.SimRuntime.iOS-18-6";
+export const runtime = "com.apple.CoreSimulator.SimRuntime.iOS-18-6";
 
 export class FakeWallpaperSimctl implements Pick<SimCtl, "executeCommandArgs"> {
   calls: string[][] = [];
@@ -21,6 +21,7 @@ export class FakeWallpaperSimctl implements Pick<SimCtl, "executeCommandArgs"> {
   onCommand?: (args: string[]) => void;
   states = new Map<string, { disabled: boolean; loaded: boolean }>();
   failLabel?: string;
+  deviceTypeIdentifier?: string = "com.apple.CoreSimulator.SimDeviceType.iPhone-16";
 
   state(service: string) {
     if (service === label) {
@@ -44,7 +45,12 @@ export class FakeWallpaperSimctl implements Pick<SimCtl, "executeCommandArgs"> {
             ? {
                 devices: {
                   [runtime]: [
-                    { udid, state: this.booted ? "Booted" : "Shutdown", isAvailable: true },
+                    {
+                      udid,
+                      state: this.booted ? "Booted" : "Shutdown",
+                      isAvailable: true,
+                      deviceTypeIdentifier: this.deviceTypeIdentifier,
+                    },
                   ],
                 },
               }

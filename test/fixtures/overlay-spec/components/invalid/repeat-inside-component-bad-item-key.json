@@ -1,0 +1,57 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "liked_a": false
+    },
+    "components": {
+      "list": {
+        "root": {
+          "type": "column",
+          "repeat": {
+            "items": [
+              {
+                "id": "a"
+              },
+              {
+                "id": "b-c"
+              }
+            ],
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "x",
+              "onTap": [
+                {
+                  "type": "toggle",
+                  "key": "{props.prefix}{item.id}"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "use",
+          "component": "list",
+          "props": {
+            "prefix": "liked_"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0] (use list) → components.list.root.repeat.items[1]",
+  "expectedMessage": "Bound state key \"liked_b-c\" is invalid"
+}

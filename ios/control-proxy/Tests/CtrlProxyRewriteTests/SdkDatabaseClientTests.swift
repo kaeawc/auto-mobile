@@ -147,6 +147,20 @@ final class SdkDatabaseClientTests: XCTestCase {
         )
     }
 
+    func testExecuteSqlForwardsTheReadOnlyFlag() async throws {
+        let stub = StubHTTPTransport(
+            status: 200,
+            body: Data(#"{"queryType":"SELECT","columns":[],"rows":[],"rowsAffected":0}"#.utf8)
+        )
+        _ = try await makeClient(stub).executeSQL(
+            databasePath: "/db", query: "SELECT 1", sessionId: nil, readOnly: true
+        )
+
+        let request = try XCTUnwrap(stub.recordedRequests.first)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+        XCTAssertEqual(json["readOnly"] as? Bool, true)
+    }
+
     func testExecuteSqlSendsTheRelayTimeoutSoTheSdkCanStopBeforeIt() async throws {
         let stub = StubHTTPTransport(
             status: 200,

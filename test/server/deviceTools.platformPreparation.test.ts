@@ -1,4 +1,5 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
@@ -91,6 +92,10 @@ describe("platform device preparation tools", () => {
   let sessionManager: SessionManager | undefined;
 
   beforeEach(() => {
+    // DaemonState is a process-wide singleton: a sibling file that left it
+    // initialized (shared-process or randomized runs) would hand startDevice a
+    // foreign device pool instead of "no pool", so start from a clean slate.
+    DaemonState.getInstance().reset();
     deviceUtils = new FakeDeviceUtils();
     matcher = new FakeDeviceMatcher();
     timer = new FakeTimer();
@@ -946,8 +951,44 @@ describe("platform device preparation tools", () => {
     const first = await callTool("getAndroid", { avdName: emulator.name });
     const second = await callTool("getAndroid", { avdName: emulator.name });
 
-    expect(second.sessionUuid).toBe(first.sessionUuid);
+    expect(first.runtime.session.sessionUuid).toBeString();
+    expect(second.runtime.session.sessionUuid).toBe(first.runtime.session.sessionUuid);
     expect(pool.getDevice(emulator.deviceId)).toMatchObject({ avdName: emulator.name });
+  });
+
+  // #11071: an anonymous repeat reuses only a session an anonymous acquisition created.
+  test("refuses an anonymous warm getAndroid of a device a connection acquired, typed", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5562",
+    };
+    sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: deviceUtils,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
+    );
+    await pool.addDevice(emulator);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    deviceUtils.setBootedDevices("android", [emulator]);
+
+    await callTool("getAndroid", {
+      avdName: emulator.name,
+      __mcpSessionId: "owner-connection",
+    });
+    const ownerSession = pool.getDevice(emulator.deviceId)?.sessionId;
+    expect(ownerSession).toBeString();
+    const refusal = await callTool("getAndroid", { avdName: emulator.name }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(refusal).toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
+    expect(pool.getDevice(emulator.deviceId)?.sessionId).toBe(ownerSession);
   });
 
   for (const [operation, platform, target, image] of [

@@ -5,10 +5,67 @@ target app. This is the iOS counterpart of the
 [Android overlay specification](../android/overlay-ux.md); the spec, validation limits
 and node vocabulary are shared. See epic #10563 and the prototype in #10498.
 
-Status: the agent (`ios/overlay-agent/`), the release dylib and its checksum-verified
-download (#10564, #10565), the per-launch port, token and handshake (#10566),
-`launchApp { overlay: true }` (#10567) and `prototype` routing (#10568) are merged.
+Status: epic #10563 is complete apart from device verification. The agent (`ios/overlay-agent/`), the
+release dylib and its checksum-verified download (#10564, #10565), the per-launch port, token and
+handshake (#10566), `launchApp { overlay: true }` (#10567), `prototype` routing (#10568) and the
+advisory per-runtime simulator smoke test (#10569) are merged, and the tool now covers anchors
+(#10874), `pressScale` (#10885), `reset` on show (#10998), hiding the overlay from `layer: "app"`
+screenshots (#10943, #10988) and the renderer and accessibility fixes that followed (#10903,
+#10918, #10928, #10953). Still open: device verification of the iOS window-layer `tapOn` fix from
+#10498, and the decisions listed under [Open decisions](#open-decisions).
 `scripts/ios/overlay-agent-demo.ts` is a standalone driver that launches with a fresh port and token.
+
+## Feature support
+
+| Feature                                                                  | iOS simulator                                                                                           |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `show`, `dismiss`, `status`, `awaitEvent`; fullscreen, floating, sheet   | Supported                                                                                               |
+| Replace in place, and `reset: true` to start fresh                       | Supported (`overlay_show_in_place_v1`)                                                                  |
+| Element and bounds anchors                                               | Supported, in points (`overlay_anchor_v1`); see [Anchors](#anchors)                                     |
+| `pressScale`, motion, `visibleWhen`, state and actions, assets and fonts | Supported                                                                                               |
+| Material component nodes, dialog, snackbar, pickers                      | Supported; see [Material components](#material-components)                                              |
+| Reusable `components` / `use` nodes (#11053)                             | Supported: the host expands them before sending, so the agent only sees plain nodes                     |
+| Overlay hidden from `layer: "app"` observe screenshots (`target`)        | Supported (#10943, #10988); the host restores it after capture                                          |
+| `display` selector                                                       | Refused: a simulator has one screen                                                                     |
+| `window.layer: "app"`                                                    | Accepted and ignored, silently: the window level is fixed at alert + 1 (decision 3)                     |
+| `window.persistence: "device"`                                           | Refused: the agent lives in the app process and dies with it                                            |
+| `inspect`                                                                | Supported (`overlay_inspect_v1`); see [Inspect](#inspect)                                               |
+| Idle TTL and dismissal on host disconnect                                | Supported; see [Expiry](#expiry). Reasons `user`, `agent`, `ttl`, `disconnect`                          |
+| Bottom sheet lifting above the keyboard                                  | Supported, not yet device-verified; see [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard) |
+| Foreground scoping to the shown-over app                                 | Not needed: the agent lives in the app, so backgrounding the app hides its window                       |
+
+## Open decisions
+
+All of these are decided (2026-10-09); the table above describes the code, and the open item is simulator verification.
+
+1. Decided 2026-10-09: `inspect` maps to the agent's `get_overlay_status` (see [Inspect](#inspect)).
+2. Decided 2026-10-09: a bottom sheet lifts above the keyboard from keyboard-frame notifications
+   (see [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)). Still open: a simulator
+   check.
+3. Decided 2026-10-09: `window.layer: "app"` is accepted and ignored silently on iOS, with no
+   warning, so one spec runs on both platforms. The overlay stays at window level alert + 1.
+
+## Expiry
+
+Owner decision 2026-10-09: iOS overlays expire exactly like Android session overlays
+([Lifecycle and safety](../android/overlay-ux.md#lifecycle-and-safety)).
+
+- **Idle TTL.** Five minutes (300,000 ms; `OverlayIdleTimer`, settable locally through
+  `OverlayModel.idleTtlMilliseconds`, no wire field). An accepted `show_overlay` (including a same-id
+  replace) and a user interaction (taps, edits, a pager page that actually changed) restart it.
+  Initial pager reports, a snackbar's own `durationMs` close, `hide_for_capture` and `get_overlay_status`
+  do not. A hidden overlay still expires.
+- **Disconnect.** The overlay belongs to the host session, not one socket. The agent counts
+  authenticated connections (`OverlayClientTracker`); when the last one closes the overlay is dismissed
+  and the uploaded assets are dropped, whether or not an overlay was showing. A `show_overlay` handled
+  after that edge is dismissed the same way.
+- **Events.** Each expiry emits one `overlay_event` `kind: "dismissed"` with a null `name` and
+  `payload: {"reason": "ttl"}` or `{"reason": "disconnect"}`, sequenced from the same per-id ledger as every
+  other event (the disconnect event has no socket to reach). `user` and `agent` are unchanged.
+- **Not applicable.** `teardown` is never emitted: the agent has no service to unbind, and the overlay
+  dies with the app process. There is no `persistence: "device"`, so nothing is exempt from the TTL.
+- **Host.** No host change or capability is needed: the host holds one persistent connection per
+  launch and already treats any `dismissed` event as removing shown status.
 
 ## How it works
 
@@ -45,6 +102,9 @@ screenshots and video recording all see the overlay the same way they see app UI
   described below.
 - **SpringBoard and system UI are not covered**, so the home screen cannot host an overlay.
 - Overlays disappear when the app exits or is relaunched without the agent.
+- **Structural limits are re-checked.** The agent does not validate a spec, but it refuses one
+  whose expanded tree passes the node (2000), depth (24) or `repeat` item (128) limit of
+  `schemas/overlay-spec-contract.json` before expanding it (#11049).
 
 ## Entry point: `launchApp { overlay: true }`
 
@@ -93,12 +153,58 @@ is simulator-only and device launches will fail to load it.
 ## Differences from Android
 
 - `prototype` on iOS has no `showVariants` and no `update` action (removed by owner decision).
-  Showing a spec with an id that is already shown updates it in place. For a variant
+  Showing a spec with an id that is already shown updates it in place, keeping each pager's page;
+  `reset: true` starts it fresh (the agent advertises `overlay_show_in_place_v1`, and the host refuses
+  `reset` on an older agent). For a variant
   carousel, compose the spec yourself and `show` it.
-- No `display` selector; a simulator has a single screen.
+- No `display` selector and no `window.persistence: "device"`; the host refuses them.
+  `window.layer: "app"` is accepted and ignored. See [Feature support](#feature-support).
+- `inspect` reports the one overlay the agent shows, with no `suspended` and no
+  `deviceDroppedEvents` (nothing is persisted or buffered offline). Idle TTL and disconnect
+  dismissal match Android; see [Expiry](#expiry).
 - Rendering is SwiftUI in the app's process rather than Compose in CtrlProxy, so there is no
   separate accessibility service involved.
 - Android reaches any app through CtrlProxy; iOS reaches only apps launched with the agent.
+
+## Inspect
+
+`inspect` (#10494 on Android) asks the device which overlays it shows and adopts them into the host's
+`status` and `awaitEvent` state, for use after a session release or daemon restart. On iOS the host
+sends `get_overlay_status` and adopts its reply. The agent holds at most one overlay and dies with the
+app, so the report is that one overlay: `id`, `state`, `pages` and `lastSequence` (the agent's event
+ledger for the id, so the host resumes past it), with `persistent: false`. The agent also replies
+`visible`, whether its window is on screen, which the host does not surface. There is no `suspended`
+(the overlay lives in the app, so backgrounding the app hides its window), no offline event replay
+and no `deviceDroppedEvents`. An overlay the host lists that the agent no longer shows is dropped.
+
+The agent advertises `overlay_inspect_v1` for the `lastSequence` and `visible` fields. The host
+refuses `inspect` on an agent without it, before sending anything, and asks to relaunch with
+`launchApp { overlay: true }` to load the current agent.
+
+## Bottom sheet and the keyboard
+
+Owner decision 2026-10-09, matching [Android](../android/overlay-ux.md#bottom-sheet-and-the-keyboard-10262):
+a `sheet` with `edge: "bottom"` (or no edge) moves above the software keyboard while it is shown and
+returns to the screen edge when it hides. Fullscreen, floating and top sheets never move.
+
+- **Source.** The agent runs in the app's process, so `keyboardWillChangeFrame` and
+  `keyboardWillHide` are the notifications of the keyboard the app shows. The lift is how far the
+  keyboard's end frame reaches into the overlay window (`OverlayKeyboardLift.amount`, in the
+  UIKit-free core), 0 for a hardware keyboard or a hidden one, and never more than the window.
+- **No double lift (#11042).** This lift is the only thing that moves for the keyboard. Both hosting
+  controllers (page and top layer) set `safeAreaRegions` to none
+  (`OverlayKeyboardLift.hostSafeAreaRegions`) and the root view ignores every safe-area region, so
+  neither UIKit nor SwiftUI adds its own keyboard inset; floating overlays do not move, as on Android.
+  On an iOS 26.5 simulator the root's `ignoresSafeArea(.keyboard)` alone still let a 300 pt sheet
+  move 527 pt for a 334 pt lift. Core tests pin sheet bottom == keyboard top, including for a window
+  with a non-zero origin and a shorter height.
+- **Touch and clip.** The sheet's content is padded up by the lift inside its full-window frame, so
+  its reported touch rect moves with it, and the anchor layer's clip region is computed with the same
+  lift (`OverlaySheetFrame.rect(lift:)`), so anchored nodes and their touch targets stay in sync.
+- **Motion.** The move animates over the keyboard's own duration, with an ease-in-out curve (UIKit's
+  private keyboard curve is not public API). It is instant under spec `motion: "none"` or Reduce
+  Motion (`OverlayKeyboardLift.animationDuration`).
+- **Not yet verified on a simulator.** No simulator was driven for this change.
 
 ## Anchors
 
@@ -135,7 +241,7 @@ transition as a real tap, including on a part identifier.
 
 | Node                            | iOS drawing                                                                                                      |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `switch`, `checkbox`            | `Toggle`; a checkbox is a button whose square reads as selected                                                  |
+| `switch`, `checkbox`            | One toggle element with a SwiftUI-drawn track (no `UISwitch`); a checkbox is a button that reads as selected     |
 | `button`                        | `.borderedProminent` filled, `.bordered` tonal/outlined/elevated, `.borderless` text; optional leading SF Symbol |
 | `slider`                        | `Slider` with `step` snapping, one adjustable element labelled by `label`                                        |
 | `chip`                          | Rounded button; a filter chip toggles its key and reads as selected                                              |
@@ -153,8 +259,11 @@ are drawn as a row of buttons. A dialog's scrim covers the whole window (below t
 bar in fullscreen) and takes every touch while it is open, even for floating or sheet
 placements; a snackbar takes touches only on itself. A dialog's title (a header), text, child
 controls and buttons are each their own accessibility element. While a dialog is open the page
-behind it (the spec tree and its anchor layer) is hidden from accessibility, as it is inert to
-touches; the dialog itself is not marked modal (#10912). Opening or closing a dialog drops keyboard focus in the overlay unless the
+behind it (the spec tree and its anchor layer) is collapsed out of the accessibility tree, as it
+is inert to touches; `accessibilityHidden` alone did not keep it out of the XCUITest snapshot
+(#10899). The dialog itself is not marked modal (#10912). Otherwise each layer is its own
+accessibility container, so a page whose only element is one node reports that node at its own
+frame, not the whole page's (#10898). Opening or closing a dialog drops keyboard focus in the overlay unless the
 dialog holds a text field; a child taller than the screen scrolls. Material icon names map to
 SF Symbols; a name without a mapping draws a placeholder.
 

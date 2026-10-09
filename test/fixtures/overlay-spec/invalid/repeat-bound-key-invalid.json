@@ -1,0 +1,40 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "liked_a": false
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": [
+          {
+            "id": "a"
+          },
+          {
+            "id": "b-c"
+          }
+        ],
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "Like",
+          "onTap": [
+            {
+              "type": "toggle",
+              "key": "liked_{item.id}"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.repeat.items[1]"
+}

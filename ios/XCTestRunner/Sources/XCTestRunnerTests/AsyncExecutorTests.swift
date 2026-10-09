@@ -348,7 +348,7 @@ final class AsyncExecutorTests: XCTestCase {
         XCTAssertEqual(client.resetSessionCount, resetsBeforeCancellation, "cancellation must not add a reset")
     }
 
-    func testSessionGeneratorRunsOnceBeforeSuspensionAndSurvivesRetryRecoveryAndResume() async throws {
+    func testSessionIsCapturedBeforeSuspensionAndARetryRunsUnderAFreshOneThatSurvivesRecoveryAndResume() async throws {
         let scheduler = VirtualDeadlineScheduler()
         let provider = ExecutorSessionProbe()
         let client = AsyncExecutorClient(failures: 1, planFailure: true, pauseInitialize: true)
@@ -368,9 +368,13 @@ final class AsyncExecutorTests: XCTestCase {
         let result = try await task.value
         XCTAssertTrue(result.success)
         XCTAssertTrue(result.aiRecoverySuccessful)
-        XCTAssertEqual(provider.calls, 1)
-        XCTAssertEqual(client.sessions, Array(repeating: "generated-session-1", count: 6))
-        XCTAssertEqual(handler.sessions, ["generated-session-1"])
+        // The transient retry runs under a fresh session (#11072); recovery and the resume keep it.
+        XCTAssertEqual(provider.calls, 2)
+        XCTAssertEqual(
+            client.sessions,
+            ["generated-session-1", "generated-session-1"] + Array(repeating: "generated-session-2", count: 4)
+        )
+        XCTAssertEqual(handler.sessions, ["generated-session-2"])
         XCTAssertEqual(client.executions.count, 3, "initial error, retry failure, recovery resume")
         XCTAssertEqual(client.resetSessionCount, 1)
     }
@@ -404,7 +408,8 @@ final class AsyncExecutorTests: XCTestCase {
             recoveryModelConfig: nil,
             daemonEnsurer: daemonEnsurer,
             deadlineScheduler: scheduler,
-            idGenerator: idGenerator
+            idGenerator: idGenerator,
+            heldSessionController: RecordingHeldSessionController()
         )
     }
 }

@@ -86,6 +86,8 @@ fun interactiveOverlayLayoutParams(
   density: Float,
   sdkInt: Int,
   layer: OverlayWindowLayer = OverlayWindowLayer.SYSTEM,
+  /** Keyboard height from the screen bottom (#10262); only a bottom sheet is moved by it. */
+  imeLiftPx: Int = 0,
 ): WindowManager.LayoutParams {
   require(density.isFinite() && density > 0) { "Density must be positive and finite" }
   val match = WindowManager.LayoutParams.MATCH_PARENT
@@ -116,6 +118,12 @@ fun interactiveOverlayLayoutParams(
               height = size
               gravity =
                 if (placement.edge == OverlayPlacement.Edge.TOP) Gravity.TOP else Gravity.BOTTOM
+              if (placement.edge == OverlayPlacement.Edge.BOTTOM) {
+                // A positive y lifts a bottom-gravity window. The host moves the window itself, so
+                // the system must not also resize or pan it for its own text field.
+                y = overlayImeShiftPx(placement, imeLiftPx)
+                softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+              }
             }
             OverlayPlacement.Edge.START,
             OverlayPlacement.Edge.END -> {

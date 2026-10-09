@@ -134,20 +134,133 @@ final class RecoveryExecutorTests: XCTestCase {
         XCTAssertEqual(client.executePlanCalls[1].arguments["startStep"] as? Int, 2)
     }
 
+    // MARK: - Held session for recovery (#10834 / #11072)
+
+    func testAttemptThatRecoveryMayFollowAsksTheDaemonToHoldItsSessionAndTheResumeTakesItOver() async throws {
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 2, totalSteps: 4,
+            failedStep: ["stepIndex": 2, "tool": "tapOn", "error": "no element", "device": "sim-1"]
+        ))
+        client.queueExecutePlan(planJSON(success: true, executedSteps: 4, totalSteps: 4))
+        let heldSessions = RecordingHeldSessionController()
+        let handler = HeartbeatProbingRecoveryHandler(
+            heldSessions: heldSessions,
+            outcome: RecoveryOutcome(success: true)
+        )
+        let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true, heldSessions: heldSessions)
+
+        let result = try await executor.execute(testMetadata: nil, sessionUuid: "held-session")
+
+        XCTAssertTrue(result.success)
+        let calls = client.executePlanCalls
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertEqual(calls[0].arguments["holdSessionOnFailure"] as? Bool, true)
+        XCTAssertNil(calls[1].arguments["holdSessionOnFailure"], "the resume may not be recovered again")
+        XCTAssertEqual(calls[1].arguments["sessionUuid"] as? String, "held-session")
+        XCTAssertEqual(handler.heartbeatsDuringRecovery, [["held-session"]], "heartbeated while recovery ran")
+        XCTAssertEqual(
+            heldSessions.events,
+            [.heartbeatStarted("held-session"), .heartbeatStopped("held-session")],
+            "the resumed plan takes the session over; the runner releases nothing"
+        )
+    }
+
+    func testFailedRecoveryReleasesTheHeldSession() async throws {
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: ["stepIndex": 1, "tool": "tapOn", "error": "boom"]
+        ))
+        let heldSessions = RecordingHeldSessionController()
+        let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: false))
+        let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true, heldSessions: heldSessions)
+
+        await assertAsyncThrowsError { try await executor.execute(testMetadata: nil, sessionUuid: "held-session") }
+
+        XCTAssertEqual(heldSessions.releasedSessions, ["held-session"])
+        XCTAssertEqual(heldSessions.liveHeartbeats, [], "the heartbeat stops with recovery")
+    }
+
+    func testFailureRecoveryCannotHandleReleasesTheHeldSession() async throws {
+        // A failure without a usable failed step never reaches recovery: the hold must not outlive it.
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(success: false, executedSteps: 0, totalSteps: 3))
+        let heldSessions = RecordingHeldSessionController()
+        let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
+        let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true, heldSessions: heldSessions)
+
+        await assertAsyncThrowsError { try await executor.execute(testMetadata: nil, sessionUuid: "held-session") }
+
+        XCTAssertEqual(client.executePlanCalls[0].arguments["holdSessionOnFailure"] as? Bool, true)
+        XCTAssertTrue(handler.receivedContexts.isEmpty)
+        XCTAssertEqual(heldSessions.releasedSessions, ["held-session"])
+    }
+
+    func testNoHoldIsRequestedWhenRecoveryCannotFollow() async throws {
+        for (enabled, aiAssistance, isCi) in [(false, true, false), (true, false, false), (true, true, true)] {
+            let client = RecoveryMCPClient()
+            client.queueExecutePlan(planJSON(
+                success: false, executedSteps: 1, totalSteps: 3,
+                failedStep: ["stepIndex": 1, "tool": "tapOn", "error": "nope"]
+            ))
+            let heldSessions = RecordingHeldSessionController()
+            let executor = makeExecutor(
+                client: client,
+                handler: SpyRecoveryHandler(outcome: RecoveryOutcome(success: true)),
+                recoveryEnabled: enabled,
+                aiAssistance: aiAssistance,
+                heldSessions: heldSessions
+            )
+            let metadata = AutoMobilePlanExecutor.TestMetadata(testClass: "T", testMethod: "m", isCi: isCi)
+
+            await assertAsyncThrowsError { try await executor.execute(testMetadata: metadata) }
+
+            XCTAssertNil(client.executePlanCalls[0].arguments["holdSessionOnFailure"])
+            XCTAssertEqual(heldSessions.events, [], "nothing held, nothing to heartbeat or release")
+        }
+    }
+
+    func testTransientRetryRunsUnderAFreshSessionAfterReleasingTheHeldOne() async throws {
+        let client = RecoveryMCPClient()
+        // A failure with no failed step is not recoverable; the retry loop runs it again.
+        client.queueExecutePlan(planJSON(success: false, executedSteps: 0, totalSteps: 3))
+        client.queueExecutePlan(planJSON(success: true, executedSteps: 3, totalSteps: 3))
+        let heldSessions = RecordingHeldSessionController()
+        let executor = makeExecutor(
+            client: client,
+            handler: SpyRecoveryHandler(outcome: RecoveryOutcome(success: true)),
+            recoveryEnabled: true,
+            heldSessions: heldSessions,
+            retryCount: 1
+        )
+
+        let result = try await executor.execute(testMetadata: nil, sessionUuid: "first-session")
+
+        XCTAssertTrue(result.success)
+        let sessions = client.executePlanCalls.map { $0.arguments["sessionUuid"] as? String }
+        XCTAssertEqual(sessions.count, 2)
+        XCTAssertEqual(sessions[0], "first-session")
+        XCTAssertNotEqual(sessions[1], "first-session", "a released UUID is terminal on the daemon")
+        XCTAssertEqual(heldSessions.releasedSessions, ["first-session"])
+    }
+
     // MARK: - Helpers
 
     private func makeExecutor(
         client: RecoveryMCPClient,
         handler: PlanRecoveryHandler,
         recoveryEnabled: Bool,
-        aiAssistance: Bool = true
+        aiAssistance: Bool = true,
+        heldSessions: RecordingHeldSessionController = RecordingHeldSessionController(),
+        retryCount: Int = 0
     )
         -> AutoMobilePlanExecutor
     {
         let config = AutoMobilePlanExecutor.Configuration(
             transport: .daemonUnixSocket(path: "/tmp/xctestrunner-recovery-test.sock"),
             planPath: "recovery-plan.yaml",
-            retryCount: 0,
+            retryCount: retryCount,
             timeoutSeconds: 5,
             retryDelaySeconds: 0,
             startStep: 0,
@@ -163,7 +276,8 @@ final class RecoveryExecutorTests: XCTestCase {
             recoveryConfigProvider: StaticRecoveryConfigProvider(enabled: recoveryEnabled, maxToolCalls: 5),
             recoveryModelConfig: nil,
             daemonEnsurer: HermeticDaemonEnsurer(),
-            deadlineScheduler: VirtualDeadlineScheduler()
+            deadlineScheduler: VirtualDeadlineScheduler(),
+            heldSessionController: heldSessions
         )
     }
 }
@@ -942,7 +1056,8 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             recoveryConfigProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
             recoveryModelConfig: nil,
             daemonEnsurer: HermeticDaemonEnsurer(),
-            deadlineScheduler: VirtualDeadlineScheduler()
+            deadlineScheduler: VirtualDeadlineScheduler(),
+            heldSessionController: RecordingHeldSessionController()
         )
     }
 
@@ -1681,6 +1796,23 @@ private final class SpyRecoveryHandler: PlanRecoveryHandler, @unchecked Sendable
 
     func attemptRecovery(_ context: FailedStepContext) async -> RecoveryOutcome {
         receivedContexts.append(context)
+        return outcome
+    }
+}
+
+/// Records which held sessions were being heartbeated at the moment recovery ran (#11072).
+private final class HeartbeatProbingRecoveryHandler: PlanRecoveryHandler, @unchecked Sendable {
+    private let heldSessions: RecordingHeldSessionController
+    private let outcome: RecoveryOutcome
+    private(set) var heartbeatsDuringRecovery: [[String]] = []
+
+    init(heldSessions: RecordingHeldSessionController, outcome: RecoveryOutcome) {
+        self.heldSessions = heldSessions
+        self.outcome = outcome
+    }
+
+    func attemptRecovery(_: FailedStepContext) async -> RecoveryOutcome {
+        heartbeatsDuringRecovery.append(heldSessions.liveHeartbeats)
         return outcome
     }
 }

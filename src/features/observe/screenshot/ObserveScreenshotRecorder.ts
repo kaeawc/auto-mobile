@@ -16,10 +16,13 @@ import type {
 import { ScreenshotJobTracker } from "../../../utils/ScreenshotJobTracker";
 import type { ScreenshotService } from "../interfaces/ScreenshotService";
 import type { ScreenshotOptions } from "../TakeScreenshot";
-import type { ScreenshotEncodingOptions } from "./screenshotOptions";
+import type { ObserveScreenshotOptions } from "./screenshotOptions";
 import { getScreenshotStateStore, ScreenshotStateStore } from "./ScreenshotStateRegistry";
 import { validateCapturedScreenshot } from "./validateCapturedScreenshot";
 import { ActionableError, toActionableError } from "../../../models/ActionableError";
+
+/** Capture-time options for the non-settled captures, which keep the device's own encoding. */
+export type ObserveCaptureOptions = Pick<ObserveScreenshotOptions, "hideOverlays">;
 
 /**
  * Minimal capability surface needed by the recorder: the standard
@@ -52,6 +55,7 @@ export interface ObserveScreenshotRecorder {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     displayId?: number,
+    capture?: ObserveCaptureOptions,
   ): void;
 
   /**
@@ -63,6 +67,7 @@ export interface ObserveScreenshotRecorder {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     displayId?: number,
+    capture?: ObserveCaptureOptions,
   ): Promise<void>;
 
   /**
@@ -75,6 +80,7 @@ export interface ObserveScreenshotRecorder {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     displayId?: number,
+    capture?: ObserveCaptureOptions,
   ): Promise<void>;
 
   /** Strict, queued PNG capture for settled observations. Optional for legacy fakes. */
@@ -83,7 +89,7 @@ export interface ObserveScreenshotRecorder {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     displayId?: number,
-    options?: ScreenshotEncodingOptions,
+    options?: ObserveScreenshotOptions,
   ): Promise<string>;
 }
 
@@ -115,42 +121,40 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
     displayId?: number,
+    capture?: ObserveCaptureOptions,
   ): void {
     this.store.beginObservation(this.device.deviceId, observationId);
     perf.startOperation("screenshot");
-    const handle = this.screenshotUtil.startTrackedCapture(
-      { displayId },
-      {
-        parentSignal: signal,
-        // Fire-and-forget: coalesce work that has not started yet, but queue
-        // once a screencap runner is executing so its pixels cannot be paired
-        // with a later observation. Cancelling and restarting every ~100ms
-        // causes a self-inflicted cancel loop because screencap takes
-        // ~200-300ms — no screenshot ever completes.
-        coalesceWithPending: true,
-        queueAfterPendingIfRunning: true,
-        onComplete: async (completion) => {
-          this.completionByJob.set(completion.jobId, {
-            aborted: completion.aborted,
-            isLatest: completion.isLatest,
-          });
-          if (!completion.isLatest) {
-            this.store.endObservation(this.device.deviceId, observationId, "capture superseded");
-            return;
-          }
-          if (completion.aborted) {
-            logger.debug("[OBSERVE] Screenshot capture cancelled");
-            this.store.endObservation(this.device.deviceId, observationId, "capture cancelled");
-            return;
-          }
-          try {
-            await this.handleScreenshotResult(completion.result, { ignoreCancel: true });
-          } catch (err) {
-            logger.warn(`[OBSERVE] Failed to finalize screenshot capture: ${err}`);
-          }
-        },
+    const handle = this.screenshotUtil.startTrackedCapture(captureRequest(displayId, capture), {
+      parentSignal: signal,
+      // Fire-and-forget: coalesce work that has not started yet, but queue
+      // once a screencap runner is executing so its pixels cannot be paired
+      // with a later observation. Cancelling and restarting every ~100ms
+      // causes a self-inflicted cancel loop because screencap takes
+      // ~200-300ms — no screenshot ever completes.
+      coalesceWithPending: true,
+      queueAfterPendingIfRunning: true,
+      onComplete: async (completion) => {
+        this.completionByJob.set(completion.jobId, {
+          aborted: completion.aborted,
+          isLatest: completion.isLatest,
+        });
+        if (!completion.isLatest) {
+          this.store.endObservation(this.device.deviceId, observationId, "capture superseded");
+          return;
+        }
+        if (completion.aborted) {
+          logger.debug("[OBSERVE] Screenshot capture cancelled");
+          this.store.endObservation(this.device.deviceId, observationId, "capture cancelled");
+          return;
+        }
+        try {
+          await this.handleScreenshotResult(completion.result, { ignoreCancel: true });
+        } catch (err) {
+          logger.warn(`[OBSERVE] Failed to finalize screenshot capture: ${err}`);
+        }
       },
-    );
+    });
 
     void this.recordObservationResult(handle, observationId);
 
@@ -172,6 +176,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
     displayId?: number,
+    capture?: ObserveCaptureOptions,
   ): Promise<void> {
     this.store.beginObservation(this.device.deviceId, observationId);
     await this.captureWithOptions(
@@ -182,7 +187,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
         coalesceWithPending: true,
         queueAfterPendingIfRunning: true,
       },
-      displayId,
+      captureRequest(displayId, capture),
     );
   }
 
@@ -191,6 +196,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
     displayId?: number,
+    capture?: ObserveCaptureOptions,
   ): Promise<void> {
     this.store.beginObservation(this.device.deviceId, observationId);
     await this.captureWithOptions(
@@ -198,7 +204,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
       perf,
       signal,
       { queueAfterPending: true },
-      displayId,
+      captureRequest(displayId, capture),
     );
   }
 
@@ -207,7 +213,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
     displayId?: number,
-    options?: ScreenshotEncodingOptions,
+    options?: ObserveScreenshotOptions,
   ): Promise<string> {
     this.store.beginObservation(this.device.deviceId, observationId);
     try {
@@ -257,7 +263,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
   private async captureSettledAttempt(
     signal?: AbortSignal,
     displayId?: number,
-    options?: ScreenshotEncodingOptions,
+    options?: ObserveScreenshotOptions,
   ): Promise<{ result: ScreenshotResult; cancelled: boolean }> {
     const handle = this.screenshotUtil.startTrackedCapture(
       { ...options, format: options?.format ?? "png", displayId },
@@ -288,41 +294,34 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
       ScreenshotJobOptions,
       "coalesceWithPending" | "queueAfterPending" | "queueAfterPendingIfRunning"
     >,
-    displayId?: number,
+    request: ScreenshotOptions,
   ): Promise<void> {
     try {
       await perf.track("screenshot", async () => {
-        const handle = this.screenshotUtil.startTrackedCapture(
-          { displayId },
-          {
-            parentSignal: signal,
-            ...trackerOptions,
-            onComplete: async (completion) => {
-              this.completionByJob.set(completion.jobId, {
-                aborted: completion.aborted,
-                isLatest: completion.isLatest,
-              });
-              if (!completion.isLatest) {
-                this.store.endObservation(
-                  this.device.deviceId,
-                  observationId,
-                  "capture superseded",
-                );
-                return;
-              }
-              if (completion.aborted) {
-                logger.debug("[OBSERVE] Screenshot capture cancelled");
-                this.store.endObservation(this.device.deviceId, observationId, "capture cancelled");
-                return;
-              }
-              try {
-                await this.handleScreenshotResult(completion.result, { ignoreCancel: true });
-              } catch (err) {
-                logger.warn(`[OBSERVE] Failed to finalize screenshot capture: ${err}`);
-              }
-            },
+        const handle = this.screenshotUtil.startTrackedCapture(request, {
+          parentSignal: signal,
+          ...trackerOptions,
+          onComplete: async (completion) => {
+            this.completionByJob.set(completion.jobId, {
+              aborted: completion.aborted,
+              isLatest: completion.isLatest,
+            });
+            if (!completion.isLatest) {
+              this.store.endObservation(this.device.deviceId, observationId, "capture superseded");
+              return;
+            }
+            if (completion.aborted) {
+              logger.debug("[OBSERVE] Screenshot capture cancelled");
+              this.store.endObservation(this.device.deviceId, observationId, "capture cancelled");
+              return;
+            }
+            try {
+              await this.handleScreenshotResult(completion.result, { ignoreCancel: true });
+            } catch (err) {
+              logger.warn(`[OBSERVE] Failed to finalize screenshot capture: ${err}`);
+            }
           },
-        );
+        });
         const observationResult = this.recordObservationResult(handle, observationId);
         await handle.promise;
         await observationResult;
@@ -449,4 +448,9 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
         );
       });
   }
+}
+
+/** The capture request for a non-settled capture: display plus, when set, overlay hiding. */
+function captureRequest(displayId?: number, capture?: ObserveCaptureOptions): ScreenshotOptions {
+  return capture?.hideOverlays === true ? { displayId, hideOverlays: true } : { displayId };
 }

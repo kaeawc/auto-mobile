@@ -477,12 +477,39 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
     });
 
-    test("a 5s stall that is only 3s late is forgiven instead of reaping a heartbeating owner (review F7)", async () => {
+    test("a 6s stall that is only 4s late is forgiven instead of reaping a heartbeating owner (review F7)", async () => {
       // The review's shape on the current windows (lease 4s, grace 4s, scans every 2s). The
-      // owner's last heartbeat is at 1s; scans run on schedule at 2s, 4s and 6s; then a 5s stall
-      // makes the next scan fire 3s late, at 11s, when the session has aged 10s, past lease plus
-      // grace.
+      // owner's last heartbeat is at 1s; scans run on schedule at 2s and 4s; then a 6s stall
+      // makes the next scan fire 4s late, at 10s, when the session has aged 9s, past lease plus
+      // grace. The owner was live (3s since its heartbeat) when the stall began (#11080).
       const original = sessionManager.getSession(SESSION);
+      monitor.start();
+      timer.setCurrentTime(1_000);
+      expect((await heartbeat(OWNER)).success).toBe(true);
+      for (const at of [2_000, 4_000]) {
+        timer.setCurrentTime(at);
+        await monitor.tick();
+      }
+      timer.setCurrentTime(10_000);
+
+      await monitor.tick();
+
+      expect(reaped).toEqual([]);
+      expect(sessionManager.getSession(SESSION)).toBe(original);
+      // The 4s the daemon was late are not counted: the session ages 5s, inside the grace.
+      expect(sessionManager.getSessionLeaseState(SESSION)).toEqual({
+        phase: "suspect",
+        remainingMs: LEASE_MS + SUSPECT_GRACE_MS - 5_000,
+      });
+      // Its owner's buffered heartbeat then restores it.
+      expect((await heartbeat(OWNER)).success).toBe(true);
+      expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("live");
+    });
+
+    test("a stall that began after the owner's lease ran out is not forgiven (#11080)", async () => {
+      // The original F7 shape: the daemon ran its scans on time at 2s, 4s and 6s and heard no
+      // heartbeat after 1s, so the owner was already 5s silent, past its 4s lease, when the stall
+      // began. The stall hid nothing from the daemon and is not held in the owner's favour.
       monitor.start();
       timer.setCurrentTime(1_000);
       expect((await heartbeat(OWNER)).success).toBe(true);
@@ -494,16 +521,8 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
       await monitor.tick();
 
-      expect(reaped).toEqual([]);
-      expect(sessionManager.getSession(SESSION)).toBe(original);
-      // The 3s the daemon was late are not counted: the session ages 7s, inside the grace.
-      expect(sessionManager.getSessionLeaseState(SESSION)).toEqual({
-        phase: "suspect",
-        remainingMs: LEASE_MS + SUSPECT_GRACE_MS - 7_000,
-      });
-      // Its owner's buffered heartbeat then restores it.
-      expect((await heartbeat(OWNER)).success).toBe(true);
-      expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("live");
+      expect(sessionManager.getSession(SESSION)).toBeNull();
+      expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
     });
 
     test("the same stall reaps the owner when the stall threshold is the lease (old blind spot)", async () => {
@@ -521,11 +540,11 @@ describe("suspect grace window and daemon stall (#10051)", () => {
         strictMonitor.start();
         timer.setCurrentTime(1_000);
         await heartbeat(OWNER);
-        for (const at of [2_000, 4_000, 6_000]) {
+        for (const at of [2_000, 4_000]) {
           timer.setCurrentTime(at);
           await strictMonitor.tick();
         }
-        timer.setCurrentTime(11_000);
+        timer.setCurrentTime(10_000);
 
         await strictMonitor.tick();
 

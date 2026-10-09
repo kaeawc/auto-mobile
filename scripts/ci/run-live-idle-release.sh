@@ -24,8 +24,21 @@ if [[ ! "${idle_timeout_ms}" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
+# The android-emulator action exports AUTOMOBILE_CTRL_PROXY_APK_PATH relative to its working
+# directory (android/). The private daemon resolves a relative override against its launch cwd
+# (the throwaway work dir), where it does not exist, so hand it an absolute path (#10840).
+apk_path="${AUTOMOBILE_CTRL_PROXY_APK_PATH:-control-proxy/build/outputs/apk/debug/control-proxy-debug.apk}"
+if [[ "${apk_path}" != /* ]]; then
+  apk_path="${REPO_ROOT}/android/${apk_path}"
+fi
+if [[ ! -f "${apk_path}" ]]; then
+  echo "error: CtrlProxy APK not found at ${apk_path}." >&2
+  exit 2
+fi
+export AUTOMOBILE_CTRL_PROXY_APK_PATH="${apk_path}"
+
 cd "${REPO_ROOT}"
-exec bash scripts/live-idle-release-check.sh --confirm-live \
+exec bash "${IDLE_CHECK_SCRIPT:-scripts/live-idle-release-check.sh}" --confirm-live \
   --serial "${serial}" --port "${port}" \
   --scenario "${scenario}" --idle-timeout-ms "${idle_timeout_ms}" \
   --evidence-dir "${REPO_ROOT}/scratch/live-idle-release-check/ci"

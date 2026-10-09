@@ -143,4 +143,33 @@ final class SQLiteDatabaseSqlErrorTests: XCTestCase {
         let result = driver.executeSQL(databasePath: fixture.path, query: "UPDATE users SET name = 'x'")
         XCTAssertEqual(result.diagnostic?.code, "busy_lock")
     }
+
+    /// The host's classifier is a heuristic; with `readOnly` set the SDK's own `sqlite3_stmt_readonly`
+    /// verdict is final, even for an authorized session (#10966).
+    func testReadOnlyRequestRefusesWritesDisguisedAsReads() throws {
+        let disguised = [
+            "WITH a AS (SELECT ')' UNION SELECT 1) DELETE FROM users",
+            "WITH a AS (SELECT 1 /* ) */ UNION SELECT 2) UPDATE users SET name = 'x'",
+            "DELETE FROM users",
+        ]
+        for query in disguised {
+            let body = try JSONEncoder().encode(SdkExecuteSqlRequest(
+                databasePath: fixture.path, query: query, sessionId: sessionId, readOnly: true
+            ))
+            let response = handler().handleExecuteSql(body: body)
+            XCTAssertEqual(response.statusCode, 403, query)
+            let payload = try JSONDecoder().decode(SdkDatabaseErrorPayload.self, from: response.body)
+            XCTAssertEqual(payload.error, "read_only_violation", query)
+        }
+        let rows = try execute("SELECT name FROM users")
+        XCTAssertEqual(rows.statusCode, 200)
+        XCTAssertTrue(String(decoding: rows.body, as: UTF8.self).contains("ada"))
+    }
+
+    func testReadOnlyRequestStillRunsReads() throws {
+        let body = try JSONEncoder().encode(SdkExecuteSqlRequest(
+            databasePath: fixture.path, query: "SELECT name FROM users", sessionId: sessionId, readOnly: true
+        ))
+        XCTAssertEqual(handler().handleExecuteSql(body: body).statusCode, 200)
+    }
 }

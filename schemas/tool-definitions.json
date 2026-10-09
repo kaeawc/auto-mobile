@@ -2187,6 +2187,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -2208,6 +2209,7 @@
               "provisionDevice",
               "putAppFile",
               "recentApps",
+              "reconcileDeviceResources",
               "recordSteps",
               "removeKeyValue",
               "resetAppLogs",
@@ -2312,6 +2314,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -2333,6 +2336,7 @@
               "provisionDevice",
               "putAppFile",
               "recentApps",
+              "reconcileDeviceResources",
               "recordSteps",
               "removeKeyValue",
               "resetAppLogs",
@@ -2410,6 +2414,9 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -2453,7 +2460,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -2487,6 +2495,9 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3064,6 +3075,9 @@
       },
       "required": ["message"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3128,7 +3142,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3172,7 +3187,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3206,6 +3222,9 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3261,6 +3280,9 @@
       },
       "required": ["scope", "key"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3523,6 +3545,9 @@
       "required": ["x", "y"],
       "additionalProperties": false,
       "description": "Preview which hierarchy nodes sit beneath one absolute point without dispatching input."
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3637,7 +3662,50 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/debugOnly": true
+      "automobile/debugOnly": true,
+      "automobile/deviceReadOnly": true
+    }
+  },
+  {
+    "name": "inspectPackageSigning",
+    "description": "Android: fresh read of one package's presence (installed/absent/unknown) for a user and its SHA-256 signing certificates (complete signer set, rotation history). Never cached.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "userId": {
+          "description": "Android user/profile to inspect; when omitted it is resolved and reported",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId"],
+      "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3650,6 +3718,20 @@
         "artifactPath": {
           "description": "App artifact path (.apk, .app, or .ipa)",
           "type": "string"
+        },
+        "expectedSigningSha256": {
+          "description": "Android: complete signer set (SHA-256 of every signing certificate) an already installed copy must have before it is replaced; any other signer set, or signers that cannot be read, refuses the install. See inspectPackageSigning.",
+          "minItems": 1,
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:[0-9a-fA-F]{2}:?){31}[0-9a-fA-F]{2}$"
+          }
+        },
+        "allowDestructiveRecovery": {
+          "description": "Android: false refuses the uninstall-and-reinstall recovery after INSTALL_FAILED_VERSION_DOWNGRADE (default true)",
+          "type": "boolean"
         },
         "platform": {
           "type": "string",
@@ -7200,6 +7282,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -7239,7 +7324,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -14427,6 +14513,7 @@
       }
     },
     "_meta": {
+      "automobile/deviceReadOnly": true,
       "ui": {
         "resourceUri": "ui://automobile/observe"
       }
@@ -18355,7 +18442,7 @@
   },
   {
     "name": "prototype",
-    "description": "Show (always a full spec), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which overlays it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, awaitEvent; sizes are points; reset is Android only). A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/toggle/increment/decrement/dismiss. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the overlay excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1. A device-persistent overlay keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising overlay_persistence_replay_v1 and is refused otherwise.",
+    "description": "Show (always a full spec, inline as spec or from a local JSON file as specPath), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which overlays it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, inspect, awaitEvent; sizes are points). A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/toggle/increment/decrement/dismiss. Reuse: a top-level components:{name:{root}} map placed with {type:\"use\",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node's anchor {type:\"element\",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the overlay excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:\"bounds\",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session overlay is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer \"overlay\" calls fail saying so) and it returns with the app; a device-persistent overlay is not tied to an app. Status makes no device request, marks an overlay suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1. A device-persistent overlay keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising overlay_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (overlay_inspect_v1) for the one overlay it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -18710,7 +18797,7 @@
                               },
                               "key": {
                                 "type": "string",
-                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$"
                               },
                               "value": {
                                 "anyOf": [
@@ -18737,8 +18824,7 @@
                                 "enum": ["toggle"]
                               },
                               "key": {
-                                "type": "string",
-                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                               }
                             },
                             "required": ["type", "key"],
@@ -18752,8 +18838,7 @@
                                 "enum": ["increment"]
                               },
                               "key": {
-                                "type": "string",
-                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                               },
                               "by": {
                                 "type": "number"
@@ -18770,8 +18855,7 @@
                                 "enum": ["decrement"]
                               },
                               "key": {
-                                "type": "string",
-                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                               },
                               "by": {
                                 "type": "number"
@@ -19171,8 +19255,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "type": "string",
-                                    "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                                   },
                                   "equals": {
                                     "anyOf": [
@@ -19195,7 +19278,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                                   },
                                   "notEquals": {
                                     "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/equals"
@@ -19208,7 +19291,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                                   },
                                   "gt": {
                                     "type": "number"
@@ -19221,7 +19304,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                                   },
                                   "lt": {
                                     "type": "number"
@@ -19442,7 +19525,7 @@
                             }
                           },
                           "minItems": 1,
-                          "maxItems": 32
+                          "maxItems": 128
                         },
                         "as": {
                           "type": "string",
@@ -19789,8 +19872,7 @@
                       "enum": ["textField"]
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "placeholder": {
                       "type": "string"
@@ -19837,8 +19919,7 @@
                       "enum": ["switch"]
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "label": {
                       "type": "string",
@@ -19886,8 +19967,7 @@
                       "enum": ["checkbox"]
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "label": {
                       "type": "string",
@@ -19987,8 +20067,7 @@
                       "enum": ["radioGroup"]
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "options": {
                       "type": "array",
@@ -20072,8 +20151,7 @@
                               "enum": ["switch"]
                             },
                             "stateKey": {
-                              "type": "string",
-                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                             }
                           },
                           "required": ["type", "stateKey"],
@@ -20087,8 +20165,7 @@
                               "enum": ["checkbox"]
                             },
                             "stateKey": {
-                              "type": "string",
-                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                             }
                           },
                           "required": ["type", "stateKey"],
@@ -20152,8 +20229,7 @@
                       "enum": ["slider"]
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "label": {
                       "type": "string",
@@ -20218,8 +20294,7 @@
                       "enum": ["assist", "filter", "input", "suggestion"]
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     }
                   },
                   "required": ["type", "label"],
@@ -20415,8 +20490,7 @@
                       "enum": ["segmentedButton"]
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "options": {
                       "type": "array",
@@ -20653,7 +20727,7 @@
                       "enum": ["linear", "circular"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/18/properties/stateKey"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "max": {
                       "type": "number"
@@ -20703,8 +20777,7 @@
                       "type": "object",
                       "properties": {
                         "key": {
-                          "type": "string",
-                          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                         },
                         "equals": {
                           "type": "boolean"
@@ -20842,10 +20915,10 @@
                       "enum": ["timePicker"]
                     },
                     "hourKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/18/properties/stateKey"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "minuteKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/18/properties/stateKey"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "is24Hour": {
                       "type": "boolean"
@@ -20892,7 +20965,7 @@
                       "enum": ["datePicker"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/18/properties/stateKey"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     }
                   },
                   "required": ["type", "stateKey"],
@@ -21061,8 +21134,7 @@
                       "minLength": 1
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     },
                     "scrollable": {
                       "type": "boolean"
@@ -21121,8 +21193,7 @@
                       "minLength": 1
                     },
                     "stateKey": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
                     }
                   },
                   "required": ["type", "items"],
@@ -21208,12 +21279,56 @@
                   },
                   "required": ["type", "openWhen", "detents", "child"],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "description": "Replaced on the host by components[component].root with {props.<field>} bound in the fields repeat binds; a placeholder that is the whole value keeps the prop's type",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": ["use"]
+                    },
+                    "component": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                    },
+                    "props": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": ["string", "number", "boolean"]
+                      }
+                    }
+                  },
+                  "required": ["type", "component"],
+                  "additionalProperties": false
                 }
               ]
+            },
+            "components": {
+              "type": "object",
+              "description": "Reusable node templates by name, placed with {type:\"use\",component,props}; expanded on the host before validation (use nesting up to 8 deep, no cycles, every prop used); limits apply to the expanded spec",
+              "propertyNames": {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "root": {
+                    "$ref": "#/properties/spec/properties/root"
+                  }
+                },
+                "required": ["root"],
+                "additionalProperties": false
+              }
             }
           },
           "required": ["id", "window", "root"],
           "additionalProperties": false
+        },
+        "specPath": {
+          "description": "show only: instead of spec, an absolute path of a local JSON file holding the same spec (up to 1048576 bytes) that the daemon reads and validates like an inline spec; the path is never sent to the device. Exactly one of spec or specPath. Use it for a spec a script generated, instead of pasting the JSON into the call.",
+          "type": "string",
+          "minLength": 1
         },
         "display": {
           "description": "show only: panel key, role, or active to show the overlay on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising overlay_display_id_v1; a disconnected panel is refused. Ignored, with a warning, by a same-id show without reset, which keeps the display the overlay is on.",
@@ -21338,6 +21453,11 @@
                 "description": "Adopted overlays only: true when the device keeps the overlay after the host disconnects (window.persistence: device), false when it ends with the session",
                 "type": "boolean"
               },
+              "suspended": {
+                "description": "Android only: the overlay is hidden because the app it was shown over is not in front (as of the last inspect); its state is kept and it returns with the app. Absent when visible and on iOS",
+                "type": "boolean",
+                "const": true
+              },
               "displayId": {
                 "description": "Android logical display the overlay was shown on; absent for the default display",
                 "type": "integer",
@@ -21437,6 +21557,11 @@
             "persistent": {
               "description": "Adopted overlays only: true when the device keeps the overlay after the host disconnects (window.persistence: device), false when it ends with the session",
               "type": "boolean"
+            },
+            "suspended": {
+              "description": "Android only: the overlay is hidden because the app it was shown over is not in front (as of the last inspect); its state is kept and it returns with the app. Absent when visible and on iOS",
+              "type": "boolean",
+              "const": true
             },
             "displayId": {
               "description": "Android logical display the overlay was shown on; absent for the default display",
@@ -21566,7 +21691,7 @@
           }
         },
         "warning": {
-          "description": "show succeeded but needs attention: names what to do about missingAssets, or that display was ignored by a same-id show",
+          "description": "show succeeded or awaitEvent timed out, and it needs attention: names what to do about missingAssets, that display was ignored by a same-id show, or (awaitEvent timeout) that the overlay is hidden because its app is not in front",
           "type": "string"
         },
         "anchors": {
@@ -21728,11 +21853,6 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "operationId": {
-          "description": "Caller-generated idempotency key",
-          "type": "string",
-          "minLength": 1
-        },
         "resources": {
           "description": "Resource settings applied after boot and before automation readiness. Requires boot=true; omitted resources stay unchanged.",
           "type": "object",
@@ -22234,6 +22354,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -22255,6 +22376,7 @@
               "provisionDevice",
               "putAppFile",
               "recentApps",
+              "reconcileDeviceResources",
               "recordSteps",
               "removeKeyValue",
               "resetAppLogs",
@@ -22290,16 +22412,13 @@
           }
         }
       },
-      "required": ["operationId", "device"],
+      "required": ["device"],
       "additionalProperties": false
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "operationId": {
-          "type": "string"
-        },
         "device": {
           "type": "object",
           "properties": {
@@ -22912,7 +23031,6 @@
         "timing": {}
       },
       "required": [
-        "operationId",
         "device",
         "requestedSpec",
         "resolvedSpec",
@@ -23092,6 +23210,359 @@
           "type": "string"
         }
       },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reconcileDeviceResources",
+    "description": "Compare an iOS Simulator with a requested resource map (workload profile) and report typed drift: missingRequested, ownedExtra (overrides AutoMobile applied earlier), unsupported, commandFailure. Report-only by default; repair applies only the drifted delta, re-reads, and succeeds only when every requested resource is proven.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "resources": {
+          "description": "Requested workload profile: the resource map the simulator should match. It has no name; its identity is the returned profileFingerprint.",
+          "type": "object",
+          "properties": {
+            "wallpaperRendering": {
+              "description": "Home and Lock Screen wallpaper rendering; excludes widgets and Live Activities.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "widgets": {
+              "description": "Widget refresh, including app widgets; excludes wallpaper and Live Activities.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "liveActivities": {
+              "description": "Live Activities and Dynamic Island updates; excludes wallpaper and widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "healthServices": {
+              "description": "HealthKit data and Health app background work. Health integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "homeServices": {
+              "description": "HomeKit accessories and automations. Home integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "fitnessServices": {
+              "description": "Apple Fitness, coaching, activity awards, and activity sharing.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "familyServices": {
+              "description": "Family Sharing, family approvals, and parental controls. Changes restriction behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "screenTime": {
+              "description": "Screen Time limits and usage tracking. Changes restriction behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "newsServices": {
+              "description": "Apple News background content.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "weatherServices": {
+              "description": "Apple Weather background forecasts.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "tipsServices": {
+              "description": "Apple Tips background content.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "gameServices": {
+              "description": "Game Center and saved-game synchronization; excludes controller input.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mapsSync": {
+              "description": "Maps favorites, history, background updates, and suggested destinations; excludes MapKit rendering and location services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "advertising": {
+              "description": "Promoted Apple content; excludes advertising privacy preferences and app integrity services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "diagnosticReporting": {
+              "description": "Diagnostic collectors, feedback, location analytics, and call-quality reporting; reduces diagnostic evidence, not call transport.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "photoAnalysis": {
+              "description": "Background Photos analysis; may reduce photo search and recognition. Preserves library access, cloud transfers, and shared media-analysis infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "assistantSuggestions": {
+              "description": "Siri inference, knowledge, and proactive suggestions; preserves speech, system voices, and shared language/model infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appleIntelligence": {
+              "description": "Apple Intelligence orchestration and generative experiences; system writing tools and intelligence integrations may become unavailable. Preserves shared model and speech services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "searchIndexing": {
+              "description": "Spotlight and Settings search, including app-provided system indexes; excludes an app's own search service.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appStoreServices": {
+              "description": "App Store installation/update services; excludes push and StoreKit payment services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "appleMediaSync": {
+              "description": "Apple Music and subscribed/purchased media background services; excludes generic audio/video playback and StoreKit payments.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mailServices": {
+              "description": "Apple Mail background services. Mail-based sign-in email workflows may be unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "calendarServices": {
+              "description": "Local Calendar database access; excludes server-side calendar integrations in apps.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "reminderServices": {
+              "description": "Apple Reminders database and background work; excludes reminders maintained by other apps.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "personalDataSync": {
+              "description": "Exchange, CalDAV, and CardDAV synchronization; preserves local Contacts database access.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "safariSync": {
+              "description": "Safari bookmark/history synchronization; preserves associated domains, shared credentials, browsing protections, and WebKit.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "icloudSettingsSync": {
+              "description": "iCloud system-settings synchronization and storage-plan recommendations; preserves accounts, credentials, CloudKit data, Drive, and Photos transfers.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "messagingMaintenance": {
+              "description": "Apple Messages history cleanup, attachment transfer, and FaceTime message storage; preserves identity, message database XPC helpers, and system calling services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "watchConnectivity": {
+              "description": "Paired Watch and companion-device communication.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "carPlay": {
+              "description": "CarPlay vehicle connectivity.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "tvRemote": {
+              "description": "Apple TV discovery and remote control.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "findMy": {
+              "description": "Find My device-location services; excludes general location APIs.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "continuity": {
+              "description": "Nearby-device Continuity discovery; cross-device workflows may stop working. Preserves system share sheets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "walletServices": {
+              "description": "Wallet, Apple Pay, digital identity, and merchant services. Payment sheets, including dependent StoreKit workflows, may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "businessServices": {
+              "description": "Apple business messaging services; excludes ordinary app messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "backgroundSync": {
+              "description": "General OS background app scheduling. Control is unsupported to preserve application behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "animations": {
+              "description": "Android system animation scales: disabled sets all three to zero; enabled sets them to one. Excludes app-owned animation.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "screensavers": {
+              "description": "Android dream/screensaver activation; excludes wallpaper and widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "backup": {
+              "description": "Android Backup Manager scheduling for the current user; disables backup and restore test behavior.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mailApp": {
+              "description": "Android optional mail apps, including Gmail. Removes mail intent handlers; preserves other apps' messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "calendarApp": {
+              "description": "Android Calendar app availability; preserves CalendarProvider.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "contactsApp": {
+              "description": "Android Contacts app availability; preserves ContactsProvider.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "mapsApp": {
+              "description": "Android Google Maps app; external navigation intents become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "videoApp": {
+              "description": "Android YouTube app; native video links become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "musicApp": {
+              "description": "Android YouTube Music app; preserves shared audio playback.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "photosApp": {
+              "description": "Android Google Photos app; changes cloud photo sources and choosers. Preserves MediaProvider and DocumentsUI.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "assistantApp": {
+              "description": "Android Google Search/Assistant app, including voice and home-search integrations.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "digitalWellbeing": {
+              "description": "Android Digital Wellbeing usage tracking, focus, and app limits.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "printing": {
+              "description": "Android print spooler and print recommendations; printing becomes unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "accessibilityApps": {
+              "description": "Optional Android accessibility apps. Active accessibility services are protected.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "textToSpeech": {
+              "description": "Android Google speech synthesis; speech-dependent functionality becomes unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "storeApp": {
+              "description": "Android Play Store app; installation, updates, billing and licensing may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "healthConnect": {
+              "description": "Android Health Connect controller and backup app; health integrations become unavailable.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "adServices": {
+              "description": "Android AdServices API package; advertising/privacy APIs may fail. Does not remove mainline/APEX infrastructure.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "onDevicePersonalization": {
+              "description": "Android on-device personalization service package; dependent APIs may fail.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "wallpaperApps": {
+              "description": "Android wallpaper picker and optional live-wallpaper apps; changes wallpaper selection. Does not disable the shared wallpaper framework or widgets.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "dialerApp": {
+              "description": "Optional Android dialer apps. Default role holders remain protected.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "messagesApp": {
+              "description": "Optional Android SMS/Messages apps. Default role holders remain protected; excludes other apps' messaging.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "googleServicesFramework": {
+              "description": "Android Google Services Framework; aggressive control that can break Google account and push integrations.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "googlePlayServices": {
+              "description": "Android Google Play services; aggressive control that breaks dependent push, authentication, location and other integrations. Keep enabled for workflows that depend on those services.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            },
+            "icloudSync": {
+              "description": "Broad iCloud/account synchronization. Control is unsupported; use the narrower icloudSettingsSync setting.",
+              "type": "string",
+              "enum": ["enabled", "disabled"]
+            }
+          },
+          "additionalProperties": false
+        },
+        "repair": {
+          "description": "Apply only the drifted requested entries, then re-read and fail closed. Defaults to false (report only).",
+          "type": "boolean"
+        },
+        "releaseOwnedExtras": {
+          "description": "With repair, re-enable services AutoMobile disabled earlier that this profile omits. Never touches overrides AutoMobile did not apply.",
+          "type": "boolean"
+        },
+        "timeoutMs": {
+          "description": "Total reconciliation budget in milliseconds. Defaults to 300000.",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 890000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["resources"],
       "additionalProperties": false
     }
   },
@@ -29082,6 +29553,7 @@
             "hitTest",
             "homeScreen",
             "identifyInteractions",
+            "inspectPackageSigning",
             "installApp",
             "keyboard",
             "killDevice",
@@ -29103,6 +29575,7 @@
             "provisionDevice",
             "putAppFile",
             "recentApps",
+            "reconcileDeviceResources",
             "recordSteps",
             "removeKeyValue",
             "resetAppLogs",
@@ -29173,6 +29646,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -29194,6 +29668,7 @@
               "provisionDevice",
               "putAppFile",
               "recentApps",
+              "reconcileDeviceResources",
               "recordSteps",
               "removeKeyValue",
               "resetAppLogs",
@@ -29506,6 +29981,9 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -37938,6 +38416,16 @@
         "keepData": {
           "description": "Keep app data after uninstall (Android only, default false)",
           "type": "boolean"
+        },
+        "expectedSigningSha256": {
+          "description": "Android: complete signer set (SHA-256 of every signing certificate) the installed package must have; a different signer set, absence, or signers that cannot be read refuses the uninstall, and removal is confirmed by a fresh presence read.",
+          "minItems": 1,
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:[0-9a-fA-F]{2}:?){31}[0-9a-fA-F]{2}$"
+          }
         },
         "platform": {
           "type": "string",

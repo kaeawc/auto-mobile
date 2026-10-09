@@ -6,6 +6,11 @@ enum OverlayDismissReason: String {
     case user
     /// A `dismiss_overlay` request.
     case agent
+    /// The last authenticated host connection closed (or an overlay was shown after that edge), so
+    /// a crashed daemon leaves no orphan. Same string as Android.
+    case disconnect
+    /// The idle TTL elapsed (`OverlayIdleTimer`). Same string as Android.
+    case ttl
 }
 
 /// One `overlay_event` push, before the wall-clock timestamp is attached.
@@ -62,6 +67,12 @@ struct OverlaySession {
 
     var isShown: Bool {
         spec != nil
+    }
+
+    /// The last event sequence issued for the shown overlay's id (0 before its first event), which
+    /// `get_overlay_status` reports so a host inspecting the agent can resume past it.
+    var lastSequence: Int {
+        spec.flatMap { sequences[$0.id] } ?? 0
     }
 
     /// A show of the overlay already on screen replaces it in place: its spec state is

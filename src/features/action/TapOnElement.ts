@@ -2263,17 +2263,28 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return consistent ? delta : undefined;
   }
 
+  /** Shared so each captured hierarchy is projected once across the focus-confirmation reads. */
+  private readonly focusProjection = new SearchableHierarchy();
+
+  /** Labels depend only on the (immutable) captured node, so each node is projected once. */
+  private readonly attachedFocusLabels = new WeakMap<object, string | undefined>();
+
   private attachedFocusLabel(element: Element): string | undefined {
     const source = getHierarchyNodeSource(element);
     if (!source) {
       return undefined;
     }
-    const labels = new SearchableHierarchy()
+    if (this.attachedFocusLabels.has(source)) {
+      return this.attachedFocusLabels.get(source);
+    }
+    const labels = this.focusProjection
       .project({ hierarchy: { node: source } })
       .filter((node) => node.parentIndex === 0 && !isFocusEditableElement(node.properties))
       .map((node) => node.textSources.text)
       .filter((text) => typeof text === "string" && text.trim().length > 0);
-    return labels.length ? labels.join("\n") : undefined;
+    const label = labels.length ? labels.join("\n") : undefined;
+    this.attachedFocusLabels.set(source, label);
+    return label;
   }
 
   private focusIdentitySignals(target: Element, candidate: Element, labelText?: string) {
@@ -2334,7 +2345,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return false;
     }
     const preNodes = preTapHierarchy
-      ? new SearchableHierarchy().project(resolveViewHierarchyForSearch(preTapHierarchy)!)
+      ? this.focusProjection.project(resolveViewHierarchyForSearch(preTapHierarchy)!)
       : [];
     const preFields = this.distinctFocusFields(
       preNodes.filter((node) => node.element && isFocusEditableElement(node.properties)),
@@ -2450,7 +2461,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     identifier: { key: FocusIdentifierKey; value: string },
     selectedIndex?: number,
   ): boolean {
-    const nodes = new SearchableHierarchy().project(hierarchy);
+    const nodes = this.focusProjection.project(hierarchy);
     const selected = this.findIndexedFocusSelection(
       options,
       hierarchy,
@@ -2549,7 +2560,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       candidate &&
       isFocusEditableElement(candidate) &&
       isElementKeyboardFocused(candidate) &&
-      this.isSameFocusTarget(target, candidate, new SearchableHierarchy().project(hierarchy)),
+      this.isSameFocusTarget(target, candidate, this.focusProjection.project(hierarchy)),
     );
   }
 
@@ -2571,7 +2582,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
     const searchHierarchy =
       resolveViewHierarchyForSearch(observation.viewHierarchy) ?? observation.viewHierarchy;
-    const nodes = new SearchableHierarchy().project(searchHierarchy);
+    const nodes = this.focusProjection.project(searchHierarchy);
     if (this.isFocusedInPreTapScope(target, nodes, labelText, preTapHierarchy)) {
       return true;
     }
@@ -2655,7 +2666,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (cached) {
       return cached;
     }
-    const projected = new SearchableHierarchy().project(
+    const projected = this.focusProjection.project(
       resolveViewHierarchyForSearch(hierarchy) ?? hierarchy,
     );
     this.preTapProjections.set(hierarchy, projected);

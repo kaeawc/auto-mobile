@@ -453,8 +453,8 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
     RESTARTS_LIVE_OWNER,
     async (schedule) =>
       (await noEarlyRelease(schedule)) ?? (await idleReleasedDespiteHeartbeats(schedule)),
-    16,
-    3,
+    24,
+    2,
   );
 
   propertyTests(

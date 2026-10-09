@@ -23,13 +23,22 @@ class KeyboardSessionTest {
   }
 
   @Test
-  fun `letter taps compose with gboard profile`() {
-    val fixture = Fixture("gboard")
+  fun `letter taps compose with samsung profile`() {
+    val fixture = Fixture("samsung")
     fixture.typeLetters("hi")
 
     assertEquals("hi", fixture.connection.editor.text)
     assertEquals(0, fixture.connection.editor.composingStart)
     assertEquals(2, fixture.connection.editor.composingEnd)
+  }
+
+  @Test
+  fun `letter taps commit per character with gboard profile`() {
+    val fixture = Fixture("gboard")
+    fixture.typeLetters("hi")
+
+    assertEquals("hi", fixture.connection.editor.text)
+    assertEquals(-1, fixture.connection.editor.composingStart)
   }
 
   @Test
@@ -69,7 +78,7 @@ class KeyboardSessionTest {
 
   @Test
   fun `automation finish commits the trailing composing word`() {
-    val fixture = Fixture("gboard")
+    val fixture = Fixture("samsung")
 
     assertTrue(fixture.session.typeForAutomation("hi", fixture.connection))
     assertEquals(0, fixture.connection.editor.composingStart)

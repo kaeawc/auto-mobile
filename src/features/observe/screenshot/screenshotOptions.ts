@@ -22,6 +22,15 @@ export interface ScreenshotEncodingOptions {
   lossless?: boolean;
 }
 
+/**
+ * Screenshot options an observe threads to its capture: the caller's encoding plus `hideOverlays`,
+ * set internally (never from tool input) for a `layer: "app"` observe on a device that can hide its
+ * own overlay for the capture (#9305).
+ */
+export interface ObserveScreenshotOptions extends ScreenshotEncodingOptions {
+  hideOverlays?: boolean;
+}
+
 export function validateScreenshotOptions(value: unknown): ScreenshotEncodingOptions {
   const parsed = screenshotOptionsSchema.safeParse(value);
   if (parsed.success) {

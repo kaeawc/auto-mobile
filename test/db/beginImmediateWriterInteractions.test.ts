@@ -58,7 +58,8 @@ describe("BEGIN IMMEDIATE with the read-then-write paths of the other db branche
     expect(deviceLocks).toBeGreaterThan(-1);
     expect(storage).toBe(deviceLocks + 1);
     expect(edgeCoverage).toBe(storage + 1);
-    expect(edgeCoverage).toBe(names.length - 1);
+    // Later migrations may follow; none may sort between or before the trio.
+    expect(names.slice(edgeCoverage + 1).every((name) => name > names[edgeCoverage]!)).toBe(true);
 
     const column = await sql<{ name: string }>`
       SELECT name FROM pragma_table_info('device_locks') WHERE name = 'device_identity'

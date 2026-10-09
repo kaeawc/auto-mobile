@@ -39,8 +39,18 @@ if [[ "$1" == "-s" && "$3" == "get-state" ]]; then
   printf '%s\n' "${FAKE_ADB_STATE:-device}"
   exit 0
 fi
+if [[ "$1" == "-s" && "$3 $4 $5" == "emu avd name" ]]; then
+  printf '%s\r\nOK\r\n' "${FAKE_AVD_NAME:-Pixel_9_API_36}"
+  exit 0
+fi
 exit 1
 EOF
+
+  mkdir -p "${FAKE}/avd/Pixel_9_API_36.avd"
+  printf '%s\n' 'AvdId=Pixel_9_API_36' 'hw.device.name = pixel_9' \
+    'image.sysdir.1=system-images/android-36/google_apis/arm64-v8a/' \
+    > "${FAKE}/avd/Pixel_9_API_36.avd/config.ini"
+  export ANDROID_AVD_HOME="${FAKE}/avd"
 
   cat > "${FAKE}/bun" <<'EOF'
 #!/usr/bin/env bash
@@ -143,6 +153,13 @@ printf '%s\n' "$$" > "${state}/proxy_pid"
 reply() {
   jq -cn --argjson id "$1" --argjson result "$2" '{jsonrpc: "2.0", id: $id, result: $result}'
 }
+# Bun on macOS never delivers stdin EOF for a named FIFO (#11073): model it by detecting one.
+stdin_is_fifo=0
+if lsof -a -p "$$" -d 0 -Fn 2> /dev/null | grep -q '^n/'; then
+  stdin_is_fifo=1
+fi
+printf '%s\n' "${stdin_is_fifo}" > "${FAKE}/stdin_is_fifo"
+trap 'exit 0' TERM
 while IFS= read -r line; do
   id="$(jq -r '.id // empty' <<< "${line}")"
   [[ -n "${id}" ]] || continue
@@ -152,11 +169,21 @@ while IFS= read -r line; do
     continue
   fi
   tool="$(jq -r '.params.name' <<< "${line}")"
+  # The owner of a lazily expired session is refused on its next call (#10964/#10979).
+  if [[ "${tool}" == observe ]]; then
+    observed="$(jq -r '.params.arguments.deviceId // empty' <<< "${line}")"
+    if [[ "${FAKE_REFUSE_WHILE_HELD:-0}" == 1 ||
+      (-n "${observed}" && ! -d "${state}/${observed}" && -f "${FAKE}/releases") ]]; then
+      jq -cn --argjson id "${id}" '{jsonrpc: "2.0", id: $id, result: {isError: true, content: [{type: "text", text: "{\"code\":\"no_active_device_session\",\"reason\":\"lazy-expiry\"}"}]}}'
+      continue
+    fi
+  fi
   printf '%s %s\n' "${tool}" "$(jq -c '.params.arguments' <<< "${line}")" >> "${FAKE}/tool.calls"
   target=""
   session_arg="$(jq -r '.params.arguments.sessionUuid // empty' <<< "${line}")"
   if [[ "${tool}" == getAndroid || "${tool}" == provisionDevice ]]; then
-    target="$(jq -r '.params.arguments.deviceId' <<< "${line}")"
+    # provisionDevice names the AVD, not the serial; the fake runs one emulator for it.
+    target="$(jq -r '.params.arguments.deviceId // "emulator-5560"' <<< "${line}")"
     mkdir -p "${state}/${target}"
     session_for "${target}" > "${state}/${target}/session"
     printf '%s\n' "$$" > "${state}/${target}/proxy_pid"
@@ -167,6 +194,10 @@ while IFS= read -r line; do
   elif [[ "${FAKE_SELECTOR_NOT_CREDITED:-0}" != 1 ]]; then
     target="$(jq -r '.params.arguments.deviceId // empty' <<< "${line}")"
   fi
+  # No read counts as activity (#10964); FAKE_READS_COUNT_AS_USE models the old daemon.
+  if [[ "${tool}" == observe && "${FAKE_READS_COUNT_AS_USE:-0}" != 1 ]]; then
+    target=""
+  fi
   if [[ -n "${target}" && -d "${state}/${target}" ]]; then
     # A tool call takes a millisecond of virtual time, so successive calls are distinguishable.
     printf '%s\n' "$(($(now) + 1))" > "${FAKE}/clock"
@@ -174,6 +205,9 @@ while IFS= read -r line; do
   fi
   reply "${id}" '{"content":[{"type":"text","text":"ok"}]}'
 done
+if [[ "${stdin_is_fifo}" == 1 ]]; then
+  while true; do command sleep 0.05; done
+fi
 EOF
 
   cat > "${FAKE}/nc" <<'EOF'
@@ -182,6 +216,10 @@ EOF
 printf '%s\n' "$*" >> "${FAKE}/nc.calls"
 IFS= read -r request || exit 0
 printf '%s\n' "${request}" >> "${FAKE}/nc.requests"
+if [[ "${request}" != *'"sessionUuid":"'* ]]; then
+  printf '%s\n' '{"id":"1","type":"error","success":false,"error":"observationStream requires an authenticated daemon session."}'
+  exit 0
+fi
 printf '%s\n' '{"id":"1","type":"subscription_response","success":true,"subscriptionId":"devicedatastream-1"}'
 if [[ "${FAKE_STREAM_ENDED:-0}" == 1 ]]; then
   printf '%s\n' '{"type":"device_session_ended","deviceId":"emulator-5560"}'
@@ -266,13 +304,14 @@ run_check() {
   [[ "${output}" == *"PASS idle"* ]]
   [[ "${output}" == *"PASS stdin-eof"* ]]
   [[ "${output}" == *"PASS selector"* ]]
+  [[ "${output}" == *"PASS observe-only"* ]]
   [[ "${output}" == *"PASS stream"* ]]
   # two-devices needs --second-serial and is not part of the default sweep.
   [[ "${output}" != *"two-devices"* ]]
 
   # Each scenario released the device the way it should.
   run cut -d' ' -f2 "${FAKE}/releases"
-  [ "${output}" = "$(printf 'owner-disconnected\nheartbeat-timeout\ncleanup-expired\nowner-disconnected\nowner-disconnected\ncleanup-expired')" ]
+  [ "${output}" = "$(printf 'owner-disconnected\nheartbeat-timeout\ncleanup-expired\nowner-disconnected\nowner-disconnected\ncleanup-expired\ncleanup-expired')" ]
 
   # A fully private daemon on the explicit port, with the short idle window.
   grep -qx "AUTOMOBILE_DAEMON_SOCKET_PATH=${WORK}/d.sock" "${FAKE}/daemon.env"
@@ -290,13 +329,15 @@ run_check() {
   run sort -u "${FAKE}/proxy.calls"
   [ "${output}" = "--port 3920 --strict-port" ]
 
-  # The device is acquired by serial and observed with the session the daemon reported.
+  # The device is acquired by serial and driven by control calls with the session the daemon
+  # reported; only the observe-only scenario reads.
   grep -qx 'getAndroid {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
-  grep -qx "observe {\"sessionUuid\":\"${SESSION_UUID}\"}" "${FAKE}/tool.calls"
+  grep -qx "homeScreen {\"sessionUuid\":\"${SESSION_UUID}\"}" "${FAKE}/tool.calls"
+  grep -qx 'observe {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
 
   # Ground truth and evidence for every scenario.
-  [ "$(grep -c 'get-state' "${FAKE}/adb.calls")" -eq 7 ]
-  for scenario in active no-heartbeat idle stdin-eof selector stream; do
+  [ "$(grep -c 'get-state' "${FAKE}/adb.calls")" -eq 8 ]
+  for scenario in active no-heartbeat idle stdin-eof selector observe-only stream; do
     [ -s "${EVIDENCE}/${scenario}.sessions.log" ]
   done
 }
@@ -341,11 +382,18 @@ run_check() {
   [ "${output}" = "owner-disconnected" ]
 }
 
+@test "stdin-eof: the proxy sees EOF on an anonymous pipe, not a FIFO, so stop does not wait" {
+  run_check --scenario stdin-eof
+  [ "${status}" -eq 0 ]
+  [ "$(cat "${FAKE}/stdin_is_fifo")" = 0 ]
+  [[ "${output}" != *"did not exit after stdin closed"* ]]
+}
+
 @test "selector: deviceId-only calls hold the device past the idle window" {
   run_check --scenario selector
   [ "${status}" -eq 0 ]
   [[ "${output}" == *"PASS selector"* ]]
-  grep -qx 'observe {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
+  grep -qx 'homeScreen {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
 }
 
 @test "selector: fails when deviceId-only calls are not credited to the session" {
@@ -354,11 +402,61 @@ run_check() {
   [[ "${output}" == *"FAIL selector"* ]]
 }
 
+@test "observe-only: an owner that only observes loses the device at the idle window" {
+  run_check --scenario observe-only
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS observe-only"* ]]
+  grep -qx 'observe {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
+  run cut -d' ' -f2 "${FAKE}/releases"
+  [ "${output}" = "cleanup-expired" ]
+}
+
+@test "observe-only: the owner's refusal after the release is the release signal" {
+  run_check --scenario observe-only
+  [ "${status}" -eq 0 ]
+  # The loop observed once more after the release and was refused, rather than dying.
+  [ "$(grep -c '^observe ' "${FAKE}/tool.calls")" -ge 2 ]
+  [[ "${output}" == *"PASS observe-only"* ]]
+}
+
+@test "observe-only: a refusal while the device is still held fails" {
+  FAKE_REFUSE_WHILE_HELD=1 run_check --scenario observe-only
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"refused with no_active_device_session while"* ]]
+}
+
+@test "observe-only: fails when a read counts as use" {
+  FAKE_READS_COUNT_AS_USE=1 run_check --scenario observe-only
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL observe-only"*"a read must not count as use"* ]]
+}
+
+@test "all: a failing scenario does not hide the scenarios after it" {
+  FAKE_SELECTOR_NOT_CREDITED=1 run_check --scenario all
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"PASS idle"* ]]
+  [[ "${output}" == *"FAIL selector"* ]]
+  [[ "${output}" == *"PASS stream"* ]]
+  [[ "${output}" == *"FAILED scenarios: selector"* ]]
+  [[ "${output}" != *"all requested scenarios passed"* ]]
+  grep -qx -- "--daemon stop --port 3920 --strict-port" "${FAKE}/daemon.calls"
+}
+
 @test "provision: a provisionDevice session is driven by deviceId and stays held" {
   run_check --scenario provision
   [ "${status}" -eq 0 ]
   [[ "${output}" == *"PASS provision"* ]]
-  grep -qx 'provisionDevice {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
+  # #11065: the exact-device schema, derived from the emulator's own AVD, with no operationId.
+  grep -qx 'provisionDevice {"device":{"platform":"android","name":"Pixel_9_API_36","spec":{"runtime":"system-images;android-36;google_apis;arm64-v8a","deviceType":"pixel_9"}}}' "${FAKE}/tool.calls"
+  run grep -q operationId "${FAKE}/tool.calls"
+  [ "${status}" -ne 0 ]
+}
+
+@test "provision: refuses when the emulator's AVD config cannot be found" {
+  FAKE_AVD_NAME=Missing_AVD run_check --scenario provision
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"no config.ini for AVD Missing_AVD"* ]]
+  [ ! -e "${FAKE}/tool.calls" ]
 }
 
 @test "stream: the subscription survives the idle release and frames are kept as evidence" {
@@ -366,6 +464,7 @@ run_check() {
   [ "${status}" -eq 0 ]
   [[ "${output}" == *"PASS stream"* ]]
   grep -q '"command":"subscribe"' "${FAKE}/nc.requests"
+  grep -q "\"sessionUuid\":\"${SESSION_UUID}\"" "${FAKE}/nc.requests"
   grep -q subscription_response "${EVIDENCE}/stream.stream.frames"
 }
 

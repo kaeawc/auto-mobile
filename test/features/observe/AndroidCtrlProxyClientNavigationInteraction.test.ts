@@ -182,6 +182,9 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
           windowLayer: 100,
         });
       }
+      // Restore the shared clock afterwards: a jump back (or ahead) would leave later
+      // tests with host sequence numbers the client treats as stale or out of window.
+      const clockBefore = timer.now();
       timer.setCurrentTime(1791181941935);
       const detector = spyOn(
         client.getHierarchyNavigationDetector(),
@@ -199,6 +202,7 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
         expect(build).toHaveBeenCalledWith(activeWindow.appId);
         expect(payload.packageName).toBe(""); // Input capture is not relabeled in place.
       } finally {
+        timer.setCurrentTime(clockBefore);
         detector.mockRestore();
         build.mockRestore();
         packages.mockRestore();

@@ -2310,9 +2310,12 @@ describe("DaemonManager status", () => {
     );
   }
 
-  test.each([undefined, "win32"] as const)(
-    "never unlinks the socket or PID file when the recorded PID is dead (platform %s)",
-    async (platformOverride) => {
+  test.each([
+    { label: "default", platformOverride: undefined },
+    { label: "win32", platformOverride: "win32" },
+  ] as const)(
+    "never unlinks the socket or PID file when the recorded PID is dead (platform $label)",
+    async ({ platformOverride }) => {
       const directory = mkdtempSync(join(tmpdir(), "daemon-manager-status-dead-pid-"));
       const pidFilePath = join(directory, "daemon.pid");
       const socketPath = join(directory, "daemon.sock");
@@ -2342,6 +2345,19 @@ describe("DaemonManager status", () => {
           undefined,
           undefined,
           platformOverride,
+          undefined,
+          undefined,
+          undefined,
+          {
+            socketExists: () => existsSync(socketPath),
+            readRecord: () => readPidFileDataSync(pidFilePath),
+            // The fixture socket is an ordinary file; a real connect would race
+            // the directory teardown below and surface as an unhandled ENOENT.
+            // A stale socket with no listener refuses the connection.
+            probe: async () => {
+              throw new Error(`connect ECONNREFUSED ${socketPath}`);
+            },
+          },
         );
 
         const status = await manager.status();
@@ -6181,6 +6197,24 @@ describe("Daemon manager process detection", () => {
         socketPath,
         processFinder,
         processSpawner,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        // The default probe would open a real client connection to the socket
+        // file; with a long macOS tmpdir path the connect fails synchronously and
+        // the auto-advancing FakeTimer can fire the connect timeout in the same
+        // tick, before the client's socket binding exists.
+        {
+          socketExists: () => existsSync(socketPath),
+          readRecord: () => readPidFileDataSync(pidFilePath),
+          probe: async () => ({ running: false }),
+        },
       );
 
       await manager.start();

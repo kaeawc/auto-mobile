@@ -11,6 +11,9 @@
         let query: String
         let sessionId: String?
         let mutationToken: String?
+        /// Set when the host classified the query as a read. The SDK then refuses any statement
+        /// `sqlite3_stmt_readonly` does not call read-only, so a host classifier gap cannot write (#10966).
+        let readOnly: Bool?
         /// How long the runner waits for this response. Optional: older runners do not send it.
         let relayTimeoutMs: Int?
 
@@ -19,12 +22,14 @@
             query: String,
             sessionId: String? = nil,
             mutationToken: String? = nil,
+            readOnly: Bool? = nil,
             relayTimeoutMs: Int? = nil
         ) {
             self.databasePath = databasePath
             self.query = query
             self.sessionId = sessionId
             self.mutationToken = mutationToken
+            self.readOnly = readOnly
             self.relayTimeoutMs = relayTimeoutMs
         }
 
@@ -34,6 +39,7 @@
             query = try container.decode(String.self, forKey: .query)
             sessionId = try container.decodeIfPresent(String.self, forKey: .sessionId)
             mutationToken = try container.decodeIfPresent(String.self, forKey: .mutationToken)
+            readOnly = try container.decodeIfPresent(Bool.self, forKey: .readOnly)
             relayTimeoutMs = try container.decodeIfPresent(Int.self, forKey: .relayTimeoutMs)
         }
     }
@@ -263,6 +269,9 @@
             }
             if classification.hasMultipleStatements {
                 return error(statusCode: 400, code: "multiple_statements_not_supported")
+            }
+            if request.readOnly == true && classification.requiresWriteConnection {
+                return error(statusCode: 403, code: "read_only_violation")
             }
             if classification.requiresWriteConnection
                 && !DatabaseInspector.shared.canMutate(

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeAvdManager } from "../../fakes/FakeAvdManager";
@@ -136,6 +138,63 @@ describe("Device Image Resources with Fakes", () => {
   });
 
   describe("createDeviceImageResourcesHandler", () => {
+    test("projects iOS per-model runtime compatibility from captured simctl output", async () => {
+      const fixtures = join(import.meta.dir, "../../fixtures/ios-simctl");
+      const runtimes = (
+        JSON.parse(readFileSync(join(fixtures, "list-runtimes.json"), "utf8")) as {
+          runtimes: AppleDeviceRuntime[];
+        }
+      ).runtimes.map((runtime) =>
+        runtime.version === "27.1" ? { ...runtime, isAvailable: false } : runtime,
+      );
+      const captured = (
+        JSON.parse(readFileSync(join(fixtures, "list-devicetypes.json"), "utf8")) as {
+          devicetypes: AppleDeviceType[];
+        }
+      ).devicetypes;
+      const malformed: AppleDeviceType = {
+        ...captured[0]!,
+        identifier: "synthetic.malformed",
+        name: "Malformed",
+        minRuntimeVersionString: "garbage",
+      };
+      fakeDeviceUtils.setDeviceImages("ios", []);
+      fakeSimCtl.setRuntimes(runtimes);
+      fakeSimCtl.setDeviceTypes([...captured, malformed]);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        simctl: fakeSimCtl,
+      });
+      const result = await handler.getDeviceImagesForPlatforms(["ios"]);
+      const byId = new Map(
+        result.provisioningCatalog.deviceTypes.map((entry) => [entry.id, entry]),
+      );
+      const compat = (id: string) =>
+        (byId.get(id) as { runtimeCompatibility?: unknown } | undefined)?.runtimeCompatibility;
+      const runtime = (version: string) =>
+        `com.apple.CoreSimulator.SimRuntime.iOS-${version.replace(".", "-")}`;
+
+      expect(compat("com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro")).toEqual({
+        knowledge: "known",
+        minRuntimeVersion: "26.0.0",
+        maxRuntimeVersion: null,
+        // 27.1 is installed but unavailable, so it is not offered as an alternative.
+        compatibleRuntimeIds: [runtime("26.2"), runtime("26.5"), runtime("27.0")],
+      });
+      expect(compat("com.apple.CoreSimulator.SimDeviceType.iPhone-8")).toEqual({
+        knowledge: "known",
+        minRuntimeVersion: "11.0.0",
+        maxRuntimeVersion: "16.9.0",
+        compatibleRuntimeIds: [runtime("16.4")],
+      });
+      expect(compat("synthetic.malformed")).toEqual({
+        knowledge: "unknown",
+        reason: expect.any(String),
+      });
+    });
+
     test("returns a normalized provisioning catalog for Android and iOS", async () => {
       fakeDeviceUtils.setDeviceImages("android", []);
       fakeDeviceUtils.setDeviceImages("ios", []);

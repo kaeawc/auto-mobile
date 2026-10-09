@@ -137,6 +137,33 @@ describe("#10702: the keeper stops after an idle release even when the notificat
     expect(heartbeatsFor("session-a")).toBe(afterWindow);
   });
 
+  // #10972: with the notification missed, the heartbeat's not-found answer carries the daemon's
+  // own release reason, and the agent sees that instead of the proxy's replay-lease-expired.
+  test("a missed idle-release notification surfaces the daemon's reason from the heartbeat answer", async () => {
+    await proxy.callTool("getAndroid", {});
+    await timer.advanceTimeAsync(INTERVAL_MS * 5);
+    releasedHeartbeatError = () =>
+      Object.assign(new Error(`Session not found: ${minted}`), {
+        code: DAEMON_SESSION_NOT_FOUND_CODE,
+        releaseReason: "cleanup-expired",
+        idle: true,
+      });
+    released.add("session-a");
+    await timer.advanceTimeAsync(INTERVAL_MS * 2);
+
+    const failure = await proxy.callTool("observe", { sessionUuid: "session-a" }).then(
+      () => undefined,
+      (error: unknown) => error as Error & { reason?: string },
+    );
+    expect(failure?.reason).toBe("cleanup-expired");
+    expect(failure?.message).toContain("Call getAndroid or getApple");
+    // Nothing was forwarded for the released session, and the keeper stopped.
+    expect(client.callToolCalls.map((call) => call.toolName)).toEqual(["getAndroid"]);
+    const afterLoss = heartbeatsFor("session-a");
+    await timer.advanceTimeAsync(INTERVAL_MS * 10);
+    expect(heartbeatsFor("session-a")).toBe(afterLoss);
+  });
+
   for (const delivery of ["notified", "missed"] as const) {
     test(`an explicit sessionUuid call after an idle release (${delivery}) is told to call getAndroid, which recovers the transport`, async () => {
       await proxy.callTool("getAndroid", {});

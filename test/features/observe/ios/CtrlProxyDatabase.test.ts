@@ -375,6 +375,24 @@ describe("CtrlProxyDatabase delegate outcomes", () => {
       expect(await promise).toEqual({ type: "mutation", rowsAffected: 4 });
     });
 
+    test("sends readOnly on the wire only when the host classified a read (#10966)", async () => {
+      const read = db.executeSQL("com.app", "/db/main.db", "SELECT 1", TIMEOUT, {
+        sessionId: "s",
+        mutationToken: "t",
+        readOnly: true,
+      });
+      await flush();
+      expect(h.sentMessages.at(-1)).toMatchObject({ type: "execute_sql", readOnly: true });
+      h.resolveLast({ success: true, totalTimeMs: 1, queryType: "query" });
+      await read;
+
+      const write = db.executeSQL("com.app", "/db/main.db", "DELETE FROM t", TIMEOUT);
+      await flush();
+      expect(h.sentMessages.at(-1)).not.toHaveProperty("readOnly");
+      h.resolveLast({ success: true, totalTimeMs: 1, queryType: "mutation" });
+      await write;
+    });
+
     test("defaults rowsAffected to 0 for a mutation that omits it", async () => {
       const promise = db.executeSQL("com.app", "/db/main.db", "DELETE FROM t", TIMEOUT);
       await flush();

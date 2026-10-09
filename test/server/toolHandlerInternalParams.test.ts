@@ -107,6 +107,15 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       ) {
         return;
       }
+      // The injected iOS agent's status reply, likewise not a tool argument.
+      if (
+        file === "overlayTools.ts" &&
+        receiver.type === "Identifier" &&
+        receiver.name === "iosAgentStatusSchema" &&
+        first?.type === "MemberExpression"
+      ) {
+        return;
+      }
       if (!first || first.type === "SpreadElement" || !isClean(first)) {
         offenders.push(`${file}:${source.slice(0, node.start).split("\n").length}`);
       }
@@ -216,7 +225,6 @@ describe("handler internal metadata regression guard", () => {
 
   test("provisionDevice argument seam strips full metadata and preserves session/deadline", () => {
     const args = Object.freeze({
-      operationId: "operation",
       device: {
         platform: "ios" as const,
         name: "Phone",
@@ -228,7 +236,6 @@ describe("handler internal metadata regression guard", () => {
       ...metadata,
     });
     expect(parseProvisionDeviceArgs(args)).toEqual({
-      operationId: args.operationId,
       device: args.device,
       boot: true,
       readiness: "automation",

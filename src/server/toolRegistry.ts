@@ -19,6 +19,7 @@ import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import {
   DeviceSessionManager,
   type ConnectedPlatformScan,
+  isScanAuthoritativeFor,
   type DeviceReadinessLevel,
 } from "../devices/DeviceSessionManager";
 import { ActionableError, BootedDevice, SomePlatform, type ViewHierarchyResult } from "../models";
@@ -41,7 +42,11 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { logger, type Logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import { PLAN_AUTO_RELEASE_REASON } from "../daemon/sessionManager";
+import {
+  PLAN_AUTO_RELEASE_REASON,
+  UnissuedSessionError,
+  type Session,
+} from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
 import { assertInputRequesterHoldsDevice, TOOL_CALL_REMEDY } from "../daemon/inputDeviceOwnership";
 import {
@@ -421,6 +426,8 @@ export interface RegisteredTool {
   transportRecovery?: ToolTransportRecovery;
   requiresDevice?: boolean;
   deviceAwareHandler?: DeviceAwareToolHandler;
+  /** The tool's `deviceReadOnly` classification for one argument set (#10969 read lane). */
+  isDeviceReadOnlyCall?: (args: unknown) => boolean;
   debugOnly?: boolean;
   hidden?: boolean;
   embeddedSdkOnly?: boolean;
@@ -429,6 +436,14 @@ export interface RegisteredTool {
   acceptsPlanLockNamespace?: boolean;
   outputSchema?: any;
   appUiResourceUri?: string;
+  /**
+   * A device-aware tool's read/control classification (#10965): true for a read, a per-args
+   * classifier for a mixed tool, absent for control. Enumerated by
+   * `test/lint/toolReadControlClassification.test.ts`. Only `true` (a read for every call) is
+   * advertised as `_meta["automobile/deviceReadOnly"]`, so a proxy can forward such reads without
+   * a session (#10971); a per-args tool (sqlQuery, keyboard, clipboard, ...) is not marked.
+   */
+  deviceReadOnly?: boolean | ((args: any) => boolean);
 }
 
 /**
@@ -705,6 +720,67 @@ function isDeviceReadOnlyCall(options: DeviceAwareToolOptions, args: unknown): b
     : options.deviceReadOnly === true;
 }
 
+/** Reads never require a session (#10970): an ambiguous read is asked for its deviceId. */
+function multipleDevicesError(
+  platform: BootedDevice["platform"],
+  readOnly: boolean,
+): ActionableError {
+  const selector = readOnly ? "deviceId" : "sessionUuid";
+  return new ActionableError(
+    platform === "ios"
+      ? `Multiple iOS simulators detected. Provide ${selector} to target a specific simulator.`
+      : `Multiple Android devices detected. Provide ${selector} to target a specific device.`,
+  );
+}
+
+/** {@link isDeviceHeld}, false outside daemon mode where no session can hold a device. */
+function isDeviceHeldInDaemon(deviceId: string): boolean {
+  return DaemonState.getInstance().isInitialized() && isDeviceHeld(deviceId);
+}
+
+/**
+ * The explicit deviceId of a call whose session holds a different device, in daemon mode
+ * (#10970). Undefined when the call names no device, has no session, or names its own.
+ */
+function foreignDeviceRead(
+  sessionUuid: string | undefined,
+  providedDeviceId: string | undefined,
+): string | undefined {
+  if (!sessionUuid || !providedDeviceId || !DaemonState.getInstance().isInitialized()) {
+    return undefined;
+  }
+  const assignedDevice = DaemonState.getInstance()
+    .getSessionManager()
+    .getSession(sessionUuid)?.assignedDevice;
+  return assignedDevice && assignedDevice !== providedDeviceId ? providedDeviceId : undefined;
+}
+
+/**
+ * Admit a read under its session without refreshing or claiming it (#10964): the live session, or
+ * null when the id names no live device session this daemon can route the read to (never issued,
+ * such as an IDE observer session (#10968), or not live) so the read runs sessionless. A terminal
+ * or suspect session keeps its typed error. Undefined when there is no daemon session manager.
+ */
+async function admitReadSession(
+  sessionUuid: string,
+  execution: { executionId: string; startTime: number } | undefined,
+): Promise<Session | null | undefined> {
+  if (!DaemonState.getInstance().isInitialized()) {
+    return undefined;
+  }
+  try {
+    const session = await DaemonState.getInstance()
+      .getSessionManager()
+      .admitIssuedSessionForAutomation(sessionUuid, execution, { access: "read-only" });
+    return session?.assignedDevice ? session : null;
+  } catch (error) {
+    if (error instanceof UnissuedSessionError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 /** A device another session holds: a live owner, or an autolock holder. */
 function isDeviceHeld(deviceId: string): boolean {
   const daemonState = DaemonState.getInstance();
@@ -712,6 +788,36 @@ function isDeviceHeld(deviceId: string): boolean {
     daemonState.getSessionManager().getSessionForDevice(deviceId) ??
     daemonState.getDevicePool().getDevice(deviceId)?.autolockSessionId,
   );
+}
+
+/**
+ * A deviceId-only call (no sessionUuid, no label) from the MCP connection that acquired the
+ * session holding that device runs as that session (#10994): admitted, readied and counted as use
+ * like a call naming it. The proxy omits the UUID for selector calls (#6807), so the daemon
+ * recognizes its holder by the forwarded connection id (`__mcpSessionId`, set only by the
+ * daemon's socket forward). Calls from any other connection keep the watcher/refusal paths.
+ */
+function adoptHolderConnectionSession(args: Record<string, unknown>): void {
+  if (
+    typeof args.deviceId !== "string" ||
+    args.sessionUuid !== undefined ||
+    args.device !== undefined ||
+    typeof args.__mcpSessionId !== "string" ||
+    !DaemonState.getInstance().isInitialized()
+  ) {
+    return;
+  }
+  const holderSessionUuid = DaemonState.getInstance()
+    .getDevicePool()
+    .resolveOwnedDeviceSessionForMcpSession(args.__mcpSessionId, args.deviceId);
+  if (!holderSessionUuid) {
+    return;
+  }
+  args.sessionUuid = holderSessionUuid;
+  if (typeof args.__executionId === "string") {
+    // Attribute the execution to the session: its end is use, and it vetoes release in flight.
+    executionTracker.setResolvedAutolockSessionUuid(args.__executionId, holderSessionUuid);
+  }
 }
 
 class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
@@ -725,6 +831,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     this.defaultDeviceRead = sessionlessDeviceReadFor(deviceReadAccess);
   }
   async resolveExecutionTarget(input: ExecutionTargetInput): Promise<ExecutionTargetContext> {
+    adoptHolderConnectionSession(input.args);
     if (
       input.options.sessionlessDeviceRead &&
       getToolSelectionContext()?.explicitObserveDeviceRead &&
@@ -748,7 +855,12 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     signal?.throwIfAborted();
     let connectedPlatformsPromise: Promise<ConnectedPlatformScan> | undefined;
     const getConnectedPlatforms = (): Promise<ConnectedPlatformScan> => {
-      connectedPlatformsPromise ??= deviceSessionManager.detectConnectedPlatformsWithStatus(signal);
+      connectedPlatformsPromise ??= deviceSessionManager.detectConnectedPlatformsWithStatus(
+        signal,
+        {
+          platform: args.platform,
+        },
+      );
       return connectedPlatformsPromise;
     };
     const shouldResolveDevice = options.shouldEnsureDevice
@@ -842,14 +954,15 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // that ToolRegistry selected.
         args.sessionUuid = sessionUuid;
       }
-      await this.enforceSessionUuidForMultipleDevices(
+      await this.enforceSessionUuidForMultipleDevices({
         platform,
         sessionUuid,
         providedDeviceId,
         deviceSessionManager,
         signal,
         getConnectedPlatforms,
-      );
+        readOnly: isDeviceReadOnlyCall(options, args),
+      });
       await this.enforceSessionUuidForAutolock({
         platform,
         sessionUuid,
@@ -862,6 +975,29 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
 
     const readOnly = isDeviceReadOnlyCall(options, args);
+    if (readOnly && execution) {
+      // A read is not use of the session it runs under, so it is never echoed as routed (#10974).
+      executionTracker.markDeviceReadCall(execution.executionId);
+    }
+    // A read is admitted read-only (#10964): it never refreshes or claims the session, and its end
+    // is not use. Only control calls extend a session's idle deadline.
+    const readSession =
+      readOnly && sessionUuid && shouldResolveDevice
+        ? await admitReadSession(sessionUuid, execution)
+        : undefined;
+    if (readSession === null) {
+      // Read-only access never requires a session (#10968): a read carrying an id that names no
+      // live device session (an IDE observer session) runs as a sessionless read.
+      logger.info(
+        `[ToolRegistry] ${name}: ${sessionUuid} is not a live device session; reading sessionlessly`,
+      );
+      sessionUuid = undefined;
+      delete args.sessionUuid;
+      if (options.sessionlessDeviceRead && providedDeviceId) {
+        // The same contract as a sessionless `observe {deviceId}`: no session, no readiness.
+        return resolveSessionlessDeviceRead(input, options.sessionlessDeviceRead, providedDeviceId);
+      }
+    }
     // A sessionless read-only call that would land on a held device watches it through the
     // read-only path: no readiness, pin or settings work on the holder's device (#10830).
     const watchedDeviceId = await this.heldDeviceToWatch({
@@ -878,6 +1014,20 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         input,
         options.sessionlessDeviceRead ?? this.defaultDeviceRead,
         watchedDeviceId,
+      );
+    }
+    // A read naming another device than its own session's watches that device (#10970): it is
+    // not this session's work, so it runs sessionless on the read-only device path.
+    const foreignReadDeviceId =
+      readOnly && shouldResolveDevice
+        ? foreignDeviceRead(sessionUuid, providedDeviceId)
+        : undefined;
+    if (foreignReadDeviceId) {
+      delete args.sessionUuid;
+      return resolveSessionlessDeviceRead(
+        input,
+        options.sessionlessDeviceRead ?? this.defaultDeviceRead,
+        foreignReadDeviceId,
       );
     }
 
@@ -897,12 +1047,11 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // A terminal ID keeps its durable TerminalSessionError. Only an ID that
       // was live during daemon restart can reach context creation without a
       // live session; never-issued IDs are rejected before assignment.
-      const admittedSession = await sessionManager.admitIssuedSessionForAutomation(
-        sessionUuid,
-        execution,
-      );
-      if (execution) {
-        // Only an admitted call's end is session use (#10824).
+      const admittedSession =
+        readSession ??
+        (await sessionManager.admitIssuedSessionForAutomation(sessionUuid, execution));
+      if (execution && !readSession) {
+        // Only an admitted control call's end is session use (#10824, #10964).
         executionTracker.markSessionAdmitted(execution.executionId);
       }
       assertSessionDeviceRouting(
@@ -1020,17 +1169,27 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // settings), so a call without a deviceId is checked against the device it would land
         // on first: a refused call leaves the holder's device untouched (#10828).
         let readinessTarget = providedDeviceId;
-        if (!providedDeviceId && !readOnly && DaemonState.getInstance().isInitialized()) {
+        if (!providedDeviceId && DaemonState.getInstance().isInitialized()) {
           readinessTarget = await predictReadinessTarget(
             platform,
             deviceSessionManager,
             getConnectedPlatforms,
           );
         }
+        // A sessionless read whose target a session acquired since the watch check above watches
+        // it instead: readiness would pin and configure the holder's device (#10970).
+        if (readOnly && !sessionUuid && readinessTarget && isDeviceHeldInDaemon(readinessTarget)) {
+          return resolveSessionlessDeviceRead(
+            input,
+            options.sessionlessDeviceRead ?? this.defaultDeviceRead,
+            readinessTarget,
+          );
+        }
         // Check and mark in one turn, before readiness: a session acquiring the target while
         // readiness runs cancels this call, and readiness stops at its next device step (#10905).
+        // A read is marked for its readiness phase only (#10970); once ready it watches.
         assertToolCallerHoldsDevice(name, readOnly, readinessTarget, sessionUuid, autolockEnabled);
-        if (readinessTarget && execution && !sessionUuid && !readOnly) {
+        if (readinessTarget && execution && !sessionUuid) {
           executionTracker.markSessionlessDeviceUse(execution.executionId, readinessTarget);
         }
         logger.info(
@@ -1046,8 +1205,9 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           signal,
           getConnectedPlatforms,
         });
-        if (readinessTarget && execution && readinessTarget !== device.deviceId) {
-          // Readiness settled elsewhere: the post-resolution check below marks that device.
+        if (readinessTarget && execution && (readOnly || readinessTarget !== device.deviceId)) {
+          // Readiness settled elsewhere: the post-resolution check below marks that device. A read
+          // is unmarked once ready: watching is allowed on a held device.
           executionTracker.unmarkSessionlessDeviceUse(execution.executionId, readinessTarget);
         }
         // Discovery re-stamps observedAt; the serial/UDID stays stable until
@@ -1124,14 +1284,17 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     return target && isDeviceHeld(target) ? target : undefined;
   }
 
-  private async enforceSessionUuidForMultipleDevices(
-    platform: SomePlatform,
-    sessionUuid: string | undefined,
-    providedDeviceId: string | undefined,
-    deviceSessionManager: DeviceSessionManager,
-    signal: AbortSignal | undefined,
-    getConnectedPlatforms: () => Promise<ConnectedPlatformScan>,
-  ): Promise<void> {
+  private async enforceSessionUuidForMultipleDevices(input: {
+    platform: SomePlatform;
+    sessionUuid: string | undefined;
+    providedDeviceId: string | undefined;
+    deviceSessionManager: DeviceSessionManager;
+    signal: AbortSignal | undefined;
+    getConnectedPlatforms: () => Promise<ConnectedPlatformScan>;
+    readOnly: boolean;
+  }): Promise<void> {
+    const { platform, sessionUuid, providedDeviceId, deviceSessionManager, signal } = input;
+    const { getConnectedPlatforms } = input;
     if (sessionUuid || providedDeviceId) {
       return;
     }
@@ -1162,11 +1325,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return;
     }
 
-    throw new ActionableError(
-      candidatePlatform === "ios"
-        ? "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator."
-        : "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
-    );
+    throw multipleDevicesError(candidatePlatform, input.readOnly);
   }
 
   private hasActiveDeviceForNamedPlatform(
@@ -1192,7 +1351,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     ) {
       return explicitPin;
     }
-    if (scan.scanned[explicitPin.platform]) {
+    if (isScanAuthoritativeFor(scan, explicitPin)) {
       deviceSessionManager.clearExplicitDevicePin(explicitPin.deviceId);
       return undefined;
     }
@@ -2522,6 +2681,7 @@ export class ToolRegistryClass {
       transportRecovery,
       requiresDevice: true,
       deviceAwareHandler: handler,
+      isDeviceReadOnlyCall: (args) => isDeviceReadOnlyCall(options, args),
       debugOnly: options.debugOnly ?? false,
       embeddedSdkOnly: options.embeddedSdkOnly ?? false,
       planExecutable: options.planExecutable ?? false,
@@ -2530,6 +2690,7 @@ export class ToolRegistryClass {
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,
       appUiResourceUri: options.appUiResourceUri,
+      deviceReadOnly: options.deviceReadOnly,
     });
   }
 
@@ -2873,6 +3034,7 @@ export class ToolRegistryClass {
           "automobile/debugOnly"?: boolean;
           "automobile/embeddedSdkOnly"?: boolean;
           "automobile/planOnly"?: boolean;
+          "automobile/deviceReadOnly"?: boolean;
           ui?: { resourceUri: string };
         };
       } = {
@@ -2905,6 +3067,10 @@ export class ToolRegistryClass {
       }
       if (tool.embeddedSdkOnly) {
         definition._meta = { ...definition._meta, "automobile/embeddedSdkOnly": true };
+      }
+      // Read/control classification for the proxy (#10971) — additive; other clients ignore it.
+      if (tool.deviceReadOnly === true) {
+        definition._meta = { ...definition._meta, "automobile/deviceReadOnly": true };
       }
       // MCP Apps UI pointer (issue #4669) — additive; non-Apps hosts ignore it.
       if (tool.appUiResourceUri) {

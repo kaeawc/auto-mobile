@@ -1,0 +1,260 @@
+{
+  "devices" : {
+    "com.apple.CoreSimulator.SimRuntime.iOS-18-6" : [
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/BCC31307-1A19-4D67-A7F0-44FC98F78921\/data",
+        "dataPathSize" : 1495502848,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/BCC31307-1A19-4D67-A7F0-44FC98F78921",
+        "udid" : "BCC31307-1A19-4D67-A7F0-44FC98F78921",
+        "lastUsedAt" : "2026-09-30T18:11:20Z",
+        "isAvailable" : true,
+        "logPathSize" : 385024,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+        "state" : "Shutdown",
+        "name" : "MT iPhone 16 iOS18.6"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-1" : [
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/490BEBFF-5F82-43CF-B7BC-59AE24229520\/data",
+        "dataPathSize" : 3770527744,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/490BEBFF-5F82-43CF-B7BC-59AE24229520",
+        "udid" : "490BEBFF-5F82-43CF-B7BC-59AE24229520",
+        "lastUsedAt" : "2026-09-30T18:17:39Z",
+        "isAvailable" : true,
+        "logPathSize" : 475136,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+        "state" : "Shutdown",
+        "name" : "iPhone Duo"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/CC665AC6-D46E-48AB-B745-856472FEB7CF\/data",
+        "dataPathSize" : 9149800448,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/CC665AC6-D46E-48AB-B745-856472FEB7CF",
+        "udid" : "CC665AC6-D46E-48AB-B745-856472FEB7CF",
+        "lastUsedAt" : "2026-10-02T19:53:10Z",
+        "isAvailable" : true,
+        "logPathSize" : 425984,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+        "state" : "Shutdown",
+        "name" : "MT iPhone Duo 27.1"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-0" : [
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/2300914A-231E-4874-8F8A-40C3D2F1E24B\/data",
+        "dataPathSize" : 7380619264,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/2300914A-231E-4874-8F8A-40C3D2F1E24B",
+        "udid" : "2300914A-231E-4874-8F8A-40C3D2F1E24B",
+        "lastUsedAt" : "2026-10-04T15:26:48Z",
+        "isAvailable" : true,
+        "logPathSize" : 638976,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro",
+        "state" : "Shutdown",
+        "name" : "iPhone 18 Pro"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/03A113EE-2753-4644-B5E8-A7A11E537FE5\/data",
+        "dataPathSize" : 2472198144,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/03A113EE-2753-4644-B5E8-A7A11E537FE5",
+        "udid" : "03A113EE-2753-4644-B5E8-A7A11E537FE5",
+        "lastUsedAt" : "2026-10-09T00:47:59Z",
+        "isAvailable" : true,
+        "logPathSize" : 131072,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro",
+        "state" : "Shutdown",
+        "name" : "MT Acceptance iPhone"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/BD69B42F-155C-4077-AAD2-2EC3D42BD1FD\/data",
+        "dataPathSize" : 2471403520,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/BD69B42F-155C-4077-AAD2-2EC3D42BD1FD",
+        "udid" : "BD69B42F-155C-4077-AAD2-2EC3D42BD1FD",
+        "lastUsedAt" : "2026-10-02T07:47:28Z",
+        "isAvailable" : true,
+        "logPathSize" : 249856,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro",
+        "state" : "Shutdown",
+        "name" : "MT Acceptance iPhone"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E\/data",
+        "dataPathSize" : 8465899520,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E",
+        "udid" : "1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E",
+        "lastUsedAt" : "2026-10-02T20:16:57Z",
+        "isAvailable" : true,
+        "logPathSize" : 499712,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro",
+        "state" : "Shutdown",
+        "name" : "MT iPhone 18 Pro iOS 27.0"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/633F9001-5F68-487C-A198-F8F440D7E50A\/data",
+        "dataPathSize" : 18337792,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/633F9001-5F68-487C-A198-F8F440D7E50A",
+        "udid" : "633F9001-5F68-487C-A198-F8F440D7E50A",
+        "isAvailable" : true,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max",
+        "state" : "Shutdown",
+        "name" : "iPhone 18 Pro Max"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/F4A70747-619B-45C4-83CF-9AB1B6786C5B\/data",
+        "dataPathSize" : 18337792,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/F4A70747-619B-45C4-83CF-9AB1B6786C5B",
+        "udid" : "F4A70747-619B-45C4-83CF-9AB1B6786C5B",
+        "isAvailable" : true,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-17e",
+        "state" : "Shutdown",
+        "name" : "iPhone 17e"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/49B9E629-F719-4885-BA09-DD621F767AF9\/data",
+        "dataPathSize" : 18337792,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/49B9E629-F719-4885-BA09-DD621F767AF9",
+        "udid" : "49B9E629-F719-4885-BA09-DD621F767AF9",
+        "isAvailable" : true,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-Air",
+        "state" : "Shutdown",
+        "name" : "iPhone Air"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/DC2298C3-72D3-4E8D-9AD4-BE6036D6F1B2\/data",
+        "dataPathSize" : 2872287232,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/DC2298C3-72D3-4E8D-9AD4-BE6036D6F1B2",
+        "udid" : "DC2298C3-72D3-4E8D-9AD4-BE6036D6F1B2",
+        "lastUsedAt" : "2026-10-08T07:11:35Z",
+        "isAvailable" : true,
+        "logPathSize" : 397312,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        "state" : "Shutdown",
+        "name" : "iPhone 17"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/495C46C5-73B6-43E5-A37E-895D0545297C\/data",
+        "dataPathSize" : 18337792,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/495C46C5-73B6-43E5-A37E-895D0545297C",
+        "udid" : "495C46C5-73B6-43E5-A37E-895D0545297C",
+        "isAvailable" : true,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB",
+        "state" : "Shutdown",
+        "name" : "iPad Pro 13-inch (M5)"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/0A31D779-CC2F-437A-AC7B-36090B8FD1FE\/data",
+        "dataPathSize" : 4363034624,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/0A31D779-CC2F-437A-AC7B-36090B8FD1FE",
+        "udid" : "0A31D779-CC2F-437A-AC7B-36090B8FD1FE",
+        "lastUsedAt" : "2026-10-08T17:15:19Z",
+        "isAvailable" : true,
+        "logPathSize" : 385024,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-11-inch-M5-12GB",
+        "state" : "Shutdown",
+        "name" : "iPad Pro 11-inch (M5)"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/87EF3140-480D-42D3-8206-099CB0FFE317\/data",
+        "dataPathSize" : 18337792,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/87EF3140-480D-42D3-8206-099CB0FFE317",
+        "udid" : "87EF3140-480D-42D3-8206-099CB0FFE317",
+        "isAvailable" : true,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro",
+        "state" : "Shutdown",
+        "name" : "iPad mini (A17 Pro)"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/DF44EEFE-B974-4CEF-A284-1200DA742F5C\/data",
+        "dataPathSize" : 18337792,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/DF44EEFE-B974-4CEF-A284-1200DA742F5C",
+        "udid" : "DF44EEFE-B974-4CEF-A284-1200DA742F5C",
+        "isAvailable" : true,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPad-Air-13-inch-M4",
+        "state" : "Shutdown",
+        "name" : "iPad Air 13-inch (M4)"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/CEBD6FE5-1518-47CF-AAD9-8F3AF1691451\/data",
+        "dataPathSize" : 18337792,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/CEBD6FE5-1518-47CF-AAD9-8F3AF1691451",
+        "udid" : "CEBD6FE5-1518-47CF-AAD9-8F3AF1691451",
+        "isAvailable" : true,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M4",
+        "state" : "Shutdown",
+        "name" : "iPad Air 11-inch (M4)"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/C60DBF7D-463C-413C-AEC2-591F09B49BF6\/data",
+        "dataPathSize" : 18337792,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/C60DBF7D-463C-413C-AEC2-591F09B49BF6",
+        "udid" : "C60DBF7D-463C-413C-AEC2-591F09B49BF6",
+        "isAvailable" : true,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPad-A16",
+        "state" : "Shutdown",
+        "name" : "iPad (A16)"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-18-0" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-26-5" : [
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/740AB8F7-F5F4-4773-82C7-122269EE2D6E\/data",
+        "dataPathSize" : 4210663424,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/740AB8F7-F5F4-4773-82C7-122269EE2D6E",
+        "udid" : "740AB8F7-F5F4-4773-82C7-122269EE2D6E",
+        "lastUsedAt" : "2026-10-08T17:15:21Z",
+        "isAvailable" : true,
+        "logPathSize" : 663552,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        "state" : "Shutdown",
+        "name" : "Acceptance iPhone 17"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/4E8A6FF9-36EC-4529-BB2A-5C480EE3C06F\/data",
+        "dataPathSize" : 4158894080,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/4E8A6FF9-36EC-4529-BB2A-5C480EE3C06F",
+        "udid" : "4E8A6FF9-36EC-4529-BB2A-5C480EE3C06F",
+        "lastUsedAt" : "2026-10-02T16:10:34Z",
+        "isAvailable" : true,
+        "logPathSize" : 729088,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        "state" : "Shutdown",
+        "name" : "Acceptance iPhone 17"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/E67F903D-B40A-4829-B8A3-B5EA1007A6E4\/data",
+        "dataPathSize" : 3148419072,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/E67F903D-B40A-4829-B8A3-B5EA1007A6E4",
+        "udid" : "E67F903D-B40A-4829-B8A3-B5EA1007A6E4",
+        "lastUsedAt" : "2026-10-08T17:14:35Z",
+        "isAvailable" : true,
+        "logPathSize" : 512000,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        "state" : "Shutdown",
+        "name" : "MT iPhone 17"
+      },
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/DFBF2D27-6674-42EA-AFC4-AB702275D1D4\/data",
+        "dataPathSize" : 2765475840,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/DFBF2D27-6674-42EA-AFC4-AB702275D1D4",
+        "udid" : "DFBF2D27-6674-42EA-AFC4-AB702275D1D4",
+        "lastUsedAt" : "2026-10-07T14:46:36Z",
+        "isAvailable" : true,
+        "logPathSize" : 286720,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        "state" : "Shutdown",
+        "name" : "Overlay Proto iPhone 17"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-16-4" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-26-2" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-17-5" : [
+
+    ]
+  }
+}

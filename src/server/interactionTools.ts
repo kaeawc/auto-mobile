@@ -5,6 +5,7 @@ import { toActionableError } from "../models/ActionableError";
 import { nodeAttributes } from "../models/ViewHierarchyResult";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
+import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelectionContext";
 import { TapOnElement } from "../features/action/TapOnElement";
 import {
   LONG_PRESS_MIN_MS,
@@ -315,6 +316,13 @@ export const keyboardSchema = addDeviceTargetingToSchema(
     })
     .strict(),
 );
+
+/** Keyboard actions that change no UI (#10965): reads, allowed without holding the device. */
+const KEYBOARD_READ_ACTIONS: ReadonlySet<KeyboardArgs["action"]> = new Set([
+  "detect",
+  "listImes",
+  "listProfiles",
+]);
 
 export async function setKeyboardProfileForTool(
   device: BootedDevice,
@@ -1885,6 +1893,47 @@ export function resetHitTestObservationFactory(): void {
   hitTestObservationFactory = (device) => new RealObserveScreen(device);
 }
 
+type HitTestDeviceReader = Pick<RealObserveScreen, "executeDeviceRead">;
+let hitTestDeviceReadFactory: (device: BootedDevice, display?: string) => HitTestDeviceReader = (
+  device,
+  display,
+) => new RealObserveScreen(device, undefined, { display, deviceReadOnly: true });
+
+/** The observer-capture reader hitTest uses on the read-only device path (#10965). */
+export function setHitTestDeviceReadFactory(
+  factory: (device: BootedDevice, display?: string) => HitTestDeviceReader,
+): void {
+  hitTestDeviceReadFactory = factory;
+}
+
+export function resetHitTestDeviceReadFactory(): void {
+  hitTestDeviceReadFactory = (device, display) =>
+    new RealObserveScreen(device, undefined, { display, deviceReadOnly: true });
+}
+
+/**
+ * hitTest's observation. A watcher of a held device (the read-only device path) reads through the
+ * observer capture, connect-only, like `observe {deviceId}`; it never touches the holder's session
+ * pipeline or cache (#10965). Every other caller reads the session pipeline's cached-ok capture.
+ */
+async function readHitTestObservation(
+  device: BootedDevice,
+  display: string | undefined,
+  signal: AbortSignal | undefined,
+) {
+  if (isSessionlessDeviceRead()) {
+    return await hitTestDeviceReadFactory(device, display).executeDeviceRead(signal, "none");
+  }
+  return await hitTestObservationFactory(device).execute({
+    display,
+    freshness: "cached-ok",
+    skipScreenshot: true,
+    skipAccessibilityAudit: true,
+    skipPerformanceAudit: true,
+    skipRecompositionTracking: true,
+  });
+}
+
 const VISIBLE_HIERARCHY_TEXT_KEYS = new Set([
   "text",
   "label",
@@ -2267,15 +2316,13 @@ export async function tapAtHandler(
   return result.success ? response : { ...response, isError: true as const };
 }
 
-export async function hitTestHandler(device: BootedDevice, args: z.infer<typeof hitTestSchema>) {
-  const observation = await hitTestObservationFactory(device).execute({
-    display: args.display,
-    freshness: "cached-ok",
-    skipScreenshot: true,
-    skipAccessibilityAudit: true,
-    skipPerformanceAudit: true,
-    skipRecompositionTracking: true,
-  });
+export async function hitTestHandler(
+  device: BootedDevice,
+  args: z.infer<typeof hitTestSchema>,
+  _progress?: ProgressCallback,
+  signal?: AbortSignal,
+) {
+  const observation = await readHitTestObservation(device, args.display, signal);
   if (args.snapshotId) {
     const staleReason = snapshotReferences.staleReason(
       args.snapshotId,
@@ -3736,10 +3783,9 @@ export function registerInteractionTools() {
     "Preview hierarchy-bounds candidates at a platform-native screen point; no input is dispatched and the actual event recipient is unknown.",
     hitTestSchema,
     hitTestHandler,
-    // Not `deviceReadOnly`: its handler reads through the session observe pipeline and shared
-    // observation cache, not the observer capture the read-only device path needs (#10828,
-    // #10830). `observe` is the read-only watch.
-    { defaultEnabled: false },
+    // Dispatches no input: a read (#10965). On a held device it reads through the observer
+    // capture (`readHitTestObservation`), never the holder's session pipeline (#10828).
+    { defaultEnabled: false, deviceReadOnly: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3784,7 +3830,12 @@ export function registerInteractionTools() {
     "Open, close, detect, list/select installed Android IMEs, or switch the AutoMobile typing profile",
     keyboardSchema,
     keyboardHandler,
-    { defaultEnabled: true, outputSchema: keyboardResultSchema },
+    {
+      defaultEnabled: true,
+      outputSchema: keyboardResultSchema,
+      // detect, listImes and listProfiles change no UI: reads (#10965). The rest are control.
+      deviceReadOnly: (args: KeyboardArgs) => KEYBOARD_READ_ACTIONS.has(args.action),
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3826,6 +3877,7 @@ export function registerInteractionTools() {
     "Clipboard operations (copy/paste/clear/get)",
     clipboardSchema,
     clipboardHandler,
-    { defaultEnabled: false },
+    // get changes no UI: a read (#10965). copy, paste and clear are control.
+    { defaultEnabled: false, deviceReadOnly: (args: ClipboardArgs) => args.action === "get" },
   );
 }

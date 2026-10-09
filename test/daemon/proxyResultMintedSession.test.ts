@@ -12,6 +12,7 @@ import {
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { daemonHeartbeatHandler } from "../helpers/daemonHeartbeatHandler";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 
 // Issue #5689: `getAndroid` / `getApple` / `startDevice` mint a device session in
@@ -81,11 +82,7 @@ function acquiringClient(
     },
     toolResultFor: (toolName) =>
       toolName === acquisitionTool ? deviceStartResult(mintedIds[acquired - 1]) : undefined,
-    onCallDaemonMethod: (method, params) => {
-      if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
-        sessionManager.recordHeartbeat(params.sessionId);
-      }
-    },
+    onCallDaemonMethod: daemonHeartbeatHandler(sessionManager),
   });
   return { client, nextIndex: () => acquired };
 }

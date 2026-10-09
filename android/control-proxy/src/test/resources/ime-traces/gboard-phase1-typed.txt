@@ -1,0 +1,12 @@
+--------- beginning of main
+10-09 05:54:51.043  2936  2936 I DVIC    : plain #3 commitText('h',1)=true sel=1..1 comp=-1..-1 text=[h]
+10-09 05:54:51.486  2936  2936 I DVIC    : plain #4 commitText('e',1)=true sel=2..2 comp=-1..-1 text=[he]
+10-09 05:54:51.901  2936  2936 I DVIC    : plain #5 commitText('l',1)=true sel=3..3 comp=-1..-1 text=[hel]
+10-09 05:54:52.674  2936  2936 I DVIC    : plain #6 commitText('l',1)=true sel=4..4 comp=-1..-1 text=[hell]
+10-09 05:54:53.158  2936  2936 I DVIC    : plain #7 commitText('o',1)=true sel=5..5 comp=-1..-1 text=[hello]
+10-09 05:54:53.675  2936  2936 I DVIC    : plain #8 commitText(' ',1)=true sel=6..6 comp=-1..-1 text=[hello ]
+10-09 05:54:54.244  2936  2936 I DVIC    : plain #9 commitText('w',1)=true sel=7..7 comp=-1..-1 text=[hello w]
+10-09 05:54:54.768  2936  2936 I DVIC    : plain #10 commitText('o',1)=true sel=8..8 comp=-1..-1 text=[hello wo]
+10-09 05:54:55.382  2936  2936 I DVIC    : plain #11 commitText('r',1)=true sel=9..9 comp=-1..-1 text=[hello wor]
+10-09 05:54:56.035  2936  2936 I DVIC    : plain #12 commitText('l',1)=true sel=10..10 comp=-1..-1 text=[hello worl]
+10-09 05:54:57.236  2936  2936 I DVIC    : plain #13 commitText('d',1)=true sel=11..11 comp=-1..-1 text=[hello world]

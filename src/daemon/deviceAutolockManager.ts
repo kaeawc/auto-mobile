@@ -1,5 +1,8 @@
 import { captureAutolockPolicy } from "./deviceAutolockPolicy";
-import { InputDeviceOwnedError } from "./inputDeviceOwnership";
+import {
+  deviceAlreadyAssignedToAnotherSessionError,
+  InputDeviceOwnedError,
+} from "./inputDeviceOwnership";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { logger } from "../utils/logger";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
@@ -82,6 +85,15 @@ export interface DeviceAutolockPoolPort {
   getPooledSessionIdentity(device: PooledDevice): Session | undefined;
   getMcpSessionRecoveryDevice(client: string): PooledDevice | undefined;
   isAdbServerResetQuarantined(id: string): boolean;
+  /** Refuse a device another live daemon claims, like an explicit bind (#10980). */
+  assertNotClaimedByForeignDaemon(deviceId: string, platform: Platform): Promise<void>;
+  /** Publish this daemon's claim, rolling a fresh acquisition back when another daemon won. */
+  claimAcquiredDevice(
+    sessionId: string,
+    deviceId: string,
+    heldBefore: string | null,
+    platform: Platform,
+  ): Promise<void>;
 }
 
 /** Owns implicit MCP routing and exclusive autolock acquisition. Pool mutations stay on its injected port. */
@@ -139,7 +151,11 @@ export class DeviceAutolockManager {
     if (!(policy.autolockEnabled ?? captureAutolockPolicy(this.env))) {
       return undefined;
     }
-    return this.pool.withTargetDeviceDiscovery({
+    // Two daemons must never drive one device (#10980, #11071): check before assigning, then
+    // publish the claim or roll the acquisition back, as an explicit bind does.
+    await this.pool.assertNotClaimedByForeignDaemon(deviceId, platform);
+    const heldBefore = this.pool.getDevice(deviceId)?.sessionId ?? null;
+    const sessionId = await this.pool.withTargetDeviceDiscovery({
       deviceId,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
       unavailableMessage: this.unavailableMessage(deviceId),
@@ -159,6 +175,10 @@ export class DeviceAutolockManager {
           collectCancellationSettlement,
         }),
     });
+    if (sessionId) {
+      await this.pool.claimAcquiredDevice(sessionId, deviceId, heldBefore, platform);
+    }
+    return sessionId;
   }
 
   private async autolockDeviceExclusive({
@@ -429,10 +449,7 @@ export class DeviceAutolockManager {
       mcpSessionId &&
       this.mcpSessionAutolockMap.get(mcpSessionId) !== client.expectedSessionId
     ) {
-      throw new ActionableError(
-        `Device '${device.id}' is already assigned to another session. ` +
-          "Acquire a different device or wait for its owner to release it.",
-      );
+      throw deviceAlreadyAssignedToAnotherSessionError(device.id);
     }
     const session = device.sessionId
       ? this.pool.getSessionManager().getSession(device.sessionId)
@@ -441,10 +458,7 @@ export class DeviceAutolockManager {
       return undefined;
     }
     if (!this.isOwnedAutolockSession(device, session, mcpSessionId)) {
-      throw new ActionableError(
-        `Device '${device.id}' is already assigned to another session. ` +
-          "Acquire a different device or wait for its owner to release it.",
-      );
+      throw deviceAlreadyAssignedToAnotherSessionError(device.id);
     }
     return session;
   }

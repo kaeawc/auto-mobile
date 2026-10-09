@@ -59,8 +59,10 @@ final class OverlayMotionTests: XCTestCase {
 
     func testDisabledMotionIsInstantWhateverTheTransition() {
         let off = OverlayMotion(specMotion: "none", reduceMotion: false)
-        XCTAssertEqual(["fade", "expand", "slide", nil].map { off.visibility(transition: $0) },
-                       Array(repeating: .instant, count: 4))
+        XCTAssertEqual(
+            ["fade", "expand", "slide", nil].map { off.visibility(transition: $0) },
+            Array(repeating: .instant, count: 4)
+        )
     }
 
     func testSpecDecodesMotionTransitionAndDuration() throws {
@@ -91,7 +93,10 @@ final class OverlayMotionTests: XCTestCase {
         var (session, node) = try snackbar(durationMs: 2500)
         let clock = FakeClock()
         let timeouts = SnackbarTimeouts(clock: clock) { _ = session.closeModal($0) }
-        timeouts.sync(openModals: session.spec!.root.openModals(state: session.state, pages: session.pages))
+        try timeouts.sync(openModals: XCTUnwrap(session.spec).root.openModals(
+            state: session.state,
+            pages: session.pages
+        ))
         XCTAssertEqual(clock.live.map(\.delay), [2500])
         XCTAssertEqual(session.state["s"], .bool(true))
         clock.advance()
@@ -104,7 +109,10 @@ final class OverlayMotionTests: XCTestCase {
         let (session, _) = try snackbar(durationMs: nil)
         let clock = FakeClock()
         let timeouts = SnackbarTimeouts(clock: clock) { _ in }
-        timeouts.sync(openModals: session.spec!.root.openModals(state: session.state, pages: session.pages))
+        try timeouts.sync(openModals: XCTUnwrap(session.spec).root.openModals(
+            state: session.state,
+            pages: session.pages
+        ))
         XCTAssertTrue(clock.timers.isEmpty)
     }
 
@@ -113,7 +121,7 @@ final class OverlayMotionTests: XCTestCase {
         let clock = FakeClock()
         var closed = 0
         let timeouts = SnackbarTimeouts(clock: clock) { _ in closed += 1 }
-        let root = session.spec!.root
+        let root = try XCTUnwrap(session.spec).root
         timeouts.sync(openModals: root.openModals(state: session.state, pages: session.pages))
         timeouts.sync(openModals: root.openModals(state: ["s": .bool(false)], pages: [:]))
         XCTAssertEqual(clock.timers.map(\.cancelled), [true])
@@ -125,7 +133,7 @@ final class OverlayMotionTests: XCTestCase {
         let (session, _) = try snackbar(durationMs: 5000)
         let clock = FakeClock()
         let timeouts = SnackbarTimeouts(clock: clock) { _ in }
-        let open = session.spec!.root.openModals(state: session.state, pages: session.pages)
+        let open = try XCTUnwrap(session.spec).root.openModals(state: session.state, pages: session.pages)
         timeouts.sync(openModals: open)
         timeouts.sync(openModals: open)
         XCTAssertEqual(clock.timers.count, 1)
@@ -135,7 +143,7 @@ final class OverlayMotionTests: XCTestCase {
         let (session, _) = try snackbar(durationMs: 5000)
         let clock = FakeClock()
         let timeouts = SnackbarTimeouts(clock: clock) { _ in }
-        let root = session.spec!.root
+        let root = try XCTUnwrap(session.spec).root
         timeouts.sync(openModals: root.openModals(state: ["s": .bool(true)], pages: [:]))
         timeouts.sync(openModals: [])
         timeouts.sync(openModals: root.openModals(state: ["s": .bool(true)], pages: [:]))

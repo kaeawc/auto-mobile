@@ -96,10 +96,11 @@ else
   if [[ -z "${PREPUSH_IOS_SKIP_SWIFTLINT_VERSION_CHECK:-}" ]]; then
     require_pinned_swiftlint_version
   fi
-  # .swiftlint.yml marks force_unwrapping and force_try as errors, matching CI.
-  for swift_file in ${swift_files[@]+"${swift_files[@]}"}; do
-    swiftlint lint --config "${project_root}/.swiftlint.yml" "${swift_file}"
-  done
+  # CI (scripts/swiftlint/validate_swiftlint.sh) lints the WHOLE ios/ tree, not just the
+  # branch's diff, so a violation already on main (or in a file this branch did not touch)
+  # fails the PR's SwiftLint job. Lint the same tree here with the same config; error-severity
+  # rules (force_unwrapping, force_try, ...) make swiftlint exit non-zero.
+  swiftlint lint --config "${project_root}/.swiftlint.yml" --quiet "${project_root}/ios"
 fi
 
 echo "Checking iOS SDK public API baseline"

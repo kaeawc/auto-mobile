@@ -14,7 +14,7 @@ final class OverlayThemeTests: XCTestCase {
         try JSONDecoder().decode(OverlayTheme.self, from: Data(json.utf8))
     }
 
-    private func hex(_ value: String) -> OverlayRGBA { OverlayRGBA(hex: value)! }
+    private func hex(_ value: String) throws -> OverlayRGBA { try XCTUnwrap(OverlayRGBA(hex: value)) }
 
     func testThereAreThirtySixRolesAndEverySchemeCoversThem() {
         XCTAssertEqual(OverlayPalette.roleNames.count, 36)
@@ -25,12 +25,12 @@ final class OverlayThemeTests: XCTestCase {
         let spec = try fixture("theme-role-overrides.json")
         let palette = OverlayPalette.make(theme: spec.theme, systemDark: true)
         XCTAssertFalse(palette.dark, "mode light beats a dark device")
-        XCTAssertEqual(palette.color(role: "primary"), hex("#B3261E"))
-        XCTAssertEqual(palette.color(role: "surfaceContainer"), hex("#F3EDF7"))
+        try XCTAssertEqual(palette.color(role: "primary"), hex("#B3261E"))
+        try XCTAssertEqual(palette.color(role: "surfaceContainer"), hex("#F3EDF7"))
         // Not overridden: derived from the #6750A4 seed, so it is no longer the baseline value.
         XCTAssertNotEqual(palette.color(role: "secondary"), OverlayPalette.baselineLight["secondary"])
-        XCTAssertEqual(palette.resolve("surfaceContainer"), hex("#F3EDF7"))
-        XCTAssertEqual(palette.resolve("#112233"), hex("#112233"))
+        try XCTAssertEqual(palette.resolve("surfaceContainer"), hex("#F3EDF7"))
+        try XCTAssertEqual(palette.resolve("#112233"), hex("#112233"))
     }
 
     func testColourRoleFixtureNamesResolveFromTheBaselineThemeless() throws {
@@ -39,11 +39,11 @@ final class OverlayThemeTests: XCTestCase {
         let palette = OverlayPalette.make(theme: spec.theme, systemDark: false)
         XCTAssertFalse(palette.themed)
         let style = try XCTUnwrap(spec.root.style)
-        XCTAssertEqual(palette.resolve(style.background), hex("#F3EDF7"))
-        XCTAssertEqual(palette.resolve(style.border?.color), hex("#79747E"))
+        try XCTAssertEqual(palette.resolve(style.background), hex("#F3EDF7"))
+        try XCTAssertEqual(palette.resolve(style.border?.color), hex("#79747E"))
         let title = try XCTUnwrap(spec.root.children?.first?.style)
-        XCTAssertEqual(palette.resolve(title.color), hex("#FFFFFF"))
-        XCTAssertEqual(palette.resolve(title.background), hex("#FF6200EE"))
+        try XCTAssertEqual(palette.resolve(title.color), hex("#FFFFFF"))
+        try XCTAssertEqual(palette.resolve(title.background), hex("#FF6200EE"))
         XCTAssertNil(palette.resolve("notARole"))
         XCTAssertNil(palette.resolve(nil))
     }
@@ -73,7 +73,7 @@ final class OverlayThemeTests: XCTestCase {
             let primary = try XCTUnwrap(palette.color(role: "primary"))
             let surface = try XCTUnwrap(palette.color(role: "surface"))
             XCTAssertGreaterThanOrEqual(primary.contrast(with: surface), 3, "yellow seed, dark=\(dark)")
-            XCTAssertEqual(primary.hueAndSaturation.hue, hex("#FFEB3B").hueAndSaturation.hue, accuracy: 6)
+            try XCTAssertEqual(primary.hueAndSaturation.hue, hex("#FFEB3B").hueAndSaturation.hue, accuracy: 6)
         }
     }
 

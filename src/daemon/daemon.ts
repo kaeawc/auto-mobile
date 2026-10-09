@@ -3150,7 +3150,7 @@ export class Daemon {
       isStartupLeased: (id) => this.devicePool.isDeviceLeasedForAndroidStartup(id),
       isShutdownReserved: (id) => this.devicePool.isShutdownReservationHeld(id),
       discover,
-      getOfflineDeviceIds: (ids) => deviceManager.getAndroidOfflineDeviceIds(ids),
+      getOfflineDeviceIds: (ids) => this.getAndroidOfflineCanonicalIds(deviceManager, ids),
       isAdbReset: (ids, discovery) =>
         isProcessWideAdbServerReset(
           ids,
@@ -3216,15 +3216,7 @@ export class Daemon {
       bootedDeviceIds,
       candidatePlatforms,
     );
-    // A held USB+Wi-Fi phone is keyed by its USB serial; after an unplug its
-    // still-attached Wi-Fi alias may be listed offline/authorizing (#11133).
-    const aliasOwners = new Map(
-      [...missingAndroidCandidateIds].flatMap((deviceId) =>
-        this.devicePool
-          .getAndroidTransportAliases(deviceId)
-          .map((alias): [string, string] => [alias, deviceId]),
-      ),
-    );
+    const aliasOwners = this.androidAliasOwners(missingAndroidCandidateIds);
     try {
       const listedStates =
         missingAndroidCandidateIds.size > 0
@@ -3252,6 +3244,34 @@ export class Daemon {
       );
       return {};
     }
+  }
+
+  /**
+   * A held USB+Wi-Fi phone is keyed by its USB serial; after an unplug its
+   * still-attached Wi-Fi alias may be listed offline/authorizing. Map each
+   * known alias serial to the canonical id it speaks for (#11133).
+   */
+  private androidAliasOwners(deviceIds: Iterable<string>): Map<string, string> {
+    return new Map(
+      [...deviceIds].flatMap((deviceId) =>
+        this.devicePool
+          .getAndroidTransportAliases(deviceId)
+          .map((alias): [string, string] => [alias, deviceId]),
+      ),
+    );
+  }
+
+  /** Offline canonical ids, counting an offline alias serial as its canonical (#11133). */
+  private async getAndroidOfflineCanonicalIds(
+    deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidOfflineDeviceIds">,
+    deviceIds: Iterable<string>,
+  ): Promise<Set<string>> {
+    const ids = [...deviceIds];
+    const aliasOwners = this.androidAliasOwners(ids);
+    const offline = await deviceManager.getAndroidOfflineDeviceIds(
+      new Set([...ids, ...aliasOwners.keys()]),
+    );
+    return new Set([...offline].map((id) => aliasOwners.get(id) ?? id));
   }
 
   private findMissingAndroidCandidates(

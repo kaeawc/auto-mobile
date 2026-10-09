@@ -511,10 +511,13 @@ call_tool() {
 }
 
 # Through the running proxy, acquire `device` with `tool` (getAndroid or provisionDevice) and
-# set session_id/entry to the session holding it.
+# set session_id/entry to the session holding it. `arguments` defaults to {deviceId: device}.
 acquire_with() {
-  local tool="$1" device="$2"
-  call_tool "${tool}" "$(jq -cn --arg device "${device}" '{deviceId: $device}')" "${acquire_timeout_s}"
+  local tool="$1" device="$2" arguments="${3:-}"
+  if [[ -z "${arguments}" ]]; then
+    arguments="$(jq -cn --arg device "${device}" '{deviceId: $device}')"
+  fi
+  call_tool "${tool}" "${arguments}" "${acquire_timeout_s}"
   local attempts=0
   query_device_entry "${device}"
   while [[ -z "${entry}" ]] && ((attempts < 30)); do
@@ -729,10 +732,48 @@ scenario_observe_only() {
   finish_scenario
 }
 
+# Print the value of `key` in an AVD config.ini (plain key=value lines).
+avd_config_value() {
+  local config="$1" key="$2" line name
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    name="${line%%=*}"
+    name="${name%"${name##*[![:space:]]}"}"
+    if [[ "${line}" == *=* && "${name}" == "${key}" ]]; then
+      line="${line#*=}"
+      printf '%s\n' "${line#"${line%%[![:space:]]*}"}"
+      return 0
+    fi
+  done < "${config}"
+  return 1
+}
+
+# Set provision_args to provisionDevice arguments that adopt the emulator's own AVD
+# (device {platform, name, spec}; #11065 removed operationId). The exact AVD name comes from
+# the emulator console and the system image and device profile from that AVD's config.ini.
+provision_args=""
+set_provision_args() {
+  local avd_name config sysdir device_type
+  avd_name="$("${ADB}" -s "${serial}" emu avd name 2> /dev/null | sed -n '1s/\r$//p' || true)"
+  [[ -n "${avd_name}" ]] || die "could not read the AVD name of ${serial} (adb emu avd name)"
+  config="${ANDROID_AVD_HOME:-${HOME}/.android/avd}/${avd_name}.avd/config.ini"
+  [[ -f "${config}" ]] || die "no config.ini for AVD ${avd_name} at ${config}"
+  sysdir="$(avd_config_value "${config}" image.sysdir.1 || true)"
+  device_type="$(avd_config_value "${config}" hw.device.name || true)"
+  [[ -n "${sysdir}" ]] || die "${config} has no image.sysdir.1"
+  [[ -n "${device_type}" ]] || die "${config} has no hw.device.name"
+  # system-images/android-36/google_apis/arm64-v8a/ -> system-images;android-36;google_apis;arm64-v8a
+  sysdir="${sysdir%/}"
+  provision_args="$(jq -cn --arg name "${avd_name}" --arg runtime "${sysdir//\//;}" \
+    --arg deviceType "${device_type}" \
+    '{device: {platform: "android", name: $name, spec: {runtime: $runtime, deviceType: $deviceType}}}')"
+}
+
 scenario_provision() {
   current_scenario="provision"
+  set_provision_args
   start_proxy
-  acquire_with provisionDevice "${serial}"
+  acquire_with provisionDevice "${serial}" "${provision_args}"
   drive_selector_calls
   release_by_proxy_exit
   finish_scenario

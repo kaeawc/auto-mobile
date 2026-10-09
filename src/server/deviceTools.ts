@@ -31,7 +31,6 @@ import {
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { terminateColdBootProcess } from "../devices/coldBootProcessTermination";
-import { createHash } from "node:crypto";
 import { z } from "zod/v4";
 import { androidAvdConfigurationSchema } from "../models/AndroidAvdConfiguration";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
@@ -178,14 +177,7 @@ import {
 } from "../devices/exactDeviceProvisioning";
 import { MIN_AVD_RAM_MB } from "../utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../utils/android-cmdline-tools/AndroidSystemImageRuntime";
-import {
-  ProvisionDeviceOperationRepository,
-  ProvisionDeviceOperationFailedError,
-  ProvisionDeviceOperationInProgressError,
-  type ProvisionDeviceLifecycleOutcome,
-  type ProvisionDeviceOperationBeginResult,
-  type ProvisionDeviceOperationStore,
-} from "../db/provisionDeviceOperationRepository";
+import type { ProvisionDeviceLifecycleOutcome } from "../devices/provisionDeviceLifecycle";
 import {
   DeviceTeardownOperationRepository,
   type DeviceTeardownOperationStore,
@@ -284,7 +276,6 @@ const listDevicesOutputSchema = z.object({
 
 const provisionDeviceOutputSchema = z
   .object({
-    operationId: z.string(),
     device: provisionedDeviceSchema,
     requestedSpec: z.unknown(),
     resolvedSpec: z.unknown(),
@@ -653,7 +644,6 @@ const iosProvisionDeviceSpecSchema = z
 
 export const provisionDeviceSchema = z
   .object({
-    operationId: z.string().min(1).describe("Caller-generated idempotency key"),
     resources: deviceResourceConfigurationSchema
       .optional()
       .describe(
@@ -807,18 +797,7 @@ export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
 // lifecycle, while bounding the wait so a wedged platform command is actionable.
 export const DEVICE_SHUTDOWN_TIMEOUT_MS = 30_000;
 export const TEARDOWN_OPERATION_RESULT_TTL_MS = 5 * 60 * 1_000;
-// A live provisionDevice attempt can legitimately hold its operation row for as
-// long as its own timeoutMs budget allows, capped at MAX_DEVICE_READY_TIMEOUT_MS
-// (~14m50s). Give the stored row headroom beyond that ceiling so a still-live
-// attempt is never mistaken for abandoned while genuinely within its own
-// deadline, plus room afterward for idempotent replay before the row is pruned
-// (#6652).
-export const PROVISION_DEVICE_OPERATION_TTL_MS = MAX_DEVICE_READY_TIMEOUT_MS + 15 * 60 * 1_000;
-export const PROVISION_DEVICE_FINALIZATION_TTL_REFRESH_MS = Math.floor(
-  PROVISION_DEVICE_OPERATION_TTL_MS / 2,
-);
 export const PROVISION_DEVICE_SETTLEMENT_WAIT_MS = 5_000;
-export const PROVISION_DEVICE_TTL_REFRESH_WAIT_MS = 1_000;
 
 export async function waitForProvisionDeviceSettlement(
   operation: Promise<unknown>,
@@ -847,11 +826,6 @@ export async function waitForProvisionDeviceSettlement(
     throw error;
   }
 }
-
-// Terminal-but-retryable error code stamped on an operation row whose attempt
-// was rejected by an in-flight MCP session recovery. Distinct from a genuine
-// provisioning failure so the stored row says why the attempt never ran.
-export const PROVISION_DEVICE_SESSION_RECOVERY_ERROR_CODE = "session_recovery_in_progress";
 
 export function createToolErrorResponse(
   code: string,
@@ -910,7 +884,6 @@ export interface GetAppleArgs {
 }
 
 export interface ProvisionDeviceArgs {
-  operationId: string;
   device: {
     platform: "android" | "ios";
     name: string;
@@ -926,6 +899,8 @@ export interface ProvisionDeviceArgs {
   __mcpRequestTimeoutMs?: number;
   /** Daemon-provided absolute transport deadline. */
   __mcpRequestDeadlineMs?: number;
+  /** Daemon-generated key of this forwarded call; correlates a cancellation outcome. */
+  __mcpLiveDeadlineKey?: string;
 }
 
 export interface KillDeviceArgs {
@@ -1339,7 +1314,6 @@ export interface DeviceToolsDependencies {
     deviceManager: PlatformDeviceManager,
     deviceCreationGate: DeviceCreationGate,
   ) => ExactDeviceProvisioner;
-  provisionDeviceOperationStoreFactory: () => ProvisionDeviceOperationStore;
   teardownDeviceOperationStoreFactory: () => DeviceTeardownOperationStore;
   clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
   stopPerformanceMonitoring: (deviceId: string) => void;
@@ -1361,65 +1335,43 @@ export interface DeviceToolsDependencies {
 }
 
 /**
- * In-flight provisionDevice operations, keyed by idempotency key, so several
- * callers of the same operationId share one lifecycle. `waiters` counts the
- * callers still listening for the result: the shared `controller` is aborted
- * when the LAST of them detaches, because past that point the lifecycle would
- * otherwise keep booting a device and binding a session that no client owns.
- * A caller that detaches while others are still waiting only detaches itself.
+ * One in-flight provisionDevice request. Every call runs its own lifecycle;
+ * nothing is shared between callers (#11065). Concurrent requests for the same
+ * exact device are serialized by the device lifecycle lease and refused by the
+ * session-ownership checks, not coalesced. `controller` aborts the lifecycle
+ * when its caller goes away, so it never keeps booting a device and binding a
+ * session that no client owns.
  */
-export interface ActiveProvisionDeviceOperation {
-  fingerprint: string;
+export interface ActiveProvisionDeviceRequest {
   promise: Promise<Record<string, unknown>>;
   controller: AbortController;
-  waiters: number;
-  /** Last lifecycle recorded by the running attempt; feeds recovery evidence. */
-  lifecycleEvidence?: {
+  /** Last lifecycle recorded by the running request; feeds recovery evidence. */
+  lifecycleEvidence: {
     lifecycle?: ProvisionDeviceLifecycleOutcome;
-    /** False when `lifecycle` was noted in memory only and the operation row stays retryable. */
-    lifecycleDurable?: boolean;
-    /** Whether this operation created the device or adopted it; sticky once observed. */
-    ownership?: "created_by_operation" | "adopted";
+    /** Whether this request created the device or adopted it; sticky once observed. */
+    ownership?: "created_by_request" | "adopted";
   };
 }
 
-export const activeProvisionDeviceOperations = new Map<string, ActiveProvisionDeviceOperation>();
+export const activeProvisionDeviceRequests = new Set<ActiveProvisionDeviceRequest>();
 executionTracker.setActiveProvisionDeviceQuery({
-  hasActiveProvisionDeviceOperation: () => activeProvisionDeviceOperations.size > 0,
+  hasActiveProvisionDeviceOperation: () => activeProvisionDeviceRequests.size > 0,
 });
 
 /**
- * Detach one caller from a shared operation. Returns true when this was the
- * last waiter and the still-running lifecycle was therefore cancelled.
+ * Cancel a request whose caller went away. Returns false when its lifecycle
+ * had already settled, so there was nothing left to cancel.
  */
-export function releaseProvisionDeviceWaiter(
-  operationId: string,
-  operation: ActiveProvisionDeviceOperation,
+export function cancelProvisionDeviceRequest(
+  request: ActiveProvisionDeviceRequest,
   cancellationReason?: unknown,
 ): boolean {
-  operation.waiters -= 1;
-  if (operation.waiters > 0) {
+  if (!activeProvisionDeviceRequests.delete(request)) {
     return false;
   }
-  if (activeProvisionDeviceOperations.get(operationId) !== operation) {
-    // Already settled: its result is persisted and replayable, so there is
-    // nothing left to cancel.
-    return false;
-  }
-  // Retire the entry HERE, not when the abandoned promise finally settles: the
-  // caller is told `operationContinues: false`, so a retry arriving while the
-  // cancelled lifecycle is still unwinding must NOT join it (it would count as
-  // a waiter from zero and inherit the cancellation failure). Dropping the
-  // entry sends that retry through `executeProvisionDevice`, where the durable
-  // operation row is the authority on whether the prior attempt is still live.
-  // The settle handlers are identity-guarded, so this early delete is safe.
-  activeProvisionDeviceOperations.delete(operationId);
-  operation.controller.abort(
+  request.controller.abort(
     cancellationReason ??
-      new ActionableError(
-        `provisionDevice operation '${operationId}' was cancelled: every caller waiting for it ` +
-          "disconnected",
-      ),
+      new ActionableError("provisionDevice request was cancelled: its caller disconnected"),
   );
   return true;
 }
@@ -2290,7 +2242,6 @@ export type TeardownToolResponse =
 
 export interface ProvisionDeviceCleanup {
   status: "succeeded" | "failed";
-  operationId: string;
   target: TeardownDeviceArgs["target"];
   state?: string;
   failure?: {
@@ -2300,15 +2251,8 @@ export interface ProvisionDeviceCleanup {
   };
 }
 
-/**
- * Record a lifecycle outcome for the running attempt. `durable: false` updates
- * only the in-memory recovery evidence: a cancelled rollback keeps the
- * operation row retryable, but its response must still report what cleanup did.
- */
-export type RecordProvisionDeviceLifecycle = (
-  lifecycle: ProvisionDeviceLifecycleOutcome,
-  options?: { durable?: boolean },
-) => Promise<void>;
+/** Record a lifecycle outcome for the running request's recovery evidence. */
+export type RecordProvisionDeviceLifecycle = (lifecycle: ProvisionDeviceLifecycleOutcome) => void;
 
 const provisionDeviceLifecycleByError = new WeakMap<object, ProvisionDeviceLifecycleOutcome>();
 
@@ -2320,24 +2264,12 @@ export function attachProvisionDeviceLifecycle<T extends object>(
   return error;
 }
 
-function lifecycleForProvisionDeviceError(
+export function lifecycleForProvisionResponseError(
   error: unknown,
 ): ProvisionDeviceLifecycleOutcome | undefined {
   return typeof error === "object" && error !== null
     ? provisionDeviceLifecycleByError.get(error)
     : undefined;
-}
-
-export function lifecycleForProvisionResponseError(
-  error: unknown,
-): ProvisionDeviceLifecycleOutcome | undefined {
-  if (error instanceof ProvisionDeviceOperationFailedError) {
-    return error.lifecycle;
-  }
-  if (error instanceof ProvisionDeviceOperationInProgressError) {
-    return error.lifecycle;
-  }
-  return lifecycleForProvisionDeviceError(error);
 }
 
 export function lifecycleStateForCleanup(
@@ -2358,28 +2290,6 @@ export function lifecycleCleanupStatus(
     return "succeeded";
   }
   return cleanup.failure?.code === "mutation_settlement_timeout" ? "in_progress" : "failed";
-}
-
-type AdmittedProvisionDeviceOperation = Extract<
-  ProvisionDeviceOperationBeginResult,
-  { reconcileExistingConfiguration: boolean }
->;
-
-export function assertProvisionDeviceOperationAdmitted(
-  operation: ProvisionDeviceOperationBeginResult,
-  operationId: string,
-): asserts operation is AdmittedProvisionDeviceOperation {
-  if ("inProgress" in operation) {
-    throw new ProvisionDeviceOperationInProgressError(operationId, operation.lifecycle);
-  }
-  if ("failed" in operation) {
-    throw new ProvisionDeviceOperationFailedError(
-      operationId,
-      operation.errorCode,
-      operation.message,
-      operation.lifecycle,
-    );
-  }
 }
 
 export class ProvisionDeviceRollbackError extends ProvisionDeviceError {
@@ -3587,7 +3497,6 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
       exactDeviceProvisionerFactory: (deviceManager, deviceCreationGate) =>
         createDefaultExactDeviceProvisioner(deviceManager, deviceCreationGate),
-      provisionDeviceOperationStoreFactory: () => new ProvisionDeviceOperationRepository(),
       teardownDeviceOperationStoreFactory: () => new DeviceTeardownOperationRepository(),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       stopPerformanceMonitoring: (deviceId) => getPerformanceMonitor().stopMonitoring(deviceId),
@@ -3604,15 +3513,10 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
 function provisionDeviceDependencyOverrides(
   deps: Partial<DeviceToolsDependencies>,
   currentDeps: DeviceToolsDependencies,
-): Pick<
-  DeviceToolsDependencies,
-  "exactDeviceProvisionerFactory" | "provisionDeviceOperationStoreFactory"
-> {
+): Pick<DeviceToolsDependencies, "exactDeviceProvisionerFactory"> {
   return {
     exactDeviceProvisionerFactory:
       deps.exactDeviceProvisionerFactory ?? currentDeps.exactDeviceProvisionerFactory,
-    provisionDeviceOperationStoreFactory:
-      deps.provisionDeviceOperationStoreFactory ?? currentDeps.provisionDeviceOperationStoreFactory,
   };
 }
 
@@ -3690,7 +3594,7 @@ export function resetDeviceToolsDependencies(): void {
   deviceTeardownService?.dispose();
   deviceTeardownService = undefined;
   moduleDependencies = null;
-  activeProvisionDeviceOperations.clear();
+  activeProvisionDeviceRequests.clear();
 }
 
 export function describeStartDeviceRequest(args: StartDeviceArgs): string {
@@ -3712,26 +3616,11 @@ export function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
   );
 }
 
-// Exported for property-based testing: the idempotency-key fingerprint is the
-// contract that decides whether a reused operationId is the SAME request, so its
-// determinism and field sensitivity are worth exercising directly.
-export function provisionDeviceFingerprint(args: ProvisionDeviceArgs): string {
-  return createHash("sha256")
-    .update(
-      stableStringify({
-        device: args.device,
-        boot: args.boot,
-        readiness: args.readiness,
-        timeoutMs: args.timeoutMs,
-        ...(args.resources ? { resources: args.resources } : {}),
-      }),
-    )
-    .digest("hex");
-}
-
 export function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceArgs {
   const __mcpSessionId = input.__mcpSessionId;
   const __mcpRequestDeadlineMs = input.__mcpRequestDeadlineMs;
+  const __mcpLiveDeadlineKey =
+    typeof input.__mcpLiveDeadlineKey === "string" ? input.__mcpLiveDeadlineKey : undefined;
   const publicInput: Record<string, unknown> = { ...input };
   // `provisionDeviceSchema` is `.strict()`, so EVERY internal param the daemon
   // may inject has to go before re-parsing -- hence the canonical shared list
@@ -3746,6 +3635,7 @@ export function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionD
     readiness: parsed.readiness ?? "automation",
     __mcpSessionId,
     __mcpRequestDeadlineMs,
+    ...(__mcpLiveDeadlineKey ? { __mcpLiveDeadlineKey } : {}),
   };
 }
 
@@ -3776,13 +3666,6 @@ export function provisionDeviceTimeoutError(phase: string): ProvisionDeviceError
   );
 }
 
-export class FinalizedProvisionDeviceCompletionError extends Error {
-  constructor(readonly completionError: unknown) {
-    super(errorMessage(completionError));
-    this.name = "FinalizedProvisionDeviceCompletionError";
-  }
-}
-
 export async function runProvisionDeviceWithinDeadline<T>(
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
   totalDeadlineMs: number,
@@ -3799,26 +3682,6 @@ export async function runProvisionDeviceWithinDeadline<T>(
     operation,
     onPendingSettlement,
   );
-}
-
-export async function awaitProvisionDeviceOperationBegin<T>(
-  timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">,
-  totalDeadlineMs: number,
-  requestSignal: AbortSignal | undefined,
-  begin: Promise<T>,
-): Promise<T> {
-  const remainingMs = Math.floor(totalDeadlineMs - timer.now());
-  if (remainingMs <= 0) {
-    throw provisionDeviceTimeoutError("starting provision operation");
-  }
-  return await raceWithDeadline(begin, {
-    timer,
-    timeoutMs: remainingMs,
-    signal: requestSignal,
-    label: "starting provision operation",
-    relabelDefaultAbort: false,
-    timeoutError: () => provisionDeviceTimeoutError("starting provision operation"),
-  });
 }
 
 export async function runOperationWithinDeadline<T>(
@@ -3867,7 +3730,7 @@ export async function runOperationWithinDeadline<T>(
   }
 }
 
-export async function waitForSharedOperation<T>(
+export async function waitForProvisionDeviceRequest<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
 ): Promise<T> {
@@ -3881,14 +3744,14 @@ export async function waitForSharedOperation<T>(
   return await raceWithDeadline(promise, {
     timer: defaultTimer,
     signal,
-    label: "Shared provision operation",
+    label: "Provision device request",
     relabelDefaultAbort: false,
   });
 }
 
 /**
  * Distinguish "the caller went away" from a provisioning failure.
- * `waitForSharedOperation` rejects with the caller signal's own reason, which
+ * `waitForProvisionDeviceRequest` rejects with the caller signal's own reason, which
  * is a `DOMException(AbortError)` unless the caller supplied one.
  */
 export function isProvisionDeviceCallerAbort(
@@ -3910,8 +3773,7 @@ export function createProvisionDeviceResponse(result: Record<string, unknown>) {
     ...createStructuredToolResponse({
       message: `${device.platform} '${device.name}' provisioned (${result.lifecycleState})${resourceFailure ? "; requested resource configuration was not fully applied" : ""}`,
       ...result,
-      // `sessionId` remains the persisted daemon-internal handle for replay and
-      // recovery. Canonical readers use `runtime.session.sessionUuid` or this
+      // `sessionId` remains the daemon-internal session handle. Canonical readers use `runtime.session.sessionUuid` or this
       // `sessionId`; the former top-level `sessionUuid` alias was unused.
       ...(sessionId ? { sessionId } : {}),
       ...(resources ? { success: resources.success } : {}),
@@ -4749,19 +4611,13 @@ export function registerDeviceTools() {
     prepareDevice: acquisitionHandlers.prepareDevice,
     stripInternalAcquisitionParams: acquisitionHandlers.stripInternalAcquisitionParams,
   });
-  const {
-    startDeviceHandler,
-    bindBootedDeviceSession,
-    recordAcquiredSessionReadiness,
-    ensureCtrlProxyReady,
-  } = startDeviceHandlers;
+  const { startDeviceHandler, bindBootedDeviceSession, ensureCtrlProxyReady } = startDeviceHandlers;
   const { getAndroidHandler, getAppleHandler } = acquisitionHandlers;
 
   const { killDeviceHandler, executeDeleteDevice, deleteDeviceHandler } = createLifecycleHandlers();
 
   const provisionDeviceHandler = createProvisionDeviceHandler({
     bindBootedDeviceSession,
-    recordAcquiredSessionReadiness,
     ensureCtrlProxyReady,
     executeDeleteDevice,
   });

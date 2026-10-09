@@ -21853,11 +21853,6 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "operationId": {
-          "description": "Caller-generated idempotency key",
-          "type": "string",
-          "minLength": 1
-        },
         "resources": {
           "description": "Resource settings applied after boot and before automation readiness. Requires boot=true; omitted resources stay unchanged.",
           "type": "object",
@@ -22417,16 +22412,13 @@
           }
         }
       },
-      "required": ["operationId", "device"],
+      "required": ["device"],
       "additionalProperties": false
     },
     "outputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "operationId": {
-          "type": "string"
-        },
         "device": {
           "type": "object",
           "properties": {
@@ -23039,7 +23031,6 @@
         "timing": {}
       },
       "required": [
-        "operationId",
         "device",
         "requestedSpec",
         "resolvedSpec",

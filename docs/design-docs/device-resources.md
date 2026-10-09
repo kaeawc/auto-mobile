@@ -240,7 +240,7 @@ missing read paths report `unsupported` with a reason, and failed reads report
 observation sets `success: false` and lists the resource names in
 `observationContradictions`; unknown/unsupported observations do not add failures.
 Observation uses the mutation's same deadline and abort signal, including the
-readiness reserve during provisioning and fresh observation on replay. A non-abort
+readiness reserve during provisioning and fresh observation on a repeated call. A non-abort
 observation failure is logged and omits `observed`, preserving mutation results;
 cancellation still propagates through the existing tool failure handling.
 

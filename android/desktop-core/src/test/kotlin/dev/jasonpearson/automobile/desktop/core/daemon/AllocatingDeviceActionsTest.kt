@@ -102,14 +102,58 @@ class AllocatingDeviceActionsTest {
   }
 
   @Test
-  fun `take screenshot runs observe on the selected device, allocated first`() {
+  fun `take screenshot runs observe on the selected device without allocating or naming a session`() {
     provider().callTool("observe", screenshotObserveArguments("emulator-5554", "android"))
 
     val call = client.toolCalls.single()
     assertEquals("observe", call.name)
     assertEquals("emulator-5554", (call.arguments["deviceId"] as JsonPrimitive).content)
     assertEquals("android", (call.arguments["platform"] as JsonPrimitive).content)
-    assertEquals(listOf("emulator-5554@0"), allocations)
+    assertTrue(allocations.isEmpty())
+    assertNull(sessionOf(call))
+  }
+
+  private fun sql(query: String) = buildJsonObject {
+    put("deviceId", "emulator-5554")
+    put("databasePath", "app.db")
+    put("query", query)
+  }
+
+  @Test
+  fun `a SELECT query only watches`() {
+    listOf("SELECT * FROM t", "  -- c\n select 1;", "WITH a AS (SELECT 1) SELECT * FROM a")
+      .forEach {
+        provider().callTool("sqlQuery", sql(it))
+      }
+
+    assertTrue(allocations.isEmpty())
+    assertTrue(client.toolCalls.all { sessionOf(it) == null })
+  }
+
+  @Test
+  fun `write and unrecognized queries allocate first and run as the desktop session`() {
+    listOf(
+        "INSERT INTO t VALUES (1)",
+        "UPDATE t SET a = 1",
+        "SELECT 1; DELETE FROM t",
+        "WITH a AS (SELECT 1) DELETE FROM t",
+        "PRAGMA user_version = 3",
+        "VACUUM",
+      )
+      .forEach { provider().callTool("sqlQuery", sql(it)) }
+
+    assertEquals(6, allocations.size)
+    assertTrue(client.toolCalls.all { sessionOf(it) == DESKTOP_SESSION })
+  }
+
+  @Test
+  fun `a refused allocation still drops a write query`() {
+    allowed = false
+
+    assertFailsWith<McpConnectionException> {
+      provider().callTool("sqlQuery", sql("DELETE FROM t"))
+    }
+    assertTrue(client.toolCalls.isEmpty())
   }
 
   @Test

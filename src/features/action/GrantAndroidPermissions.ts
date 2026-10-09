@@ -177,7 +177,7 @@ export class GrantAndroidPermissions {
         : {
             error:
               failedRequired.length > 0
-                ? `Failed step(s): ${failedRequired.map((f) => f.operationId).join(", ")}`
+                ? `Failed step(s): ${failedRequired.map((f) => f.stepId).join(", ")}`
                 : "One or more required Android permission changes failed",
           }),
     };
@@ -191,7 +191,7 @@ export class GrantAndroidPermissions {
     const trimmed = normalizeAndroidPermissionName(permission);
     const { packageName, action } = context;
     const item: GrantAndroidPermissionItemResult = {
-      operationId: `pm_${action}:${trimmed || "(empty)"}`,
+      stepId: `pm_${action}:${trimmed || "(empty)"}`,
       permission: trimmed || permission,
       success: false,
       countsTowardSuccess: true,
@@ -336,7 +336,7 @@ export class GrantAndroidPermissions {
         userId: 0,
         results: [
           {
-            operationId: "pm_reset_permissions",
+            stepId: "pm_reset_permissions",
             success: false,
             countsTowardSuccess: true,
             error: "Android reset is device-wide and does not support userId",
@@ -354,7 +354,7 @@ export class GrantAndroidPermissions {
         userId: 0,
         results: [
           {
-            operationId: "pm_reset_permissions",
+            stepId: "pm_reset_permissions",
             success: false,
             countsTowardSuccess: true,
             error:
@@ -388,7 +388,7 @@ export class GrantAndroidPermissions {
         userId: 0,
         results: [
           {
-            operationId: "pm_reset_permissions",
+            stepId: "pm_reset_permissions",
             success: true,
             countsTowardSuccess: true,
           },
@@ -403,7 +403,7 @@ export class GrantAndroidPermissions {
         userId: 0,
         results: [
           {
-            operationId: "pm_reset_permissions",
+            stepId: "pm_reset_permissions",
             success: false,
             countsTowardSuccess: true,
             error: message,

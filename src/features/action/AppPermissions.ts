@@ -96,7 +96,7 @@ export interface AppPermissionStateResult {
 }
 
 export interface AppPermissionOperationResult {
-  operationId: string;
+  stepId: string;
   success: boolean;
   changedCount: number;
   failedCount: number;
@@ -224,7 +224,7 @@ export class AppPermissions {
       changedCount: result.changedCount,
       failedCount: result.failedCount,
       operations: result.results.map((permissionResult) => ({
-        operationId: `ios_simctl_privacy:${action}:${permissionResult.permission}`,
+        stepId: `ios_simctl_privacy:${action}:${permissionResult.permission}`,
         success: permissionResult.success,
         changedCount: permissionResult.success ? 1 : 0,
         failedCount: permissionResult.success ? 0 : 1,
@@ -253,7 +253,7 @@ export class AppPermissions {
       changedCount: result.changedCount,
       failedCount: result.failedCount,
       operations: result.results.map((permissionResult) => ({
-        operationId: `ios_xcuitest_reset:${action}:${permissionResult.permission}`,
+        stepId: `ios_xcuitest_reset:${action}:${permissionResult.permission}`,
         success: permissionResult.success,
         changedCount: permissionResult.success ? 1 : 0,
         failedCount: permissionResult.success ? 0 : 1,
@@ -294,7 +294,7 @@ export class AppPermissions {
         (result) => result.countsTowardSuccess && !result.success && !result.skipped,
       ).length;
       operations.push({
-        operationId: `android_runtime_permissions:${action}`,
+        stepId: `android_runtime_permissions:${action}`,
         success: permissionResult.success,
         changedCount,
         failedCount,
@@ -309,7 +309,7 @@ export class AppPermissions {
 
     if (operations.length === 0) {
       operations.push({
-        operationId: "app_permissions:no_operation",
+        stepId: "app_permissions:no_operation",
         success: false,
         changedCount: 0,
         failedCount: 1,
@@ -331,7 +331,7 @@ export class AppPermissions {
       ...(failedOperations.length > 0
         ? {
             error: failedOperations
-              .map((operation) => operation.error ?? operation.operationId)
+              .map((operation) => operation.error ?? operation.stepId)
               .join("; "),
           }
         : {}),
@@ -351,7 +351,7 @@ export class AppPermissions {
         },
       );
       operations.push({
-        operationId: "android_notifications_enabled",
+        stepId: "android_notifications_enabled",
         success: result.success,
         changedCount: result.success ? 1 : 0,
         failedCount: result.success ? 0 : 1,
@@ -389,7 +389,7 @@ export class AppPermissions {
   ): AppPermissionOperationResult {
     const observedRequested = result.success && result.policyAccess.allowed === requested;
     return {
-      operationId: "android_notification_policy_access",
+      stepId: "android_notification_policy_access",
       success: result.success,
       changedCount: observedRequested ? 1 : 0,
       failedCount: result.success ? 0 : 1,
@@ -403,7 +403,7 @@ export class AppPermissions {
     result: AndroidDeviceShellToolResult,
   ): AppPermissionOperationResult {
     return {
-      operationId: "android_schedule_exact_alarm_appop",
+      stepId: "android_schedule_exact_alarm_appop",
       success: result.success,
       changedCount: result.success && !result.skipped ? 1 : 0,
       failedCount: result.success ? 0 : 1,

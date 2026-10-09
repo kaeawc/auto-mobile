@@ -106,7 +106,7 @@ describe("isError consistency (#6251)", () => {
           failedCount: 1,
           operations: [
             {
-              operationId: "android_runtime_permissions:grant",
+              stepId: "android_runtime_permissions:grant",
               success: false,
               changedCount: 0,
               failedCount: 1,
@@ -138,13 +138,13 @@ describe("isError consistency (#6251)", () => {
           failedCount: 1,
           operations: [
             {
-              operationId: "android_runtime_permissions:grant",
+              stepId: "android_runtime_permissions:grant",
               success: true,
               changedCount: 1,
               failedCount: 0,
             },
             {
-              operationId: "android_notifications_enabled",
+              stepId: "android_notifications_enabled",
               success: false,
               changedCount: 0,
               failedCount: 1,
@@ -179,7 +179,7 @@ describe("isError consistency (#6251)", () => {
           failedCount: 0,
           operations: [
             {
-              operationId: "android_runtime_permissions:grant",
+              stepId: "android_runtime_permissions:grant",
               success: true,
               changedCount: 1,
               failedCount: 0,

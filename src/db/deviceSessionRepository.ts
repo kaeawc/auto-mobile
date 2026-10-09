@@ -184,8 +184,7 @@ export class DeviceSessionRepository {
   }
 
   async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
-    // Mirrors `DeviceTeardownOperationRepository.begin()`'s
-    // `expires_at_ms <= now` pattern: a cheap, unconditional, indexed range
+    // A cheap, unconditional, indexed range
     // delete run before the write rather than gated behind amortization —
     // session starts are far less frequent than the amortized-per-insert
     // tables (#6464). Self-contained: a prune failure must never block a new

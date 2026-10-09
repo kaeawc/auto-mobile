@@ -33,10 +33,7 @@ import {
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
   teardownDeviceSchema,
-  teardownOperationFingerprint,
-  TEARDOWN_OPERATION_RESULT_TTL_MS,
 } from "../../src/server/deviceTools";
-import type { TeardownDeviceArgs } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import {
@@ -57,7 +54,6 @@ import type {
 } from "../../src/devices/deviceUtils";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
-import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
@@ -258,7 +254,6 @@ function request(
   isVirtual: true = true,
 ) {
   return {
-    operationId: "35e6f783-b794-47b8-b8a1-8619677820f0",
     target: {
       platform,
       isVirtual,
@@ -274,7 +269,6 @@ function request(
 describe("deleteDevice handler", () => {
   let manager: TeardownDeviceManager;
   let avdManager: FakeAvdManager;
-  let teardownOperationStore: FakeDeviceTeardownOperationStore;
   // What `emu avd name` answers for a serial whose discovered runtime name is
   // `Unknown (<serial>)`. undefined == the console did not answer, which leaves
   // the target unidentified: teardown refuses rather than acting on the pooled
@@ -292,7 +286,6 @@ describe("deleteDevice handler", () => {
     runtimeAvdNameProbeTimeouts = [];
     manager = new TeardownDeviceManager();
     avdManager = new FakeAvdManager();
-    teardownOperationStore = new FakeDeviceTeardownOperationStore();
     await setVideoRecordingManagerDependencies({
       videoRecorderService: {} as never,
       recordingRepository: {
@@ -309,7 +302,6 @@ describe("deleteDevice handler", () => {
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
-      teardownDeviceOperationStoreFactory: () => teardownOperationStore,
       timer: new FakeTimer(),
       resolveRunningAndroidAvdName: async (device, timeoutMs) => {
         runtimeAvdNameProbes.push(device.deviceId);
@@ -903,13 +895,13 @@ describe("deleteDevice handler", () => {
         timer.advanceTime(60_000);
       }
       const response = await outcome;
-      // A cancelled caller receives its own cancellation; reattach to the
-      // accepted operation to inspect the authoritative stop-phase failure.
-      const acceptedResponse = failure === "abort" ? await teardownTool().handler(args) : response;
-      expect(responseBody(acceptedResponse)).toMatchObject({
-        state: "failed",
-        failure: { phase: "stop" },
-      });
+      // A cancelled caller receives its own cancellation; the accepted operation keeps
+      // running and its failure releases the reservation (asserted below).
+      expect(responseBody(response)).toMatchObject(
+        failure === "abort"
+          ? { state: "failed", failure: { code: "operation_cancelled" } }
+          : { state: "failed", failure: { phase: "stop" } },
+      );
       for (let attempt = 0; attempt < 30; attempt++) {
         await Promise.resolve();
       }
@@ -918,7 +910,6 @@ describe("deleteDevice handler", () => {
       manager.getBootedDevicesDetailed = discover;
       const retry = {
         ...request("android", image.name),
-        operationId: "a172a14a-fd4d-416e-8c14-ff7c6c065bd2",
       };
       expect(responseBody(await teardownTool().handler(retry)).state).toBe("destroyed");
       expect(manager.destroyRequests).toHaveLength(1);
@@ -1406,7 +1397,6 @@ describe("deleteDevice handler", () => {
 
     const secondDeleteRequest = {
       ...request("android", image.name, image.name),
-      operationId: "4935e13f-86dd-4a3c-a811-85959ec715fb",
     };
     const secondDelete = await teardownTool().handler(secondDeleteRequest);
     expect(responseBody(secondDelete).state).toBe("destroyed");
@@ -1415,7 +1405,6 @@ describe("deleteDevice handler", () => {
 
     const repeatedRequest = {
       ...request("android", image.name, image.name),
-      operationId: "97592399-76d8-4c2c-b106-331004003f7b",
     };
     const repeated = await teardownTool().handler(repeatedRequest);
     expect(responseBody(repeated).state).toBe("already_absent");
@@ -1821,10 +1810,8 @@ describe("deleteDevice handler", () => {
 
     expect(body.state).toBe("destroyed");
     expect(avdManager.getListDeviceImagesCalls()).toHaveLength(3);
-    // No verification poll is left behind; only the terminal result's TTL may be.
-    expect(
-      timer.getPendingTimeouts().filter((ms) => ms !== TEARDOWN_OPERATION_RESULT_TTL_MS),
-    ).toEqual([]);
+    // No verification poll is left behind.
+    expect(timer.getPendingTimeouts()).toEqual([]);
     expect(await manager.getBootedDevices("android")).toEqual([]);
     expect(await manager.listDeviceImages("android")).toEqual([]);
   });
@@ -3924,7 +3911,6 @@ describe("deleteDevice handler", () => {
     await destroyStarted;
     const second = teardownTool().handler({
       ...request("ios", device.deviceId!, device.name),
-      operationId: "70e6f783-b794-47b8-b8a1-8619677820f0",
       timeoutMs: 10,
     });
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -3966,24 +3952,6 @@ describe("deleteDevice handler", () => {
     );
   });
 
-  test("replays a completed teardown operation without issuing another destructive command", async () => {
-    const device: DeviceInfo = {
-      platform: "ios",
-      name: "iPhone 16",
-      deviceId: "IOS-DEVICE-1",
-      isRunning: false,
-    };
-    manager.setDeviceImages("ios", [device]);
-    const args = request("ios", device.deviceId!, device.name);
-
-    const first = await teardownTool().handler(args);
-    const second = await teardownTool().handler(args);
-
-    expect(responseBody(first).state).toBe("destroyed");
-    expect(responseBody(second).state).toBe("destroyed");
-    expect(manager.destroyRequests).toHaveLength(1);
-  });
-
   test("keeps a shared teardown running when its initiating caller aborts", async () => {
     const device: DeviceInfo = {
       platform: "ios",
@@ -4016,39 +3984,7 @@ describe("deleteDevice handler", () => {
     expect(manager.destroyRequests).toHaveLength(1);
 
     releaseDestroy();
-    expect(responseBody(await second).state).toBe("destroyed");
-  });
-
-  test("rejects reuse of an operation ID with different teardown arguments", async () => {
-    const device: DeviceInfo = {
-      platform: "ios",
-      name: "iPhone 16",
-      deviceId: "IOS-DEVICE-1",
-      isRunning: false,
-    };
-    let releaseDestroy!: () => void;
-    const destroyStarted = new Promise<void>((resolve) => {
-      manager.destroyStarted = resolve;
-    });
-    manager.destroyGate = new Promise<void>((resolve) => {
-      releaseDestroy = resolve;
-    });
-    manager.setDeviceImages("ios", [device]);
-    const first = teardownTool().handler(request("ios", device.deviceId!, device.name));
-    await destroyStarted;
-
-    const conflict = await teardownTool().handler(request("ios", "IOS-DEVICE-2", "iPhone 17"));
-    const body = responseBody(conflict);
-
-    expect(body.state).toBe("failed");
-    expect(body.failure).toEqual(
-      expect.objectContaining({
-        code: "operation_id_conflict",
-        phase: "precondition",
-      }),
-    );
-    releaseDestroy();
-    await first;
+    expect(responseBody(await second).state).toBe("already_absent");
   });
 
   test("publishes a confirmed absent target without waiting for resource work", async () => {
@@ -4234,69 +4170,20 @@ describe("deleteDevice handler", () => {
   });
 });
 
-// The teardown idempotency key. A reused `operationId` is an idempotent replay
-// only when the request's fingerprint is byte-identical, so any NEW field in it
-// is a compatibility event: a teardown row written before the upgrade is still
-// within its five-minute TTL when the upgraded daemon comes back, and an
-// unforced retry that now serializes one extra field fails the exact-string
-// comparison in `DeviceTeardownOperationRepository.resolveExisting` and reports
-// `operation_id_conflict` instead of joining the original operation
-// ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
-describe("deleteDevice operation fingerprint", () => {
-  const base: TeardownDeviceArgs = {
-    operationId: "11111111-1111-4111-8111-111111111111",
-    target: {
-      platform: "android",
-      isVirtual: true,
-      stableId: "Pixel_8_API_35",
-      stableName: "Pixel_8_API_35",
-    },
-    mode: "destroy",
-    verifyAbsence: true,
-    timeoutMs: 120_000,
-  };
-
-  // The literal a pre-`force` daemon wrote. Asserting against the string, not
-  // against another call of the same function, is the point: a fingerprint that
-  // merely agrees with itself would still have broken every in-flight row.
-  const LEGACY_FINGERPRINT =
-    '{"mode":"destroy","target":{"isVirtual":true,"platform":"android",' +
-    '"stableId":"Pixel_8_API_35","stableName":"Pixel_8_API_35"},' +
-    '"timeoutMs":120000,"verifyAbsence":true}';
-
-  test("an unforced teardown keeps the pre-force fingerprint byte-for-byte", () => {
-    expect(teardownOperationFingerprint(base)).toBe(LEGACY_FINGERPRINT);
-  });
-
-  test("an explicit force:false is the same request as omitting it", () => {
-    expect(teardownOperationFingerprint({ ...base, force: false })).toBe(LEGACY_FINGERPRINT);
-  });
-
-  // `force` still has to be PART of the identity when it is set: a forced
-  // teardown drops identity checks a verified one runs, so replaying one as the
-  // other would silently upgrade the caller's request.
-  test("a forced teardown is a different request from an unforced one", () => {
-    const forced = teardownOperationFingerprint({ ...base, force: true });
-    expect(forced).not.toBe(LEGACY_FINGERPRINT);
-    expect(forced).toContain('"force":true');
-  });
-
-  test("two forced teardowns of the same target agree", () => {
-    expect(teardownOperationFingerprint({ ...base, force: true })).toBe(
-      teardownOperationFingerprint({ ...base, force: true }),
-    );
-  });
-});
-
 // `teardownDeviceSchema` is `.strict()`, so `force` is unsendable until the
 // schema declares it (#6864).
 describe("deleteDevice input schema", () => {
   const base = {
-    operationId: "35e6f783-b794-47b8-b8a1-8619677820f0",
     target: { platform: "android" as const, isVirtual: true as const, stableId: "Pixel_8_API_35" },
     mode: "destroy" as const,
     verifyAbsence: true as const,
   };
+
+  test("rejects the removed operationId", () => {
+    expect(() =>
+      teardownDeviceSchema.parse({ ...base, operationId: "35e6f783-b794-47b8-b8a1-8619677820f0" }),
+    ).toThrow();
+  });
 
   test("accepts force and defaults it to false when omitted", () => {
     expect(teardownDeviceSchema.parse({ ...base, force: true }).force).toBe(true);

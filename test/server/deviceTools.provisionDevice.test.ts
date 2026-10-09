@@ -37,7 +37,6 @@ import {
 } from "../../src/devices/exactDeviceProvisioning";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
-import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceResourceController } from "../fakes/FakeDeviceResourceController";
@@ -327,7 +326,6 @@ describe("provisionDevice handler", () => {
   let deviceManager: FakeDeviceUtils;
   let resourceObserver: FakeDeviceResourceObserver;
   let exactProvisioner: FakeExactDeviceProvisioner;
-  let teardownOperationStore: FakeDeviceTeardownOperationStore;
   let restorePipelineOverrides: (() => void) | undefined;
 
   const setup = async () => {
@@ -355,14 +353,12 @@ describe("provisionDevice handler", () => {
     };
     deviceManager = new FakeDeviceUtils();
     exactProvisioner = new FakeExactDeviceProvisioner();
-    teardownOperationStore = new FakeDeviceTeardownOperationStore();
     setDeviceToolsDependencies({
       env: autolockEnv,
       deviceResourceObserverFactory: () => resourceObserver,
       deviceManagerFactory: () => deviceManager,
       avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
       exactDeviceProvisionerFactory: () => exactProvisioner,
-      teardownDeviceOperationStoreFactory: () => teardownOperationStore,
       notifyResourcesChanged: async () => {},
       clearInstalledAppsForDevice: async () => {},
     });
@@ -3216,7 +3212,6 @@ describe("provisionDevice handler", () => {
       deviceManager.clearHistory();
 
       const teardown = teardownTool.handler({
-        operationId: "35e6f783-b794-47b8-b8a1-8619677820f0",
         target: {
           platform: "ios",
           isVirtual: true,

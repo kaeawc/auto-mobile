@@ -100,7 +100,6 @@ import {
   runOperationWithinDeadline,
   runProvisionDeviceWithinDeadline,
   StableDeviceTarget,
-  TEARDOWN_OPERATION_RESULT_TTL_MS,
   TeardownDeviceArgs,
   TeardownToolResponse,
   validatePooledDeviceMapping,
@@ -761,7 +760,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       return unresolvedProvisionCleanup(args, createdDevice, provisionFailure);
     }
     const cleanupArgs: TeardownDeviceArgs = {
-      operationId: deps.idGenerator.next(),
       target: {
         platform: createdDevice.platform,
         isVirtual: true,
@@ -796,7 +794,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     const cleanupService = new DeviceTeardownService({
       lifecycleCoordinator: deps.lifecycleCoordinator,
       timer: deps.timer,
-      resultTtlMs: TEARDOWN_OPERATION_RESULT_TTL_MS,
     });
     let lifecycleLeaseTransferred = false;
     try {
@@ -887,8 +884,6 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         }),
       );
     } finally {
-      // Rollback is not caller-replayable, so it must not retain operation state.
-      cleanupService.dispose();
       if (!lifecycleLeaseTransferred) {
         lifecycleLease?.release();
       }

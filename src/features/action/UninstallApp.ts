@@ -1,5 +1,5 @@
 import { isPackageInstalledForUser } from "../../utils/android-cmdline-tools/isPackageInstalledForUser";
-import { unsupportedPlatformError } from "../../models/ActionableError";
+import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   AdbClientFactory,
@@ -40,6 +40,11 @@ import {
   DefaultDeviceWindowCacheInvalidator,
   type DeviceWindowCacheInvalidator,
 } from "./TerminateApp";
+import { InspectPackageSigning } from "../observe/InspectPackageSigning";
+import { checkSigningIdentity, type PackageSigningInspector } from "./SigningIdentityGuard";
+import { SigningGuardError } from "../../models/SigningGuardError";
+import { withAndroidPackageMutationLock } from "../../utils/androidPackageMutationLock";
+import { normalizeSignerSet } from "../../utils/signingIdentity";
 
 const ANDROID_UNINSTALL_TIMEOUT_MS = 20_000;
 const ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS = 5_000;
@@ -50,6 +55,13 @@ export interface UninstallAppOptions {
   installedAppsRepository?: InstalledAppsStore;
   performanceTrackerFactory?: () => PerformanceTracker;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
+  signingInspector?: PackageSigningInspector;
+}
+
+/** Opt-in guard for Android uninstall; omitted means the historical unguarded behavior. */
+export interface UninstallGuardOptions {
+  /** Complete signer set (SHA-256 digests) the installed package must have. */
+  expectedSigningSha256: string[];
 }
 
 export class UninstallApp {
@@ -61,6 +73,7 @@ export class UninstallApp {
   private installedAppsRepository: InstalledAppsStore;
   private createPerformanceTracker: () => PerformanceTracker;
   private cacheInvalidator: DeviceWindowCacheInvalidator;
+  private signingInspectorOverride?: PackageSigningInspector;
 
   constructor(
     device: BootedDevice,
@@ -78,6 +91,14 @@ export class UninstallApp {
     this.createPerformanceTracker =
       options.performanceTrackerFactory ?? createGlobalPerformanceTracker;
     this.cacheInvalidator = options.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
+    this.signingInspectorOverride = options.signingInspector;
+  }
+
+  private get signingInspector(): PackageSigningInspector {
+    return (this.signingInspectorOverride ??= new InspectPackageSigning(
+      this.device,
+      this.adbFactory,
+    ));
   }
 
   /**
@@ -91,11 +112,12 @@ export class UninstallApp {
     keepData: boolean = false,
     userId?: number,
     signal?: AbortSignal,
+    guard?: UninstallGuardOptions,
   ): Promise<UninstallAppResult> {
     const nested = hasAmbientPerfTracker();
     const perf = nested ? getPerfTracker() : this.createPerformanceTracker();
     const result = await runWithNestedPerfTracker(perf, () =>
-      this.executeInner(packageName, keepData, userId, perf, signal),
+      this.executeInner(packageName, keepData, userId, perf, signal, guard),
     );
     if (!nested && perf.isEnabled()) {
       const timings = perf.getTimings();
@@ -112,6 +134,7 @@ export class UninstallApp {
     userId: number | undefined,
     perf: PerformanceTracker,
     signal?: AbortSignal,
+    guard?: UninstallGuardOptions,
   ): Promise<UninstallAppResult> {
     throwIfAborted(signal);
     perf.serial("uninstallApp");
@@ -130,10 +153,16 @@ export class UninstallApp {
 
     switch (this.device.platform) {
       case "ios":
+        if (guard) {
+          perf.end();
+          throw new ActionableError("expectedSigningSha256 is only supported for Android devices");
+        }
         return perf.track("iOSUninstall", () => this.executeiOS(packageName, signal));
       case "android":
         return perf.track("androidUninstall", () =>
-          this.executeAndroid(packageName, keepData, userId, signal),
+          withAndroidPackageMutationLock(this.device.deviceId, signal, () =>
+            this.executeAndroidGuarded(packageName, keepData, userId, signal, guard),
+          ),
         );
       default:
         perf.end();
@@ -264,6 +293,67 @@ export class UninstallApp {
   }
 
   /**
+   * Runs the Android uninstall and, when a signing guard was requested, confirms the removal
+   * with a fresh presence read so an unverifiable outcome is never reported as success.
+   */
+  private async executeAndroidGuarded(
+    packageName: string,
+    keepData: boolean,
+    userId: number | undefined,
+    signal: AbortSignal | undefined,
+    guard: UninstallGuardOptions | undefined,
+  ): Promise<UninstallAppResult> {
+    const outcome = await this.executeAndroid(packageName, keepData, userId, signal, guard);
+    if (!guard) {
+      return outcome;
+    }
+    // A guard that did not throw means the installed signers matched the expected set.
+    const result: UninstallAppResult = {
+      ...outcome,
+      signingGuard: { matchedSha256: normalizeSignerSet(guard.expectedSigningSha256) },
+    };
+    if (!result.success || !result.wasInstalled || result.userId === undefined) {
+      return result;
+    }
+    return this.confirmGuardedRemoval(result, result.userId, signal);
+  }
+
+  private async confirmGuardedRemoval(
+    result: UninstallAppResult,
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<UninstallAppResult> {
+    let removal: UninstallAppResult["removalVerification"];
+    try {
+      const inspection = await this.signingInspector.execute(result.packageName, {
+        userId,
+        signal,
+      });
+      removal = inspection.userId === userId ? inspection.presence : "unknown";
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(
+        `[UninstallApp] Post-uninstall presence read failed: ${errorMessage(error)}`,
+        error,
+      );
+      removal = "unknown";
+    }
+    if (removal === "absent") {
+      return { ...result, removalVerification: "absent" };
+    }
+    return {
+      ...result,
+      success: false,
+      removalVerification: removal,
+      error:
+        removal === "installed"
+          ? `${result.packageName} is still installed for user ${userId} after uninstall`
+          : `Uninstall of ${result.packageName} for user ${userId} ran but removal could not be ` +
+            `verified: a fresh package presence read was inconclusive`,
+    };
+  }
+
+  /**
    * Uninstall an Android app by package name
    * @param packageName - The package name to uninstall
    * @param keepData - Whether to keep app data
@@ -274,6 +364,7 @@ export class UninstallApp {
     keepData: boolean,
     userId?: number,
     signal?: AbortSignal,
+    guard?: UninstallGuardOptions,
   ): Promise<UninstallAppResult> {
     try {
       // Auto-detect target user if not specified
@@ -285,6 +376,10 @@ export class UninstallApp {
           signal,
         })
       ).userId;
+
+      if (guard) {
+        await this.requireExpectedSigning(packageName, targetUserId, guard, signal);
+      }
 
       const installed = await this.isInstalledForUser(packageName, targetUserId, undefined, signal);
 
@@ -351,6 +446,9 @@ export class UninstallApp {
       return this.successfulAndroidUninstall(packageName, keepData, targetUserId);
     } catch (error) {
       throwIfAborted(signal);
+      if (error instanceof SigningGuardError) {
+        throw error;
+      }
       logger.warn(`[UninstallApp] Android uninstall failed: ${errorMessage(error)}`);
       return {
         success: false,
@@ -359,6 +457,34 @@ export class UninstallApp {
         keepData,
         error: errorMessage(error),
       };
+    }
+  }
+
+  /** Refuses (typed error) unless the package is installed with exactly the expected signers. */
+  private async requireExpectedSigning(
+    packageName: string,
+    userId: number,
+    guard: UninstallGuardOptions,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const inspection = await checkSigningIdentity(
+      this.signingInspector,
+      packageName,
+      userId,
+      guard.expectedSigningSha256,
+      signal,
+    );
+    if (inspection.presence === "absent") {
+      throw new SigningGuardError(
+        "absent",
+        `${packageName} is not installed for user ${userId}, so the expected signing identity ` +
+          `cannot be confirmed`,
+        {
+          appId: packageName,
+          userId,
+          expectedSha256: normalizeSignerSet(guard.expectedSigningSha256),
+        },
+      );
     }
   }
 

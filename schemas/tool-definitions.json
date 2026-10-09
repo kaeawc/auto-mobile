@@ -2187,6 +2187,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -2313,6 +2314,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -3643,6 +3645,45 @@
     }
   },
   {
+    "name": "inspectPackageSigning",
+    "description": "Android: fresh read of one package's presence (installed/absent/unknown) for a user and its SHA-256 signing certificates (complete signer set, rotation history). Never cached.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "userId": {
+          "description": "Android user/profile to inspect; when omitted it is resolved and reported",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "installApp",
     "description": "Install app on device (.apk, .app, or .ipa)",
     "inputSchema": {
@@ -3652,6 +3693,20 @@
         "artifactPath": {
           "description": "App artifact path (.apk, .app, or .ipa)",
           "type": "string"
+        },
+        "expectedSigningSha256": {
+          "description": "Android: complete signer set (SHA-256 of every signing certificate) an already installed copy must have before it is replaced; any other signer set, or signers that cannot be read, refuses the install. See inspectPackageSigning.",
+          "minItems": 1,
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:[0-9a-fA-F]{2}:?){31}[0-9a-fA-F]{2}$"
+          }
+        },
+        "allowDestructiveRecovery": {
+          "description": "Android: false refuses the uninstall-and-reinstall recovery after INSTALL_FAILED_VERSION_DOWNGRADE (default true)",
+          "type": "boolean"
         },
         "platform": {
           "type": "string",
@@ -22246,6 +22301,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -29448,6 +29504,7 @@
             "hitTest",
             "homeScreen",
             "identifyInteractions",
+            "inspectPackageSigning",
             "installApp",
             "keyboard",
             "killDevice",
@@ -29540,6 +29597,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -38306,6 +38364,16 @@
         "keepData": {
           "description": "Keep app data after uninstall (Android only, default false)",
           "type": "boolean"
+        },
+        "expectedSigningSha256": {
+          "description": "Android: complete signer set (SHA-256 of every signing certificate) the installed package must have; a different signer set, absence, or signers that cannot be read refuses the uninstall, and removal is confirmed by a fresh presence read.",
+          "minItems": 1,
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(?:[0-9a-fA-F]{2}:?){31}[0-9a-fA-F]{2}$"
+          }
         },
         "platform": {
           "type": "string",

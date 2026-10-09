@@ -138,3 +138,5 @@ test/fixtures/ios/merger-pairs/*.json text eol=lf
 android/control-proxy/src/test/resources/ime-traces/*.txt text eol=lf
 test/fixtures/ios-sim-fleet/*.txt text eol=lf
 test/fixtures/ios-sim-fleet/*.json text eol=lf
+test/fixtures/android-apk-signing/*.b64 text eol=lf
+test/fixtures/android-apk-signing/*.txt text eol=lf

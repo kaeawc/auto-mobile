@@ -370,6 +370,9 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
     expect(resumedNotices(result)).toEqual([
       expect.objectContaining({ code: DAEMON_STALL_RESUMED_CODE, sessionUuid: "android-session" }),
     ]);
+    // The daemon that stalled answered the resume itself: no restart is reported (#11018).
+    expect(resumedNotices(result)[0]).not.toHaveProperty("daemonInstance");
+    expect(String(resumedNotices(result)[0].message)).toContain("nothing needs restarting");
     await advance(LEASE_MS * 5);
     expect(reaped).toEqual([]);
   });

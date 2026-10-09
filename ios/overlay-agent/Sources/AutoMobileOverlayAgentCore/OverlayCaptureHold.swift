@@ -6,6 +6,10 @@ import Foundation
 /// other: each `hide` returns its own token with its own deadline, and the window is shown again
 /// only once no token is left. The deadline is the safety net for a host that is cancelled between
 /// hide and restore. UIKit-free: the agent supplies timers, tests a clock.
+///
+/// Tokens start from a random per-process seed (#11018), so a host still holding a token from a
+/// previous agent process cannot release a live hold in a relaunched one: the stale token is
+/// unknown, `restore` answers `restored: false`, and the host treats that capture as unconfirmed.
 struct OverlayCaptureHold {
     static let defaultDeadlineMs = 1500
     /// Upper bound so a bad request cannot keep the overlay hidden for long. It must cover the
@@ -19,12 +23,30 @@ struct OverlayCaptureHold {
         let deadlineMs: Int
     }
 
+    /// Largest token seed. The host reads tokens as JSON numbers in JavaScript, which are exact
+    /// only up to 2^53 - 1, so seeds stay below 2^52 and leave 2^52 tokens of headroom; a full
+    /// 64-bit seed would round in the host and make every restore miss its hold.
+    static let maxTokenSeed = 1 << 52
+
+    /// A fresh seed from the system's cryptographically secure generator.
+    static func randomTokenSeed() -> Int {
+        var generator = SystemRandomNumberGenerator()
+        return randomTokenSeed(using: &generator)
+    }
+
+    static func randomTokenSeed(using generator: inout some RandomNumberGenerator) -> Int {
+        Int.random(in: 0 ..< maxTokenSeed, using: &generator)
+    }
+
     private let now: () -> TimeInterval
-    private var lastToken = 0
+    private var lastToken: Int
     private var deadlines: [Int: TimeInterval] = [:]
 
-    init(now: @escaping () -> TimeInterval) {
+    /// `tokenSeed` is the value the first token follows; tests inject it, the agent leaves the
+    /// random per-process default.
+    init(now: @escaping () -> TimeInterval, tokenSeed: Int = OverlayCaptureHold.randomTokenSeed()) {
         self.now = now
+        lastToken = tokenSeed
     }
 
     var isHiding: Bool {

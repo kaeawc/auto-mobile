@@ -85,7 +85,7 @@ for (const { path: sourcemapPath, options } of selectSourceMaps(
     const { map, trimmedCount } = optimizeSourceMap(JSON.parse(rawMap) as SourceMap, options);
     writeFileSync(sourcemapPath, JSON.stringify(map));
     console.log(
-      `✓ Minified sourcemap ${sourcemapPath} (trimmed ${trimmedCount} ${options.stripSources ? "embedded" : "dependency"} sources${options.stripSources ? "; removed sourcesContent" : ""})`,
+      `✓ Minified sourcemap ${sourcemapPath} (trimmed ${trimmedCount} ${options.stripSources ? "embedded" : "dependency"} sources${options.stripSources ? "; nulled sourcesContent" : ""})`,
     );
   } catch (error) {
     console.warn("Failed to optimize sourcemap:", error);

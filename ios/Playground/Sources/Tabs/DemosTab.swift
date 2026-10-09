@@ -1487,7 +1487,6 @@ struct NestedSelectionDemo: View {
     }
 }
 
-
 /// Fixture for verifying clipboard paste outcome reporting: a text field that
 /// rejects paste (Cmd+V is dropped), a secure field that accepts it but never
 /// exposes its value, and an ordinary field that accepts it.

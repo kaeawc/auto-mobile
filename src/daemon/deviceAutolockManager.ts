@@ -1,4 +1,6 @@
 import { captureAutolockPolicy } from "./deviceAutolockPolicy";
+import { InputDeviceOwnedError } from "./inputDeviceOwnership";
+import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { logger } from "../utils/logger";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
@@ -750,15 +752,22 @@ export class DeviceAutolockManager {
       return;
     }
 
-    if (device.autolockSessionId !== sessionUuid) {
-      throw new ActionableError(
-        `Device '${deviceId}' is locked to another session.\n` +
-          `Autolock is enabled, so tool calls must either come from the same MCP session ` +
-          `that called 'getAndroid' or 'getApple', or include the sessionUuid returned for this device.\n\n` +
-          `Options:\n` +
-          `  - Pass the sessionUuid from getAndroid or getApple that locked this device\n` +
-          `  - Use getAndroid or getApple to lock a different available device\n` +
-          `  - Wait for the idle timeout to release this device`,
+    // A derived `${base}:${label}` session counts as its base, as in the input/* ownership check.
+    const sessionManager = this.pool.getSessionManager();
+    const base = (uuid: string) =>
+      resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
+    if (!sessionUuid || base(device.autolockSessionId) !== base(sessionUuid)) {
+      // Typed (device_owned_by_other_session) so the JUnit runner's held-device wait and the CLI
+      // held-device hint recognize it (#10833).
+      throw new InputDeviceOwnedError(
+        "Tool call",
+        deviceId,
+        sessionUuid,
+        "autolock is enabled, so tool calls must either come from the same MCP session that " +
+          "called 'getAndroid' or 'getApple', or include the sessionUuid returned for this " +
+          "device. Options: pass the sessionUuid from getAndroid or getApple that locked this " +
+          "device; use getAndroid or getApple to lock a different available device; or wait for " +
+          "the idle timeout to release this device.",
       );
     }
   }

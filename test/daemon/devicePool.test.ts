@@ -5159,7 +5159,7 @@ describe("DevicePool", () => {
         });
         expect(devicePool.getDevice("emulator-new")?.autolockSessionId).toBe(sessionId);
         expect(() => devicePool.assertAutolockAccess("emulator-new", "next-owner")).toThrow(
-          "locked to another session",
+          "held by another session",
         );
       });
 

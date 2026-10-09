@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,6 +8,7 @@ import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { sendSocketRequest } from "./helpers/socketRequest";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
+import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { createExecResult } from "../../src/utils/execResult";
@@ -37,12 +38,15 @@ const iosDevice: BootedDevice = {
   platform: "ios",
 };
 
+/** The session holding each device, or none; mutated by the held-device tests (#10827). */
+const deviceHolders = new Map<string, string>();
+
 function createDaemonState() {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
       getSession: () => null,
-      getSessionForDevice: () => null,
+      getSessionForDevice: (deviceId: string) => deviceHolders.get(deviceId) ?? null,
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
     }),
@@ -134,6 +138,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
   });
 
   afterEach(async () => {
+    deviceHolders.clear();
     await server.close();
     AndroidCtrlProxyClient.getInstance = originalAndroidGetInstance;
     IOSCtrlProxyClient.getInstance = originalIosGetInstance;
@@ -331,6 +336,95 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
   // disabled on the app, the Android routes must fall back to the same direct-file
   // `adb shell run-as` XML edit the MCP tools use — otherwise the pane can read but not
   // write/delete/clear. iOS has no on-device XML fallback and must never attempt one.
+  describe("held-device ownership on mutating ide/* routes (#10827)", () => {
+    const kvParams = {
+      deviceId: androidDevice.deviceId,
+      appId: "com.example.app",
+      fileName: "prefs",
+      key: "theme",
+      value: "dark",
+      type: "STRING",
+    };
+    const kvRoutes = ["ide/setKeyValue", "ide/removeKeyValue", "ide/clearKeyValueFile"];
+
+    test("the holder's edit passes", async () => {
+      deviceHolders.set(androidDevice.deviceId, "agent-session");
+      const response = await sendRequest(socketPath, "ide/setKeyValue", {
+        ...kvParams,
+        sessionUuid: "agent-session",
+      });
+      expect(response.success).toBe(true);
+      expect(androidSetPreference).toHaveBeenCalledTimes(1);
+    });
+
+    for (const route of kvRoutes) {
+      test(`${route} from a foreign or sessionless client is refused with the typed code`, async () => {
+        deviceHolders.set(androidDevice.deviceId, "agent-session");
+        const foreign = await sendRequest(socketPath, route, {
+          ...kvParams,
+          sessionUuid: "someone-else",
+        });
+        const sessionless = await sendRequest(socketPath, route, kvParams);
+        for (const response of [foreign, sessionless]) {
+          expect(response.success).toBe(false);
+          expect((response as { code?: string }).code).toBe("device_owned_by_other_session");
+        }
+        expect(androidSetPreference).not.toHaveBeenCalled();
+        expect(androidRemovePreference).not.toHaveBeenCalled();
+        expect(androidClearPreferenceStore).not.toHaveBeenCalled();
+      });
+    }
+
+    test("an unheld device still accepts a sessionless edit", async () => {
+      const response = await sendRequest(socketPath, "ide/setKeyValue", kvParams);
+      expect(response.success).toBe(true);
+    });
+
+    describe("ide/updateService", () => {
+      let ensure: ReturnType<typeof mock>;
+      let managerSpy: ReturnType<typeof spyOn>;
+
+      beforeEach(() => {
+        ensure = mock(async () => ({ status: "compatible" }));
+        managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
+          ensureCompatibleVersion: ensure,
+        } as never);
+      });
+
+      afterEach(() => {
+        managerSpy.mockRestore();
+      });
+
+      const params = { deviceId: androidDevice.deviceId, platform: "android" };
+
+      test("is refused for a non-owner and never reaches the manager", async () => {
+        deviceHolders.set(androidDevice.deviceId, "agent-session");
+        const response = await sendRequest(socketPath, "ide/updateService", {
+          ...params,
+          sessionUuid: "someone-else",
+        });
+        expect(response.success).toBe(false);
+        expect((response as { code?: string }).code).toBe("device_owned_by_other_session");
+        expect(ensure).not.toHaveBeenCalled();
+      });
+
+      test("is allowed for the holder and with force", async () => {
+        deviceHolders.set(androidDevice.deviceId, "agent-session");
+        const holder = await sendRequest(socketPath, "ide/updateService", {
+          ...params,
+          sessionUuid: "agent-session",
+        });
+        const forced = await sendRequest(socketPath, "ide/updateService", {
+          ...params,
+          force: true,
+        });
+        expect(holder.success).toBe(true);
+        expect(forced.success).toBe(true);
+        expect(ensure).toHaveBeenCalledTimes(2);
+      });
+    });
+  });
+
   describe("SharedPreferences inspection-disabled fallback on the ide/* routes (#6292)", () => {
     const INSPECTION_DISABLED = "SharedPreferences inspection is disabled";
 

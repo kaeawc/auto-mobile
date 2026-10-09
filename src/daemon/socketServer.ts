@@ -4832,6 +4832,14 @@ export class UnixSocketServer {
         if (await this.daemonState.getDevicePool().isShutdownReserved?.(targetDevice.deviceId)) {
           throw new Error(`Device '${targetDevice.deviceId}' is shutting down.`);
         }
+        // A lifecycle action on a held device: only the holder, or an explicit `force` (as
+        // killDevice allows), may reinstall/restart its CtrlProxy (#10827).
+        this.assertIdeMutationOwnership(
+          request,
+          targetDevice.deviceId,
+          "ide/updateService",
+          (request.params as { force?: unknown }).force === true,
+        );
 
         if (args.platform === "android") {
           AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
@@ -4873,6 +4881,8 @@ export class UnixSocketServer {
         const { platform, client, device } = await this.resolveKeyValueMutationClient(
           args.platform,
           args.deviceId,
+          request,
+          "ide/setKeyValue",
         );
         const appId = args.appId;
         const fileName = args.fileName;
@@ -4933,6 +4943,8 @@ export class UnixSocketServer {
         const { platform, client, device } = await this.resolveKeyValueMutationClient(
           args.platform,
           args.deviceId,
+          request,
+          "ide/removeKeyValue",
         );
         const appId = args.appId;
         const fileName = args.fileName;
@@ -4969,6 +4981,8 @@ export class UnixSocketServer {
         const { platform, client, device } = await this.resolveKeyValueMutationClient(
           args.platform,
           args.deviceId,
+          request,
+          "ide/clearKeyValueFile",
         );
         const appId = args.appId;
         const fileName = args.fileName;
@@ -4996,6 +5010,33 @@ export class UnixSocketServer {
   }
 
   /**
+   * `ide/*` routes that mutate a device follow device ownership like `input/*` (#10827): a held
+   * device accepts them only from its holder (the optional `sessionUuid` param), or when `force`
+   * is allowed and set. Reads stay open to watchers. Unheld devices stay open to any client.
+   */
+  private assertIdeMutationOwnership(
+    request: DaemonRequest,
+    deviceId: string,
+    action: string,
+    force = false,
+  ): void {
+    const requesterSessionUuid = parseInputRequesterSessionUuid(request.method, request.params);
+    if (force || !this.daemonState.isInitialized()) {
+      return;
+    }
+    const sessionManager = this.daemonState.getSessionManager();
+    assertInputRequesterHoldsDevice({
+      action,
+      deviceId,
+      ownerSessionUuid: sessionManager.getSessionForDevice?.(deviceId) ?? undefined,
+      requesterSessionUuid,
+      sessionManager,
+      remedy:
+        "pass the holding session's sessionUuid, or wait for the holder to release the device.",
+    });
+  }
+
+  /**
    * Resolve the platform-appropriate storage-mutation client for a key-value
    * `ide/*` request. iOS Storage-facet edits carry `platform: "ios"` so the pane
    * targets the iOS simulator + IOSCtrlProxyClient; a missing platform defaults
@@ -5004,6 +5045,8 @@ export class UnixSocketServer {
   private async resolveKeyValueMutationClient(
     platformValue: string | undefined,
     deviceId: string,
+    request: DaemonRequest,
+    action: string,
   ): Promise<{
     platform: "android" | "ios";
     client: KeyValueMutationClient;
@@ -5022,6 +5065,7 @@ export class UnixSocketServer {
     if (!targetDevice) {
       throw new Error(`Device not found: ${deviceId}`);
     }
+    this.assertIdeMutationOwnership(request, targetDevice.deviceId, action);
     const client =
       platform === "ios"
         ? IOSCtrlProxyClient.getInstance(targetDevice)

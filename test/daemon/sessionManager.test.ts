@@ -1911,25 +1911,29 @@ describe("SessionManager", () => {
       expect(retrieved).toBeNull();
     });
 
-    test("expires a session before accepting a request that arrives after its deadline", async () => {
+    test("refuses a request that arrives after its deadline while earlier work holds the veto, without releasing (#10956)", async () => {
       const released: string[] = [];
-      sessionManager.setActiveSessionExecutionChecker(
-        (_sessionId, startedAtOrBefore) => startedAtOrBefore === undefined,
-      );
+      // Earlier work stays in flight, whichever execution a query excludes.
+      sessionManager.setActiveSessionExecutionChecker(() => true);
       sessionManager.onSessionRelease((sessionId) => released.push(sessionId));
       await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
       fakeTimer.advanceTime(1001);
 
-      // Existing work keeps an expired session assigned, but a new request must
-      // not use that protection to revive the session after its deadline.
+      // Existing work keeps an expired session assigned, and a routing lookup with no
+      // execution respects that veto rather than releasing under the running call.
       expect(sessionManager.getSession("session-1")).not.toBeNull();
-      // The UUID was issued, so the refusal reports its idle release, not "never issued" (#10832).
-      await expect(sessionManager.getOrCreateSession("session-1")).rejects.toThrow(
-        "is terminal after lazy-expiry",
-      );
+      expect(sessionManager.getSessionForNewExecution("session-1")).not.toBeNull();
+      // A new request that began after the deadline is refused; it does not revive the session
+      // and does not release it under the earlier work either.
+      await expect(
+        sessionManager.getOrCreateSession("session-1", undefined, undefined, {
+          executionId: "late",
+          startTime: fakeTimer.now(),
+        }),
+      ).rejects.toThrow("expired before this execution began while earlier work is still active");
 
-      expect(released).toEqual(["session-1"]);
-      expect(sessionManager.getActiveSessionCount()).toBe(0);
+      expect(released).toEqual([]);
+      expect(sessionManager.getActiveSessionCount()).toBe(1);
     });
 
     test("keeps an expired session unavailable while its teardown restores device state", async () => {

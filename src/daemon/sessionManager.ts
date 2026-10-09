@@ -6793,9 +6793,10 @@ export class SessionManager {
   /**
    * An idle-expiry release overrides in-flight work only once that work's veto has run out
    * (#10713). Abort it before the release starts so a call that never settles cannot keep driving
-   * the device after its next owner binds it (#10820). Nothing in flight, or a veto still holding
-   * (a lookup for a new execution can expire a session without consulting the veto), cancels
-   * nothing. Returns whether it cancelled.
+   * the device after its next owner binds it (#10820). Every expiry path consults the veto before
+   * releasing (#10956), so by the time this runs any execution still in flight is one the release
+   * overrides: cancel it unconditionally rather than free the device under a running call. The
+   * execution whose own lookup expired the session is spared. Returns whether it cancelled.
    */
   private cancelExecutionsOverriddenByExpiry(
     session: Session,
@@ -6804,15 +6805,7 @@ export class SessionManager {
   ): boolean {
     const query: ActiveSessionExecutionQuery =
       excludeExecutionId === undefined ? {} : { excludeExecutionId };
-    const hasActiveExecutions = this.activeSessionExecutionChecker(session.sessionId, query);
-    if (
-      !hasActiveExecutions ||
-      isReleaseVetoedByExecutions({
-        hasActiveExecutions,
-        now: this.timer.now(),
-        ...this.idleExecutionVetoBoundInput(session),
-      })
-    ) {
+    if (!this.activeSessionExecutionChecker(session.sessionId, query)) {
       return false;
     }
     this.expiryReleaseExecutionCanceller(session.sessionId, releaseReason, query);
@@ -6837,10 +6830,17 @@ export class SessionManager {
     session: Session,
     execution?: SessionExecutionMetadata,
   ): boolean {
+    // A lookup that carries no execution (routing resolution: autolock, setActiveDevice, the
+    // lifecycle ownership check) is not a call that arrived after the deadline; it only asks who
+    // holds the device. It must respect the unsettled-execution veto exactly as the idle sweep
+    // does, or it releases a session whose long call is still driving the device (#10956).
+    if (execution === undefined) {
+      return this.isSessionExpired(session);
+    }
     if (this.timer.now() <= session.expiresAt + suspectGraceMsFor(session)) {
       return false;
     }
-    return execution?.startTime === undefined || execution.startTime > session.expiresAt;
+    return execution.startTime > session.expiresAt;
   }
 
   private isLateExecutionWhileEarlierWorkIsActive(

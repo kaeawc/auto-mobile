@@ -565,18 +565,18 @@ describe("DevicePool autolock", () => {
       expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBeUndefined();
     });
 
-    it("does not route a new MCP request through an expired autolock held by older work", async () => {
+    it("keeps routing an expired autolock to its session while older work holds the veto (#10956)", async () => {
       await initializeLiveAndroidDevice();
-      sessionManager.setActiveSessionExecutionChecker(
-        (_sessionId, startedAtOrBefore) => startedAtOrBefore === undefined,
-      );
+      sessionManager.setActiveSessionExecutionChecker(() => true);
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
       timer.advanceTime(61 * 1000);
 
-      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBeUndefined();
-      await sessionManager.waitForSessionRelease(sessionId!);
-      expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
+      // A routing lookup carries no execution: it must not release the session under the
+      // older call, which is still driving the device.
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(sessionId);
+      expect(sessionManager.getSession(sessionId!)).not.toBeNull();
+      expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
     });
 
     it("keeps autolock enforcement until deferred expiry release publishes the device idle", async () => {

@@ -162,6 +162,7 @@ import {
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
+import { BootedDeviceDiscoveryIncompleteError } from "../devices/deviceBootService";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { PressButton } from "../features/action/PressButton";
@@ -5062,8 +5063,9 @@ export class UnixSocketServer {
         }
 
         // Find the booted device
-        const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices(
+        const bootedDevices = await this.listBootedDevicesForIdeAction(
           args.platform,
+          args.deviceId,
         );
         // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
         await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/updateService");
@@ -5280,6 +5282,31 @@ export class UnixSocketServer {
   }
 
   /**
+   * Booted devices for an `ide/*` action on one serial. iOS discovery has two
+   * sources, and the legacy listing turns a failed simctl sweep into `[]`, which
+   * surfaced as a misleading "Device not found". When the serial is absent from an
+   * incomplete iOS sweep the absence proves nothing, so refuse with the retryable
+   * discovery error instead (#11122, cf. #11103).
+   */
+  private async listBootedDevicesForIdeAction(
+    platform: "android" | "ios",
+    serial: string,
+  ): Promise<BootedDevice[]> {
+    const manager = PlatformDeviceManagerFactory.getInstance();
+    if (platform !== "ios") {
+      return manager.getBootedDevices(platform);
+    }
+    const discovery = await manager.getBootedDevicesDetailed("ios");
+    if (
+      !discovery.succeededPlatforms.has("ios") &&
+      !discovery.devices.map((device) => device.deviceId).includes(serial)
+    ) {
+      throw new BootedDeviceDiscoveryIncompleteError("ios", discovery.discoveryErrors?.ios);
+    }
+    return discovery.devices;
+  }
+
+  /**
    * Resolve the platform-appropriate storage-mutation client for a key-value
    * `ide/*` request. iOS Storage-facet edits carry `platform: "ios"` so the pane
    * targets the iOS simulator + IOSCtrlProxyClient; a missing platform defaults
@@ -5299,8 +5326,7 @@ export class UnixSocketServer {
     if (platform !== "android" && platform !== "ios") {
       throw new Error(`Invalid platform: ${platform}. Must be 'android' or 'ios'.`);
     }
-    const bootedDevices =
-      await PlatformDeviceManagerFactory.getInstance().getBootedDevices(platform);
+    const bootedDevices = await this.listBootedDevicesForIdeAction(platform, deviceId);
     // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
     await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/keyValueMutation");
     this.assertDeviceActionable(deviceId, "to mutate stored values");

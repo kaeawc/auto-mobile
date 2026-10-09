@@ -17,6 +17,7 @@ import {
 import {
   assertAndroidImageRunningStateKnown,
   MultiPlatformDeviceManager,
+  PHYSICAL_IOS_SCAN_BUDGET_MS,
   waitForDeviceReadyOrCancel,
 } from "./deviceUtils";
 import {
@@ -418,8 +419,7 @@ export interface ConnectedPlatformScanOptions {
   platform?: SomePlatform;
 }
 
-/** Readiness budget for the shared devicectl sweep; a wedged CoreDevice must not stall callers (#11077). */
-export const PHYSICAL_IOS_SCAN_BUDGET_MS = 3_000;
+export { PHYSICAL_IOS_SCAN_BUDGET_MS };
 
 export interface DeviceSessionManagerOptions {
   /** Overrides {@link PHYSICAL_IOS_SCAN_BUDGET_MS}. */

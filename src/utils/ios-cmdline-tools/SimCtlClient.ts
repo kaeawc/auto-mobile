@@ -1343,7 +1343,7 @@ export class SimCtlClient implements SimCtl {
     udid: string,
     deadlineMs: number | undefined,
     signal: AbortSignal | undefined,
-    operation: "start" | "shut down" = "start",
+    operation: "start" | "shut down" | "erase" = "start",
   ): Promise<SimulatorBootLease> {
     if (signal?.aborted) {
       throw signal.reason ?? new ActionableError(`iOS simulator ${operation} aborted for ${udid}`);
@@ -1529,7 +1529,30 @@ export class SimCtlClient implements SimCtl {
 
   async eraseSimulator(udid: string): Promise<void> {
     logger.debug(`Erasing iOS simulator ${udid}`);
-    await this.executeCommandArgs(["erase", udid]);
+    const signal = getAbortSignal();
+    // Erase mutates the same device a boot or shutdown is working on, so it queues
+    // behind them under the same lease (bounded, even with no abort signal) and
+    // leaves a cold simulator whose cached "booted" listing is stale (#11122).
+    const lease = await this.acquireSimulatorBoot(
+      udid,
+      this.timer.now() + SIMULATOR_SHUTDOWN_LEASE_WAIT_TIMEOUT_MS,
+      signal,
+      "erase",
+    );
+    try {
+      await this.executeCommandArgv(
+        ["erase", udid],
+        SIMCTL_COMMAND_TIMEOUT_MS,
+        `erase ${udid}`,
+        signal,
+        true,
+      );
+      lease.state.lastBootSucceeded = false;
+      lease.state.ownerToken = undefined;
+    } finally {
+      SimCtlClient.invalidateDeviceListCache();
+      lease.release();
+    }
   }
 
   async waitForSimulatorReady(

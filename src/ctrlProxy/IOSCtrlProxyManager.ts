@@ -690,6 +690,30 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     );
   }
 
+  /**
+   * A device left discovery: stop its runner, and for a simulator also drop the
+   * manager and its `PortManager` reservation. A deleted or erased simulator never
+   * returns under the same UDID, so keeping its manager only burns one of the
+   * shared 100 ports per UDID until "No available ports" (#11122). Physical
+   * devices keep their manager so a reconnect resumes the same runner budget.
+   */
+  public static async evictAfterDeviceRemoval(
+    deviceId: string,
+    timer: Timer = defaultTimer,
+  ): Promise<void> {
+    const manager = IOSCtrlProxyManager.getExistingInstance(deviceId);
+    if (!manager) {
+      return;
+    }
+    await manager.suspendForDeviceRemoval();
+    if (
+      resolveIosDeviceKind({ deviceId }) === "simulator" &&
+      IOSCtrlProxyManager.instances.get(deviceId) === manager
+    ) {
+      await IOSCtrlProxyManager.evict(deviceId, timer);
+    }
+  }
+
   public static async evict(
     deviceId: string,
     timer: Timer = defaultTimer,

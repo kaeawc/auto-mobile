@@ -777,8 +777,7 @@ export class Daemon {
         // Full removal: prune AFTER epoch retirement, which also invalidates frames.
         this.deviceDataStreamServer?.removeDeviceFrames(deviceId);
         if (platform === "ios") {
-          const manager = IOSCtrlProxyManager.getExistingInstance(deviceId);
-          void manager?.suspendForDeviceRemoval().catch((error) => {
+          void IOSCtrlProxyManager.evictAfterDeviceRemoval(deviceId).catch((error) => {
             logger.warn(
               `[Daemon] Failed to stop iOS CtrlProxy for removed device ${deviceId}: ${errorMessage(error)}`,
             );

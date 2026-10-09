@@ -78,4 +78,65 @@ final class OverlayKeyboardLiftTests: XCTestCase {
         let top = OverlaySheetFrame.rect(containerWidth: 400, containerHeight: 800, edge: "top", height: 200, lift: 300)
         XCTAssertEqual(top.y, 0, "a top sheet ignores the lift")
     }
+
+    /// Where the sheet's bottom edge lands on screen: the full-window frame raised by the lift,
+    /// plus any keyboard inset the host applied on its own (what `hostSafeAreaRegions` rules out).
+    private func sheetBottomOnScreen(
+        keyboard: OverlayRect, windowOriginY: Double, windowHeight: Double, sheetHeight: Double,
+        hostKeyboardInset: Double = 0
+    )
+        -> Double
+    {
+        let lift = OverlayKeyboardLift.amount(
+            placementType: "sheet", edge: "bottom", keyboardFrame: keyboard,
+            windowOriginY: windowOriginY, windowHeight: windowHeight
+        )
+        let frame = OverlaySheetFrame.rect(
+            containerWidth: 402, containerHeight: windowHeight, edge: "bottom", height: sheetHeight,
+            lift: lift + hostKeyboardInset
+        )
+        return windowOriginY + frame.y + frame.height
+    }
+
+    func testSheetBottomMeetsTheKeyboardTopOnTheIssueDevice() {
+        // #11042: iPhone 17, iOS 26.5, 874 pt screen, keyboard top at 540, 300 pt sheet.
+        let keyboard = OverlayRect(x: 0, y: 540, width: 402, height: 334)
+        XCTAssertEqual(
+            sheetBottomOnScreen(keyboard: keyboard, windowOriginY: 0, windowHeight: 874, sheetHeight: 300), 540
+        )
+    }
+
+    func testSheetBottomMeetsTheKeyboardTopInAnOffsetShorterWindow() {
+        // A window that does not start at the screen's top and is shorter than the screen.
+        let keyboard = OverlayRect(x: 0, y: 540, width: 402, height: 334)
+        for (originY, height) in [(20.0, 854.0), (44.0, 800.0), (100.0, 700.0)] {
+            XCTAssertEqual(
+                sheetBottomOnScreen(keyboard: keyboard, windowOriginY: originY, windowHeight: height, sheetHeight: 300),
+                540,
+                "window origin \(originY), height \(height)"
+            )
+        }
+    }
+
+    func testHostsApplyNoKeyboardInsetOnTopOfTheManualLift() {
+        // The manual lift is the only keyboard mechanism: the hosting controllers keep neither the
+        // keyboard nor the container region, so they add no inset (#11042's 527 pt over-lift).
+        XCTAssertFalse(OverlayKeyboardLift.hostSafeAreaRegions.contains(.keyboard))
+        XCTAssertFalse(OverlayKeyboardLift.hostSafeAreaRegions.contains(.container))
+        let keyboard = OverlayRect(x: 0, y: 540, width: 402, height: 334)
+        let hostInset = OverlayKeyboardLift.hostSafeAreaRegions.contains(.keyboard) ? 334.0 : 0
+        XCTAssertEqual(
+            sheetBottomOnScreen(
+                keyboard: keyboard, windowOriginY: 0, windowHeight: 874, sheetHeight: 300, hostKeyboardInset: hostInset
+            ),
+            540
+        )
+        // Were the host to keep its keyboard safe area, the sheet would sit a keyboard height too high.
+        XCTAssertLessThan(
+            sheetBottomOnScreen(
+                keyboard: keyboard, windowOriginY: 0, windowHeight: 874, sheetHeight: 300, hostKeyboardInset: 334
+            ),
+            540
+        )
+    }
 }

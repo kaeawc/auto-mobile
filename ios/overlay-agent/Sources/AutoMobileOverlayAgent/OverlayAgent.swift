@@ -397,6 +397,11 @@ final class OverlayLayersViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .clear
         for host in [page, top] {
+            // Only `OverlayKeyboardLift` moves anything for the keyboard (#11042), and the window's
+            // insets reach the spec through the model, so neither host applies a safe area of its
+            // own. This is UIKit's switch: with only the root's `ignoresSafeArea`, a 300 pt sheet
+            // still moved 527 pt for a 334 pt lift on an iOS 26.5 simulator.
+            host.safeAreaRegions = SafeAreaRegions(OverlayKeyboardLift.hostSafeAreaRegions)
             addChild(host)
             host.view.backgroundColor = .clear
             host.view.frame = view.bounds
@@ -512,10 +517,10 @@ struct OverlayRootView: View {
         .environment(\.overlayShapes, OverlayShapes(theme: model.spec?.theme?.shapes))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Bars and cutouts are the spec's job (safeAreaPadding). A bottom sheet is raised by the
-        // keyboard frame itself (`keyboardLift`), so SwiftUI's keyboard avoidance is off for it
-        // and cannot lift it twice; a bottom-floating overlay still gets SwiftUI's push.
-        .ignoresSafeArea(.container)
-        .ignoresSafeArea(.keyboard, edges: liftsForKeyboard ? .all : [])
+        // keyboard frame itself (`keyboardLift`) and nothing else moves for the keyboard, as on
+        // Android: the hosts keep no safe area (`OverlayKeyboardLift.hostSafeAreaRegions`), and
+        // this ignores every region too, so no second lift can stack on the sheet's (#11042).
+        .ignoresSafeArea()
     }
 
     /// The spec's anchored nodes, above its tree and below its modals, as Android's anchor layer.
@@ -532,11 +537,6 @@ struct OverlayRootView: View {
                 : nil
         )
         .animation(keyboardLiftDuration.map { .easeInOut(duration: $0) }, value: keyboardLift)
-    }
-
-    private var liftsForKeyboard: Bool {
-        let placement = model.spec?.window.placement
-        return OverlayKeyboardLift.appliesTo(placementType: placement?.type ?? "", edge: placement?.edge)
     }
 
     /// How far the bottom sheet is raised and how long the move takes: the keyboard's own duration,
@@ -679,5 +679,14 @@ private final class FrameWaiter: NSObject {
         let done = completion
         completion = nil
         done?()
+    }
+}
+
+extension SafeAreaRegions {
+    /// The UIKit regions for the agent's device-free `OverlayHostSafeAreaRegions`.
+    init(_ regions: OverlayHostSafeAreaRegions) {
+        self = []
+        if regions.contains(.container) { insert(.container) }
+        if regions.contains(.keyboard) { insert(.keyboard) }
     }
 }

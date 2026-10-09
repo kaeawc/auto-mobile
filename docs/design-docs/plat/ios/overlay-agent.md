@@ -187,8 +187,13 @@ returns to the screen edge when it hides. Fullscreen, floating and top sheets ne
   `keyboardWillHide` are the notifications of the keyboard the app shows. The lift is how far the
   keyboard's end frame reaches into the overlay window (`OverlayKeyboardLift.amount`, in the
   UIKit-free core), 0 for a hardware keyboard or a hidden one, and never more than the window.
-- **No double lift.** SwiftUI's own keyboard avoidance is turned off for a bottom sheet, so only
-  this lift moves it; floating overlays keep SwiftUI's push.
+- **No double lift (#11042).** This lift is the only thing that moves for the keyboard. Both hosting
+  controllers (page and top layer) set `safeAreaRegions` to none
+  (`OverlayKeyboardLift.hostSafeAreaRegions`) and the root view ignores every safe-area region, so
+  neither UIKit nor SwiftUI adds its own keyboard inset; floating overlays do not move, as on Android.
+  On an iOS 26.5 simulator the root's `ignoresSafeArea(.keyboard)` alone still let a 300 pt sheet
+  move 527 pt for a 334 pt lift. Core tests pin sheet bottom == keyboard top, including for a window
+  with a non-zero origin and a shorter height.
 - **Touch and clip.** The sheet's content is padded up by the lift inside its full-window frame, so
   its reported touch rect moves with it, and the anchor layer's clip region is computed with the same
   lift (`OverlaySheetFrame.rect(lift:)`), so anchored nodes and their touch targets stay in sync.

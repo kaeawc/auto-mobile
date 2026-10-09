@@ -38,10 +38,12 @@ jobs:
           reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
+  # The full desktop-core suite stays off the merge path (consistently >1 minute, not required for
+  # release/docs publishing), but the desktop wire-contract replay runs on every merge (#10983):
+  # the daemon-side desktopWireContract test writes test/fixtures/desktop-wire/, and this replay
+  # is the only thing that proves the Kotlin client still composes against it.
   desktop-core-unit-tests:
-    name: "Run Desktop Core Unit Tests"
-    # Disabled: consistently >1 minute on merge and not required for release/docs publishing.
-    if: ${{ false }}
+    name: "Run Desktop Wire Replay"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: build-desktop-core
@@ -57,6 +59,7 @@ jobs:
       - uses: ./.github/actions/gradle-task-run
         with:
           gradle-tasks: ":desktop-core:test"
+          gradle-flags: '["--tests", "*DesktopWireFixtureCompositionTest"]'
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

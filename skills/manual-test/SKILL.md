@@ -215,8 +215,9 @@ release and sees no `device_session_ended`), and, with `--second-serial <emulato
 snapshots, daemon log lines, stream frames) lands under
 `scratch/live-idle-release-check/`. To see who holds a device on any daemon, run
 `--daemon active-sessions`. The same single-emulator scenarios run on demand in CI
-from the dispatch-only `Live Idle Release` workflow
-(`.github/workflows/live-idle-release.yml`); it never runs on pull requests.
+from the `Live Idle Release` workflow
+(`.github/workflows/live-idle-release.yml`, dispatch plus an advisory nightly run); it never runs
+on pull requests.
 
 **Desktop / IDE idle-release checklist (manual; run with the desktop app against a
 private daemon with a short `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS`):**

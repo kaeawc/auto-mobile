@@ -265,6 +265,7 @@ jobs:
               # PR that regenerates them must run that Kotlin replay (#10838).
               - 'test/fixtures/desktop-wire/**'
               - 'test/daemon/desktopWireContract.test.ts'
+              - 'test/daemon/helpers/desktopWireHarness.ts'
 
       - name: "Check for IDE Plugin changes"
         id: filter-ide-plugin

@@ -38,8 +38,8 @@
 # daemon: CtrlProxy forwarding is leased per device.
 #
 # This is a live, opt-in check. It never runs on pull requests or in fast
-# validation; the only CI entry point is the dispatch-only workflow
-# .github/workflows/live-idle-release.yml.
+# validation; the only CI entry point is the dispatch and
+# advisory-nightly workflow .github/workflows/live-idle-release.yml.
 #
 # Status-returning helpers (proxy_alive, wait_for_release, daemon_cmd,
 # active_sessions_json, stop_daemon, stop_proxy) are called in conditions on

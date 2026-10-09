@@ -61,6 +61,7 @@ import { disableStylusHandwriting } from "../utils/disableStylusHandwriting";
 import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
 import { RunnerReadinessError, RunnerReadinessService } from "../ctrlProxy/RunnerReadinessService";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { serverConfig } from "../utils/ServerConfig";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../utils/runnerReadinessConfig";
 import { trackProcess, waitForExit } from "../utils/ChildProcessTracker";
@@ -297,7 +298,10 @@ export interface DeviceSessionManager {
    * Detect the platform of connected devices
    */
   detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]>;
-  detectConnectedPlatformsWithStatus(signal?: AbortSignal): Promise<ConnectedPlatformScan>;
+  detectConnectedPlatformsWithStatus(
+    signal?: AbortSignal,
+    options?: ConnectedPlatformScanOptions,
+  ): Promise<ConnectedPlatformScan>;
 
   /**
    * Verify a specific device is connected and ready for the given platform.
@@ -403,7 +407,17 @@ export interface DeviceReadyOptions {
   skipAccessibilitySetup?: boolean;
 }
 
+export interface ConnectedPlatformScanOptions {
+  /** An Android-only caller never waits on (or scans) the physical iOS lister (#11077). */
+  platform?: SomePlatform;
+}
+
+/** Readiness budget for the shared devicectl sweep; a wedged CoreDevice must not stall callers (#11077). */
+export const PHYSICAL_IOS_SCAN_BUDGET_MS = 3_000;
+
 export interface DeviceSessionManagerOptions {
+  /** Overrides {@link PHYSICAL_IOS_SCAN_BUDGET_MS}. */
+  physicalIosScanBudgetMs?: number;
   appearanceOnConnectDependencies?: Partial<AppearanceOnConnectDependencies>;
   admissionGate?: DeviceAdmissionGate;
   executionBinding?: DeviceExecutionBinding;
@@ -438,6 +452,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
   private readonly adbFactory: AdbClientFactory;
   private readonly runnerReadinessService: RunnerReadinessService;
   private readonly runnerReadinessTimer: Timer;
+  private readonly physicalIosScanBudgetMs: number;
   private readonly runnerReadinessTimeoutMs: number | undefined;
   private readonly runnerProvisionTimeoutMs: number | undefined;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
@@ -460,6 +475,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     this.provider = provider;
     this.adbFactory = adbFactory;
     this.runnerReadinessTimer = options.runnerReadinessTimer ?? defaultTimer;
+    this.physicalIosScanBudgetMs = options.physicalIosScanBudgetMs ?? PHYSICAL_IOS_SCAN_BUDGET_MS;
     this.idGenerator = options.idGenerator ?? defaultIdGenerator;
     this.appearanceOnConnectDependencies = options.appearanceOnConnectDependencies;
     this.runnerReadinessTimeoutMs = options.runnerReadinessTimeoutMs;
@@ -573,6 +589,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
   public async detectConnectedPlatformsWithStatus(
     signal?: AbortSignal,
+    options?: ConnectedPlatformScanOptions,
   ): Promise<ConnectedPlatformScan> {
     const devices: BootedDevice[] = [];
     const scannedSources: Record<DiscoverySource, boolean> = {
@@ -597,7 +614,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
     const [simulators, physical] = await Promise.all([
       this.scanBootedSimulators(perf, signal),
-      this.scanPhysicalIosDevices(),
+      this.scanPhysicalIosDevices(options?.platform, signal),
     ]);
     signal?.throwIfAborted();
     // Simulator entries win on overlap: they carry richer runtime metadata.
@@ -648,15 +665,25 @@ export class DeviceSessionManager implements DeviceSessionManager {
    * devices from an incomplete listing still resolve, but the source counts as
    * scanned only when devicectl reported a complete listing (#11063).
    */
-  private async scanPhysicalIosDevices(): Promise<{ devices: BootedDevice[]; complete: boolean }> {
+  private async scanPhysicalIosDevices(
+    platform?: SomePlatform,
+    signal?: AbortSignal,
+  ): Promise<{ devices: BootedDevice[]; complete: boolean }> {
     const lister = this.provider.getIosPhysicalDeviceLister?.();
-    if (!lister) {
+    if (!lister || platform === "android") {
       return { devices: [], complete: false };
     }
     try {
-      const discovery = await lister.listConnectedDevices();
+      // The lister run is shared and uncancellable; losing the race leaves it running.
+      const discovery = await raceWithDeadline(() => lister.listConnectedDevices(), {
+        timer: this.runnerReadinessTimer,
+        timeoutMs: this.physicalIosScanBudgetMs,
+        signal,
+        label: "Physical iOS device scan",
+      });
       return { devices: discovery.devices, complete: discovery.complete };
     } catch (error) {
+      signal?.throwIfAborted();
       // The lister contract is non-throwing; a misbehaving one must not fail the scan.
       logger.warn(`Failed to detect physical iOS devices: ${errorMessage(error)}`);
       return { devices: [], complete: false };
@@ -680,7 +707,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
 
     // Detect all connected devices
-    const result = await this.getReadinessScan(options);
+    const result = await this.getReadinessScan(platform, options);
     const scan = this.normalizeReadinessScan(result);
     const connectedPlatforms = scan.devices;
     this.reconcileReadinessPin(scan);
@@ -852,11 +879,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
   }
 
   private getReadinessScan(
+    platform: SomePlatform,
     options?: DeviceReadyOptions,
   ): Promise<BootedDevice[] | ConnectedPlatformScan> {
     return options?.getConnectedPlatforms
       ? options.getConnectedPlatforms()
-      : this.detectConnectedPlatformsWithStatus(options?.signal);
+      : this.detectConnectedPlatformsWithStatus(options?.signal, { platform });
   }
 
   private reconcileReadinessPin(scan: ConnectedPlatformScan): void {

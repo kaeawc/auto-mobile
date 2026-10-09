@@ -43,6 +43,18 @@ export interface OverlayAgentConnections {
 /** No injected agents: every iOS device reports no agent connection. */
 export const noOverlayAgentConnections: OverlayAgentConnections = { get: () => undefined };
 
+/** Capability the agent advertises when it can hide itself around a host screenshot (#9305). */
+export const SCREENSHOT_HIDE_OVERLAY_CAPABILITY = "screenshot_hide_overlay_v1";
+
+/** The agent restores the overlay by itself after this long, even if the host never asks. */
+export const DEFAULT_CAPTURE_HIDE_DEADLINE_MS = 1500;
+
+export interface CaptureWithOverlayHidden<T> {
+  value: T;
+  /** False only when the agent confirmed the overlay was hidden for the whole capture. */
+  screenshotIncludesOverlay: boolean;
+}
+
 export function overlayAgentNotConnectedMessage(deviceId: string): string {
   return (
     `No overlay agent is connected for iOS device ${deviceId}. Overlays on iOS need the injected ` +
@@ -79,6 +91,44 @@ export class IosOverlayTransport implements OverlayTransport {
    */
   supportsCapability(capability: string): boolean {
     return this.agent.handshake.capabilities.includes(capability);
+  }
+
+  /**
+   * Runs `capture` (the host's simulator screenshot) with the overlay hidden: `hide_for_capture`
+   * is answered only once the hide is on screen, then `restore_after_capture` follows even when
+   * the capture throws. The agent also restores at `deadlineMs` on its own, so a cancelled host
+   * cannot leave the overlay hidden. Without the capability, or when the hide fails, the capture
+   * still runs and reports `screenshotIncludesOverlay: true` so callers can annotate it.
+   */
+  async captureWithOverlayHidden<T>(
+    capture: () => Promise<T>,
+    deadlineMs: number = DEFAULT_CAPTURE_HIDE_DEADLINE_MS,
+  ): Promise<CaptureWithOverlayHidden<T>> {
+    if (!this.supportsCapability(SCREENSHOT_HIDE_OVERLAY_CAPABILITY)) {
+      return { value: await capture(), screenshotIncludesOverlay: true };
+    }
+    let holding = false;
+    let hidden = false;
+    try {
+      const reply = await this.agent.request("hide_for_capture", { deadlineMs });
+      holding = reply.success;
+      hidden = holding && reply.hidden !== false;
+    } catch (error) {
+      logger.warn(`[overlay-agent] hide_for_capture failed: ${errorMessage(error)}`, error);
+    }
+    try {
+      return { value: await capture(), screenshotIncludesOverlay: !hidden };
+    } finally {
+      if (holding) {
+        await this.agent.request("restore_after_capture").catch((error: unknown) => {
+          // The agent's own deadline restores the overlay, so a lost restore is not fatal.
+          logger.warn(
+            `[overlay-agent] restore_after_capture failed: ${errorMessage(error)}`,
+            error,
+          );
+        });
+      }
+    }
   }
 
   async show(spec: OverlaySpec): Promise<OverlayResult> {

@@ -132,6 +132,29 @@ class OverlayAnchorLayerTest {
     OverlayBoxNode(testTag = "root", children = children.toList())
 
   @Test
+  fun `a zero-size wrap root still exposes its anchored nodes to accessibility at their anchors`() {
+    val rendered = render(wrapRoot(small, large))
+    val provider = checkNotNull(rendered.view.accessibilityNodeProvider)
+    for ((tag, expected) in
+      listOf("small" to dpRect(100f, 300f, 100f), "large" to dpRect(100f, 100f, 300f))) {
+      // Compose clips a node's accessibility bounds to its ancestors: an empty ancestor reported
+      // empty, invisible bounds and `observe` dropped the node (#10870).
+      val info = checkNotNull(provider.createAccessibilityNodeInfo(rendered.root.tagged(tag).id))
+      val bounds = android.graphics.Rect()
+      info.getBoundsInScreen(bounds)
+      assertRect(
+        expected,
+        Rect(
+          bounds.left.toFloat(),
+          bounds.top.toFloat(),
+          bounds.right.toFloat(),
+          bounds.bottom.toFloat(),
+        ),
+      )
+    }
+  }
+
+  @Test
   fun `anchors under a wrap-content root are drawn and reported where they are anchored`() {
     val rendered = render(wrapRoot(small, large))
     for ((tag, expected) in

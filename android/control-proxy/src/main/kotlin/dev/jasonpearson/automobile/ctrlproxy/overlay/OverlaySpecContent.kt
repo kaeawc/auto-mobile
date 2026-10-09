@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
@@ -100,7 +101,7 @@ fun OverlaySpecContent(
   OverlayTheme(root, theme) {
     val anchorLocals = remember { OverlayAnchorLocals() }
     CompositionLocalProvider(LocalOverlayAnchorLocals provides anchorLocals) {
-      Box(Modifier.semantics { testTagsAsResourceId = true }) {
+      Box(Modifier.semantics { testTagsAsResourceId = true }.fillWhenEmpty()) {
         RenderOverlayNode(root, interact, windowRoot = true)
         OverlayAnchorLayer(layeredOverlayAnchors(root), interact)
         modalOverlaySheets(root).forEach { node ->
@@ -112,6 +113,24 @@ fun OverlaySpecContent(
       }
     }
   }
+}
+
+/**
+ * Gives a content box that measured empty the whole bounded space it was offered. A root whose
+ * children are all anchored (#10814) measures 0x0 because the anchor layer takes no space, and
+ * Compose clips every descendant's accessibility bounds to its ancestors, so the anchored nodes
+ * reported empty, invisible bounds and `observe` dropped them (#10870). A non-empty box keeps its
+ * measured size, so a floating window still wraps its content.
+ */
+internal fun Modifier.fillWhenEmpty(): Modifier = layout { measurable, constraints ->
+  val placeable = measurable.measure(constraints)
+  val width =
+    if (placeable.width == 0 && constraints.hasBoundedWidth) constraints.maxWidth
+    else placeable.width
+  val height =
+    if (placeable.height == 0 && constraints.hasBoundedHeight) constraints.maxHeight
+    else placeable.height
+  layout(width, height) { placeable.place(0, 0) }
 }
 
 /**

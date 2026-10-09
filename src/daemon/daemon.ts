@@ -281,6 +281,7 @@ import {
   setProcessShutdownHandler,
 } from "../processLifecycle";
 import type { BootedDevice, Platform } from "../models";
+import { isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   safeProcessCwd,
@@ -2922,13 +2923,49 @@ export class Daemon {
     const discovery = await deviceManager.getBootedDevicesDetailed(platform, {
       bypassAndroidDeviceListCache,
     });
-    discovery.devices = this.devicePool.mapAndroidDiscovery(discovery.devices);
+    discovery.devices = await this.mapMonitorAndroidDiscovery(discovery.devices);
     // Reconciliation can quarantine identity and cancel in-flight work. During
     // allocation, discovery supplies only presence evidence for miss counting.
     if (!planActive) {
       await this.devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor");
     }
     return discovery;
+  }
+
+  /**
+   * Monitor ticks only map known transports. A wireless adb port change shows
+   * up as an unknown `host:port` row while the pooled transport goes missing;
+   * probe-and-fold it (ro.serialno + boot_id) before that counts as a miss, or
+   * the held session is released after three ticks (#11133).
+   */
+  private async mapMonitorAndroidDiscovery(devices: BootedDevice[]): Promise<BootedDevice[]> {
+    const mapped = this.devicePool.mapAndroidDiscovery(devices);
+    const present = new Set(mapped.map((device) => device.deviceId));
+    const pooled = this.devicePool
+      .getAllDevices()
+      .filter((device) => device.platform === "android");
+    const pooledIds = new Set(pooled.map((device) => device.id));
+    const unmappedTransport = mapped.some(
+      (device) =>
+        device.platform === "android" &&
+        !pooledIds.has(device.deviceId) &&
+        isAndroidTransportAddressSerial(device.deviceId),
+    );
+    if (!unmappedTransport) {
+      return mapped;
+    }
+    const missingTransportCandidate = pooled.some(
+      (device) =>
+        !present.has(device.id) &&
+        [device.id, ...this.devicePool.getAndroidTransportAliases(device.id)].some(
+          isAndroidTransportAddressSerial,
+        ),
+    );
+    if (!missingTransportCandidate) {
+      return mapped;
+    }
+    // Additive fold: a monitor tick must not prune alias groups or connection evidence.
+    return await this.devicePool.normalizeAndroidDiscovery(devices, false, () => true, false);
   }
 
   private startDeviceDisconnectMonitor(

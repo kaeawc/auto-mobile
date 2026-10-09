@@ -126,6 +126,8 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     "SessionManager.isSessionExpired",
     "SessionManager.isSessionExpiredForNewExecution",
   ],
+  "src/daemon/sessionHoldDiagnostics.ts": ["idleReleaseAt", "vetoedIdleReleaseAt"],
+  "src/daemon/daemonMcpProxy.ts": ["DaemonMcpProxy.evictAbandonedHeldSessions"],
 };
 
 /** Rule 5: lease judgements read only liveness clocks. */

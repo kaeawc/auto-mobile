@@ -1,4 +1,8 @@
 import type { Environment } from "./poolConfig";
+import {
+  currentAllocationCancellationScope,
+  withAllocationCancellationScope,
+} from "./allocationCancellationScope";
 import { notifyDeviceIdentityReplaced } from "../utils/deviceIncarnation";
 import { AndroidTransportAliases, type AndroidTransportRouting } from "../utils/androidSerial";
 import {
@@ -2320,6 +2324,16 @@ export class DevicePool {
     timeoutMs: number = 300000,
     platform?: Platform,
   ): Promise<Map<string, string>> {
+    return withAllocationCancellationScope(this.sessionManager, () =>
+      this.assignMultipleDevicesInScope(sessionIds, timeoutMs, platform),
+    );
+  }
+
+  private async assignMultipleDevicesInScope(
+    sessionIds: string[],
+    timeoutMs: number,
+    platform?: Platform,
+  ): Promise<Map<string, string>> {
     const ticket: MultiDeviceAllocationTicket = {
       requests: sessionIds.map((sessionId) => ({ sessionId, criteria: { platform } })),
     };
@@ -2523,6 +2537,15 @@ export class DevicePool {
   async assignMultipleDevicesByCriteria(
     requests: DeviceAllocationRequest[],
     timeoutMs: number = 300000,
+  ): Promise<Map<string, string>> {
+    return withAllocationCancellationScope(this.sessionManager, () =>
+      this.assignMultipleDevicesByCriteriaInScope(requests, timeoutMs),
+    );
+  }
+
+  private async assignMultipleDevicesByCriteriaInScope(
+    requests: DeviceAllocationRequest[],
+    timeoutMs: number,
   ): Promise<Map<string, string>> {
     const ticket: MultiDeviceAllocationTicket = { requests };
     try {
@@ -5938,6 +5961,7 @@ export class DevicePool {
     await this.assignmentMutex.runExclusive(async () => {
       for (const [sessionId, allocation] of assignments) {
         const { deviceId, session: allocatedSession } = allocation;
+        currentAllocationCancellationScope()?.discard(sessionId);
         const device = this.devices.get(deviceId);
         if (!device || device.sessionId !== sessionId) {
           logger.warn(
@@ -6017,12 +6041,19 @@ export class DevicePool {
       this.sessionManager.deferDeviceAcquisitionCancellation(deferredSessionId);
     }
     let committed = false;
+    let heldByAllocation = false;
     try {
       const session = await this.createSessionAndCommit(device, snapshot, createSession);
       committed = true;
+      // A multi-device allocation settles every device together (#10929).
+      const allocationScope = currentAllocationCancellationScope();
+      if (deferredSessionId && allocationScope) {
+        allocationScope.hold(deferredSessionId);
+        heldByAllocation = true;
+      }
       return session;
     } finally {
-      if (deferredSessionId) {
+      if (deferredSessionId && !heldByAllocation) {
         this.sessionManager.settleDeviceAcquisitionCancellation(deferredSessionId, committed);
       }
     }

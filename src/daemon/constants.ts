@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { platform } from "node:os";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
@@ -20,6 +21,36 @@ function getUserId(): string {
 }
 
 const uid = getUserId();
+
+/**
+ * Isolation namespace suffix for the daemon's /tmp state files (socket, pid, lock).
+ *
+ * A private daemon started with `AUTOMOBILE_AUX_SOCKET_DIR` must not share the
+ * resident daemon's `/tmp/auto-mobile-daemon-<uid>.*` files, or it would bind (or
+ * contend for) the resident control socket (issue #10871). The suffix is a short
+ * hash of the resolved aux dir rather than the dir itself, so the path stays well
+ * under the ~104-byte `sun_path` limit however deep the isolation dir is. Daemon
+ * and every TS client compute it from the same env, so they agree. An explicit
+ * per-file `AUTOMOBILE_DAEMON_*_PATH` override still wins. Unset/blank aux dir
+ * yields "" (the resident, unsuffixed names).
+ */
+export function resolveDaemonIsolationSuffix(env: NodeJS.ProcessEnv = process.env): string {
+  const auxDir = env.AUTOMOBILE_AUX_SOCKET_DIR?.trim();
+  if (!auxDir) {
+    return "";
+  }
+  const resolved = resolvePathFromDaemonLaunchWorkingDirectory(auxDir, env);
+  return `-${createHash("sha256").update(resolved).digest("hex").slice(0, 10)}`;
+}
+
+/** Default `/tmp` state-file path for this uid, isolated per `AUTOMOBILE_AUX_SOCKET_DIR`. */
+export function resolveIsolatedDaemonStatePath(
+  extension: "sock" | "pid" | "lock",
+  env: NodeJS.ProcessEnv = process.env,
+  userId: string = uid,
+): string {
+  return `/tmp/auto-mobile-daemon-${userId}${resolveDaemonIsolationSuffix(env)}.${extension}`;
+}
 
 /**
  * Default port for the daemon's internal HTTP server
@@ -134,7 +165,7 @@ const socketPathOverride =
   process.env.AUTOMOBILE_DAEMON_SOCKET_PATH ?? process.env.AUTO_MOBILE_DAEMON_SOCKET_PATH;
 export const SOCKET_PATH = socketPathOverride
   ? resolvePathFromDaemonLaunchWorkingDirectory(socketPathOverride)
-  : DEFAULT_SOCKET_PATH;
+  : resolveIsolatedDaemonStatePath("sock");
 
 /**
  * PID lock file path
@@ -150,7 +181,7 @@ const pidFilePathOverride =
   process.env.AUTOMOBILE_DAEMON_PID_FILE_PATH ?? process.env.AUTO_MOBILE_DAEMON_PID_FILE_PATH;
 export const PID_FILE_PATH = pidFilePathOverride
   ? resolvePathFromDaemonLaunchWorkingDirectory(pidFilePathOverride)
-  : DEFAULT_PID_FILE_PATH;
+  : resolveIsolatedDaemonStatePath("pid");
 
 /**
  * Lock file path for coordinating concurrent daemon start operations.
@@ -161,7 +192,7 @@ const lockFilePathOverride =
   process.env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH ?? process.env.AUTO_MOBILE_DAEMON_LOCK_FILE_PATH;
 export const LOCK_FILE_PATH = lockFilePathOverride
   ? resolvePathFromDaemonLaunchWorkingDirectory(lockFilePathOverride)
-  : `/tmp/auto-mobile-daemon-${uid}.lock`;
+  : resolveIsolatedDaemonStatePath("lock");
 
 /**
  * Absolute path of the launch-capture log inherited from DaemonManager. The

@@ -556,12 +556,17 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       expect(session.expiresAt).toBe(expiresAt + 3_000);
     });
 
-    test("a one-shot CLI session keeps its own idle policy through a stall", async () => {
+    test("a one-shot CLI session has no lease to forgive, only its idle window (#10835)", async () => {
       sessionManager.adoptCliLivenessPolicy(SESSION);
+      const session = sessionManager.getSession(SESSION)!;
+      const lastUsedAt = session.lastUsedAt;
 
-      expect(sessionManager.forgiveDaemonStall(timer.now() + 60_000, 60_000)).toBe(0);
-      expect(sessionManager.getSession(SESSION)?.stallForgivenAt).toBeUndefined();
+      expect(sessionManager.forgiveDaemonStall(timer.now() + 60_000, 60_000)).toBe(1);
+      expect(session.stallForgivenAt).toBeUndefined();
       expect(sessionManager.getSessionLeaseState(SESSION)).toBeUndefined();
+      // The idle anchor moves by the lost interval; the activity clock itself is untouched.
+      expect(session.idleStallForgivenAt).toBe(lastUsedAt + 60_000);
+      expect(session.lastUsedAt).toBe(lastUsedAt);
     });
   });
 

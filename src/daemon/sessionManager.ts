@@ -60,6 +60,7 @@ import {
 import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { Mutex } from "async-mutex";
 import { errorMessage } from "../utils/describeUnknownError";
+import { effectiveLastToolActivity } from "./sessionClocks";
 import {
   effectiveLastHeartbeat,
   isLivenessOwnerLeaseLive,
@@ -334,6 +335,15 @@ export interface Session {
    * `lastHeartbeat`.
    */
   stallForgivenAt?: number;
+  /**
+   * The daemon's resume point after a stall of its own event loop, for a `cli-idle` session's idle
+   * judgement (#10835). Not persisted. A `cli-idle` session's idleness is measured from the later of
+   * this and `lastUsedAt` (`effectiveLastToolActivity`), so time the daemon itself lost is never
+   * held against the CLI, while `lastUsedAt` keeps meaning "last tool call". Only the daemon-stall
+   * portion moves it, never host sleep, which counts toward idle. A later tool call supersedes it
+   * because it stamps `lastUsedAt` past it.
+   */
+  idleStallForgivenAt?: number;
   sessionTimeoutMs: number; // Idle timeout used when extending this session
   heartbeatTimeoutMs: number; // Heartbeat timeout for this session
   heartbeatTimeoutSource: "default" | "custom"; // Whether the heartbeat timeout was defaulted or explicitly provided
@@ -6291,13 +6301,20 @@ export class SessionManager {
    *   policy, #10661).
    *
    * Nothing moves past `resumedAt`, so time an owner genuinely missed before the gap still counts.
-   * CLI sessions keep their own wall-clock idle policy. Returns how many sessions were extended.
+   * A `cli-idle` session has no lease; its wall-clock idle window moves forward by the same
+   * `lostMs` (and never by `sleptMs`) through `idleStallForgivenAt`, so whether it survives a stall
+   * no longer depends on which timer fires first afterwards (#10835). Returns how many sessions
+   * were extended.
    */
   forgiveDaemonStall(resumedAt: number, lostMs: number, sleptMs = 0): number {
     const leaseLostMs = lostMs + sleptMs;
     let forgiven = 0;
     for (const session of this.sessions.values()) {
       if (session.livenessPolicy === "cli-idle") {
+        // Shift, never reset (#10662), and never past the resume point.
+        const idleStart = effectiveLastToolActivity(session);
+        session.idleStallForgivenAt = Math.max(idleStart, Math.min(resumedAt, idleStart + lostMs));
+        forgiven++;
         continue;
       }
       const leaseStart = effectiveLastHeartbeat(session);

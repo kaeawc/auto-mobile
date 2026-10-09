@@ -702,6 +702,7 @@ class McpDaemonClient(
     value: String?,
     type: String,
     platform: String,
+    sessionUuid: String?,
   ): SetKeyValueResult {
     val response =
       sendRequest(
@@ -714,6 +715,11 @@ class McpDaemonClient(
           put("key", JsonPrimitive(key))
           put("value", if (value != null) JsonPrimitive(value) else JsonNull)
           put("type", JsonPrimitive(type))
+          (sessionUuid ?: this@McpDaemonClient.sessionUuid)
+            ?.takeIf { it.isNotBlank() }
+            ?.let {
+              put("sessionUuid", JsonPrimitive(it))
+            }
         },
       )
     val responseResult = ensureSuccess(response, "ide/setKeyValue")
@@ -730,6 +736,7 @@ class McpDaemonClient(
     fileName: String,
     key: String,
     platform: String,
+    sessionUuid: String?,
   ): RemoveKeyValueResult {
     val response =
       sendRequest(
@@ -740,6 +747,11 @@ class McpDaemonClient(
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
           put("key", JsonPrimitive(key))
+          (sessionUuid ?: this@McpDaemonClient.sessionUuid)
+            ?.takeIf { it.isNotBlank() }
+            ?.let {
+              put("sessionUuid", JsonPrimitive(it))
+            }
         },
       )
     val responseResult = ensureSuccess(response, "ide/removeKeyValue")
@@ -755,6 +767,7 @@ class McpDaemonClient(
     appId: String,
     fileName: String,
     platform: String,
+    sessionUuid: String?,
   ): ClearKeyValueResult {
     val response =
       sendRequest(
@@ -764,6 +777,11 @@ class McpDaemonClient(
           put("platform", JsonPrimitive(platform))
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
+          (sessionUuid ?: this@McpDaemonClient.sessionUuid)
+            ?.takeIf { it.isNotBlank() }
+            ?.let {
+              put("sessionUuid", JsonPrimitive(it))
+            }
         },
       )
     val responseResult = ensureSuccess(response, "ide/clearKeyValueFile")

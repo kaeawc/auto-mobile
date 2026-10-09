@@ -278,6 +278,7 @@ class McpHttpClient(
     value: String?,
     type: String,
     platform: String,
+    sessionUuid: String?,
   ): SetKeyValueResult {
     val response =
       callTool(
@@ -290,6 +291,7 @@ class McpHttpClient(
           put("key", JsonPrimitive(key))
           put("value", if (value != null) JsonPrimitive(value) else JsonNull)
           put("type", JsonPrimitive(type))
+          sessionUuid?.takeIf { it.isNotBlank() }?.let { put("sessionUuid", JsonPrimitive(it)) }
         },
       )
     return try {
@@ -306,6 +308,7 @@ class McpHttpClient(
     fileName: String,
     key: String,
     platform: String,
+    sessionUuid: String?,
   ): RemoveKeyValueResult {
     val response =
       callTool(
@@ -316,6 +319,7 @@ class McpHttpClient(
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
           put("key", JsonPrimitive(key))
+          sessionUuid?.takeIf { it.isNotBlank() }?.let { put("sessionUuid", JsonPrimitive(it)) }
         },
       )
     return try {
@@ -331,6 +335,7 @@ class McpHttpClient(
     appId: String,
     fileName: String,
     platform: String,
+    sessionUuid: String?,
   ): ClearKeyValueResult {
     val response =
       callTool(
@@ -340,6 +345,7 @@ class McpHttpClient(
           put("platform", JsonPrimitive(platform))
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
+          sessionUuid?.takeIf { it.isNotBlank() }?.let { put("sessionUuid", JsonPrimitive(it)) }
         },
       )
     return try {

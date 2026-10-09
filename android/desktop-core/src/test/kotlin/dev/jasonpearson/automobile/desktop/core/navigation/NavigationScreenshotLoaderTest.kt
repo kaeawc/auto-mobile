@@ -484,6 +484,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     value: String?,
     type: String,
     platform: String,
+    sessionUuid: String?,
   ) = notImplemented()
 
   override fun removeKeyValue(
@@ -492,6 +493,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     fileName: String,
     key: String,
     platform: String,
+    sessionUuid: String?,
   ) = notImplemented()
 
   override fun clearKeyValueFile(
@@ -499,6 +501,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     appId: String,
     fileName: String,
     platform: String,
+    sessionUuid: String?,
   ) = notImplemented()
 
   override fun callTool(name: String, arguments: kotlinx.serialization.json.JsonObject) =

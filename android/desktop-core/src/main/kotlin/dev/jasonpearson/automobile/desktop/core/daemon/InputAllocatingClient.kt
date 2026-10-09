@@ -111,6 +111,74 @@ class InputAllocatingClient(
       delegate.inputKey(key, platform, deviceId, frameContext)
     }
 
+  // Key-value edits are device mutations (#10827): claim the device for the desktop session, then
+  // send as it. A refused claim reports a typed failure instead of reaching the daemon. The reads
+  // (resources) never come through here, so they only watch.
+  override fun setKeyValue(
+    deviceId: String,
+    appId: String,
+    fileName: String,
+    key: String,
+    value: String?,
+    type: String,
+    platform: String,
+    sessionUuid: String?,
+  ): SetKeyValueResult =
+    if (!allocation.awaitInputAllowed(deviceId)) {
+      SetKeyValueResult(success = false, message = INPUT_NOT_ALLOCATED_ERROR)
+    } else {
+      delegate.setKeyValue(
+        deviceId,
+        appId,
+        fileName,
+        key,
+        value,
+        type,
+        platform,
+        sessionUuid ?: sessionUuidProvider(),
+      )
+    }
+
+  override fun removeKeyValue(
+    deviceId: String,
+    appId: String,
+    fileName: String,
+    key: String,
+    platform: String,
+    sessionUuid: String?,
+  ): RemoveKeyValueResult =
+    if (!allocation.awaitInputAllowed(deviceId)) {
+      RemoveKeyValueResult(success = false, message = INPUT_NOT_ALLOCATED_ERROR)
+    } else {
+      delegate.removeKeyValue(
+        deviceId,
+        appId,
+        fileName,
+        key,
+        platform,
+        sessionUuid ?: sessionUuidProvider(),
+      )
+    }
+
+  override fun clearKeyValueFile(
+    deviceId: String,
+    appId: String,
+    fileName: String,
+    platform: String,
+    sessionUuid: String?,
+  ): ClearKeyValueResult =
+    if (!allocation.awaitInputAllowed(deviceId)) {
+      ClearKeyValueResult(success = false, message = INPUT_NOT_ALLOCATED_ERROR)
+    } else {
+      delegate.clearKeyValueFile(
+        deviceId,
+        appId,
+        fileName,
+        platform,
+        sessionUuid ?: sessionUuidProvider(),
+      )
+    }
+
   /**
    * A refused allocation opens no stream; the caller then falls back to [inputSwipe], which is
    * refused the same way and reports [INPUT_NOT_ALLOCATED_ERROR].

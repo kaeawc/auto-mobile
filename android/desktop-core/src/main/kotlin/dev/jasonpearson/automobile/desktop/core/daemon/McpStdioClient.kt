@@ -302,6 +302,7 @@ class McpStdioClient(
     value: String?,
     type: String,
     platform: String,
+    sessionUuid: String?,
   ): SetKeyValueResult {
     val response =
       callTool(
@@ -317,6 +318,7 @@ class McpStdioClient(
             if (value != null) JsonPrimitive(value) else kotlinx.serialization.json.JsonNull,
           )
           put("type", JsonPrimitive(type))
+          sessionUuid?.takeIf { it.isNotBlank() }?.let { put("sessionUuid", JsonPrimitive(it)) }
         },
       )
     return try {
@@ -332,6 +334,7 @@ class McpStdioClient(
     fileName: String,
     key: String,
     platform: String,
+    sessionUuid: String?,
   ): RemoveKeyValueResult {
     val response =
       callTool(
@@ -342,6 +345,7 @@ class McpStdioClient(
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
           put("key", JsonPrimitive(key))
+          sessionUuid?.takeIf { it.isNotBlank() }?.let { put("sessionUuid", JsonPrimitive(it)) }
         },
       )
     return try {
@@ -356,6 +360,7 @@ class McpStdioClient(
     appId: String,
     fileName: String,
     platform: String,
+    sessionUuid: String?,
   ): ClearKeyValueResult {
     val response =
       callTool(
@@ -365,6 +370,7 @@ class McpStdioClient(
           put("platform", JsonPrimitive(platform))
           put("appId", JsonPrimitive(appId))
           put("fileName", JsonPrimitive(fileName))
+          sessionUuid?.takeIf { it.isNotBlank() }?.let { put("sessionUuid", JsonPrimitive(it)) }
         },
       )
     return try {

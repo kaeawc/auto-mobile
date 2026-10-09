@@ -125,6 +125,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     val value: String?,
     val type: String,
     val platform: String = "android",
+    val sessionUuid: String? = null,
   )
 
   data class RemoveKeyValueCall(
@@ -133,6 +134,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     val fileName: String,
     val key: String,
     val platform: String = "android",
+    val sessionUuid: String? = null,
   )
 
   data class ClearKeyValueFileCall(
@@ -140,6 +142,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     val appId: String,
     val fileName: String,
     val platform: String = "android",
+    val sessionUuid: String? = null,
   )
 
   data class InputTapCall(
@@ -463,9 +466,12 @@ class FakeAutoMobileClient : AutoMobileClient {
     value: String?,
     type: String,
     platform: String,
+    sessionUuid: String?,
   ): SetKeyValueResult {
     calls.add("setKeyValue")
-    setKeyValueCalls.add(SetKeyValueCall(deviceId, appId, fileName, key, value, type, platform))
+    setKeyValueCalls.add(
+      SetKeyValueCall(deviceId, appId, fileName, key, value, type, platform, sessionUuid),
+    )
     onKeyValueMutation?.invoke()
     return setKeyValueResult
   }
@@ -476,9 +482,12 @@ class FakeAutoMobileClient : AutoMobileClient {
     fileName: String,
     key: String,
     platform: String,
+    sessionUuid: String?,
   ): RemoveKeyValueResult {
     calls.add("removeKeyValue")
-    removeKeyValueCalls.add(RemoveKeyValueCall(deviceId, appId, fileName, key, platform))
+    removeKeyValueCalls.add(
+      RemoveKeyValueCall(deviceId, appId, fileName, key, platform, sessionUuid),
+    )
     onKeyValueMutation?.invoke()
     return removeKeyValueResult
   }
@@ -488,9 +497,12 @@ class FakeAutoMobileClient : AutoMobileClient {
     appId: String,
     fileName: String,
     platform: String,
+    sessionUuid: String?,
   ): ClearKeyValueResult {
     calls.add("clearKeyValueFile")
-    clearKeyValueFileCalls.add(ClearKeyValueFileCall(deviceId, appId, fileName, platform))
+    clearKeyValueFileCalls.add(
+      ClearKeyValueFileCall(deviceId, appId, fileName, platform, sessionUuid),
+    )
     onKeyValueMutation?.invoke()
     return clearKeyValueFileResult
   }

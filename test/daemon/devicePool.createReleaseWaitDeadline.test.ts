@@ -149,6 +149,10 @@ describe("createSessionOrRestore's release wait is bounded (#10836)", () => {
       timer.setCurrentTime(1000);
       const manager = new NeverSettlingReleaseManager(timer);
       const pool = await poolFor(manager, timer);
+      const acquisitionCancellations: string[] = [];
+      manager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
+        acquisitionCancellations.push(deviceId);
+      });
       manager.stuck = true;
 
       const bind = pool
@@ -170,6 +174,9 @@ describe("createSessionOrRestore's release wait is bounded (#10836)", () => {
       expect(pool.getDevice(first.deviceId)?.sessionId ?? null).toBeNull();
       await flush();
       expect(unrelated.state()).toBe("resolved");
+      // The refused create leaves its device free: only the unrelated committed create cancels
+      // sessionless calls, on its own device (#10905).
+      expect(acquisitionCancellations).toEqual([second.deviceId]);
       expect(
         warn.mock.calls.some((call) =>
           String(call[0]).includes("reason=create-release-wait-timeout"),
@@ -189,9 +196,15 @@ describe("createSessionOrRestore's release wait is bounded (#10836)", () => {
       () => new FakeDbWriteBarrier(),
     );
     const pool = await poolFor(manager, timer);
+    const acquisitionCancellations: Array<[string, string]> = [];
+    manager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
+      acquisitionCancellations.push([deviceId, sessionId]);
+    });
 
     await pool.bindOrReuseDeviceSession("plain", first.deviceId, "android");
 
     expect(pool.getDevice(first.deviceId)?.sessionId).toBe("plain");
+    // A committed create still cancels sessionless calls on its device, once (#10905).
+    expect(acquisitionCancellations).toEqual([[first.deviceId, "plain"]]);
   });
 });

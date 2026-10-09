@@ -5894,6 +5894,12 @@ describe("DevicePool", () => {
         }),
       );
 
+      // A rolled-back create leaves the device free: it cancels no sessionless call (#10905).
+      const acquisitionCancellations: string[] = [];
+      sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
+        acquisitionCancellations.push(deviceId);
+      });
+
       const assignment = devicePool.assignMultipleDevices(["session-1"], 1000, "android");
       await persistence.waitForUpsert();
       manager.childProcess.emit("exit", 0, null);
@@ -5906,6 +5912,7 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("emulator-5554")).toBeNull();
       expect(sessionManager.getSession("session-1")).toBeNull();
       expect(sessionManager.getSessionForDevice("emulator-5554")).toBeNull();
+      expect(acquisitionCancellations).toEqual([]);
     });
 
     test("keeps criteria auto-start available after a process exit when recovery is disabled", async () => {

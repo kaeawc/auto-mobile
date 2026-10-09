@@ -6010,6 +6010,30 @@ export class DevicePool {
     createSession: () => Promise<Session>,
   ): Promise<Session> {
     const attemptedSessionId = device.sessionId;
+    // Sessionless calls on the device are cancelled once the create commits, not at publish: the
+    // checks below can still refuse it or roll it back, leaving the device free (#10905).
+    const deferredSessionId = attemptedSessionId;
+    if (deferredSessionId) {
+      this.sessionManager.deferDeviceAcquisitionCancellation(deferredSessionId);
+    }
+    let committed = false;
+    try {
+      const session = await this.createSessionAndCommit(device, snapshot, createSession);
+      committed = true;
+      return session;
+    } finally {
+      if (deferredSessionId) {
+        this.sessionManager.settleDeviceAcquisitionCancellation(deferredSessionId, committed);
+      }
+    }
+  }
+
+  private async createSessionAndCommit(
+    device: PooledDevice,
+    snapshot: SessionAssignmentSnapshot,
+    createSession: () => Promise<Session>,
+  ): Promise<Session> {
+    const attemptedSessionId = device.sessionId;
     try {
       const session = await createSession();
       if (session.assignedDevice !== device.id) {

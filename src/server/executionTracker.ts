@@ -371,6 +371,11 @@ export class ExecutionTracker {
     }
   }
 
+  /** Drop a mark when the call's readiness settled on another device than it was admitted to. */
+  unmarkSessionlessDeviceUse(executionId: string, deviceId: string): void {
+    this.executions.get(executionId)?.sessionlessDeviceUse?.delete(deviceId);
+  }
+
   /**
    * A session just acquired `deviceId`: abort every sessionless call admitted to drive it while it
    * was free, synchronously, with the same typed ownership refusal a new sessionless call gets

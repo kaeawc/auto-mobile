@@ -6,6 +6,7 @@ import {
   formatReportTable,
   helpText,
   parseBenchmarkArgs,
+  platformFromDeviceList,
   settledAsyncDelta,
   type BenchmarkReport,
 } from "../../scripts/benchmarkSettledScreenshotReport";
@@ -117,34 +118,7 @@ describe("benchmark-settled-screenshot pure logic", () => {
       async close(): Promise<void> {}
     }
     const fake = new FakeClient();
-    const deps: BenchmarkDeps = {
-      parentEnv: {},
-      safety: {
-        homeDir: "/fake/home",
-        builtInResidentPaths: [
-          "/tmp/auto-mobile-daemon-501.sock",
-          "/tmp/auto-mobile-daemon-501.pid",
-          "/tmp/auto-mobile-daemon-501.lock",
-        ],
-        effectiveDaemonPaths: [
-          "/fake/scratch/d.sock",
-          "/fake/scratch/d.pid",
-          "/fake/scratch/d.lock",
-        ],
-      },
-      createClient: async () => fake,
-      pickPort: async () => 49152,
-      now: (() => {
-        let n = 0;
-        return () => n++;
-      })(),
-      log: () => {},
-      write: () => {},
-      serverExists: () => true,
-      stopPrivateDaemon: async () => {},
-      makeRunDir: () => resolve("/tmp/fake-aux"),
-      removeRunDir: () => {},
-    };
+    const deps: BenchmarkDeps = fakeDeps(fake);
     const report = await runBenchmark(
       parseBenchmarkArgs(["--device", "emu", "--iterations", "1", "--warmup", "0"]),
       deps,
@@ -160,4 +134,75 @@ describe("benchmark-settled-screenshot pure logic", () => {
     });
     expect(report.platform).toBe("android");
   });
+
+  test("platformFromDeviceList matches runtime id, stable id or transport alias", () => {
+    const payload = {
+      devices: [
+        { platform: "ios", runtime: { deviceId: "SIM-UDID" }, identity: { stableId: "SIM-UDID" } },
+        {
+          platform: "android",
+          runtime: { deviceId: "emulator-5554" },
+          identity: { stableId: "Pixel_Fold" },
+          transportAliases: ["localhost:5555"],
+        },
+      ],
+    };
+    expect(platformFromDeviceList(payload, "SIM-UDID")).toBe("ios");
+    expect(platformFromDeviceList(payload, "emulator-5554")).toBe("android");
+    expect(platformFromDeviceList(payload, "Pixel_Fold")).toBe("android");
+    expect(platformFromDeviceList(payload, "localhost:5555")).toBe("android");
+    expect(platformFromDeviceList(payload, "missing")).toBeUndefined();
+    expect(platformFromDeviceList(undefined, "SIM-UDID")).toBeUndefined();
+  });
+  test("--device runs report the platform from listDevices when observe omits it (#8758)", async () => {
+    const calls: string[] = [];
+    const client: BenchmarkClient = {
+      async callTool(name: string): Promise<unknown> {
+        calls.push(name);
+        if (name === "listDevices") {
+          return {
+            structuredContent: {
+              devices: [{ platform: "ios", runtime: { deviceId: "SIM-UDID" } }],
+            },
+          };
+        }
+        return { structuredContent: { success: true, observation: { screenshotSettled: true } } };
+      },
+      async close(): Promise<void> {},
+    };
+    const report = await runBenchmark(
+      parseBenchmarkArgs(["--device", "SIM-UDID", "--iterations", "1", "--warmup", "0"]),
+      fakeDeps(client),
+    );
+    expect(report.platform).toBe("ios");
+    expect(calls[0]).toBe("listDevices");
+    expect(report.results.observe.settled?.failures).toBe(0);
+  });
 });
+
+function fakeDeps(client: BenchmarkClient): BenchmarkDeps {
+  return {
+    parentEnv: {},
+    safety: {
+      homeDir: "/fake/home",
+      builtInResidentPaths: [
+        "/tmp/auto-mobile-daemon-501.sock",
+        "/tmp/auto-mobile-daemon-501.pid",
+        "/tmp/auto-mobile-daemon-501.lock",
+      ],
+      effectiveDaemonPaths: ["/fake/scratch/d.sock", "/fake/scratch/d.pid", "/fake/scratch/d.lock"],
+    },
+    createClient: async () => client,
+    pickPort: async () => 49152,
+    now: (() => {
+      let n = 0;
+      return () => n++;
+    })(),
+    log: () => {},
+    write: () => {},
+    serverExists: () => true,
+    stopPrivateDaemon: async () => {},
+    makeRunDir: () => resolve("/tmp/fake-aux"),
+    removeRunDir: () => {},
+  };
+}

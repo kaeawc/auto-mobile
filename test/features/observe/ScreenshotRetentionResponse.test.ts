@@ -3,10 +3,7 @@ import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
-import {
-  BoundedScreenshotPathProtection,
-  ScreenshotRetentionCapacityError,
-} from "../../../src/features/observe/ScreenshotRetention";
+import { ScreenshotRetentionCapacityError } from "../../../src/features/observe/ScreenshotRetention";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { resetScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
@@ -53,31 +50,18 @@ function setup(capture: ScreenshotResult) {
   return { timer, protection, screen, result: screen.createBaseResult() };
 }
 
+/** Retention no longer refuses (#8758), but callers still handle the typed error from a capture. */
 function capacityCapture(timer: FakeTimer) {
-  const files = new FakeFileSystem();
-  files.setFile("/screenshots/screenshot_0_device_live.png", "live");
-  files.stat = async () => ({ size: 128 * 1024 * 1024, mtimeMs: 0, isFile: () => true });
   const screenshot = new TakeScreenshot(
     device,
     new FakeAdbClientFactory(new FakeAdbExecutor()),
     timer,
     undefined,
     new FakeScreenshotFileWriter(),
-    files,
+    new FakeFileSystem(),
     () => "/screenshots",
-    undefined,
-    false,
-    {
-      pathProtection: new BoundedScreenshotPathProtection(timer, undefined),
-    },
   );
-  spyOn(screenshot, "captureScreenshot").mockImplementation(async () => {
-    await screenshot["writeScreenshot"](
-      "/screenshots/screenshot_0_device_new.png",
-      Buffer.from("frame"),
-    );
-    return { success: true, path: "/fresh.png" };
-  });
+  spyOn(screenshot, "captureScreenshot").mockRejectedValue(capacity);
   return screenshot.execute.bind(screenshot);
 }
 

@@ -1,8 +1,5 @@
 import { FakeFileSystem } from "../fakes/FakeFileSystem";
-import {
-  BoundedScreenshotPathProtection,
-  ScreenshotRetentionCapacityError,
-} from "../../src/features/observe/ScreenshotRetention";
+import { BoundedScreenshotPathProtection } from "../../src/features/observe/ScreenshotRetention";
 import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../src/features/observe/ScreenshotRetention";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import path from "node:path";
@@ -782,7 +779,7 @@ describe("observe crop failures", () => {
   });
 });
 
-test("crop writer refuses capacity with a typed error and retains both devices' paths", async () => {
+test("crop writer at capacity evicts the least recently used path instead of refusing (#8758)", async () => {
   const files = new FakeFileSystem();
   files.setFile("/screenshots/screenshot_0_deviceA.png", "a");
   files.setFile("/screenshots/screenshot_0_deviceB.png", "b");
@@ -796,15 +793,13 @@ test("crop writer refuses capacity with a typed error and retains both devices' 
       outputDirectory: () => "/screenshots",
       imageBackend: image,
       writer: {
-        write: async () => {
-          throw new Error("must not write at capacity");
-        },
+        write: async () => {},
         remove: async () => {},
       },
     },
   });
-  await expect(call({ crop: { rect } })).rejects.toBeInstanceOf(ScreenshotRetentionCapacityError);
-  expect(files.existsSync("/screenshots/screenshot_0_deviceA.png")).toBe(true);
+  await call({ crop: { rect } });
+  expect(files.existsSync("/screenshots/screenshot_0_deviceA.png")).toBe(false);
   expect(files.existsSync("/screenshots/screenshot_0_deviceB.png")).toBe(true);
 });
 

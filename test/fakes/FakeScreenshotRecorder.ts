@@ -1,5 +1,8 @@
-import type { ObserveScreenshotRecorder } from "../../src/features/observe/screenshot/ObserveScreenshotRecorder";
-import type { ScreenshotEncodingOptions } from "../../src/features/observe/screenshot/screenshotOptions";
+import type {
+  ObserveCaptureOptions,
+  ObserveScreenshotRecorder,
+} from "../../src/features/observe/screenshot/ObserveScreenshotRecorder";
+import type { ObserveScreenshotOptions } from "../../src/features/observe/screenshot/screenshotOptions";
 import type { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 
 export class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
@@ -8,17 +11,42 @@ export class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
   captureFreshCalls = 0;
   captureSettledCalls = 0;
   settledError?: Error;
+  /** Capture options passed to start/capture/captureFresh, in call order. */
+  readonly captureOptions: (ObserveCaptureOptions | undefined)[] = [];
+  /** Options passed to captureSettled, in call order. */
+  readonly settledOptions: (ObserveScreenshotOptions | undefined)[] = [];
 
-  start(): void {
+  start(
+    _observationId: string,
+    _perf?: PerformanceTracker,
+    _signal?: AbortSignal,
+    _displayId?: number,
+    capture?: ObserveCaptureOptions,
+  ): void {
     this.startCalls++;
+    this.captureOptions.push(capture);
   }
 
-  async capture(): Promise<void> {
+  async capture(
+    _observationId: string,
+    _perf?: PerformanceTracker,
+    _signal?: AbortSignal,
+    _displayId?: number,
+    capture?: ObserveCaptureOptions,
+  ): Promise<void> {
     this.captureCalls++;
+    this.captureOptions.push(capture);
   }
 
-  async captureFresh(): Promise<void> {
+  async captureFresh(
+    _observationId: string,
+    _perf?: PerformanceTracker,
+    _signal?: AbortSignal,
+    _displayId?: number,
+    capture?: ObserveCaptureOptions,
+  ): Promise<void> {
     this.captureFreshCalls++;
+    this.captureOptions.push(capture);
   }
 
   async captureSettled(
@@ -26,9 +54,10 @@ export class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
     _perf?: PerformanceTracker,
     _signal?: AbortSignal,
     _displayId?: number,
-    _options?: ScreenshotEncodingOptions,
+    options?: ObserveScreenshotOptions,
   ): Promise<string> {
     this.captureSettledCalls++;
+    this.settledOptions.push(options);
     if (this.settledError) {
       throw this.settledError;
     }

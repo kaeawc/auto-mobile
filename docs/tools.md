@@ -1060,9 +1060,15 @@ element conditions. `identifyInteractions.layer` analyzes only that layer's
 elements. `dragAndDrop.layer` scopes both the `source` and the `target`
 drop-target resolution; `swipeOn.layer` scopes `container`, auto-target, and
 `lookFor` resolution; `pinchOn.layer` scopes `container` and auto-target resolution.
-The device cannot hide its own overlay for a capture, so an `observe` screenshot
-or crop taken with `layer: "app"` while an overlay is showing still includes the
-overlay; the result says so with `screenshotIncludesOverlay: true`. Navigation-graph
+With `layer: "app"`, an Android CtrlProxy that advertises
+`screenshot_hide_overlay_v1` hides its overlay for the `observe` capture: it hides
+the window, waits for a rendered frame, captures and restores, all on the device in
+one request, so a cancelled observe never leaves the overlay hidden. While an
+overlay is showing, the result then reports `screenshotIncludesOverlay: false`; a
+capture that cannot confirm the hide fails instead of falling back to ADB. Older
+CtrlProxy builds, iOS, and `deviceId` reads (which capture through ADB) still
+include the overlay in the screenshot or crop, and the result says so with
+`screenshotIncludesOverlay: true`. Navigation-graph
 screen identity always uses the app's windows only, so showing, paging, or
 dismissing an overlay records no navigation.
 

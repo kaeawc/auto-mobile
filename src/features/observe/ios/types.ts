@@ -196,6 +196,8 @@ export interface CtrlProxyScreenshotResult {
   rotation?: number;
   error?: string;
   frameContext?: string;
+  /** Present when the request asked to hide overlays: true when the image excludes them (#9305). */
+  overlaysHidden?: boolean;
 }
 
 /** Swipe result from CtrlProxy iOS */

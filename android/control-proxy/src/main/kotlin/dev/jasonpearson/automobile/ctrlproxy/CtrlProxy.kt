@@ -69,6 +69,7 @@ import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayEventSink
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayFontCache
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayForegroundTracker
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayForegroundWindow
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayHiddenCapture
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImageCache
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
@@ -2376,6 +2377,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun requestScreenshot(requestId: String?, displayId: Int?) =
     broadcastScreenshot(requestId, displayId)
+
+  override fun requestScreenshot(requestId: String?, displayId: Int?, hideOverlays: Boolean) =
+    broadcastScreenshot(requestId, displayId, hideOverlays)
 
   override fun requestDoubleTapCoordinates(
     requestId: String?,
@@ -8206,7 +8210,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /** Broadcast screenshot to WebSocket clients */
-  private fun broadcastScreenshot(requestId: String?, displayId: Int? = null) {
+  private fun broadcastScreenshot(
+    requestId: String?,
+    displayId: Int? = null,
+    hideOverlays: Boolean = false,
+  ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping screenshot broadcast")
       return
@@ -8218,7 +8226,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     asyncActionRunner.launch(requestId, "screenshot") {
       val contextBeforeCapture = currentFrameContext()
       val targetDisplayId = displayId ?: activeDisplayId()
-      val outcome = takeScreenshotAsync(targetDisplayId)
+      val overlaysHidden: Boolean?
+      val outcome =
+        if (hideOverlays) {
+          val capture = captureWithOverlayHidden(targetDisplayId)
+          overlaysHidden = capture.overlayExcluded
+          capture.value
+        } else {
+          overlaysHidden = null
+          takeScreenshotAsync(targetDisplayId)
+        }
       val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
       when (outcome) {
         is ScreenshotCaptureOutcome.Success -> {
@@ -8237,6 +8254,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               screenshotByteLength = screenshot.byteLength,
               screenshotBase64Length = screenshot.base64Length,
               frameContext = stableContext?.toString(),
+              overlaysHidden = overlaysHidden,
             ),
           )
           Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")
@@ -8252,6 +8270,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
     }
   }
+
+  /**
+   * Hide-capture-restore in one device-side step (#9305), so a host that gives up mid-request can
+   * never leave the overlay hidden: the host restores in its own finally.
+   */
+  private suspend fun captureWithOverlayHidden(
+    targetDisplayId: Int,
+  ): OverlayHiddenCapture<ScreenshotCaptureOutcome> =
+    if (::overlayController.isInitialized)
+      overlayController.withHiddenForCapture { takeScreenshotAsync(targetDisplayId) }
+    else OverlayHiddenCapture(takeScreenshotAsync(targetDisplayId), overlayExcluded = true)
 
   /** Broadcast navigation event to WebSocket clients using typed protocol */
   private suspend fun broadcastNavigationEvent(

@@ -52,6 +52,13 @@ data class SetHierarchyInterval(
 data class RequestScreenshot(
   override val requestId: String? = null,
   val displayId: Int? = null,
+  /**
+   * Hide CtrlProxy's interactive overlay window for this capture only: hide, wait for a rendered
+   * frame, capture, restore, all on the device in this one request
+   * (`screenshot_hide_overlay_v1`, #9305). Older APKs ignore the field and capture with the overlay
+   * showing.
+   */
+  val hideOverlays: Boolean = false,
 ) : WebSocketRequest()
 
 // =============================================================================

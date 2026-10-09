@@ -113,6 +113,17 @@ class OverlayController(
   val isSuspendedByForeground: Boolean
     get() = activeRuntime != null && foreground.suspended
 
+  /**
+   * Captures with the overlay hidden (#9305). Deliberately outside the controller mutex: a capture
+   * must not wait behind a show, and the host serializes captures and restores on its own. A
+   * suspended overlay (its app is not in front, #10261) has no window: the capture treats it as not
+   * showing and never touches the host, so it cannot re-show it. The host's restore also goes
+   * through isBlocked, covering a suspension or lock that lands mid-capture.
+   */
+  suspend fun <T> withHiddenForCapture(block: suspend () -> T): OverlayHiddenCapture<T> =
+    if (isSuspendedByForeground) OverlayHiddenCapture(block(), overlayExcluded = true)
+    else host.withHiddenForCapture(block = block)
+
   private val mutex = Mutex()
   @Volatile
   internal var activeRuntime: OverlayRuntime? = null

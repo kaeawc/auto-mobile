@@ -143,6 +143,7 @@ import {
   ANDROID_REQUEST_ID_ECHO_CAPABILITY,
   ANDROID_REQUEST_ID_RESPONSE_TYPES,
   OVERLAY_DISPLAY_CAPABILITY,
+  SCREENSHOT_HIDE_OVERLAY_CAPABILITY,
   OVERLAY_WINDOW_OPTIONS_CAPABILITY,
   OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
   ctrlProxyMissingRequestIdError,
@@ -347,6 +348,7 @@ interface WsScreenshotMessage extends WsMessageBase, ScreenshotPerformanceMetada
   rotation?: number;
   displayId?: number | null;
   panelUniqueId?: string | null;
+  overlaysHidden?: boolean | null;
 }
 
 export interface AndroidDisplayTransition {
@@ -4758,6 +4760,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     sentRequestId: string,
     signal?: AbortSignal,
     displayId?: number,
+    hideOverlays = false,
   ): Promise<void> {
     if (signal?.aborted) {
       // Settle the registration we just made so it neither waits out its
@@ -4769,7 +4772,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       throw new Error("WebSocket not connected");
     }
     const message = serializeCtrlProxyRequest(
-      ctrlProxyRequests.requestScreenshot({ requestId: sentRequestId, displayId }),
+      ctrlProxyRequests.requestScreenshot({
+        requestId: sentRequestId,
+        displayId,
+        // A capability flag, never a request type: the legacy "assume supported" path must not
+        // apply, or an older APK would silently capture with the overlay showing.
+        hideOverlays:
+          hideOverlays && this.supportedCommands?.has(SCREENSHOT_HIDE_OVERLAY_CAPABILITY) === true,
+      }),
     );
     // Shared rate-limit floor accounting (issue #4927): a one-shot screenshot (observe /
     // junit-runner) and the observation-stream scheduler both hit the same rate-limited
@@ -4814,12 +4824,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  /**
+   * `hideOverlays` asks the device to hide its overlay for this capture (#9305); it is sent only
+   * to a CtrlProxy advertising `screenshot_hide_overlay_v1`, and the result's `overlaysHidden`
+   * reports the outcome.
+   */
   async requestScreenshot(
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     suppressObservationStreamPush: boolean = false,
     signal?: AbortSignal,
     displayId?: number,
+    hideOverlays: boolean = false,
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     let suppressedRequestId: string | undefined;
@@ -4856,7 +4872,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       );
 
       await perf.track("sendRequest", () =>
-        this.dispatchScreenshotRequest(sentRequestId, signal, displayId),
+        this.dispatchScreenshotRequest(sentRequestId, signal, displayId, hideOverlays),
       );
 
       removeAbortListener = this.registerPostDispatchAbort(sentRequestId, signal);
@@ -5863,6 +5879,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           displayId: message.displayId,
           panelUniqueId: message.panelUniqueId,
           ...screenshotPerformanceMetadataFrom(message),
+          ...(typeof message.overlaysHidden === "boolean"
+            ? { overlaysHidden: message.overlaysHidden }
+            : {}),
         });
       }
     },

@@ -44,56 +44,83 @@ EOF
 
   cat > "${FAKE}/bun" <<'EOF'
 #!/usr/bin/env bash
-# Fake AutoMobile entry point: `--daemon <command>` or the stdio MCP proxy.
+# Fake AutoMobile entry point: `--daemon <command>` or the stdio MCP proxy. Each held emulator
+# has a directory of facts under state/<serial>/.
 state="${FAKE}/state"
 now() { cat "${FAKE}/clock"; }
 idle_ms="${AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS:-120000}"
 
 release() {
-  rm -f "${state}/session" "${state}/stopped_since"
-  printf '%s %s\n' "$(now)" "$1" >> "${FAKE}/releases"
+  rm -rf "${state:?}/$1"
+  printf '%s %s %s\n' "$(now)" "$2" "$1" >> "${FAKE}/releases"
+}
+
+session_for() {
+  if [[ "$1" == emulator-5560 ]]; then
+    printf '%s\n' "${FAKE_SESSION_UUID}"
+  else
+    printf '%s\n' "${FAKE_SESSION_UUID}-$1"
+  fi
+}
+
+device_for_session() {
+  local dir
+  for dir in "${state}"/emulator-*; do
+    if [[ -f "${dir}/session" && "$(cat "${dir}/session")" == "$1" ]]; then
+      basename "${dir}"
+      return 0
+    fi
+  done
+  return 0
+}
+
+scan_device() {
+  local dev="$1" t pid dir="${state}/$1"
+  t="$(now)"
+  pid="$(cat "${dir}/proxy_pid")"
+  if ! kill -0 "${pid}" 2> /dev/null; then
+    release "${dev}" owner-disconnected
+    return
+  elif [[ "$(ps -o stat= -p "${pid}" 2> /dev/null)" == *T* ]]; then
+    [[ -f "${dir}/stopped_since" ]] || printf '%s\n' "${t}" > "${dir}/stopped_since"
+    if ((t - $(cat "${dir}/stopped_since") >= ${FAKE_NO_HB_RELEASE_MS:-8000})); then
+      release "${dev}" heartbeat-timeout
+      return
+    fi
+  else
+    rm -f "${dir}/stopped_since"
+    printf '%s\n' "${t}" > "${dir}/last_beat"
+    if [[ "${FAKE_HEARTBEAT_COUNTS_AS_USE:-0}" == 1 ]]; then
+      printf '%s\n' "${t}" > "${dir}/last_tool"
+    fi
+  fi
+  if [[ "${FAKE_NEVER_IDLE_RELEASE:-0}" != 1 ]] && ((t > $(cat "${dir}/last_tool") + idle_ms + 4000)); then
+    release "${dev}" cleanup-expired
+  elif [[ -n "${FAKE_RELEASE_AFTER_MS:-}" ]] && ((t - $(cat "${dir}/acquired") >= FAKE_RELEASE_AFTER_MS)); then
+    release "${dev}" bug
+  fi
 }
 
 active_sessions() {
-  local t pid
-  t="$(now)"
-  if [[ -f "${state}/session" ]]; then
-    pid="$(cat "${state}/proxy_pid")"
-    if ! kill -0 "${pid}" 2> /dev/null; then
-      release owner-disconnected
-    elif [[ "$(ps -o stat= -p "${pid}" 2> /dev/null)" == *T* ]]; then
-      [[ -f "${state}/stopped_since" ]] || printf '%s\n' "${t}" > "${state}/stopped_since"
-      if ((t - $(cat "${state}/stopped_since") >= ${FAKE_NO_HB_RELEASE_MS:-8000})); then
-        release heartbeat-timeout
-      fi
-    else
-      rm -f "${state}/stopped_since"
-      printf '%s\n' "${t}" > "${state}/last_beat"
-      if [[ "${FAKE_HEARTBEAT_COUNTS_AS_USE:-0}" == 1 ]]; then
-        printf '%s\n' "${t}" > "${state}/last_tool"
-      fi
-    fi
-  fi
-  if [[ -f "${state}/session" ]]; then
-    local last_tool acquired
-    last_tool="$(cat "${state}/last_tool")"
-    acquired="$(cat "${state}/acquired")"
-    if [[ "${FAKE_NEVER_IDLE_RELEASE:-0}" != 1 ]] && ((t > last_tool + idle_ms + 4000)); then
-      release cleanup-expired
-    elif [[ -n "${FAKE_RELEASE_AFTER_MS:-}" ]] && ((t - acquired >= FAKE_RELEASE_AFTER_MS)); then
-      release bug
-    fi
-  fi
-  if [[ -f "${state}/session" ]]; then
-    jq -cn --arg id "$(cat "${state}/session")" --argjson tool "$(cat "${state}/last_tool")" \
-      --argjson beat "$(cat "${state}/last_beat")" --argjson idle "${idle_ms}" \
-      --arg kind "${FAKE_HOLDER_KIND:-stdio-proxy}" \
-      '{activeSessions: 1, activeExecutions: 0, sessions: [{sessionId: $id,
-        assignedDevice: "emulator-5560", platform: "android", lastToolActivityAt: $tool,
+  local dir dev entries=()
+  for dir in "${state}"/emulator-*; do
+    [[ -d "${dir}" && -f "${dir}/session" ]] || continue
+    scan_device "$(basename "${dir}")"
+  done
+  for dir in "${state}"/emulator-*; do
+    [[ -d "${dir}" && -f "${dir}/session" ]] || continue
+    dev="$(basename "${dir}")"
+    entries+=("$(jq -cn --arg id "$(cat "${dir}/session")" --arg dev "${dev}" \
+      --argjson tool "$(cat "${dir}/last_tool")" --argjson beat "$(cat "${dir}/last_beat")" \
+      --argjson idle "${idle_ms}" --arg kind "${FAKE_HOLDER_KIND:-stdio-proxy}" \
+      '{sessionId: $id, assignedDevice: $dev, platform: "android", lastToolActivityAt: $tool,
         lastOwnerHeartbeatAt: $beat, idleReleaseAt: ($tool + $idle + 4000),
-        holderKind: $kind, activeExecutions: 0}]}'
-  else
+        holderKind: $kind, activeExecutions: 0}')")
+  done
+  if ((${#entries[@]} == 0)); then
     printf '%s\n' '{"activeSessions":0,"activeExecutions":0,"sessions":[]}'
+  else
+    printf '%s\n' "${entries[@]}" | jq -cs '{activeSessions: length, activeExecutions: 0, sessions: .}'
   fi
 }
 
@@ -112,6 +139,7 @@ fi
 
 # stdio MCP proxy
 printf '%s\n' "${*:2}" >> "${FAKE}/proxy.calls"
+printf '%s\n' "$$" > "${state}/proxy_pid"
 reply() {
   jq -cn --argjson id "$1" --argjson result "$2" '{jsonrpc: "2.0", id: $id, result: $result}'
 }
@@ -125,23 +153,49 @@ while IFS= read -r line; do
   fi
   tool="$(jq -r '.params.name' <<< "${line}")"
   printf '%s %s\n' "${tool}" "$(jq -c '.params.arguments' <<< "${line}")" >> "${FAKE}/tool.calls"
-  if [[ "${tool}" == getAndroid ]]; then
-    printf '%s\n' "${FAKE_SESSION_UUID}" > "${state}/session"
-    printf '%s\n' "$$" > "${state}/proxy_pid"
-    now > "${state}/acquired"
-    now > "${state}/last_beat"
+  target=""
+  session_arg="$(jq -r '.params.arguments.sessionUuid // empty' <<< "${line}")"
+  if [[ "${tool}" == getAndroid || "${tool}" == provisionDevice ]]; then
+    target="$(jq -r '.params.arguments.deviceId' <<< "${line}")"
+    mkdir -p "${state}/${target}"
+    session_for "${target}" > "${state}/${target}/session"
+    printf '%s\n' "$$" > "${state}/${target}/proxy_pid"
+    now > "${state}/${target}/acquired"
+    now > "${state}/${target}/last_beat"
+  elif [[ -n "${session_arg}" ]]; then
+    target="$(device_for_session "${session_arg}")"
+  elif [[ "${FAKE_SELECTOR_NOT_CREDITED:-0}" != 1 ]]; then
+    target="$(jq -r '.params.arguments.deviceId // empty' <<< "${line}")"
   fi
-  now > "${state}/last_tool"
+  if [[ -n "${target}" && -d "${state}/${target}" ]]; then
+    # A tool call takes a millisecond of virtual time, so successive calls are distinguishable.
+    printf '%s\n' "$(($(now) + 1))" > "${FAKE}/clock"
+    now > "${state}/${target}/last_tool"
+  fi
   reply "${id}" '{"content":[{"type":"text","text":"ok"}]}'
 done
 EOF
-  chmod +x "${FAKE}/now" "${FAKE}/sleep" "${FAKE}/adb" "${FAKE}/bun"
+
+  cat > "${FAKE}/nc" <<'EOF'
+#!/usr/bin/env bash
+# Fake `nc -U`: acknowledge the subscription, then stay open until stdin closes.
+printf '%s\n' "$*" >> "${FAKE}/nc.calls"
+IFS= read -r request || exit 0
+printf '%s\n' "${request}" >> "${FAKE}/nc.requests"
+printf '%s\n' '{"id":"1","type":"subscription_response","success":true,"subscriptionId":"devicedatastream-1"}'
+if [[ "${FAKE_STREAM_ENDED:-0}" == 1 ]]; then
+  printf '%s\n' '{"type":"device_session_ended","deviceId":"emulator-5560"}'
+fi
+cat > /dev/null
+EOF
+  chmod +x "${FAKE}/now" "${FAKE}/sleep" "${FAKE}/adb" "${FAKE}/bun" "${FAKE}/nc"
 
   export FAKE_SESSION_UUID="${SESSION_UUID}"
   export AUTOMOBILE_IDLE_CHECK_BUN="${FAKE}/bun"
   export AUTOMOBILE_IDLE_CHECK_ADB="${FAKE}/adb"
   export AUTOMOBILE_IDLE_CHECK_SLEEP="${FAKE}/sleep"
   export AUTOMOBILE_IDLE_CHECK_NOW="${FAKE}/now"
+  export AUTOMOBILE_IDLE_CHECK_NC="${FAKE}/nc"
 }
 
 teardown() {
@@ -210,10 +264,15 @@ run_check() {
   [[ "${output}" == *"PASS active"* ]]
   [[ "${output}" == *"PASS no-heartbeat"* ]]
   [[ "${output}" == *"PASS idle"* ]]
+  [[ "${output}" == *"PASS stdin-eof"* ]]
+  [[ "${output}" == *"PASS selector"* ]]
+  [[ "${output}" == *"PASS stream"* ]]
+  # two-devices needs --second-serial and is not part of the default sweep.
+  [[ "${output}" != *"two-devices"* ]]
 
   # Each scenario released the device the way it should.
   run cut -d' ' -f2 "${FAKE}/releases"
-  [ "${output}" = "$(printf 'owner-disconnected\nheartbeat-timeout\ncleanup-expired')" ]
+  [ "${output}" = "$(printf 'owner-disconnected\nheartbeat-timeout\ncleanup-expired\nowner-disconnected\nowner-disconnected\ncleanup-expired')" ]
 
   # A fully private daemon on the explicit port, with the short idle window.
   grep -qx "AUTOMOBILE_DAEMON_SOCKET_PATH=${WORK}/d.sock" "${FAKE}/daemon.env"
@@ -235,8 +294,8 @@ run_check() {
   grep -qx "observe {\"sessionUuid\":\"${SESSION_UUID}\"}" "${FAKE}/tool.calls"
 
   # Ground truth and evidence for every scenario.
-  [ "$(grep -c 'get-state' "${FAKE}/adb.calls")" -eq 4 ]
-  for scenario in active no-heartbeat idle; do
+  [ "$(grep -c 'get-state' "${FAKE}/adb.calls")" -eq 7 ]
+  for scenario in active no-heartbeat idle stdin-eof selector stream; do
     [ -s "${EVIDENCE}/${scenario}.sessions.log" ]
   done
 }
@@ -271,4 +330,68 @@ run_check() {
   FAKE_HOLDER_KIND=unknown run_check --scenario idle
   [ "${status}" -eq 1 ]
   [[ "${output}" == *"holderKind unknown, expected stdio-proxy"* ]]
+}
+
+@test "stdin-eof: the proxy exits on its own and the device is released" {
+  run_check --scenario stdin-eof
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS stdin-eof"* ]]
+  run cut -d' ' -f2 "${FAKE}/releases"
+  [ "${output}" = "owner-disconnected" ]
+}
+
+@test "selector: deviceId-only calls hold the device past the idle window" {
+  run_check --scenario selector
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS selector"* ]]
+  grep -qx 'observe {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
+}
+
+@test "selector: fails when deviceId-only calls are not credited to the session" {
+  FAKE_SELECTOR_NOT_CREDITED=1 run_check --scenario selector
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL selector"* ]]
+}
+
+@test "provision: a provisionDevice session is driven by deviceId and stays held" {
+  run_check --scenario provision
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS provision"* ]]
+  grep -qx 'provisionDevice {"deviceId":"emulator-5560"}' "${FAKE}/tool.calls"
+}
+
+@test "stream: the subscription survives the idle release and frames are kept as evidence" {
+  run_check --scenario stream
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS stream"* ]]
+  grep -q '"command":"subscribe"' "${FAKE}/nc.requests"
+  grep -q subscription_response "${EVIDENCE}/stream.stream.frames"
+}
+
+@test "stream: fails when the idle release pushes device_session_ended" {
+  FAKE_STREAM_ENDED=1 run_check --scenario stream
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"device_session_ended"* ]]
+}
+
+@test "two-devices: A goes at its own idle deadline while B stays held" {
+  run_check --scenario two-devices --second-serial emulator-5562
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS two-devices"* ]]
+  run cut -d' ' -f2- "${FAKE}/releases"
+  [ "${output}" = "$(printf 'cleanup-expired emulator-5560\nowner-disconnected emulator-5562')" ]
+}
+
+@test "two-devices: fails when B is released while it is in use" {
+  FAKE_RELEASE_AFTER_MS=8000 run_check --scenario two-devices --second-serial emulator-5562
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL two-devices"* ]]
+}
+
+@test "two-devices needs a different emulator as --second-serial" {
+  run_check --scenario two-devices
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"--second-serial"* ]]
+  run_check --scenario two-devices --second-serial emulator-5560
+  [ "${status}" -eq 2 ]
 }

@@ -33,6 +33,7 @@ import {
   subscribeToolCallEndActivity,
 } from "../../src/daemon/toolCallActivity";
 import { executionTracker } from "../../src/server/executionTracker";
+import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -159,6 +160,11 @@ export class LivenessScenario {
   readonly heartbeatsBySession = new Map<string, number>();
   /** Heartbeat frames delivered, by owner token. */
   readonly heartbeatsByToken = new Map<string, number>();
+  /**
+   * Session-release pushes the stream servers key off (`SessionReleaseBroadcaster`, the channel
+   * the video and WebRTC servers re-authorize their subscribers on), in emission order.
+   */
+  readonly releaseBroadcasts: Array<{ at: number; sessionId: string; reason: string }> = [];
   /** While true, the transport silently loses every heartbeat frame (the proxy sees an ack). */
   dropHeartbeats = false;
   daemon!: DaemonSide;
@@ -169,6 +175,7 @@ export class LivenessScenario {
   private readonly spies: Array<ReturnType<typeof spyOn>> = [];
   private readonly savedEnv = new Map<string, string | undefined>();
   private readonly gates = new Map<string, Promise<void>>();
+  private unsubscribeReleaseBroadcast: (() => void) | undefined;
   private minted: string | undefined;
   private mintCount = 0;
 
@@ -210,6 +217,9 @@ export class LivenessScenario {
     this.tools.setBody(async (input) => {
       await this.gates.get(input.args?.sessionUuid);
       return { content: [{ type: "text", text: JSON.stringify({ success: true }) }] };
+    });
+    this.unsubscribeReleaseBroadcast = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
+      this.releaseBroadcasts.push({ at: this.timer.now(), sessionId, reason: reason ?? "" });
     });
     this.daemon = await this.createDaemonSide();
     this.proxy = this.createProxy();
@@ -256,6 +266,9 @@ export class LivenessScenario {
     const unsubscribeToolCallEnd = subscribeToolCallEndActivity(executionTracker, manager, pool);
     manager.onSessionRelease((sessionId, deviceId, reason) => {
       this.releases.push({ at: this.timer.now(), sessionId, deviceId, reason: reason ?? "" });
+      // Mirrors the one-line forward in Daemon (onSessionRelease -> SessionReleaseBroadcaster.emit).
+      // This is a copy of production wiring: a regression in that forward is NOT caught here.
+      SessionReleaseBroadcaster.emit(sessionId, reason);
     });
     const monitor = new SessionHeartbeatMonitor(
       manager,
@@ -570,6 +583,7 @@ export class LivenessScenario {
     this.daemon.manager.stopCleanupTimer();
     this.daemon.unsubscribeToolCallEnd();
     this.tools.uninstall();
+    this.unsubscribeReleaseBroadcast?.();
     DaemonState.getInstance().reset();
     for (const spy of this.spies.splice(0)) {
       spy.mockRestore();

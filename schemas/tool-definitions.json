@@ -3105,6 +3105,9 @@
       },
       "required": ["deviceType", "runtime"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -7992,6 +7995,9 @@
       },
       "required": ["message", "images", "count", "platform", "configuredInventory"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -8709,6 +8715,9 @@
       },
       "required": ["message", "devices", "count", "discovery", "note"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {

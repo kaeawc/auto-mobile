@@ -422,6 +422,13 @@ export const DAEMON_ONE_SHOT_CLI_PARAM = "__autoMobileOneShotCli";
  */
 export const INTERNAL_ONE_SHOT_CLI_PARAM = "__oneShotCli";
 
+/**
+ * The restoring proxy's liveness owner token, sent with {@link DAEMON_OWNED_SESSIONS_PARAM}: a
+ * restore moves ownership off another live connection only when it matches the session's owner
+ * token (#11107).
+ */
+export const DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM = "__autoMobileOwnedSessionsOwnerToken";
+
 /** Socket RPC field identifying a released session used only for inactive resource reads. */
 export const DAEMON_RELEASED_SESSION_PARAM = "__autoMobileReleasedSessionUuid";
 

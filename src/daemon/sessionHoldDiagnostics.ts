@@ -10,7 +10,6 @@
  * the same answer.
  */
 
-import { suspectGraceMsFor } from "./livenessOwnerLease";
 import { effectiveLastToolActivity } from "./sessionClocks";
 import type { Session } from "./sessionManager";
 import { unsettledExecutionVetoExpiresAt } from "./unsettledExecutionVeto";
@@ -87,14 +86,14 @@ export function classifySessionHolderKind(
 /**
  * The idle deadline the daemon releases on. A `cli-idle` session is judged by
  * the heartbeat monitor on wall-clock idleness from its last tool activity; a
- * `heartbeat` session expires at `expiresAt`, plus the suspect grace when its
- * owner has heartbeated (`SessionManager.isSessionExpired`).
+ * `heartbeat` session expires exactly at `expiresAt` (`SessionManager.isSessionExpired`): the
+ * suspect grace extends only the heartbeat lease, never the idle deadline (#11107).
  */
 export function idleReleaseAt(session: SessionHoldSnapshot): number {
   if (session.livenessPolicy === "cli-idle") {
     return effectiveLastToolActivity(session) + session.heartbeatTimeoutMs;
   }
-  return session.expiresAt + suspectGraceMsFor(session);
+  return session.expiresAt;
 }
 
 /** What bounds an in-flight execution's veto (`SessionManager.getIdleReleaseExecutionVeto`). */

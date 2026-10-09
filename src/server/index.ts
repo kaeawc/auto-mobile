@@ -1296,8 +1296,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       }
       throw error;
     }
-    if (isDeviceInventoryTool(name)) {
-      // Inventory reads are admitted read-only (no activity refresh), so their end is not use.
+    // A plain read (inventory, diagnostics, status) names a session only to watch it: it is
+    // admitted read-only (no activity refresh), so neither its start nor its end is use (#11107).
+    const plainReadCall =
+      !tool.requiresDevice &&
+      (isDeviceInventoryTool(name) || tool.isDeviceReadOnlyCall?.(parsedParams) === true);
+    if (plainReadCall) {
       executionTracker.markReadOnlySessionAccess(execution.id);
     }
     if (resolvedImplicitAutolockSessionUuid) {
@@ -1460,7 +1464,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
               executionId: execution.id,
               startTime: execution.startTime,
             },
-            isDeviceInventoryTool(name) ? { access: "read-only" } : undefined,
+            plainReadCall ? { access: "read-only" } : undefined,
           );
         // Only an admitted call's end is session use (#10824).
         executionTracker.markSessionAdmitted(execution.id);

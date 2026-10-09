@@ -4585,7 +4585,7 @@ export function registerDeviceTools() {
     "List device images",
     listDeviceImagesSchema,
     listDeviceImagesHandler,
-    { defaultEnabled: true, outputSchema: listDeviceImagesOutputSchema },
+    { defaultEnabled: true, outputSchema: listDeviceImagesOutputSchema, readOnly: true },
   );
 
   ToolRegistry.register(
@@ -4593,7 +4593,7 @@ export function registerDeviceTools() {
     "List booted devices; pending configured-image enrichment includes retry hints and failed provenance includes a non-retryable reason; resource pointers for images and detail in the note",
     listDevicesSchema,
     listDevicesHandler,
-    { defaultEnabled: true, outputSchema: listDevicesOutputSchema },
+    { defaultEnabled: true, outputSchema: listDevicesOutputSchema, readOnly: true },
   );
 
   ToolRegistry.register(

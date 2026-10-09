@@ -538,6 +538,11 @@ export const registerPlanTools = () => {
     "Record MCP tool calls to YAML. begin/end require mcp-recording; status always works.",
     recordStepsSchema,
     recordStepsTool,
-    { defaultEnabled: false, outputSchema: recordStepsResultSchema },
+    {
+      defaultEnabled: false,
+      outputSchema: recordStepsResultSchema,
+      // `status` only reports the recording; begin/end change it (#11107).
+      readOnly: (args: { action?: unknown }) => args?.action === "status",
+    },
   );
 };

@@ -137,6 +137,7 @@ export interface DaemonStateAccess {
     restoreOwnedDeviceSessionsForMcpSession?(
       sessionIds: readonly string[],
       mcpSessionId: string,
+      livenessOwnerToken?: string,
     ): Promise<void>;
     releaseMcpSessionBindings?(mcpSessionId: string): void;
     refreshDevices(): Promise<number>;

@@ -426,7 +426,7 @@ be told from host sleep and counts as sleep.
 
 Idle time is wall-clock, host sleep included (owner decision 2026-10-08,
 #10661; classification of sleep versus a daemon stall in #10699). A stall that on its own outlasts a
-session's idle window (its timeout plus the suspect grace), such as a laptop
+session's idle window (its timeout; the suspect grace never extends it), such as a laptop
 asleep for longer than that, is idleness and is not forgiven, so waking the host
 may release the session. The verdict does not depend on which timer runs first
 after the wake: the monitor tick, an owner heartbeat, a tool call and the

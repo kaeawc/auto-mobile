@@ -263,7 +263,7 @@
               "platform": "android",
               "lastToolActivityAt": 0,
               "lastOwnerHeartbeatAt": 12000,
-              "idleReleaseAt": 124000,
+              "idleReleaseAt": 120000,
               "holderKind": "unknown",
               "activeExecutions": 0
             }

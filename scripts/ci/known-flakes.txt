@@ -23,6 +23,15 @@ Run Playground Automobile Emulator*|*is not available in the device pool*|RERUN-
 Run Playground Automobile Emulator*|*sys.boot_completed is not 1*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Run Playground Automobile Emulator*|*timeout exhausted while waiting for device boot readiness*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Run Playground Automobile Emulator*|*notification shade) is covering the app*|INVESTIGATE|post-fix LaunchApp launch-observation poll retries shade collapse; inspect a recurring overlay timeout before rerunning
+Run Android Emulator Tests*|*getAndroid automation runner readiness failed*phase=runner-connect*|INVESTIGATE|CtrlProxy runner-connect failed after emulator boot; inspect accessibility binding, WebSocket lifecycle, and ADB forwarding diagnostics
+Run Android Emulator Tests*|*notification shade) is covering the app*|INVESTIGATE|post-fix LaunchApp launch-observation poll retries shade collapse; inspect a recurring overlay timeout before rerunning
+Run Android Emulator Tests*|*could not connect to TCP port 5554: Connection refused*|RERUN-DONT-FIX|emulator start-up infra failure (emulator never launched, often a corrupt system-image download), non-required, rerun; see the emulator diagnostics step
+Run Android Emulator Tests*|*Error on ZipFile unknown archive*|RERUN-DONT-FIX|emulator start-up infra failure (system-image download corruption; emulator never launched), non-required, rerun; see the emulator diagnostics step
+Run Android Emulator Tests*|*startDevice automation runner readiness failed*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run Android Emulator Tests*|*readiness phase exceeded the remaining deadline*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run Android Emulator Tests*|*is not available in the device pool*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run Android Emulator Tests*|*sys.boot_completed is not 1*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
+Run Android Emulator Tests*|*timeout exhausted while waiting for device boot readiness*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Node Unit Timing Budget*|*test exceeded 100ms*median*isolated runs*|INVESTIGATE|isolated recheck confirms this is not a loaded-runner artifact; a real regression survived the bounded median recheck, fix the test or source and do not just rerun
 Node Unit Tests (ubuntu-latest)|*test exceeded 100ms*median*isolated runs*|INVESTIGATE|isolated recheck confirms this is not a loaded-runner artifact; a real regression survived the bounded median recheck, fix the test or source and do not just rerun
 Node TypeScript Build and Test (ubuntu-latest)|*test exceeded 100ms*median*isolated runs*|INVESTIGATE|isolated recheck confirms this is not a loaded-runner artifact; a real regression survived the bounded median recheck, fix the test or source and do not just rerun

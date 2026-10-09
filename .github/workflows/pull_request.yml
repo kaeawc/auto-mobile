@@ -2250,10 +2250,17 @@ jobs:
 
   # Test isolation issue resolved in #107 and #109
   # Re-enabled in #110
-  junit-runner-emulator-tests:
-    name: "Run JUnit Runner Emulator Tests"
+  # The JUnit Runner and Playground Automobile emulator suites share one booted
+  # emulator (#10891): each used to pay its own emulator boot and Gradle setup
+  # (~9-10 min). scripts/android/run-emulator-suites.sh runs both, resets the
+  # daemon between them, and fails if either fails. Their JUnit reports stay
+  # separate check runs so a failure remains attributable to its suite.
+  android-emulator-tests:
+    name: "Run Android Emulator Tests"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # One boot (~10 min incl. Gradle setup) + both suites, inside the action's
+    # one bounded retry.
+    timeout-minutes: 30
     # Compile failures stop this lane before it boots a device through the build
     # jobs that already compile its modules (#10890): Build CtrlProxy APK,
     # Build Playground App (incl. :playground:app unit-test sources) and Run
@@ -2278,7 +2285,7 @@ jobs:
       # Run AutoMobile tests that require emulator
       - uses: ./.github/actions/android-emulator
         with:
-          script: "./gradlew :junit-runner:test --stacktrace --info"
+          script: "../scripts/android/run-emulator-suites.sh control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"
           working-directory: "./android/"
           accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
           gradle-home-directory: "~/.gradle/${{ github.job }}"
@@ -2286,6 +2293,7 @@ jobs:
           release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
       - name: "Upload Heap Dumps"
         if: failure()
         continue-on-error: true
@@ -2295,19 +2303,33 @@ jobs:
           path: heap-dump
           if-no-files-found: ignore
 
-      - name: "Upload Test Results"
+      - name: "Upload JUnit Runner Test Results"
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: junit-runner-emulator-test-results
           path: android/junit-runner/build/reports/tests/test/
 
-      - name: "Publish Test Report"
+      - name: "Upload Playground Test Results"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: playground-automobile-emulator-test-results
+          path: android/playground/app/build/reports/tests/test/
+
+      - name: "Publish JUnit Runner Test Report"
         uses: mikepenz/action-junit-report@v6
         if: always()
         with:
           check_name: "JUnit Runner Emulator Test Report"
-          report_paths: "**/build/test-results/**/*.xml"
+          report_paths: "android/junit-runner/build/test-results/**/*.xml"
+
+      - name: "Publish Playground Test Report"
+        uses: mikepenz/action-junit-report@v6
+        if: always()
+        with:
+          check_name: "Playground Automobile Emulator Test Report"
+          report_paths: "android/playground/**/build/test-results/**/*.xml"
 
   # Emulator.wtf session-based tests (see #94 for investigation context)
   # Requires EMULATOR_WTF_ENABLED=true variable and EMULATOR_WTF_API_KEY secret
@@ -2384,59 +2406,6 @@ jobs:
         if: always()
         with:
           check_name: "JUnit Runner Emulator.wtf Test Report"
-          report_paths: "**/build/test-results/**/*.xml"
-
-  playground-automobile-emulator-tests:
-    name: "Run Playground Automobile Emulator Tests"
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    # Compile failures stop this lane before it boots a device through the build
-    # jobs that already compile its modules (#10890): Build CtrlProxy APK,
-    # Build Playground App (incl. :playground:app unit-test sources) and Run
-    # JUnit Runner Unit Tests (:junit-runner main + test sources).
-    needs:
-      [detect-changes, build-android-control-proxy, build-playground-app, junit-runner-unit-tests]
-    if: needs.detect-changes.outputs.android_should_run == 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@v7
-        with:
-          name: control-proxy-apk
-          path: android/control-proxy/build/outputs/apk/debug
-
-      # Run AutoMobile tests that require emulator
-      - uses: ./.github/actions/android-emulator
-        env:
-          AUTOMOBILE_ENABLED_TOOLS: "navigateTo,getNavigationGraph,explore"
-        with:
-          script: "../scripts/android/verify-sdk-ctrl-proxy-permission-contract.sh control-proxy/build/outputs/apk/debug/control-proxy-debug.apk && ../scripts/android/navigation-graph-sdk-event-integration.sh && ./gradlew :playground:app:test --stacktrace --info"
-          working-directory: "./android/"
-          accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
-          release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
-          release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
-
-      - name: "Upload Test Results"
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: playground-automobile-emulator-test-results
-          path: android/playground/app/build/reports/tests/test/
-
-      - name: "Publish Test Report"
-        uses: mikepenz/action-junit-report@v6
-        if: always()
-        with:
-          check_name: "Playground Automobile Emulator Test Report"
           report_paths: "**/build/test-results/**/*.xml"
 
   build-junit-runner-library:

@@ -157,7 +157,7 @@ wiring_requires_yq() {
   [[ "$(job_block build-playground-app)" == *":playground:app:compileDebugUnitTestKotlin"* ]]
   [[ "$(job_block junit-runner-unit-tests)" == *'gradle-tasks: ":junit-runner:test"'* ]]
   local job needs
-  for job in junit-runner-emulator-tests playground-automobile-emulator-tests; do
+  for job in android-emulator-tests; do
     needs="$(yq -r ".jobs.\"${job}\".needs[]" "$WF")"
     [[ $'\n'"$needs"$'\n' == *$'\n'"build-android-control-proxy"$'\n'* ]]
     [[ $'\n'"$needs"$'\n' == *$'\n'"build-playground-app"$'\n'* ]]
@@ -165,6 +165,26 @@ wiring_requires_yq() {
   done
   # The SDK Debug Inspector Consumer guard the smoke carried stays on PRs.
   [[ "$(job_block build-junit-runner-library)" == *"validate-sdk-debug-inspector-consumer.sh --skip-publish"* ]]
+}
+
+@test "both emulator suites share one booted emulator with separate reports (#10891)" {
+  wiring_requires_yq
+  [[ -z "$(job_block junit-runner-emulator-tests)" ]]
+  [[ -z "$(job_block playground-automobile-emulator-tests)" ]]
+  # Exactly one PR job boots an emulator for these suites (the WHEP capture job
+  # boots its own for a different test).
+  run yq -r '
+    .jobs[]
+    | select([.steps[]? | select(.uses == "./.github/actions/android-emulator" and ((.with.script // "") | test("junit-runner|playground|run-emulator-suites")))] | length > 0)
+    | key
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = "android-emulator-tests" ]
+  run yq -r '.jobs."android-emulator-tests".steps[] | select(.uses == "./.github/actions/android-emulator") | .with.script' "$WF"
+  [[ "$output" == "../scripts/android/run-emulator-suites.sh "* ]]
+  run yq -r '.jobs."android-emulator-tests".steps[] | select(.uses == "mikepenz/action-junit-report@v6") | .with.check_name + "|" + .with.report_paths' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'JUnit Runner Emulator Test Report|android/junit-runner/build/test-results/**/*.xml\nPlayground Automobile Emulator Test Report|android/playground/**/build/test-results/**/*.xml' ]
 }
 
 @test "portable PR matrices leave macOS coverage to nightly" {

@@ -435,6 +435,24 @@ JSON
   [[ "$output" != *"RERUN-DONT-FIX"* ]]
 }
 
+@test "classifies the combined Android emulator job's boot flake and runner-connect (#10891)" {
+  fixture="$BATS_TEST_TMPDIR/combined-emulator-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/android-emulator-combined",
+  "jobs": [
+    {"databaseId": 6, "name": "Run Android Emulator Tests", "conclusion": "failure", "steps": [{"name": "Run ./.github/actions/android-emulator", "conclusion": "failure"}]},
+    {"databaseId": 35, "name": "Run Android Emulator Tests", "conclusion": "failure", "steps": [{"name": "Run ./.github/actions/android-emulator", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 7786
+  [ "$status" -eq 0 ]
+  [[ "${lines[0]}" == *"Run Android Emulator Tests → Run ./.github/actions/android-emulator → none → RERUN-DONT-FIX"* ]]
+  [[ "${lines[1]}" == *"Run Android Emulator Tests → Run ./.github/actions/android-emulator → none → INVESTIGATE"* ]]
+}
+
 @test "does not classify a Playground runner-health failure as runner-connect" {
   fixture="$BATS_TEST_TMPDIR/playground-runner-health-run.json"
   cat > "$fixture" <<'JSON'

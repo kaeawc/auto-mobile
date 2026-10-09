@@ -13,7 +13,7 @@ import {
   DAEMON_VERSION,
 } from "../../src/daemon/constants";
 import {
-  DAEMON_STALL_RESUMED_CODE,
+  DAEMON_RESTART_RESUMED_CODE,
   type LivenessHandover,
 } from "../../src/daemon/proxyLivenessRecovery";
 import { DAEMON_INSTANCE_CHANGED_CODE } from "../../src/daemon/types";
@@ -264,9 +264,20 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
     // The harness names the session: it resumes, and the first call says so once.
     const first = await proxy.callTool("observe", { sessionUuid: HELD });
     expect((first as { isError?: boolean }).isError).toBeFalsy();
+    // The restarted daemon acknowledged the resume, so the notice says the daemon was restarted
+    // and state may have been rebuilt, not that nothing needs restarting.
     expect(warnings(first)).toEqual([
-      expect.objectContaining({ code: DAEMON_STALL_RESUMED_CODE, sessionUuid: HELD }),
+      expect.objectContaining({
+        code: DAEMON_RESTART_RESUMED_CODE,
+        sessionUuid: HELD,
+        deviceId: DEVICES[HELD],
+        handedOverCode: "daemon_stalled",
+        previousDaemonInstance: "daemon-1",
+        daemonInstance: "daemon-2",
+      }),
     ]);
+    expect(String(warnings(first)[0].message)).toContain("restarted");
+    expect(String(warnings(first)[0].message)).not.toContain("nothing needs restarting");
     const second = await proxy.callTool("observe", { sessionUuid: HELD });
     expect(warnings(second)).toEqual([]);
   });

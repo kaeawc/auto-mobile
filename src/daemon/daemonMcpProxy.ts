@@ -114,6 +114,7 @@ import {
   livenessHandoverPayload,
   livenessRecoveryCallWaitMs,
   livenessResumedNotice,
+  type DaemonRestartEvidence,
   ownershipConflictLeashMs,
   advanceOwnerConflictLeash,
   type OwnerConflictLeash,
@@ -238,6 +239,11 @@ interface StallHandoverRecord {
    * found replaced, or when its identity was never reported, so nothing probes (#10989).
    */
   probeDaemonInstance?: string;
+  /**
+   * The daemon process that last acknowledged a heartbeat before the handover, kept even after
+   * probing stops, so a resume acknowledged by another process is reported as a restart (#11018).
+   */
+  stalledDaemonInstance?: string;
   /** How the session was held when it was handed over, so a resume restores it as it was. */
   restore: {
     /** It was the latest binding. */
@@ -373,6 +379,34 @@ function isDaemonInstanceChangedError(error: unknown): boolean {
     "code" in error &&
     error.code === DAEMON_INSTANCE_CHANGED_CODE
   );
+}
+
+/** The daemon process a heartbeat acknowledgement reports, when it reports one (#10989). */
+function ackDaemonInstance(ack: unknown): string | undefined {
+  return ack !== null &&
+    typeof ack === "object" &&
+    "daemonInstance" in ack &&
+    typeof ack.daemonInstance === "string" &&
+    ack.daemonInstance.length > 0
+    ? ack.daemonInstance
+    : undefined;
+}
+
+/**
+ * The restart a resume acknowledgement reveals (#11018): another daemon process than the one that
+ * stalled answered. Undefined when both are the same, or either was never reported.
+ */
+function daemonRestartEvidence(
+  record: StallHandoverRecord,
+  ack: unknown,
+): DaemonRestartEvidence | undefined {
+  const previousDaemonInstance = record.stalledDaemonInstance;
+  const daemonInstance = ackDaemonInstance(ack);
+  return previousDaemonInstance !== undefined &&
+    daemonInstance !== undefined &&
+    daemonInstance !== previousDaemonInstance
+    ? { previousDaemonInstance, daemonInstance }
+    : undefined;
 }
 
 /** Append the resumed-session warning as one more text block of a tool result (#10989). */
@@ -1151,7 +1185,10 @@ export class DaemonMcpProxy {
    * Sessions resumed after a `daemon_stalled` handover whose next tool call has not run yet: that
    * call carries the warning instead of the handover's failure (#10989).
    */
-  private readonly resumedStallNotices = new Map<string, LivenessHandover>();
+  private readonly resumedStallNotices = new Map<
+    string,
+    { handover: LivenessHandover; restart?: DaemonRestartEvidence }
+  >();
   /**
    * The daemon process that last acknowledged a heartbeat, as the daemon reports it (#10989). A
    * stall probe only resumes sessions on this same process; a restarted daemon is left to the
@@ -3469,12 +3506,15 @@ export class DaemonMcpProxy {
    */
   private withPendingResumedNotice(args: Record<string, unknown>, result: unknown): unknown {
     const sessionUuid = this.sessionUuidFromArgs(args) ?? this.boundSessionUuid;
-    const handover = sessionUuid ? this.resumedStallNotices.get(sessionUuid) : undefined;
-    if (!sessionUuid || !handover) {
+    const pending = sessionUuid ? this.resumedStallNotices.get(sessionUuid) : undefined;
+    if (!sessionUuid || !pending) {
       return result;
     }
     this.resumedStallNotices.delete(sessionUuid);
-    return withResumedNotice(result, livenessResumedNotice(handover, sessionUuid));
+    return withResumedNotice(
+      result,
+      livenessResumedNotice(pending.handover, sessionUuid, pending.restart),
+    );
   }
 
   /**
@@ -3992,14 +4032,9 @@ export class DaemonMcpProxy {
 
   /** Keep the idle deadline the daemon reported in a heartbeat ack (#10823). */
   private noteDaemonIdleEvidence(sessionUuid: string, ack: unknown): void {
-    if (
-      ack !== null &&
-      typeof ack === "object" &&
-      "daemonInstance" in ack &&
-      typeof ack.daemonInstance === "string" &&
-      ack.daemonInstance.length > 0
-    ) {
-      this.ackedDaemonInstance = ack.daemonInstance;
+    const daemonInstance = ackDaemonInstance(ack);
+    if (daemonInstance !== undefined) {
+      this.ackedDaemonInstance = daemonInstance;
     }
     const releaseAt = (ack as { idleReleaseAt?: unknown } | null | undefined)?.idleReleaseAt;
     if (typeof releaseAt === "number" && Number.isFinite(releaseAt)) {
@@ -4887,6 +4922,9 @@ export class DaemonMcpProxy {
       handover,
       delivered: false,
       ...(probed ? { probeDaemonInstance: this.ackedDaemonInstance } : {}),
+      ...(this.ackedDaemonInstance !== undefined
+        ? { stalledDaemonInstance: this.ackedDaemonInstance }
+        : {}),
       restore: this.stallRestoreSnapshot(sessionUuid),
     };
   }
@@ -5000,13 +5038,16 @@ export class DaemonMcpProxy {
    * it was held before, heartbeating it from now on. Its next tool call carries a warning instead
    * of the handover.
    */
-  private restoreResumedSession(sessionUuid: string): void {
+  private restoreResumedSession(sessionUuid: string, restart?: DaemonRestartEvidence): void {
     const record = this.stallHandovers.get(sessionUuid);
     if (!record) {
       return;
     }
     this.stallHandovers.delete(sessionUuid);
-    this.resumedStallNotices.set(sessionUuid, record.handover);
+    this.resumedStallNotices.set(sessionUuid, {
+      handover: record.handover,
+      ...(restart ? { restart } : {}),
+    });
     this.livenessAcks.set(sessionUuid, this.timer.now());
     const terminal = this.terminalBoundSession;
     if (terminal?.sessionUuid === sessionUuid) {
@@ -5113,7 +5154,7 @@ export class DaemonMcpProxy {
       throw new DaemonSessionStalledError(sessionUuid, record.handover);
     }
     if (this.stallHandovers.get(sessionUuid) === record) {
-      this.restoreResumedSession(sessionUuid);
+      this.restoreResumedSession(sessionUuid, daemonRestartEvidence(record, ack));
     }
     this.noteDaemonIdleEvidence(sessionUuid, ack);
   }

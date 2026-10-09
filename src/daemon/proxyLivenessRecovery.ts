@@ -271,11 +271,51 @@ export function livenessHandoverPayload(handover: LivenessHandover) {
 export const DAEMON_STALL_RESUMED_CODE = "daemon_stall_resumed";
 
 /**
- * The warning the first tool call to reach a session resumed after a `daemon_stalled` handover
- * carries: the harness was told the session stalled, and now learns it needs nothing restarted.
+ * Code of the warning a tool result carries when a handed-over session was resumed on a daemon
+ * process other than the one that stalled: the daemon was restarted meanwhile (#11018).
  */
-export function livenessResumedNotice(handover: LivenessHandover, sessionUuid: string) {
+export const DAEMON_RESTART_RESUMED_CODE = "daemon_restart_resumed";
+
+/** The daemon processes a resumed session went from and to, when the daemon was restarted. */
+export interface DaemonRestartEvidence {
+  /** The daemon process that last acknowledged a heartbeat before the handover. */
+  previousDaemonInstance: string;
+  /** The daemon process that acknowledged the resume. */
+  daemonInstance: string;
+}
+
+/**
+ * The warning the first tool call to reach a session resumed after a `daemon_stalled` handover
+ * carries. The same daemon process answering again means the harness can disregard the handover
+ * and needs nothing restarted; a different process means the daemon was restarted and restored
+ * the session, so device and runner state may have been rebuilt (#11018).
+ */
+export function livenessResumedNotice(
+  handover: LivenessHandover,
+  sessionUuid: string,
+  restart?: DaemonRestartEvidence,
+) {
   const session = handover.sessions.find((entry) => entry.sessionUuid === sessionUuid);
+  const deviceId = session?.deviceId ?? null;
+  if (restart) {
+    return {
+      warning: {
+        code: DAEMON_RESTART_RESUMED_CODE,
+        message:
+          `The AutoMobile daemon stopped acknowledging heartbeats for session ${sessionUuid} and ` +
+          `this proxy reported ${handover.code}. The daemon was then restarted (process ` +
+          `${restart.previousDaemonInstance} was replaced by ${restart.daemonInstance}) and the ` +
+          `new daemon restored the session, so it was resumed with the same UUID. The restart may ` +
+          `have rebuilt device and runner state: observe the screen again before relying on ` +
+          `anything seen before the handover.`,
+        sessionUuid,
+        deviceId,
+        handedOverCode: handover.code,
+        previousDaemonInstance: restart.previousDaemonInstance,
+        daemonInstance: restart.daemonInstance,
+      },
+    };
+  }
   return {
     warning: {
       code: DAEMON_STALL_RESUMED_CODE,
@@ -285,7 +325,7 @@ export function livenessResumedNotice(handover: LivenessHandover, sessionUuid: s
         `session, so it was resumed with the same UUID: disregard that handover, nothing needs ` +
         `restarting.`,
       sessionUuid,
-      deviceId: session?.deviceId ?? null,
+      deviceId,
       handedOverCode: handover.code,
     },
   };

@@ -1001,7 +1001,26 @@ public final class GesturePerformer: GesturePerforming {
 
         public func setApplication(_ app: XCUIApplication) {
             ownedApplication = nil
+            pinnedBundleId = nil
             application = app
+        }
+
+        /// Bundle id `application` was built for; nil when it was injected without one.
+        private var pinnedBundleId: String?
+
+        /// The application a coordinate gesture targets: the pinned app unless the locator's
+        /// tracked foreground app has moved on (e.g. after `simctl launch`, #10858).
+        private func gestureApplication() -> XCUIApplication? {
+            switch GestureApplicationTarget.resolve(
+                pinnedBundleId: pinnedBundleId,
+                trackedBundleId: elementLocator.foregroundBundleId
+            ) {
+            case .keepPinned:
+                return application
+            case let .rebind(bundleId):
+                updateApplication(bundleId: bundleId)
+                return application
+            }
         }
 
         // MARK: - Tap Gestures
@@ -1047,7 +1066,7 @@ public final class GesturePerformer: GesturePerforming {
             throws -> TapDiagnostics?
         {
             GesturePhaseDiagnostics.current?.begin("targetResolution")
-            guard let app = application else {
+            guard let app = gestureApplication() else {
                 throw GestureError.noApplication
             }
 
@@ -1150,7 +1169,7 @@ public final class GesturePerformer: GesturePerforming {
 
         public func swipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws {
             GesturePhaseDiagnostics.current?.begin("targetResolution")
-            guard let app = application else {
+            guard let app = gestureApplication() else {
                 throw GestureError.noApplication
             }
 
@@ -1274,7 +1293,7 @@ public final class GesturePerformer: GesturePerforming {
             throws
         {
             GesturePhaseDiagnostics.current?.begin("targetResolution")
-            guard let app = application else {
+            guard let app = gestureApplication() else {
                 throw GestureError.noApplication
             }
 
@@ -1327,7 +1346,7 @@ public final class GesturePerformer: GesturePerforming {
             throws -> PinchGesturePath
         {
             GesturePhaseDiagnostics.current?.begin("targetResolution")
-            guard let app = application else {
+            guard let app = gestureApplication() else {
                 throw GestureError.noApplication
             }
 
@@ -2810,6 +2829,7 @@ public final class GesturePerformer: GesturePerforming {
             catchingObjCExceptionNonThrowing({
                 let app = XCUIApplication(bundleIdentifier: bundleId)
                 self.ownedApplication = app
+                self.pinnedBundleId = bundleId
                 self.application = app
             }, fallback: ())
         }

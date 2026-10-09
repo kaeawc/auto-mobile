@@ -548,11 +548,21 @@ comments. **A refactor that drops a comment silently drops an invariant.**
   `test/helpers/realToolCallPath.ts` (real registrations, `ToolRegistry`,
   admission and execution tracker; fakes only at the device boundary) and the
   daemon's own `subscribeToolCallEndActivity` / `hasActiveSessionExecution`
-  (`src/daemon/toolCallActivity.ts`).
+  (`src/daemon/toolCallActivity.ts`). Start new liveness tests there: pair every
+  "held" assertion with a "released when" one on the same scenario.
 - **Known blind spot**: harness-reimplemented production wiring. A harness that
   hand-calls `recordToolCallEnded`, the ownership assert or a tracker
   subscription stays green when the production copy regresses (#10839). Call
-  the production function; if it is private, export it first.
+  the production function; if it is private, export it first. The harness still
+  copies some wiring that lives in `Daemon` (the heartbeat monitor's reap
+  callback, the `onSessionRelease` ->
+  `SessionReleaseBroadcaster.emit` forward, selector routing in
+  `resolveSelectorRoute`); each is marked as a copy in
+  `livenessScenarioHarness.ts`. Treat a green matrix as proof of the policy and
+  the producers, not of that glue: when you change the glue, run
+  `scripts/live-idle-release-check.sh` (or the dispatch-only `Live Idle Release`
+  workflow) and, if the glue is worth guarding, export it from `src/` and call it
+  from the harness instead of copying it.
 - **Known blind spot**: unit fakes can't represent live adb reconnect timing —
   #5369 shipped green through unit tests. Anything touching pool runtime
   identity (incarnation boundaries, name matching on real reconnects, the

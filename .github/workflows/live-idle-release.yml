@@ -1,0 +1,85 @@
+name: "Live Idle Release"
+
+# Opt-in, on-demand check of the device-session release windows (#10840, parent #10655).
+# Dispatch only: it never runs on pull requests, merges or schedules. It boots one
+# emulator and runs scripts/live-idle-release-check.sh against a private daemon with a
+# short idle window; each scenario's ground truth (daemon `active-sessions` snapshots,
+# daemon log lines, observation-stream frames) is uploaded as an artifact.
+#
+# The two-devices scenario needs a second emulator, which the android-emulator action
+# does not boot; run it locally with --second-serial.
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Scenario to run"
+        required: false
+        default: "all"
+        type: choice
+        options: [all, active, no-heartbeat, idle, stdin-eof, selector, stream, provision]
+      idle-timeout-ms:
+        description: "AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS for the private daemon"
+        required: false
+        default: "20000"
+        type: choice
+        options: ["20000", "30000", "60000"]
+
+permissions:
+  contents: read
+
+jobs:
+  build-control-proxy-apk:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/build-control-proxy-apk.yml
+    secrets:
+      GRADLE_ENCRYPTION_KEY: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+      RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+      RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+      RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+
+  live-idle-release:
+    name: "Live Idle Release Check"
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: build-control-proxy-apk
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Download CtrlProxy APK"
+        uses: actions/download-artifact@v7
+        with:
+          name: control-proxy-apk
+          path: android/control-proxy/build/outputs/apk/debug
+
+      - uses: ./.github/actions/android-emulator
+        with:
+          working-directory: "./android/"
+          accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
+          release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          # cwd inside the action is ./android/, so hop back to the repo root. Both inputs are
+          # choice-typed, so only listed values reach the shell; the runner validates them again.
+          script: |
+            cd "$GITHUB_WORKSPACE"
+            sudo apt-get install -y --no-install-recommends netcat-openbsd jq > /dev/null
+            IDLE_SCENARIO='${{ inputs.scenario }}' IDLE_TIMEOUT_MS='${{ inputs.idle-timeout-ms }}' \
+              bash scripts/ci/run-live-idle-release.sh
+
+      - name: "Upload Idle Release Evidence"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: live-idle-release-evidence
+          path: scratch/live-idle-release-check/
+          if-no-files-found: warn

@@ -202,12 +202,38 @@ Make the target device active and leave the other alone. For **each** checklist 
 **Device-session idle release:** when the range touches session liveness, run
 `bash scripts/live-idle-release-check.sh --confirm-live --serial <emulator> --port <unused-port>`
 against an emulator no other daemon holds. It starts its own private daemon with a
-20 s idle window and checks three things: the device stays held while the proxy
-heartbeats and calls tools, it is released about 10 s after heartbeats stop, and
-it is released once the idle window passes with heartbeats only. Evidence
-(`--daemon active-sessions` snapshots and daemon log lines) lands under
+20 s idle window and checks, per scenario: `active` (held while the proxy
+heartbeats and calls tools), `no-heartbeat` (released about 10 s after heartbeats
+stop), `idle` (released once the window passes with heartbeats only), `stdin-eof`
+(the proxy exits when its stdin closes and the device is released within the same
+budget), `selector` (calls naming only `deviceId` are credited to the holding
+session), `stream` (an observation-stream subscriber stays subscribed across the
+release and sees no `device_session_ended`), and, with `--second-serial <emulator>`,
+`two-devices` (A goes at its own idle deadline while B, in use, stays held).
+`--scenario provision` repeats `selector` for a `provisionDevice`-minted session
+(opt-in: the tool is not enabled everywhere). Evidence (`--daemon active-sessions`
+snapshots, daemon log lines, stream frames) lands under
 `scratch/live-idle-release-check/`. To see who holds a device on any daemon, run
-`--daemon active-sessions`.
+`--daemon active-sessions`. The same single-emulator scenarios run on demand in CI
+from the dispatch-only `Live Idle Release` workflow
+(`.github/workflows/live-idle-release.yml`); it never runs on pull requests.
+
+**Desktop / IDE idle-release checklist (manual; run with the desktop app against a
+private daemon with a short `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS`):**
+
+1. Watching a device (mirror open, no input) never allocates it: `--daemon
+   active-sessions` shows no session for that serial.
+2. The first tap allocates it: a session with `holderKind` for the desktop appears
+   and the tap lands.
+3. Further taps refresh the idle window: `lastToolActivityAt` advances, and the
+   session outlives one idle window while you keep tapping.
+4. Stop interacting: the session is released at the idle deadline and the pane
+   drops back to watching (no session listed, device still alive in `adb`).
+5. Hide or minimize the window (or switch away from the device pane): the device is
+   released promptly, within the no-heartbeat budget, not after the idle window.
+6. IDE snapshot/record (#10831): starting a snapshot or recording from the IDE
+   allocates like a tap, and finishing it lets the idle window run out normally.
+   While an agent holds the device, the IDE is refused rather than taking it over.
 
 **Known blockers — record, don't fight:**
 

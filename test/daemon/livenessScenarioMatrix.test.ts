@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { decideOwnershipChange } from "../../src/daemon/streamSubscriptionPolicy";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { OWNER_DISCONNECT_GRACE_MS } from "../../src/daemon/ownerDisconnectRelease";
 import {
@@ -141,6 +142,45 @@ describe("live stdio proxy", () => {
     expect(releasedAt).toBeGreaterThan(settledAt + IDLE_WINDOW_MS);
     expect(releasedAt).toBeLessThanOrEqual(settledAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
     expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
+    expectFreed();
+  });
+});
+
+describe("a stream subscriber on a held device (#10840)", () => {
+  // A video/WebRTC owner subscription re-authorizes on every session release broadcast and is
+  // ended with `session_ended` once its session no longer exists (decideOwnershipChange).
+  const subscriberDecision = (sessionId: string) =>
+    decideOwnershipChange({
+      kind: "owner",
+      authEnabled: true,
+      sessionExists: scenario.isHeld(sessionId),
+      ownsDevice: scenario.poolState().sessionId === sessionId,
+    });
+
+  test("the subscription is kept while the session is used; the idle release broadcasts once and ends it with session_ended", async () => {
+    scenario = await LivenessScenario.start();
+    const session = await scenario.acquire();
+
+    // Held side: used across two windows, so nothing is broadcast and the subscriber is kept.
+    for (let call = 0; call < 4; call++) {
+      await scenario.idle(IDLE_WINDOW_MS / 2);
+      await scenario.toolCall(session);
+      expect(subscriberDecision(session)).toEqual({ action: "keep" });
+    }
+    expect(scenario.releaseBroadcasts).toEqual([]);
+
+    // Released side: the idle release is the broadcast that re-authorizes the subscriber.
+    const lastCallAt = scenario.timer.now();
+    const releasedAt = await scenario.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(releasedAt).toBeGreaterThan(lastCallAt + IDLE_WINDOW_MS);
+    expect(scenario.releaseBroadcasts).toEqual([
+      {
+        at: releasedAt!,
+        sessionId: session,
+        reason: expect.stringMatching(/^(cleanup-expired|lazy-expiry)$/),
+      },
+    ]);
+    expect(subscriberDecision(session)).toEqual({ action: "end", reason: "session_ended" });
     expectFreed();
   });
 });

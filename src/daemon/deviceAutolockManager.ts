@@ -5,6 +5,7 @@ import {
 } from "./inputDeviceOwnership";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -14,6 +15,12 @@ import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import { getDevicePoolTimeoutMs, type Environment } from "./poolConfig";
 import type { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import type { Session, SessionExecutionMetadata, SessionManager } from "./sessionManager";
+
+/**
+ * Result of attaching an autolock session to an MCP session (#11129). `attached-not-persisted`
+ * routes in this daemon but its row write failed (already logged), so a restart will not restore it.
+ */
+export type AutolockAttachOutcome = "attached" | "attached-not-persisted" | "not-attached";
 import type {
   DeviceAutolockChildProcess,
   PooledDevice,
@@ -648,6 +655,7 @@ export class DeviceAutolockManager {
       // assignment mutex. A pre-loop snapshot would be stale by the time the
       // second attachment runs, letting restoration clobber a `setActiveDevice`
       // that landed in between (#6807).
+      // A persistence failure is logged and reported by the attach; keep restoring the rest.
       await this.attachAutolockSessionToMcpSession(id, mcpSessionId, "if-absent");
     }
   }
@@ -659,11 +667,11 @@ export class DeviceAutolockManager {
     sessionId: string,
     mcpSessionId: string | undefined,
     makeDefault: boolean | "if-absent" = true,
-  ): Promise<void> {
+  ): Promise<AutolockAttachOutcome> {
     if (!mcpSessionId) {
-      return;
+      return "not-attached";
     }
-    await this.pool.withAssignmentLock(async () => {
+    return await this.pool.withAssignmentLock(async (): Promise<AutolockAttachOutcome> => {
       const session = this.pool.getSessionManager().getSession(sessionId);
       const device = session ? this.pool.getDevice(session.assignedDevice) : undefined;
       if (
@@ -672,15 +680,27 @@ export class DeviceAutolockManager {
         device.sessionId !== sessionId ||
         device.autolockSessionId !== sessionId
       ) {
-        return;
+        return "not-attached";
       }
       this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);
-      await this.deviceSessionRepository.markAutolockSession(sessionId, {
-        mcpSessionId,
-        daemonSessionId: this.pool.getDaemonSessionId(),
-        lastUsedAtMs: session.lastUsedAt,
-        expiresAtMs: session.expiresAt,
-      });
+      let outcome: AutolockAttachOutcome = "attached";
+      try {
+        await this.deviceSessionRepository.markAutolockSession(sessionId, {
+          mcpSessionId,
+          daemonSessionId: this.pool.getDaemonSessionId(),
+          lastUsedAtMs: session.lastUsedAt,
+          expiresAtMs: session.expiresAt,
+        });
+      } catch (error) {
+        // The live session is attached in memory either way; only a daemon restart loses the
+        // mapping, so the caller's request still succeeds and learns the row is stale (#11129).
+        logger.warn(
+          `Autolock session ${sessionId} attached to MCP session ${mcpSessionId} but not ` +
+            `persisted; a daemon restart will not restore it: ${errorMessage(error)}`,
+          error,
+        );
+        outcome = "attached-not-persisted";
+      }
       if (
         makeDefault === true ||
         (makeDefault === "if-absent" &&
@@ -691,6 +711,7 @@ export class DeviceAutolockManager {
       const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
       acquired.add(sessionId);
       this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
+      return outcome;
     });
   }
 

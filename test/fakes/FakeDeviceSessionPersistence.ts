@@ -15,7 +15,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
   private readonly rows = new Map<string, DeviceSession>();
   getSession?: (sessionUuid: string) => Promise<DeviceSession | undefined>;
 
-  async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  async upsertActiveSession(record: DeviceSessionRecord): Promise<number> {
     this.createAttempts++;
     if (this.failure === "create" || this.createFailureOnAttempt === this.createAttempts) {
       throw new Error("persist create failed");
@@ -50,6 +50,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       updated_at: new Date(record.lastUsedAtMs).toISOString(),
     });
     this.enableSessionLookup();
+    return this.rows.get(record.sessionUuid)!.stable_identity_generation ?? 0;
   }
 
   private enableSessionLookup(): void {

@@ -1390,6 +1390,55 @@ describe("DeviceSessionRepository", () => {
     });
   });
 
+  test("markAutolockSession propagates a write failure (#11129)", async () => {
+    const warnSpy = spyOn(logger, "warn");
+    try {
+      await db.schema.dropTable("device_sessions").execute(); // force the update to throw
+      await expect(
+        repo.markAutolockSession("session-fail", {
+          mcpSessionId: "mcp-1",
+          lastUsedAtMs: 1000,
+          expiresAtMs: 61_000,
+        }),
+      ).rejects.toThrow(/Failed to persist autolock session session-fail/);
+      expect(warnSpy.mock.calls.map((c) => String(c[0])).join("\n")).toContain("session-fail");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test("markAutolockSession never regresses a newer activity's lease (#11129)", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "session-1",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: false,
+    });
+    await repo.recordActivity("session-1", {
+      lastUsedAtMs: 5000,
+      expiresAtMs: 65_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: true,
+    });
+    // The autolock stamps were snapshotted before the activity write landed.
+    await repo.markAutolockSession("session-1", {
+      mcpSessionId: "mcp-1",
+      lastUsedAtMs: 2000,
+      expiresAtMs: 62_000,
+    });
+
+    const row = await repo.getSession("session-1");
+    expect(row!.mcp_session_id).toBe("mcp-1");
+    expect(row!.last_used_at_ms).toBe(5000);
+    expect(row!.expires_at_ms).toBe(65_000);
+  });
+
   test("upsertActiveSession logs and propagates a write failure for session rollback", async () => {
     // SessionManager owns the in-memory rollback after this awaited write fails.
     // Destroy the table so the insert rejects, then preserve the diagnostic log

@@ -425,8 +425,10 @@ export class DeviceSessionRepository {
           autolock_enabled: 1,
           mcp_session_id: input.mcpSessionId ?? null,
           daemon_session_id: input.daemonSessionId ?? null,
-          last_used_at_ms: input.lastUsedAtMs,
-          expires_at_ms: input.expiresAtMs,
+          // Monotonic (#11129): the stamps come from a snapshot taken before this write was
+          // queued, so a newer activity write may already have landed.
+          last_used_at_ms: sql<number>`max(last_used_at_ms, ${input.lastUsedAtMs})`,
+          expires_at_ms: unlessStale("expires_at_ms", input.lastUsedAtMs, input.expiresAtMs),
           released_at_ms: null,
           release_reason: null,
           updated_at: this.nowIso(),
@@ -440,6 +442,8 @@ export class DeviceSessionRepository {
       logger.warn(
         `[DeviceSessionRepository] Failed to mark autolock session ${sessionUuid}: ${error}`,
       );
+      // The autolock -> MCP mapping is what a restart restores; callers must know it is missing.
+      throw toActionableError(error, `Failed to persist autolock session ${sessionUuid}`);
     }
   }
 

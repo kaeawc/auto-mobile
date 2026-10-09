@@ -7922,7 +7922,7 @@ export class DevicePool {
 
   attachAutolockSessionToMcpSession(
     ...args: Parameters<DeviceAutolockManager["attachAutolockSessionToMcpSession"]>
-  ): Promise<void> {
+  ): ReturnType<DeviceAutolockManager["attachAutolockSessionToMcpSession"]> {
     return this.autolockManager.attachAutolockSessionToMcpSession(...args);
   }
 

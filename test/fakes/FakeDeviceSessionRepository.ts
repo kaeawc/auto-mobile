@@ -21,11 +21,14 @@ export class FakeDeviceSessionRepository
     return undefined;
   }
 
-  override async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  override async upsertActiveSession(record: DeviceSessionRecord): Promise<number> {
     this.sessions.set(record.sessionUuid, { status: "active", releasedAtMs: null, reason: null });
+    return 0;
   }
 
   override async replaceLivenessOwnership(): Promise<void> {}
+
+  override async markAutolockSession(): Promise<void> {}
 
   override async recordActivity(
     _sessionUuid: string,

@@ -57,6 +57,8 @@ final class OverlayAgent {
     private var appliedAccessibility = OverlayHostAccessibility.hidden
 
     private var testHooksEnabled = false
+    /// Authenticated host connections, as last reported by the server on the main queue.
+    private var connectedClients = 0
     /// Hide-for-screenshot hold (#9305); the overlay window stays hidden while it is active.
     private var captureHold = OverlayCaptureHold(now: { ProcessInfo.processInfo.systemUptime })
 
@@ -85,6 +87,7 @@ final class OverlayAgent {
             self?.handle(message, reply: reply)
         }
         model.onEvent = { [weak server] event in server?.broadcast(event) }
+        server.onClientCountChanged = { [weak self] count in self?.clientCountChanged(count) }
         model.onVisibilityChange = { [weak self] visible in self?.setVisible(visible) }
         model.onEndEditing = { [weak self] in _ = self?.window?.endEditing(true) }
         // `$session` publishes the new value before `model.session` holds it, so the flags are
@@ -221,7 +224,10 @@ final class OverlayAgent {
                 }
                 model.show(spec, reset: message["reset"] as? Bool == true)
                 warnAboutFontAssets(for: spec)
-                result(true, extra: missingAssetsExtra())
+                let missing = missingAssetsExtra()
+                // The host can leave before this queued show runs; nothing would remove it later.
+                if connectedClients == 0 { model.hostDisconnected() }
+                result(true, extra: missing)
             // No update_overlay (#10550): a same-id show_overlay replaces the shown overlay.
             case "dismiss_overlay":
                 // Like Android's OverlayController: an id that is not the shown overlay fails, and
@@ -261,6 +267,15 @@ final class OverlayAgent {
         } catch {
             result(false, "Invalid overlay spec: \(error)")
         }
+    }
+
+    // MARK: Host connection
+
+    /// The overlay belongs to the host session: when the last authenticated connection closes it
+    /// is dismissed (`reason: disconnect`) and its assets dropped, as on Android.
+    private func clientCountChanged(_ count: Int) {
+        connectedClients = count
+        if count == 0 { model.hostDisconnected() }
     }
 
     // MARK: Hide for capture

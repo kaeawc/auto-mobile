@@ -17,6 +17,16 @@ flowchart LR
 
 The Desktop App automatically uses an available local daemon socket or
 Streamable HTTP connection. It cannot connect externally to an MCP process over
-stdio. While it is controlling a selected device, that device is reserved for
-the Desktop App. Close or disconnect the app before using the same device from
-another agent or CLI session.
+stdio.
+
+The app watches first. Selecting or viewing a device holds nothing: the app
+registers a read-only observer session and may watch any device, including one
+another session holds; control stays with the holder. The first tap, swipe, key
+or text input on a free device allocates it for the app, and each later input
+restarts the 2-minute idle window. When input stops, the daemon releases the
+device and the app drops back to watching; the next input allocates it again. If
+another session holds the device, the app's input is refused with
+`device_owned_by_other_session` and the app shows that refusal. Closing the last
+pane or hiding the window releases a device the app holds. See
+[device ownership](../../../using/device-ownership.md) and
+[environment variables](../../../using/environment-variables.md#session-heartbeat-timeout).

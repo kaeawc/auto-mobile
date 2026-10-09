@@ -1,10 +1,11 @@
 # Agent-authored overlay specification
 
-This is the current, unversioned contract for #9296, child of #9295. It defines
-models and validation only. Compose rendering (#9299, #9300), asset transport
-(#9301), wire messages (#9298), and the MCP tool (#9302) implement this contract
-later. No code, expressions, URLs, image bytes, or migration instructions are
-accepted in a spec.
+This is the current, unversioned contract for #9296, child of #9295. Compose
+rendering on Android (#9299, #9300), asset transport (#9301), wire messages
+(#9298), the `prototype` MCP tool (#9302) and the
+[iOS simulator agent](../ios/overlay-agent.md) implement it. No code,
+expressions, URLs, image bytes, or migration instructions are accepted in a
+spec.
 
 ## Owner decisions
 

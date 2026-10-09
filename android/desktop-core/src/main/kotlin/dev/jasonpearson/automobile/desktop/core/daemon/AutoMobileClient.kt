@@ -168,6 +168,7 @@ interface AutoMobileClient {
     value: String?,
     type: String,
     platform: String = "android",
+    sessionUuid: String? = null,
   ): SetKeyValueResult
 
   fun removeKeyValue(
@@ -176,6 +177,7 @@ interface AutoMobileClient {
     fileName: String,
     key: String,
     platform: String = "android",
+    sessionUuid: String? = null,
   ): RemoveKeyValueResult
 
   fun clearKeyValueFile(
@@ -183,6 +185,7 @@ interface AutoMobileClient {
     appId: String,
     fileName: String,
     platform: String = "android",
+    sessionUuid: String? = null,
   ): ClearKeyValueResult
 
   fun callTool(name: String, arguments: JsonObject): JsonElement

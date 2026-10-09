@@ -18,10 +18,14 @@ class InputAllocatingClientTest {
   private val sent = CopyOnWriteArrayList<String>()
   private val toolArguments = CopyOnWriteArrayList<JsonObject>()
   private val allocations = CopyOnWriteArrayList<String>()
+  private val params = CopyOnWriteArrayList<JsonObject>()
+  private val events = CopyOnWriteArrayList<String>()
   private val delegate =
     McpDaemonClient(
       DaemonRequestTransport { request ->
         sent += request.method
+        params += request.params
+        events += "send:${request.method}"
         (request.params["arguments"] as? JsonObject)?.let(toolArguments::add)
         DaemonResponse(
           id = request.id,
@@ -59,6 +63,7 @@ class InputAllocatingClientTest {
       delegate,
       DesktopInputAllocation { deviceId ->
         allocations += deviceId
+        events += "allocate:$deviceId"
         allowed
       },
       sessionUuidProvider = { sessionUuid },
@@ -156,5 +161,51 @@ class InputAllocatingClientTest {
     assertEquals(emptyList(), allocations)
     assertEquals(listOf("tools/call"), sent)
     assertNull(toolArguments.single()["sessionUuid"])
+  }
+
+  @Test
+  fun `key-value writes allocate before the frame and carry the desktop session`() {
+    val client = client(allowed = true, sessionUuid = "desktop-1")
+
+    client.setKeyValue("emulator-5554", "app", "prefs", "k", "v", "string")
+    client.removeKeyValue("emulator-5554", "app", "prefs", "k")
+    client.clearKeyValueFile("emulator-5554", "app", "prefs")
+
+    assertEquals(
+      listOf(
+        "allocate:emulator-5554",
+        "send:ide/setKeyValue",
+        "allocate:emulator-5554",
+        "send:ide/removeKeyValue",
+        "allocate:emulator-5554",
+        "send:ide/clearKeyValueFile",
+      ),
+      events,
+    )
+    assertEquals(List(3) { JsonPrimitive("desktop-1") }, params.map { it["sessionUuid"] })
+  }
+
+  @Test
+  fun `a refused allocation fails a key-value write without a frame`() {
+    val client = client(allowed = false, sessionUuid = "desktop-1")
+
+    val results =
+      listOf(
+        client.setKeyValue("emulator-5554", "app", "prefs", "k", "v", "string").message,
+        client.removeKeyValue("emulator-5554", "app", "prefs", "k").message,
+        client.clearKeyValueFile("emulator-5554", "app", "prefs").message,
+      )
+
+    assertEquals(List(3) { INPUT_NOT_ALLOCATED_ERROR }, results)
+    assertEquals(emptyList(), sent)
+  }
+
+  @Test
+  fun `resource reads never allocate`() {
+    client(allowed = false, sessionUuid = "desktop-1").runCatching {
+      readResource("automobile:devices/emulator-5554/app/storage/files")
+    }
+
+    assertEquals(emptyList(), allocations)
   }
 }

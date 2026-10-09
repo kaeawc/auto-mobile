@@ -75,11 +75,14 @@ struct OverlaySpec: Decodable {
     let window: WindowSpec
     let state: [String: JSONValue]?
     let theme: OverlayTheme?
+    /// `none` keeps every visibility and page change instant; `standard` (the default) animates them
+    /// unless the system reduces motion (#10442). See `OverlayMotion`.
+    let motion: String?
     /// The node tree with every `repeat` list template already expanded (see `OverlayRepeat`).
     let root: OverlayNode
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, theme, root
+        case id, window, state, theme, motion, root
     }
 
     init(from decoder: Decoder) throws {
@@ -88,6 +91,7 @@ struct OverlaySpec: Decodable {
         window = try container.decode(WindowSpec.self, forKey: .window)
         state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
         theme = try container.decodeIfPresent(OverlayTheme.self, forKey: .theme)
+        motion = try container.decodeIfPresent(String.self, forKey: .motion)
         let raw = try container.decode(JSONValue.self, forKey: .root)
         root = try JSONDecoder().decode(OverlayNode.self, from: JSONEncoder().encode(OverlayRepeat.expand(raw)))
     }
@@ -401,6 +405,8 @@ final class OverlayNode: Decodable {
     let style: Style?
     let styleWhen: [StyleWhen]?
     let visibleWhen: Condition?
+    /// The `visibleWhen` enter/exit: `none`, `fade`, `expand` or `slide`; absent is fade + expand.
+    let transition: String?
     let safeAreaPadding: SafeAreaPadding?
     let children: [OverlayNode]?
     let child: OverlayNode?
@@ -447,6 +453,9 @@ final class OverlayNode: Decodable {
     let confirm: OverlayDialogButton?
     let dismiss: OverlayDialogButton?
     let action: OverlayDialogButton?
+    /// `snackbar` only: closes itself this many milliseconds after opening (1 to 600000); absent
+    /// stays until closed.
+    let durationMs: Int?
     /// `timePicker` integer keys and clock style; nil `is24Hour` follows the device setting.
     let hourKey: String?
     let minuteKey: String?

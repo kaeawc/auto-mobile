@@ -119,11 +119,19 @@ struct NodeView: View {
     @Environment(\.overlayPalette) private var palette
     @Environment(\.overlayTypography) private var typography
     @Environment(\.overlayShapes) private var shapes
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        if isVisible, presentedAsModal || !overlayModalTypes.contains(node.type) {
-            styled(content)
+        // `visibleWhen` appears and disappears with the node's `transition`; instant when motion is
+        // off (spec `motion: "none"` or the system's Reduce Motion), as on Android (#10442).
+        let motion = OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+        let transition = node.visibleWhen == nil ? .instant : motion.visibility(transition: node.transition)
+        Group {
+            if isVisible, presentedAsModal || !overlayModalTypes.contains(node.type) {
+                styled(content).transition(transition.swiftUITransition)
+            }
         }
+        .animation(transition == .instant ? nil : .easeInOut(duration: 0.25), value: isVisible)
     }
 
     private var isVisible: Bool {
@@ -640,6 +648,7 @@ private struct IdentifierModifier: ViewModifier {
 struct PagerView: View {
     let node: OverlayNode
     @ObservedObject var model: OverlayModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var pagerId: String { node.id ?? "" }
     private var pages: [OverlayNode] { node.children ?? [] }
@@ -649,6 +658,12 @@ struct PagerView: View {
             get: { model.pages[pagerId] ?? 0 },
             set: { model.setPage(pagerId, $0) }
         )
+    }
+
+    /// Page changes animate unless spec `motion: "none"` or Reduce Motion is on (#10442).
+    private var pageAnimation: Animation? {
+        OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion).enabled
+            ? .easeInOut(duration: 0.25) : nil
     }
 
     private var fills: Bool {
@@ -668,6 +683,7 @@ struct PagerView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .animation(pageAnimation, value: selection.wrappedValue)
             // Pages own the safe area themselves (safeAreaPadding), as on Android.
             .ignoresSafeArea()
         } else {
@@ -681,8 +697,21 @@ struct PagerView: View {
                         if value.translation.width < -40 { model.setPage(pagerId, index + 1) }
                         if value.translation.width > 40 { model.setPage(pagerId, index - 1) }
                     })
-                    .animation(.easeInOut(duration: 0.2), value: index)
+                    .animation(pageAnimation, value: index)
             }
+        }
+    }
+}
+
+extension OverlayVisibilityTransition {
+    /// The SwiftUI insertion/removal for a `visibleWhen` node; `expand` grows from the top edge.
+    var swiftUITransition: AnyTransition {
+        switch self {
+        case .instant: .identity
+        case .fade: .opacity
+        case .expand: .scale(scale: 0.01, anchor: .top).combined(with: .opacity)
+        case .slide: .move(edge: .top).combined(with: .opacity)
+        case .standard: .scale(scale: 0.01, anchor: .top).combined(with: .opacity)
         }
     }
 }

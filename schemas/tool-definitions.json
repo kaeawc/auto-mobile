@@ -7701,6 +7701,20 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "connection": {
+                    "type": "object",
+                    "properties": {
+                      "state": {
+                        "type": "string",
+                        "const": "offline"
+                      },
+                      "adbState": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["state", "adbState"],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -8374,6 +8388,20 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "connection": {
+                    "type": "object",
+                    "properties": {
+                      "state": {
+                        "type": "string",
+                        "const": "offline"
+                      },
+                      "adbState": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["state", "adbState"],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -22764,6 +22792,20 @@
                       "type": "null"
                     }
                   ]
+                },
+                "connection": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "const": "offline"
+                    },
+                    "adbState": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["state", "adbState"],
+                  "additionalProperties": false
                 }
               },
               "required": [

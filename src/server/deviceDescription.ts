@@ -56,6 +56,8 @@ export type DeviceDescriptionInput =
       serviceStatus?: DeviceServiceStatusLike;
       locked?: boolean;
       orientation?: "portrait" | "landscape";
+      /** adb lists the device in this non-`device` state (#11118). */
+      adbOfflineState?: string;
     }
   | {
       kind: "provisioned";
@@ -110,6 +112,7 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
     locked: input.locked,
     orientation: input.orientation,
     configured: input.kind === "booted" ? input.configured : undefined,
+    adbOfflineState: input.kind === "booted" ? input.adbOfflineState : undefined,
   });
   return input.unhealthy ? { ...description, unhealthy: input.unhealthy } : description;
 }
@@ -162,6 +165,7 @@ interface BootedDescriptionOptions {
   locked?: boolean | null;
   orientation?: "portrait" | "landscape";
   configured?: StableConfiguredDeviceImage;
+  adbOfflineState?: string;
 }
 
 // oxlint-disable-next-line complexity -- one exhaustive canonical booted projection preserves precedence.
@@ -176,6 +180,7 @@ function describeBooted({
   locked = null,
   orientation,
   configured,
+  adbOfflineState,
 }: BootedDescriptionOptions): DeviceDescription {
   const merged = mergeRuntimeFacts(device, admittedImage, admittedImageAuthoritative);
   // A cold-boot adapter can report a temporary non-emulator transport id even
@@ -209,7 +214,9 @@ function describeBooted({
       connectionId: pooled ? `${device.deviceId}#${pooled.incarnation}` : device.deviceId,
       deviceSessionUuid: deviceSessionUuid ?? null,
       lifecycle: { state: "booted", known: true },
-      readiness: { state: readinessFromServiceStatus(serviceStatus) },
+      readiness: {
+        state: adbOfflineState ? "not_ready" : readinessFromServiceStatus(serviceStatus),
+      },
       poolStatus: poolStatus(pooled),
       session: session
         ? {
@@ -220,6 +227,7 @@ function describeBooted({
       serviceStatus: serviceStatus ?? null,
       locked,
       orientation: orientation ?? null,
+      ...(adbOfflineState ? { connection: { state: "offline", adbState: adbOfflineState } } : {}),
     },
   };
 }
@@ -431,6 +439,10 @@ export const deviceDescriptionSchema = z
         serviceStatus: serviceStatusSchema,
         locked: z.boolean().nullable(),
         orientation: z.enum(["portrait", "landscape"]).nullable(),
+        connection: z
+          .object({ state: z.literal("offline"), adbState: z.string() })
+          .strict()
+          .optional(),
       })
       .strict(),
     display: z

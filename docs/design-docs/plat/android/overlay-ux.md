@@ -863,6 +863,10 @@ allocation) and when the app returns the same runtime is shown again. A
   hierarchy capture carries top-level `overlaySuspended: true`, so `layer: "overlay"`
   calls fail with "hidden because the app it was shown over is not in front" instead
   of "no overlay is showing".
+  The host stores `suspended` from `inspect` and surfaces it on `overlay` status
+  entries (host-local, so it is as fresh as the last `inspect`; a new `show` or an
+  `inspect` after the app returns clears it), and an `awaitEvent` that times out on
+  a suspended overlay carries the same explanation as a `warning`. Absent on iOS.
 - **Separate from other hides.** Suspension is its own state
   (`OverlayForegroundTracker.suspended`). The host's `isBlocked` is the lock-screen
   check OR suspension, so any restore path (unlock, relayout, or a future capture-time

@@ -15,6 +15,11 @@ export interface OverlayLastResult {
   adopted?: true;
   /** Adopted overlays only: the device keeps it after the host disconnects (`persistence: "device"`). */
   persistent?: boolean;
+  /**
+   * Android only: the device reported this overlay hidden because the app it was shown over is not
+   * in front (as of the last `inspect`). Absent when visible and always on iOS.
+   */
+  suspended?: true;
   displayId?: number;
   success: boolean;
   error?: string;
@@ -29,6 +34,7 @@ export interface OverlayEventState {
 export interface AdoptedOverlay {
   id: string;
   persistent?: boolean;
+  suspended?: boolean;
   pages: OverlayEvent["pages"];
   state: OverlayEvent["state"];
 }
@@ -140,6 +146,7 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
       lastAction: "show",
       adopted: true,
       ...(overlay.persistent === undefined ? {} : { persistent: overlay.persistent }),
+      ...(overlay.suspended === true ? { suspended: true as const } : {}),
       success: true,
       timestamp: this.clock.now(),
     };

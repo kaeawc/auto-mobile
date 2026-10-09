@@ -34,6 +34,37 @@ struct OverlayMotion: Equatable {
     }
 }
 
+extension OverlayMotion {
+    /// Seconds a container takes to settle after its children appear, disappear or resize
+    /// (Android's `animateContentSize`); nil is instant, so settled screenshots never see an
+    /// in-flight size when motion is off.
+    var containerSizeDuration: Double? {
+        enabled ? 0.25 : nil
+    }
+}
+
+extension OverlayNode {
+    /// What decides a container's size from its direct children: whether each one is shown and the
+    /// width and height its style resolves to under the current state. The renderer animates size
+    /// changes only when this changes, so text edits and other content updates stay unanimated.
+    func containerLayoutSignature(state: [String: JSONValue], holds: (Condition) -> Bool) -> [String] {
+        (children ?? []).map { child in
+            let shown = child.visibleWhen.map(holds) ?? true
+            let style = child.resolvedStyle(state: state)
+            return "\(shown)|\(Self.describe(style?.width))|\(Self.describe(style?.height))"
+        }
+    }
+
+    private static func describe(_ dimension: Dimension?) -> String {
+        switch dimension {
+        case nil: return "-"
+        case .fill: return "fill"
+        case .wrap: return "wrap"
+        case let .points(value): return "\(value)"
+        }
+    }
+}
+
 /// A scheduled callback that can be cancelled before it fires.
 protocol OverlayTimerHandle: AnyObject {
     func cancel()

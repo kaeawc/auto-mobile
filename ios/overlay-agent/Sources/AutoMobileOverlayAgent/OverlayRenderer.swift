@@ -134,6 +134,17 @@ struct NodeView: View {
         .animation(transition == .instant ? nil : .easeInOut(duration: 0.25), value: isVisible)
     }
 
+    /// Siblings slide into freed space when a child appears, disappears or resizes (Android's
+    /// `animateContentSize`, #10442); nil keeps it instant under `motion: "none"` or Reduce Motion.
+    private var sizeAnimation: Animation? {
+        OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+            .containerSizeDuration.map { .easeInOut(duration: $0) }
+    }
+
+    private var layoutSignature: [String] {
+        node.containerLayoutSignature(state: model.state) { model.holds($0) }
+    }
+
     private var isVisible: Bool {
         guard let condition = node.visibleWhen else { return true }
         return model.holds(condition)
@@ -160,10 +171,13 @@ struct NodeView: View {
         switch node.type {
         case "box":
             ZStack(alignment: swiftUIAlignment(style?.alignment)) { children }
+                .animation(sizeAnimation, value: layoutSignature)
         case "row":
             HStack(alignment: .center, spacing: style?.spacing ?? 0) { arranged(horizontal: true) }
+                .animation(sizeAnimation, value: layoutSignature)
         case "column":
             VStack(alignment: .leading, spacing: style?.spacing ?? 0) { arranged(horizontal: false) }
+                .animation(sizeAnimation, value: layoutSignature)
         case "text":
             textView
         case "image":

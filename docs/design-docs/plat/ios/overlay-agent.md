@@ -137,9 +137,11 @@ A snackbar that sets `durationMs` closes itself that long after it opens, by wri
 its `openWhen` key like any other close (a plain timer behind an injectable `OverlayClock`).
 Motion matches Android (#10442, #10439): a `visibleWhen` node fades and expands in and out, its
 `transition` (`none`, `fade`, `expand`, `slide`) picks the animation, and pager page changes
-animate. Spec `motion: "none"` or the system's Reduce Motion
-(`UIAccessibility.isReduceMotionEnabled`) makes every change instant. Container size animation
-(`animateContentSize`) is not ported.
+animate. A `box`, `row` or `column` also animates its size (Android's `animateContentSize`) when a
+direct child appears, disappears or resolves to a new width or height, so siblings slide into
+freed space; unrelated state changes such as typing do not animate. The animation is scoped to
+`OverlayNode.containerLayoutSignature`, so only layout changes trigger it. Spec `motion: "none"` or
+the system's Reduce Motion (`UIAccessibility.isReduceMotionEnabled`) makes every change instant.
 
 The host's dismiss control (`automobile-overlay-dismiss`, "Dismiss overlay") cannot be removed
 by the spec. In fullscreen it sits in a bar across the top of the window, like Android's

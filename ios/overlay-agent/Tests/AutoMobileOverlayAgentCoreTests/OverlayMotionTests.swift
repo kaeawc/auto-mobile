@@ -141,4 +141,41 @@ final class OverlayMotionTests: XCTestCase {
         timeouts.sync(openModals: root.openModals(state: ["s": .bool(true)], pages: [:]))
         XCTAssertEqual(clock.timers.map(\.cancelled), [true, false])
     }
+
+    // MARK: Container size animation (#10442)
+
+    func testContainerSizeAnimatesUnlessMotionIsOff() {
+        XCTAssertEqual(OverlayMotion(specMotion: nil, reduceMotion: false).containerSizeDuration, 0.25)
+        XCTAssertNil(OverlayMotion(specMotion: "none", reduceMotion: false).containerSizeDuration)
+        XCTAssertNil(OverlayMotion(specMotion: nil, reduceMotion: true).containerSizeDuration)
+    }
+
+    private func column() throws -> OverlayNode {
+        try spec("""
+        {"id":"a","window":{"placement":{"type":"fullscreen"}},"root":{"type":"column","children":[
+          {"type":"text","text":"a","visibleWhen":{"key":"on","equals":true}},
+          {"type":"box","style":{"height":{"dp":10}},
+           "styleWhen":[{"when":{"key":"big","equals":true},"style":{"height":{"dp":40}}}]},
+          {"type":"text","text":"c"}]}}
+        """).root
+    }
+
+    func testLayoutSignatureChangesWhenAChildAppearsOrResizes() throws {
+        let root = try column()
+        let sig = { (state: [String: JSONValue]) in
+            root.containerLayoutSignature(state: state) { $0.holds(state) }
+        }
+        let base = sig([:])
+        XCTAssertEqual(base.count, 3)
+        XCTAssertNotEqual(base, sig(["on": .bool(true)]))
+        XCTAssertNotEqual(base, sig(["big": .bool(true)]))
+    }
+
+    func testLayoutSignatureIgnoresUnrelatedStateChanges() throws {
+        let root = try column()
+        let sig = { (state: [String: JSONValue]) in
+            root.containerLayoutSignature(state: state) { $0.holds(state) }
+        }
+        XCTAssertEqual(sig([:]), sig(["typed": .string("hello")]))
+    }
 }

@@ -17,6 +17,7 @@ import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { setDebugModeEnabled } from "../../src/utils/debug";
 
 /**
  * A device another live session holds runs device-aware tools only for its holder, as `input/*`
@@ -38,6 +39,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   let originalNavigationRecorder: unknown;
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
+  let devices: FakeDeviceSessionManager;
 
   const call = (name: string, args: Record<string, unknown>) =>
     ToolRegistry.getTool(name)!.handler(args);
@@ -70,6 +72,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     });
     const fakeDeviceSessionManager = new FakeDeviceSessionManager();
     fakeDeviceSessionManager.setConnectedDevices([held, free]);
+    devices = fakeDeviceSessionManager;
     originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
     Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
     originalToolCallRepository = Reflect.get(ToolRegistry, "toolCallRepository");
@@ -158,6 +161,47 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     await call("observe", { platform: "android", deviceId: held.deviceId });
     expect(ran).toEqual([{ name: "observe", deviceId: held.deviceId }]);
   });
+
+  // #10828: a call without a deviceId used to run ensureDeviceReady (CtrlProxy setup, the
+  // current-device pin, settings) on the held device before the ownership check refused it.
+  test("a sessionless rotate with no deviceId that would land on a held device does no device work", async () => {
+    devices.setConnectedDevices([held]);
+    const error = await refusal("rotate", { orientation: "landscape", platform: "android" });
+    expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
+    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+    expect(ran).toEqual([]);
+  });
+
+  test("a sessionless rotate with no deviceId is checked against the setActiveDevice pin first", async () => {
+    devices.setExplicitDevicePin(held);
+    const error = await refusal("rotate", { orientation: "landscape", platform: "android" });
+    expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
+    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+  });
+
+  test("a sessionless rotate with no deviceId on an unheld only device still readies and runs", async () => {
+    devices.setConnectedDevices([free]);
+    await call("rotate", { orientation: "landscape", platform: "android" });
+    expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
+    expect(ran).toEqual([{ name: "rotate", deviceId: free.deviceId }]);
+  });
+
+  for (const [name, args] of [
+    ["hitTest", { x: 10, y: 10 }],
+    ["identifyInteractions", {}],
+  ] as Array<[string, Record<string, unknown>]>) {
+    test(`a sessionless ${name} on a held device is refused before readiness (#10828)`, async () => {
+      setDebugModeEnabled(true); // identifyInteractions is debugOnly
+      const error = await refusal(name, { ...args, platform: "android", deviceId: held.deviceId });
+      setDebugModeEnabled(false);
+      expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
+      expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+      expect(ran).toEqual([]);
+    });
+  }
 
   test("the refusal reaches the client with the typed code", async () => {
     const error = await refusal("rotate", {

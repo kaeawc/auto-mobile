@@ -25,6 +25,10 @@ import {
 // whose fix flips it.
 
 const IDLE_REASONS = ["cleanup-expired", "lazy-expiry"];
+// Emulator serials: tool calls run the real session setup, which probes a non-emulator serial
+// for keep-awake over adb.
+const DEVICE_A = "emulator-5554";
+const DEVICE_B = "emulator-5556";
 
 let scenario: LivenessScenario;
 
@@ -94,24 +98,24 @@ describe("live stdio proxy", () => {
   });
 
   test("moving from device A to B: B is held while used; A is freed after its own idle window (#10657)", async () => {
-    scenario = await LivenessScenario.start({ devices: ["device-a", "device-b"] });
-    const a = await scenario.acquire("device-a");
+    scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
+    const a = await scenario.acquire(DEVICE_A);
     const aLastUsedAt = scenario.timer.now();
     await scenario.idle(30_000);
-    const b = await scenario.acquire("device-b");
+    const b = await scenario.acquire(DEVICE_B);
 
     // Held side: B keeps being used, so it outlives A's window; A is still held until then.
     await scenario.idle(70_000);
     await scenario.toolCall(b);
-    expectHeld(a, "device-a");
-    expectHeld(b, "device-b");
+    expectHeld(a, DEVICE_A);
+    expectHeld(b, DEVICE_B);
 
     // Released side: A, never used again, goes at its own deadline while B stays.
     const releasedAt = await scenario.idleUntilReleased(a, IDLE_WINDOW_MS);
     expect(releasedAt).toBeGreaterThan(aLastUsedAt + IDLE_WINDOW_MS);
     expect(releasedAt).toBeLessThanOrEqual(aLastUsedAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
-    expectFreed("device-a");
-    expectHeld(b, "device-b");
+    expectFreed(DEVICE_A);
+    expectHeld(b, DEVICE_B);
   });
 
   test("a long-running call in flight past the window keeps the session; it is freed one window after the call settles", async () => {
@@ -135,6 +139,35 @@ describe("live stdio proxy", () => {
     expect(releasedAt).toBeGreaterThan(settledAt + IDLE_WINDOW_MS);
     expect(releasedAt).toBeLessThanOrEqual(settledAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
     expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
+    expectFreed();
+  });
+});
+
+describe("after an idle release", () => {
+  test("the agent's next call naming the released session is refused and the device stays idle (#10839)", async () => {
+    scenario = await LivenessScenario.start();
+    const session = await scenario.acquire();
+    await scenario.toolCall(session);
+    expect(
+      await scenario.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS),
+    ).toBeDefined();
+    expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
+    expectFreed();
+    const refusal = (call: Promise<unknown>) =>
+      call.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    // The agent's own proxy refuses it, and so does the daemon for a caller with no proxy in front
+    // (--cli, desktop, JUnit), before and after a restart, when only the persisted row remembers
+    // the release. Nothing rebinds the device.
+    expect(await refusal(scenario.toolCall(session))).toBeInstanceOf(Error);
+    expect(await refusal(scenario.daemonToolCall(session))).toBeInstanceOf(Error);
+    expectFreed();
+    await scenario.daemonRestart();
+    expect(await refusal(scenario.daemonToolCall(session))).toBeInstanceOf(Error);
+    expect(scenario.isHeld(session)).toBe(false);
     expectFreed();
   });
 });
@@ -258,6 +291,27 @@ describe("desktop / IDE tokenless client", () => {
     const unfocusedAt = scenario.timer.now();
     const releasedAt = await scenario.idleUntilReleased(session, 2 * NO_HEARTBEAT_BUDGET_MS);
     expect(releasedAt).toBeLessThanOrEqual(unfocusedAt + NO_HEARTBEAT_BUDGET_MS);
+    expectFreed();
+  });
+
+  test("focused with tokenless heartbeats but no input: held until the idle window, then freed as idle (#10839)", async () => {
+    scenario = await LivenessScenario.start();
+    const acquiredAt = scenario.timer.now();
+    const session = await scenario.acquireTokenless();
+    const focus = scenario.startTokenlessHeartbeats(session);
+
+    // Held side: the heartbeats prove the client is alive, so nothing frees it early.
+    expect(await scenario.idleWhileHeld(session, acquiredAt + IDLE_WINDOW_MS - 10_000)).toBe(
+      undefined,
+    );
+    expectHeld(session);
+
+    // Released side: watching is not use, so a tokenless heartbeat never restarts the idle window.
+    const releasedAt = await scenario.idleUntilReleased(session, 2 * RELEASE_SLACK_MS);
+    focus.stop();
+    expect(releasedAt).toBeDefined();
+    expect(releasedAt!).toBeLessThanOrEqual(acquiredAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
     expectFreed();
   });
 

@@ -52,6 +52,12 @@ extension OverlayNode {
         return (modal ? [self] : []) + nested.flatMap { $0.openModals(state: state, pages: pages) }
     }
 
+    /// Whether an open dialog makes the page behind it inert (hidden from accessibility); a
+    /// snackbar does not block the page, as on Android.
+    func blocksPage(state: [String: JSONValue], pages: [String: Int]) -> Bool {
+        openModals(state: state, pages: pages).contains { $0.type == "dialog" }
+    }
+
     /// The node or composite part whose identifier is `identifier`, depth-first in tree order.
     /// Parts of a closed dialog or snackbar are not on screen, so they never match.
     func tapTarget(identifier wanted: String, state: [String: JSONValue]) -> OverlayTapTarget? {

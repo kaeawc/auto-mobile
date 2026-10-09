@@ -57,6 +57,10 @@ setup() {
   # OS, so a macOS CI runner (RUNNER_OS=macOS: --timeout 20000) must not leak
   # into stubbed invocations; tests that need an OS set RUNNER_OS themselves.
   unset RUNNER_OS AUTOMOBILE_TEST_TIMEOUT_MS AUTOMOBILE_UNIT_TEST_WORKERS
+  # Chunking and shared-process knobs are lane tuning that a caller shell (CI job env,
+  # orchestrator) may export; every test that depends on them sets them explicitly.
+  unset AUTOMOBILE_UNIT_TEST_CHUNK_FILES AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE \
+    AUTOMOBILE_UNIT_SHARED_PROCESS AUTOMOBILE_UNIT_SHARED_FILE_COUNT
   STUB_BIN="$(mktemp -d)"
   REAL_BUN="$(command -v bun)"
   export REAL_BUN

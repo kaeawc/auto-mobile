@@ -23,6 +23,11 @@ const INTERVAL_MS = 2_000;
 const IDLE_WINDOW_MS = DAEMON_BOUND_SESSION_REPLAY_TTL_MS;
 const ANDROID = { sessionUuid: "android-session", deviceId: "emulator-5554", platform: "android" };
 const IOS = { sessionUuid: "ios-session", deviceId: "SIM-UDID-1", platform: "ios" };
+const PROVISIONED = {
+  sessionUuid: "provisioned-session",
+  deviceId: "emulator-5556",
+  platform: "android",
+};
 
 function deviceStartResult(device: typeof ANDROID) {
   return {
@@ -32,6 +37,26 @@ function deviceStartResult(device: typeof ANDROID) {
         text: JSON.stringify({
           platform: device.platform,
           runtime: { deviceId: device.deviceId, session: { sessionUuid: device.sessionUuid } },
+        }),
+      },
+    ],
+  };
+}
+
+/** provisionDevice's shape: the description nests under `device` beside a top-level `sessionId`. */
+function provisionDeviceResult(device: typeof ANDROID) {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          device: {
+            name: "Pixel_Provisioned",
+            platform: device.platform,
+            runtime: { deviceId: device.deviceId },
+          },
+          sessionId: device.sessionUuid,
+          source: "created",
         }),
       },
     ],
@@ -81,7 +106,9 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
           ? deviceStartResult(ANDROID)
           : name === "getApple"
             ? deviceStartResult(IOS)
-            : undefined,
+            : name === "provisionDevice"
+              ? provisionDeviceResult(PROVISIONED)
+              : undefined,
     });
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
@@ -161,4 +188,22 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
     await callEvery("observe", { platform: "ios" }, IDLE_WINDOW_MS / 3, IDLE_WINDOW_MS * 2);
     expect(await nextTicksHeartbeat()).toEqual([IOS.sessionUuid]);
   });
+
+  // #10821: provisionDevice nests the description under `device`, so the proxy never learned the
+  // provisioned session's platform or device id and no selector-routed call ever credited it.
+  for (const [form, args] of [
+    ["deviceId", { deviceId: PROVISIONED.deviceId }],
+    ["platform", { platform: "android" }],
+  ] as const) {
+    test(`#10821 ${form}: a provisionDevice session driven by selector keeps heartbeating beside a second session`, async () => {
+      await proxy.callTool("provisionDevice", {});
+      await proxy.callTool("getApple", {});
+      await callEvery("observe", args, IDLE_WINDOW_MS / 3, IDLE_WINDOW_MS * 3);
+      expect(await nextTicksHeartbeat()).toEqual([PROVISIONED.sessionUuid]);
+
+      // A pause past the window still releases it once the calls stop.
+      await timer.advanceTimeAsync(IDLE_WINDOW_MS);
+      expect(await nextTicksHeartbeat()).toEqual([]);
+    });
+  }
 });

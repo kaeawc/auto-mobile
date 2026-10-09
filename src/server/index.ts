@@ -1431,6 +1431,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             },
             isDeviceInventoryTool(name) ? { access: "read-only" } : undefined,
           );
+        // Only an admitted call's end is session use (#10824).
+        executionTracker.markSessionAdmitted(execution.id);
       }
       const runToolHandler = () =>
         runWithToolSelectionContext(

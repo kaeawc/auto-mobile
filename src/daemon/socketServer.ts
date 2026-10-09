@@ -6729,6 +6729,8 @@ export class UnixSocketServer {
     try {
       executionTracker.bindDeviceExecution(execution.id, targetDevice.deviceId);
       signal.throwIfAborted();
+      // The holder and readiness checks above passed: this input is use of the session (#10824).
+      executionTracker.markSessionAdmitted(execution.id);
       return await runWithToolSelectionContext(
         {
           execution: {

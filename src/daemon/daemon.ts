@@ -763,14 +763,16 @@ export class Daemon {
   private subscribeToolCallEndActivity(): void {
     this.unsubscribeSessionExecutionEnded?.();
     this.unsubscribeSessionExecutionEnded = executionTracker.onSessionExecutionEnded(
-      (sessionUuids) => {
+      (sessionUuids, { admitted }) => {
         const sessionIds = new Set(
           sessionUuids.map(
             (uuid) => resolveToolSelectionBaseSessionUuid(uuid, this.sessionManager) ?? uuid,
           ),
         );
+        // A call refused at admission is not use: it must not revive a suspect or expired session
+        // (#10824). It still re-arms the deferred releases its in-flight execution vetoed.
         for (const sessionId of sessionIds) {
-          this.sessionManager.recordToolCallEnded(sessionId);
+          this.sessionManager.recordToolCallEnded(sessionId, { admitted });
         }
         // A deferred owner-disconnect release may be keyed by either id (#10712).
         this.devicePool.sessionExecutionsEnded(new Set([...sessionUuids, ...sessionIds]));
@@ -814,11 +816,19 @@ export class Daemon {
       }
     });
     // Register centralized cleanup for session-scoped state
-    this.sessionManager.onSessionRelease((sessionId, deviceId) => {
+    this.sessionManager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, options) => {
+      // A terminal upgrade of an already-cleaned-up release must not touch the device's next
+      // owner: its pin, caches and CtrlProxy binding (#10825).
+      if (options?.upgradeOnly) {
+        return;
+      }
       DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
-      this.navigationGraphListenerManagers.delete(
-        NavigationGraphManager.getInstanceForSession(sessionId),
-      );
+      // Only this session's own manager: the lookup with fallback returns the global manager for
+      // an already-released session, and dropping it would silence its listeners (#10825).
+      const navigationManager = NavigationGraphManager.findInstanceForSession(sessionId);
+      if (navigationManager) {
+        this.navigationGraphListenerManagers.delete(navigationManager);
+      }
       NavigationGraphManager.releaseSession(sessionId);
       RealObserveScreen.clearCache(deviceId);
       defaultDisplayInventoryProvider.invalidate(deviceId);

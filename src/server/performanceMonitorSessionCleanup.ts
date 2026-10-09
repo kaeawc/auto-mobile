@@ -26,6 +26,11 @@ export function registerPerformanceMonitorSessionCleanup(
   const cleanup = (_sessionId: string, deviceId: string): void => {
     (options.monitor?.() ?? getPerformanceMonitor()).stopMonitoring(deviceId);
   };
-  manager.onSessionRelease(cleanup);
+  // A terminal upgrade of a finished release would stop the device's next owner's sampling (#10825).
+  manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
+    if (!releaseOptions?.upgradeOnly) {
+      cleanup(sessionId, deviceId);
+    }
+  });
   manager.onSessionDeviceUnbound(cleanup);
 }

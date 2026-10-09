@@ -568,6 +568,12 @@ export interface SessionReleaseOptions {
   expiryOrigin?: "lazy-expiry" | "cleanup-expired";
   /** Set by the expiry handler when it owns the ordered device return after release. */
   deviceReleaseManaged?: boolean;
+  /**
+   * A terminal reason upgrading a release that already finalized and was already notified
+   * (#10825). Its device may belong to another session by now, so device-keyed cleanup must
+   * ignore it; only observers of the release reason (the broadcaster) act on it.
+   */
+  upgradeOnly?: boolean;
 }
 
 export type SessionReleaseCallback = (
@@ -3804,7 +3810,9 @@ export class SessionManager {
         await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
       }
       reason.terminalPersisted = true;
-      this.notifySessionRelease(upgradedSnapshot);
+      // The release's cleanup already ran on the first notification; the device may now belong to
+      // the next owner, so announce only the reason change (#10825).
+      this.notifySessionRelease(upgradedSnapshot, { upgradeOnly: true });
       return upgradedSnapshot.deviceId;
     })();
     reason.lateTerminalRelease = release;
@@ -5970,7 +5978,7 @@ export class SessionManager {
    * release its session the moment it ended. The end of a call is tool usage, so it also refreshes
    * the session's activity heartbeat, exactly as the start did (`reclaimAndRefreshExistingSession`).
    */
-  recordToolCallEnded(sessionId: string): void {
+  recordToolCallEnded(sessionId: string, end: { admitted: boolean } = { admitted: true }): void {
     const session = this.sessions.get(sessionId);
     if (!session && this.restartRecoveryActivityAt.has(sessionId)) {
       // A call that waited on, or failed because of, a device restart is still the client using
@@ -5978,7 +5986,9 @@ export class SessionManager {
       this.recordRestartRecoveryActivity(sessionId);
       return;
     }
-    if (!session || this.releasingSessions.has(session)) {
+    // A call refused at admission (suspect, expired, not the holder) never used the session, so
+    // its end must not restore a suspect lease or push an expired deadline out (#10824).
+    if (!end.admitted || !session || this.releasingSessions.has(session)) {
       return;
     }
     const now = this.timer.now();

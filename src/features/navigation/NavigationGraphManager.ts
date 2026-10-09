@@ -681,6 +681,14 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
+   * The manager this session already has, without minting one and without the released-session
+   * fallback to the global manager (#10825).
+   */
+  public static findInstanceForSession(sessionId: string): NavigationGraphManager | undefined {
+    return NavigationGraphManager.sessionInstances.get(sessionId);
+  }
+
+  /**
    * Clear a session's released-tombstone (#4984). Session UUIDs are normally not
    * reused, but `setActiveDevice` releases an existing session and immediately
    * re-creates it with the SAME uuid on another device — so when a session is

@@ -840,6 +840,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         sessionUuid,
         execution,
       );
+      if (execution) {
+        // Only an admitted call's end is session use (#10824).
+        executionTracker.markSessionAdmitted(execution.executionId);
+      }
       assertSessionDeviceRouting(
         name,
         providedDeviceId,

@@ -42,11 +42,27 @@ interface ActiveExecution {
    */
   readOnlySessionAccess?: boolean;
   /**
+   * The call passed session admission (#10824). A call refused at admission (a suspect or expired
+   * session, a non-holder) still ends, and its end must not restart the session's idle or liveness
+   * clocks: only an admitted call is session use.
+   */
+  sessionAdmitted?: boolean;
+  /**
    * Reads the request's current absolute deadline (live: progress may extend it), on the
    * tracker's clock. Undefined when the call was admitted without a deadline (#10712).
    */
   readDeadlineMs?: () => number | undefined;
 }
+
+/** How a session-bearing execution ended: whether it was ever admitted under its session. */
+export interface SessionExecutionEnd {
+  admitted: boolean;
+}
+
+export type SessionExecutionEndListener = (
+  sessionUuids: readonly string[],
+  end: SessionExecutionEnd,
+) => void;
 
 export type ExecutionScope = "session" | "global";
 
@@ -104,7 +120,7 @@ export class ExecutionTracker {
   private sessionUuidExecutions = new Map<string, Set<string>>();
   private autolockSessionExecutions = new Map<string, Set<string>>();
   private executionEndListeners = new Set<() => void>();
-  private sessionExecutionEndListeners = new Set<(sessionUuids: readonly string[]) => void>();
+  private sessionExecutionEndListeners = new Set<SessionExecutionEndListener>();
   private timer: Timer;
   private idGenerator: IdGenerator;
   private daemonRestartPrepared = false;
@@ -279,9 +295,11 @@ export class ExecutionTracker {
    * Observe the end of every tool execution that belonged to a device session, with the session
    * UUIDs it ran under (explicit, resolved-autolock and provisional-autolock). The daemon restarts a
    * session's idle window from here, so idleness counts from the end of the last call, not its
-   * start. Returns the unsubscribe function.
+   * start — but only for an admitted call (`end.admitted`, #10824): a call refused at admission is
+   * reported so deferred releases it vetoed can re-arm, and must not count as use. Returns the
+   * unsubscribe function.
    */
-  onSessionExecutionEnded(listener: (sessionUuids: readonly string[]) => void): () => void {
+  onSessionExecutionEnded(listener: SessionExecutionEndListener): () => void {
     this.sessionExecutionEndListeners.add(listener);
     return () => {
       this.sessionExecutionEndListeners.delete(listener);
@@ -317,6 +335,17 @@ export class ExecutionTracker {
     return deadlines.length === 0 ? undefined : Math.max(...deadlines);
   }
 
+  /**
+   * Mark an execution as admitted under its session (#10824). Set once the call's session admission
+   * (or, for `input/*`, its ownership checks) passed; only an admitted execution's end is use.
+   */
+  markSessionAdmitted(executionId: string): void {
+    const execution = this.executions.get(executionId);
+    if (execution) {
+      execution.sessionAdmitted = true;
+    }
+  }
+
   /** Mark an execution as a read-only inventory call, whose end is not session use. */
   markReadOnlySessionAccess(executionId: string): void {
     const execution = this.executions.get(executionId);
@@ -343,7 +372,7 @@ export class ExecutionTracker {
     }
     for (const listener of this.sessionExecutionEndListeners) {
       try {
-        listener(sessionUuids);
+        listener(sessionUuids, { admitted: execution.sessionAdmitted === true });
       } catch (error) {
         // A listener's failure must not stop the remaining listeners or the execution's teardown.
         logger.warn(

@@ -58,8 +58,16 @@ describe("Daemon tool-call-end idle wiring", () => {
       internals.subscribeToolCallEndActivity();
       internals.subscribeToolCallEndActivity();
 
+      // A call refused at admission is not use (#10824): its end leaves the window alone.
+      const refused = executionTracker.startExecution("tapOn", undefined, "tool-call-end-wiring");
+      timer.advanceTime(30_000);
+      executionTracker.endExecution(refused.id);
+      expect(session.lastUsedAt).toBe(0);
+      expect(session.expiresAt).toBe(createdExpiry);
+
       const execution = executionTracker.startExecution("tapOn", undefined, "tool-call-end-wiring");
-      timer.advanceTime(90_000);
+      executionTracker.markSessionAdmitted(execution.id);
+      timer.advanceTime(60_000);
       executionTracker.endExecution(execution.id);
 
       expect(session.lastUsedAt).toBe(90_000);
@@ -69,6 +77,7 @@ describe("Daemon tool-call-end idle wiring", () => {
       // Shutdown unsubscribes: a later call end no longer reaches this daemon's sessions.
       internals.stopSessionTimers();
       const afterStop = executionTracker.startExecution("tapOn", undefined, "tool-call-end-wiring");
+      executionTracker.markSessionAdmitted(afterStop.id);
       timer.advanceTime(10_000);
       executionTracker.endExecution(afterStop.id);
       expect(session.lastUsedAt).toBe(90_000);

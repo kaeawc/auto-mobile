@@ -22,6 +22,8 @@ import {
 import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
+import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
+import type { PackageSigningInspection } from "../models/PackageSigningInspection";
 import type { UninstallAppResult } from "../models/UninstallAppResult";
 import { AppPermissions, type SetAppPermissionsResult } from "../features/action/AppPermissions";
 import { ResetKeychain } from "../features/action/ResetKeychain";
@@ -333,6 +335,39 @@ export function setUninstallAppToolDependencies(deps: Partial<UninstallAppToolDe
 
 export function resetUninstallAppToolDependencies(): void {
   uninstallAppToolDependencies = null;
+}
+
+export interface InspectPackageSigningExecutor {
+  execute(
+    appId: string,
+    options?: { userId?: number; signal?: AbortSignal },
+  ): Promise<PackageSigningInspection>;
+}
+
+export interface InspectPackageSigningToolDependencies {
+  createInspectPackageSigning(device: BootedDevice): InspectPackageSigningExecutor;
+}
+
+let inspectPackageSigningToolDependencies: InspectPackageSigningToolDependencies | null = null;
+
+function getInspectPackageSigningToolDependencies(): InspectPackageSigningToolDependencies {
+  return (inspectPackageSigningToolDependencies ??= {
+    createInspectPackageSigning: (device) => new InspectPackageSigning(device),
+  });
+}
+
+export function setInspectPackageSigningToolDependencies(
+  deps: Partial<InspectPackageSigningToolDependencies>,
+): void {
+  inspectPackageSigningToolDependencies = {
+    createInspectPackageSigning:
+      deps.createInspectPackageSigning ??
+      getInspectPackageSigningToolDependencies().createInspectPackageSigning,
+  };
+}
+
+export function resetInspectPackageSigningToolDependencies(): void {
+  inspectPackageSigningToolDependencies = null;
 }
 
 let installAppToolDependencies: InstallAppToolDependencies | null = null;
@@ -764,6 +799,22 @@ export const getAppPermissionsSchema = withAppIdAliases(
   ),
 );
 
+export const inspectPackageSigningSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z
+      .object({
+        appId: z.string(),
+        userId: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe("Android user/profile to inspect; when omitted it is resolved and reported"),
+      })
+      .strict(),
+  ),
+);
+
 export const resetKeychainSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
     z
@@ -893,6 +944,8 @@ export interface UninstallAppArgs {
 }
 
 export type SetAppPermissionsArgs = z.infer<typeof setAppPermissionsSchema>;
+
+export type InspectPackageSigningArgs = z.infer<typeof inspectPackageSigningSchema>;
 
 export type GetAppPermissionsArgs = z.infer<typeof getAppPermissionsSchema>;
 
@@ -1393,6 +1446,22 @@ function subscribeOverlayAgentLifecycle(): () => void {
 export function registerAppTools() {
   unsubscribeOverlayAgentLifecycle?.();
   unsubscribeOverlayAgentLifecycle = subscribeOverlayAgentLifecycle();
+  const inspectPackageSigningHandler = async (
+    device: BootedDevice,
+    args: InspectPackageSigningArgs,
+    _progress?: unknown,
+    signal?: AbortSignal,
+  ) => {
+    try {
+      const inspection = await getInspectPackageSigningToolDependencies()
+        .createInspectPackageSigning(device)
+        .execute(args.appId, { userId: args.userId, signal });
+      return createJSONToolResponse({ ...inspection });
+    } catch (error) {
+      throw toActionableError(error, "Failed to inspect package signing");
+    }
+  };
+
   const getAppPermissionsHandler = async (device: BootedDevice, args: GetAppPermissionsArgs) => {
     const permissions = new AppPermissions(device);
     const result = await permissions.getPermissions(args.appId, {
@@ -1494,6 +1563,15 @@ export function registerAppTools() {
     getAppPermissionsSchema,
     getAppPermissionsHandler,
     { defaultEnabled: false },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "inspectPackageSigning",
+    "Android: fresh read of one package's presence (installed/absent/unknown) for a user and its " +
+      "SHA-256 signing certificates (complete signer set, rotation history). Never cached.",
+    inspectPackageSigningSchema,
+    inspectPackageSigningHandler,
+    { defaultEnabled: false, deviceReadiness: "booted", deviceReadOnly: true },
   );
 
   ToolRegistry.registerDeviceAware(

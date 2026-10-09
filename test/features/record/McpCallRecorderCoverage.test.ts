@@ -62,6 +62,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   snapshotOf: READ_ONLY,
   listApps: READ_ONLY,
   getAppPermissions: READ_ONLY,
+  inspectPackageSigning: READ_ONLY,
   getDeepLinks: READ_ONLY,
   getDeviceState: READ_ONLY,
   getIosSimulatorCapabilities: READ_ONLY,

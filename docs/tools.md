@@ -19,7 +19,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
 `getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
-`identifyInteractions`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
+`identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
 `mockNetwork`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
 `reconcileDeviceResources`, `recordSteps`, `removeKeyValue`,
@@ -1308,6 +1308,7 @@ subtree, or the whole active-window tree when owner-less.
 | ♻️ <code>appLifecycle</code>                                                                     | State-preserving background-process kill for saved-state restoration tests (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 🔏 <code>inspectPackageSigning</code>                                                            | Android: fresh read of a package's presence (`installed`, `absent`, `unknown`) for one user and its SHA-256 signing certificates, including the complete signer set and rotation history. Never cached.                                                                                                                                                                                                                                                                                                                                                                                   |
 | 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded platform-qualified user_files, or media_library. Default-enabled for every storage target; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                            |
 | 🧾 <code>resetAppLogs</code>                                                                     | Resets explicitly named app-container log files and their rotated siblings on the session device, with per-path outcomes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -1356,6 +1357,23 @@ erases every app's Keychain, regardless of `appId`.
 `installApp.artifactPath` is the host path to an `.apk`, `.app`, or `.ipa`.
 `uninstallApp.keepData` retains app data after uninstall on Android (default
 false; Android only).
+
+`inspectPackageSigning` (Android) takes `appId` and an optional `userId`; when omitted the
+user is resolved the way `uninstallApp` does and reported as `userId` and `userSource`. Each
+call reads the device (`dumpsys package`, `pm path`, and the installed base APK's signing
+block); nothing is cached, and `observation` records `fresh: true`, `observedAt`, the scope,
+and the device `apiLevel`. `presence` is `installed`, `absent`, or `unknown`: `absent` requires
+PackageManager to report no such package or `installed=false` for that user, and a failed,
+timed-out, malformed or cancelled lookup is `unknown`, never `absent`. `signing` is either
+`{status: "available", scheme, signerSha256, signers, history?}` or
+`{status: "unavailable", reason}`. `signerSha256` is the complete sorted signer set (a
+multi-signer package lists every signer; all of them form the identity). Signers are chosen as
+PackageManager would for the device API level: v3.1, then v3, then v2. For a rotated package
+`history` is the certificate lineage, oldest first with the current signer last, copied from the
+installed APK without re-verifying its signatures. JAR (v1)-only APKs, ZIP64 APKs, and a v3.1
+package on a device whose API level cannot be read report `unavailable`. The signing read pulls
+the installed base APK to a host temp file and removes it afterwards. It does not use CtrlProxy,
+so helper version does not affect the result.
 
 `openLink.acceptOpenAlert` automatically taps Open on an iOS system
 "Open in <app>?" alert. On Android, `chooserAppPackage` selects the exact package

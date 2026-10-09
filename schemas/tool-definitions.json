@@ -2187,6 +2187,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -2313,6 +2314,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -3640,6 +3642,45 @@
     },
     "_meta": {
       "automobile/debugOnly": true
+    }
+  },
+  {
+    "name": "inspectPackageSigning",
+    "description": "Android: fresh read of one package's presence (installed/absent/unknown) for a user and its SHA-256 signing certificates (complete signer set, rotation history). Never cached.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "userId": {
+          "description": "Android user/profile to inspect; when omitted it is resolved and reported",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId"],
+      "additionalProperties": false
     }
   },
   {
@@ -22246,6 +22287,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",
@@ -29448,6 +29490,7 @@
             "hitTest",
             "homeScreen",
             "identifyInteractions",
+            "inspectPackageSigning",
             "installApp",
             "keyboard",
             "killDevice",
@@ -29540,6 +29583,7 @@
               "hitTest",
               "homeScreen",
               "identifyInteractions",
+              "inspectPackageSigning",
               "installApp",
               "keyboard",
               "killDevice",

@@ -41,6 +41,7 @@ describe("ProvisionDeviceError retryability", () => {
       timeout: true,
       unsupported: false,
       platform_command_failed: false,
+      resource_profile_unproven: false,
     });
   });
 

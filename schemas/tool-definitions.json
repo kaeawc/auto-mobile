@@ -19529,7 +19529,7 @@
                             }
                           },
                           "minItems": 1,
-                          "maxItems": 32
+                          "maxItems": 128
                         },
                         "as": {
                           "type": "string",

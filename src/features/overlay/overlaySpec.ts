@@ -415,7 +415,7 @@ const repeatItemSchema = z.record(
   z.union([z.string(), z.number().finite(), z.boolean()]),
 );
 const repeatSchema = z
-  .object({ items: z.array(repeatItemSchema).min(1).max(32), as: keySchema })
+  .object({ items: z.array(repeatItemSchema).min(1).max(128), as: keySchema })
   .strict();
 const repeatShape = { repeat: repeatSchema.optional() };
 const boxBaseSchema = z

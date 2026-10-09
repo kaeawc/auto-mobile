@@ -48,13 +48,13 @@ keys) match `[A-Za-z_][A-Za-z0-9_]{0,63}`. No nested state, arrays, or nulls.
 Overlay IDs, pager IDs, tags, event names, and asset IDs are opaque nonempty
 strings; they do not share the state-key restriction.
 
-| Constant                         | Value            | Counting rule                                                                                      |
-| -------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------- |
-| `MAX_OVERLAY_NODES`              | 500              | Includes root and every child/page/sheet child; `repeat` templates count once per instance.        |
-| `MAX_OVERLAY_DEPTH`              | 24               | Root has depth 1; only node nesting counts.                                                        |
-| `MAX_OVERLAY_IMAGES`             | 32               | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again. |
-| `MAX_OVERLAY_SPEC_BYTES`         | 262144 (256 KiB) | UTF-8 bytes of raw JSON, including whitespace.                                                     |
-| `MAX_OVERLAY_EMIT_PAYLOAD_BYTES` | 4096 (4 KiB)     | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.             |
+| Constant                         | Value           | Counting rule                                                                                      |
+| -------------------------------- | --------------- | -------------------------------------------------------------------------------------------------- |
+| `MAX_OVERLAY_NODES`              | 2000            | Includes root and every child/page/sheet child; `repeat` templates count once per instance.        |
+| `MAX_OVERLAY_DEPTH`              | 24              | Root has depth 1; only node nesting counts.                                                        |
+| `MAX_OVERLAY_IMAGES`             | 32              | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again. |
+| `MAX_OVERLAY_SPEC_BYTES`         | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                     |
+| `MAX_OVERLAY_EMIT_PAYLOAD_BYTES` | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.             |
 
 Navigation item `image` uses also count toward `MAX_OVERLAY_IMAGES`. Assets have
 separate transport and decoded-memory limits in #9301. These spec limits keep
@@ -593,6 +593,8 @@ per item without writing every row out. The container's `children` are the
 template: they are instantiated once per entry of `items`, in item order, as
 siblings inside the same container (the container itself is not repeated, so a
 list is a `column` with `repeat` whose single child is the row template).
+`items` holds 1–128 entries, and the expanded tree still counts against
+`MAX_OVERLAY_NODES`.
 
 ```json
 {

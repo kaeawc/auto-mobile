@@ -32,6 +32,7 @@ function makeSimctl(recorder: SimctlRecorder, simulatorImages: DeviceInfo[] = []
   return {
     listSimulatorImages: async () => simulatorImages,
     getBootedSimulators: async () => [],
+    getBootedSimulatorsChecked: async () => [],
     getDeviceTypes: async () => [
       {
         name: "iPhone 17",

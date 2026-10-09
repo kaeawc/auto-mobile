@@ -63,6 +63,7 @@ import {
   type BootedDeviceDiscovery,
   waitForDeviceReadyOrCancel,
 } from "../devices/deviceUtils";
+import { BootedDeviceDiscoveryIncompleteError } from "../devices/deviceBootService";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { SingleFlight } from "../utils/cache/SingleFlight";
@@ -3585,9 +3586,16 @@ export class DevicePool {
     device: DeviceInfo,
     outcome: DeviceStartResult["outcome"],
   ): Promise<boolean> {
-    const visible = (await this.deviceManager.getBootedDevices("android")).find(
-      (booted) => booted.name === device.name,
-    );
+    const discovery = await this.deviceManager.getBootedDevicesDetailed("android");
+    if (!discovery.succeededPlatforms.has("android")) {
+      // An incomplete adb listing cannot prove the emulator is ours to adopt (or
+      // free of a foreign lease); refuse rather than wait on it (#11103).
+      logger.warn(
+        `[DevicePool] Android discovery was incomplete; not adopting AVD '${device.name}' for allocation`,
+      );
+      return false;
+    }
+    const visible = discovery.devices.find((booted) => booted.name === device.name);
     if (visible) {
       return !(await this.refusesForeignOwnedEmulator(device, visible.deviceId));
     }
@@ -3748,6 +3756,22 @@ export class DevicePool {
     }
   }
 
+  /**
+   * Booted devices for a start decision. A failed listing is not "nothing is
+   * booted": starting from it could boot a duplicate beside an attached device,
+   * so an incomplete scan refuses with a retryable error (#11103).
+   */
+  private async listBootedDevicesForStart(platform: Platform): Promise<BootedDevice[]> {
+    const discovery = await this.deviceManager.getBootedDevicesDetailed(platform);
+    if (!discovery.succeededPlatforms.has(platform)) {
+      throw new BootedDeviceDiscoveryIncompleteError(
+        platform,
+        discovery.discoveryErrors?.[platform],
+      );
+    }
+    return discovery.devices;
+  }
+
   private async getStartableDeviceImageCandidates(
     platform: Platform,
     criteria?: DeviceAllocationCriteria,
@@ -3758,7 +3782,7 @@ export class DevicePool {
       return [];
     }
 
-    const bootedDevices = await this.deviceManager.getBootedDevices(platform);
+    const bootedDevices = await this.listBootedDevicesForStart(platform);
     const bootedIds = new Set(bootedDevices.map((device) => device.deviceId));
     const bootedNames = new Set(bootedDevices.map((device) => device.name));
     const candidates: DeviceInfo[] = [];

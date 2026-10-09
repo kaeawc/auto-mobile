@@ -37,6 +37,10 @@ import { logger } from "../utils/logger";
 import { AndroidCtrlProxyManager, CtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AdbUnavailableError } from "../utils/android-cmdline-tools/AdbClient";
+import {
+  AndroidBootedDeviceDiscoveryIncompleteError,
+  BootedDeviceDiscoveryIncompleteError,
+} from "./deviceBootService";
 import { AndroidEmulatorClient } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { PlatformDeviceManager } from "../utils/interfaces/DeviceUtils";
@@ -1679,8 +1683,14 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const perf = createGlobalPerformanceTracker();
 
     perf.startOperation("listBootedDevices");
-    const allDevices = await this.deviceUtils.getBootedDevices("android");
+    const discovery = await this.deviceUtils.getBootedDevicesDetailed("android");
     perf.endOperation("listBootedDevices");
+    // A failed/timed-out adb listing is not "no devices": refuse rather than
+    // cold-boot an AVD while an attached device may be present (#11103).
+    if (!discovery.succeededPlatforms.has("android")) {
+      throw new AndroidBootedDeviceDiscoveryIncompleteError(discovery.discoveryErrors?.android);
+    }
+    const allDevices = discovery.devices;
 
     if (allDevices.length > 0) {
       // Use the first available device
@@ -1878,7 +1888,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
     // Check for already booted simulators first
     perf.startOperation("checkBooted");
-    const bootedDevices = await this.simctl.getBootedSimulators();
+    // The checked listing rethrows simctl failures: a timeout must refuse
+    // rather than boot availableDevices[0] beside an already-booted one (#11103).
+    const bootedDevices = await this.listBootedSimulatorsForSelection();
     perf.endOperation("checkBooted");
     bootedDevices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
 
@@ -1926,6 +1938,18 @@ export class DeviceSessionManager implements DeviceSessionManager {
         return bootedDevice;
       },
     );
+  }
+
+  private async listBootedSimulatorsForSelection(): Promise<BootedDevice[]> {
+    try {
+      return await this.simctl!.getBootedSimulatorsChecked();
+    } catch (error) {
+      throw new BootedDeviceDiscoveryIncompleteError("ios", {
+        code: "failed",
+        message: errorMessage(error),
+        retryable: true,
+      });
+    }
   }
 
   private async revalidateCreatedIosDevice(deviceId: string): Promise<StableVirtualDeviceIdentity> {

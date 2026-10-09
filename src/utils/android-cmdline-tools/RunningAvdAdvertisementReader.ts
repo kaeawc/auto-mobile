@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { logger } from "../logger";
 import { sortedReaddirSync } from "../io";
 
@@ -9,12 +9,12 @@ import { sortedReaddirSync } from "../io";
  * AVD, so a launch guard can ask "does some process on this host already run
  * this AVD?" without depending on ADB having named the runtime yet.
  *
- * This is a SECONDARY signal only, and deliberately narrow (one method). On
- * macOS/Apple silicon the emulator does not advertise instances at all (see
- * #6407's device verification: the advertisement directory does not exist even
- * with two emulators up), so a `false` here means "no advertisement", never
- * "not running". The primary guards are this process's in-flight launch
- * registry and the console-port-correlated device scan.
+ * This is a SECONDARY signal only, and deliberately narrow (one method). #6407
+ * found no advertisements under `os.tmpdir()` on macOS because the emulator
+ * advertises elsewhere there (see {@link runningAvdAdvertisementDirs}, #11103);
+ * a `false` here still means "no advertisement", never "not running". The
+ * primary guards are this process's in-flight launch registry and the
+ * console-port-correlated device scan.
  */
 export interface RunningAvdAdvertisementReader {
   /**
@@ -28,26 +28,80 @@ export interface RunningAvdAdvertisementReader {
   isAvdAdvertisedRunning(avdName: string): Promise<boolean>;
 }
 
+export interface AdvertisementHost {
+  platform: NodeJS.Platform;
+  homeDir: string;
+  tmpDir: string;
+  env: Readonly<Record<string, string | undefined>>;
+}
+
 /**
- * Default reader over `${os.tmpdir()}/avd/running/pid_<pid>.ini`, the location
+ * Candidate `avd/running` discovery directories, most specific first. The
+ * emulator (`EmulatorAdvertisement` / `ConfigDirs::getDiscoveryDirectory`)
+ * advertises under `$HOME/Library/Caches/TemporaryItems` on macOS and under
+ * `$XDG_RUNTIME_DIR` on Linux, falling back to its temp dir
+ * (`/tmp/android-<user>`) when that is unset (#11103). `os.tmpdir()` is kept as
+ * the historical candidate (it is the Windows `%LOCALAPPDATA%\Temp` location).
+ */
+export function runningAvdAdvertisementDirs(host: AdvertisementHost): string[] {
+  const roots: string[] = [];
+  if (host.platform === "darwin") {
+    roots.push(join(host.homeDir, "Library", "Caches", "TemporaryItems"));
+  } else if (host.platform !== "win32") {
+    const xdgRuntimeDir = host.env.XDG_RUNTIME_DIR;
+    const user = host.env.USER ?? host.env.LOGNAME;
+    if (xdgRuntimeDir) {
+      roots.push(xdgRuntimeDir);
+    } else if (user) {
+      roots.push(join("/tmp", `android-${user}`));
+    }
+  }
+  roots.push(host.tmpDir);
+  return [...new Set(roots.map((root) => join(root, "avd", "running")))];
+}
+
+function defaultRunningAvdAdvertisementDirs(): string[] {
+  return runningAvdAdvertisementDirs({
+    platform: process.platform,
+    homeDir: homedir(),
+    tmpDir: tmpdir(),
+    env: process.env,
+  });
+}
+
+/**
+ * Default reader over `<discovery dir>/avd/running/pid_<pid>.ini`, the location
  * the Android emulator uses to advertise running instances on the platforms
  * where it does so at all.
  */
 export class TmpdirRunningAvdAdvertisementReader implements RunningAvdAdvertisementReader {
+  private readonly runningDirs: readonly string[];
+
   constructor(
-    private readonly runningDir: string = join(tmpdir(), "avd", "running"),
+    runningDirs: string | readonly string[] = defaultRunningAvdAdvertisementDirs(),
     private readonly isProcessAlive: (pid: number) => boolean = defaultIsProcessAlive,
-  ) {}
+  ) {
+    this.runningDirs = typeof runningDirs === "string" ? [runningDirs] : runningDirs;
+  }
 
   async isAvdAdvertisedRunning(avdName: string): Promise<boolean> {
-    if (!existsSync(this.runningDir)) {
-      // Expected miss, not a failure: most hosts (every macOS host checked in
-      // #6407) never create this directory, so it stays at debug level.
-      logger.debug(`No running-AVD advertisement directory at ${this.runningDir}`);
+    for (const runningDir of this.runningDirs) {
+      if (this.isAdvertisedIn(runningDir, avdName)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private isAdvertisedIn(runningDir: string, avdName: string): boolean {
+    if (!existsSync(runningDir)) {
+      // Expected miss, not a failure: only one candidate exists per host, and
+      // the emulator creates it lazily, so it stays at debug level.
+      logger.debug(`No running-AVD advertisement directory at ${runningDir}`);
       return false;
     }
 
-    const pidFiles = sortedReaddirSync(this.runningDir)
+    const pidFiles = sortedReaddirSync(runningDir)
       .filter((file) => file.startsWith("pid_") && file.endsWith(".ini"))
       // Sorted so a scan reads the directory in the same order every time.
       .sort();
@@ -57,7 +111,7 @@ export class TmpdirRunningAvdAdvertisementReader implements RunningAvdAdvertisem
       if (pid === undefined) {
         continue;
       }
-      const content = this.readAdvertisement(file);
+      const content = this.readAdvertisement(runningDir, file);
       if (content === undefined) {
         continue;
       }
@@ -81,9 +135,9 @@ export class TmpdirRunningAvdAdvertisementReader implements RunningAvdAdvertisem
    * would hide every advertisement after it in the scan and report the AVD as
    * not running (#6407).
    */
-  private readAdvertisement(file: string): string | undefined {
+  private readAdvertisement(runningDir: string, file: string): string | undefined {
     try {
-      return readFileSync(join(this.runningDir, file), "utf-8");
+      return readFileSync(join(runningDir, file), "utf-8");
     } catch (error) {
       logger.warn(`Failed to read running-AVD advertisement ${file}: ${error}`, error);
       return undefined;

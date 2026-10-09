@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { TmpdirRunningAvdAdvertisementReader } from "../../../src/utils/android-cmdline-tools/RunningAvdAdvertisementReader";
+import {
+  TmpdirRunningAvdAdvertisementReader,
+  runningAvdAdvertisementDirs,
+} from "../../../src/utils/android-cmdline-tools/RunningAvdAdvertisementReader";
 
 const AVD = "am-api36-ga-arm64";
 
@@ -59,5 +62,54 @@ describe("TmpdirRunningAvdAdvertisementReader", () => {
     );
 
     expect(await reader.isAvdAdvertisedRunning(AVD)).toBe(false);
+  });
+});
+
+describe("runningAvdAdvertisementDirs (#11103)", () => {
+  const host = {
+    homeDir: "/Users/dev",
+    tmpDir: "/var/folders/xy/T",
+    env: {} as Record<string, string | undefined>,
+  };
+
+  test("probes the emulator's macOS discovery directory before tmpdir", () => {
+    expect(runningAvdAdvertisementDirs({ ...host, platform: "darwin" })).toEqual([
+      join("/Users/dev", "Library", "Caches", "TemporaryItems", "avd", "running"),
+      join("/var/folders/xy/T", "avd", "running"),
+    ]);
+  });
+
+  test("probes XDG_RUNTIME_DIR on Linux", () => {
+    expect(
+      runningAvdAdvertisementDirs({
+        ...host,
+        platform: "linux",
+        tmpDir: "/tmp",
+        env: { XDG_RUNTIME_DIR: "/run/user/1000", USER: "dev" },
+      }),
+    ).toEqual([join("/run/user/1000", "avd", "running"), join("/tmp", "avd", "running")]);
+  });
+
+  test("falls back to the emulator temp dir on Linux without XDG_RUNTIME_DIR", () => {
+    expect(
+      runningAvdAdvertisementDirs({
+        ...host,
+        platform: "linux",
+        tmpDir: "/tmp",
+        env: { USER: "dev" },
+      }),
+    ).toEqual([join("/tmp", "android-dev", "avd", "running"), join("/tmp", "avd", "running")]);
+  });
+
+  test("the reader finds an advertisement in a later candidate directory", async () => {
+    const first = createRunningDir();
+    const second = createRunningDir();
+    writeAdvertisement(second, 4242, AVD);
+    const reader = new TmpdirRunningAvdAdvertisementReader(
+      [join(first, "missing"), first, second],
+      (pid) => pid === 4242,
+    );
+
+    expect(await reader.isAvdAdvertisedRunning(AVD)).toBe(true);
   });
 });

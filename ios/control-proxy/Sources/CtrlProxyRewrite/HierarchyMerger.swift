@@ -22,6 +22,19 @@ public enum HierarchyMerger {
         func record() { count += 1 }
     }
 
+    /// How the ±tolerance direct match breaks ties between candidates (#5837).
+    /// Production always uses `nearestThenDocumentOrder`; `legacyDeltaLoopOrder`
+    /// reproduces the pre-#8662 625-probe loop so the golden replay can measure
+    /// which real hierarchy pairs the reviewed behavior change affects.
+    enum ToleranceTieBreak: Sendable {
+        /// Smallest L∞ distance, then pre-order `NodeID`.
+        case nearestThenDocumentOrder
+        /// Exact bounds first, then the first `(dl, dt, dr, db)` delta in ascending
+        /// nested-loop order whose first-inserted node (per class+bounds or bounds
+        /// key) passes `accept`. A key whose first node fails `accept` is a miss.
+        case legacyDeltaLoopOrder
+    }
+
     /// Merge SDK hierarchy data into the XCUITest hierarchy.
     ///
     /// Single-pass merge: every XCUITest node is matched against the SDK tree exactly
@@ -36,7 +49,14 @@ public enum HierarchyMerger {
 
     /// Test-observable entry point. `matchCounter`, when supplied, records one tick per
     /// XCUITest node whose SDK match is resolved.
-    static func merge(xcuitest: ViewHierarchy, sdk: SdkViewHierarchy?, matchCounter: MatchCounter?) -> ViewHierarchy {
+    static func merge(
+        xcuitest: ViewHierarchy,
+        sdk: SdkViewHierarchy?,
+        matchCounter: MatchCounter?,
+        tieBreak: ToleranceTieBreak = .nearestThenDocumentOrder
+    )
+        -> ViewHierarchy
+    {
         guard let sdk else { return xcuitest }
         let safeArea = sdk.safeAreaInsets.map {
             EdgeInsetsInfo(top: $0.top, right: $0.right, bottom: $0.bottom, left: $0.left)
@@ -114,7 +134,8 @@ public enum HierarchyMerger {
         let context = MatchContext(
             identifierLookup: identifierLookup,
             allSdkNodes: allSdkNodes,
-            counter: matchCounter
+            counter: matchCounter,
+            tieBreak: tieBreak
         )
 
         // Single match pass: resolve each XCUITest node's SDK match once and cache both
@@ -470,7 +491,14 @@ public enum HierarchyMerger {
         /// contain every node; no whole-tree scan or per-query sort is performed.
         /// All compatible candidates, including duplicates and exact bounds, compete
         /// by (L-infinity distance, NodeID), regardless of coordinate traversal order.
-        func nearest(bounds: ElementBounds, accept: (SdkViewNode) -> Bool) -> SdkViewNode? {
+        func nearest(
+            bounds: ElementBounds,
+            className: String? = nil,
+            tieBreak: ToleranceTieBreak = .nearestThenDocumentOrder,
+            accept: (SdkViewNode) -> Bool
+        )
+            -> SdkViewNode?
+        {
             let leftRange = toleranceRange(around: bounds.left)
             let topRange = toleranceRange(around: bounds.top)
             let rightRange = toleranceRange(around: bounds.right)
@@ -482,6 +510,14 @@ public enum HierarchyMerger {
                 bottom.window(inRange: bottomRange),
             ]
             guard let candidates = windows.min(by: { $0.count < $1.count }) else { return nil }
+            if tieBreak == .legacyDeltaLoopOrder {
+                return legacyLoopOrderMatch(
+                    bounds: bounds,
+                    candidates: candidates,
+                    className: className,
+                    accept: accept
+                )
+            }
             var bestID: NodeID?
             var bestDistance = Int.max
             for entry in candidates {
@@ -489,6 +525,7 @@ public enum HierarchyMerger {
                 let nb = node.bounds
                 guard leftRange.contains(nb.left), topRange.contains(nb.top),
                       rightRange.contains(nb.right), bottomRange.contains(nb.bottom),
+                      className.map({ node.className == $0 }) ?? true,
                       accept(node)
                 else { continue }
                 let distance = boundsDistance(nb, bounds)
@@ -499,6 +536,44 @@ public enum HierarchyMerger {
                 }
             }
             return bestID.map { allNodes[$0] }
+        }
+
+        /// The pre-#8662 probe, kept only for the golden-replay comparison. The old
+        /// dictionaries held the first-inserted node per key, so each distinct bounds
+        /// key is represented by its minimum `NodeID`, and `accept` sees only that node.
+        private func legacyLoopOrderMatch(
+            bounds: ElementBounds,
+            candidates: ArraySlice<(value: Int, id: NodeID)>,
+            className: String?,
+            accept: (SdkViewNode) -> Bool
+        )
+            -> SdkViewNode?
+        {
+            let tol = boundsTolerance
+            var representatives: [BoundsKey: NodeID] = [:]
+            for entry in candidates {
+                let node = allNodes[entry.id]
+                if let className, node.className != className { continue }
+                let nb = node.bounds
+                guard boundsDistance(nb, bounds) <= tol else { continue }
+                let key = BoundsKey(left: nb.left, top: nb.top, right: nb.right, bottom: nb.bottom)
+                if let existing = representatives[key], existing <= entry.id { continue }
+                representatives[key] = entry.id
+            }
+            var best: (rank: Int, id: NodeID)?
+            for (key, id) in representatives {
+                guard accept(allNodes[id]) else { continue }
+                let deltas = [
+                    key.left - bounds.left, key.top - bounds.top,
+                    key.right - bounds.right, key.bottom - bounds.bottom,
+                ]
+                // Exact bounds were looked up before the probe; the probe skipped delta zero.
+                let rank = deltas.allSatisfy { $0 == 0 } ? -1 : deltas.reduce(0) { $0 * (2 * tol + 1) + ($1 + tol) }
+                if best.map({ rank < $0.rank }) ?? true {
+                    best = (rank, id)
+                }
+            }
+            return best.map { allNodes[$0.id] }
         }
     }
 
@@ -519,6 +594,7 @@ public enum HierarchyMerger {
         let identifierLookup: [String: SdkViewNode]
         let sdkNodesByClass: [String: [SdkViewNode]]
         let counter: MatchCounter?
+        let tieBreak: ToleranceTieBreak
 
         // `Optional<SdkViewNode>` value distinguishes a cached miss (`.some(nil)`) from
         // an absent entry (`nil`), so misses are memoized too.
@@ -528,9 +604,11 @@ public enum HierarchyMerger {
         init(
             identifierLookup: [String: SdkViewNode],
             allSdkNodes: [SdkViewNode],
-            counter: MatchCounter?
+            counter: MatchCounter?,
+            tieBreak: ToleranceTieBreak
         ) {
             geometryIndex = GeometryIndex(allNodes: allSdkNodes)
+            self.tieBreak = tieBreak
             self.identifierLookup = identifierLookup
             sdkNodesByClass = Dictionary(grouping: allSdkNodes, by: { classFamily($0.className) })
             self.counter = counter
@@ -566,7 +644,8 @@ public enum HierarchyMerger {
                 resourceId: resourceId,
                 bounds: bounds,
                 in: geometryIndex,
-                identifierLookup: identifierLookup
+                identifierLookup: identifierLookup,
+                tieBreak: tieBreak
             )
             directCache[key] = result
             return result
@@ -624,21 +703,24 @@ public enum HierarchyMerger {
         resourceId: String?,
         bounds: ElementBounds?,
         in index: GeometryIndex,
-        identifierLookup: [String: SdkViewNode]
+        identifierLookup: [String: SdkViewNode],
+        tieBreak: ToleranceTieBreak
     )
         -> SdkViewNode?
     {
         if let bounds = bounds {
             // 1. Exact className + bounds within ±tolerance (not classFamily).
             if let className = className {
-                if let near = index.nearest(bounds: bounds, accept: {
-                    $0.className == className && identifiersCompatible($0, resourceId)
+                if let near = index.nearest(bounds: bounds, className: className, tieBreak: tieBreak, accept: {
+                    identifiersCompatible($0, resourceId)
                 }) {
                     return near
                 }
             }
             // 2. Bounds-only fallback: different class names at the same position.
-            if let near = index.nearest(bounds: bounds, accept: { identifiersCompatible($0, resourceId) }) {
+            if let near = index.nearest(bounds: bounds, tieBreak: tieBreak, accept: {
+                identifiersCompatible($0, resourceId)
+            }) {
                 return near
             }
         }

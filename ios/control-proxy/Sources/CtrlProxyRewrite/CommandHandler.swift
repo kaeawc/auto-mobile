@@ -82,6 +82,7 @@ final class CommandHandler: CommandHandling {
     let hingeAngleSetter: any HingeAngleSetting
     let frameContext: FrameContext
     let rotationTimer: any ProxyTimer
+    let hierarchyPairRecorder: (any HierarchyPairRecording)?
 
     init(
         elementLocator: any ElementLocating,
@@ -97,7 +98,8 @@ final class CommandHandler: CommandHandling {
         voiceOverToggle: any VoiceOverToggling = DefaultVoiceOverToggle(),
         hingeAngleSetter: any HingeAngleSetting = DefaultHingeAngleSetter(),
         frameContext: FrameContext = FrameContext(),
-        rotationTimer: any ProxyTimer = SystemTimer()
+        rotationTimer: any ProxyTimer = SystemTimer(),
+        hierarchyPairRecorder: (any HierarchyPairRecording)? = nil
     ) {
         self.elementLocator = elementLocator
         self.gesturePerformer = gesturePerformer
@@ -113,6 +115,7 @@ final class CommandHandler: CommandHandling {
         self.hingeAngleSetter = hingeAngleSetter
         self.frameContext = frameContext
         self.rotationTimer = rotationTimer
+        self.hierarchyPairRecorder = hierarchyPairRecorder
     }
 
     /// Handle an incoming request and return a response.

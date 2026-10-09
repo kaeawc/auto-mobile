@@ -99,6 +99,9 @@ extension CommandHandler {
 
     func enrichWithMatchingSdkHierarchy(_ hierarchy: ViewHierarchy) async -> ViewHierarchy {
         let sdk = await matchingSdkHierarchy(for: hierarchy)
+        if let sdk {
+            hierarchyPairRecorder?.record(xcuitest: hierarchy, sdk: sdk)
+        }
         return HierarchyMerger.merge(xcuitest: hierarchy, sdk: sdk)
     }
 

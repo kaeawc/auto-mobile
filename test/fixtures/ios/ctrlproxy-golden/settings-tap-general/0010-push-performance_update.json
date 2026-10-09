@@ -1,0 +1,14 @@
+{
+  "push": {
+    "performanceData": {
+      "cpuUsagePercent": 40.1,
+      "fps": 60,
+      "frameTimeMs": 16.666666,
+      "jankFrames": 0,
+      "memoryUsageMb": 275.04688,
+      "timestamp": 1791506445466
+    },
+    "timestamp": 1791506445466,
+    "type": "performance_update"
+  }
+}

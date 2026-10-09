@@ -1,4 +1,5 @@
 import { iosWireDeadlineParams, type IOSDispatchResult } from "./CtrlProxyDispatch";
+import { withCtrlProxyRecordingFromEnv } from "./CtrlProxyExchangeRecorder";
 import type { CtrlProxyMagicTapResult, CtrlProxySdkTriggerResult } from "./types";
 import { requestSdkTrigger, type SdkTriggerRequest } from "./CtrlProxySdkTrigger";
 /**
@@ -916,7 +917,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   ) {
     super(
       options.timer ?? defaultTimer,
-      options.wsFactory ?? defaultWebSocketFactory,
+      withCtrlProxyRecordingFromEnv(options.wsFactory ?? defaultWebSocketFactory),
       { connectionResetMs: IOSCtrlProxyClient.CONNECTION_RESET_MS },
       options.retryExecutor ?? defaultRetryExecutor,
     );

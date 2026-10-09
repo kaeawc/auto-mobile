@@ -124,7 +124,8 @@ public final class CtrlProxy {
             sdkDatabaseClient: sdkDatabaseClient,
             sdkPreferenceClient: sdkPreferenceClient,
             hierarchyDebouncer: hierarchyDebouncer,
-            frameContext: frameContext
+            frameContext: frameContext,
+            hierarchyPairRecorder: HierarchyPairFileRecorder.fromEnvironment()
         )
         let fpsMonitor = DisplayLinkFPSMonitor()
         let coordinatorBox = WeakCoordinator()

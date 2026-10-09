@@ -65,7 +65,17 @@ export class NoopTerminalReleaseJournal implements TerminalReleaseJournal {
   resolve(): void {}
 }
 
-function parseIntent(line: string): TerminalReleaseIntent | undefined {
+/** A durable "fence lifted" marker: load drops the session's earlier intent (#11077). */
+interface LiftedMarker {
+  sessionId: string;
+  lifted: true;
+}
+
+type JournalLine =
+  | { kind: "intent"; intent: TerminalReleaseIntent }
+  | { kind: "lifted"; sessionId: string };
+
+function parseLine(line: string): JournalLine | undefined {
   let value: unknown;
   try {
     value = JSON.parse(line);
@@ -77,7 +87,10 @@ function parseIntent(line: string): TerminalReleaseIntent | undefined {
   if (typeof value !== "object" || value === null) {
     return undefined;
   }
-  const { sessionId, reason, at } = value as Record<string, unknown>;
+  const { sessionId, reason, at, lifted } = value as Record<string, unknown>;
+  if (lifted === true && typeof sessionId === "string" && sessionId.length > 0) {
+    return { kind: "lifted", sessionId };
+  }
   if (
     typeof sessionId !== "string" ||
     sessionId.length === 0 ||
@@ -88,7 +101,12 @@ function parseIntent(line: string): TerminalReleaseIntent | undefined {
   ) {
     return undefined;
   }
-  return { sessionId, reason, at };
+  return { kind: "intent", intent: { sessionId, reason, at } };
+}
+
+function serializeLifted(sessionId: string): string {
+  const marker: LiftedMarker = { sessionId, lifted: true };
+  return `${JSON.stringify(marker)}\n`;
 }
 
 function serialize(intent: TerminalReleaseIntent): string {
@@ -134,7 +152,20 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
       return;
     }
     intents.delete(sessionId);
-    this.compact(intents);
+    if (this.compact(intents)) {
+      return;
+    }
+    // Compaction failed (e.g. Windows EPERM): the stale intent would terminalize a live session
+    // on restart, so make the lift itself durable with an appended marker.
+    try {
+      this.fileSystem.appendDurable(this.filePath, serializeLifted(sessionId));
+    } catch (error) {
+      logger.warn(
+        `[TerminalReleaseJournal] Failed to record the lifted fence of session ${sessionId}: ` +
+          errorMessage(error),
+        error,
+      );
+    }
   }
 
   private ensureLoaded(): Map<string, TerminalReleaseIntent> {
@@ -162,9 +193,11 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
     const tornTail = lines.pop() ?? "";
     let discarded = tornTail.length > 0;
     for (const line of lines) {
-      const intent = parseIntent(line);
-      if (intent) {
-        intents.set(intent.sessionId, intent);
+      const parsed = parseLine(line);
+      if (parsed?.kind === "intent") {
+        intents.set(parsed.intent.sessionId, parsed.intent);
+      } else if (parsed?.kind === "lifted") {
+        intents.delete(parsed.sessionId);
       } else {
         discarded = true;
       }
@@ -181,7 +214,8 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
     return intents;
   }
 
-  private compact(intents: Map<string, TerminalReleaseIntent>): void {
+  /** Returns whether the file now reflects `intents`. */
+  private compact(intents: Map<string, TerminalReleaseIntent>): boolean {
     try {
       if (intents.size === 0) {
         this.fileSystem.remove(this.filePath);
@@ -191,12 +225,42 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
           Array.from(intents.values(), serialize).join(""),
         );
       }
+      return true;
     } catch (error) {
       // A stale intent is harmless: startup drops it once it sees the row is already terminal.
       logger.warn(
         `[TerminalReleaseJournal] Failed to compact ${this.filePath}: ${errorMessage(error)}`,
         error,
       );
+      return false;
+    }
+  }
+}
+
+const RENAME_ATTEMPTS = 4;
+const RENAME_RETRY_DELAY_MS = 25;
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Rename, retrying transient EPERM/EACCES a few times (Windows AV/indexer holds). */
+export function renameWithRetry(
+  rename: (from: string, to: string) => void,
+  sleep: (ms: number) => void,
+  from: string,
+  to: string,
+): void {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if ((code !== "EPERM" && code !== "EACCES") || attempt >= RENAME_ATTEMPTS) {
+        throw error;
+      }
+      sleep(RENAME_RETRY_DELAY_MS * attempt);
     }
   }
 }
@@ -243,8 +307,8 @@ export const nodeTerminalReleaseJournalFileSystem: TerminalReleaseJournalFileSys
     }
     try {
       // libuv renames with MOVEFILE_REPLACE_EXISTING on Windows, so this replaces in place there
-      // too; it fails only while another process holds the target open.
-      fs.renameSync(temporaryPath, filePath);
+      // too; it fails only while another process (AV, indexer) briefly holds the target open.
+      renameWithRetry(fs.renameSync, sleepSync, temporaryPath, filePath);
     } catch (error) {
       fs.rmSync(temporaryPath, { force: true });
       throw error;

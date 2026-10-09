@@ -35,9 +35,9 @@ function defaultFinalizeCapMs(deviceId: string): number {
 /** The recording operations session cleanup needs, injectable so tests need no device or DB. */
 export interface RecordingSessionCleanupDeps {
   /** Synchronous pre-check: false means the release has no recording work and stays a no-op. */
-  hasRecordingsToStop(sessionId: string, deviceId: string): boolean;
+  hasRecordingsToStop(sessionId: string | undefined, deviceId: string): boolean;
   /** Finalize timer-driven segmented sessions the session owns on the device. */
-  stopSegmentedRecordings(sessionId: string, deviceId: string): Promise<void>;
+  stopSegmentedRecordings(sessionId: string | undefined, deviceId: string): Promise<void>;
   /** Active single-file video recordings on the device with their owning session. */
   listActiveVideoRecordings(deviceId: string): Promise<
     Array<{
@@ -46,7 +46,7 @@ export interface RecordingSessionCleanupDeps {
     }>
   >;
   stopVideoRecording(recordingId: string): Promise<void>;
-  isTestRecordingOwnedBy(sessionId: string, deviceId: string): boolean;
+  isTestRecordingOwnedBy(sessionId: string | undefined, deviceId: string): boolean;
   stopTestRecording(): Promise<void>;
   /** Deadline clock for the finalize cap; a FakeTimer in tests. */
   timer: Pick<Timer, "setTimeout" | "clearTimeout">;
@@ -89,19 +89,21 @@ async function attempt(description: string, work: () => Promise<void>): Promise<
   }
 }
 
+/** `sessionId` undefined selects the owner-less recordings on the device (#10961). */
 async function stopOwnedRecordings(
   deps: RecordingSessionCleanupDeps,
-  sessionId: string,
+  sessionId: string | undefined,
   deviceId: string,
   stopping: Set<string>,
 ): Promise<void> {
   // Segmented sessions first: stopping one of their segments directly would leave the rotation
   // timer running to start the next.
-  await attempt(`finalize segmented recordings of released session ${sessionId}`, () =>
-    deps.stopSegmentedRecordings(sessionId, deviceId),
+  await attempt(
+    `finalize segmented recordings of released session ${sessionId ?? "(owner-less)"}`,
+    () => deps.stopSegmentedRecordings(sessionId, deviceId),
   );
   await attempt(
-    `stop video recordings of released session ${sessionId} on ${deviceId}`,
+    `stop video recordings of released session ${sessionId ?? "(owner-less)"} on ${deviceId}`,
     async () => {
       const active = await deps.listActiveVideoRecordings(deviceId);
       for (const { recordingId, ownerSessionUuid } of active) {
@@ -110,14 +112,14 @@ async function stopOwnedRecordings(
         }
         stopping.add(recordingId);
         await attempt(
-          `stop video recording ${recordingId} of released session ${sessionId}`,
+          `stop video recording ${recordingId} of released session ${sessionId ?? "(owner-less)"}`,
           async () => {
             await deps.stopVideoRecording(recordingId);
             stopping.delete(recordingId);
             // The finalized file stays in the recording store, readable by its owner via
             // owner-scoped video recording lookups.
             logger.info(
-              `[recording] Stopped recording ${recordingId} on ${deviceId}: owning session ${sessionId} was released`,
+              `[recording] Stopped recording ${recordingId} on ${deviceId}: owning session ${sessionId ?? "(owner-less)"} was released`,
             );
           },
         );
@@ -126,12 +128,12 @@ async function stopOwnedRecordings(
   );
   if (deps.isTestRecordingOwnedBy(sessionId, deviceId)) {
     await attempt(
-      `stop test recording of released session ${sessionId} on ${deviceId}`,
+      `stop test recording of released session ${sessionId ?? "(owner-less)"} on ${deviceId}`,
       async () => {
         await deps.stopTestRecording();
         // The plan is retained by recording id for the owning session (#10958).
         logger.info(
-          `[recording] Test recording on ${deviceId} stopped: owning session ${sessionId} was released; its plan stays fetchable by the owner`,
+          `[recording] Test recording on ${deviceId} stopped: owning session ${sessionId ?? "(owner-less)"} was released; its plan stays fetchable by the owner`,
         );
       },
     );
@@ -144,7 +146,7 @@ async function stopOwnedRecordings(
  */
 async function stopOwnedRecordingsWithinCap(
   deps: RecordingSessionCleanupDeps,
-  sessionId: string,
+  sessionId: string | undefined,
   deviceId: string,
 ): Promise<void> {
   const stopping = new Set<string>();
@@ -153,7 +155,7 @@ async function stopOwnedRecordingsWithinCap(
     await raceWithDeadline(stopOwnedRecordings(deps, sessionId, deviceId, stopping), {
       timer: deps.timer,
       timeoutMs: capMs,
-      label: `finalize recordings of released session ${sessionId}`,
+      label: `finalize recordings of released session ${sessionId ?? "(owner-less)"}`,
       timeoutError: () => new FinalizeCapExceeded(),
     });
   } catch (error) {
@@ -161,7 +163,7 @@ async function stopOwnedRecordingsWithinCap(
       throw error;
     }
     logger.warn(
-      `[recording] Finalizing recordings of released session ${sessionId} on ${deviceId} exceeded ${capMs}ms; ` +
+      `[recording] Finalizing recordings of released session ${sessionId ?? "(owner-less)"} on ${deviceId} exceeded ${capMs}ms; ` +
         `force-stopping ${[...stopping].join(", ") || "none"} and marking incomplete`,
     );
     await Promise.all(
@@ -176,6 +178,27 @@ async function stopOwnedRecordingsWithinCap(
       ),
     );
   }
+}
+
+/**
+ * A session acquiring a device stops and finalizes the owner-less (sessionless) recordings on it
+ * (#10961), so they cannot keep capturing the new owner's session or block its own recording
+ * start. Returns the callback to run where acquisition cancels sessionless executions
+ * (#10829); the stop is pending device cleanup, capped as in {@link RECORDING_FINALIZE_CAP_MS}.
+ */
+export function createOwnerlessRecordingAcquisitionCleanup(
+  manager: Pick<SessionManager, "registerPendingDeviceCleanup">,
+  deps: RecordingSessionCleanupDeps = defaultRecordingSessionCleanupDeps,
+): (deviceId: string) => void {
+  return (deviceId) => {
+    if (!deps.hasRecordingsToStop(undefined, deviceId)) {
+      return;
+    }
+    manager.registerPendingDeviceCleanup(
+      deviceId,
+      stopOwnedRecordingsWithinCap(deps, undefined, deviceId),
+    );
+  };
 }
 
 /**

@@ -158,7 +158,7 @@ const segmentedSessions = (() => {
     },
     /** Tracked sessions a daemon session owns on a device (used when that session is released). */
     forOwner(
-      sessionUuid: string,
+      sessionUuid: string | undefined,
       deviceId: string,
     ): Array<[string, AndroidSegmentedPlanVideoSession]> {
       return [...byHandle.entries()].filter(([, session]) =>
@@ -262,7 +262,7 @@ export async function stopSegmentedVideoRecordingsForDevice(
 
 /** Whether a daemon session owns a timer-driven segmented recording on the device. */
 export function hasSegmentedVideoRecordingsForOwner(
-  sessionUuid: string,
+  sessionUuid: string | undefined,
   deviceId: string,
 ): boolean {
   return segmentedSessions.forOwner(sessionUuid, deviceId).length > 0;
@@ -274,7 +274,7 @@ export function hasSegmentedVideoRecordingsForOwner(
  * not be blocked by a recording that cannot be stopped.
  */
 export async function stopSegmentedVideoRecordingsForOwner(
-  sessionUuid: string,
+  sessionUuid: string | undefined,
   deviceId: string,
 ): Promise<void> {
   for (const [handle, session] of segmentedSessions.forOwner(sessionUuid, deviceId)) {

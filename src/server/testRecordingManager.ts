@@ -123,10 +123,15 @@ export function getTestRecordingStatus(timer: Timer = defaultTimer): TestRecordi
   };
 }
 
-/** Whether the daemon session `sessionUuid` owns the live test recording on `deviceId`. */
-export function isTestRecordingOwnedBy(sessionUuid: string, deviceId: string): boolean {
+/**
+ * Whether the daemon session `sessionUuid` owns the live test recording on `deviceId`;
+ * `undefined` asks about an owner-less (sessionless) one.
+ */
+export function isTestRecordingOwnedBy(sessionUuid: string | undefined, deviceId: string): boolean {
   const session = activeRecording ?? startingRecording?.session ?? null;
-  return session?.ownerSessionUuid === sessionUuid && session.deviceId === deviceId;
+  return (
+    session !== null && session.ownerSessionUuid === sessionUuid && session.deviceId === deviceId
+  );
 }
 
 const buildPlanFromSteps = (

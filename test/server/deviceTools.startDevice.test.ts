@@ -1,4 +1,5 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterAll, describe, expect, beforeEach, afterEach } from "bun:test";
@@ -3575,5 +3576,31 @@ describe("startDevice handler", () => {
     expect(session!.platform).toBe("ios");
     expect(pool.getDevice(iosDevice.deviceId)?.sessionId).toBe(result.runtime.session.sessionUuid);
     expect(pool.getDevice(iosDevice.deviceId)?.status).toBe("busy");
+  });
+
+  // #11071: an anonymous repeat reuses only a session an anonymous acquisition created.
+  it("refuses an anonymous repeat of a startDevice a connection made, typed", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
+    );
+    await pool.initializeWithDevices([iosDevice]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("ios", [iosDevice]);
+    fakeMatcher.setBootedResult(iosDevice);
+
+    const owner = await callStartDevice({ platform: "ios", __mcpSessionId: "owner-connection" });
+    const refusal = await callStartDevice({ platform: "ios" }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(refusal).toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
+    expect(pool.getDevice(iosDevice.deviceId)?.sessionId).toBe(owner.runtime.session.sessionUuid);
   });
 });

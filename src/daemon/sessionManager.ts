@@ -394,6 +394,18 @@ export interface Session {
   clientName?: string;
 }
 
+/**
+ * `device_sessions.source` of a session an acquisition without an MCP connection id (a `--cli`
+ * startDevice/getAndroid/getApple) created. Only such a session may be reused by another anonymous
+ * acquisition of its device (#2421, #11071); it is persisted, so a daemon restart keeps the rule.
+ */
+export const ANONYMOUS_ACQUISITION_SESSION_SOURCE = "anonymous-acquisition";
+
+/** Whether an anonymous acquisition (no MCP connection id) created this session (#11071). */
+export function isAnonymousAcquisitionSession(session: Session): boolean {
+  return session.persistenceMetadata?.source === ANONYMOUS_ACQUISITION_SESSION_SOURCE;
+}
+
 interface SessionPersistenceMetadata {
   source: string | null;
   autolockEnabled: boolean;
@@ -2087,6 +2099,8 @@ export class SessionManager {
     stableDeviceId?: string,
     recoveredLiveness?: SessionRecoveryLiveness,
     initialOwnership: "owned" | "awaiting-owner" = "owned",
+    /** Persisted `source` recording who created the session; a rehydrated row's own wins. */
+    persistenceSource?: string,
   ): Promise<Session> {
     getAbortSignal()?.throwIfAborted();
     if (!this.acceptingSessionCreations) {
@@ -2139,6 +2153,16 @@ export class SessionManager {
       lastHeartbeat: now,
       ...liveness,
       ownership: initialOwnership,
+      ...(persistenceSource
+        ? {
+            persistenceMetadata: {
+              source: persistenceSource,
+              autolockEnabled: false,
+              mcpSessionId: null,
+              daemonSessionId: null,
+            },
+          }
+        : {}),
       ...this.recoverySessionFields(persistedRecovery),
       ...(initialOwnership === "awaiting-owner"
         ? { awaitingOwnerSince: now, hasReceivedHeartbeat: false }

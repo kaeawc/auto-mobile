@@ -35,6 +35,8 @@ import { truncateBodyText } from "../utils/truncateBodyText";
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import { getObserveCacheStore } from "../features/observe/cache/ObserveCacheRegistry";
 import {
+  ANONYMOUS_ACQUISITION_SESSION_SOURCE,
+  isAnonymousAcquisitionSession,
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   SessionManager,
@@ -907,6 +909,24 @@ interface StopDiscoveredEmulatorOptions {
   handoffOwner: symbol;
   preservedSessionId: string | undefined;
   preservedSession: Session | undefined;
+}
+
+/**
+ * The persisted creator kind of a session a pool bind creates (#11071): an acquisition (not a
+ * caller-chosen session rebind or a recovery) with no MCP connection id is anonymous, and only
+ * another anonymous acquisition may reuse it, keeping repeated `--cli` startDevice idempotent
+ * (#2421).
+ */
+function creatorPersistenceSource(
+  mcpSessionId: string | undefined,
+  allowSessionRebind: boolean,
+  expectedExistingSessionDeviceId: string | undefined,
+): string | undefined {
+  return mcpSessionId === undefined &&
+    !allowSessionRebind &&
+    expectedExistingSessionDeviceId === undefined
+    ? ANONYMOUS_ACQUISITION_SESSION_SOURCE
+    : undefined;
 }
 
 export class DevicePool {
@@ -7162,7 +7182,8 @@ export class DevicePool {
             );
             return this.reuseExistingDeviceSession(
               deviceId,
-              existingSession.sessionId,
+              existingSession,
+              sessionId,
               sourceImage,
               confirmedSameOwner,
             );
@@ -7202,7 +7223,14 @@ export class DevicePool {
             deviceId,
             platform,
             allowSessionRebind,
-            this.stableDeviceIdFor(device),
+            {
+              stableDeviceId: this.stableDeviceIdFor(device),
+              persistenceSource: creatorPersistenceSource(
+                mcpSessionId,
+                allowSessionRebind,
+                expectedExistingSessionDeviceId,
+              ),
+            },
           ),
         );
         this.recordMcpSessionOwnership(mcpSessionId, sessionId);
@@ -7427,8 +7455,9 @@ export class DevicePool {
     deviceId: string,
     platform: Platform,
     allowSessionRebind: boolean,
-    stableDeviceId: string | undefined,
+    creation: { stableDeviceId: string | undefined; persistenceSource: string | undefined },
   ): () => Promise<Session> {
+    const { stableDeviceId, persistenceSource } = creation;
     const previousDeviceId = previousSession?.assignedDevice;
     if (!previousDeviceId || previousDeviceId === deviceId) {
       return async () => {
@@ -7439,6 +7468,9 @@ export class DevicePool {
           undefined,
           undefined,
           stableDeviceId,
+          undefined,
+          undefined,
+          persistenceSource,
         );
         if (previousSession && platform === "android") {
           this.sessionManager.invalidateAutomationReadiness(
@@ -7519,15 +7551,28 @@ export class DevicePool {
 
   private async reuseExistingDeviceSession(
     deviceId: string,
-    existingSessionId: string,
+    existingSession: Session,
+    requestedSessionId: string,
     sourceImage?: DeviceInfo,
     confirmedSameOwner = false,
   ): Promise<string> {
+    const existingSessionId = existingSession.sessionId;
     if (sourceImage && !confirmedSameOwner) {
       throw new ActionableError(
         `Freshly started device '${deviceId}' was assigned to session ` +
           `${existingSessionId} before its owning session could reserve it.`,
       );
+    }
+    // A caller that proved it owns the holder (its MCP connection acquired it) may reuse another
+    // session, and so may an anonymous caller when an anonymous acquisition created that session,
+    // which keeps repeated `--cli` startDevice idempotent (#2421). Any other anonymous caller is
+    // refused rather than handed the holder's UUID (#11071).
+    if (
+      !confirmedSameOwner &&
+      existingSessionId !== requestedSessionId &&
+      !isAnonymousAcquisitionSession(existingSession)
+    ) {
+      throw deviceAssignedToOtherSessionError(deviceId, existingSessionId, requestedSessionId);
     }
     const refreshedSession = await this.sessionManager.getOrCreateSession(existingSessionId);
     logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);

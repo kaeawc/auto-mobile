@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.daemon.SessionReleaseReason
 
 /**
  * Shown while the picked device is held by another session, so this pane only views it (#10660).
@@ -30,19 +31,35 @@ fun DeviceViewingNotice(onTakeControl: () -> Unit, modifier: Modifier = Modifier
 }
 
 /**
- * Shown while the daemon has released the picked device from this desktop for inactivity (2 min
- * with no tool call or input). The pane still mirrors it and stays controllable: the first input on
- * it, or [onTakeControl], binds it again. Nothing re-binds it on its own.
+ * Shown while the session no longer holds the picked device although the user did not leave it
+ * (#10695, #10730). The pane still mirrors it and stays controllable: the first input on it, or
+ * [onTakeControl], binds it again. Nothing re-binds it on its own. The text says why it was
+ * released ([releasedNoticeText]).
  */
 @Composable
-fun DeviceIdleReleasedNotice(onTakeControl: () -> Unit, modifier: Modifier = Modifier) {
+fun DeviceIdleReleasedNotice(
+  reason: SessionReleaseReason?,
+  onTakeControl: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
   PaneSessionNotice(
-    text = "Released after inactivity: interact with the device to control it again",
+    text = releasedNoticeText(reason),
     actionLabel = "Take control",
     onAction = onTakeControl,
     modifier = modifier,
   )
 }
+
+/** The pane notice for a released device, specific to [reason]. */
+internal fun releasedNoticeText(reason: SessionReleaseReason?): String =
+  when (reason) {
+    SessionReleaseReason.HIDDEN_WINDOW ->
+      "Released while the window was hidden: interact with the device to control it again"
+    SessionReleaseReason.DAEMON_RELEASED,
+    null ->
+      "Released by the daemon (idle for 2 minutes, restarted or expired): " +
+        "interact with the device to control it again"
+  }
 
 /**
  * Shown when binding the picked device failed for a reason other than another session holding it

@@ -108,6 +108,7 @@ class DesktopDaemonSessionCompositionTest {
       assertEquals(40, transport.sessionsFor("daemon/heartbeat").count { it == "session-2" })
       assertEquals(null, host.state().boundDeviceId)
       assertEquals("emulator-5554", host.state().idleReleasedDeviceId)
+      assertEquals(SessionReleaseReason.DAEMON_RELEASED, host.state().releaseReason)
       assertEquals("session-2", host.state().sessionUuidProvider())
       assertEquals(true, host.state().isRegistered)
 
@@ -133,6 +134,7 @@ class DesktopDaemonSessionCompositionTest {
 
     assertEquals(listOf("emulator-5554"), transport.boundDevices())
     assertEquals("emulator-5554", host.state().idleReleasedDeviceId)
+    assertEquals(SessionReleaseReason.DAEMON_RELEASED, host.state().releaseReason)
     assertEquals(5, transport.sessionsFor("daemon/heartbeat").count { it == "session-2" })
   }
 
@@ -599,6 +601,7 @@ class DesktopDaemonSessionCompositionTest {
       assertEquals(listOf("emulator-5554"), transport.boundDevices())
       assertEquals(null, host.state().boundDeviceId)
       assertEquals("emulator-5554", host.state().idleReleasedDeviceId)
+      assertEquals(SessionReleaseReason.HIDDEN_WINDOW, host.state().releaseReason)
       assertEquals("session-2", host.state().sessionUuidProvider())
 
       // Showing the window again binds nothing on its own.
@@ -613,6 +616,7 @@ class DesktopDaemonSessionCompositionTest {
       assertEquals(listOf("emulator-5554", "emulator-5554"), transport.boundDevices())
       assertEquals("emulator-5554", host.state().boundDeviceId)
       assertEquals(null, host.state().idleReleasedDeviceId)
+      assertEquals(null, host.state().releaseReason)
       assertEquals(1, transport.count("daemon/releaseSession"))
     }
 

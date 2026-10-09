@@ -695,6 +695,7 @@ fun AutoMobileDesktopApp(
                         )
                       } else if (idleReleased) {
                         DeviceIdleReleasedNotice(
+                          reason = desktopSessionState.releaseReason,
                           onTakeControl = takeControl,
                           modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
                         )

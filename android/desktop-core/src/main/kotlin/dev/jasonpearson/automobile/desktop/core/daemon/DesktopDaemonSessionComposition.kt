@@ -89,6 +89,18 @@ fun interface DesktopInputAllocation {
   }
 }
 
+/**
+ * Why the session stopped holding a device the user was not leaving (#10695, #10730). The daemon's
+ * answer to a heartbeat is identical for an idle release, a daemon restart and an expired session
+ * (the session is not found), so those share [DAEMON_RELEASED].
+ */
+enum class SessionReleaseReason {
+  /** The host stayed hidden past [HIDDEN_RELEASE_GRACE_MS], so this desktop released it. */
+  HIDDEN_WINDOW,
+  /** The daemon no longer had the session's hold: idle release, restart or expiry. */
+  DAEMON_RELEASED,
+}
+
 data class DesktopDaemonSessionState(
   val session: DesktopDaemonSession?,
   /** The device the session holds: the one the user last sent input to, while its pane shows. */
@@ -117,6 +129,8 @@ data class DesktopDaemonSessionState(
    * the session never re-acquires it on its own; the next input allocates it again.
    */
   val idleReleasedDeviceId: String? = null,
+  /** Why [idleReleasedDeviceId] was released, for the pane's notice (#10730). */
+  val releaseReason: SessionReleaseReason? = null,
   /**
    * Starts (or joins) allocating a device for input without blocking. The result completes true
    * once the session holds the device, false when the input must be dropped. Safe from any thread.
@@ -235,6 +249,7 @@ fun rememberDesktopDaemonSession(
   var inputDeviceId by remember(socketPath) { mutableStateOf<String?>(null) }
   var heldElsewhereDeviceId by remember(socketPath) { mutableStateOf<String?>(null) }
   var idleReleasedDeviceId by remember(socketPath) { mutableStateOf<String?>(null) }
+  var releaseReason by remember(socketPath) { mutableStateOf<SessionReleaseReason?>(null) }
   // A bind error that forced a rotation (to drop a hold on another device) is carried so the fresh
   // session shows it instead of re-running the bounded retries.
   var carriedBindError by remember(socketPath) { mutableStateOf<Pair<String, String>?>(null) }
@@ -262,6 +277,7 @@ fun rememberDesktopDaemonSession(
       inputDeviceId?.let { device ->
         LOG.info("Desktop host hidden; releasing $device until it is used again")
         idleReleasedDeviceId = device
+        releaseReason = SessionReleaseReason.HIDDEN_WINDOW
         inputDeviceId = null
       }
     }
@@ -289,7 +305,10 @@ fun rememberDesktopDaemonSession(
           bindErrorDeviceId == deviceId -> CompletableDeferred(false)
           else ->
             gates.join(deviceId).also {
-              if (idleReleasedDeviceId != null) idleReleasedDeviceId = null
+              if (idleReleasedDeviceId != null) {
+                idleReleasedDeviceId = null
+                releaseReason = null
+              }
               if (inputDeviceId != deviceId) inputDeviceId = deviceId
             }
         }
@@ -312,6 +331,7 @@ fun rememberDesktopDaemonSession(
         if (currentPanes.any { it.deviceId == deviceId }) {
           if (heldElsewhereDeviceId == deviceId) heldElsewhereDeviceId = null
           idleReleasedDeviceId = null
+          releaseReason = null
           carriedBindError = null
           inputDeviceId = deviceId
           controlRequests++
@@ -551,6 +571,7 @@ fun rememberDesktopDaemonSession(
         )
         heldDevice.set(null)
         idleReleasedDeviceId = target.deviceId
+        releaseReason = SessionReleaseReason.DAEMON_RELEASED
         inputDeviceId = null
         pendingRecoveryRefresh.set(true)
         sessionEpoch++
@@ -576,6 +597,7 @@ fun rememberDesktopDaemonSession(
     bindErrorMessage = bindErrorMessage,
     bindErrorDeviceId = bindErrorDeviceId,
     idleReleasedDeviceId = idleReleasedDeviceId,
+    releaseReason = releaseReason,
     requestInput = requestInput,
     inputAllocation = inputAllocation,
     reportHeldElsewhere = reportHeldElsewhere,

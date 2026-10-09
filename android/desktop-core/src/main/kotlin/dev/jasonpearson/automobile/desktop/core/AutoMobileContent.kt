@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,9 +22,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -159,7 +156,6 @@ import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import dev.jasonpearson.automobile.desktop.core.telemetry.matchesSearch
 import dev.jasonpearson.automobile.desktop.core.test.TestDashboard
 import dev.jasonpearson.automobile.desktop.core.theme.AppIcons
-import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import dev.jasonpearson.automobile.desktop.core.timeline.TimelineCanvas
 import dev.jasonpearson.automobile.desktop.core.timeline.TimelineCategory
@@ -2099,6 +2095,7 @@ fun AutoMobileContent(
                 noticeDeviceId != null && desktopSessionState.idleReleasedDeviceId == noticeDeviceId
               ) {
                 DeviceIdleReleasedNotice(
+                  reason = desktopSessionState.releaseReason,
                   onTakeControl = { desktopSessionState.requestControl(noticeDeviceId) },
                 )
               }
@@ -2419,268 +2416,6 @@ private fun MainContentViewToggle(
           color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
         )
       }
-    }
-  }
-}
-
-@Composable
-private fun GlobalShellHeader(
-  devices: List<BootedDevice>,
-  activeDeviceId: String?,
-  onDeviceSelected: (String) -> Unit,
-  isDevicePanelExpanded: Boolean = false,
-  availableEmulators: List<AvailableEmulator> = emptyList(),
-  systemImages: List<SystemImage> = emptyList(),
-  onBootEmulator: (String) -> Unit = {},
-  onCreateEmulator: (String) -> Unit = {},
-  onCollapsePanel: () -> Unit = {},
-  needsSetup: Boolean = false,
-  onSetupClick: () -> Unit = {},
-  dataSourceMode: DataSourceMode = DataSourceMode.Fake,
-  onDataSourceModeChanged: (DataSourceMode) -> Unit = {},
-  onMcpDeviceSelected: (deviceId: String, deviceName: String?) -> Unit = { _, _ -> },
-  onProcessConnected: (McpProcess?) -> Unit = {},
-  suppressAutoSelect: Boolean = false,
-  // App selector props (kept for backwards compatibility, but FG toggle is preferred)
-  installedApps: List<InstalledApp> = emptyList(),
-  selectedAppId: String? = null,
-  isAppListLoading: Boolean = false,
-  appDropdownExpanded: Boolean = false,
-  onAppDropdownExpandedChange: (Boolean) -> Unit = {},
-  onAppSelected: (String?) -> Unit = {},
-  onSettingsClicked: () -> Unit = {},
-) {
-  val colors = SharedTheme.globalColors
-
-  Column(modifier = Modifier.fillMaxWidth().background(SharedTheme.globalColors.panelBackground)) {
-    FlowRow(
-      modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-      // Left side: Device selection
-      if (dataSourceMode == DataSourceMode.Fake) {
-        Row(
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Text(
-            "Devices:",
-            fontSize = 11.sp,
-            maxLines = 1,
-            softWrap = false,
-            color = colors.text.normal.copy(alpha = 0.5f),
-          )
-
-          // Device icons
-          Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            devices.forEach { device ->
-              DeviceIcon(
-                device = device,
-                isActive = device.id == activeDeviceId,
-                onClick = { onDeviceSelected(device.id) },
-              )
-            }
-          }
-        }
-      } else {
-        // Real mode: show MCP server indicator or empty space
-        Row(
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          // Show "Devices:" when a device is selected, "MCP Servers" otherwise
-          if (activeDeviceId != null) {
-            Text(
-              "Devices:",
-              fontSize = 11.sp,
-              maxLines = 1,
-              softWrap = false,
-              color = Color(0xFF2196F3),
-              modifier =
-                Modifier.clickable {
-                    // Clicking "Devices:" expands the device panel
-                    // We need to deselect the device and expand the panel
-                    onDeviceSelected("")
-                  }
-                  .pointerHoverIcon(PointerIcon.Hand),
-            )
-
-            // Show device buttons next to "Devices:" using emojis with tooltips
-            devices.forEach { device ->
-              val isActive = device.id == activeDeviceId
-              val deviceIsIos =
-                device.type == DeviceType.iOSSimulator || device.type == DeviceType.iOSPhysical
-              Tooltip(
-                tooltip = {
-                  Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(device.name, fontSize = 12.sp)
-                    Text(
-                      "Status: ${device.status}",
-                      fontSize = 10.sp,
-                      color = colors.text.normal.copy(alpha = 0.6f),
-                    )
-                    device.foregroundApp?.let { app ->
-                      Text(
-                        "App: $app",
-                        fontSize = 10.sp,
-                        color = colors.text.normal.copy(alpha = 0.6f),
-                      )
-                    }
-                  }
-                },
-              ) {
-                Box(
-                  modifier =
-                    Modifier.background(
-                        if (isActive) Color(0xFF2196F3).copy(alpha = 0.15f)
-                        else colors.text.normal.copy(alpha = 0.08f),
-                        RoundedCornerShape(4.dp),
-                      )
-                      .clickable {
-                        if (device.id == activeDeviceId) {
-                          // Tapping active device expands panel to show more devices
-                          onDeviceSelected("")
-                        } else {
-                          onDeviceSelected(device.id)
-                        }
-                      }
-                      .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(horizontal = 8.dp, vertical = 4.dp),
-                ) {
-                  Icon(
-                    imageVector = PlatformIcons.logo(deviceIsIos),
-                    contentDescription = PlatformIcons.contentDescription(deviceIsIos),
-                    tint = PlatformIcons.tint(deviceIsIos),
-                    modifier = Modifier.size(16.dp),
-                  )
-                }
-              }
-            }
-          } else {
-            Text(
-              "🔌",
-              fontSize = 14.sp,
-            )
-            Text(
-              "MCP Servers",
-              fontSize = 11.sp,
-              maxLines = 1,
-              softWrap = false,
-              color = colors.text.normal.copy(alpha = 0.7f),
-            )
-          }
-        }
-      }
-
-      // Right side: Setup button (conditional), Real Data toggle, Live toggle
-      Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        // Setup AutoMobile button (shown when service not detected)
-        if (needsSetup) {
-          Box(
-            modifier =
-              Modifier.background(
-                  Color(0xFF2196F3).copy(alpha = 0.15f),
-                  RoundedCornerShape(4.dp),
-                )
-                .clickable(onClick = onSetupClick)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-          ) {
-            Text(
-              "Setup",
-              fontSize = 10.sp,
-              maxLines = 1,
-              softWrap = false,
-              color = Color(0xFF64B5F6),
-            )
-          }
-        }
-
-        // Real Data switch
-        RealDataSwitch(
-          isRealData = dataSourceMode == DataSourceMode.Real,
-          onToggle = { isReal ->
-            onDataSourceModeChanged(if (isReal) DataSourceMode.Real else DataSourceMode.Fake)
-          },
-        )
-
-        // Settings gear
-        Text(
-          "⚙",
-          fontSize = 16.sp,
-          modifier =
-            Modifier.clickable { onSettingsClicked() }
-              .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 8.dp, vertical = 4.dp),
-        )
-      }
-    }
-
-    // Device management panel (expanded when no active device selected)
-    if (isDevicePanelExpanded) {
-      if (dataSourceMode == DataSourceMode.Real) {
-        McpProcessesPanel(
-          useRealData = true,
-          onDeviceSelected = onMcpDeviceSelected,
-          onProcessConnected = onProcessConnected,
-          suppressAutoSelect = suppressAutoSelect,
-        )
-      } else {
-        McpProcessesPanel(
-          useRealData = false,
-          onDeviceSelected = onMcpDeviceSelected,
-          onProcessConnected = onProcessConnected,
-          suppressAutoSelect = suppressAutoSelect,
-        )
-      }
-    }
-  }
-}
-
-@Composable
-private fun RealDataSwitch(
-  isRealData: Boolean,
-  onToggle: (Boolean) -> Unit,
-) {
-  val colors = SharedTheme.globalColors
-  val trackColor = if (isRealData) Color(0xFF4CAF50) else colors.text.normal.copy(alpha = 0.3f)
-  val thumbColor = Color.White
-
-  Row(
-    horizontalArrangement = Arrangement.spacedBy(6.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    Text(
-      "Real Data",
-      fontSize = 11.sp,
-      maxLines = 1,
-      softWrap = false,
-      color = if (isRealData) colors.text.normal else colors.text.normal.copy(alpha = 0.5f),
-    )
-    Box(
-      modifier =
-        Modifier.width(32.dp)
-          .height(18.dp)
-          .clip(RoundedCornerShape(9.dp))
-          .background(trackColor)
-          .clickable { onToggle(!isRealData) }
-          .pointerHoverIcon(PointerIcon.Hand)
-          .padding(2.dp),
-    ) {
-      Box(
-        modifier =
-          Modifier.size(14.dp)
-            .offset(x = if (isRealData) 14.dp else 0.dp)
-            .clip(CircleShape)
-            .background(thumbColor),
-      )
     }
   }
 }

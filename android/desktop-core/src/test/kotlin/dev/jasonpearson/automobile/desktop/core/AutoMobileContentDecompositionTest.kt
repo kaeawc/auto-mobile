@@ -27,8 +27,6 @@ class AutoMobileContentDecompositionTest {
             "fun DeviceSectionHeader",
             "fun DeviceListItem",
           ),
-        "McpProcessesPanel.kt" to
-          listOf("fun McpProcessesPanel", "fun ProcessSection", "fun McpProcessItem"),
         "DevicesSection.kt" to
           listOf("fun DevicesSection", "fun DeviceImagesGrouped", "fun BootedDeviceRow"),
         "shell/LeftSidebarPanel.kt" to listOf("fun LeftSidebarPanel"),

@@ -365,6 +365,15 @@ internal object AutoMobilePlanExecutor {
     // device (#10834) so no other session can take the device between the attempt and recovery.
     // Every path that does not go on to recovery releases the held session itself.
     val holdForRecovery = recoveryMayFollow(options, recoveryAlreadyAttempted)
+    // A resumed run takes over the session the daemon held for recovery. Until this run's
+    // executePlan reaches the daemon, whose plan lifecycle then releases it, the runner still owns
+    // that session: it releases it before switching to a fresh one or giving up, or the held
+    // session blocks the device until its lease lapses (#11139).
+    var takenOverSession: String? = sessionUuidOverride.takeIf { !holdForRecovery }
+    val releaseTakenOverSession = {
+      takenOverSession?.let { releaseHeldSession(it) }
+      takenOverSession = null
+    }
 
     var response: DaemonResponse
     var outputPayload: String
@@ -438,6 +447,7 @@ internal object AutoMobilePlanExecutor {
           )
         }
 
+        takenOverSession = null
         DaemonHeartbeat.registerSession(sessionUuid)
         response =
           try {
@@ -487,6 +497,7 @@ internal object AutoMobilePlanExecutor {
             "(wait ${deviceOwnedWaits + 1}): $errorMessage",
         )
         if (holdForRecovery) releaseHeldSession(sessionUuid)
+        releaseTakenOverSession()
         deviceOwnedSleeper(delayMs)
         deviceOwnedWaits++
         deviceOwnedWaitMs += delayMs
@@ -504,6 +515,7 @@ internal object AutoMobilePlanExecutor {
 
       // The retry is a fresh session; the held one would otherwise keep the device from it.
       if (holdForRecovery) releaseHeldSession(sessionUuid)
+      releaseTakenOverSession()
       println("Retrying plan execution after transient error (attempt $attempt): $errorMessage")
       Thread.sleep(retryBackoffMs)
     }
@@ -520,6 +532,7 @@ internal object AutoMobilePlanExecutor {
       )
     }
 
+    releaseTakenOverSession()
     // Non-transient failure or retries exhausted — attempt recovery if allowed
     val failedStepContext =
       buildFailedStepContext(response, json, planContent, options.device, secretValues)

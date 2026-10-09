@@ -210,7 +210,8 @@ public final class AutoMobilePlanExecutor: Sendable {
         recoveryAlreadyAttempted: Bool,
         deviceIdOverride: String?,
         sessionUuidOverride: String,
-        testMetadata: TestMetadata?
+        testMetadata: TestMetadata?,
+        executePlanDispatch: ExecutePlanDispatch? = nil
     )
         async throws -> ExecutePlanResult
     {
@@ -294,6 +295,7 @@ public final class AutoMobilePlanExecutor: Sendable {
             try Task.checkCancellation()
             let result: ExecutePlanResult
             do {
+                executePlanDispatch?.sent = true
                 let response = try await mcpClient.callTool(
                     name: "executePlan", arguments: arguments, timeout: configuration.timeoutSeconds
                 )
@@ -441,13 +443,27 @@ public final class AutoMobilePlanExecutor: Sendable {
         // `recoveryAlreadyAttempted: true` prevents a second recovery within this attempt.
         let resumeStep = failedStep.stepIndex
         logger.info("AI recovery succeeded, re-running failed step \(resumeStep + 1) and resuming")
-        var resumeResult = try await executeAttempt(
-            startStep: resumeStep,
-            recoveryAlreadyAttempted: true,
-            deviceIdOverride: context.deviceId,
-            sessionUuidOverride: sessionUuid,
-            testMetadata: testMetadata
-        )
+        // The resumed plan takes the held session over, and its executePlan lifecycle releases it.
+        // A resume that fails before executePlan is sent (initialize, setToolEnabled, cancellation)
+        // never hands it over, so release it here before the caller retries under a fresh session;
+        // otherwise it blocks that retry's device until its lease lapses (#11139).
+        let dispatch = ExecutePlanDispatch()
+        var resumeResult: ExecutePlanResult
+        do {
+            resumeResult = try await executeAttempt(
+                startStep: resumeStep,
+                recoveryAlreadyAttempted: true,
+                deviceIdOverride: context.deviceId,
+                sessionUuidOverride: sessionUuid,
+                testMetadata: testMetadata,
+                executePlanDispatch: dispatch
+            )
+        } catch {
+            if !dispatch.sent {
+                await releaseHeld()
+            }
+            throw error
+        }
         resumeResult.aiRecoveryAttempted = true
         resumeResult.aiRecoverySuccessful = resumeResult.success
         return resumeResult
@@ -665,4 +681,10 @@ extension AutoMobilePlanExecutor {
 
         return configuration.defaultPlatform
     }
+}
+
+/// Whether an attempt sent its `executePlan` call, after which the daemon's plan lifecycle (not
+/// this runner) owns the attempt's session. Confined to the one attempt that writes and reads it.
+final class ExecutePlanDispatch {
+    var sent = false
 }

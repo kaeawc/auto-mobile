@@ -167,6 +167,53 @@ final class RecoveryExecutorTests: XCTestCase {
         )
     }
 
+    // MARK: - A resume that never reaches executePlan frees the held session (#11139)
+
+    func testResumeFailingBeforeExecutePlanReleasesTheHeldSession() async throws {
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: ["stepIndex": 1, "tool": "tapOn", "error": "boom"]
+        ))
+        client.setToolEnabledFailures[1] = MCPClientError.invalidResponse("enable refused")
+        let heldSessions = RecordingHeldSessionController()
+        let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
+        let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true, heldSessions: heldSessions)
+
+        await assertAsyncThrowsError { try await executor.execute(testMetadata: nil, sessionUuid: "held-session") }
+
+        XCTAssertEqual(client.executePlanCalls.count, 1, "the resume never sent executePlan")
+        XCTAssertEqual(heldSessions.releasedSessions, ["held-session"])
+    }
+
+    func testResumeRetriedUnderAFreshSessionReleasesTheHeldOneFirst() async throws {
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: ["stepIndex": 1, "tool": "tapOn", "error": "boom"]
+        ))
+        client.queueExecutePlan(planJSON(success: true, executedSteps: 3, totalSteps: 3))
+        client.setToolEnabledFailures[1] = MCPClientError.requestFailed("transient")
+        let heldSessions = RecordingHeldSessionController()
+        var releasedAtEachEnable: [[String]] = []
+        client.onSetToolEnabled = { releasedAtEachEnable.append(heldSessions.releasedSessions) }
+        let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
+        let executor = makeExecutor(
+            client: client, handler: handler, recoveryEnabled: true, heldSessions: heldSessions, retryCount: 1
+        )
+
+        let result = try await executor.execute(testMetadata: nil, sessionUuid: "held-session")
+
+        XCTAssertTrue(result.success)
+        let retrySession = try XCTUnwrap(client.executePlanCalls.last?.arguments["sessionUuid"] as? String)
+        XCTAssertNotEqual(retrySession, "held-session")
+        XCTAssertEqual(
+            releasedAtEachEnable,
+            [[], [], ["held-session"]],
+            "the held session is released before the retry under a fresh session starts"
+        )
+    }
+
     func testFailedRecoveryReleasesTheHeldSession() async throws {
         let client = RecoveryMCPClient()
         client.queueExecutePlan(planJSON(
@@ -1910,6 +1957,11 @@ private final class RecoveryMCPClient: AutoMobileMCPClient, @unchecked Sendable 
     var observeText = "{\"elements\":{}}"
 
     var executePlanCalls: [Call] { calls.filter { $0.name == "executePlan" } }
+    /// Error to throw from the Nth (0-based) `setToolEnabled` call instead of enabling.
+    var setToolEnabledFailures: [Int: Error] = [:]
+    /// Runs at each `setToolEnabled` call, before it answers.
+    var onSetToolEnabled: (() -> Void)?
+    private var setToolEnabledCount = 0
 
     func queueExecutePlan(_ text: String) {
         executePlanResponses.append(MCPToolResponse(text: text))
@@ -1926,6 +1978,11 @@ private final class RecoveryMCPClient: AutoMobileMCPClient, @unchecked Sendable 
     {
         calls.append(Call(name: name, arguments: arguments))
         if name == "setToolEnabled" {
+            onSetToolEnabled?()
+            defer { setToolEnabledCount += 1 }
+            if let failure = setToolEnabledFailures[setToolEnabledCount] {
+                throw failure
+            }
             return MCPToolResponse(text: "{\"enabled\":true}")
         }
         if name == "executePlan" {

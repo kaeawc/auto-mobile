@@ -4902,6 +4902,13 @@ export class DaemonMcpProxy {
         this.endLostSessionHandover(sessionUuid);
       }
     }
+    this.notifyLivenessHandoverListeners(handover);
+    if (this.hasProbeableStall() && !this.closing) {
+      this.stallResumeProbe.start();
+    }
+  }
+
+  private notifyLivenessHandoverListeners(handover: LivenessHandover): void {
     for (const listener of this.livenessHandoverListeners) {
       try {
         listener(handover);
@@ -4909,9 +4916,6 @@ export class DaemonMcpProxy {
         // Best-effort: a dead client transport must not stop the other listeners or the proxy.
         logger.warn(`[DaemonMcpProxy] liveness handover listener failed: ${error}`);
       }
-    }
-    if (this.hasProbeableStall() && !this.closing) {
-      this.stallResumeProbe.start();
     }
   }
 
@@ -5183,7 +5187,7 @@ export class DaemonMcpProxy {
     }
     // A delivered proxy_stalled already reported this definitive loss. daemon_stalled did not.
     if (record.handover.code !== PROXY_STALLED_CODE || !record.delivered) {
-      this.pendingSessionLosses.set(sessionUuid, {
+      const loss: LivenessHandover = {
         ...record.handover,
         code: PROXY_STALLED_CODE,
         ...(record.handover.code === DAEMON_STALLED_CODE ? { stalledBy: "daemon" as const } : {}),
@@ -5192,7 +5196,14 @@ export class DaemonMcpProxy {
           record.handover.sessions.find((session) => session.sessionUuid === sessionUuid)
             ?.lastAcknowledgedHeartbeatAt ?? record.handover.lastAcknowledgedHeartbeatAt,
         action: "reacquire_lost_sessions",
-      });
+      };
+      this.pendingSessionLosses.set(sessionUuid, loss);
+      if (record.handover.code === DAEMON_STALLED_CODE) {
+        // A daemon stall that ends in a lost session pushes the same liveness notification a
+        // proxy stall does, worded as the daemon stall it was (#11028). A proxy_stalled handover
+        // was already pushed when it was delivered.
+        this.notifyLivenessHandoverListeners(loss);
+      }
     }
     this.forgetSessionLivenessState(sessionUuid);
     this.ownedDeviceSessions.delete(sessionUuid);

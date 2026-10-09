@@ -1564,6 +1564,13 @@ export class DevicePool {
         getPooledSessionIdentity: (device) => this.pooledSessionIdentities.get(device),
         getMcpSessionRecoveryDevice: (client) => this.mcpSessionRecoveryDevices.get(client)?.device,
         isAdbServerResetQuarantined: (id) => this.adbServerResetQuarantinedSessions.has(id),
+        assertNotClaimedByForeignDaemon: (deviceId, platform) =>
+          this.assertNotClaimedByForeignDaemon(deviceId, platform),
+        claimAcquiredDevice: async (sessionId, deviceId, heldBefore, platform) => {
+          if (this.foreignOwnershipFor(platform)) {
+            await this.claimExplicitlyBoundDevice(sessionId, deviceId, heldBefore);
+          }
+        },
       },
       this.deviceSessionRepository,
       this.idGenerator,

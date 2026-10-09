@@ -91,6 +91,8 @@ function harness(env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" }) {
       pooled.sessionId ? (sessions.getSession(pooled.sessionId) ?? undefined) : undefined,
     getMcpSessionRecoveryDevice: () => undefined,
     isAdbServerResetQuarantined: (id) => quarantined.has(id),
+    assertNotClaimedByForeignDaemon: async () => {},
+    claimAcquiredDevice: async () => {},
   };
   const manager = new DeviceAutolockManager(
     port,

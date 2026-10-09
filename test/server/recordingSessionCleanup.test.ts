@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 import type { SessionManager } from "../../src/daemon/sessionManager";
 import {
@@ -56,6 +57,11 @@ class FakeRecordings implements RecordingSessionCleanupDeps {
   testRecording: { ownerSessionUuid: string; deviceId: string } | null = null;
   testStops = 0;
   stopFailure: Error | null = null;
+  /** When set, video stops never settle (a wedged backend). */
+  hangStops = false;
+  timer = new FakeTimer();
+  incomplete: string[] = [];
+  capMs = 120_000;
 
   start(deviceId: string, ownerSessionUuid: string): void {
     if (this.active.has(deviceId)) {
@@ -77,7 +83,21 @@ class FakeRecordings implements RecordingSessionCleanupDeps {
   async listActiveVideoRecordings(deviceId: string) {
     return [...this.active.values()].filter((record) => record.deviceId === deviceId);
   }
+  finalizeCapMs(): number {
+    return this.capMs;
+  }
+  async markVideoRecordingIncomplete(recordingId: string): Promise<void> {
+    this.incomplete.push(recordingId);
+    for (const [deviceId, record] of this.active) {
+      if (record.recordingId === recordingId) {
+        this.active.delete(deviceId);
+      }
+    }
+  }
   async stopVideoRecording(recordingId: string): Promise<void> {
+    if (this.hangStops) {
+      await new Promise<void>(() => {});
+    }
     if (this.stopFailure) {
       throw this.stopFailure;
     }
@@ -194,5 +214,45 @@ describe("registerRecordingSessionCleanup", () => {
     manager.release("session-a", "SIM-1", true);
 
     expect(manager.pendingCleanups).toHaveLength(0);
+  });
+
+  test("a stop that never settles is force-stopped and marked incomplete at the cap, freeing the device (#10957)", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    recordings.hangStops = true;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+
+    try {
+      manager.release("session-a", "SIM-1");
+      let settled = false;
+      const done = manager.settle().then(() => {
+        settled = true;
+      });
+
+      await recordings.timer.advanceTimersByTimeAsync(119_999);
+      expect(settled).toBe(false);
+      expect(recordings.active.has("SIM-1")).toBe(true);
+
+      await recordings.timer.advanceTimersByTimeAsync(1);
+      await done;
+
+      expect(settled).toBe(true);
+      expect(recordings.incomplete).toEqual(["rec-session-a"]);
+      recordings.start("SIM-1", "session-b");
+      expect(warn.mock.calls.some(([message]) => String(message).includes("exceeded"))).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a stop that settles within the cap is not marked incomplete", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+
+    manager.release("session-a", "SIM-1");
+    await manager.settle();
+
+    expect(recordings.incomplete).toEqual([]);
+    expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
   });
 });

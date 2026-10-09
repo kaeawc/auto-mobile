@@ -147,11 +147,24 @@ wiring_requires_yq() {
   [[ "$(yq -r '.jobs."junit-runner-unit-tests".name' "$WF")" == "Run JUnit Runner Unit Tests" ]]
 }
 
-@test "Android emulator compile smoke includes test-source compilation" {
-  block="$(job_block android-emulator-compile-smoke)"
-  [[ -n "$block" ]]
-  [[ "$block" == *":junit-runner:compileTestKotlin"* ]]
-  [[ "$block" == *":playground:app:compileDebugUnitTestKotlin"* ]]
+@test "emulator lanes fail fast on compile errors through the build jobs (#10890)" {
+  wiring_requires_yq
+  [[ -z "$(job_block android-emulator-compile-smoke)" ]]
+  # Each module the removed compile smoke compiled is compiled by a build job
+  # the emulator lanes depend on.
+  [[ "$(job_block build-android-control-proxy)" == *":control-proxy:assembleDebug"* ]]
+  [[ "$(job_block build-playground-app)" == *":playground:app:assembleDebug"* ]]
+  [[ "$(job_block build-playground-app)" == *":playground:app:compileDebugUnitTestKotlin"* ]]
+  [[ "$(job_block junit-runner-unit-tests)" == *'gradle-tasks: ":junit-runner:test"'* ]]
+  local job needs
+  for job in junit-runner-emulator-tests playground-automobile-emulator-tests; do
+    needs="$(yq -r ".jobs.\"${job}\".needs[]" "$WF")"
+    [[ $'\n'"$needs"$'\n' == *$'\n'"build-android-control-proxy"$'\n'* ]]
+    [[ $'\n'"$needs"$'\n' == *$'\n'"build-playground-app"$'\n'* ]]
+    [[ $'\n'"$needs"$'\n' == *$'\n'"junit-runner-unit-tests"$'\n'* ]]
+  done
+  # The SDK Debug Inspector Consumer guard the smoke carried stays on PRs.
+  [[ "$(job_block build-junit-runner-library)" == *"validate-sdk-debug-inspector-consumer.sh --skip-publish"* ]]
 }
 
 @test "portable PR matrices leave macOS coverage to nightly" {

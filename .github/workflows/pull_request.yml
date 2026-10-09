@@ -309,7 +309,8 @@ jobs:
               # because it also touched scripts/android/** (see #4237).
               - '.github/actions/android-emulator/**'
               # Same reasoning for the Gradle-run composite: Android jobs (the
-              # SDK Debug Inspector Consumer publication guard among them) drive
+              # SDK Debug Inspector Consumer publication guard in Build
+              # JUnitRunner Library among them) drive
               # it, so an edit to it must exercise them rather than be skipped.
               - '.github/actions/gradle-task-run/**'
               - 'scripts/local-dev/hot-reload.sh'
@@ -2179,51 +2180,6 @@ jobs:
   # Android Build and Test Jobs (Android-related changes only)
   # =============================================================================
 
-  # A compile failure is deterministic and must stop the emulator lanes before
-  # they spend their 15-minute budget booting a device. Detekt intentionally is
-  # not part of this gate: its full-tree result remains non-blocking by policy.
-  android-emulator-compile-smoke:
-    timeout-minutes: 25
-    name: "Android Emulator Compile Smoke"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.android_should_run == 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: ./.github/actions/gradle-task-run
-        with:
-          gradle-tasks: ":control-proxy:compileDebugKotlin :junit-runner:compileKotlin :junit-runner:compileTestKotlin :playground:app:compileDebugKotlin :playground:app:compileDebugUnitTestKotlin"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
-          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-          release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
-          release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
-          release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
-
-      # Folded in from the former sdk-debug-inspector-consumer job (separate
-      # runner slot, same checkout + Gradle setup). Publish both SDK variants to
-      # the local Maven repo. The storage-inspection ContentProviders ship in the
-      # debug variant only (#5714); this proves a Maven consumer -- not an
-      # in-repo project() dependency -- can obtain them. Check the public API
-      # here because publishing already compiles SDK release classes.
-      # Update the baseline with: cd android && ./gradlew :auto-mobile-sdk:apiDump
-      - uses: ./.github/actions/gradle-task-run
-        with:
-          gradle-tasks: ":auto-mobile-sdk:publishToMavenLocal :auto-mobile-sdk:apiCheck"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
-          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Verify published debug inspection providers"
-        run: bash scripts/android/validate-sdk-debug-inspector-consumer.sh --skip-publish
-
   junit-runner-unit-tests:
     timeout-minutes: 20
     name: "Run JUnit Runner Unit Tests"
@@ -2298,7 +2254,12 @@ jobs:
     name: "Run JUnit Runner Emulator Tests"
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [detect-changes, build-android-control-proxy, android-emulator-compile-smoke]
+    # Compile failures stop this lane before it boots a device through the build
+    # jobs that already compile its modules (#10890): Build CtrlProxy APK,
+    # Build Playground App (incl. :playground:app unit-test sources) and Run
+    # JUnit Runner Unit Tests (:junit-runner main + test sources).
+    needs:
+      [detect-changes, build-android-control-proxy, build-playground-app, junit-runner-unit-tests]
     if: needs.detect-changes.outputs.android_should_run == 'true'
     steps:
       - name: "Git Checkout"
@@ -2429,7 +2390,12 @@ jobs:
     name: "Run Playground Automobile Emulator Tests"
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [detect-changes, build-android-control-proxy, android-emulator-compile-smoke]
+    # Compile failures stop this lane before it boots a device through the build
+    # jobs that already compile its modules (#10890): Build CtrlProxy APK,
+    # Build Playground App (incl. :playground:app unit-test sources) and Run
+    # JUnit Runner Unit Tests (:junit-runner main + test sources).
+    needs:
+      [detect-changes, build-android-control-proxy, build-playground-app, junit-runner-unit-tests]
     if: needs.detect-changes.outputs.android_should_run == 'true'
     steps:
       - name: "Git Checkout"
@@ -2474,7 +2440,7 @@ jobs:
           report_paths: "**/build/test-results/**/*.xml"
 
   build-junit-runner-library:
-    timeout-minutes: 20
+    timeout-minutes: 25
     name: "Build JUnitRunner Library"
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -2507,6 +2473,26 @@ jobs:
         with:
           name: aar
           path: core/build/outputs/aar/core-debug.aar
+
+      # SDK Debug Inspector Consumer, moved here from the removed Android
+      # Emulator Compile Smoke (#10890): same Gradle setup, no extra runner slot.
+      # Publish both SDK variants to the local Maven repo. The storage-inspection
+      # ContentProviders ship in the debug variant only (#5714); this proves a
+      # Maven consumer -- not an in-repo project() dependency -- can obtain them.
+      # Check the public API here because publishing already compiles SDK
+      # release classes.
+      # Update the baseline with: cd android && ./gradlew :auto-mobile-sdk:apiDump
+      - uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":auto-mobile-sdk:publishToMavenLocal :auto-mobile-sdk:apiCheck"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Verify published debug inspection providers"
+        working-directory: .
+        run: bash scripts/android/validate-sdk-debug-inspector-consumer.sh --skip-publish
 
   build-android-control-proxy:
     timeout-minutes: 20
@@ -2571,7 +2557,10 @@ jobs:
           # :playground:design:system, which :playground:app:assembleDebug does
           # not exercise, so without this they never gate.
           # Discover host unit tests (including Long Press Drag reorder) also gate here.
-          gradle-tasks: ":playground:app:assembleDebug :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest"
+          # :playground:app:compileDebugUnitTestKotlin keeps the app's unit-test
+          # sources compiling before the emulator lane runs them (#10890; it
+          # moved here from the removed Android Emulator Compile Smoke).
+          gradle-tasks: ":playground:app:assembleDebug :playground:app:compileDebugUnitTestKotlin :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

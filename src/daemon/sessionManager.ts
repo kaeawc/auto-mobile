@@ -35,6 +35,7 @@ import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import {
+  DeviceSessionNotActiveError,
   DeviceSessionRepository,
   isDeviceRestartReleaseReason,
   isRecoverableDeviceSession,
@@ -8148,7 +8149,7 @@ export class SessionManager {
     const issued: IssuedActivityWrite = { key: activityUpdateKey(update) };
     this.issuedActivityWrites.set(session, issued);
     try {
-      await this.deviceSessionRepository.recordActivity(session.sessionId, update);
+      await this.persistSessionActivity(session, update);
     } catch (error) {
       // Forget a failed write only while it is still the newest one, so a later write that
       // carries the same row is not undone; a stale entry only costs one redundant write.
@@ -8157,6 +8158,42 @@ export class SessionManager {
       }
       throw new SessionActivityPersistenceError(session.sessionId, error);
     }
+  }
+
+  /**
+   * Write an activity row. When no active row matched (#11129) while this daemon still holds the
+   * session — a peer expired it — re-upsert the whole row so the live session stays recoverable; a
+   * terminal row stays a failure, so the dedupe forgets the write. A session this daemon already
+   * released has no row to keep.
+   */
+  private async persistSessionActivity(
+    session: Session,
+    update: DeviceSessionActivityUpdate,
+  ): Promise<void> {
+    try {
+      await this.deviceSessionRepository.recordActivity(session.sessionId, update);
+      return;
+    } catch (error) {
+      if (!(error instanceof DeviceSessionNotActiveError)) {
+        throw error;
+      }
+    }
+    if (!this.isAdmittedForAutomation(session)) {
+      // Expected: this daemon's own release retired the row while the write was in flight; the
+      // released incarnation has nothing left to persist, and callers detect the release.
+      logger.debug(`[SessionManager] Activity for released session ${session.sessionId} skipped`);
+      return;
+    }
+    // A terminal row is final, whoever wrote it: never revive it.
+    const terminal = await this.getPersistedTerminalRelease(session.sessionId);
+    if (terminal || !this.isAdmittedForAutomation(session)) {
+      throw new DeviceSessionNotActiveError(session.sessionId);
+    }
+    logger.warn(
+      `[SessionManager] Session ${session.sessionId} is live but its row is not active; ` +
+        "re-persisting it",
+    );
+    await this.persistSession(session, session);
   }
 
   /** Whether the session's persisted activity fields differ from the newest issued write. */

@@ -1,4 +1,5 @@
 import {
+  DeviceSessionNotActiveError,
   isDeviceRestartReleaseReason,
   isRecoverableDaemonReleaseReason,
   type DeviceSessionActivityUpdate,
@@ -64,7 +65,8 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
   async recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void> {
     const row = this.rows.get(sessionUuid);
     if (!row || row.status !== "active") {
-      return;
+      // Mirrors DeviceSessionRepository: zero matched rows is a failure (#11129).
+      throw new DeviceSessionNotActiveError(sessionUuid);
     }
     Object.assign(row, {
       last_used_at_ms: update.lastUsedAtMs,

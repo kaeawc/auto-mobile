@@ -5,7 +5,7 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { Platform } from "../models";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { toActionableError } from "../models/ActionableError";
+import { ActionableError, toActionableError } from "../models/ActionableError";
 
 // Terminal-state (`released`/`expired`) rows accumulate for the life of the
 // on-disk DB with no delete path (#6464). Bound their retention window rather
@@ -42,6 +42,17 @@ export function isRecoverableDeviceSession(session: DeviceSession, nowMs: number
 
 function shouldRetainLivenessOwner(reason: string): boolean {
   return isRecoverableDaemonReleaseReason(reason);
+}
+
+/**
+ * An activity write matched no active row (#11129): a peer expired it, or it was released. The
+ * write did not persist, so callers must not treat it as stored.
+ */
+export class DeviceSessionNotActiveError extends ActionableError {
+  constructor(readonly sessionUuid: string) {
+    super(`Device session ${sessionUuid} has no active row to record activity on.`);
+    this.name = "DeviceSessionNotActiveError";
+  }
 }
 
 export interface DeviceSessionRecord {
@@ -319,9 +330,10 @@ export class DeviceSessionRepository {
   }
 
   async recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void> {
+    let updatedRows: number;
     try {
       const db = await this.getDb();
-      await db
+      const result = await db
         .updateTable("device_sessions")
         .set({
           last_used_at_ms: sql<number>`max(last_used_at_ms, ${update.lastUsedAtMs})`,
@@ -334,12 +346,16 @@ export class DeviceSessionRepository {
         })
         .where("session_uuid", "=", sessionUuid)
         .where("status", "=", "active")
-        .execute();
+        .executeTakeFirst();
+      updatedRows = Number(result.numUpdatedRows);
     } catch (error) {
       logger.warn(
         `[DeviceSessionRepository] Failed to record activity for ${sessionUuid}: ${error}`,
       );
       throw toActionableError(error, `Failed to record activity for session ${sessionUuid}`);
+    }
+    if (updatedRows === 0) {
+      throw new DeviceSessionNotActiveError(sessionUuid);
     }
   }
 

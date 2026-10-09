@@ -4,6 +4,7 @@ import { type Kysely, sql } from "kysely";
 import type { Database } from "../../src/db/types";
 import {
   deviceRestartReleaseReason,
+  DeviceSessionNotActiveError,
   DeviceSessionRepository,
   isRecoverableDaemonReleaseReason,
   RECOVERABLE_DAEMON_RELEASE_REASONS,
@@ -804,13 +805,16 @@ describe("DeviceSessionRepository", () => {
     });
     await repo.markReleased("session-1", "released", 2000, "explicit-release");
 
-    await repo.recordActivity("session-1", {
-      lastUsedAtMs: 3000,
-      expiresAtMs: 63_000,
-      sessionTimeoutMs: 60_000,
-      heartbeatTimeoutMs: 60_000,
-      hasReceivedHeartbeat: true,
-    });
+    // Zero rows matched: a failure, not a silent success the dedupe would remember (#11129).
+    await expect(
+      repo.recordActivity("session-1", {
+        lastUsedAtMs: 3000,
+        expiresAtMs: 63_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+        hasReceivedHeartbeat: true,
+      }),
+    ).rejects.toBeInstanceOf(DeviceSessionNotActiveError);
 
     const row = await repo.getSession("session-1");
     expect(row!.status).toBe("released");
@@ -927,6 +931,44 @@ describe("DeviceSessionRepository", () => {
       const row = await repo.getSession("session-1");
       expect(row!.status).toBe("active");
       expect(row!.release_reason).toBeNull();
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("SessionManager re-persists a live session whose row a peer expired (#11129)", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, repo);
+    try {
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      // A peer daemon judged this daemon dead and expired the row.
+      await repo.markReleased("session-1", "expired", 500, "daemon-restart");
+      timer.advanceTime(1000);
+      await sessionManager.getOrCreateSession("session-1");
+
+      const row = await repo.getSession("session-1");
+      expect(row!.status).toBe("active");
+      expect(row!.release_reason).toBeNull();
+      expect(row!.last_used_at_ms).toBe(1000);
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("SessionManager never revives a terminally released row on activity (#11129)", async () => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, repo);
+    try {
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      await repo.markReleased("session-1", "released", 500, "explicit-release");
+      timer.advanceTime(1000);
+      await expect(sessionManager.getOrCreateSession("session-1")).rejects.toThrow(
+        "Failed to persist liveness activity",
+      );
+
+      const row = await repo.getSession("session-1");
+      expect(row!.status).toBe("released");
+      expect(row!.release_reason).toBe("explicit-release");
     } finally {
       sessionManager.stopCleanupTimer();
     }

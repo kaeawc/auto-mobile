@@ -274,6 +274,12 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "Resume (#10990): a session the stable owner token holds is held with the daemon's own " +
       "lastUsedAt, listed in KNOWN_LIVENESS_WRITES.",
   },
+  "src/daemon/daemonRequestHandlers.ts handleTokenOwnedSessions": {
+    writes: 1,
+    reason:
+      "A read projection (#11117): the tokenOwnedSessions answer reports the session's lastUsedAt " +
+      "converted to wall-clock ms for the resuming proxy; it stamps nothing.",
+  },
   "src/daemon/daemonMcpProxy.ts <module>": {
     writes: 1,
     reason: "The tokenOwnedSessions answer schema (zod) declares lastUsedAt, not a clock value.",

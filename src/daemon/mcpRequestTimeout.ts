@@ -254,6 +254,8 @@ const TOOL_TIMEOUT_FLOORS: ReadonlyMap<string, number> = new Map(
     explore: DEFAULT_EXPLORE_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
     putAppFile: APP_FILE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
     setDeviceResources: DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    reconcileDeviceResources:
+      DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     uninstallApp: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
     crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
     getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
@@ -572,6 +574,7 @@ function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | 
       );
     }
     case "setDeviceResources":
+    case "reconcileDeviceResources":
       return resolveDeviceResourceBudgetMs(argumentsRecord);
     default:
       return undefined;

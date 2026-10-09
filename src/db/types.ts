@@ -538,6 +538,19 @@ export interface DeviceLocksTable {
   updated_at: Generated<string>;
 }
 
+/** AutoMobile-applied simulator service overrides per incarnation (#6694). */
+export interface DeviceResourceApplicationsTable {
+  /** Stable serialization of platform, UDID, runtime and device type. */
+  identity_key: string;
+  udid: string;
+  runtime_id: string;
+  device_type_id: string;
+  /** JSON DeviceResourceConfiguration of owned overrides. */
+  resources_json: string;
+  profile_fingerprint: string;
+  updated_at_ms: number;
+}
+
 /** Bounded, durable diagnostics for unexpectedly lost Android emulators. */
 export interface EmulatorLossIncidentsTable {
   id: Generated<number>;
@@ -839,6 +852,7 @@ export interface Database {
   layout_events: LayoutEventsTable;
   device_sessions: DeviceSessionsTable;
   device_locks: DeviceLocksTable;
+  device_resource_applications: DeviceResourceApplicationsTable;
   emulator_loss_incidents: EmulatorLossIncidentsTable;
   provision_device_operations: ProvisionDeviceOperationsTable;
   provisioned_device_transport_tombstones: ProvisionedDeviceTransportTombstonesTable;

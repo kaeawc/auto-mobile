@@ -164,6 +164,11 @@ describe("resolveMcpRequestTimeoutMs", () => {
       tool: "setDeviceResources",
       expected: 305_000,
     },
+    {
+      name: "reconcileDeviceResources floor when timeoutMs omitted",
+      tool: "reconcileDeviceResources",
+      expected: 305_000,
+    },
     // --- Tool floors applied when the client omits timeoutMs (base -> DEFAULT) ---
     {
       name: "tool without a floor -> default",

@@ -42,6 +42,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   installApp: DEVICE_MANAGEMENT,
   uninstallApp: DEVICE_MANAGEMENT,
   setDeviceResources: DEVICE_MANAGEMENT,
+  reconcileDeviceResources: DEVICE_MANAGEMENT,
   executePlan: SESSION_META,
   exportPlan: SESSION_META,
   recordSteps: SESSION_META,

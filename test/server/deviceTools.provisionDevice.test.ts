@@ -1262,6 +1262,170 @@ describe("provisionDevice handler", () => {
     });
   });
 
+  const SIM_UDID = "A1B2C3D4-0000-4000-8000-000000000001";
+  const simDevice = () => ({
+    ...provisionedTestDevice("ios", false).device,
+    deviceId: SIM_UDID,
+  });
+
+  const setupSimulator = (created: boolean, resources: FakeDeviceResourceController) => {
+    exactProvisioner.provision = async () => ({
+      ...provisionedTestDevice("ios", created),
+      device: simDevice(),
+    });
+    deviceManager.setBootedDevices("ios", [
+      {
+        name: provisionTestArgs("ios", "unused").device.name,
+        platform: "ios",
+        deviceId: SIM_UDID,
+      },
+    ]);
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
+    let readinessCalls = 0;
+    setDeviceToolsDependencies({
+      lifecycleCoordinator: coordinator,
+      deviceResourceControllerFactory: () => resources,
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+      },
+    });
+    return { coordinator, readinessCalls: () => readinessCalls };
+  };
+
+  const expectDeviceFree = async (coordinator: InMemoryVirtualDeviceLifecycleCoordinator) => {
+    const lease = await coordinator.reserve(
+      { kind: "stable", platform: "ios", stableId: SIM_UDID },
+      { operation: "teardown", deadlineMs: 1_000 },
+    );
+    lease.release();
+  };
+
+  test("iOS simulator profile (#6695): an unproven profile fails with typed drift, binds no session and frees the device", async () => {
+    const resources = new FakeDeviceResourceController();
+    resources.result.requested = { wallpaperRendering: "disabled", widgets: "disabled" };
+    resources.result.resources = {
+      wallpaperRendering: { state: "disabled" },
+      widgets: { state: "disabled" },
+    };
+    resourceObserver.result.resources.wallpaperRendering = { state: "disabled" };
+    resourceObserver.result.resources.widgets = { state: "enabled" };
+    const harness = setupSimulator(false, resources);
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("ios", "profile-unproven"),
+      resources: { wallpaperRendering: "disabled", widgets: "disabled" },
+    });
+
+    expect(response.isError).toBe(true);
+    const payload = JSON.parse(response.content[0].text);
+    expect(payload.sessionId).toBeUndefined();
+    expect(payload.error).toMatchObject({
+      code: "resource_profile_unproven",
+      retryable: false,
+      resourceDrift: [
+        {
+          resource: "widgets",
+          kind: "missingRequested",
+          expected: "disabled",
+          observed: { state: "enabled" },
+        },
+      ],
+    });
+    expect(payload.error.message).toContain("widgets (missingRequested");
+    expect(payload.error.message).not.toContain("wallpaperRendering (");
+    expect(harness.readinessCalls()).toBe(0);
+    // Partial transition: the override that did land stays (no compensating write)
+    // and remains recorded as AutoMobile-owned, so a retry or reconcile sees it.
+    expect(resources.requests).toHaveLength(1);
+    await expectDeviceFree(harness.coordinator);
+  });
+
+  test("iOS simulator profile (#6695): an unsupported resource rolls back a device this operation created", async () => {
+    const resources = new FakeDeviceResourceController();
+    resources.result.success = false;
+    resources.result.resources = {
+      wallpaperRendering: { state: "unsupported", reason: "group not installed" },
+    };
+    resourceObserver.result.resources.wallpaperRendering = { state: "unsupported" };
+    const provisioned = { ...provisionedTestDevice("ios", true), device: simDevice() };
+    configureProvisionBootAndTeardown(deviceManager, "ios");
+    const bootWait = deviceManager.waitForDeviceReady.bind(deviceManager);
+    deviceManager.waitForDeviceReady = async (...args) => ({
+      ...(await bootWait(...args)),
+      deviceId: SIM_UDID,
+    });
+    let readinessCalls = 0;
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages("ios", [provisioned.device]);
+          return provisioned;
+        },
+      }),
+      deviceResourceControllerFactory: () => resources,
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+      },
+      idGenerator: new FakeIdGenerator(["attempt-sim", "cleanup-sim"]),
+    });
+    registerDeviceTools();
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("ios", "profile-unsupported"),
+      resources: { wallpaperRendering: "disabled" },
+    });
+
+    expect(response.isError).toBe(true);
+    const payload = JSON.parse(response.content[0].text);
+    expect(payload.sessionId).toBeUndefined();
+    expect(payload.error.code).toBe("resource_profile_unproven");
+    expect(payload.error.resourceDrift).toMatchObject([
+      { resource: "wallpaperRendering", kind: "unsupported" },
+    ]);
+    expect(payload.cleanup).toMatchObject({ status: "succeeded", state: "destroyed" });
+    expect(readinessCalls).toBe(0);
+    expect(await deviceManager.listDeviceImages("ios")).toEqual([]);
+  });
+
+  test("iOS simulator profile (#6695): an unknown re-read is a command failure, never a guessed success", async () => {
+    const resources = new FakeDeviceResourceController();
+    resourceObserver.result.resources.wallpaperRendering = {
+      state: "unknown",
+      reason: "launchctl timed out",
+    };
+    const harness = setupSimulator(false, resources);
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("ios", "profile-unknown"),
+      resources: { wallpaperRendering: "disabled" },
+    });
+
+    const payload = JSON.parse(response.content[0].text);
+    expect(payload.error.resourceDrift).toMatchObject([
+      { resource: "wallpaperRendering", kind: "commandFailure" },
+    ]);
+    expect(payload.sessionId).toBeUndefined();
+    await expectDeviceFree(harness.coordinator);
+  });
+
+  test("iOS simulator profile (#6695): a proven profile binds the session", async () => {
+    const resources = new FakeDeviceResourceController();
+    resourceObserver.result.resources.wallpaperRendering = { state: "disabled" };
+    const harness = setupSimulator(false, resources);
+
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("ios", "profile-proven"),
+      resources: { wallpaperRendering: "disabled" },
+    });
+
+    expect(response.isError).not.toBe(true);
+    const payload = JSON.parse(response.content[0].text);
+    expect(payload.sessionId).toEqual(expect.any(String));
+    expect(payload.resources.success).toBe(true);
+    expect(harness.readinessCalls()).toBe(1);
+  });
+
   test("accepts omitted boot and readiness with their documented defaults", () => {
     expect(
       provisionDeviceSchema.parse({

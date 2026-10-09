@@ -12,7 +12,7 @@ import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClien
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import {
-  DevicectlDeviceLister,
+  getSharedDevicectlDeviceLister,
   type IosPhysicalDeviceLister,
   type PhysicalIosDeviceDiscovery,
 } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
@@ -436,7 +436,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     this.adb = adb || defaultAdbClientFactory.create(null);
     this.simctl = simctl || new SimCtlClient();
     this.emulator = emulator || new AndroidEmulatorClient();
-    this.physicalIosDevices = physicalIosDevices || new DevicectlDeviceLister();
+    this.physicalIosDevices = physicalIosDevices || getSharedDevicectlDeviceLister();
     this.lifecycleCoordinator = lifecycleCoordinator;
     this.timer = timer;
   }

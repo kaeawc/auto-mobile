@@ -7,7 +7,8 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { resetAndroidInventoryEnrichmentCache } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { AndroidAvdProvenanceCache } from "../utils/AndroidAvdProvenanceCache";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
-import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../devices/deviceUtils";
+import { PlatformDeviceManager } from "../devices/deviceUtils";
+import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerService";
 import { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import { logger } from "../utils/logger";
@@ -240,7 +241,7 @@ export function createDeviceImageResourcesHandler(
   getDeviceImagesByPlatform: (params: Record<string, string>) => Promise<ResourceContent>;
   getDeviceImagesForPlatforms: (platforms: Platform[]) => Promise<DeviceImagesResourceContent>;
 } {
-  const deviceManager = deps?.deviceManager ?? new MultiPlatformDeviceManager();
+  const deviceManager = deps?.deviceManager ?? PlatformDeviceManagerFactory.getInstance();
   const avdManager = deps?.avdManager ?? new AvdManagerService();
   // Tests often inject only the Android/device seam. Avoid creating a real simctl
   // client in those partial fakes; production construction always includes it.

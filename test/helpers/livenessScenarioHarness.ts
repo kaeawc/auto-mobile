@@ -30,6 +30,10 @@ import {
   SessionManager,
   getDefaultSessionHeartbeatTimeoutMs,
 } from "../../src/daemon/sessionManager";
+import {
+  routedSessionUuidFromResult,
+  withRoutedSessionMeta,
+} from "../../src/server/routedSessionMeta";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";
@@ -325,16 +329,31 @@ export class LivenessScenario {
   private createProxy(token = OWNER_TOKEN, initialSessionUuid?: string): DaemonMcpProxy {
     // Each proxy is its own daemon socket connection.
     const connection = token === OWNER_TOKEN ? CONNECTION : `scenario-connection:${token}`;
+    // The session the daemon echoed for each forwarded call (#10974), keyed by the call's params.
+    const routedEchoes = new WeakMap<object, string>();
     const client = new FakeDaemonClient({
-      onCallTool: (tool, params) => this.runDeviceTool(tool, params, connection),
+      onCallTool: async (tool, params) => {
+        const routed = routedSessionUuidFromResult(
+          await this.runDeviceTool(tool, params, connection),
+        );
+        if (routed) {
+          routedEchoes.set(params, routed);
+        }
+      },
       toolResultFor: (tool, params) => {
+        const routed = routedEchoes.get(params);
         if (!this.minted) {
           return undefined;
         }
         if (tool === "provisionDevice") {
           return provisionDeviceResult(this.minted, String(params.deviceId));
         }
-        return tool === "getAndroid" ? deviceStartResult(this.minted) : undefined;
+        if (tool === "getAndroid") {
+          return deviceStartResult(this.minted);
+        }
+        return routed
+          ? withRoutedSessionMeta({ content: [{ type: "text", text: "success" }] }, routed)
+          : undefined;
       },
       onCallDaemonMethod: async (method, params) => {
         if (method !== "daemon/heartbeat") {
@@ -589,9 +608,16 @@ export class LivenessScenario {
     return this.startTokenlessHeartbeats(sessionId, JUNIT_HEARTBEAT_MS);
   }
 
-  /** A device tool call the agent routes by `deviceId`, with no session UUID. */
-  async selectorCall(deviceId: string, tool = "observe"): Promise<void> {
-    await this.proxy.callTool(tool, { deviceId });
+  /**
+   * A device tool call the agent routes by `deviceId`, with no session UUID. A control call by
+   * default: a read is watching, which the proxy never credits as use (#10964, #10974).
+   */
+  async selectorCall(
+    deviceId: string,
+    tool = "rotate",
+    args: Record<string, unknown> = { orientation: "portrait" },
+  ): Promise<void> {
+    await this.proxy.callTool(tool, { ...args, deviceId });
   }
 
   /**

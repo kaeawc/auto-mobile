@@ -931,6 +931,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
 
     const readOnly = isDeviceReadOnlyCall(options, args);
+    if (readOnly && execution) {
+      // A read is not use of the session it runs under, so it is never echoed as routed (#10974).
+      executionTracker.markDeviceReadCall(execution.executionId);
+    }
     // A sessionless read-only call that would land on a held device watches it through the
     // read-only path: no readiness, pin or settings work on the holder's device (#10830).
     const watchedDeviceId = await this.heldDeviceToWatch({

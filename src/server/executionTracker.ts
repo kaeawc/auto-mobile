@@ -54,6 +54,11 @@ interface ActiveExecution {
    */
   sessionAdmitted?: boolean;
   /**
+   * The call was a device read (`deviceReadOnly` for its args): watching, which is not use of the
+   * session it ran under (#10964, #10974).
+   */
+  deviceReadCall?: boolean;
+  /**
    * Reads the request's current absolute deadline (live: progress may extend it), on the
    * tracker's clock. Undefined when the call was admitted without a deadline (#10712).
    */
@@ -409,6 +414,31 @@ export class ExecutionTracker {
       );
     }
     return cancelled;
+  }
+
+  /** Mark an execution as a device read (`deviceReadOnly`), which does not use its session. */
+  markDeviceReadCall(executionId: string): void {
+    const execution = this.executions.get(executionId);
+    if (execution) {
+      execution.deviceReadCall = true;
+    }
+  }
+
+  /**
+   * The session a running execution was admitted under and used (#10974): its explicit session or
+   * the one routing resolved for it (autolock, or the holder of a `deviceId`-only call). Undefined
+   * for a call not admitted under a session, a device read, or an inventory read.
+   */
+  getAdmittedSessionUse(executionId: string): string | undefined {
+    const execution = this.executions.get(executionId);
+    if (
+      !execution?.sessionAdmitted ||
+      execution.deviceReadCall ||
+      execution.readOnlySessionAccess
+    ) {
+      return undefined;
+    }
+    return execution.sessionUuid ?? execution.resolvedAutolockSessionUuid;
   }
 
   /** Mark an execution as a read-only inventory call, whose end is not session use. */

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_BOUND_SESSION_REPLAY_TTL_MS, DAEMON_VERSION } from "../../src/daemon/constants";
+import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -92,7 +93,9 @@ describe("#10823: the daemon is authoritative for idle release", () => {
                   },
                 ],
               }
-            : undefined;
+            : name === "pressButton"
+              ? withRoutedSessionMeta({ content: [{ type: "text", text: "ok" }] }, SESSION)
+              : undefined;
       },
     });
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -208,17 +211,18 @@ describe("#10823: the daemon is authoritative for idle release", () => {
     await expect(proxy.callTool("observe", {})).rejects.toThrow(/Call getAndroid or getApple/);
   });
 
-  test("a serial the proxy never recorded still credits the only live session", async () => {
+  test("a serial the proxy never recorded credits the session the daemon routed it to (#10974)", async () => {
     // The daemon kept the session when the same device came back on emulator-5560; its selector
-    // matches the new identity, but the proxy only ever saw emulator-5554.
+    // matches the new identity, but the proxy only ever saw emulator-5554. The daemon echoes the
+    // session it routed the call to, and the proxy credits that.
     daemonReportsIdleRelease = false;
     await proxy.callTool("getAndroid", {});
     for (let elapsed = 0; elapsed < PROXY_WINDOW_MS * 5; elapsed += 60_000) {
       await advance(60_000);
-      await proxy.callTool("observe", { deviceId: "emulator-5560" });
+      await proxy.callTool("pressButton", { deviceId: "emulator-5560", button: "back" });
     }
     expect(client.callToolCalls.at(-1)).toMatchObject({
-      toolName: "observe",
+      toolName: "pressButton",
       params: { deviceId: "emulator-5560" },
     });
     const before = heartbeatCount();

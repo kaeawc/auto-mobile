@@ -158,6 +158,16 @@ struct DemosTab: View {
                     }
 
                     NavigationLink {
+                        PasteTargetsDemo()
+                    } label: {
+                        DemoRow(
+                            title: "Paste Targets",
+                            description: "Fields that reject or hide pasted text",
+                            icon: "doc.on.clipboard"
+                        )
+                    }
+
+                    NavigationLink {
                         UIKitSemanticLinksDemo()
                     } label: {
                         DemoRow(
@@ -1475,4 +1485,66 @@ struct NestedSelectionDemo: View {
         .padding(.horizontal, 12)
         .navigationTitle("Nested Selection")
     }
+}
+
+
+/// Fixture for verifying clipboard paste outcome reporting: a text field that
+/// rejects paste (Cmd+V is dropped), a secure field that accepts it but never
+/// exposes its value, and an ordinary field that accepts it.
+struct PasteTargetsDemo: View {
+    @State private var plain = ""
+    @State private var secure = ""
+    @Environment(\.autoMobileTheme) private var theme
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Paste targets")
+                    .font(theme.typography.titleMedium)
+                    .foregroundStyle(theme.textPrimary)
+
+                PasteRejectingField(placeholder: "Rejects paste", identifier: "paste_rejecting_field")
+                    .frame(height: 40)
+
+                SecureField("Secure field", text: $secure)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("paste_secure_field")
+
+                TextField("Plain field", text: $plain)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("paste_plain_field")
+            }
+            .padding()
+        }
+        .playgroundContent()
+        .navigationTitle("Paste Targets")
+        .navigationBarTitleDisplayMode(.inline)
+        .trackNavigation(destination: "PasteTargetsDemo")
+    }
+}
+
+private final class PasteRejectingTextField: UITextField {
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(UIResponderStandardEditActions.paste(_:)) {
+            return false
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func paste(_: Any?) {}
+}
+
+private struct PasteRejectingField: UIViewRepresentable {
+    let placeholder: String
+    let identifier: String
+
+    func makeUIView(context _: Context) -> UITextField {
+        let field = PasteRejectingTextField()
+        field.borderStyle = .roundedRect
+        field.placeholder = placeholder
+        field.accessibilityIdentifier = identifier
+        return field
+    }
+
+    func updateUIView(_: UITextField, context _: Context) {}
 }

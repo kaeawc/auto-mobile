@@ -403,6 +403,8 @@ describe("DaemonMcpProxy", () => {
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
               claimLivenessOwnership: true,
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           { method: "tools/list", params: { sessionUuid: "device-session-a" } },
@@ -425,6 +427,8 @@ describe("DaemonMcpProxy", () => {
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
               claimLivenessOwnership: true,
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           { method: "tools/list", params: { sessionUuid: "device-session-b" } },
@@ -496,6 +500,8 @@ describe("DaemonMcpProxy", () => {
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
               claimLivenessOwnership: true,
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           {
@@ -539,6 +545,8 @@ describe("DaemonMcpProxy", () => {
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
               claimLivenessOwnership: true,
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           {
@@ -611,6 +619,8 @@ describe("DaemonMcpProxy", () => {
             livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
             livenessOwnerToken: expect.any(String),
             claimLivenessOwnership: true,
+            reportIdleRelease: true,
+            reportDaemonInstance: true,
           },
         };
         // The best-effort establishment claim, then the keeper tick that finds the socket lost.
@@ -3935,6 +3945,8 @@ describe("DaemonMcpProxy", () => {
               livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
               livenessOwnerToken: expect.any(String),
               claimLivenessOwnership: true,
+              reportIdleRelease: true,
+              reportDaemonInstance: true,
             },
           },
           { method: "tools/list", params: { sessionUuid: "session-a" } },
@@ -5768,6 +5780,8 @@ describe("DaemonMcpProxy", () => {
                 livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
                 livenessOwnerToken: expect.any(String),
                 claimLivenessOwnership: true,
+                reportIdleRelease: true,
+                reportDaemonInstance: true,
               },
             },
             {
@@ -5777,6 +5791,8 @@ describe("DaemonMcpProxy", () => {
                 livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
                 livenessOwnerToken: expect.any(String),
                 claimLivenessOwnership: true,
+                reportIdleRelease: true,
+                reportDaemonInstance: true,
               },
             },
           ]);

@@ -231,6 +231,14 @@ function isSuspectRefusalRetryable(
 }
 
 /** A `daemon_stalled` / `proxy_stalled` handover recorded for one session (#10053). */
+/** The daemon's idle-release instant for a session, as one heartbeat ack reported it (#10823). */
+interface DaemonIdleReport {
+  /** Epoch-ms instant the daemon would idle-release the session. */
+  releaseAt: number;
+  /** Proxy-clock time the ack carrying it arrived. */
+  reportedAt: number;
+}
+
 interface StallHandoverRecord {
   handover: LivenessHandover;
   delivered: boolean;
@@ -1166,7 +1174,7 @@ export class DaemonMcpProxy {
    * from its own environment, so this - not `boundSessionReplayTtlMs` - decides while the daemon
    * answers. Absent for a daemon that reports nothing.
    */
-  private readonly daemonIdleReleaseAt = new Map<string, number>();
+  private readonly daemonIdleReports = new Map<string, DaemonIdleReport>();
   /** Device each held session runs on, learned from acquisition results and explicit calls. */
   private readonly sessionDeviceIds = new Map<string, string>();
   /**
@@ -4038,26 +4046,32 @@ export class DaemonMcpProxy {
     }
     const releaseAt = (ack as { idleReleaseAt?: unknown } | null | undefined)?.idleReleaseAt;
     if (typeof releaseAt === "number" && Number.isFinite(releaseAt)) {
-      this.daemonIdleReleaseAt.set(sessionUuid, releaseAt);
+      this.daemonIdleReports.set(sessionUuid, { releaseAt, reportedAt: this.timer.now() });
     } else {
-      this.daemonIdleReleaseAt.delete(sessionUuid);
+      this.daemonIdleReports.delete(sessionUuid);
     }
   }
 
   /**
-   * The daemon is authoritative for idle release: while it answers heartbeats and its last report
-   * puts the idle release in the future, the proxy's own idle clock (its environment, its call
-   * bookkeeping) must not retire the session. With no recent ack or no report, the daemon is
-   * unreachable or silent and the local clock is the fallback (#10823).
+   * The daemon is authoritative for idle release (#10823, #10972): the proxy's own idle clock (its
+   * environment, its call bookkeeping) only stands in for a daemon that reports nothing. Once the
+   * daemon has reported an idle-release instant, the local window never retires the session on its
+   * own. It is kept:
+   * - while liveness recovery runs for it: a missed ack is not evidence of idleness;
+   * - while the reported instant is in the future, however long ago the last ack arrived;
+   * - while the report predates its instant: a tool call since then (inside the daemon's grace)
+   *   may have moved it, so only a heartbeat answered at or after the instant proves it passed.
+   * A not-found answer or a release notification ends the session through their own paths.
    */
   private daemonKeepsSessionInUse(sessionUuid: string): boolean {
-    const releaseAt = this.daemonIdleReleaseAt.get(sessionUuid);
-    const ackedAt = this.livenessAcks.get(sessionUuid);
-    if (releaseAt === undefined || ackedAt === undefined) {
+    if (this.livenessRecovery.isRecovering(sessionUuid)) {
+      return true;
+    }
+    const report = this.daemonIdleReports.get(sessionUuid);
+    if (report === undefined) {
       return false;
     }
-    const now = this.timer.now();
-    return now - ackedAt < this.heartbeatLeashMs && now < releaseAt;
+    return this.timer.now() < report.releaseAt || report.reportedAt < report.releaseAt;
   }
 
   private hasSessionCallInFlight(sessionUuid: string): boolean {
@@ -4506,11 +4520,12 @@ export class DaemonMcpProxy {
       return;
     }
     try {
-      await this.client.callDaemonMethod(
+      const ack = await this.client.callDaemonMethod(
         DAEMON_HEARTBEAT_METHOD,
-        this.boundSessionHeartbeatParams(sessionUuid, true),
+        this.boundSessionHeartbeatParams(sessionUuid, true, true),
       );
       if (this.boundSessionUuid === sessionUuid && !this.terminalBoundSession) {
+        this.noteDaemonIdleEvidence(sessionUuid, ack);
         this.livenessOwnershipClaimSent = true;
         // A heartbeat ack proves liveness, not use: it must not refresh the replay lease (#10656).
         this.livenessAcks.set(sessionUuid, this.timer.now());
@@ -4767,10 +4782,13 @@ export class DaemonMcpProxy {
         }
         await this.ensureConnected();
         attemptedClient = this.requireClient();
-        await attemptedClient.callDaemonMethod(
+        const ack = await attemptedClient.callDaemonMethod(
           DAEMON_HEARTBEAT_METHOD,
-          this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership),
+          this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership, true),
         );
+        if (this.isHeldSession(sessionUuid)) {
+          this.noteDaemonIdleEvidence(sessionUuid, ack);
+        }
       });
     } catch (error) {
       if (attemptedClient && error instanceof DaemonUnavailableError) {
@@ -5538,7 +5556,7 @@ export class DaemonMcpProxy {
    */
   private forgetSessionLivenessState(sessionUuid: string, keepHandover = false): void {
     this.livenessAcks.delete(sessionUuid);
-    this.daemonIdleReleaseAt.delete(sessionUuid);
+    this.daemonIdleReports.delete(sessionUuid);
     this.livenessConflictLogged.delete(sessionUuid);
     if (!keepHandover) {
       this.sessionDeviceIds.delete(sessionUuid);
@@ -5577,26 +5595,42 @@ export class DaemonMcpProxy {
     if (!sessionUuid || !this.latestBindingClaimable() || this.closing) {
       return;
     }
-    if (this.isBoundSessionReplayExpired()) {
-      // Backstop for a missed session-released notification (#10702): an idle binding is retired
-      // here, so the keeper stops instead of heartbeating it until the next call arrives.
-      this.fenceBoundSessionUuid(sessionUuid, "replay-lease-expired");
-      return;
-    }
     if (this.latestBindingNotFound === sessionUuid) {
       // The daemon answered that it does not know this session; heartbeating it again cannot help.
+      this.retireIdleLatestBinding(sessionUuid);
       return;
     }
+    // Heartbeat first, then judge idleness (#10972): the judgement uses this tick's report, and a
+    // session the daemon already released answers not-found with its own reason, which the agent
+    // then sees instead of the proxy's.
     // A caller that explicitly schedules heartbeats beyond the lease cannot
     // maintain daemon ownership by cadence. Preserve that opt-out's prior
     // single-flight behavior (used by replay-lease tests).
-    if (this.heartbeatIntervalMs >= this.heartbeatLeashMs) {
-      await this.sendBoundSessionHeartbeat();
-      return;
+    try {
+      if (this.heartbeatIntervalMs >= this.heartbeatLeashMs) {
+        await this.sendBoundSessionHeartbeat();
+      } else {
+        await this.heartbeatWithStallDetection(sessionUuid, (isCurrent) =>
+          this.sendBoundSessionHeartbeat(isCurrent),
+        );
+      }
+    } finally {
+      this.retireIdleLatestBinding(sessionUuid);
     }
-    await this.heartbeatWithStallDetection(sessionUuid, (isCurrent) =>
-      this.sendBoundSessionHeartbeat(isCurrent),
-    );
+  }
+
+  /**
+   * Backstop for a missed session-released notification (#10702): an idle binding is retired here,
+   * so the keeper stops instead of heartbeating it until the next call arrives.
+   */
+  private retireIdleLatestBinding(sessionUuid: string): void {
+    if (
+      this.boundSessionUuid === sessionUuid &&
+      !this.terminalBoundSession &&
+      this.isBoundSessionReplayExpired()
+    ) {
+      this.fenceBoundSessionUuid(sessionUuid, "replay-lease-expired");
+    }
   }
 
   private async sendBoundSessionHeartbeat(isCurrent: () => boolean = () => true): Promise<void> {
@@ -5651,6 +5685,15 @@ export class DaemonMcpProxy {
    */
   private stopHeartbeatingUnknownLatestBinding(sessionUuid: string, releaseReason?: string): void {
     if (this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
+      return;
+    }
+    // A not-found answer is no idle report: the daemon's instant no longer describes the session.
+    this.daemonIdleReports.delete(sessionUuid);
+    if (releaseReason) {
+      // The daemon recorded why it released the session, so it is not a replacement daemon that
+      // may still restore it: fence with the daemon's reason, which a missed release notification
+      // would have carried (#10972).
+      this.fenceBoundSessionUuid(sessionUuid, releaseReason);
       return;
     }
     if (this.latestBindingNotFound !== sessionUuid) {
@@ -6488,7 +6531,7 @@ export class DaemonMcpProxy {
     this.clearBoundSessionUuid();
     this.otherHeldSessions.clear();
     this.livenessAcks.clear();
-    this.daemonIdleReleaseAt.clear();
+    this.daemonIdleReports.clear();
     this.sessionDeviceIds.clear();
     this.sessionPlatforms.clear();
     this.stallHandovers.clear();

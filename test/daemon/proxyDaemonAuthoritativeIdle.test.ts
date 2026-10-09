@@ -15,7 +15,7 @@ import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
 const INTERVAL_MS = 2_000;
 const PROXY_WINDOW_MS = DAEMON_BOUND_SESSION_REPLAY_TTL_MS;
-const DAEMON_WINDOW_MS = PROXY_WINDOW_MS * 5;
+const LONG_DAEMON_WINDOW_MS = PROXY_WINDOW_MS * 5;
 const SESSION = "android-session";
 
 function deviceStartResult(): { content: Array<{ type: string; text: string }> } {
@@ -39,6 +39,10 @@ describe("#10823: the daemon is authoritative for idle release", () => {
   /** What the fake daemon's heartbeat ack says; empty models a daemon that reports nothing. */
   let daemonMethodResults: Map<string, unknown>;
   let daemonReportsIdleRelease: boolean;
+  /** The daemon's own idle window; its acks report the instant this long after the last call. */
+  let daemonWindowMs: number;
+  /** Heartbeats sent before this time are never answered (an ack gap). */
+  let heartbeatGapUntil: number;
   let isAvailableSpy: ReturnType<typeof spyOn>;
   let warnSpy: ReturnType<typeof spyOn>;
   let infoSpy: ReturnType<typeof spyOn>;
@@ -55,7 +59,7 @@ describe("#10823: the daemon is authoritative for idle release", () => {
     if (daemonReportsIdleRelease) {
       daemonMethodResults.set("daemon/heartbeat", {
         sessionId: SESSION,
-        idleReleaseAt: timer.now() + DAEMON_WINDOW_MS,
+        idleReleaseAt: timer.now() + daemonWindowMs,
       });
     }
   }
@@ -64,11 +68,31 @@ describe("#10823: the daemon is authoritative for idle release", () => {
     timer = new FakeTimer();
     daemonMethodResults = new Map();
     daemonReportsIdleRelease = true;
+    daemonWindowMs = LONG_DAEMON_WINDOW_MS;
+    heartbeatGapUntil = 0;
     client = new FakeDaemonClient({
       daemonMethodResults,
+      onCallDaemonMethod: (method) =>
+        method === "daemon/heartbeat" && timer.now() < heartbeatGapUntil
+          ? new Promise(() => {})
+          : undefined,
       toolResultFor: (name) => {
         daemonSawToolCall();
-        return name === "getAndroid" ? deviceStartResult() : undefined;
+        return name === "getAndroid"
+          ? deviceStartResult()
+          : name === "getApple"
+            ? {
+                content: [
+                  {
+                    type: "text",
+                    text: JSON.stringify({
+                      platform: "ios",
+                      runtime: { deviceId: "SIM-1", session: { sessionUuid: "ios-session" } },
+                    }),
+                  },
+                ],
+              }
+            : undefined;
       },
     });
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -110,11 +134,71 @@ describe("#10823: the daemon is authoritative for idle release", () => {
 
   test("the proxy retires the session once the daemon's own deadline passes", async () => {
     await proxy.callTool("getAndroid", {});
-    await advance(DAEMON_WINDOW_MS + INTERVAL_MS * 3);
+    await advance(daemonWindowMs + INTERVAL_MS * 3);
     await expect(proxy.callTool("observe", {})).rejects.toThrow(/Call getAndroid or getApple/);
     const afterWindow = heartbeatCount();
     await advance(INTERVAL_MS * 10);
     expect(heartbeatCount()).toBe(afterWindow);
+  });
+
+  // #10972 P7d: one unanswered heartbeat does not hand idleness back to the proxy's window.
+  test("an ack gap past the proxy's window keeps the session the daemon still reports in use", async () => {
+    await proxy.callTool("getAndroid", {});
+    await advance(PROXY_WINDOW_MS + 30_000);
+    // 2:30 into the pause the daemon stops acknowledging heartbeats for 5 s.
+    heartbeatGapUntil = timer.now() + 5_000;
+    await advance(10_000);
+
+    await proxy.callTool("observe", {});
+    expect(client.callToolCalls.at(-1)).toMatchObject({
+      toolName: "observe",
+      params: { sessionUuid: SESSION },
+    });
+    const before = heartbeatCount();
+    await advance(INTERVAL_MS * 3);
+    expect(heartbeatCount()).toBeGreaterThan(before);
+  });
+
+  // #10972 P7e: the same for a held session, which the keeper evicts on the local window.
+  test("an ack gap does not evict a held session the daemon still reports in use", async () => {
+    await proxy.callTool("getAndroid", {});
+    await proxy.callTool("getApple", {});
+    // Android is held behind the iOS binding; the agent keeps driving iOS only.
+    for (let elapsed = 0; elapsed < PROXY_WINDOW_MS + 30_000; elapsed += 30_000) {
+      await advance(30_000);
+      await proxy.callTool("observe", { sessionUuid: "ios-session" });
+    }
+    heartbeatGapUntil = timer.now() + 8_000;
+    await advance(12_000);
+
+    const heartbeatsFor = (sessionUuid: string) =>
+      client.callDaemonMethodCalls.filter(
+        (call) => call.method === "daemon/heartbeat" && call.params.sessionId === sessionUuid,
+      ).length;
+    const before = heartbeatsFor(SESSION);
+    await advance(INTERVAL_MS * 3);
+    expect(heartbeatsFor(SESSION)).toBeGreaterThan(before);
+  });
+
+  // #10972 #1: the instant the last ack reported has passed, but that ack predates it; a call the
+  // proxy did not see (inside the daemon's grace) may have moved it. Only a fresh ack can tell.
+  test("a reported instant that passed after its ack is re-asked, not acted on", async () => {
+    daemonWindowMs = PROXY_WINDOW_MS;
+    await proxy.callTool("getAndroid", {});
+    const reportedRelease = timer.now() + PROXY_WINDOW_MS;
+    await advance(PROXY_WINDOW_MS - 500);
+    // Use the proxy never credited (another client's input on this session) moves the instant.
+    daemonMethodResults.set("daemon/heartbeat", {
+      sessionId: SESSION,
+      idleReleaseAt: timer.now() + PROXY_WINDOW_MS,
+    });
+    await advance(reportedRelease - timer.now() + INTERVAL_MS * 2);
+
+    await proxy.callTool("observe", {});
+    expect(client.callToolCalls.at(-1)).toMatchObject({
+      toolName: "observe",
+      params: { sessionUuid: SESSION },
+    });
   });
 
   test("a daemon that reports nothing leaves the proxy's own window as the fallback", async () => {

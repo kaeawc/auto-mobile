@@ -22,6 +22,12 @@ import { isUnresolvedAndroidEmulatorName } from "../devices/deviceIdentityEviden
 import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
 import { McpSessionRecoveryInProgressError } from "../daemon/devicePool";
+import {
+  buildProvisionDeviceRecoveryEvidence,
+  type ProvisionDeviceFailureBoundary,
+  type ProvisionDeviceRecoveryEvidence,
+  type ProvisionDeviceRecoveryInput,
+} from "./provisionDeviceRecoveryEvidence";
 import { getCurrentBuildIdentity } from "../daemon/buildIdentity";
 import { DAEMON_VERSION } from "../daemon/constants";
 import {
@@ -219,12 +225,19 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     }
 
     const sharedController = new AbortController();
-    const promise = executeProvisionDevice(args, fingerprint, sharedController.signal);
+    const lifecycleEvidence: NonNullable<ActiveProvisionDeviceOperation["lifecycleEvidence"]> = {};
+    const promise = executeProvisionDevice(
+      args,
+      fingerprint,
+      sharedController.signal,
+      lifecycleEvidence,
+    );
     const operation: ActiveProvisionDeviceOperation = {
       fingerprint,
       promise,
       controller: sharedController,
       waiters: 1,
+      lifecycleEvidence,
     };
     activeProvisionDeviceOperations.set(args.operationId, operation);
     void promise.then(
@@ -267,7 +280,13 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
           `[DeviceTools] provisionDevice ${args.operationId} interrupted by daemon handoff: ${errorMessage(error)}`,
           error,
         );
-        return provisionDeviceErrorResponse(error, args.operationId);
+        return provisionDeviceErrorResponse(
+          error,
+          args.operationId,
+          provisionDeviceRecovery(args.operationId, "daemon_handoff", operation, {
+            originalError: { code: error.code, message: error.message },
+          }),
+        );
       }
       if (isProvisionDeviceCallerAbort(error, signal)) {
         const settled = await waitForProvisionDeviceSettlement(
@@ -298,7 +317,14 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
             : `provisionDevice request for operationId '${args.operationId}' was cancelled by ` +
                 "the caller; the operation continued for other callers and its result can be collected by " +
                 "re-issuing the same operationId.",
-          { operationId: args.operationId, operationContinues: !cancelledOperation },
+          {
+            operationId: args.operationId,
+            operationContinues: !cancelledOperation,
+            recovery: provisionDeviceRecovery(args.operationId, "caller_cancellation", operation, {
+              settled,
+              retryAfterMs: PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
+            }),
+          },
         );
       }
       logger.warn(
@@ -309,10 +335,27 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     }
   }
 
+  function provisionDeviceRecovery(
+    operationId: string,
+    boundary: ProvisionDeviceFailureBoundary,
+    operation: ActiveProvisionDeviceOperation,
+    extra: Pick<ProvisionDeviceRecoveryInput, "settled" | "originalError" | "retryAfterMs">,
+  ): ProvisionDeviceRecoveryEvidence {
+    return buildProvisionDeviceRecoveryEvidence({
+      operationId,
+      boundary,
+      nowMs: getDeviceToolsDependencies().timer.now(),
+      daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
+      lifecycle: operation.lifecycleEvidence?.lifecycle,
+      ...extra,
+    });
+  }
+
   async function executeProvisionDevice(
     args: ProvisionDeviceArgs,
     fingerprint: string,
     signal: AbortSignal | undefined,
+    lifecycleEvidence: NonNullable<ActiveProvisionDeviceOperation["lifecycleEvidence"]> = {},
   ): Promise<Record<string, unknown>> {
     const deps = getDeviceToolsDependencies();
     const store = deps.provisionDeviceOperationStoreFactory();
@@ -326,6 +369,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       if (!(await store.recordLifecycleOutcome(args.operationId, attemptId, lifecycle))) {
         throw new ProvisionDeviceOperationSupersededError(args.operationId);
       }
+      lifecycleEvidence.lifecycle = lifecycle;
     };
     // ONE absolute deadline for the whole request, anchored here and sliced
     // across every phase below. A replay runs up to three phases (waiting for
@@ -887,8 +931,59 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
             `${errorMessage(finalizationError)}`,
         );
       }
-      throw new FinalizedProvisionDeviceCompletionError(error);
+      throw new FinalizedProvisionDeviceCompletionError(
+        superseded ? error : persistenceFailure(args, result, error),
+      );
     }
+  }
+
+  /**
+   * The native side effects in `result` stand even though the commit failed; the
+   * commit itself is unconfirmed, and the bound session is being released.
+   */
+  function persistenceFailure(
+    args: ProvisionDeviceArgs,
+    result: Record<string, unknown>,
+    cause: unknown,
+  ): ProvisionDeviceError {
+    const device = getPersistedProvisionDevice(result);
+    const original = toProvisionDeviceError(args, cause);
+    const stableId = device?.platform === "android" ? device.name : device?.deviceId;
+    const recovery = buildProvisionDeviceRecoveryEvidence({
+      operationId: args.operationId,
+      boundary: "result_persistence",
+      nowMs: getDeviceToolsDependencies().timer.now(),
+      daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
+      originalError: { code: original.code, message: original.message },
+      result: {
+        created: result.created === true,
+        hasSession: typeof result.sessionId === "string",
+        ...(device && stableId
+          ? {
+              device: {
+                platform: device.platform,
+                name: device.name,
+                stableId,
+                ...(device.deviceId ? { runtimeDeviceId: device.deviceId } : {}),
+              },
+            }
+          : {}),
+      },
+    });
+    // A request-deadline expiry keeps its `timeout` code (callers retry on it);
+    // the persistence boundary is still identified through the recovery evidence.
+    if (original.code === "timeout") {
+      return new ProvisionDeviceError("timeout", original.message, original.retryable, {
+        ...original.diagnostics,
+        recovery,
+      });
+    }
+    return new ProvisionDeviceError(
+      "result_persistence_failed",
+      `provisionDevice ${args.operationId} completed on the device but its result could not be persisted (${original.message}); the bound session, if any, is released. Retry the original operationId.`,
+      undefined,
+      { recovery },
+    );
   }
 
   function retireLateProvisionDeviceOperationBegin(
@@ -2663,11 +2758,25 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     };
   }
 
-  function provisionDeviceErrorResponse(error: unknown, operationId: string) {
+  function recoveryField(recovery: ProvisionDeviceRecoveryEvidence | undefined) {
+    return recovery ? { recovery } : {};
+  }
+
+  function recoveryFromError(error: unknown): ProvisionDeviceRecoveryEvidence | undefined {
+    return error instanceof ProvisionDeviceError ? error.diagnostics.recovery : undefined;
+  }
+
+  function provisionDeviceErrorResponse(
+    error: unknown,
+    operationId: string,
+    recovery?: ProvisionDeviceRecoveryEvidence,
+  ) {
     const lifecycle = lifecycleForProvisionResponseError(error);
+    const operationRecovery = recovery ?? recoveryFromError(error);
     const operationOutcome = {
       operationId,
       ...(lifecycle ? { lifecycle } : {}),
+      ...recoveryField(operationRecovery),
     };
     if (error instanceof DaemonHandoffInterruptionError) {
       return createToolErrorResponse(error.code, error.message, {

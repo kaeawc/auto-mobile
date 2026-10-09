@@ -1373,6 +1373,8 @@ export interface ActiveProvisionDeviceOperation {
   promise: Promise<Record<string, unknown>>;
   controller: AbortController;
   waiters: number;
+  /** Last lifecycle durably recorded by the running attempt; feeds recovery evidence. */
+  lifecycleEvidence?: { lifecycle?: ProvisionDeviceLifecycleOutcome };
 }
 
 export const activeProvisionDeviceOperations = new Map<string, ActiveProvisionDeviceOperation>();

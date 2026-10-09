@@ -2956,6 +2956,14 @@ describe("provisionDevice handler", () => {
       },
     });
     expect(failed.cleanup).toBeUndefined();
+    expect(failed.recovery).toMatchObject({
+      schemaVersion: 1,
+      boundary: "daemon_handoff",
+      operationId: args.operationId,
+      originalError: { code: "daemon_handoff_interrupted" },
+      freshness: { source: "snapshot" },
+    });
+    expect(failed.recovery.nextAction.automaticRetrySafe).toBe(true);
     expect(
       deviceManager
         .getExecutedOperations()
@@ -4303,7 +4311,20 @@ describe("provisionDevice handler", () => {
     expect(response).toMatchObject({
       success: false,
       error: {
-        code: "platform_command_failed",
+        code: "result_persistence_failed",
+        retryable: true,
+      },
+      recovery: {
+        boundary: "result_persistence",
+        operationId: "operation-persistence-failure",
+        device: { platform: "android", name: "phone-api-36-a", ownership: "created_by_operation" },
+        outcomes: {
+          deviceCreation: "created",
+          resultPersistence: "unconfirmed",
+          session: "release_requested",
+        },
+        originalError: { code: "platform_command_failed" },
+        nextAction: { action: "retry_original_operation", automaticRetrySafe: true },
       },
     });
 
@@ -4366,7 +4387,7 @@ describe("provisionDevice handler", () => {
     expect(releaseCalls).toBe(0);
     extendGate.resolve();
     expect(JSON.parse(((await request) as any).content[0].text).error.code).toBe(
-      "platform_command_failed",
+      "result_persistence_failed",
     );
     expect(releaseCalls).toBe(1);
     sessionManager.stopCleanupTimer();
@@ -4470,7 +4491,7 @@ describe("provisionDevice handler", () => {
     const replay = JSON.parse(((await replayRequest) as any).content[0].text);
     expect(replay).toMatchObject({
       success: false,
-      error: { code: "platform_command_failed" },
+      error: { code: "result_persistence_failed" },
     });
     expect(operationStore.failCalls).toBe(1);
     expect(sessionManager.getAllSessionIds()).toEqual([]);
@@ -4533,7 +4554,7 @@ describe("provisionDevice handler", () => {
     });
     const payload = JSON.parse((response as any).content[0].text);
 
-    expect(payload.error.code).toBe("platform_command_failed");
+    expect(payload.error.code).toBe("result_persistence_failed");
     expect(operationStore.failCalls).toBe(1);
     expect(operationStore.isFailed("release-rejection-persistence")).toBe(true);
     sessionManager.stopCleanupTimer();
@@ -4796,6 +4817,11 @@ describe("provisionDevice handler", () => {
       error: { code: "request_cancelled" },
       operationId: args.operationId,
       operationContinues: false,
+      recovery: {
+        boundary: "caller_cancellation",
+        outcomes: { settlement: "settled", deviceCreation: "unknown" },
+        nextAction: { action: "obtain_further_evidence", automaticRetrySafe: false },
+      },
     });
     expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
   });
@@ -4918,6 +4944,11 @@ describe("provisionDevice handler", () => {
     expect(cancelled).toMatchObject({
       error: { code: "request_cancelled" },
       operationContinues: false,
+      recovery: {
+        boundary: "caller_cancellation",
+        outcomes: { settlement: "settled", deviceCreation: "unknown" },
+        nextAction: { action: "obtain_further_evidence", automaticRetrySafe: false },
+      },
     });
 
     // Once cancellation is reported, a retry runs its own provision instead

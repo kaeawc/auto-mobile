@@ -49,6 +49,7 @@ describe("ProvisionDeviceError retryability", () => {
       platform_command_failed: false,
       resource_profile_unproven: false,
       runtime_incompatible: false,
+      result_persistence_failed: true,
     });
   });
 

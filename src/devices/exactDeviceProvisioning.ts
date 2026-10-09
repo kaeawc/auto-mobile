@@ -24,6 +24,7 @@ import {
   evaluateRuntimeCompatibility,
   type DeviceTypeRuntimeBounds,
 } from "../utils/ios-cmdline-tools/runtimeCompatibility";
+import type { ProvisionDeviceRecoveryEvidence } from "../server/provisionDeviceRecoveryEvidence";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../utils/toolUtils";
@@ -101,7 +102,8 @@ export type ProvisionDeviceFailureCode =
   | "unsupported"
   | "platform_command_failed"
   | "resource_profile_unproven"
-  | "runtime_incompatible";
+  | "runtime_incompatible"
+  | "result_persistence_failed";
 
 export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   Record<ProvisionDeviceFailureCode, boolean>
@@ -118,6 +120,8 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   resource_profile_unproven: false,
   // A proven model/runtime mismatch is a property of the request; only a different pair can succeed.
   runtime_incompatible: false,
+  // The device outcome is known but the result commit is unconfirmed; replaying the original operationId converges.
+  result_persistence_failed: true,
 };
 
 interface ProvisionDeviceErrorDiagnostics {
@@ -130,6 +134,8 @@ interface ProvisionDeviceErrorDiagnostics {
   resourceDrift?: DeviceResourceDrift[];
   /** Proven iOS model/runtime mismatch: requested pair, known bounds, installed alternatives. */
   runtimeCompatibility?: IosRuntimeIncompatibility;
+  /** Structured recovery evidence delivered with the error (a snapshot, not live state). */
+  recovery?: ProvisionDeviceRecoveryEvidence;
 }
 
 export interface IosRuntimeIncompatibility {

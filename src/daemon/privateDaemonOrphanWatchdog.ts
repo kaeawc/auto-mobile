@@ -50,17 +50,24 @@ export function isHarnessPrivateDaemon(
   defaultSocketPath: string,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  const marker = env[HARNESS_PRIVATE_DAEMON_ENV]?.trim();
+  const marker = firstNonBlank(env, HARNESS_PRIVATE_DAEMON_ENV);
   if (marker === "1" || marker === "0") {
     return marker === "1";
   }
-  const explicitSocket =
-    env.AUTOMOBILE_DAEMON_SOCKET_PATH?.trim() || env.AUTO_MOBILE_DAEMON_SOCKET_PATH?.trim() || "";
+  const explicitSocket = firstNonBlank(
+    env,
+    "AUTOMOBILE_DAEMON_SOCKET_PATH",
+    "AUTO_MOBILE_DAEMON_SOCKET_PATH",
+  );
   return (
     explicitSocket !== "" &&
     socketPath !== defaultSocketPath &&
-    (env.AUTOMOBILE_AUX_SOCKET_DIR?.trim() ?? "") !== ""
+    firstNonBlank(env, "AUTOMOBILE_AUX_SOCKET_DIR") !== ""
   );
+}
+
+function firstNonBlank(env: NodeJS.ProcessEnv, ...keys: string[]): string {
+  return keys.map((key) => env[key]?.trim() ?? "").find((value) => value !== "") ?? "";
 }
 
 /**

@@ -88,6 +88,14 @@ class LateCallbackFakeTimer extends FakeTimer {
   }
 }
 
+/** Yield macrotasks until `settled()` holds, bounded so a regression fails fast. */
+async function yieldUntil(settled: () => boolean, maxYields = 1000): Promise<void> {
+  for (let attempt = 0; attempt < maxYields && !settled(); attempt++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  expect(settled()).toBe(true);
+}
+
 describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
   const startupOptions: DaemonOptions = {
     enabledTools: ["listDevices", "provisionDevice", "deleteDevice"],
@@ -614,9 +622,20 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       const disconnected = new Promise<void>((resolve) => admitted.socket.once("close", resolve));
       admitted.socket.destroy();
       await disconnected;
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      const afterDisconnect = executionTracker.startExecution("tapOn", "after-disconnect");
-      executionTracker.endExecution(afterDisconnect.id);
+      // The client's close event does not order the server's own disconnect
+      // handling: Bun 1.4 delivers it later than 1.3, so a single macrotask yield
+      // is not enough. Wait for the observable effect instead.
+      await yieldUntil(() => {
+        try {
+          executionTracker.endExecution(
+            executionTracker.startExecution("tapOn", "after-disconnect").id,
+          );
+          return true;
+        } catch {
+          // Still restart-pending: the server has not processed the disconnect yet.
+          return false;
+        }
+      });
 
       const committedAdmission = await sendPersistentSocketRequest(
         acceptanceSocketPath,

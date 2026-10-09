@@ -91,6 +91,10 @@ describe("platform device preparation tools", () => {
   let sessionManager: SessionManager | undefined;
 
   beforeEach(() => {
+    // DaemonState is a process-wide singleton: a sibling file that left it
+    // initialized (shared-process or randomized runs) would hand startDevice a
+    // foreign device pool instead of "no pool", so start from a clean slate.
+    DaemonState.getInstance().reset();
     deviceUtils = new FakeDeviceUtils();
     matcher = new FakeDeviceMatcher();
     timer = new FakeTimer();

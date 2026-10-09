@@ -61,6 +61,9 @@ setup() {
   # orchestrator) may export; every test that depends on them sets them explicitly.
   unset AUTOMOBILE_UNIT_TEST_CHUNK_FILES AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE \
     AUTOMOBILE_UNIT_SHARED_PROCESS AUTOMOBILE_UNIT_SHARED_FILE_COUNT
+  # The portable watchdog's TERM-to-KILL grace is 2s in production; every
+  # timeout test would pay it, so tests shrink it (the escalation still runs).
+  export AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS=0.2
   STUB_BIN="$(mktemp -d)"
   REAL_BUN="$(command -v bun)"
   export REAL_BUN
@@ -94,7 +97,20 @@ EOF
 #!/usr/bin/env bash
 printf '%s\n' "${UNAME_S:-Linux}"
 EOF
-  chmod +x "$STUB_BIN/nproc" "$STUB_BIN/sysctl" "$STUB_BIN/uname"
+  # Lane discovery walks the real tree (~2000 unit files) in a bash loop on every
+  # invocation, ~0.5s each. Tests that do not assert on the real file set get a
+  # fixed 12-file list; anything but the discovery query reaches the real find.
+  REAL_FIND="$(command -v find)"
+  export REAL_FIND
+  cat > "$STUB_BIN/find" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == "test -type f -name *.test.ts -print" && -z "${STUB_REAL_DISCOVERY:-}" ]]; then
+  for ((i = 0; i < 12; i += 1)); do printf 'test/fixture%02d.test.ts\n' "$i"; done
+  exit 0
+fi
+exec "$REAL_FIND" "$@"
+EOF
+  chmod +x "$STUB_BIN/nproc" "$STUB_BIN/sysctl" "$STUB_BIN/uname" "$STUB_BIN/find"
   cat > "$STUB_BIN/git" <<'EOF'
 #!/usr/bin/env bash
 printf '%b' "${TIMING_CHANGED_FILES:-}"
@@ -1170,6 +1186,8 @@ EOF
 }
 
 @test "optional Bun flags classify normalized test target spellings" {
+  # Classifies the real tree's lanes, so it needs the real discovery.
+  export STUB_REAL_DISCOVERY=1
   run_lane unit --changed ./test/contracts/runAll.integration.test.ts
   [ "$status" -eq 2 ]
   [[ "$output" == *"No unit test paths were selected."* ]]
@@ -2308,14 +2326,14 @@ EOF
 @test "one watchdog bounds the complete chunk sequence rather than each fresh invocation" {
   stub_chunk_discovery
   record="$BATS_TEST_TMPDIR/chunks"
-  # Each invocation fits the 2s deadline (1.5s); their 4.5s sequence cannot. A
+  # Each invocation fits the 1s deadline (0.8s); their 4.5s sequence cannot. A
   # per-invocation watchdog would let all three finish and exit 0, so the 124
   # below proves the one deadline spans the whole sequence. The margins are
   # wide so a loaded runner's slow startup or late watchdog wake-up does not
   # change which side of the deadline each invocation lands on.
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 STUB_CHUNK_RECORD="$record" \
-    STUB_BUN_SLEEP_SECONDS=1.5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=2 \
+    STUB_BUN_SLEEP_SECONDS=0.8 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
   # The fake chunk only creates the record once it starts. On a loaded runner
@@ -2425,12 +2443,12 @@ fixture_list() {
 @test "one watchdog bounds the shared and isolated groups of a shard together" {
   stub_chunk_discovery
   write_shared_allowlist
-  # Each group fits the 2s deadline (1.5s); the pair cannot. See the chunk
+  # Each group fits the 1s deadline (0.8s); the pair cannot. See the chunk
   # watchdog test above for the margins.
   # Retries are off so the shard's single attempt is what the isolated count sees.
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     AUTOMOBILE_UNIT_SHARD_RETRIES=0 \
-    STUB_BUN_SLEEP_SECONDS=1.5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=2 \
+    STUB_BUN_SLEEP_SECONDS=0.8 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
   [ "$(grep -c -- '--isolate' "$BUN_ARGS_FILE")" -le 1 ]
@@ -2524,7 +2542,7 @@ fixture_list() {
   # See the chunk watchdog test above for the margins.
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=5 AUTOMOBILE_UNIT_SHARD_RETRIES=0 STUB_CHUNK_RECORD="$record" \
-    STUB_BUN_SLEEP_SECONDS=1.5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=2 \
+    STUB_BUN_SLEEP_SECONDS=0.8 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
   started=0

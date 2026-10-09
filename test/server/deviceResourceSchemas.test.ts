@@ -38,11 +38,9 @@ describe("device resource advertised constraints", () => {
     const set = validators.get(`${source}/setDeviceResources`)!;
     const provision = validators.get(`${source}/provisionDevice`)!;
     expect(set({ resources: {} })).toBe(false);
-    expect(provision({ operationId: "test", device, resources: {} })).toBe(false);
+    expect(provision({ device, resources: {} })).toBe(false);
     expect(set({ resources: { widgets: "enabled" } })).toBe(true);
-    expect(provision({ operationId: "test", device, resources: { widgets: "enabled" } })).toBe(
-      true,
-    );
+    expect(provision({ device, resources: { widgets: "enabled" } })).toBe(true);
   });
 
   test.each(["live", "artifact"])("%s schema leaves resource selection to runtime", (source) => {
@@ -64,11 +62,11 @@ describe("device resource advertised constraints", () => {
     "%s schema leaves resource booting validation to runtime",
     (source) => {
       const validate = validators.get(`${source}/provisionDevice`)!;
-      const args = { operationId: "test", device, resources: { widgets: "enabled" } };
+      const args = { device, resources: { widgets: "enabled" } };
       expect(validate({ ...args, boot: false })).toBe(true);
       expect(validate({ ...args, boot: true })).toBe(true);
       expect(validate(args)).toBe(true);
-      expect(validate({ operationId: "test", device, boot: false })).toBe(true);
+      expect(validate({ device, boot: false })).toBe(true);
     },
   );
 });

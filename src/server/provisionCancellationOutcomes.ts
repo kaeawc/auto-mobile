@@ -8,29 +8,32 @@ import type { Timer } from "../utils/SystemTimer";
  * for `provisionDevice` it first waits (bounded) here so the abandoned-request reply carries the
  * handler's typed `request_cancelled` envelope and its `recovery` evidence instead of a generic
  * "daemon abandoned it" error (#11074).
+ *
+ * Outcomes are keyed by the daemon-generated per-call key it forwards as
+ * `__mcpLiveDeadlineKey`; provisionDevice has no caller-supplied id (#11065).
  */
 export class ProvisionCancellationOutcomes {
   private readonly waiters = new Map<string, Array<(outcome: unknown) => void>>();
 
   /** Called by the handler once it has built its cancellation result. */
-  publish(operationId: string, outcome: unknown): void {
-    const waiting = this.waiters.get(operationId);
-    this.waiters.delete(operationId);
+  publish(requestKey: string, outcome: unknown): void {
+    const waiting = this.waiters.get(requestKey);
+    this.waiters.delete(requestKey);
     waiting?.forEach((resolve) => resolve(outcome));
   }
 
-  /** Whether a reply is currently waiting for this operation's outcome. */
-  isAwaiting(operationId: string): boolean {
-    return this.waiters.has(operationId);
+  /** Whether a reply is currently waiting for this call's outcome. */
+  isAwaiting(requestKey: string): boolean {
+    return this.waiters.has(requestKey);
   }
 
   /** Resolves with the published outcome, or undefined when none arrives within `timeoutMs`. */
-  async await(operationId: string, timeoutMs: number, timer: Timer): Promise<unknown> {
+  async await(requestKey: string, timeoutMs: number, timer: Timer): Promise<unknown> {
     let resolveOutcome: (outcome: unknown) => void = () => {};
     const outcome = new Promise<unknown>((resolve) => {
       resolveOutcome = resolve;
     });
-    this.waiters.set(operationId, [...(this.waiters.get(operationId) ?? []), resolveOutcome]);
+    this.waiters.set(requestKey, [...(this.waiters.get(requestKey) ?? []), resolveOutcome]);
     try {
       return await raceWithDeadline(outcome, {
         timer,
@@ -41,14 +44,14 @@ export class ProvisionCancellationOutcomes {
     } catch (error) {
       // Timing out is expected when the handler is slower than the bounded wait: the caller then
       // gets the generic abandonment reply, exactly as before.
-      logger.debug(`provisionDevice ${operationId} cancellation outcome not received: ${error}`);
+      logger.debug(`provisionDevice ${requestKey} cancellation outcome not received: ${error}`);
       return undefined;
     } finally {
-      const rest = (this.waiters.get(operationId) ?? []).filter((w) => w !== resolveOutcome);
+      const rest = (this.waiters.get(requestKey) ?? []).filter((w) => w !== resolveOutcome);
       if (rest.length > 0) {
-        this.waiters.set(operationId, rest);
+        this.waiters.set(requestKey, rest);
       } else {
-        this.waiters.delete(operationId);
+        this.waiters.delete(requestKey);
       }
     }
   }

@@ -225,7 +225,6 @@ describe("handler internal metadata regression guard", () => {
 
   test("provisionDevice argument seam strips full metadata and preserves session/deadline", () => {
     const args = Object.freeze({
-      operationId: "operation",
       device: {
         platform: "ios" as const,
         name: "Phone",
@@ -237,7 +236,6 @@ describe("handler internal metadata regression guard", () => {
       ...metadata,
     });
     expect(parseProvisionDeviceArgs(args)).toEqual({
-      operationId: args.operationId,
       device: args.device,
       boot: true,
       readiness: "automation",

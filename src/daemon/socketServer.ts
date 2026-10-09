@@ -917,6 +917,12 @@ export class UnixSocketServer {
   private timer: Timer;
   private readonly onFrameTrace?: (event: SocketFrameTraceEvent) => void;
   private readonly idGenerator: IdGenerator;
+  /**
+   * The daemon-generated key ({@link INTERNAL_LIVE_DEADLINE_KEY_PARAM}) last forwarded with each
+   * tools/call request. It is the only identity both this layer and the tool handler share for one
+   * call, so a cancelled provisionDevice publishes its outcome under it (#11065: no operationId).
+   */
+  private readonly forwardedCallKeys = new WeakMap<DaemonRequest, string>();
   /** Observation-only liveness probe used before an existing socket's reclaim (issue #6232). */
   private readonly socketReachability: DaemonSocketReachabilityLike;
   /** Observation-only owner check that fails every bind closed on an inconclusive probe (issue #6232). */
@@ -2183,17 +2189,17 @@ export class UnixSocketServer {
     failure: DaemonResponse | undefined,
     signal: AbortSignal | undefined,
   ): Promise<DaemonResponse | undefined> {
-    const operationId = request.params?.arguments?.operationId;
+    const requestKey = this.forwardedCallKeys.get(request);
     if (
       !failure ||
       !this.isProvisionDeviceCall(request) ||
-      typeof operationId !== "string" ||
+      requestKey === undefined ||
       !(signal?.reason instanceof ClientRequestCancellation)
     ) {
       return undefined;
     }
     const outcome = await provisionCancellationOutcomes.await(
-      operationId,
+      requestKey,
       PROVISION_DEVICE_SETTLEMENT_WAIT_MS + PROVISION_CANCELLATION_OUTCOME_GRACE_MS,
       this.timer,
     );
@@ -7071,6 +7077,7 @@ export class UnixSocketServer {
         // `liveDeadlineRegistry` instead of only the frozen snapshot forwarded
         // through `INTERNAL_MCP_REQUEST_TIMEOUT_PARAM` (issue #6222 P1 reopen).
         const liveDeadlineKey = this.idGenerator.next();
+        this.forwardedCallKeys.set(request, liveDeadlineKey);
         registerLiveDeadline(liveDeadlineKey, deadline);
         let cleanup = () => unregisterLiveDeadline(liveDeadlineKey);
 

@@ -1762,7 +1762,6 @@ function acquisitionSessionUuid(payload: JsonObject, tool: string): string {
 
 function provisionRequest(args: AcceptanceArgs): JsonObject {
   return {
-    operationId: crypto.randomUUID(),
     device:
       args.platform === "android"
         ? {

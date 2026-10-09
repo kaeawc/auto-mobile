@@ -177,6 +177,7 @@ interface FakeToolCall {
   name: string;
   signal: AbortSignal | undefined;
   settle: (value: unknown) => void;
+  arguments?: Record<string, unknown>;
 }
 
 function createFakeDaemonState() {
@@ -372,10 +373,14 @@ describe("UnixSocketServer provisionDevice cancel reply (issue #11074)", () => {
     );
     server.mcpClientFactory = async () => ({
       listTools: async () => ({ tools: [] }),
-      callTool: (params: { name: string }, _schema: unknown, options?: { signal?: AbortSignal }) =>
+      callTool: (
+        params: { name: string; arguments?: Record<string, unknown> },
+        _schema: unknown,
+        options?: { signal?: AbortSignal },
+      ) =>
         new Promise((resolve, reject) => {
           const signal = options?.signal;
-          calls.push({ name: params.name, signal, settle: resolve });
+          calls.push({ name: params.name, signal, settle: resolve, arguments: params.arguments });
           signal?.addEventListener("abort", () => {
             reject(signal.reason);
             callsChanged.notify();
@@ -395,7 +400,7 @@ describe("UnixSocketServer provisionDevice cancel reply (issue #11074)", () => {
     await removeSocketFile(socketPath);
   });
 
-  async function cancelProvision(operationId: string): Promise<DaemonResponse> {
+  async function cancelProvision(): Promise<DaemonResponse> {
     const socket = new Socket();
     const responses = new Map<string, DaemonResponse>();
     const responded = new Condition();
@@ -417,7 +422,7 @@ describe("UnixSocketServer provisionDevice cancel reply (issue #11074)", () => {
           id: "prov",
           type: "mcp_request",
           method: "tools/call",
-          params: { name: "provisionDevice", arguments: { operationId } },
+          params: { name: "provisionDevice", arguments: {} },
         } satisfies DaemonRequest) + "\n",
       );
       await callsChanged.until(() => calls.length === 1, "the provision forward to start");
@@ -430,12 +435,15 @@ describe("UnixSocketServer provisionDevice cancel reply (issue #11074)", () => {
         } satisfies DaemonRequest) + "\n",
       );
       await callsChanged.until(() => calls[0].signal?.aborted === true, "the forward to abort");
-      // The handler finishes its rollback after the daemon abandoned the request.
+      // The handler finishes its rollback after the daemon abandoned the request, and publishes
+      // under the per-call key the daemon forwarded with it (#11065: no operationId).
+      const callKey = calls[0].arguments?.__mcpLiveDeadlineKey;
+      expect(typeof callKey).toBe("string");
       await callsChanged.until(
-        () => provisionCancellationOutcomes.isAwaiting(operationId),
+        () => provisionCancellationOutcomes.isAwaiting(callKey as string),
         "the daemon to await the handler result",
       );
-      provisionCancellationOutcomes.publish(operationId, {
+      provisionCancellationOutcomes.publish(callKey as string, {
         isError: true,
         content: [{ type: "text", text: '{"error":{"code":"request_cancelled"},"recovery":{}}' }],
       });
@@ -447,7 +455,7 @@ describe("UnixSocketServer provisionDevice cancel reply (issue #11074)", () => {
   }
 
   test("the reply to a cancelled provisionDevice carries the handler's request_cancelled result", async () => {
-    const response = await cancelProvision("op-cancel-reply");
+    const response = await cancelProvision();
 
     expect(response.success).toBe(true);
     expect(response.result.content[0].text).toContain("request_cancelled");
@@ -468,7 +476,7 @@ describe("UnixSocketServer provisionDevice cancel reply (issue #11074)", () => {
           id: "prov2",
           type: "mcp_request",
           method: "tools/call",
-          params: { name: "provisionDevice", arguments: { operationId: "op-no-result" } },
+          params: { name: "provisionDevice", arguments: {} },
         }) + "\n",
       );
       await callsChanged.until(() => calls.length === 1, "the provision forward to start");

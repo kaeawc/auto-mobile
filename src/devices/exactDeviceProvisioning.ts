@@ -74,10 +74,8 @@ export interface ExactDeviceProvisionRequest {
   name: string;
   deviceId?: string;
   spec: ExactDeviceSpecification;
-  /** Reconcile mutable configuration only for a replay of the same operation. */
-  reconcileExistingConfiguration?: boolean;
-  /** Persist ownership immediately before creating a previously absent device. */
-  onBeforeCreate?: () => Promise<void>;
+  /** Note ownership immediately before creating a previously absent device. */
+  onBeforeCreate?: () => void;
   /** Shared lifecycle lease held by a higher-level operation through boot/readiness. */
   lifecycleLease?: VirtualDeviceLifecycleLease;
   /** Absolute deadline for acquiring lifecycle coordination. */
@@ -103,8 +101,7 @@ export type ProvisionDeviceFailureCode =
   | "unsupported"
   | "platform_command_failed"
   | "resource_profile_unproven"
-  | "runtime_incompatible"
-  | "result_persistence_failed";
+  | "runtime_incompatible";
 
 export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   Record<ProvisionDeviceFailureCode, boolean>
@@ -123,8 +120,6 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   resource_profile_unproven: false,
   // A proven model/runtime mismatch is a property of the request; only a different pair can succeed.
   runtime_incompatible: false,
-  // The device outcome is known but the result commit is unconfirmed; replaying the original operationId converges.
-  result_persistence_failed: true,
 };
 
 interface ProvisionDeviceErrorDiagnostics {
@@ -500,7 +495,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       await this.assertIosPairCompatible(request, request.spec as IosDeviceSpecification);
     }
 
-    await request.onBeforeCreate?.();
+    request.onBeforeCreate?.();
     if (request.platform === "android") {
       return await trackAmbient("provision:createAndroid", () =>
         this.createAndroid(request, request.spec as AndroidDeviceSpecification, displayCutout),
@@ -666,19 +661,6 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     const config = await this.dependencies.androidConfigReader.readConfig(existing.name);
     if (sameAndroidSpecification(spec, config)) {
       return;
-    }
-    if (
-      request.reconcileExistingConfiguration &&
-      spec.configuration !== undefined &&
-      existing.isRunning === false &&
-      existing.isRunningStateKnown !== false &&
-      sameAndroidDeviceIdentity(spec, config)
-    ) {
-      await this.configureAndroid(existing.name, spec.configuration, request.signal);
-      const reconciled = await this.dependencies.androidConfigReader.readConfig(existing.name);
-      if (sameAndroidSpecification(spec, reconciled)) {
-        return;
-      }
     }
     throw new ProvisionDeviceError(
       "identity_conflict",

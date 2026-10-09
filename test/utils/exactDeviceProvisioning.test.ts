@@ -50,7 +50,6 @@ describe("ProvisionDeviceError retryability", () => {
       platform_command_failed: false,
       resource_profile_unproven: false,
       runtime_incompatible: false,
-      result_persistence_failed: true,
     });
   });
 
@@ -96,7 +95,7 @@ describe("DefaultExactDeviceProvisioner", () => {
         platform: "android",
         name: "phone-api-36-a",
         spec: { ...ANDROID_SPEC, configuration: {} },
-        onBeforeCreate: async () => {},
+        onBeforeCreate: () => {},
       });
       expect(cache.getCachedByName()).toBeUndefined();
     } finally {
@@ -239,7 +238,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       platform: "android",
       name: "phone-api-36-a",
       spec: ANDROID_SPEC,
-      onBeforeCreate: async () => {
+      onBeforeCreate: () => {
         creationStarted = true;
       },
     });
@@ -487,7 +486,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       platform: "android" as const,
       name: "phone-api-36-a",
       spec: ANDROID_SPEC,
-      onBeforeCreate: async () => {},
+      onBeforeCreate: () => {},
     };
 
     const first = provisioner.provision(request);
@@ -689,48 +688,6 @@ describe("DefaultExactDeviceProvisioner", () => {
     }
   });
 
-  test("reconciles a matching GPU mode when the existing AVD has GPU disabled", async () => {
-    let gpuEnabled = false;
-    let writes = 0;
-    const provisioner = new DefaultExactDeviceProvisioner({
-      listDeviceImages: async () => [androidImage("phone-api-36-a")],
-      isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
-      androidConfigReader: {
-        readConfig: async () => ({
-          apiLevel: 36,
-          systemImagePackage: ANDROID_SPEC.runtime,
-          tag: "google_apis",
-          architecture: "x86_64",
-          deviceName: "pixel_9",
-          hardware: { gpuMode: "host" },
-          gpuEnabled,
-        }),
-      },
-      androidConfigWriter: {
-        setMemoryMb: async () => {},
-        setConfiguration: async (_name, configuration) => {
-          writes++;
-          gpuEnabled = configuration.gpuMode !== undefined;
-        },
-      },
-      iosSimulator: {} as ExactIosSimulatorClient,
-    });
-
-    const result = await provisioner.provision({
-      platform: "android",
-      name: "phone-api-36-a",
-      spec: {
-        ...ANDROID_SPEC,
-        configuration: { gpuMode: "host" },
-      },
-      reconcileExistingConfiguration: true,
-    });
-
-    expect(writes).toBe(1);
-    expect(result.created).toBe(false);
-  });
-
   test("adopts an existing Android AVD when matching GPU mode is enabled", async () => {
     let writes = 0;
     const provisioner = new DefaultExactDeviceProvisioner({
@@ -764,108 +721,15 @@ describe("DefaultExactDeviceProvisioner", () => {
         ...ANDROID_SPEC,
         configuration: { gpuMode: "host" },
       },
-      reconcileExistingConfiguration: true,
     });
 
     expect(writes).toBe(0);
     expect(result.created).toBe(false);
   });
 
-  test.each([false, true])(
-    "reconciles memory only on a stopped AVD (running=%s)",
-    async (isRunning) => {
-      let ramSizeMb = 2048;
-      const writes: number[] = [];
-      const provisioner = new DefaultExactDeviceProvisioner({
-        listDeviceImages: async () => [{ ...androidImage("phone-api-36-a"), isRunning }],
-        isCreationAllowed: () => true,
-        avdManager: {} as ExactAndroidAvdClient,
-        androidConfigReader: {
-          readConfig: async () => ({
-            apiLevel: 36,
-            systemImagePackage: ANDROID_SPEC.runtime,
-            tag: "google_apis",
-            architecture: "x86_64",
-            deviceName: "pixel_9",
-            ramSizeMb,
-          }),
-        },
-        androidConfigWriter: {
-          setMemoryMb: async (_name, memoryMb) => {
-            writes.push(memoryMb);
-            ramSizeMb = memoryMb;
-          },
-        },
-        iosSimulator: {} as ExactIosSimulatorClient,
-      });
-
-      const operation = provisioner.provision({
-        platform: "android",
-        name: "phone-api-36-a",
-        spec: ANDROID_SPEC,
-        reconcileExistingConfiguration: true,
-      });
-
-      if (isRunning) {
-        await expect(operation).rejects.toMatchObject({ code: "identity_conflict" });
-        expect(writes).toEqual([]);
-        return;
-      }
-      const result = await operation;
-
-      expect(writes).toEqual([4096]);
-      expect(result).toEqual({
-        created: false,
-        device: androidImage("phone-api-36-a"),
-        resolvedSpec: { ...ANDROID_SPEC, displayCutout: "hole_punch" },
-      });
-    },
-  );
-
-  test("does not reconcile an AVD whose stopped state is unknown after an ADB overlay failure", async () => {
-    const writes: number[] = [];
-    const provisioner = new DefaultExactDeviceProvisioner({
-      listDeviceImages: async () => [
-        {
-          ...androidImage("phone-api-36-a"),
-          // `listDeviceImages` preserves configured AVDs when its ADB overlay
-          // fails, but must not let that inventory result authorize a config write.
-          isRunningStateKnown: false,
-        },
-      ],
-      isCreationAllowed: () => true,
-      avdManager: {} as ExactAndroidAvdClient,
-      androidConfigReader: {
-        readConfig: async () => ({
-          apiLevel: 36,
-          systemImagePackage: ANDROID_SPEC.runtime,
-          tag: "google_apis",
-          architecture: "x86_64",
-          deviceName: "pixel_9",
-          ramSizeMb: 2048,
-        }),
-      },
-      androidConfigWriter: {
-        setMemoryMb: async (_name, memoryMb) => {
-          writes.push(memoryMb);
-        },
-      },
-      iosSimulator: {} as ExactIosSimulatorClient,
-    });
-
-    await expect(
-      provisioner.provision({
-        platform: "android",
-        name: "phone-api-36-a",
-        spec: ANDROID_SPEC,
-        reconcileExistingConfiguration: true,
-      }),
-    ).rejects.toMatchObject({ code: "identity_conflict" });
-
-    expect(writes).toEqual([]);
-  });
-
-  test("does not reconcile a pre-existing Android AVD without creation provenance", async () => {
+  // #11065: an existing AVD whose configuration differs is never rewritten; a
+  // mismatch is an identity conflict.
+  test("rejects an existing Android AVD whose configuration differs without rewriting it", async () => {
     const writes: number[] = [];
     const provisioner = new DefaultExactDeviceProvisioner({
       listDeviceImages: async () => [androidImage("phone-api-36-a")],
@@ -894,7 +758,6 @@ describe("DefaultExactDeviceProvisioner", () => {
         platform: "android",
         name: "phone-api-36-a",
         spec: ANDROID_SPEC,
-        reconcileExistingConfiguration: false,
       }),
     ).rejects.toMatchObject({
       code: "identity_conflict",
@@ -1003,7 +866,7 @@ describe("exact iOS provisioning runtime compatibility", () => {
         name: "phone-a",
         signal,
         spec: { runtime, deviceType },
-        onBeforeCreate: async () => {
+        onBeforeCreate: () => {
           events.push("before-create");
         },
       });

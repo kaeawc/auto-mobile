@@ -847,7 +847,6 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     bootAndPrepareDevice,
     startDeviceHandler,
     bindBootedDeviceSession,
-    recordAcquiredSessionReadiness,
     ensureCtrlProxyReady,
   };
 }

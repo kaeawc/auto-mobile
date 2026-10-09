@@ -1,24 +1,26 @@
-import type { ProvisionDeviceLifecycleOutcome } from "../db/provisionDeviceOperationRepository";
+import type { ProvisionDeviceLifecycleOutcome } from "../devices/provisionDeviceLifecycle";
 
 /**
  * Recovery evidence delivered in `provisionDevice` error responses. It is a
  * snapshot taken at `observedAtMs`: it lets a caller pick a safe next action
  * without parsing messages, and it never upgrades missing evidence to a
  * confirmed outcome ("unknown" stays "unknown").
+ *
+ * provisionDevice keeps no durable per-request record (#11065), so every retry
+ * is a fresh request: the lifecycle lease serializes it behind any work still
+ * holding the same exact device, and an existing device is adopted rather than
+ * created twice.
  */
 export type ProvisionDeviceFailureBoundary =
   | "daemon_handoff"
   | "caller_cancellation"
-  | "result_persistence"
   | "readiness_failure"
   | "cleanup_failure";
 
-type DeviceOwnership = "created_by_operation" | "adopted";
+type DeviceOwnership = "created_by_request" | "adopted";
 
 export type ProvisionDeviceRecoveryAction =
-  | "retry_original_operation"
-  | "wait_then_retry_original_operation"
-  | "retry_with_new_operation"
+  | "retry"
   | "reacquire_retained_device"
   | "perform_cleanup"
   | "obtain_further_evidence";
@@ -31,19 +33,15 @@ interface RecoveryDevice {
 }
 
 export interface ProvisionDeviceRecoveryEvidence {
-  schemaVersion: 1;
-  operationId: string;
+  schemaVersion: 2;
   boundary: ProvisionDeviceFailureBoundary;
-  /** Lifecycle phase last durably recorded for the operation, when any. */
+  /** Lifecycle phase last recorded by the request, when any. */
   phaseReached?: string;
   /** Exact identity; a display name alone never authorizes destructive recovery. */
   device?: RecoveryDevice & { ownership: DeviceOwnership | "unknown" };
   outcomes: {
     deviceCreation: "created" | "adopted" | "not_created" | "unknown";
-    resultPersistence: "not_attempted" | "unconfirmed" | "unknown";
-    /** `release_requested` means the bound session must not be used. */
-    session: "none" | "release_requested" | "unknown";
-    /** Cancellation boundary only: whether the operation ended within the bounded wait. */
+    /** Cancellation boundary only: whether the request's work ended within the bounded wait. */
     settlement: "not_applicable" | "settling" | "settled";
   };
   cleanup: {
@@ -53,7 +51,6 @@ export interface ProvisionDeviceRecoveryEvidence {
       | "failed_device_retained"
       | "reported_complete_unverified"
       | "unknown";
-    operationId?: string;
   };
   originalError?: { code: string; message: string };
   nextAction: {
@@ -67,50 +64,32 @@ export interface ProvisionDeviceRecoveryEvidence {
 }
 
 export interface ProvisionDeviceRecoveryInput {
-  operationId: string;
   boundary: ProvisionDeviceFailureBoundary;
   nowMs: number;
   daemonBuild: string;
   lifecycle?: ProvisionDeviceLifecycleOutcome;
-  /** Cancellation boundary: did the operation settle within the bounded wait? */
+  /** Cancellation boundary: did the request's work settle within the bounded wait? */
   settled?: boolean;
   originalError?: { code: string; message: string };
-  /** Persistence boundary: what the unpersisted result said about the device. */
-  result?: {
-    created: boolean;
-    device?: RecoveryDevice;
-    hasSession: boolean;
-  };
   retryAfterMs?: number;
-  /** Whether this operation created the device or adopted an existing one, when observed. */
+  /** Whether this request created the device or adopted an existing one, when observed. */
   ownership?: DeviceOwnership;
   /** Failure boundaries: the provider's own verdict on whether retrying can help. */
   retryable?: boolean;
-  /**
-   * False when `lifecycle` was noted in memory only (a cancelled rollback that
-   * kept the operation row retryable), so the original operationId is still
-   * admitted instead of replaying a stored terminal failure. Defaults to true.
-   */
-  lifecycleDurable?: boolean;
 }
 
 type Cleanup = ProvisionDeviceRecoveryEvidence["cleanup"];
+type NextAction = ProvisionDeviceRecoveryEvidence["nextAction"];
 
 function cleanupFromLifecycle(lifecycle: ProvisionDeviceLifecycleOutcome | undefined): Cleanup {
-  if (!lifecycle) {
-    return { status: "unknown" };
-  }
-  const operationId = lifecycle.cleanup?.operationId;
-  const withId = (status: Cleanup["status"]): Cleanup =>
-    operationId ? { status, operationId } : { status };
-  switch (lifecycle.state) {
+  switch (lifecycle?.state) {
     case "cleanup_in_progress":
-      return withId("pending");
+      return { status: "pending" };
     case "retained":
-      return withId("failed_device_retained");
+      return { status: "failed_device_retained" };
     // A successful destroy command alone does not prove the device is absent.
     case "removed":
-      return withId("reported_complete_unverified");
+      return { status: "reported_complete_unverified" };
     case "no_device_created":
       return { status: "unnecessary" };
     default:
@@ -124,88 +103,62 @@ function isUnretryableFailureBoundary(input: ProvisionDeviceRecoveryInput): bool
   return failureBoundary && input.retryable !== true;
 }
 
-/**
- * Lifecycle states the operation row treats as terminal: re-issuing the same
- * operationId replays the stored failure until the row expires instead of
- * starting a new attempt (`provisionDeviceOperationRepository.ts`).
- */
-function replaysStoredFailure(input: ProvisionDeviceRecoveryInput): boolean {
-  if (input.lifecycleDurable === false) {
-    return false;
-  }
-  switch (input.lifecycle?.state) {
-    case "no_device_created":
-    case "removed":
-    case "cleanup_in_progress":
-      return true;
-    default:
-      return false;
-  }
+function withRetryAfter(action: NextAction, retryAfterMs: number | undefined): NextAction {
+  return retryAfterMs !== undefined ? { ...action, retryAfterMs } : action;
 }
 
-function nextAction(
-  input: ProvisionDeviceRecoveryInput,
-  cleanup: Cleanup,
-): ProvisionDeviceRecoveryEvidence["nextAction"] {
-  const retryAfterMs = input.retryAfterMs;
+function nextAction(input: ProvisionDeviceRecoveryInput, cleanup: Cleanup): NextAction {
   if (input.boundary === "caller_cancellation" && !input.settled) {
-    return {
-      action: "wait_then_retry_original_operation" as const,
-      reason: "Work is still settling; retrying the original operationId converges once it ends.",
-      automaticRetrySafe: true,
-      ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
-    };
+    return withRetryAfter(
+      {
+        action: "retry",
+        reason:
+          "The cancelled request's work is still settling; a retry waits behind it on the device lifecycle lease and adopts whatever device it left.",
+        automaticRetrySafe: true,
+      },
+      input.retryAfterMs,
+    );
   }
   if (cleanup.status === "failed_device_retained") {
     return retainedDeviceAction(input);
   }
   if (input.lifecycle?.state === "created_not_ready" && input.lifecycle.device) {
     return {
-      action: "reacquire_retained_device" as const,
+      action: "reacquire_retained_device",
       reason:
-        "The device was created before the failure; retrying the original operationId adopts it without creating another.",
-      automaticRetrySafe: true,
-    };
-  }
-  if (input.boundary === "result_persistence") {
-    return {
-      action: "retry_original_operation" as const,
-      reason:
-        "The device outcome is known but the result commit is unconfirmed; replaying the original operationId re-establishes the session without duplicate creation.",
+        "The device was created and still exists; retrying provisionDevice with the same device adopts it without creating another.",
       automaticRetrySafe: true,
     };
   }
   return evidenceGatedRetryAction(input, cleanup);
 }
 
-function retainedDeviceAction(
-  input: ProvisionDeviceRecoveryInput,
-): ProvisionDeviceRecoveryEvidence["nextAction"] {
+function retainedDeviceAction(input: ProvisionDeviceRecoveryInput): NextAction {
   if (!input.lifecycle?.device) {
     // A creation may have landed, but its exact identity was never resolved.
     return {
-      action: "obtain_further_evidence" as const,
+      action: "obtain_further_evidence",
       reason:
         "A device may have been created but its exact identity is unknown, so it was not removed; query inventory for it before acting.",
       automaticRetrySafe: false,
     };
   }
   return {
-    action: "perform_cleanup" as const,
+    action: "perform_cleanup",
     reason:
       "Cleanup failed and the device is retained; remove it by its exact identity (not its name) or reacquire it.",
     automaticRetrySafe: false,
   };
 }
 
-/** The retry path once settling, retained, and persistence evidence are ruled out. */
+/** The retry path once settling and retained-device evidence are ruled out. */
 function evidenceGatedRetryAction(
   input: ProvisionDeviceRecoveryInput,
   cleanup: Cleanup,
-): ProvisionDeviceRecoveryEvidence["nextAction"] {
+): NextAction {
   if (isUnretryableFailureBoundary(input)) {
     return {
-      action: "obtain_further_evidence" as const,
+      action: "obtain_further_evidence",
       reason:
         "The failure is not marked retryable; inspect the original error and the device inventory before acting.",
       automaticRetrySafe: false,
@@ -213,29 +166,27 @@ function evidenceGatedRetryAction(
   }
   if (!input.lifecycle) {
     return {
-      action: "obtain_further_evidence" as const,
+      action: "obtain_further_evidence",
       reason:
         "No lifecycle evidence was recorded, so the response cannot establish whether a device was created; query inventory before acting.",
       automaticRetrySafe: false,
     };
   }
-  if (replaysStoredFailure(input)) {
-    return {
-      action: "retry_with_new_operation" as const,
-      reason:
-        cleanup.status === "pending"
-          ? "Cleanup is still settling and the original operationId only replays this terminal failure; once it settles, retry with a new operationId."
-          : "The operation ended in a terminal state, so the original operationId only replays this failure; retry with a new operationId.",
-      // Automatically re-issuing the ORIGINAL operationId can only replay.
-      automaticRetrySafe: false,
-      ...(cleanup.status === "pending" && input.retryAfterMs !== undefined
-        ? { retryAfterMs: input.retryAfterMs }
-        : {}),
-    };
+  if (cleanup.status === "pending") {
+    return withRetryAfter(
+      {
+        action: "retry",
+        reason:
+          "Cleanup of the created device is still settling; wait for it to finish before retrying so the retry does not race the removal.",
+        automaticRetrySafe: false,
+      },
+      input.retryAfterMs,
+    );
   }
   return {
-    action: "retry_original_operation" as const,
-    reason: "Retrying the original operationId resumes the interrupted lifecycle idempotently.",
+    action: "retry",
+    reason:
+      "No device is left half-provisioned by this request; a retry starts a fresh provision and adopts the device if it exists.",
     automaticRetrySafe: true,
   };
 }
@@ -251,23 +202,6 @@ function settlementFor(
   return input.settled ? "settled" : "settling";
 }
 
-/** The unpersisted result is authoritative for the device outcome. */
-function evidenceFromResult(
-  result: NonNullable<ProvisionDeviceRecoveryInput["result"]>,
-  settlement: DeviceEvidence["outcomes"]["settlement"],
-): DeviceEvidence {
-  const ownership = result.created ? ("created_by_operation" as const) : ("adopted" as const);
-  return {
-    ...(result.device ? { device: { ...result.device, ownership } } : {}),
-    outcomes: {
-      deviceCreation: result.created ? "created" : "adopted",
-      resultPersistence: "unconfirmed",
-      session: result.hasSession ? "release_requested" : "none",
-      settlement,
-    },
-  };
-}
-
 function creationFromLifecycle(
   lifecycle: ProvisionDeviceLifecycleOutcome | undefined,
   ownership: DeviceOwnership | undefined,
@@ -276,7 +210,7 @@ function creationFromLifecycle(
     return "not_created";
   }
   // Observed ownership is more precise than the lifecycle state: an adopted
-  // device that failed readiness was never created by this operation.
+  // device that failed readiness was never created by this request.
   if (ownership && lifecycle) {
     return ownership === "adopted" ? "adopted" : "created";
   }
@@ -293,10 +227,6 @@ function creationFromLifecycle(
 }
 
 function deviceEvidence(input: ProvisionDeviceRecoveryInput): DeviceEvidence {
-  const settlement = settlementFor(input);
-  if (input.result) {
-    return evidenceFromResult(input.result, settlement);
-  }
   const { lifecycle } = input;
   return {
     ...(lifecycle?.device
@@ -304,9 +234,7 @@ function deviceEvidence(input: ProvisionDeviceRecoveryInput): DeviceEvidence {
       : {}),
     outcomes: {
       deviceCreation: creationFromLifecycle(lifecycle, input.ownership),
-      resultPersistence: "not_attempted",
-      session: "unknown",
-      settlement,
+      settlement: settlementFor(input),
     },
   };
 }
@@ -317,8 +245,7 @@ export function buildProvisionDeviceRecoveryEvidence(
   const cleanup = cleanupFromLifecycle(input.lifecycle);
   const { device, outcomes } = deviceEvidence(input);
   return {
-    schemaVersion: 1,
-    operationId: input.operationId,
+    schemaVersion: 2,
     boundary: input.boundary,
     ...(input.lifecycle ? { phaseReached: input.lifecycle.phase } : {}),
     ...(device ? { device } : {}),

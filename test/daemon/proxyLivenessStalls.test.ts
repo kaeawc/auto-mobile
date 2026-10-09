@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { DaemonMcpProxy, DaemonSessionStalledError } from "../../src/daemon/daemonMcpProxy";
+import {
+  DaemonBoundSessionExpiredError,
+  DaemonMcpProxy,
+  DaemonSessionStalledError,
+} from "../../src/daemon/daemonMcpProxy";
 import {
   DaemonClient,
   DaemonRequestNotDeliveredError,
@@ -1640,6 +1644,69 @@ describe("proxy liveness stalls (#10053)", () => {
       expect(livenessRecoveryCallWaitMs(LONG_LEASE_MS, 4_000)).toBe(
         LIVENESS_RECOVERY_ATTEMPTS * 2 * 4_000,
       );
+    });
+  });
+  describe("handover reporting (#10991)", () => {
+    test("session_ownership_lost names the session the call referenced, not the fenced latest binding", async () => {
+      const proxy = createProxy(2_000, false, "ios-session");
+      await proxy.callTool("observe", { sessionUuid: "ios-session" });
+      latestClient.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        "ios-session",
+        "heartbeat-timeout",
+      );
+
+      const error = await proxy.callTool("observe", { sessionUuid: "other-session" }).then(
+        () => undefined,
+        (rejected: unknown) => rejected,
+      );
+
+      expect(error).toBeInstanceOf(DaemonBoundSessionExpiredError);
+      expect((error as DaemonBoundSessionExpiredError).sessionUuid).toBe("other-session");
+      expect((error as Error).message).toContain("other-session");
+      expect((error as Error).message).not.toContain("ios-session");
+    });
+
+    test("a loss found after a daemon stall says the daemon stalled and still names the device", async () => {
+      const proxy = createProxy(2_000, true);
+      await acquire(proxy, "getAndroid");
+      hangSessions.add("android-session");
+      await advanceUntilHandover();
+      hangSessions.clear();
+      expect(handovers[0]?.code).toBe("daemon_stalled");
+      await expect(
+        proxy.callTool("observe", { sessionUuid: "android-session" }),
+      ).rejects.toMatchObject({ reason: "daemon_stalled" });
+      await sessionManager.releaseSession("android-session", "heartbeat-timeout");
+
+      const error = await proxy.callTool("observe", { sessionUuid: "android-session" }).then(
+        () => undefined,
+        (rejected: unknown) => rejected,
+      );
+
+      expect(error).toBeInstanceOf(DaemonSessionStalledError);
+      const { error: body } = (error as DaemonSessionStalledError).toPayload();
+      expect(body.code).toBe("proxy_stalled");
+      expect(body.sessions[0]).toMatchObject({
+        sessionUuid: "android-session",
+        deviceId: "emulator-5554",
+      });
+      expect(body.message).toContain("daemon stalled");
+      expect(body.message).not.toContain("This MCP proxy stalled");
+    });
+
+    test("a call naming the fenced binding itself still reports it with its release", async () => {
+      const proxy = createProxy(2_000);
+      await acquire(proxy, "getAndroid");
+      latestClient.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        "android-session",
+        "heartbeat-timeout",
+      );
+
+      await expect(
+        proxy.callTool("observe", { sessionUuid: "android-session" }),
+      ).rejects.toMatchObject({ sessionUuid: "android-session", reason: "heartbeat-timeout" });
     });
   });
 });

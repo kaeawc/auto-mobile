@@ -5598,7 +5598,7 @@ describe("DaemonMcpProxy", () => {
         );
         await expect(
           proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" }),
-        ).rejects.toThrow(/session-a.*(?:expired|released)/i);
+        ).rejects.toThrow(/session-b.*(?:expired|released)/i);
         expect(replacementClient.callToolCalls).toEqual([]);
       } finally {
         isAvailableSpy.mockRestore();

@@ -395,6 +395,7 @@ describe("recovery review fixes (PR 10115)", () => {
           attempts: 1,
           lastAcknowledgedHeartbeatAt: 0,
           action: REACQUIRE_LOST_SESSIONS_ACTION,
+          ...(code === DAEMON_STALLED_CODE ? { stalledBy: "daemon" } : {}),
         },
       ]);
       expect(livenessHandoverMessage(h.handovers[0])).toContain("another liveness owner");
@@ -492,6 +493,60 @@ describe("recovery review fixes (PR 10115)", () => {
     expect(pendingWaits()).toBe(0);
     expect(h.attempts).toHaveLength(1);
     expect(h.handovers).toEqual([]);
+  });
+});
+
+describe("handover reporting (#10991)", () => {
+  test("proxy_stalled still names the device when the proxy forgets it while attempts run", async () => {
+    const deviceIds: Record<string, string> = { lost1: "emulator-5554", lost2: "sim-1" };
+    const h = harness({
+      outcomeFor: () => "session-gone",
+      lastAckAt: 1_000,
+      deviceIds,
+    });
+    h.timer.setCurrentTime(30_000);
+    h.recovery.begin("lost1", PROXY_STALLED_CODE);
+    h.recovery.begin("lost2", PROXY_STALLED_CODE);
+    // The heartbeat tick's own not-found answer drops the session's tracked device mid-recovery.
+    delete deviceIds.lost1;
+    delete deviceIds.lost2;
+    await h.timer.advanceTimeAsync(10_000);
+
+    expect(h.handovers).toHaveLength(1);
+    expect(h.handovers[0].sessions.map((s) => [s.sessionUuid, s.deviceId])).toEqual([
+      ["lost1", "emulator-5554"],
+      ["lost2", "sim-1"],
+    ]);
+    expect(livenessHandoverMessage(h.handovers[0])).toContain("lost1 (emulator-5554)");
+  });
+
+  test("a proxy_stalled loss that follows a daemon stall blames the daemon, not the proxy", async () => {
+    const h = harness({
+      outcomeFor: () => "superseded",
+      deviceIds: { s1: "emulator-5554" },
+    });
+    h.recovery.begin("s1", DAEMON_STALLED_CODE);
+    await h.timer.advanceTimeAsync(10_000);
+
+    const [handover] = h.handovers;
+    expect(handover.code).toBe(PROXY_STALLED_CODE);
+    const message = livenessHandoverMessage(handover);
+    expect(message).toContain("daemon stalled");
+    expect(message).toContain("s1 (emulator-5554)");
+    expect(message).not.toContain("This MCP proxy stalled");
+    // The wire payload keeps its stable shape: wording is the only difference.
+    expect(Object.keys(livenessHandoverPayload(handover).error)).not.toContain("stalledBy");
+  });
+
+  test("a genuine proxy stall keeps the proxy wording", () => {
+    const message = livenessHandoverMessage({
+      code: PROXY_STALLED_CODE,
+      sessions: [{ sessionUuid: "s1", deviceId: null, lastAcknowledgedHeartbeatAt: 0 }],
+      attempts: 1,
+      lastAcknowledgedHeartbeatAt: 0,
+      action: REACQUIRE_LOST_SESSIONS_ACTION,
+    });
+    expect(message).toContain("This MCP proxy stalled");
   });
 });
 

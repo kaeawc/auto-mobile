@@ -415,4 +415,16 @@ describe("a crash while a terminal release write is parked does not revive the U
     expect((await h.persistence.getSession!("old"))?.release_reason).toBe("heartbeat-timeout");
     expect(h.files.files.has(JOURNAL)).toBe(false);
   });
+
+  test("a pending recovered intent reads as the release reason before its row is written (#11077)", async () => {
+    const h = await journaledHarness();
+    h.files.files.set(
+      JOURNAL,
+      `${JSON.stringify({ sessionId: "old", reason: "heartbeat-timeout", at: 1 })}\n`,
+    );
+    const restarted = restart(h, h.files);
+
+    expect(await restarted.getReleasedSessionReason("old")).toBe("heartbeat-timeout");
+    expect(await restarted.getReleasedSessionReason("never-issued")).toBeUndefined();
+  });
 });

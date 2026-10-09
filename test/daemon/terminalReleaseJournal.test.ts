@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   FileTerminalReleaseJournal,
+  renameWithRetry,
   createDaemonTerminalReleaseJournal,
   TERMINAL_RELEASE_JOURNAL_FILE_NAME,
 } from "../../src/daemon/terminalReleaseJournal";
@@ -42,6 +43,49 @@ describe("FileTerminalReleaseJournal (#10959)", () => {
 
     journal.resolve("b");
     expect(fs.files.has(FILE)).toBe(false);
+  });
+
+  test("a lifted fence stays lifted across restart even when compaction fails (#11077)", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    const journal = new FileTerminalReleaseJournal(FILE, fs);
+    journal.record({ sessionId: "live", reason: "heartbeat-timeout", at: 1 });
+    journal.record({ sessionId: "other", reason: "explicit-release", at: 2 });
+    fs.failCompaction = Object.assign(new Error("EPERM"), { code: "EPERM" });
+
+    journal.resolve("live");
+
+    expect(new FileTerminalReleaseJournal(FILE, fs).loadUnconfirmed()).toEqual([
+      { sessionId: "other", reason: "explicit-release", at: 2 },
+    ]);
+    // A later release of the same session after the lift is honoured again.
+    journal.record({ sessionId: "live", reason: "device-killed", at: 3 });
+    expect(new FileTerminalReleaseJournal(FILE, fs).loadUnconfirmed()).toEqual([
+      { sessionId: "other", reason: "explicit-release", at: 2 },
+      { sessionId: "live", reason: "device-killed", at: 3 },
+    ]);
+  });
+
+  test("renameWithRetry retries transient EPERM/EACCES and rethrows other errors (#11077)", () => {
+    const sleeps: number[] = [];
+    let calls = 0;
+    const flaky = () => {
+      calls++;
+      if (calls < 3) {
+        throw Object.assign(new Error("busy"), { code: calls === 1 ? "EPERM" : "EACCES" });
+      }
+    };
+    renameWithRetry(flaky, (ms) => sleeps.push(ms), "a", "b");
+    expect(calls).toBe(3);
+    expect(sleeps.length).toBe(2);
+
+    const missing = () => {
+      throw Object.assign(new Error("gone"), { code: "ENOENT" });
+    };
+    expect(() => renameWithRetry(missing, () => {}, "a", "b")).toThrow("gone");
+    const stuck = () => {
+      throw Object.assign(new Error("stuck"), { code: "EPERM" });
+    };
+    expect(() => renameWithRetry(stuck, () => {}, "a", "b")).toThrow("stuck");
   });
 
   test("a confirmation for another reason keeps a later upgraded intent", () => {

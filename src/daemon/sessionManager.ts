@@ -3463,7 +3463,8 @@ export class SessionManager {
     if (inMemory) {
       return inMemory;
     }
-    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    // Through the recovered-intent overlay so a pending intent reads as released (#11077).
+    const persisted = await this.readPersistedSession(sessionId);
     return persisted?.release_reason ?? undefined;
   }
 

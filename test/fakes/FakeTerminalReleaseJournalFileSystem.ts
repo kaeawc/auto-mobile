@@ -7,6 +7,8 @@ export class FakeTerminalReleaseJournalFileSystem implements TerminalReleaseJour
   replaces = 0;
   /** While set, the next append throws this (a full disk). */
   failNextAppend: Error | undefined;
+  /** While set, compaction (replace/remove) throws it, e.g. Windows EPERM. */
+  failCompaction: Error | undefined;
 
   readText(filePath: string): string | undefined {
     return this.files.get(filePath);
@@ -23,11 +25,17 @@ export class FakeTerminalReleaseJournalFileSystem implements TerminalReleaseJour
   }
 
   replaceDurable(filePath: string, text: string): void {
+    if (this.failCompaction) {
+      throw this.failCompaction;
+    }
     this.replaces++;
     this.files.set(filePath, text);
   }
 
   remove(filePath: string): void {
+    if (this.failCompaction) {
+      throw this.failCompaction;
+    }
     this.files.delete(filePath);
   }
 }

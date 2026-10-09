@@ -401,7 +401,7 @@ export class DeviceSessionRepository {
    * session state (issue #2784). Do not add a local catch — the caller owns the
    * fatal/backoff decision. Active sessions owned by a daemon in
    * `liveDaemonSessionIds` are peer-owned and must remain untouched, as are legacy
-   * NULL-owner rows while any peer is live.
+   * NULL-owner rows while any peer is live and their lease has not lapsed.
    */
   async markStaleActiveSessionsExpired(
     currentDaemonSessionId: string,
@@ -429,8 +429,15 @@ export class DeviceSessionRepository {
             ? nonCurrentOwner
             : eb.and([nonCurrentOwner, eb("daemon_session_id", "not in", liveDaemonSessionIdList)]);
         // A NULL owner is a legacy row written before every upsert stamped its daemon (#11114):
-        // it may belong to a live peer, so it is only reclaimed when no peer is live.
-        return hasLivePeer ? deadOwner : eb.or([eb("daemon_session_id", "is", null), deadOwner]);
+        // it may belong to a live peer, so while a peer is live it is spared only when its lease
+        // (`expires_at_ms`, extended by every activity) is still unexpired; a lapsed one can no
+        // longer be an active peer's session and is expired so recovery/prune can handle it
+        // (#11132). With no live peer it is always reclaimed.
+        const nullOwner = eb("daemon_session_id", "is", null);
+        const reclaimableNullOwner = hasLivePeer
+          ? eb.and([nullOwner, eb("expires_at_ms", "<=", releasedAtMs)])
+          : nullOwner;
+        return eb.or([reclaimableNullOwner, deadOwner]);
       })
       .execute();
   }

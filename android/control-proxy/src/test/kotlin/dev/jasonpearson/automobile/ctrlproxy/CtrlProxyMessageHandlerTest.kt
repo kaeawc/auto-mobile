@@ -107,6 +107,12 @@ class CtrlProxyMessageHandlerTest {
     assertEquals("requestScreenshot" to listOf<Any?>("s1"), lastCall)
   }
 
+  @Test
+  fun `dispatches request_screenshot hideOverlays to the hide-capture-restore action`() = runTest {
+    dispatch("""{"type":"request_screenshot","requestId":"s2","displayId":3,"hideOverlays":true}""")
+    assertEquals("requestScreenshot" to listOf<Any?>("s2", 3, true), lastCall)
+  }
+
   // ---------------------------------------------------------------------------
   // Gestures
   // ---------------------------------------------------------------------------

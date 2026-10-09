@@ -83,7 +83,10 @@ class OverlayForegroundTest {
     assertTrue(controller.isSuspendedByForeground)
     assertTrue(status().suspended)
     assertEquals(OverlayScalar.Numeric(3.0), status().state["count"])
-    assertTrue("no dismissed event for a temporary hide", events.none { it.kind == OverlayEventKind.DISMISSED })
+    assertTrue(
+      "no dismissed event for a temporary hide",
+      events.none { it.kind == OverlayEventKind.DISMISSED },
+    )
 
     tracker.onWindowEvent("com.example.app", app)
     settle()
@@ -92,6 +95,31 @@ class OverlayForegroundTest {
     assertFalse(status().suspended)
     assertEquals(OverlayScalar.Numeric(3.0), status().state["count"])
     assertTrue(events.none { it.kind == OverlayEventKind.DISMISSED })
+  }
+
+  @Test
+  fun `a capture while suspended treats the overlay as not showing and never re-shows it`() =
+    runTest {
+      controller.show("s", spec())
+      tracker.onWindowEvent("com.android.settings", app)
+      settle()
+      assertTrue(controller.isSuspendedByForeground)
+      val calls = host.calls.size
+
+      val capture = controller.withHiddenForCapture { "pixels" }
+
+      assertEquals(OverlayHiddenCapture("pixels", overlayExcluded = true), capture)
+      // Neither a capture hide nor a restore reached the host: the overlay stays hidden.
+      assertEquals(calls, host.calls.size)
+      assertFalse(host.isShowing)
+      assertTrue(controller.isSuspendedByForeground)
+    }
+
+  @Test
+  fun `a capture while the app is in front hides through the host`() = runTest {
+    controller.show("s", spec())
+    controller.withHiddenForCapture { "pixels" }
+    assertEquals("hideForCapture", host.calls.last())
   }
 
   @Test
@@ -186,7 +214,9 @@ class OverlayForegroundTest {
     assertNull(overlayForegroundCandidate("com.example.app", null, own))
     assertNull(overlayForegroundCandidate(null, app, own))
     assertNull(overlayForegroundCandidate(own, app, own))
-    OVERLAY_FOREGROUND_IGNORED_PACKAGES.forEach { assertNull(overlayForegroundCandidate(it, app, own)) }
+    OVERLAY_FOREGROUND_IGNORED_PACKAGES.forEach {
+      assertNull(overlayForegroundCandidate(it, app, own))
+    }
   }
 
   @Test
@@ -200,7 +230,10 @@ class OverlayForegroundTest {
         OverlayForegroundWindow(app, true, "com.example.active"),
       )
     assertEquals("com.example.active", overlayForegroundFromWindows(windows, own))
-    assertEquals("com.example.top", overlayForegroundFromWindows(windows.map { it.copy(active = false) }, own))
+    assertEquals(
+      "com.example.top",
+      overlayForegroundFromWindows(windows.map { it.copy(active = false) }, own),
+    )
     assertNull(overlayForegroundFromWindows(windows.take(2), own))
   }
 }

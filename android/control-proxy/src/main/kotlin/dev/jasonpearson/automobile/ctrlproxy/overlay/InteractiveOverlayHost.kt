@@ -40,15 +40,34 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
 const val MIN_TOUCH_THROUGH_SETTLE_MILLIS = 100L
 const val DEFAULT_TOUCH_THROUGH_SETTLE_MILLIS = MIN_TOUCH_THROUGH_SETTLE_MILLIS
+
+/** How long a hide waits for the frames that confirm the window is gone before capturing anyway. */
+const val DEFAULT_HIDE_FRAME_TIMEOUT_MILLIS = 500L
+
+/** The longest a capture may keep the overlay hidden; the window is restored when it expires. */
+const val DEFAULT_MAX_HIDDEN_MILLIS = 5_000L
+
+/** Frames awaited after hiding: the one that applies the hide, then one drawn without it. */
+internal const val HIDE_CONFIRM_FRAMES = 2
+
+/**
+ * A capture taken by [InteractiveOverlayHost.withHiddenForCapture]. [overlayExcluded] is true when
+ * no overlay window was showing, or when one was hidden and the confirming frames rendered before
+ * the capture; false when the hide could not be confirmed in time (the capture still ran).
+ */
+data class OverlayHiddenCapture<T>(val value: T, val overlayExcluded: Boolean)
 
 /**
  * Opacity is a whole-view integer percentage; invalid values throw IllegalArgumentException.
@@ -135,6 +154,20 @@ interface InteractiveOverlayHost {
     settleMillis: Long = DEFAULT_TOUCH_THROUGH_SETTLE_MILLIS,
     block: suspend () -> T,
   ): T
+
+  /**
+   * Hides the window for one capture (#9305): makes it invisible, waits up to [frameTimeoutMillis]
+   * for the frames that confirm it is gone, runs [block], then restores visibility in a
+   * NonCancellable finally, also when [block] throws or the caller is cancelled. [block] may keep
+   * the window hidden for at most [maxHiddenMillis]; past that it is cancelled, the window is
+   * restored and IllegalStateException is thrown. Captures are serialized; without a window,
+   * [block] runs as is.
+   */
+  suspend fun <T> withHiddenForCapture(
+    frameTimeoutMillis: Long = DEFAULT_HIDE_FRAME_TIMEOUT_MILLIS,
+    maxHiddenMillis: Long = DEFAULT_MAX_HIDDEN_MILLIS,
+    block: suspend () -> T,
+  ): OverlayHiddenCapture<T>
 }
 
 /**
@@ -180,6 +213,7 @@ class DefaultInteractiveOverlayHost(
     if (sdkInt >= OVERLAY_BACK_CALLBACK_MIN_SDK) AndroidOverlayBackRegistrar(view)
     else NoOverlayBackCallbackRegistrar
   },
+  private val frames: OverlayFrameWaiter = ChoreographerOverlayFrameWaiter,
 ) : InteractiveOverlayHost {
   private class Window(
     val view: OverlayComposeView,
@@ -199,6 +233,7 @@ class DefaultInteractiveOverlayHost(
   @Volatile private var touchThroughToken: Any? = null
   private var destroyed = false
   private val gestureMutex = Mutex()
+  private val captureMutex = Mutex()
 
   override val isShowing: Boolean
     get() = window != null
@@ -519,6 +554,58 @@ class DefaultInteractiveOverlayHost(
         }
       }
     }
+
+  override suspend fun <T> withHiddenForCapture(
+    frameTimeoutMillis: Long,
+    maxHiddenMillis: Long,
+    block: suspend () -> T,
+  ): OverlayHiddenCapture<T> = captureMutex.withLock {
+    val hidden = withContext(NonCancellable) { mainThread.onMain(::hideForCaptureOnMain) }
+    if (hidden == null) return@withLock OverlayHiddenCapture(block(), overlayExcluded = true)
+    try {
+      val confirmed =
+        withTimeoutOrNull(frameTimeoutMillis) { frames.awaitFrames(HIDE_CONFIRM_FRAMES) } != null
+      if (!confirmed) Log.w(TAG, "Overlay hide unconfirmed after ${frameTimeoutMillis}ms")
+      OverlayHiddenCapture(captureWhileHidden(maxHiddenMillis, block), confirmed)
+    } finally {
+      withContext(NonCancellable) { restoreAfterCapture(hidden) }
+    }
+  }
+
+  /** The view hidden for a capture, or null when no window is showing. */
+  private fun hideForCaptureOnMain(): View? {
+    val current = window ?: return null
+    current.view.visibility = View.INVISIBLE
+    return current.view
+  }
+
+  private suspend fun <T> captureWhileHidden(maxHiddenMillis: Long, block: suspend () -> T): T =
+    try {
+      withTimeout(maxHiddenMillis) { block() }
+    } catch (error: TimeoutCancellationException) {
+      throw IllegalStateException(
+        "Capture kept the overlay hidden over ${maxHiddenMillis}ms",
+        error,
+      )
+    }
+
+  /**
+   * Restores the hidden view itself: an in-place update kept it, and a window that replaced or
+   * removed it in the meantime is unaffected (a detached view is harmless to touch). A capture hide
+   * never re-shows a blocked overlay (lock screen, or suspended because its app left the
+   * front, #10261): a window still attached then is removed as relayout would, and the controller's
+   * own restore path shows it again once unblocked.
+   */
+  private suspend fun restoreAfterCapture(view: View) {
+    try {
+      mainThread.onMain {
+        if (!isBlocked()) view.visibility = View.VISIBLE
+        else if (window?.view === view) dismissOnMain()
+      }
+    } catch (error: Exception) {
+      Log.e(TAG, "Failed to restore overlay after capture", error)
+    }
+  }
 
   private fun update(current: Window, params: WindowManager.LayoutParams): Boolean {
     try {

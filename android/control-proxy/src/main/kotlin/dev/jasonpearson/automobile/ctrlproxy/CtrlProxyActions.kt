@@ -36,6 +36,13 @@ interface CtrlProxyActions {
 
   fun requestScreenshot(requestId: String?, displayId: Int?) = requestScreenshot(requestId)
 
+  /**
+   * [hideOverlays] hides CtrlProxy's interactive overlay for this capture and restores it after,
+   * whatever the capture's outcome (#9305).
+   */
+  fun requestScreenshot(requestId: String?, displayId: Int?, hideOverlays: Boolean) =
+    requestScreenshot(requestId, displayId)
+
   // Coordinate params are `Double` so fractional wire values pass through untruncated to the
   // gesture engine (which builds float `Path`s). `offset`, durations, and `rotationDegrees` are not
   // coordinates and stay their original types. Symmetric to iOS; see #2927 / WebSocketRequest.kt.

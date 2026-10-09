@@ -321,6 +321,12 @@ data class ScreenshotResult(
   val screenshotEncodeDurationMs: Long? = null,
   val screenshotByteLength: Int? = null,
   val screenshotBase64Length: Int? = null,
+  /**
+   * Answers a request that carried `hideOverlays`: true when the image contains no CtrlProxy
+   * interactive overlay (none was showing, or it was hidden and a frame confirmed it gone), false
+   * when the hide could not be confirmed before capture. Absent for requests without the flag.
+   */
+  val overlaysHidden: Boolean? = null,
 ) : WebSocketResponse()
 
 @Serializable

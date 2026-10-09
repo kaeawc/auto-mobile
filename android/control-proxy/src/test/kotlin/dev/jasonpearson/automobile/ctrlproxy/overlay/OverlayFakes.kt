@@ -148,6 +148,15 @@ internal class FakeInteractiveOverlayHost : InteractiveOverlayHost {
   }
 
   override suspend fun <T> withTouchThrough(settleMillis: Long, block: suspend () -> T): T = block()
+
+  override suspend fun <T> withHiddenForCapture(
+    frameTimeoutMillis: Long,
+    maxHiddenMillis: Long,
+    block: suspend () -> T,
+  ): OverlayHiddenCapture<T> {
+    calls += "hideForCapture"
+    return OverlayHiddenCapture(block(), overlayExcluded = true)
+  }
 }
 
 /**

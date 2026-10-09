@@ -321,6 +321,27 @@ run_runner() {
   [[ "$output" == *"Usage:"* ]]
 }
 
+@test "AUTOMOBILE_BATS_SERIAL=1 runs every file serially without invoking parallel" {
+  AUTOMOBILE_BATS_SERIAL=1 run_runner unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"running every BATS file serially"* ]]
+  [ "$(grep -c "^bats:$FIXTURES/unit.bats$" "$ARGS_FILE")" -eq 1 ]
+  [ "$(grep -c "^bats:$FIXTURES/serial.bats$" "$ARGS_FILE")" -eq 1 ]
+  ! grep -q "^parallel:" "$ARGS_FILE"
+}
+
+@test "falls back to serial with a notice when GNU parallel cannot be installed" {
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$STUB_BIN/parallel"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$STUB_BIN/brew"
+  chmod +x "$STUB_BIN/parallel" "$STUB_BIN/brew"
+  run_runner unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"falling back to serial BATS execution"* ]]
+  [ "$(grep -c "^bats:$FIXTURES/unit.bats$" "$ARGS_FILE")" -eq 1 ]
+  [ "$(grep -c "^bats:$FIXTURES/serial.bats$" "$ARGS_FILE")" -eq 1 ]
+  ! grep -q "^parallel:" "$ARGS_FILE"
+}
+
 @test "is_gnu_parallel accepts GNU parallel" {
   PATH="$STUB_BIN:$PATH" source "$SCRIPT"
   PATH="$STUB_BIN:$PATH" run is_gnu_parallel

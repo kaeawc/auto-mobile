@@ -347,8 +347,18 @@ main() {
   shift || true
   local bats_dir="${1:-test/bats}"
 
-  ensure_gnu_parallel || exit 1
-  silence_parallel_citation
+  # Without GNU parallel (or with AUTOMOBILE_BATS_SERIAL=1) every selected file
+  # runs in the serial pass instead of failing the lane: slower, still correct.
+  local have_parallel=true
+  if [[ "${AUTOMOBILE_BATS_SERIAL:-0}" == "1" ]]; then
+    have_parallel=false
+    log "notice: AUTOMOBILE_BATS_SERIAL=1; running every BATS file serially"
+  elif ensure_gnu_parallel; then
+    silence_parallel_citation
+  else
+    have_parallel=false
+    log "notice: GNU parallel unavailable; falling back to serial BATS execution (slower)"
+  fi
 
   if [[ "$lane" == "all" ]]; then
     local all_rc=0
@@ -383,7 +393,12 @@ main() {
   mkdir -p "$(dirname "$joblog")"
   rm -f "$joblog" "$within_joblog"
   classify_files "$bats_dir" "$lane" "$parallel_list" "$serial_list" "$within_list"
-  if [[ "$inner_jobs" -eq 1 ]]; then
+  if [[ "$have_parallel" == "false" ]]; then
+    cat "$within_list" "$parallel_list" "$serial_list" > "$temp_dir/all-files"
+    mv "$temp_dir/all-files" "$serial_list"
+    : > "$parallel_list"
+    : > "$within_list"
+  elif [[ "$inner_jobs" -eq 1 ]]; then
     # Slow hermetic files lead the cross-file pass (longest-first scheduling).
     cat "$within_list" "$parallel_list" > "$temp_dir/front-loaded-files"
     mv "$temp_dir/front-loaded-files" "$parallel_list"
@@ -407,15 +422,17 @@ main() {
 
   local started="$SECONDS"
   local rc=0
-  log "Parallel ${lane} pass: one BATS file per GNU Parallel job (${jobs} jobs)"
-  run_parallel_files "$parallel_list" "$jobs" "$joblog" || rc=1
+  if [[ -s "$parallel_list" ]]; then
+    log "Parallel ${lane} pass: one BATS file per GNU Parallel job (${jobs} jobs)"
+    run_parallel_files "$parallel_list" "$jobs" "$joblog" || rc=1
+  fi
 
   if [[ -s "$within_list" ]]; then
     log "Within-file ${lane} pass: files tagged parallel-within-file (${outer_jobs} files x ${inner_jobs} tests <= ${jobs} cores)"
     run_parallel_files "$within_list" "$outer_jobs" "$within_joblog" "$inner_jobs" || rc=1
   fi
 
-  log "Serial ${lane} pass: files tagged serial"
+  log "Serial ${lane} pass: files tagged serial (or all files without GNU parallel)"
   run_serial_files "$serial_list" "$file_budget" || rc=1
 
   local elapsed=$((SECONDS - started))

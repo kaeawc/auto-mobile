@@ -135,7 +135,7 @@ import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import {
   AndroidAvdIdentityConflictError,
-  AndroidBootedDeviceDiscoveryIncompleteError,
+  BootedDeviceDiscoveryIncompleteError,
   DeviceBootService,
   findUniqueBootedAndroidDeviceByName,
   type DeviceBootResult,
@@ -203,7 +203,7 @@ export function knownProvisionDeviceError(error: unknown): ProvisionDeviceError 
   if (error instanceof AndroidAvdIdentityConflictError) {
     return new ProvisionDeviceError("identity_conflict", error.message);
   }
-  if (error instanceof AndroidBootedDeviceDiscoveryIncompleteError) {
+  if (error instanceof BootedDeviceDiscoveryIncompleteError) {
     return new ProvisionDeviceError("discovery_incomplete", error.message, true);
   }
   return undefined;

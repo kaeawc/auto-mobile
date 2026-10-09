@@ -398,6 +398,12 @@ export async function waitForDeviceReadyOrCancel(
   }
 }
 
+/** Readiness budget for the shared devicectl sweep; a wedged CoreDevice must not stall callers (#11077, #11122). */
+export const PHYSICAL_IOS_SCAN_BUDGET_MS = 3_000;
+
+/** Thrown by the budget race only, so it is never confused with a caller abort. */
+class PhysicalIosScanBudgetExceeded extends Error {}
+
 function skippedPhysicalIosDiscovery(): {
   devices: BootedDevice[];
   complete: false;
@@ -425,6 +431,8 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private readonly physicalIosDevices: IosPhysicalDeviceLister;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   private readonly timer: Pick<Timer, "now">;
+  private physicalIosScanTimer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer;
+  private physicalIosScanBudgetMs = PHYSICAL_IOS_SCAN_BUDGET_MS;
   private iosBootInstrumentationOverride: IosBootInstrumentation | null = null;
   private defaultIosBootInstrumentation: IosBootInstrumentation | null = null;
 
@@ -449,6 +457,16 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     this.physicalIosDevices = physicalIosDevices || getSharedDevicectlDeviceLister();
     this.lifecycleCoordinator = lifecycleCoordinator;
     this.timer = timer;
+  }
+
+  /** Overrides the devicectl sweep budget and its timer (tests, embedders). */
+  withPhysicalIosScanBudget(
+    budgetMs: number,
+    timer: Pick<Timer, "setTimeout" | "clearTimeout">,
+  ): this {
+    this.physicalIosScanBudgetMs = budgetMs;
+    this.physicalIosScanTimer = timer;
+    return this;
   }
 
   /** Replaces boot-duration recording and capacity gating for iOS boots (tests, embedders). */
@@ -936,12 +954,33 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   ): Promise<PhysicalIosDeviceDiscovery> {
     // Physical-device discovery runs regardless of the simulator outcome and
     // cannot fail the sweep: it is best-effort by contract.
-    const physical = await raceWithDeadline(this.listPhysicalIosDevices(), {
-      timer: defaultTimer,
-      signal,
-      label: "iOS physical-device discovery",
-      relabelDefaultAbort: false,
-    });
+    let physical: PhysicalIosDeviceDiscovery;
+    try {
+      physical = await raceWithDeadline(this.listPhysicalIosDevices(), {
+        timer: this.physicalIosScanTimer,
+        timeoutMs: this.physicalIosScanBudgetMs,
+        signal,
+        label: "iOS physical-device discovery",
+        relabelDefaultAbort: false,
+        timeoutError: () => new PhysicalIosScanBudgetExceeded(),
+      });
+    } catch (error) {
+      if (!(error instanceof PhysicalIosScanBudgetExceeded)) {
+        throw error;
+      }
+      // The shared devicectl run keeps going; this sweep just stops waiting for it.
+      logger.warn(
+        `[DeviceManager] iOS physical-device discovery exceeded ${this.physicalIosScanBudgetMs}ms; continuing without it`,
+      );
+      return {
+        devices: [],
+        complete: false,
+        error: {
+          code: "timeout",
+          message: `devicectl did not list physical iOS devices within ${this.physicalIosScanBudgetMs}ms`,
+        },
+      };
+    }
     if (!physical.complete) {
       logger.debug(
         "[DeviceManager] iOS physical-device discovery was incomplete; " +
@@ -978,18 +1017,30 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       };
     }
     // Physical-device discovery runs regardless of the simulator outcome and
-    // cannot fail the sweep: it is best-effort by contract.
-    const physical = options.skipPhysicalIosDiscovery
-      ? skippedPhysicalIosDiscovery()
-      : await this.discoverPhysicalIosDevices(signal);
+    // cannot fail the sweep: it is best-effort by contract. Start the devicectl sweep first and run simctl beside it: a wedged
+    // CoreDevice must cost at most its budget, never simulator latency (#11122).
+    const physicalPromise: Promise<
+      PhysicalIosDeviceDiscovery | ReturnType<typeof skippedPhysicalIosDiscovery>
+    > = options.skipPhysicalIosDiscovery
+      ? Promise.resolve(skippedPhysicalIosDiscovery())
+      : this.discoverPhysicalIosDevices(signal);
+    // An abort rejects the physical race too; the await below surfaces it.
+    physicalPromise.catch(() => undefined);
+    const simulatorOutcome = await this.simctl
+      .getBootedSimulatorsChecked(undefined, signal, {
+        bypassCache: options.bypassIosDeviceListCache,
+      })
+      .then(
+        (simulators) => ({ simulators }),
+        (error: unknown) => ({ error }),
+      );
+    const physical = await physicalPromise;
     const freshPhysicalIds = physical.complete
       ? physical.devices.map((device) => device.deviceId)
       : [];
     const physicalError = physical.complete ? undefined : physical.error;
-    try {
-      const simulators = await this.simctl.getBootedSimulatorsChecked(undefined, signal, {
-        bypassCache: options.bypassIosDeviceListCache,
-      });
+    if ("simulators" in simulatorOutcome) {
+      const { simulators } = simulatorOutcome;
       return {
         devices: mergeIosDevices(simulators, physical.devices),
         simulatorsSucceeded: true,
@@ -1000,25 +1051,25 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           ...freshPhysicalIds,
         ]),
       };
-    } catch (error) {
-      signal?.throwIfAborted();
-      // A failed simctl sweep says nothing about the devicectl half: a physical
-      // device it positively observed stays authoritative (#5683).
-      logger.warn(
-        `[DeviceManager] iOS simulator discovery failed; retaining tracked simulators: ${error}`,
-      );
-      return {
-        devices: physical.devices,
-        simulatorsSucceeded: false,
-        physicalSucceeded: physical.complete,
-        ...(physicalError ? { physicalError } : {}),
-        freshDeviceIds: new Set(freshPhysicalIds),
-        error: {
-          code: "failed",
-          message: `iOS booted-device discovery failed: ${errorMessage(error)}`,
-        },
-      };
     }
+    const { error } = simulatorOutcome;
+    signal?.throwIfAborted();
+    // A failed simctl sweep says nothing about the devicectl half: a physical
+    // device it positively observed stays authoritative (#5683).
+    logger.warn(
+      `[DeviceManager] iOS simulator discovery failed; retaining tracked simulators: ${error}`,
+    );
+    return {
+      devices: physical.devices,
+      simulatorsSucceeded: false,
+      physicalSucceeded: physical.complete,
+      ...(physicalError ? { physicalError } : {}),
+      freshDeviceIds: new Set(freshPhysicalIds),
+      error: {
+        code: "failed",
+        message: `iOS booted-device discovery failed: ${errorMessage(error)}`,
+      },
+    };
   }
 
   private validateCameraPosterTarget(device: DeviceInfo, options: DeviceStartOptions): void {

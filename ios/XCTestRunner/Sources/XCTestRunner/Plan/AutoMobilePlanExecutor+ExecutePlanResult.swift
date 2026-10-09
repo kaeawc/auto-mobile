@@ -17,13 +17,16 @@ extension AutoMobilePlanExecutor {
         public let error: String?
         public let platform: String?
         public let deviceMapping: [String: String]?
+        // Present only on a failed run that asked for `holdSessionOnFailure`: whether the daemon kept
+        // the session and device for recovery. `false` means it released them (#11091).
+        public let sessionHeld: Bool?
         // Set by the executor after an AI-recovery attempt (not decoded from the wire). Mirrors the
         // Android result's aiRecoveryAttempted/aiRecoverySuccessful flags.
-        public var aiRecoveryAttempted: Bool = false
-        public var aiRecoverySuccessful: Bool = false
+        public var aiRecoveryAttempted = false
+        public var aiRecoverySuccessful = false
 
         private enum CodingKeys: String, CodingKey {
-            case success, executedSteps, totalSteps, failedStep, error, platform, deviceMapping
+            case success, executedSteps, totalSteps, failedStep, error, platform, deviceMapping, sessionHeld
         }
     }
 }

@@ -38,6 +38,7 @@ import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/Android
 import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "./sessionManager";
+import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
 import { hasActiveSessionExecution, subscribeToolCallEndActivity } from "./toolCallActivity";
 import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
@@ -895,6 +896,11 @@ export class Daemon {
       // heartbeat, device-switch, and derived `${base}:${label}` sessions alike.
       AndroidCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
       IOSCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
+    });
+    // A released base takes its derived `${base}:${label}` sessions with it (#11091).
+    // The pool is created after these callbacks are wired, so resolve it per release.
+    registerDerivedLabelSessionReleaseCascade(this.sessionManager, {
+      releaseDevice: (deviceId, sessionId) => this.devicePool.releaseDevice(deviceId, sessionId),
     });
     // A rebind keeps the session live, but its navigation state was collected on
     // the old device and must not follow it to the new one.

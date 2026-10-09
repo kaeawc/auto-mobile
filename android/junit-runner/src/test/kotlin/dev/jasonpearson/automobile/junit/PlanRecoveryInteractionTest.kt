@@ -201,6 +201,35 @@ class PlanRecoveryInteractionTest {
     )
   }
 
+  @Test
+  fun `a failed plan the daemon reports as not held skips recovery and fails clearly`() {
+    daemon.cannedFailure = failedPayload { it.with("sessionHeld" to JsonPrimitive(false)) }
+
+    val result = executeSimplePlan()
+
+    assertFalse(result.success)
+    assertTrue("recovery never ran on a released device", recordingAgent.contexts.isEmpty())
+    assertFalse(result.aiRecoveryAttempted)
+    assertEquals("no resume on the released session", 1, daemon.startSteps.size)
+    assertTrue(result.errorMessage.orEmpty().contains("sessionHeld: false"))
+    assertEquals(
+      "the daemon already released it; nothing to release",
+      emptyList<Pair<String, String?>>(),
+      daemon.daemonMethodCalls,
+    )
+  }
+
+  @Test
+  fun `a failed plan the daemon reports as held goes on to recovery`() {
+    daemon.cannedFailure = failedPayload { it.with("sessionHeld" to JsonPrimitive(true)) }
+
+    val result = executeSimplePlan()
+
+    assertTrue(result.success)
+    assertTrue(result.aiRecoveryAttempted)
+    assertEquals(1, recordingAgent.contexts.size)
+  }
+
   // ── #11072: a session the daemon released is never driven again ──
 
   @Test

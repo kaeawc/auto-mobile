@@ -505,6 +505,18 @@ internal object AutoMobilePlanExecutor {
       Thread.sleep(retryBackoffMs)
     }
 
+    // The daemon reports whether it actually kept the failed attempt's session (#11091): a plan
+    // with derived device-label sessions is always released, so recovery would drive a device
+    // this runner no longer holds. Fail now, with nothing to release.
+    if (holdForRecovery && parsed.sessionHeld == false) {
+      return sessionNotHeldFailure(
+        sessionUuid = attemptSessionUuid,
+        output = outputPayload,
+        errorOutput = response.error ?: parsed.errorMessage,
+        toolResults = toolResults,
+      )
+    }
+
     // Non-transient failure or retries exhausted — attempt recovery if allowed
     val failedStepContext =
       buildFailedStepContext(response, json, planContent, options.device, secretValues)
@@ -556,6 +568,34 @@ internal object AutoMobilePlanExecutor {
   }
 
   // ── Failure handling & recovery ───────────────────────────────────────────
+
+  /**
+   * The failure to report when the daemon answered a failed executePlan that asked to hold its
+   * session with `sessionHeld: false` (#11091): it released the session and device, so AI recovery
+   * is skipped rather than run on a device another session may already own.
+   */
+  private fun sessionNotHeldFailure(
+    sessionUuid: String,
+    output: String,
+    errorOutput: String,
+    toolResults: List<ToolResultEntry>,
+  ): InternalExecutionResult {
+    val reason =
+      "AI recovery skipped: the daemon released session $sessionUuid after the failed plan " +
+        "(sessionHeld: false; plans with derived device-label sessions are always released)"
+    val errorMessage =
+      "AutoMobile plan execution failed with exit code 1" +
+        (if (errorOutput.isNotEmpty()) "\nErrors: $errorOutput" else "") +
+        "\n$reason"
+    System.err.println(errorMessage)
+    return InternalExecutionResult(
+      success = false,
+      exitCode = 1,
+      output = output,
+      errorMessage = errorMessage,
+      toolResults = toolResults,
+    )
+  }
 
   /**
    * The failure to report when the daemon released [sessionUuid] while the runner heartbeated it
@@ -878,6 +918,12 @@ internal object AutoMobilePlanExecutor {
         retryable,
         code,
         daemonMessage,
+        sessionHeld =
+          when (parsed["sessionHeld"]) {
+            JsonPrimitive(true) -> true
+            JsonPrimitive(false) -> false
+            else -> null
+          },
       )
     }
     return ParsedToolResult(true, "")
@@ -1258,5 +1304,10 @@ internal object AutoMobilePlanExecutor {
     val code: String? = null,
     /** The daemon's human-readable `error` string, when it sent one. */
     val daemonMessage: String? = null,
+    /**
+     * Whether the daemon kept the session after a failed run that asked to hold it (#11091); null
+     * when it did not say.
+     */
+    val sessionHeld: Boolean? = null,
   )
 }

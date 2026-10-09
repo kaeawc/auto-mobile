@@ -276,6 +276,26 @@ wiring_requires_yq() {
   done
 }
 
+@test "desktop_core change detection covers the desktop wire-contract fixtures (#10838)" {
+  # The daemon-side TS test writes test/fixtures/desktop-wire/*.json and the Kotlin
+  # DesktopWireFixtureCompositionTest (desktop-core) replays them. A daemon-only PR that
+  # regenerates the fixtures must still trigger the Kotlin replay.
+  wiring_requires_yq
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-desktop-core")
+    | (.with.filters | from_yaml | .desktop_core[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  local path
+  for path in \
+    "android/desktop-core/**" \
+    "test/fixtures/desktop-wire/**" \
+    "test/daemon/desktopWireContract.test.ts"; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
+  done
+}
+
 @test "runtime-graph-verification runs the clean-room pinned-graph check exactly once (#5421)" {
   # The heavy pack+install verification must live in its own required-able job
   # and NOT be duplicated back into the benchmarks job (it was extracted from

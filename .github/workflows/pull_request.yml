@@ -260,6 +260,11 @@ jobs:
               - 'android/gradle.properties'
               - 'android/build.gradle.kts'
               - 'android/gradle/libs.versions.toml'
+              # The desktop wire-contract fixtures are written by the daemon-side TS test and
+              # replayed by DesktopWireFixtureCompositionTest in desktop-core. A daemon-only
+              # PR that regenerates them must run that Kotlin replay (#10838).
+              - 'test/fixtures/desktop-wire/**'
+              - 'test/daemon/desktopWireContract.test.ts'
 
       - name: "Check for IDE Plugin changes"
         id: filter-ide-plugin

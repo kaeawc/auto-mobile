@@ -978,7 +978,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
 
     // Enforce autolock: a locked device may only be driven by the session that locked it.
-    if (device && autolockEnabled && DaemonState.getInstance().isInitialized()) {
+    // Tools flagged `deviceReadOnly` only watch, which is allowed on any device (#10833).
+    if (
+      device &&
+      autolockEnabled &&
+      !options.deviceReadOnly &&
+      DaemonState.getInstance().isInitialized()
+    ) {
       DaemonState.getInstance()
         .getDevicePool()
         .assertAutolockAccess(device.deviceId, sessionUuid, autolockEnabled);

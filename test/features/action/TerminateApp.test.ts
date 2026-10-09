@@ -82,6 +82,16 @@ describe("TerminateApp (Android install listing)", () => {
     expect(adb.wasCommandExecuted("force-stop")).toBe(false);
   });
 
+  test("a failed process read does not mask the not-installed result (#9758)", async () => {
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.other");
+    adb.setCommandError("shell dumpsys activity processes", new Error("dumpsys timed out"));
+    expect(await app.execute("com.example.app", { skipObservation: true })).toMatchObject({
+      success: true,
+      wasInstalled: false,
+    });
+    expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+  });
+
   test("install-aware targeting force-stops a personal-only background app", async () => {
     adb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
     adb.setUsers([
@@ -110,6 +120,51 @@ describe("TerminateApp (Android install listing)", () => {
     const result = await app.execute("com.example.app", { skipObservation: true });
     expect(result).toMatchObject({ success: true, wasInstalled: true, wasRunning: true });
     expect(adb.wasCommandExecuted("shell am force-stop --user 0 'com.example.app'")).toBe(true);
+  });
+
+  test("issues the install, process and foreground reads concurrently before force-stop (#9758)", async () => {
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
+    adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
+    adb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
+
+    // Each read parks until released, so a sequential implementation can never
+    // have more than one read in flight.
+    const events: string[] = [];
+    const releases: Array<() => void> = [];
+    const park = (name: string) =>
+      new Promise<void>((resolve) => {
+        events.push(`start:${name}`);
+        releases.push(() => {
+          events.push(`end:${name}`);
+          resolve();
+        });
+      });
+    const realExecute = adb.executeCommand.bind(adb);
+    const realForeground = adb.getForegroundApp.bind(adb);
+    const executeSpy = spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+      const command = String(args[0]);
+      if (command.includes("pm list packages") || command.includes("dumpsys activity processes")) {
+        await park(command.includes("pm list") ? "installed" : "processes");
+      }
+      return realExecute(...args);
+    });
+    const foregroundSpy = spyOn(adb, "getForegroundApp").mockImplementation(async (...args) => {
+      await park("foreground");
+      return realForeground(...args);
+    });
+
+    const outcome = app.execute("com.example.app", { skipObservation: true, userId: 0 });
+    for (let i = 0; i < 20 && releases.length < 3; i++) {
+      await Promise.resolve();
+    }
+    expect(events).toEqual(["start:installed", "start:processes", "start:foreground"]);
+    expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+    releases.forEach((release) => release());
+
+    expect(await outcome).toMatchObject({ success: true, wasRunning: true, wasForeground: true });
+    expect(adb.wasCommandExecuted("shell am force-stop --user 0 'com.example.app'")).toBe(true);
+    executeSpy.mockRestore();
+    foregroundSpy.mockRestore();
   });
 
   test("propagates an aborted request as cancellation", async () => {

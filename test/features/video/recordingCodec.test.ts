@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   defaultRecordingCodecProbe,
+  parseMp4DurationMs,
   parseMp4VideoCodec,
 } from "../../../src/features/video/recordingCodec";
 
@@ -89,6 +90,43 @@ describe("parseMp4VideoCodec", () => {
   });
 });
 
+/** An `mvhd` box (version 0 or 1) with the given timescale and duration in ticks. */
+function mvhd(version: 0 | 1, timescale: number, duration: number): Buffer {
+  const payload = Buffer.alloc(version === 1 ? 32 : 20);
+  payload.writeUInt8(version, 0);
+  if (version === 1) {
+    payload.writeUInt32BE(timescale, 20);
+    payload.writeUInt32BE(Math.floor(duration / 2 ** 32), 24);
+    payload.writeUInt32BE(duration % 2 ** 32, 28);
+  } else {
+    payload.writeUInt32BE(timescale, 12);
+    payload.writeUInt32BE(duration, 16);
+  }
+  return box("mvhd", payload);
+}
+
+describe("parseMp4DurationMs", () => {
+  test("reads a version 0 mvhd (screenrecord shorter than wall clock: 18.2 s)", () => {
+    const mp4 = Buffer.concat([FTYP, moov(mvhd(0, 1000, 18200), trak(sampleEntry("avc1")))]);
+    expect(parseMp4DurationMs(mp4)).toBe(18200);
+  });
+
+  test("honors the timescale", () => {
+    expect(parseMp4DurationMs(moov(mvhd(0, 90000, 135000)))).toBe(1500);
+  });
+
+  test("reads a version 1 mvhd with a 64-bit duration", () => {
+    expect(parseMp4DurationMs(moov(mvhd(1, 1000, 25500)))).toBe(25500);
+  });
+
+  test("returns undefined without mvhd, with a zero timescale, or for garbage", () => {
+    expect(parseMp4DurationMs(moov(trak(sampleEntry("avc1"))))).toBeUndefined();
+    expect(parseMp4DurationMs(moov(mvhd(0, 0, 100)))).toBeUndefined();
+    expect(parseMp4DurationMs(Buffer.from("not an mp4 file", "latin1"))).toBeUndefined();
+    expect(parseMp4DurationMs(moov(box("mvhd", Buffer.alloc(6))))).toBeUndefined();
+  });
+});
+
 describe("defaultRecordingCodecProbe", () => {
   let tempDir: string;
 
@@ -131,6 +169,26 @@ describe("defaultRecordingCodecProbe", () => {
   test("returns undefined when the file does not exist rather than throwing", async () => {
     expect(
       await defaultRecordingCodecProbe.codec(path.join(tempDir, "missing.mp4")),
+    ).toBeUndefined();
+  });
+
+  test("reads the container duration from a finalized file", async () => {
+    const filePath = path.join(tempDir, "duration.mp4");
+    const mp4 = Buffer.concat([
+      FTYP,
+      box("mdat", Buffer.alloc(64)),
+      moov(mvhd(0, 1000, 18200), trak(sampleEntry("avc1"))),
+    ]);
+    await fsPromises.writeFile(filePath, mp4);
+    expect(await defaultRecordingCodecProbe.durationMs?.(filePath)).toBe(18200);
+  });
+
+  test("duration is undefined for a missing or non-mp4 file rather than throwing", async () => {
+    const bogus = path.join(tempDir, "bogus.mp4");
+    await fsPromises.writeFile(bogus, Buffer.alloc(4096, 1));
+    expect(await defaultRecordingCodecProbe.durationMs?.(bogus)).toBeUndefined();
+    expect(
+      await defaultRecordingCodecProbe.durationMs?.(path.join(tempDir, "missing.mp4")),
     ).toBeUndefined();
   });
 });

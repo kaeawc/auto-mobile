@@ -79,7 +79,14 @@ export interface VideoRecordingMetadata {
   filePath: string;
   format: VideoContainerFormat;
   sizeBytes: number;
+  /** Wall-clock time between recording start and stop. */
   durationMs?: number;
+  /**
+   * Playable duration of the finalized file, read from the container (`mvhd`).
+   * Can be shorter than `durationMs`: Android `screenrecord` only writes frames
+   * when the screen changes, so an idle screen yields a shorter file.
+   */
+  videoDurationMs?: number;
   codec?: string;
   outputName?: string;
   createdAt: string;

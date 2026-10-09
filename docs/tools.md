@@ -2059,6 +2059,15 @@ explicit bitrate or frame-rate settings.
 at 300 seconds on Android and 3600 seconds on iOS. `outputName` supplies a
 recording label.
 
+The stop result reports two durations. `durationMs` is the wall-clock time
+between start and stop. `videoDurationMs` is the playable duration read from the
+finished file's MP4 header (`mvhd`); it is omitted when the header cannot be
+read. The two can differ: Android `screenrecord` writes frames only when the
+screen changes, so an idle screen can yield a file shorter than the wall-clock
+span (for example 18.2 s of video for a 25.5 s recording). Use
+`videoDurationMs` for assertions about the file and `durationMs` for how long
+the recording ran.
+
 On Android, `videoRecording({ action: "start", display })` accepts a physical
 panel key, the role `inner`, `cover`, `rear`, or `external`, or `"active"`.
 Omitting `display` selects the active panel when supported. Multi-panel recordings pin

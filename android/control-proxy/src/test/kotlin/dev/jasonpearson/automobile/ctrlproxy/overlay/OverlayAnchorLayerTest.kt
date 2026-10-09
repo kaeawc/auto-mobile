@@ -132,6 +132,49 @@ class OverlayAnchorLayerTest {
     OverlayBoxNode(testTag = "root", children = children.toList())
 
   @Test
+  fun `a zero-size wrap root still exposes its anchored nodes to accessibility at their anchors`() {
+    val rendered = render(wrapRoot(small, large))
+    val provider = checkNotNull(rendered.view.accessibilityNodeProvider)
+    for ((tag, expected) in
+      listOf("small" to dpRect(100f, 300f, 100f), "large" to dpRect(100f, 100f, 300f))) {
+      // Compose clips a node's accessibility bounds to its ancestors: an empty ancestor reported
+      // empty, invisible bounds and `observe` dropped the node (#10870).
+      val info = checkNotNull(provider.createAccessibilityNodeInfo(rendered.root.tagged(tag).id))
+      val bounds = android.graphics.Rect()
+      info.getBoundsInScreen(bounds)
+      assertRect(
+        expected,
+        Rect(
+          bounds.left.toFloat(),
+          bounds.top.toFloat(),
+          bounds.right.toFloat(),
+          bounds.bottom.toFloat(),
+        ),
+      )
+    }
+  }
+
+  @Test
+  fun `a wrap-content window keeps its measured size when every child of the root is anchored`() {
+    // Filling a zero-size root would grow a floating or sheet window to the screen, where it would
+    // block touches on the app below (#10870). Only a fullscreen window is already that size.
+    val placements =
+      listOf(
+        OverlayPlacement.Floating(offsetXDp = 24f, offsetYDp = 120f),
+        OverlayPlacement.Sheet(OverlayPlacement.Edge.BOTTOM, 200f),
+      )
+    for (placement in placements) {
+      val rendered = render(wrapRoot(small, large), placement)
+      val content = checkNotNull(rendered.root.tagged("root").layoutInfo.parentInfo)
+      assertEquals("$placement width", 0, content.width)
+      assertEquals("$placement height", 0, content.height)
+    }
+    val fullscreen =
+      checkNotNull(render(wrapRoot(small, large)).root.tagged("root").layoutInfo.parentInfo)
+    assertEquals(true, fullscreen.width > 0 && fullscreen.height > 0)
+  }
+
+  @Test
   fun `anchors under a wrap-content root are drawn and reported where they are anchored`() {
     val rendered = render(wrapRoot(small, large))
     for ((tag, expected) in

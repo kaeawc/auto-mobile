@@ -4462,11 +4462,20 @@ describe("DeviceDataStreamSocketServer control command authorization (#7950)", (
       expect(calls).toEqual([]);
     });
 
-    it(`${request.command} rejects a different device owner before device work`, async () => {
+    // Watching a held device is allowed for any live identity (#10830): these are reads.
+    it(`${request.command} admits a live non-owner as a read-only viewer`, async () => {
       const { calls, send } = setup();
       const response = await send({ ...request, sessionUuid: "intruder" });
+      expect(response).toMatchObject({ type: "subscription_response", success: true });
+      // An unsubscribe with no prior subscribe has no observer to release.
+      expect(calls).toHaveLength(request.command === "unsubscribe_storage" ? 0 : 1);
+    });
+
+    it(`${request.command} still rejects an unknown session before device work`, async () => {
+      const { calls, send } = setup();
+      const response = await send({ ...request, sessionUuid: "stranger" });
       expect(response).toMatchObject({ type: "error", success: false });
-      expect(response?.error).toContain("different daemon session");
+      expect(response?.error).toContain("not an active daemon session");
       expect(calls).toEqual([]);
     });
 
@@ -4563,7 +4572,7 @@ streamSubscribeAuthCases("observation-stream", (timer, authenticator) => {
   };
 });
 
-it("registered observer request_observation passes both auth layers while other-owned requests fail", async () => {
+it("registered observer request_observation passes both auth layers on unowned and held devices (#10830)", async () => {
   const timer = new FakeTimer();
   const registry = new ObserverSessionRegistry(timer);
   registry.register("desktop", "AutoMobile Desktop");
@@ -4586,6 +4595,7 @@ it("registered observer request_observation passes both auth layers while other-
     new ObserverAdmittingStreamAuthenticator(options).authorize({
       sessionUuid,
       deviceId: deviceId ?? undefined,
+      admitViewer: true,
     });
     captures++;
     return [
@@ -4620,15 +4630,29 @@ it("registered observer request_observation passes both auth layers while other-
   await server.processLineForTest(
     socket,
     JSON.stringify({
-      id: "refuse",
+      id: "watch-held",
       command: "request_observation",
       deviceId: "owned",
       sessionUuid: "desktop",
     }),
   );
-  expect(captures).toBe(1);
+  expect(captures).toBe(2);
+  expect(socket.getWrittenMessages()).toEqual([
+    { id: "watch-held", type: "subscription_response", success: true },
+  ]);
+  socket.resetWrittenData();
+  await server.processLineForTest(
+    socket,
+    JSON.stringify({
+      id: "refuse-unregistered",
+      command: "request_observation",
+      deviceId: "owned",
+      sessionUuid: "unregistered",
+    }),
+  );
+  expect(captures).toBe(2);
   expect(socket.getWrittenMessages<{ error: string; type: string }>()[0]).toMatchObject({
     type: "error",
-    error: expect.stringContaining("different daemon session"),
+    error: expect.stringContaining("not an active daemon session"),
   });
 });

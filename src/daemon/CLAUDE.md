@@ -124,8 +124,9 @@ asking the client to retry registration; unrelated UUIDs do not wait for that re
 `ObserverSessionRegistry` is a separate in-memory registry, never a `Session`
 and never persisted. Defaults pending owner confirmation: cap 32
 (`MAX_OBSERVER_SESSIONS`), the default heartbeat timeout plus the suspect grace
-(8 seconds; the timeout keeps its environment override), and unowned-device-only scope via
-`observerMaySeeDeviceOwner`. Every registry operation lazily purges expiry using
+(8 seconds; the timeout keeps its environment override). `canObserveDevice`
+(`observerMaySeeDeviceOwner`, unowned devices only) is not consulted by any socket
+path; watching follows the read-only viewer grant below. Every registry operation lazily purges expiry using
 the injected Timer; there are no background timers. `dispose()` closes and clears
 it. Registration is idempotent and refreshes TTL; expired entries free quota.
 Heartbeat and release consult it only when no device session exists, without
@@ -137,8 +138,10 @@ continues to consult SessionManager alone.
 Read-only viewer grant (#10698): a registered observer, like any live device
 session, may watch any device through video relay subscribe and WebRTC start, as
 a read-only viewer. The grant does not depend on holding an unrelated device.
-The observation and push sockets keep unowned-device-only scope
-(`observerMaySeeDeviceOwner`). `input/*` follows ownership instead: a held device
+The observation socket's on-demand reads (`request_observation`,
+`request_navigation_graph`, `subscribe_storage`/`unsubscribe_storage`) take the
+same grant (#10830), matching its passive `subscribe`, which is not device-scoped
+at all; they still require a live identity. `input/*` follows ownership instead: a held device
 takes input only from a frame whose `sessionUuid` names its holder (typed code
 `device_owned_by_other_session`); an unowned device takes input from anyone.
 Device-aware `tools/call` follows the same rule (`assertToolCallerHoldsDevice` in

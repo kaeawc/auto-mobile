@@ -1144,7 +1144,12 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       if (deviceSessionUuid !== null && deviceId === undefined) {
         throw this.deviceSessionResolver.getSessionError(deviceSessionUuid);
       }
-      this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId });
+      // Reading the navigation graph is watching (#10830): any live identity may, held or not.
+      this.authenticator.authorize({
+        sessionUuid: request.sessionUuid,
+        deviceId,
+        admitViewer: true,
+      });
       if (!this.onNavigationGraphRequested) {
         this.sendJson(socket, {
           id: request.id,
@@ -1786,9 +1791,12 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     let storageDeviceId: string | null;
     try {
       storageDeviceId = this.resolveStorageTargetDeviceId(request, subscribe);
+      // Watching stored values is a read (#10830): a held device admits any live identity, as
+      // the video viewer grant does (#10698). Writes stay owner-only through tools/call.
       this.authenticator.authorize({
         sessionUuid: request.sessionUuid,
         deviceId: storageDeviceId ?? undefined,
+        admitViewer: true,
       });
     } catch (error) {
       this.sendJson(socket, {
@@ -1890,7 +1898,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       if (deviceSessionUuid !== null && deviceId === undefined) {
         throw this.deviceSessionResolver.getSessionError(deviceSessionUuid);
       }
-      this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId });
+      // An on-demand observation is watching, like the passive subscribe (#10830): a held device
+      // admits any live identity as a read-only viewer (#10698).
+      this.authenticator.authorize({
+        sessionUuid: request.sessionUuid,
+        deviceId,
+        admitViewer: true,
+      });
       if (!this.onObservationRequested) {
         throw new Error("Observation requests are not available");
       }

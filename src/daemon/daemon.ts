@@ -2211,7 +2211,8 @@ export class Daemon {
           signal,
           assertDeviceActionable: (pooledDevice) => {
             this.devicePool.assertDeviceActionable(pooledDevice.id, "to observe");
-            authenticator.authorize({ sessionUuid, deviceId: pooledDevice.id });
+            // Watching: a held device admits any live identity read-only (#10830).
+            authenticator.authorize({ sessionUuid, deviceId: pooledDevice.id, admitViewer: true });
           },
         },
       );
@@ -2267,7 +2268,8 @@ export class Daemon {
         continue;
       }
       try {
-        authenticator.authorize({ sessionUuid, deviceId: device.id });
+        // Watching stored values is a read: a held device admits any live identity (#10830).
+        authenticator.authorize({ sessionUuid, deviceId: device.id, admitViewer: true });
       } catch (error) {
         refusals.push(errorMessage(error));
         continue;

@@ -1,4 +1,5 @@
 import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
+import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { DeviceShuttingDownError } from "../daemon/deviceAcquisitionRefusals";
 import { ActionableError, BootedDevice, DeviceInfo } from "../models";
@@ -676,6 +677,11 @@ async function bindBootedDeviceSession(
     collectCancellationSettlement?: (settlement: Promise<void>) => void;
   } = {},
 ): Promise<string> {
+  if (device.platform === "android") {
+    // A deliberate startDevice/provisionDevice boot owns this serial now; a tombstone left by a
+    // previously retired emulator must not fence it (#11134).
+    await getProvisionedDeviceTransportFence().clear(device.deviceId);
+  }
   // Reserve the exact ready device before resource notifications publish it
   // to concurrent allocators.
   const daemonState = DaemonState.getInstance();

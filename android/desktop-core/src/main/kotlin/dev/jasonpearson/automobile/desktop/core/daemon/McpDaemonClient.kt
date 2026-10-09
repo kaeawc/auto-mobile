@@ -66,6 +66,12 @@ class McpDaemonClient(
   private val inputRequestTimeoutMs: Long = INPUT_REQUEST_TIMEOUT_MS,
   private val statusRequestTimeoutMs: Long = STATUS_REQUEST_TIMEOUT_MS,
   /**
+   * Hang ceiling for the session keep-alive requests (`daemon/heartbeat`,
+   * `daemon/registerSession`, #11072). They run on a 2 s timer, so a daemon that accepts but never
+   * replies must fail the tick as a lapse rather than stall every later tick.
+   */
+  private val sessionKeepaliveTimeoutMs: Long = SESSION_KEEPALIVE_TIMEOUT_MS,
+  /**
    * The daemon session input frames act for (#10698). A device a session holds takes input only
    * from that session, so a client that drives a device its desktop session holds (but is not
    * itself bound to that session, like the per-action pane clients) names it here. Read per frame,
@@ -81,7 +87,14 @@ class McpDaemonClient(
     socketPathValue: String,
     daemonLifecycle: DaemonLifecycleEnsurer,
     statusRequestTimeoutMs: Long = STATUS_REQUEST_TIMEOUT_MS,
-  ) : this(socketPathValue = socketPathValue, statusRequestTimeoutMs = statusRequestTimeoutMs) {
+    sessionUuid: String? = null,
+    sessionKeepaliveTimeoutMs: Long = SESSION_KEEPALIVE_TIMEOUT_MS,
+  ) : this(
+    socketPathValue = socketPathValue,
+    sessionUuid = sessionUuid,
+    statusRequestTimeoutMs = statusRequestTimeoutMs,
+    sessionKeepaliveTimeoutMs = sessionKeepaliveTimeoutMs,
+  ) {
     this.daemonLifecycle = daemonLifecycle
   }
 
@@ -858,12 +871,20 @@ class McpDaemonClient(
     }
   }
 
-  /** Registers an identity without binding or reserving any device. */
+  /**
+   * Registers an identity without binding or reserving any device.
+   *
+   * Runs from the session's heartbeat loop, so it never runs the lifecycle preflight (#11072): a
+   * missing or other-version daemon is a lapse the loop retries, never a reason to start or restart
+   * the shared daemon. Only user-initiated requests (input, Retry) run the preflight.
+   */
   fun registerSession(sessionId: String, clientName: String): RegisterSessionResult {
     val response =
       sendRequest(
         DAEMON_REGISTER_SESSION_METHOD,
         json.encodeToJsonElement(RegisterSessionRequest(sessionId, clientName)).jsonObject,
+        timeoutMs = sessionKeepaliveTimeoutMs,
+        skipLifecyclePreflight = true,
       )
     val responseResult = ensureSuccess(response, "daemon/registerSession")
     return json.decodeFromJsonElement(serializer<RegisterSessionResult>(), responseResult)
@@ -881,13 +902,22 @@ class McpDaemonClient(
     ownedSessionUuids.remove(sessionId)
   }
 
-  /** Refreshes the heartbeat for this client's daemon session, if it owns one. */
+  /**
+   * Refreshes the heartbeat for this client's daemon session, if it owns one.
+   *
+   * A passive keep-alive (#11072): it skips the lifecycle preflight, so a heartbeat tick never
+   * starts a daemon the user stopped or restarts one of another version (which dropped every other
+   * harness's sessions), and it is bounded by [sessionKeepaliveTimeoutMs]. A missing or wedged
+   * daemon fails the tick, which the session loop treats as a lapse.
+   */
   internal fun heartbeatSession() {
     val sessionId = sessionUuid ?: return
     val response =
       sendRequest(
         "daemon/heartbeat",
         buildJsonObject { put("sessionId", JsonPrimitive(sessionId)) },
+        timeoutMs = sessionKeepaliveTimeoutMs,
+        skipLifecyclePreflight = true,
       )
     if (!response.success && response.code?.contentOrNull == SESSION_NOT_FOUND_CODE) {
       throw DaemonSessionNotFoundException(
@@ -1070,8 +1100,9 @@ class McpDaemonClient(
         ),
       )
     }
-    // Status is a passive health probe. Its purpose is to report a wedged daemon, so running the
-    // lifecycle preflight first can itself hang before the request watchdog is armed.
+    // Status and the session keep-alives are passive. Status reports a wedged daemon, so running
+    // the lifecycle preflight first can itself hang before the request watchdog is armed; a
+    // keep-alive must never start or restart the shared daemon (#11072).
     if (!skipLifecyclePreflight) {
       ensureVersionMatchedDaemon()
     }
@@ -1207,6 +1238,9 @@ class McpDaemonClient(
      * Hang ceiling for the daemon connectivity probe (ide/status); a healthy probe is ~ms (#4858).
      */
     const val STATUS_REQUEST_TIMEOUT_MS = 5_000L
+
+    /** Hang ceiling for `daemon/heartbeat` and `daemon/registerSession` (#11072). */
+    const val SESSION_KEEPALIVE_TIMEOUT_MS = 2_000L
 
     // One shared daemon thread arms/cancels every request deadline. It only ever runs a
     // channel.close() for a request that overran its ceiling, so it stays idle in normal use.

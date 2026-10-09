@@ -568,8 +568,11 @@ internal object AutoMobilePlanExecutor {
     errorMessage: String,
     toolResults: List<ToolResultEntry>,
     recoveryAttempted: Boolean,
+    releaseHeld: () -> Unit = {},
   ): InternalExecutionResult? {
     val loss = sessionUuid?.let { DaemonHeartbeat.sessionLoss(it) } ?: return null
+    // An unconfirmed loss may be a session the daemon still holds: release it rather than leak it.
+    if (!loss.confirmed) releaseHeld()
     val reason = "AI recovery cannot continue: ${loss.describe()}"
     System.err.println(reason)
     return InternalExecutionResult(
@@ -647,6 +650,7 @@ internal object AutoMobilePlanExecutor {
         errorMessage,
         toolResults,
         recoveryAttempted = false,
+        releaseHeld = releaseHeld,
       )
       ?.let {
         return it
@@ -663,7 +667,14 @@ internal object AutoMobilePlanExecutor {
       }
 
     // Released while recovery ran: never resume on it, whatever recovery reported.
-    sessionLossFailure(recoverySession, result, errorMessage, toolResults, recoveryAttempted = true)
+    sessionLossFailure(
+        recoverySession,
+        result,
+        errorMessage,
+        toolResults,
+        recoveryAttempted = true,
+        releaseHeld = releaseHeld,
+      )
       ?.let {
         return it
       }

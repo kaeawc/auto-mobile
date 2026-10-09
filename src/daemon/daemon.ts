@@ -2912,7 +2912,10 @@ export class Daemon {
   private startDeviceDisconnectMonitor(
     deviceManager: Pick<
       MultiPlatformDeviceManager,
-      "getBootedDevicesDetailed" | "getAndroidOfflineDeviceIds" | "recoverAndroidOfflineDevices"
+      | "getBootedDevicesDetailed"
+      | "getAndroidOfflineDeviceIds"
+      | "getAndroidListedDeviceStates"
+      | "recoverAndroidOfflineDevices"
     > = new MultiPlatformDeviceManager(),
     listRecordings: typeof listActiveVideoRecordings = listActiveVideoRecordings,
     transportRestarts: AdbTransportRestartLookup = defaultAdbTransportRestartRegistry,
@@ -2949,34 +2952,13 @@ export class Daemon {
           const missingByDevice = new Map<string, string[]>();
           const { candidateDeviceIds, candidatePlatforms, candidateIncarnations } =
             this.collectDisconnectCandidates(activeRecordings);
-          // Online-ness is otherwise binary: an in-session Android emulator
-          // that dropped to ADB `offline` looks identical to one that is
-          // fully gone, since bootedDeviceIds only ever contains `device`
-          // -state serials. Ask only about candidates already missing from
-          // that list, so a fully-healthy sweep never pays for this extra
-          // `devices -l` probe (#7536).
-          let offlineDeviceIds: Set<string> | undefined;
-          try {
-            if (!planActive) {
-              const missingAndroidCandidateIds = this.findMissingAndroidCandidates(
-                candidateDeviceIds,
-                bootedDeviceIds,
-                candidatePlatforms,
-              );
-              offlineDeviceIds =
-                missingAndroidCandidateIds.size > 0
-                  ? await deviceManager.getAndroidOfflineDeviceIds(missingAndroidCandidateIds)
-                  : new Set<string>();
-            }
-          } catch (error) {
-            if (!(error instanceof AndroidOfflineProbeError)) {
-              throw error;
-            }
-            // Auxiliary probe failure supplies no evidence that an offline episode ended.
-            logger.warn(
-              `[DisconnectMonitor] Retaining offline recovery attempts: ${errorMessage(error)}`,
-            );
-          }
+          const { offlineDeviceIds, listedNonDeviceIds } = await this.probeListedAndroidStates(
+            deviceManager,
+            planActive,
+            candidateDeviceIds,
+            bootedDeviceIds,
+            candidatePlatforms,
+          );
           if (!planActive) {
             const { dispatchTargets, offlineRecoveryTargets } = this.prepareOfflineRecovery(
               candidateDeviceIds,
@@ -3021,7 +3003,7 @@ export class Daemon {
               candidateDeviceIds,
               candidatePlatforms,
               bootedDeviceIds,
-              offlineDeviceIds,
+              listedNonDeviceIds,
               transportRestarts,
             ),
           });
@@ -3148,6 +3130,54 @@ export class Daemon {
       );
       logger.debug("[DisconnectMonitor] Deferring actions — plan execution active");
     };
+  }
+
+  /**
+   * Online-ness is otherwise binary: an in-session Android emulator that
+   * dropped to ADB `offline` looks identical to one that is fully gone, since
+   * bootedDeviceIds only ever contains `device`-state serials. Ask only about
+   * candidates already missing from that list, so a fully-healthy sweep never
+   * pays for this extra `devices -l` probe (#7536). Every non-`device` row
+   * counts as still attached for the immediate physical-device path; only
+   * `offline` drives reconnect and the offline budget (#11090). Both sets are
+   * undefined when the probe is skipped (plan active) or fails.
+   */
+  private async probeListedAndroidStates(
+    deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidListedDeviceStates">,
+    planActive: boolean,
+    candidateDeviceIds: Set<string>,
+    bootedDeviceIds: Set<string>,
+    candidatePlatforms: Map<string, "android" | "ios">,
+  ): Promise<{ offlineDeviceIds?: Set<string>; listedNonDeviceIds?: Set<string> }> {
+    if (planActive) {
+      return {};
+    }
+    const missingAndroidCandidateIds = this.findMissingAndroidCandidates(
+      candidateDeviceIds,
+      bootedDeviceIds,
+      candidatePlatforms,
+    );
+    try {
+      const listedStates =
+        missingAndroidCandidateIds.size > 0
+          ? await deviceManager.getAndroidListedDeviceStates(missingAndroidCandidateIds)
+          : new Map<string, string>();
+      return {
+        listedNonDeviceIds: new Set(listedStates.keys()),
+        offlineDeviceIds: new Set(
+          [...listedStates].filter(([, state]) => state === "offline").map(([id]) => id),
+        ),
+      };
+    } catch (error) {
+      if (!(error instanceof AndroidOfflineProbeError)) {
+        throw error;
+      }
+      // Auxiliary probe failure supplies no evidence that an offline episode ended.
+      logger.warn(
+        `[DisconnectMonitor] Retaining offline recovery attempts: ${errorMessage(error)}`,
+      );
+      return {};
+    }
   }
 
   private findMissingAndroidCandidates(

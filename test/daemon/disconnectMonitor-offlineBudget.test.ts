@@ -15,6 +15,7 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const EMULATOR = "emulator-5554";
+const PHONE = "57281FDCH00462";
 const POLL_MS = 5_000;
 
 // `adb devices -l` rows in the shape adb prints them (#11090).
@@ -22,16 +23,38 @@ const ROWS = {
   device: `${EMULATOR}          device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu64a transport_id:1`,
   offline: `${EMULATOR}          offline transport_id:1`,
 };
+const PHONE_DEVICE_ROW = `${PHONE}         device usb:1-1 product:husky model:Pixel_8_Pro device:husky transport_id:3`;
+// A physical phone between `device` sweeps: adbd restart, USB re-enumeration,
+// a revoked RSA key, a reboot into recovery/sideload, or missing udev rules.
+const PHONE_TRANSITIONAL_ROWS: Array<[string, string]> = [
+  ["authorizing", `${PHONE}         authorizing usb:1-1 transport_id:4`],
+  ["connecting", `${PHONE}         connecting usb:1-1 transport_id:4`],
+  ["unauthorized", `${PHONE}         unauthorized usb:1-1 transport_id:4`],
+  ["offline", `${PHONE}         offline usb:1-1 transport_id:4`],
+  [
+    "recovery",
+    `${PHONE}         recovery usb:1-1 product:husky model:Pixel_8_Pro device:husky transport_id:4`,
+  ],
+  ["bootloader", `${PHONE}         bootloader usb:1-1 transport_id:4`],
+  [
+    "sideload",
+    `${PHONE}         sideload usb:1-1 product:husky model:Pixel_8_Pro device:husky transport_id:4`,
+  ],
+  [
+    "no permissions",
+    `${PHONE}         no permissions (missing udev rules? user is in the plugdev group); see [http://developer.android.com/tools/device.html] usb:1-1`,
+  ],
+];
 
 /**
  * Daemon disconnect monitor over one session-bound emulator. Discovery and the
  * offline probe both parse the same `adb devices -l` listing through the real
  * AdbClient, so the test drives the monitor exactly as adb's output would.
  */
-function offlineMonitorHarness() {
+function offlineMonitorHarness(deviceId = EMULATOR, initialRow = ROWS.device) {
   resetAdbClientCaches();
   const timer = new FakeTimer();
-  let listing: string[] = [ROWS.device];
+  let listing: string[] = [initialRow];
   const adb = new AdbClient(null, async (command: string): Promise<ExecResult> =>
     command.includes("adb devices")
       ? createExecResult(["List of devices attached", ...listing, ""].join("\n"), "")
@@ -52,14 +75,14 @@ function offlineMonitorHarness() {
         }));
       return super.getBootedDevicesDetailed(platform);
     }
-    async getAndroidOfflineDeviceIds(ids: Iterable<string>) {
-      return emulator.getOfflineDeviceIdsAmong(ids);
+    override async getAndroidListedDeviceStates(ids: Iterable<string>) {
+      return emulator.getListedNonDeviceStatesAmong(ids);
     }
     async recoverAndroidOfflineDevices() {
       reconnects++;
     }
   }
-  const device = { id: EMULATOR, platform: "android", incarnation: 1 };
+  const device = { id: deviceId, platform: "android", incarnation: 1 };
   const cleanedUp: string[] = [];
   const daemon = Object.assign(Object.create(Daemon.prototype), {
     timer,
@@ -151,6 +174,39 @@ describe("disconnect monitor offline budget (#11090)", () => {
       expect(h.cleanedUp).toEqual([]);
       await h.monitor.run();
       expect(h.cleanedUp).toEqual([EMULATOR]);
+    } finally {
+      await h.monitor.stop();
+    }
+  });
+});
+
+describe("physical device in a transitional adb state (#11090)", () => {
+  test.each(PHONE_TRANSITIONAL_ROWS)(
+    "a phone listed %s for one sweep keeps its session",
+    async (_state, row) => {
+      const h = offlineMonitorHarness(PHONE, PHONE_DEVICE_ROW);
+      try {
+        await h.sweepFor(POLL_MS);
+        h.list(row);
+        await h.sweepFor(POLL_MS);
+        expect(h.cleanedUp).toEqual([]);
+        h.list(PHONE_DEVICE_ROW);
+        await h.sweepFor(POLL_MS);
+        expect(h.cleanedUp).toEqual([]);
+        expect(h.daemon.deviceDisconnectMisses.has(PHONE)).toBe(false);
+      } finally {
+        await h.monitor.stop();
+      }
+    },
+  );
+
+  test("a phone gone from the listing is still released on the first sweep", async () => {
+    const h = offlineMonitorHarness(PHONE, PHONE_DEVICE_ROW);
+    try {
+      await h.sweepFor(POLL_MS);
+      h.list("");
+      await h.monitor.run();
+      expect(h.cleanedUp).toEqual([PHONE]);
     } finally {
       await h.monitor.stop();
     }

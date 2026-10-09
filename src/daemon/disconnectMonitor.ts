@@ -95,25 +95,28 @@ export interface DisconnectMonitorEvaluationInput {
 }
 
 /**
- * Physical USB Android candidates absent from this sweep's booted list and not
- * merely ADB `offline` (#10493). Unplugging a phone or dropping its transport
- * removes it from `adb devices`, which a physical device does not do
+ * Physical USB Android candidates absent from this sweep's `adb devices`
+ * listing in every state (#10493, #11090). Unplugging a phone or dropping its
+ * transport removes it from `adb devices`, which a physical device does not do
  * transiently the way an emulator restart or wireless transport can, so its
- * sessions are released on the first miss. Emulators and TCP/mDNS transports
- * keep the debounce, as does a serial whose adbd AutoMobile is restarting
- * (`adb root`/`unroot`, plus a short grace). An unknown offline state (probe
- * failed or skipped) selects nothing, and the evaluator still requires the
- * Android source to have succeeded, so a failed or partial listing never
- * fast-paths a release.
+ * sessions are released on the first miss. A serial still listed in any
+ * non-`device` state (offline, authorizing after an adbd restart or USB
+ * re-enumeration, connecting, unauthorized, recovery, bootloader, sideload,
+ * no permissions) is attached and keeps the normal debounce. Emulators and
+ * TCP/mDNS transports keep the debounce, as does a serial whose adbd
+ * AutoMobile is restarting (`adb root`/`unroot`, plus a short grace). An
+ * unknown listing (probe failed or skipped) selects nothing, and the evaluator
+ * still requires the Android source to have succeeded, so a failed or partial
+ * listing never fast-paths a release.
  */
 export function selectImmediateDisconnectCandidates(
   candidateDeviceIds: ReadonlySet<string>,
   candidatePlatforms: ReadonlyMap<string, Platform>,
   bootedDeviceIds: ReadonlySet<string>,
-  offlineDeviceIds: ReadonlySet<string> | undefined,
+  listedNonDeviceIds: ReadonlySet<string> | undefined,
   transportRestarts?: AdbTransportRestartLookup,
 ): Set<string> {
-  if (offlineDeviceIds === undefined) {
+  if (listedNonDeviceIds === undefined) {
     return new Set();
   }
   return new Set(
@@ -122,7 +125,7 @@ export function selectImmediateDisconnectCandidates(
         candidatePlatforms.get(deviceId) === "android" &&
         isPhysicalAndroidUsbSerial(deviceId) &&
         !bootedDeviceIds.has(deviceId) &&
-        !offlineDeviceIds.has(deviceId) &&
+        !listedNonDeviceIds.has(deviceId) &&
         transportRestarts?.isRestarting(deviceId) !== true,
     ),
   );

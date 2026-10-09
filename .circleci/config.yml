@@ -97,9 +97,6 @@ jobs:
           # Mirror GitHub's filter-ios paths (ios/**, scripts/ios/**,
           # .swiftformat, .swiftlint.yml) plus .circleci/** so config changes
           # revalidate. Keep this in sync with `filter-ios` in pull_request.yml.
-          # The run-prototype-simulator lines gate the advisory "Prototype Simulator"
-          # (overlay agent smoke) workflow on its own inputs: the overlay agent, its
-          # smoke script and driver, and the TypeScript the driver imports.
           # run-webrtc (#10887) is the glob-for-glob regex translation of
           # pull_request.yml's filter-webrtc list (plus continue_config.yml itself);
           # XCTestRunner Simulator Tests runs on PRs only via the GitHub run-ios-sim
@@ -113,15 +110,6 @@ jobs:
             \.swiftformat run-ios true
             \.swiftlint\.yml run-ios true
             \.circleci/.* run-ios true
-            ios/overlay-agent/.* run-prototype-simulator true
-            scripts/ios/overlay-agent-.* run-prototype-simulator true
-            scripts/ios/run_with_timeout\.sh run-prototype-simulator true
-            src/features/overlay/overlaySpec\.ts run-prototype-simulator true
-            src/features/overlay/overlayValidation\.ts run-prototype-simulator true
-            src/features/overlay/ios/.* run-prototype-simulator true
-            src/utils/SystemTimer\.ts run-prototype-simulator true
-            test/bats/overlay-agent-smoke\.bats run-prototype-simulator true
-            \.circleci/continue_config\.yml run-prototype-simulator true
             src/features/webrtc/.* run-webrtc true
             src/features/screen-stream/.* run-webrtc true
             src/server/webrtcStreamManager\.ts run-webrtc true

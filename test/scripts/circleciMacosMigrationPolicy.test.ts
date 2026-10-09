@@ -136,7 +136,7 @@ function onlyTesting(command: string): string[] {
 }
 
 const CIRCLE_CONFIG_SELF_TRIGGER = "\\.circleci/continue_config\\.yml";
-const PR_PARAMETERS = ["run-ios", "run-webrtc", "run-prototype-simulator"];
+const PR_PARAMETERS = ["run-ios", "run-webrtc"];
 const MAIN_PARAMETERS = ["run-main-ios", "run-main-desktop"];
 const NIGHTLY_ORDER = [
   "XCTestRunner Simulator Tests",
@@ -183,11 +183,10 @@ describe("CircleCI macOS policy (#10887, #11010)", () => {
     const prJobs = workflowsGatedBy(PR_PARAMETERS).flatMap((workflow) =>
       invocations(workflow).map(([key]) => key),
     );
-    expect(prJobs.sort()).toEqual([
-      "ios-device-webrtc",
-      "ios-playground-tests",
-      "prototype-simulator",
-    ]);
+    expect(prJobs.sort()).toEqual(["ios-device-webrtc", "ios-playground-tests"]);
+    // Prototype Simulator moved to the GitHub heavy self-hosted lane (#11011).
+    expect(loadCircle(CONTINUE).jobs?.["prototype-simulator"]).toBeUndefined();
+    expect(prMapping().has("run-prototype-simulator")).toBe(false);
     const iosWorkflow = loadCircle(CONTINUE).workflows?.["ios-macos"];
     expect(invocations(iosWorkflow).map(([key]) => key)).toEqual(["ios-playground-tests"]);
   });

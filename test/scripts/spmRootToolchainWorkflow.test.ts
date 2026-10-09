@@ -5,8 +5,29 @@ import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { loadJobSteps, loadJobs, loadWorkflow, stepNamed } from "../helpers/workflowSteps";
 
+const OWNER = "github.event.pull_request.user.login == 'kaeawc'";
+const SAME_REPO = "github.event.pull_request.head.repo.full_name == github.repository";
+const POOLS_ENABLED = "vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true'";
+const SMALL_LABEL = 'fromJSON(\'["self-hosted","automobile-mac"]\')';
+const HEAVY_LABEL = 'fromJSON(\'["self-hosted","automobile-mac-heavy"]\')';
+const ORIGINAL_SELF_HOSTED_JOBS = [
+  "build-desktop-app",
+  "installer-minimal",
+  "swiftlint",
+  "swift-code-coverage",
+];
+const SMALL_POOL_JOBS = ["ios-swift-packages", "ios-spm-root-package-build"];
+const HEAVY_LANE_JOBS = ["ios-xcode-build", "ios-playground-tests", "prototype-simulator"];
+const FALLBACK: Record<string, string> = {
+  "ios-swift-packages": "matrix.config.runner",
+  "ios-spm-root-package-build": "'macos-26'",
+  "ios-xcode-build": "matrix.config.runner",
+  "ios-playground-tests": "matrix.config.runner",
+  "prototype-simulator": "'macos-26'",
+};
+
 describe("root SPM toolchain floor workflow", () => {
-  test("permits only four isolated PR jobs on the self-hosted runner", () => {
+  test("permits only the listed PR jobs on the self-hosted runners", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
     const prohibitedRunners = ["self-hosted", "automobile-mac"];
     const selfHostedJobs = Object.entries(jobs)
@@ -15,28 +36,20 @@ describe("root SPM toolchain floor workflow", () => {
       )
       .map(([name]) => name);
 
-    expect(selfHostedJobs).toEqual([
-      "build-desktop-app",
-      "installer-minimal",
-      "swiftlint",
-      "swift-code-coverage",
-    ]);
+    expect(selfHostedJobs.sort()).toEqual(
+      [...ORIGINAL_SELF_HOSTED_JOBS, ...SMALL_POOL_JOBS, ...HEAVY_LANE_JOBS].sort(),
+    );
   });
 
   test("routes only owner-authored same-repository PRs to the Mac", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
-    const owner = "github.event.pull_request.user.login == 'kaeawc'";
-    const sameRepo = "github.event.pull_request.head.repo.full_name == github.repository";
-    for (const name of [
-      "build-desktop-app",
-      "installer-minimal",
-      "swiftlint",
-      "swift-code-coverage",
-    ]) {
+    for (const name of [...ORIGINAL_SELF_HOSTED_JOBS, ...SMALL_POOL_JOBS, ...HEAVY_LANE_JOBS]) {
       const runsOn = jobs[name]?.["runs-on"];
-      expect(runsOn).toContain(owner);
-      expect(runsOn).toContain(sameRepo);
-      expect(runsOn).toContain('fromJSON(\'["self-hosted","automobile-mac"]\')');
+      expect(runsOn).toContain(OWNER);
+      expect(runsOn).toContain(SAME_REPO);
+    }
+    for (const name of ORIGINAL_SELF_HOSTED_JOBS) {
+      expect(jobs[name]?.["runs-on"]).toContain(SMALL_LABEL);
     }
     expect(jobs["build-desktop-app"]?.["runs-on"]).toContain("matrix.os == 'macos-latest'");
     expect(jobs["build-desktop-app"]?.["runs-on"]).toContain("|| matrix.os");
@@ -44,6 +57,59 @@ describe("root SPM toolchain floor workflow", () => {
     expect(jobs["installer-minimal"]?.["runs-on"]).toContain("|| matrix.os");
     for (const name of ["swiftlint", "swift-code-coverage"]) {
       expect(jobs[name]?.["runs-on"]).toContain("|| 'macos-26'");
+    }
+  });
+
+  test("splits the moved iOS jobs into the small pool and the single heavy lane (#11011)", () => {
+    const jobs = loadJobs(".github/workflows/pull_request.yml");
+    const heavy = Object.entries(jobs)
+      .filter(([, job]) => JSON.stringify(job["runs-on"] ?? "").includes("automobile-mac-heavy"))
+      .map(([name]) => name);
+    expect(heavy.sort()).toEqual([...HEAVY_LANE_JOBS].sort());
+    for (const name of [...SMALL_POOL_JOBS, ...HEAVY_LANE_JOBS]) {
+      const runsOn = String(jobs[name]?.["runs-on"]);
+      const label = HEAVY_LANE_JOBS.includes(name) ? HEAVY_LABEL : SMALL_LABEL;
+      // The rollout switch keeps jobs off pools that are not registered yet.
+      expect(runsOn).toBe(
+        `\${{ (${OWNER} && ${SAME_REPO} && ${POOLS_ENABLED}) && ${label} || ${FALLBACK[name]} }}`,
+      );
+    }
+    for (const name of HEAVY_LANE_JOBS) {
+      // One heavy runner process: a hung job must not hold the lane for long.
+      expect(jobs[name]?.["timeout-minutes"]).toBeLessThanOrEqual(30);
+    }
+    const xcodeBuild = loadJobSteps(".github/workflows/pull_request.yml", "ios-xcode-build");
+    // The PR-time XcodeGen drift gate (#10939) runs on the heavy lane.
+    expect(stepNamed(xcodeBuild, "Check XcodeGen Project Drift")?.run).toBe(
+      "./scripts/ios/xcodegen-drift-check.sh --all",
+    );
+  });
+
+  test("never imports signing certificates on the self-hosted Mac", () => {
+    const env = loadJobs(".github/workflows/pull_request.yml")["ios-swift-packages"]?.env;
+    for (const key of ["IOS_SIGNING_ENABLED", "MACOS_SIGNING_ENABLED"]) {
+      expect(String(env?.[key])).toContain(`!(${OWNER} && ${SAME_REPO} && ${POOLS_ENABLED})`);
+    }
+  });
+
+  test("moved iOS jobs isolate their home and select Xcode per runner kind", () => {
+    for (const name of [...SMALL_POOL_JOBS, ...HEAVY_LANE_JOBS]) {
+      const steps = loadJobSteps(".github/workflows/pull_request.yml", name);
+      const checkout = stepNamed(steps, "Git Checkout");
+      const isolate = steps.find((step) => step.name?.startsWith("Isolate self-hosted"));
+      const cleanup = steps.find((step) => step.name?.startsWith("Remove isolated"));
+      expect(isolate?.if, name).toBe("runner.environment == 'self-hosted'");
+      expect(isolate?.run).toContain('echo "HOME=');
+      expect(steps.indexOf(isolate!)).toBeLessThan(steps.indexOf(checkout!));
+      expect(checkout?.with?.clean).toBe(true);
+      expect(cleanup?.if).toBe("always() && runner.environment == 'self-hosted'");
+      expect(steps.indexOf(cleanup!)).toBe(steps.length - 1);
+      const hosted = steps.find((step) => step.uses === "maxim-lobanov/setup-xcode@v1");
+      const selfHosted = steps.find((step) => step.name?.startsWith("Select self-hosted Xcode"));
+      expect(hosted?.if, name).toBe("runner.environment == 'github-hosted'");
+      expect(selfHosted?.if).toBe("runner.environment == 'self-hosted'");
+      expect(selfHosted?.run).toContain("bash scripts/ci/select-self-hosted-xcode.sh");
+      expect(steps.indexOf(checkout!)).toBeLessThan(steps.indexOf(selfHosted!));
     }
   });
 
@@ -258,23 +324,28 @@ describe("root SPM toolchain floor workflow", () => {
   test("pins the Swift package matrix to its configured Xcode floor", () => {
     const steps = loadJobSteps(".github/workflows/pull_request.yml", "ios-swift-packages");
     const selectXcode = stepNamed(steps, "Select Xcode ${{ matrix.config.xcode }}");
+    const selfHosted = stepNamed(steps, "Select self-hosted Xcode ${{ matrix.config.xcode }}");
 
-    expect(selectXcode?.if).toBeUndefined();
+    expect(selectXcode?.if).toBe("runner.environment == 'github-hosted'");
     expect(selectXcode?.uses).toBe("maxim-lobanov/setup-xcode@v1");
     expect(selectXcode?.with?.["xcode-version"]).toBe("${{ matrix.config.xcode }}");
+    expect(selfHosted?.run).toBe(
+      'bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"',
+    );
   });
 
   test("selects Xcode 26.5 on every runner before building the root package", () => {
     const steps = loadJobSteps(".github/workflows/pull_request.yml", "ios-spm-root-package-build");
     const selectXcode = stepNamed(steps, "Select Xcode 26.5");
+    const selfHosted = stepNamed(steps, "Select self-hosted Xcode 26.5");
+    const build = steps.findIndex((step) => step.name === "Build root Package.swift");
 
     expect(steps.length).toBeGreaterThan(0);
-    expect(selectXcode).toBeDefined();
-    expect(selectXcode?.if).toBeUndefined();
+    expect(selectXcode?.if).toBe("runner.environment == 'github-hosted'");
     expect(selectXcode?.uses).toBe("maxim-lobanov/setup-xcode@v1");
     expect(selectXcode?.with?.["xcode-version"]).toBe("26.5");
-    expect(steps.indexOf(selectXcode!)).toBeLessThan(
-      steps.findIndex((step) => step.name === "Build root Package.swift"),
-    );
+    expect(selfHosted?.run).toBe('bash scripts/ci/select-self-hosted-xcode.sh "26.5"');
+    expect(steps.indexOf(selectXcode!)).toBeLessThan(build);
+    expect(steps.indexOf(selfHosted!)).toBeLessThan(build);
   });
 });

@@ -28,9 +28,9 @@ version: 2.1
 # on GitHub (#10887, docs/design-docs/ci/circleci-macos-migration.md); no workflow
 # in this file references a context.
 #
-# Prototype Simulator and iOS Device Capture to WHEP are still PR-path CircleCI
-# jobs here; they move to GitHub (self-hosted heavy lane / Namespace macOS) in
-# #11011 and #11012.
+# Prototype Simulator moved to the GitHub self-hosted heavy lane (#11011). iOS
+# Device Capture to WHEP is still a PR-path CircleCI job here; it moves to a
+# Namespace macOS runner in #11012.
 
 parameters:
   run-ios:
@@ -43,10 +43,6 @@ parameters:
     type: boolean
     default: false
   run-swift-coverage-main:
-    type: boolean
-    default: false
-  # Set by path filtering in config.yml when the overlay agent's smoke inputs change.
-  run-prototype-simulator:
     type: boolean
     default: false
   # Post-merge path groups, set from .circleci/main-macos-paths.txt on main.
@@ -599,40 +595,6 @@ jobs:
           path: ci-logs/daemon-logs
           destination: automobile-daemon-logs-xctestrunner
 
-  # "Prototype Simulator": per-runtime smoke test for the iOS overlay agent (#10569).
-  # Injection depends on simulator dyld behaviour and each runtime's Swift runtime, so
-  # a new Xcode or runtime can break it silently. Each matrix leg boots ONE fresh
-  # simulator, used serially and deleted afterwards. Advisory: simulator tests must not
-  # gate merges, so this check stays OFF the required list.
-  # Run locally on a Mac: bash scripts/ios/overlay-agent-smoke.sh 26
-  prototype-simulator:
-    parameters:
-      ios:
-        type: string
-        description: "iOS runtime version passed to overlay-agent-smoke.sh (26 matches 26.x)."
-    executor: ios
-    steps:
-      - checkout_without_lfs
-      - run:
-          name: "Report toolchain"
-          command: xcodebuild -version && xcrun simctl list runtimes iOS
-      - install_bun
-      - run:
-          name: "Install dependencies"
-          command: bash scripts/ci/install-bun-deps.sh
-      - run:
-          name: "Ensure iOS Simulator runtime"
-          command: ./scripts/ios/ensure-simulator-runtime.sh
-      - run:
-          name: "Run overlay agent smoke test (iOS << parameters.ios >>)"
-          # Exit 3 (runtime missing) fails the leg: the image is expected to ship the
-          # runtime, so a vanished runtime is an image change worth seeing.
-          command: bash scripts/ios/overlay-agent-smoke.sh "<< parameters.ios >>"
-          no_output_timeout: 20m
-      - store_artifacts:
-          path: scratch/overlay-agent-smoke
-          destination: overlay-agent-smoke-ios-<< parameters.ios >>
-
   # Mirror of pull_request.yml → "iOS Device Capture to WHEP" (GitHub: 35 min cap).
   # The capture loop, retry and reap logic stay identical to GitHub's step.
   ios-device-webrtc:
@@ -775,17 +737,6 @@ workflows:
     jobs:
       - ios-device-webrtc:
           name: "iOS Device Capture to WHEP"
-
-  prototype-simulator:
-    when: << pipeline.parameters.run-prototype-simulator >>
-    jobs:
-      - prototype-simulator:
-          name: "Prototype Simulator iOS << matrix.ios >>"
-          matrix:
-            parameters:
-              # One leg per iOS runtime. Add a version here (e.g. "27") once the
-              # `ios` executor's Xcode image ships that runtime.
-              ios: ["26"]
 
   # ── Post-merge (main only; replaces merge.yml's macOS jobs) ─────────────────
   main-ios-macos:

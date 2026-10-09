@@ -10,9 +10,11 @@ GitHub `macos-26` is the fallback for fork PRs only.
 
 ## Pools
 
-| Pool                    | Concurrency           | Carries                                                    |
-| ----------------------- | --------------------- | ---------------------------------------------------------- |
-| CircleCI `m4pro.medium` | 1 macOS job at a time | PR Playground tests, all post-merge and nightly macOS work |
+| Pool                                   | Concurrency                            | Carries                                                    |
+| -------------------------------------- | -------------------------------------- | ---------------------------------------------------------- |
+| CircleCI `m4pro.medium`                | 1 macOS job at a time                  | PR Playground tests, all post-merge and nightly macOS work |
+| Self-hosted Mac `automobile-mac`       | N runner processes (N = 4 recommended) | Small, non-simulator PR jobs                               |
+| Self-hosted Mac `automobile-mac-heavy` | exactly 1 runner process               | PR xcodebuild and simulator jobs, one at a time            |
 
 ## CircleCI (#11010)
 
@@ -79,6 +81,59 @@ workflows (`build-ctrl-proxy-ios-ipa`, `build-network-filter-probe`,
 `build-overlay-agent`, `build-screen-capture-helper`, the desktop installers)
 stay on GitHub.
 
+## Self-hosted Mac (#11011)
+
+The owner's Mac (ARM64, 16 cores: 12 performance + 4 efficiency, 128 GiB) runs
+two runner pools for owner-authored same-repository PRs. Fork PRs always use
+hosted `macos-26` / `macos-latest`. Routing is the existing expression
+(`github.event.pull_request.user.login == 'kaeawc'` and same repository), plus a
+rollout switch, the repository variable `AUTOMOBILE_MAC_POOLS_ENABLED`, on the
+jobs this change moved. Until the owner registers the runners and sets it to
+`true`, those jobs keep running on hosted `macos-26`. Without the switch, a job
+labelled `automobile-mac-heavy` would queue forever with no runner, and the
+required `iOS Build` gate with it.
+
+| Pool                   | Jobs                                                                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `automobile-mac`       | SwiftLint, Swift Code Coverage, Build Desktop App (macos-latest), Installer Minimal (macos-latest), Swift Packages, Build Root SPM Package |
+| `automobile-mac-heavy` | Build Xcode Projects (Playground, CtrlProxy), Prototype Simulator iOS 26, iOS Playground Tests (label-forced fallback only)                |
+
+- The heavy pool has exactly one runner process, so xcodebuild and simulator
+  jobs never overlap, and each job owns the simulators it creates. Heavy jobs
+  have tight `timeout-minutes` (25, or 30 for the Playground fallback).
+- The PR-time XcodeGen drift check (#10939) is the `Check XcodeGen Project
+  Drift` step of Build Xcode Projects, so it runs on the heavy lane.
+- Every moved job isolates `HOME`, `TMPDIR`, the XDG dirs and
+  `CFFIXED_USER_HOME` under `$RUNNER_TEMP`, checks out with `clean: true`, and
+  removes the isolated home at the end, like the existing self-hosted jobs.
+- Xcode: hosted runners use `maxim-lobanov/setup-xcode`. Self-hosted runners use
+  `scripts/ci/select-self-hosted-xcode.sh <version>`, which exports
+  `DEVELOPER_DIR` for that job only, so concurrent jobs do not fight over
+  `xcode-select`. It fails when the requested Xcode is missing instead of
+  building on another toolchain.
+- Swift Packages builds unsigned on the Mac: its signing flags are false
+  whenever the job is routed there, so no certificate is imported into the
+  owner's keychains.
+- Cache keys of the moved jobs include `runner.environment`, so hosted and
+  self-hosted runs never restore each other's SwiftPM or DerivedData state.
+- Required check names are unchanged (`SwiftLint`, `Swift Code Coverage`,
+  `Build Root SPM Package`, `Installer Minimal (macos-latest)`, `iOS Build`), so
+  the `green-main` ruleset needs no edit.
+
+**Exception: XCTestRunner Simulator Tests (`run-ios-sim` label).** The label
+opt-in still runs on hosted `macos-26` for same-repo PRs. Its daemon steps start
+an AutoMobile daemon on the default port and install gems and Homebrew packages,
+which would collide with the owner's own daemon and tooling on this Mac. Moving
+it needs a dedicated runner user (see owner steps) and an isolated daemon port.
+It is a rare, opt-in label run, so this was left for an owner decision.
+
+**N for the small pool: 4.** Swift package builds and the desktop Gradle build
+are CPU-bound and each can use most of the cores. Four small jobs plus the heavy
+lane keep about one performance core per process plus headroom for the owner's
+own work. Memory (128 GiB) is not the limit. That is five runner processes in
+total: the existing `mac` runner plus three new small runners, and one heavy
+runner.
+
 ## Owner steps
 
 These need a login or a credential, so they were not done in the change.
@@ -97,3 +152,67 @@ These need a login or a credential, so they were not done in the change.
    (the sweep fails at VM start if CircleCI retires it) and that Build Desktop
    App (macos) can install JDK 21 and the Android command-line tools on the
    image. Neither has run on CircleCI yet.
+
+### Self-hosted Mac runners
+
+Registering runners needs a registration token, so it was not done here. Run on
+the Mac as the user that owns `~/actions-runner`:
+
+1. Install Xcode 26.5 next to the current Xcode 26.6 (`/Applications/Xcode.app`)
+   and Xcode 27.1 beta, for example `xcodes install 26.5`, then
+   `DEVELOPER_DIR=/Applications/Xcode-26.5.0.app/Contents/Developer xcodebuild -downloadPlatform iOS`.
+   `bash scripts/ci/select-self-hosted-xcode.sh 26.5` must succeed afterwards.
+   Swift Packages, Build Root SPM Package, Build Xcode Projects, the Playground
+   fallback and Prototype Simulator all pin 26.5.
+2. Get a registration token (valid for one hour):
+
+   ```bash
+   TOKEN="$(gh api -X POST repos/kaeawc/auto-mobile/actions/runners/registration-token --jq .token)"
+   ```
+
+3. Add three small-pool runners (the existing `mac` runner, labels
+   `self-hosted,macOS,ARM64,automobile-mac`, stays as the first one):
+
+   ```bash
+   for i in 2 3 4; do
+     dir="$HOME/actions-runner-small-$i"
+     mkdir -p "$dir" && cd "$dir"
+     tar xzf "$HOME/actions-runner/actions-runner-osx-arm64-2.337.0.tar.gz"
+     cp "$HOME/actions-runner/.path" "$HOME/actions-runner/.env" .
+     ./config.sh --unattended --url https://github.com/kaeawc/auto-mobile \
+       --token "$TOKEN" --name "mac-small-$i" --labels automobile-mac --work _work
+     ./svc.sh install && ./svc.sh start
+   done
+   ```
+
+4. Add exactly one heavy runner. It must have the `automobile-mac-heavy` label
+   and must NOT have `automobile-mac`, otherwise small jobs could land on it and
+   overlap a simulator job:
+
+   ```bash
+   dir="$HOME/actions-runner-heavy"
+   mkdir -p "$dir" && cd "$dir"
+   tar xzf "$HOME/actions-runner/actions-runner-osx-arm64-2.337.0.tar.gz"
+   cp "$HOME/actions-runner/.path" "$HOME/actions-runner/.env" .
+   ./config.sh --unattended --url https://github.com/kaeawc/auto-mobile \
+     --token "$TOKEN" --name mac-heavy --labels automobile-mac-heavy --work _work
+   ./svc.sh install && ./svc.sh start
+   ```
+
+   Recommended: install the heavy runner under a dedicated macOS user account
+   instead, so its CoreSimulator device set, `~/Library` and launchd services
+   are separate from the owner's own simulators and AutoMobile daemon. With a
+   dedicated user, log in as that user once so its LaunchAgent can start.
+
+5. Check the pools:
+
+   ```bash
+   gh api repos/kaeawc/auto-mobile/actions/runners \
+     --jq '.runners[] | [.name, .status, ([.labels[].name] | join(","))] | @tsv'
+   ```
+
+   Expect `mac`, `mac-small-2..4` with `automobile-mac`, and `mac-heavy` with
+   `automobile-mac-heavy`, all `online`.
+
+6. Turn the routing on: `gh variable set AUTOMOBILE_MAC_POOLS_ENABLED --body true`.
+   To fall back to hosted runners, set it to anything else.

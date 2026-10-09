@@ -14,8 +14,8 @@ export interface HierarchyReadOptions {
  */
 export interface ViewHierarchy {
   /**
-   * Return the latest app-provided iOS navigation identity, if this hierarchy
-   * reader has one. Optional so hierarchy-only fakes do not need an SDK seam.
+   * Return the latest app-provided (AutoMobile SDK) navigation identity, if
+   * this hierarchy reader has one. Optional so hierarchy-only fakes do not need an SDK seam.
    */
   getScreenIdentity?(
     applicationId?: string,

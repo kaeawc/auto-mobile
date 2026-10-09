@@ -371,4 +371,20 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
       elementResourceId: "com.example.app:id/button",
     });
   });
+
+  test("keeps each app's newest SDK navigation route as its screen identity", async () => {
+    const playground = "dev.jasonpearson.automobile.playground";
+    await sendNavigation("HomeDestination", playground);
+    await sendNavigation("DemoContrastDestination", playground);
+    await sendNavigation("OtherDestination", "com.example.other");
+
+    expect(client.getSdkScreenIdentity(playground)).toMatchObject({
+      platform: "android",
+      source: "sdk",
+      confidence: "high",
+      components: { bundleId: playground, navigationRoute: "DemoContrastDestination" },
+    });
+    expect(client.getSdkScreenIdentity("com.example.never-reported")).toBeUndefined();
+    expect(client.getSdkScreenIdentity()).toBeUndefined();
+  });
 });

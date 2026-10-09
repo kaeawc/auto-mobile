@@ -11,6 +11,8 @@ import androidScrollBefore from "../../../fixtures/observe/diff/scroll-before.js
 import androidScrollAfter from "../../../fixtures/observe/diff/scroll-after.json";
 import launcherHome from "../../../fixtures/android-launcher/launcher-home-emulator-5602.json";
 import playgroundMain from "../../../fixtures/android-enabled/playground-disabled-control-api36.json";
+import playgroundTapScreen from "../../../fixtures/android-overlay-window/app-layer-overlay-over-playground.raw.json";
+import { deriveSdkNavigationScreenIdentity } from "../../../../src/features/observe/sdkScreenIdentity";
 
 // Captured on an iPhone 17 sim: the Playground Demos list (SDK identity route "demos").
 const demosList = JSON.parse(demosEnvelope.content[0].text) as ObserveResult;
@@ -26,6 +28,37 @@ function rowCenter(title: string): { x: number; y: number } {
 }
 const formsRowCenter = rowCenter("Forms & Input");
 const alertsRowCenter = rowCenter("Alerts & Sheets");
+
+const PLAYGROUND = "dev.jasonpearson.automobile.playground";
+
+/**
+ * A captured Playground observation as ObserveScreen reports it when the app's SDK last sent
+ * `destination` (the shape of Navigation3Adapter.TrackNavigation).
+ */
+function withSdkRoute(
+  source: unknown,
+  destination: string,
+  arguments_: Record<string, string> = {},
+): ObserveResult {
+  return {
+    ...(structuredClone(source) as ObserveResult),
+    screenIdentity: deriveSdkNavigationScreenIdentity("android", PLAYGROUND, {
+      destination,
+      arguments: arguments_,
+      metadata: {},
+    }),
+  };
+}
+
+/** A captured Playground observation whose app window carries Compose `paneTitle` semantics. */
+function withPaneTitle(source: unknown, windowId: number, paneTitle: string): ObserveResult {
+  const observation = structuredClone(source) as ObserveResult;
+  const roots = observation.viewHierarchy!.hierarchy.node as Array<Record<string, unknown>>;
+  const root = roots.find((node) => node.windowId === windowId)!;
+  const children = root.node as Array<Record<string, unknown>> | Record<string, unknown>;
+  (Array.isArray(children) ? children[0]! : children)["pane-title"] = paneTitle;
+  return observation;
+}
 
 describe("assessSwipeNavigation", () => {
   test("iOS swipe that opened the row under its start point warns it acted as a tap", () => {
@@ -68,7 +101,9 @@ describe("assessSwipeNavigation", () => {
     ).toEqual({ navigated: false });
   });
 
-  test("Android scroll within the same activity is not navigation", () => {
+  test("Android scroll within one activity and no screen identity reports nothing", () => {
+    // A single-activity Compose app keeps its activity across screens, so the activity alone
+    // cannot show the swipe stayed put.
     expect(
       assessSwipeNavigation(
         androidScrollBefore as unknown as ObserveResult,
@@ -76,7 +111,54 @@ describe("assessSwipeNavigation", () => {
         { x: 540, y: 1200 },
         "android",
       ),
+    ).toBeUndefined();
+  });
+
+  test("Android Compose navigation within MainActivity without a screen signal reports nothing", () => {
+    // Captured Playground Tap demo and design-system screens: both MainActivity, no pane title.
+    expect(
+      assessSwipeNavigation(
+        playgroundTapScreen as unknown as ObserveResult,
+        playgroundMain as unknown as ObserveResult,
+        { x: 540, y: 1200 },
+        "android",
+      ),
+    ).toBeUndefined();
+  });
+
+  test("Android Compose navigation within MainActivity is detected from the SDK route", () => {
+    const assessment = assessSwipeNavigation(
+      withSdkRoute(playgroundTapScreen, "HomeDestination", { tab: "Demos" }),
+      withSdkRoute(playgroundMain, "DemoContrastDestination"),
+      { x: 540, y: 1200 },
+      "android",
+    );
+    expect(assessment?.navigated).toBe(true);
+    expect(assessment?.warning).toBe(
+      'Swipe navigated from "HomeDestination" to "DemoContrastDestination" instead of scrolling. If you expected a scroll, observe before retrying.',
+    );
+  });
+
+  test("Android swipe that kept the SDK route is not navigation, even across tabs", () => {
+    expect(
+      assessSwipeNavigation(
+        withSdkRoute(playgroundTapScreen, "HomeDestination", { tab: "Demos" }),
+        withSdkRoute(playgroundMain, "HomeDestination", { tab: "Discover" }),
+        { x: 540, y: 1200 },
+        "android",
+      ),
     ).toEqual({ navigated: false });
+  });
+
+  test("Android Compose navigation is detected from the app window's pane title", () => {
+    const assessment = assessSwipeNavigation(
+      withPaneTitle(playgroundTapScreen, 150, "Tap"),
+      withPaneTitle(playgroundMain, 710, "Design system"),
+      { x: 540, y: 1200 },
+      "android",
+    );
+    expect(assessment?.navigated).toBe(true);
+    expect(assessment?.warning).toContain('from "Tap" to "Design system"');
   });
 
   test("Android swipe that changed the foreground activity reports navigation", () => {

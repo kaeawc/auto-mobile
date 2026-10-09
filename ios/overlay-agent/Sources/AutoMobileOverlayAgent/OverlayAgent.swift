@@ -262,6 +262,8 @@ struct OverlayRootView: View {
 
     var body: some View {
         let palette = OverlayPalette.make(theme: model.spec?.theme, systemDark: systemScheme == .dark)
+        // An open dialog makes the page behind it inert for accessibility, as it is for touches (#10899).
+        let pageInert = model.spec?.root.blocksPage(state: model.state, pages: model.pages) ?? false
         ZStack {
             if let spec = model.spec {
                 let chrome = OverlayHostChrome(placementType: spec.window.placement.type)
@@ -275,8 +277,14 @@ struct OverlayRootView: View {
                         // the spec and the modal layer are laid out in it separately, so a dialog
                         // taller than that area neither pushes the bar up nor moves the spec.
                         Color.clear
-                            .overlay { placed(spec).opacity(Double(spec.window.opacity ?? 100) / 100) }
-                            .overlay { anchorLayer(spec).opacity(Double(spec.window.opacity ?? 100) / 100) }
+                            .overlay {
+                                placed(spec).opacity(Double(spec.window.opacity ?? 100) / 100)
+                                    .accessibilityHidden(pageInert)
+                            }
+                            .overlay {
+                                anchorLayer(spec).opacity(Double(spec.window.opacity ?? 100) / 100)
+                                    .accessibilityHidden(pageInert)
+                            }
                             .overlay {
                                 OverlayModalLayer(model: model)
                                     .opacity(Double(spec.window.opacity ?? 100) / 100)
@@ -286,8 +294,10 @@ struct OverlayRootView: View {
                 } else {
                     placed(spec)
                         .opacity(Double(spec.window.opacity ?? 100) / 100)
+                        .accessibilityHidden(pageInert)
                     anchorLayer(spec)
                         .opacity(Double(spec.window.opacity ?? 100) / 100)
+                        .accessibilityHidden(pageInert)
                     OverlayModalLayer(model: model)
                         .opacity(Double(spec.window.opacity ?? 100) / 100)
                     dismissControl()

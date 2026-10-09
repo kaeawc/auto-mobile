@@ -182,6 +182,18 @@ final class OverlayComponentsTests: XCTestCase {
         XCTAssertEqual(root.openModals(state: session.state, pages: session.pages).map(\.type), ["snackbar"])
     }
 
+    /// #10899: only an open dialog makes the page inert for accessibility; a snackbar does not.
+    func testOnlyAnOpenDialogBlocksThePage() throws {
+        var session = try shown("material-app-bar-dialog-pickers")
+        let root = try XCTUnwrap(session.spec?.root)
+        XCTAssertFalse(root.blocksPage(state: session.state, pages: session.pages))
+        let fab = try XCTUnwrap(root.children?[9])
+        _ = session.activate(.node(fab))
+        XCTAssertTrue(root.blocksPage(state: session.state, pages: session.pages))
+        _ = try session.simulateTap(identifier: "edit.confirm").get()
+        XCTAssertFalse(root.blocksPage(state: session.state, pages: session.pages), "snackbar only")
+    }
+
     func testDialogDismissAndScrimCloseWithoutTheConfirmActions() throws {
         var session = OverlaySession()
         try session.show(spec("""

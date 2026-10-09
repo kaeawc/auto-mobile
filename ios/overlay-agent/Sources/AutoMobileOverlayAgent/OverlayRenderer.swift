@@ -130,7 +130,11 @@ struct NodeView: View {
         // off (spec `motion: "none"` or the system's Reduce Motion), as on Android (#10442).
         let motion = OverlayMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
         let transition = node.visibleWhen == nil ? .instant : motion.visibility(transition: node.transition)
-        Group {
+        // The conditional lives in a stable ZStack so the insertion/removal has a container whose
+        // animation is driven by `isVisible`; a bare `Group` is flattened into the parent's
+        // children, which left a trailing conditional child undrawn and its transition
+        // un-animated (#10898). An empty ZStack is zero-sized, so a hidden node takes no space.
+        ZStack {
             if isVisible, presentedAsModal || !overlayModalTypes.contains(node.type), drawnHere {
                 styled(content).transition(transition.swiftUITransition)
             }
@@ -382,10 +386,14 @@ struct NodeView: View {
 
     @ViewBuilder private var switchView: some View {
         let binding = Binding(get: { isOn }, set: { _ in toggleBound() })
+        // One element per switch: the toggle's label text and switch are combined so the tree
+        // does not list them separately at identical bounds (#10899).
         if let label = node.label {
             Toggle(label, isOn: binding)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(label)
         } else {
-            Toggle("", isOn: binding).labelsHidden()
+            Toggle("", isOn: binding).labelsHidden().accessibilityElement(children: .combine)
         }
     }
 
@@ -408,11 +416,19 @@ struct NodeView: View {
     @ViewBuilder private var buttonView: some View {
         let button = Button { model.run(node.onTap ?? []) } label: {
             if let icon = node.icon {
-                Label(node.label ?? "", systemImage: overlaySymbol(icon))
+                // The icon is decoration: a hidden glyph, so the button is one element named by
+                // its label rather than also exposing the icon's name (#10899).
+                HStack(spacing: 6) {
+                    OverlayGlyph(symbol: overlaySymbol(icon))
+                    Text(node.label ?? "")
+                }
             } else {
                 Text(node.label ?? "")
             }
         }
+        .accessibilityLabel(node.label ?? "")
+        // Never truncate the label ("Save" -> "Sa...") in a tight row (#10899).
+        .fixedSize(horizontal: true, vertical: false)
         switch node.variant {
         case "outlined", "tonal": button.buttonStyle(.bordered)
         case "elevated": button.buttonStyle(.bordered).shadow(color: .black.opacity(0.2), radius: 2, y: 1)

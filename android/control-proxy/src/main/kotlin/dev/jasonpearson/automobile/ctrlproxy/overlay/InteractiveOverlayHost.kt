@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalConfiguration
@@ -696,7 +697,8 @@ internal fun InteractiveOverlayWindowContent(
     }
   } else if (chrome.closeVisible) {
     Box {
-      Box(Modifier.alpha(chrome.contentAlpha)) {
+      // Not `alpha`, which clips to this wrap-content box: anchored nodes are drawn outside it.
+      Box(Modifier.graphicsLayer { alpha = chrome.contentAlpha }) {
         CompositionLocalProvider(LocalOverlayInsetFloor provides floor) { request.content() }
       }
       // Drawn after the content so authored nodes cannot cover it.

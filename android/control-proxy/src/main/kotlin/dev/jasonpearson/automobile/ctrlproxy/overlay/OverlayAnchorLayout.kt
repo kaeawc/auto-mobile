@@ -120,10 +120,11 @@ internal fun currentOverlayWindowGeometry(): OverlayWindowGeometry {
 }
 
 /**
- * Lays the node out at [anchor]'s screen rectangle. The node keeps a slot of its anchored size in
- * its parent and is drawn translated from that slot onto the rectangle, so siblings are not moved
- * by the translation. A floating window's root ([windowRoot]) instead stays at the window's (0, 0)
- * and moves the window onto the rectangle through [geometry]'s `moveTo`.
+ * Lays the node out at [anchor]'s screen rectangle, translated from the slot it is placed in. A
+ * node below the root sits in its window's anchor layer, which takes no space, so its parent
+ * neither reserves a slot for it nor clips it (#10803). A floating window's root ([windowRoot])
+ * instead stays at the window's (0, 0) and moves the window onto the rectangle through [geometry]'s
+ * `moveTo`.
  */
 internal fun Modifier.overlayAnchor(
   anchor: OverlayBoundsAnchor,

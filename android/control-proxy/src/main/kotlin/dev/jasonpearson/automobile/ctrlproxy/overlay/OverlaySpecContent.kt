@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Shader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
@@ -98,10 +99,41 @@ fun OverlaySpecContent(
   OverlayTheme(root, theme) {
     Box(Modifier.semantics { testTagsAsResourceId = true }) {
       RenderOverlayNode(root, interact, windowRoot = true)
+      OverlayAnchorLayer(layeredOverlayAnchors(root), interact)
       modalOverlaySheets(root).forEach { node ->
-        key(node.identity) { RenderOverlayModal(node, interact) }
+        key(node.identity) {
+          RenderOverlayModal(node, interact)
+          OverlayAnchorLayer(layeredOverlayAnchorsIn(node.children), interact)
+        }
       }
     }
+  }
+}
+
+/**
+ * Draws [nodes], the anchored nodes of the content below it, above that content and at window level
+ * (#10803). Drawn inside their parents, a wrap-content parent clipped them to its slot and reserved
+ * that slot for them. The layer takes no space of its own, measures each node against the whole
+ * space the overlay content is given (not its parent's slot) and places it at the layer's origin,
+ * from which [overlayAnchor] moves it, touch target and semantics included, onto its anchor. Only
+ * the window and the host's content viewport clip it.
+ */
+@Composable
+private fun OverlayAnchorLayer(
+  nodes: List<OverlayRenderNode>,
+  interact: (OverlayInteraction) -> Unit,
+) {
+  if (nodes.isEmpty()) return
+  Layout(
+    content = {
+      nodes.forEach { node ->
+        key(node.identity) { RenderOverlayNode(node, interact, anchorLayer = true) }
+      }
+    },
+  ) { measurables, constraints ->
+    val loose = constraints.copy(minWidth = 0, minHeight = 0)
+    val placeables = measurables.map { it.measure(loose) }
+    layout(constraints.minWidth, constraints.minHeight) { placeables.forEach { it.place(0, 0) } }
   }
 }
 
@@ -132,7 +164,10 @@ private fun RenderOverlayNode(
   parentModifier: Modifier = Modifier,
   weightAxis: OverlayWeightAxis? = null,
   windowRoot: Boolean = false,
+  anchorLayer: Boolean = false,
 ) {
+  // An anchored node below the root is drawn by its window's anchor layer, not in its parent.
+  if (!windowRoot && !anchorLayer && isLayeredOverlayAnchor(node)) return
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
   if (LocalOverlayMotion.current && node.source?.visibleWhen != null) {
     // The row/column weight rides on the animated container: it is the Row/Column's direct child.

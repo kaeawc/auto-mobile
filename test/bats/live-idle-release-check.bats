@@ -277,6 +277,7 @@ run_check() {
   # A fully private daemon on the explicit port, with the short idle window.
   grep -qx "AUTOMOBILE_DAEMON_SOCKET_PATH=${WORK}/d.sock" "${FAKE}/daemon.env"
   grep -qx "AUTOMOBILE_AUX_SOCKET_DIR=${WORK}" "${FAKE}/daemon.env"
+  grep -qx "AUTOMOBILE_HARNESS_PRIVATE_DAEMON=1" "${FAKE}/daemon.env"
   grep -qx "AUTOMOBILE_DATA_DIR=${WORK}/data" "${FAKE}/daemon.env"
   grep -qx "AUTOMOBILE_LOG_DIR=${WORK}/logs" "${FAKE}/daemon.env"
   grep -qx "AUTOMOBILE_DB_DIR=${WORK}/db" "${FAKE}/daemon.env"

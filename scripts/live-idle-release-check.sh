@@ -365,6 +365,8 @@ setup_private_namespace() {
   export AUTOMOBILE_DAEMON_LOCK_FILE_PATH="${work_dir}/d.lock"
   export AUTOMOBILE_DAEMON_LAUNCH_CWD="${work_dir}"
   export AUTOMOBILE_AUX_SOCKET_DIR="${work_dir}"
+  # Arms the private-daemon orphan watchdog (#10497) explicitly (#10906).
+  export AUTOMOBILE_HARNESS_PRIVATE_DAEMON=1
   export AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH="${work_dir}/w.sock"
   export AUTOMOBILE_DATA_DIR="${work_dir}/data"
   export AUTOMOBILE_LOG_DIR="${work_dir}/logs"

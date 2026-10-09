@@ -588,7 +588,8 @@ private final class FrameWaiter: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) { waiter.finish() }
     }
 
-    @objc private func tick() {
+    @objc
+    private func tick() {
         finish()
     }
 

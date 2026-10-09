@@ -838,6 +838,36 @@ cleanup() {
   exit "${status}"
 }
 
+# Run every scenario, each in its own subshell, so one failing scenario (its die exits only that
+# subshell) does not hide the verdict of the scenarios after it. The run still fails if any did.
+run_all_scenarios() {
+  local names=(active no-heartbeat idle stdin-eof selector stream)
+  local name status failed=()
+  if [[ -n "${second_serial}" ]]; then
+    names+=(two-devices)
+  fi
+  for name in "${names[@]}"; do
+    # errexit is off around the subshell (a `||` would disable it inside too), then back on in it.
+    set +e
+    (
+      set -e
+      trap 'stop_stream_subscriber || true; stop_proxy || true; close_proxy_fds' EXIT
+      "scenario_${name//-/_}"
+    )
+    status=$?
+    set -e
+    if ((status != 0)); then
+      failed+=("${name}")
+      # The failed scenario's proxy is gone; give its device time to release before the next one.
+      wait_for_release $(($(now_ms) + NO_HEARTBEAT_BUDGET_MS + slack_ms)) || true
+    fi
+  done
+  if ((${#failed[@]} > 0)); then
+    log "FAILED scenarios: ${failed[*]}"
+    exit 1
+  fi
+}
+
 main() {
   parse_args "$@"
   validate_args
@@ -851,17 +881,7 @@ main() {
   setup_private_namespace
   start_daemon
   case "${scenario}" in
-    all)
-      scenario_active
-      scenario_no_heartbeat
-      scenario_idle
-      scenario_stdin_eof
-      scenario_selector
-      scenario_stream
-      if [[ -n "${second_serial}" ]]; then
-        scenario_two_devices
-      fi
-      ;;
+    all) run_all_scenarios ;;
     active) scenario_active ;;
     no-heartbeat) scenario_no_heartbeat ;;
     idle) scenario_idle ;;

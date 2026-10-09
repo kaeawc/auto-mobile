@@ -22,6 +22,18 @@ fun allocatingClientProvider(
 }
 
 /**
+ * The client the device-control session (taps, swipes, keys, text) mints per input: the current
+ * [clientProvider]'s client wrapped in an [InputAllocatingClient], so every input first allocates
+ * its device to the desktop session (#10730). Null when there is no provider or it yields no client
+ * (not connected), so nothing is dispatched. The provider and [allocation] are read on each call,
+ * so a daemon reconnect or a new desktop session takes effect behind one long-lived session.
+ */
+fun inputAllocatingClient(
+  clientProvider: (() -> AutoMobileClient)?,
+  allocation: () -> DesktopInputAllocation,
+): AutoMobileClient? = clientProvider?.invoke()?.let { InputAllocatingClient(it, allocation()) }
+
+/**
  * Appearance changes act on devices: the daemon applies them only to devices the caller's session
  * holds, and refuses a session that holds none (#10831). Before a change, the selected device
  * ([activeDeviceId]) is allocated to the desktop session the same way input is, so the change

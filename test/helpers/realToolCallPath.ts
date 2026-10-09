@@ -5,6 +5,7 @@ import {
 } from "../../src/daemon/constants";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
+import type { DeviceObservationAccess } from "../../src/server/deviceObservationAccess";
 import { executionTracker } from "../../src/server/executionTracker";
 import { withAdmittedSessionEcho } from "../../src/server/routedSessionEcho";
 import { registerInteractionTools } from "../../src/server/interactionTools";
@@ -12,6 +13,7 @@ import { registerObserveTools } from "../../src/server/observeTools";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
 import { setActiveDeviceSchema } from "../../src/server/utilityTools";
+import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
@@ -45,6 +47,16 @@ export class RealToolCallPath {
   readonly runs: DeviceToolRun[] = [];
   /** Devices the read-only (watcher) path resolved from the booted list (#10830). */
   watcherResolutions = 0;
+  /** Devices whose observer capture the read-only path ran (the handler's `executeDeviceRead`). */
+  readonly watcherReads: string[] = [];
+  /** The watcher path lists booted devices itself; never reach adb from a unit test. */
+  private readonly deviceReadAccess: DeviceObservationAccess = {
+    listBooted: async () => {
+      this.watcherResolutions++;
+      return this.devices;
+    },
+    isAuthorized: () => true,
+  };
   private body: DeviceToolBody = async () => SUCCESS;
   private readonly restorers: Array<() => void> = [];
 
@@ -57,14 +69,7 @@ export class RealToolCallPath {
     this.restorers.push(
       ToolRegistry.setPipelineOverridesForTesting({
         displayInventory: new FakeDisplayInventoryProvider(),
-        // The watcher path lists booted devices itself; never reach adb from a unit test.
-        deviceReadAccess: {
-          listBooted: async () => {
-            this.watcherResolutions++;
-            return this.devices;
-          },
-          isAuthorized: () => true,
-        },
+        deviceReadAccess: this.deviceReadAccess,
         auditRunner: {
           run: async (input: AuditRunnerInput) => {
             this.runs.push({
@@ -101,7 +106,25 @@ export class RealToolCallPath {
     );
     this.restorers.push(() => ctrlProxy.mockRestore());
     registerInteractionTools();
-    registerObserveTools();
+    // The read-only path's capture is the one device-boundary call the handler makes itself (the
+    // audit runner does not wrap it): a fake screen stands in for the observer's hierarchy service.
+    registerObserveTools({
+      deviceReadAccess: this.deviceReadAccess,
+      createScreen: (device) => ({
+        executeDeviceRead: async () => {
+          this.watcherReads.push(device.deviceId);
+          return loadAndroidHomeObserve().observe;
+        },
+        execute: async () => {
+          throw new Error("RealToolCallPath: the session observe pipeline is not faked");
+        },
+        appendRawViewHierarchy: async () => {},
+        getMostRecentCachedObserveResult: async () => loadAndroidHomeObserve().observe,
+        captureScreenshot: async () => {
+          throw new Error("RealToolCallPath: screenshots are not faked");
+        },
+      }),
+    });
     // The real handler and registration; only the CtrlProxy resume at the device boundary is fake.
     ToolRegistry.register(
       "setActiveDevice",

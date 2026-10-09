@@ -77,7 +77,6 @@ import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotSocketClien
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresStreamSocketClient
-import dev.jasonpearson.automobile.desktop.core.daemon.InputAllocatingClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDeviceSnapshotActions
 import dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClient
@@ -91,6 +90,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingSocketClien
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.allocatingClientProvider
+import dev.jasonpearson.automobile.desktop.core.daemon.inputAllocatingClient
 import dev.jasonpearson.automobile.desktop.core.daemon.isStreamSessionRejection
 import dev.jasonpearson.automobile.desktop.core.daemon.rememberDesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.daemon.screenshotObserveArguments
@@ -1010,9 +1010,7 @@ fun AutoMobileContent(
     remember(screenshotScope) {
       DeviceControlSession(
         scope = screenshotScope,
-        clientProvider = {
-          controlClientProvider?.invoke()?.let { InputAllocatingClient(it, inputAllocation) }
-        },
+        clientProvider = { inputAllocatingClient(controlClientProvider) { inputAllocation } },
         platform = { controlPlatform.value },
         nowMs = MONOTONIC_NOW_MS,
         publishError = { message -> deviceControlTapError = message },

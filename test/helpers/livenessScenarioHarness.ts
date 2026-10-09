@@ -646,6 +646,11 @@ export class LivenessScenario {
     return this.tools.deviceSessionManager.getEnsureDeviceReadyCalls();
   }
 
+  /** Devices the read-only watcher path resolved, and captured, without a session (#10830). */
+  get watched(): { resolutions: number; reads: readonly string[] } {
+    return { resolutions: this.tools.watcherResolutions, reads: this.tools.watcherReads };
+  }
+
   /** Tool bodies that reached the device boundary (what actually drove a device). */
   get driven(): readonly DeviceToolRun[] {
     return this.tools.runs;

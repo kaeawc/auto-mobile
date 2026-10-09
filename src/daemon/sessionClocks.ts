@@ -23,6 +23,7 @@ export const SESSION_LIVENESS_CLOCKS = [
   "lastHeartbeat",
   "lastOwnerHeartbeat",
   "stallForgivenAt",
+  "hasReceivedHeartbeat",
 ] as const satisfies readonly (keyof Session)[];
 
 /**

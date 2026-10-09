@@ -2,10 +2,6 @@ import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { spyOn } from "bun:test";
 import { DAEMON_OWNED_SESSIONS_PARAM } from "../../../src/daemon/constants";
-import {
-  assertInputRequesterHoldsDevice,
-  TOOL_CALL_REMEDY,
-} from "../../../src/daemon/inputDeviceOwnership";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
@@ -13,9 +9,12 @@ import { ObserverSessionRegistry } from "../../../src/daemon/observerSessionRegi
 import { releaseSessionAndDevice } from "../../../src/daemon/releaseSessionAndDevice";
 import { SessionHeartbeatMonitor } from "../../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager, TerminalSessionError } from "../../../src/daemon/sessionManager";
+import {
+  hasActiveSessionExecution,
+  subscribeToolCallEndActivity,
+} from "../../../src/daemon/toolCallActivity";
 import { UnixSocketServer } from "../../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
-import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { BootedDevice } from "../../../src/models";
 import { sessionOwnershipLostPayload } from "../../../src/server/deviceSessionResult";
 import { executionTracker } from "../../../src/server/executionTracker";
@@ -29,6 +28,7 @@ import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
 import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+import { RealToolCallPath } from "../../helpers/realToolCallPath";
 import { createFakeDeviceManager } from "./inputSocketHarness";
 
 /**
@@ -44,13 +44,14 @@ import { createFakeDeviceManager } from "./inputSocketHarness";
  *   `shapeToolCallError`), wrapped in the socket's `success: true` envelope that a
  *   forwarded MCP result rides in. The call is a tracked execution under its
  *   `sessionUuid`, so its end restarts the session's idle window as in production.
- * - `tools/call rotate` (a pane's device control) runs the same device-ownership
- *   check `ToolRegistry` applies to a device-aware tool (`assertInputRequesterHoldsDevice`
- *   with `TOOL_CALL_REMEDY`) and answers a permitted call with a plain success; its
- *   refusal is shaped by the real `shapeToolCallError`.
+ * - `tools/call rotate` (a pane's device control) runs the real `rotate` registration
+ *   through the real `ToolRegistry` ({@link RealToolCallPath}): its ownership refusal,
+ *   session admission and execution tracking are production's; only the device work is a
+ *   stand-in success. Its refusal is shaped by the real `shapeToolCallError` (#10839).
  * - Idle release and heartbeat expiry run on {@link FakeTimer}: the
  *   SessionManager's own cleanup interval plus the daemon's
- *   {@link SessionHeartbeatMonitor} reaper, wired as `daemon.ts` wires them.
+ *   {@link SessionHeartbeatMonitor} reaper, wired as `daemon.ts` wires them, with the
+ *   daemon's own `subscribeToolCallEndActivity` and `hasActiveSessionExecution`.
  */
 
 export const DESKTOP_HEARTBEAT_MS = 2_000; // DesktopDaemonSessionComposition.kt HEARTBEAT_INTERVAL_MS
@@ -153,15 +154,10 @@ class DaemonUnderTest {
       new DeviceSessionRegistry(),
       new ObserverSessionRegistry(timer),
     );
-    // daemon.ts subscribeToolCallEndActivity: a tool call's END restarts the idle window.
-    this.unsubscribe = executionTracker.onSessionExecutionEnded((uuids) => {
-      for (const uuid of uuids) {
-        manager.recordToolCallEnded(uuid);
-      }
-      pool.sessionExecutionsEnded(new Set(uuids));
-    });
-    manager.setActiveSessionExecutionChecker((sessionId) =>
-      executionTracker.hasActiveSessionUuidExecutions(sessionId),
+    // The daemon's own wiring: a tool call's END restarts the idle window.
+    this.unsubscribe = subscribeToolCallEndActivity(executionTracker, manager, pool);
+    manager.setActiveSessionExecutionChecker((sessionId, query) =>
+      hasActiveSessionExecution(executionTracker, manager, pool, sessionId, query),
     );
     // daemon.ts wires the reaper's release to releaseSessionAndDevice.
     this.monitor = new SessionHeartbeatMonitor(
@@ -217,6 +213,7 @@ export class DesktopWireHarness {
   readonly timer = new FakeTimer();
   readonly exchanges: WireExchange[] = [];
   private daemon!: DaemonUnderTest;
+  private tools!: RealToolCallPath;
   private frameSeq = 0;
   private readonly restore: Array<{ mockRestore(): void }> = [];
 
@@ -235,14 +232,8 @@ export class DesktopWireHarness {
       spyOn(logger, "info").mockImplementation(() => {}),
       spyOn(logger, "warn").mockImplementation(() => {}),
       spyOn(logger, "error").mockImplementation(() => {}),
-      spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-        () =>
-          ({
-            getScreenScaleMetadata: () => null,
-            requestTapCoordinates: async () => ({ success: true }),
-          }) as unknown as AndroidCtrlProxyClient,
-      ),
     );
+    this.tools = new RealToolCallPath(this.devices).install();
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager(this.devices));
     this.daemon = await DaemonUnderTest.start(this.timer, this.devices);
   }
@@ -255,6 +246,7 @@ export class DesktopWireHarness {
 
   async stop(): Promise<void> {
     await this.daemon.stop();
+    this.tools.uninstall();
     PlatformDeviceManagerFactory.reset();
     for (const spy of this.restore.splice(0)) {
       spy.mockRestore();
@@ -421,27 +413,16 @@ export class DesktopWireHarness {
     }
   }
 
-  /** A device-aware tool call: ToolRegistry's ownership check, then a stand-in success. */
+  /** A device-aware tool call through the real ToolRegistry; the device work is a stand-in. */
   private async callDeviceControl(
     name: string,
-    args: Record<string, unknown> & { sessionUuid?: string },
+    args: Record<string, unknown>,
   ): Promise<DaemonResponse> {
+    const forwarded: Record<string, unknown> = { ...args };
+    delete forwarded[DAEMON_OWNED_SESSIONS_PARAM];
     try {
-      assertInputRequesterHoldsDevice({
-        action: name,
-        deviceId: String(args.deviceId),
-        ownerSessionUuid: this.holderOf(String(args.deviceId)) ?? undefined,
-        requesterSessionUuid: args.sessionUuid,
-        sessionManager: this.manager,
-        remedy: TOOL_CALL_REMEDY,
-      });
-      const text = JSON.stringify({ success: true });
-      return {
-        id: "tool",
-        type: "mcp_response",
-        success: true,
-        result: { content: [{ type: "text", text }] },
-      };
+      const result = await this.tools.call(name, forwarded);
+      return { id: "tool", type: "mcp_response", success: true, result };
     } catch (error) {
       return {
         id: "tool",
@@ -449,6 +430,8 @@ export class DesktopWireHarness {
         success: true,
         result: toolErrorResult(error, name),
       };
+    } finally {
+      await drainMicrotasks(40);
     }
   }
 }

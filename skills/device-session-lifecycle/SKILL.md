@@ -540,6 +540,19 @@ comments. **A refactor that drops a comment silently drops an invariant.**
   `FakeTimer` auto-fires scheduled intervals when advanced a full period
   (don't also fire manually); `initializeWithDevices` is deliberately a
   silent pre-populate (no ready listeners).
+- Liveness and ownership scenarios: the two-sided matrix
+  (`test/daemon/livenessScenarioMatrix.test.ts`, harness
+  `test/helpers/livenessScenarioHarness.ts`) and the desktop wire contract
+  (`test/daemon/desktopWireContract.test.ts`, fixtures under
+  `test/fixtures/desktop-wire/`). Both run tool calls through
+  `test/helpers/realToolCallPath.ts` (real registrations, `ToolRegistry`,
+  admission and execution tracker; fakes only at the device boundary) and the
+  daemon's own `subscribeToolCallEndActivity` / `hasActiveSessionExecution`
+  (`src/daemon/toolCallActivity.ts`).
+- **Known blind spot**: harness-reimplemented production wiring. A harness that
+  hand-calls `recordToolCallEnded`, the ownership assert or a tracker
+  subscription stays green when the production copy regresses (#10839). Call
+  the production function; if it is private, export it first.
 - **Known blind spot**: unit fakes can't represent live adb reconnect timing —
   #5369 shipped green through unit tests. Anything touching pool runtime
   identity (incarnation boundaries, name matching on real reconnects, the

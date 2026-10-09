@@ -35,6 +35,7 @@ import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/Android
 import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "./sessionManager";
+import { hasActiveSessionExecution, subscribeToolCallEndActivity } from "./toolCallActivity";
 import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
@@ -762,21 +763,10 @@ export class Daemon {
    */
   private subscribeToolCallEndActivity(): void {
     this.unsubscribeSessionExecutionEnded?.();
-    this.unsubscribeSessionExecutionEnded = executionTracker.onSessionExecutionEnded(
-      (sessionUuids, { admitted }) => {
-        const sessionIds = new Set(
-          sessionUuids.map(
-            (uuid) => resolveToolSelectionBaseSessionUuid(uuid, this.sessionManager) ?? uuid,
-          ),
-        );
-        // A call refused at admission is not use: it must not revive a suspect or expired session
-        // (#10824). It still re-arms the deferred releases its in-flight execution vetoed.
-        for (const sessionId of sessionIds) {
-          this.sessionManager.recordToolCallEnded(sessionId, { admitted });
-        }
-        // A deferred owner-disconnect release may be keyed by either id (#10712).
-        this.devicePool.sessionExecutionsEnded(new Set([...sessionUuids, ...sessionIds]));
-      },
+    this.unsubscribeSessionExecutionEnded = subscribeToolCallEndActivity(
+      executionTracker,
+      this.sessionManager,
+      this.devicePool,
     );
   }
 
@@ -2617,15 +2607,12 @@ export class Daemon {
     sessionId: string,
     query?: ActiveSessionExecutionQuery,
   ): boolean {
-    const executionSessionId =
-      resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
-    return (
-      this.devicePool.isSessionRecoveryInFlight(sessionId) ||
-      executionTracker.hasActiveSessionUuidExecutions(sessionId, query) ||
-      executionTracker.hasActiveAutolockSessionExecutions(sessionId, query) ||
-      (executionSessionId !== sessionId &&
-        (executionTracker.hasActiveSessionUuidExecutions(executionSessionId, query) ||
-          executionTracker.hasActiveAutolockSessionExecutions(executionSessionId, query)))
+    return hasActiveSessionExecution(
+      executionTracker,
+      this.sessionManager,
+      this.devicePool,
+      sessionId,
+      query,
     );
   }
 

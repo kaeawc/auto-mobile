@@ -133,7 +133,9 @@ function serialize(intent: TerminalReleaseIntent): string {
  * line that does not parse as an intent.
  */
 export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
-  private intents: Map<string, TerminalReleaseIntent> | undefined;
+  /** Intents known so far; until the file has been read, only this daemon's own (#11114). */
+  private readonly intents = new Map<string, TerminalReleaseIntent>();
+  private loaded = false;
 
   constructor(
     private readonly filePath: string,
@@ -141,11 +143,12 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
   ) {}
 
   loadUnconfirmed(): TerminalReleaseIntent[] {
-    return Array.from(this.ensureLoaded().values());
+    this.ensureLoaded();
+    return Array.from(this.intents.values());
   }
 
   record(intent: TerminalReleaseIntent): void {
-    const intents = this.ensureLoaded();
+    this.ensureLoaded();
     try {
       this.fileSystem.appendDurable(this.filePath, serialize(intent));
     } catch (error) {
@@ -156,21 +159,23 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
         error,
       );
     }
-    intents.set(intent.sessionId, intent);
+    this.intents.set(intent.sessionId, intent);
   }
 
   resolve(sessionId: string, reason?: string): void {
-    const intents = this.ensureLoaded();
-    const intent = intents.get(sessionId);
+    // An unread file may hold a predecessor's intents this cache does not: never rewrite it from
+    // the partial cache, only append the lift (#11114).
+    const loaded = this.ensureLoaded();
+    const intent = this.intents.get(sessionId);
     if (!intent || (reason !== undefined && intent.reason !== reason)) {
       return;
     }
-    intents.delete(sessionId);
-    if (this.compact(intents)) {
+    this.intents.delete(sessionId);
+    if (loaded && this.compact(this.intents)) {
       return;
     }
-    // Compaction failed (e.g. Windows EPERM): the stale intent would terminalize a live session
-    // on restart, so make the lift itself durable with an appended marker.
+    // Compaction failed (e.g. Windows EPERM) or is unsafe: the stale intent would terminalize a
+    // live session on restart, so make the lift itself durable with an appended marker.
     try {
       this.fileSystem.appendDurable(this.filePath, serializeLifted(sessionId));
     } catch (error) {
@@ -182,40 +187,52 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
     }
   }
 
-  private ensureLoaded(): Map<string, TerminalReleaseIntent> {
-    if (this.intents) {
-      return this.intents;
+  /**
+   * Reads the file once it is readable; returns whether the cache reflects it. A failed read is
+   * retried on the next call rather than cached as an empty journal (#11114).
+   */
+  private ensureLoaded(): boolean {
+    if (this.loaded) {
+      return true;
     }
-    const intents = new Map<string, TerminalReleaseIntent>();
-    this.intents = intents;
     let text: string | undefined;
     try {
       text = this.fileSystem.readText(this.filePath);
     } catch (error) {
       logger.warn(
         `[TerminalReleaseJournal] Failed to read ${this.filePath}; unconfirmed terminal releases ` +
-          `from a previous daemon cannot be applied: ${errorMessage(error)}`,
+          `from a previous daemon cannot be applied yet: ${errorMessage(error)}`,
         error,
       );
-      return intents;
+      return false;
     }
-    if (text === undefined) {
-      return intents;
+    this.loaded = true;
+    const unread = new Map(this.intents);
+    this.intents.clear();
+    if (text !== undefined) {
+      this.replay(text);
     }
+    // This daemon's own intents are the newest; one whose append failed exists only in memory.
+    for (const [sessionId, intent] of unread) {
+      this.intents.set(sessionId, intent);
+    }
+    return true;
+  }
+
+  private replay(text: string): void {
     const lines = text.split("\n");
     // Everything after the last newline is a torn append (or empty when the file ends cleanly).
     const tornTail = lines.pop() ?? "";
-    const discarded = replayLines(lines, intents) || tornTail.length > 0;
+    const discarded = replayLines(lines, this.intents) || tornTail.length > 0;
     if (discarded) {
       logger.warn(
         `[TerminalReleaseJournal] Discarded a torn or corrupt tail of ${this.filePath}; ` +
-          `${intents.size} intent(s) kept`,
+          `${this.intents.size} intent(s) kept`,
       );
     }
-    if (discarded || lines.length !== intents.size) {
-      this.compact(intents);
+    if (discarded || lines.length !== this.intents.size) {
+      this.compact(this.intents);
     }
-    return intents;
   }
 
   /** Returns whether the file now reflects `intents`. */

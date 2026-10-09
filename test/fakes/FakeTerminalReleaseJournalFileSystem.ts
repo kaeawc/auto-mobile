@@ -9,8 +9,13 @@ export class FakeTerminalReleaseJournalFileSystem implements TerminalReleaseJour
   failNextAppend: Error | undefined;
   /** While set, compaction (replace/remove) throws it, e.g. Windows EPERM. */
   failCompaction: Error | undefined;
+  /** While set, reads throw it (e.g. EACCES or EIO). */
+  failReads: Error | undefined;
 
   readText(filePath: string): string | undefined {
+    if (this.failReads) {
+      throw this.failReads;
+    }
     return this.files.get(filePath);
   }
 

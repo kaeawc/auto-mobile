@@ -55,6 +55,13 @@ internal fun releasedNoticeText(reason: SessionReleaseReason?): String =
   when (reason) {
     SessionReleaseReason.HIDDEN_WINDOW ->
       "Released while the window was hidden: interact with the device to control it again"
+    SessionReleaseReason.IDLE ->
+      "Released after 2 minutes of inactivity: interact with the device to control it again"
+    SessionReleaseReason.HEARTBEAT_LAPSED ->
+      "Released because the daemon lost contact with this session: " +
+        "interact with the device to control it again"
+    SessionReleaseReason.DAEMON_RESTARTED ->
+      "Released because the daemon or device restarted: interact with the device to control it again"
     SessionReleaseReason.DAEMON_RELEASED,
     null ->
       "Released by the daemon (idle for 2 minutes, restarted or expired): " +

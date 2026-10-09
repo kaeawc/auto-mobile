@@ -874,6 +874,27 @@ describe("handleDaemonRequest", () => {
     },
   );
 
+  test.each(["daemon/sessionInfo", "daemon/heartbeat"])(
+    "%s names the release reason of a session the daemon released (#10730)",
+    async (method) => {
+      const sessionId = "released-session";
+      await sessionManager.createSession(sessionId, "device", "android");
+      await sessionManager.releaseSession(sessionId, "heartbeat-timeout");
+      const state = new FakeDaemonState(
+        sessionManager,
+        new FakeDevicePool({ total: 1, idle: 1, assigned: 0, error: 0 }),
+      );
+      await expect(
+        handleDaemonRequest(buildRequest(method, { sessionId }), state),
+      ).resolves.toEqual({
+        success: false,
+        error: `Session not found: ${sessionId}`,
+        code: DAEMON_SESSION_NOT_FOUND_CODE,
+        releaseReason: "heartbeat-timeout",
+      });
+    },
+  );
+
   test("returns error when sessionId is missing", async () => {
     const devicePool = new FakeDevicePool({
       total: 0,

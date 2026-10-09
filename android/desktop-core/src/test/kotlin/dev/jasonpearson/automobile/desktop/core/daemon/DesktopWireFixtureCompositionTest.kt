@@ -213,7 +213,7 @@ class DesktopWireFixtureCompositionTest {
       replay.transport.assertReplayed(throughLabel = "heartbeat-watching-after-release")
       assertEquals(null, replay.state().boundDeviceId)
       assertEquals("emulator-5554", replay.state().idleReleasedDeviceId)
-      assertEquals(SessionReleaseReason.DAEMON_RELEASED, replay.state().releaseReason)
+      assertEquals(SessionReleaseReason.IDLE, replay.state().releaseReason)
       assertEquals(
         replay.fixture.sessions.getValue("desktop-2"),
         replay.state().sessionUuidProvider(),
@@ -280,7 +280,7 @@ class DesktopWireFixtureCompositionTest {
 
       replay.transport.assertReplayed()
       assertEquals("emulator-5554", replay.state().idleReleasedDeviceId)
-      assertEquals(SessionReleaseReason.DAEMON_RELEASED, replay.state().releaseReason)
+      assertEquals(SessionReleaseReason.HEARTBEAT_LAPSED, replay.state().releaseReason)
       assertEquals(null, replay.state().boundDeviceId)
       assertEquals(null, replay.state().bindErrorMessage)
       assertEquals(

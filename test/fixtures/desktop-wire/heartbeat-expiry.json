@@ -134,7 +134,8 @@
       "response": {
         "success": false,
         "error": "Session not found: d0000000-0000-4000-8000-000000000001",
-        "code": "daemon_session_not_found"
+        "code": "daemon_session_not_found",
+        "releaseReason": "heartbeat-timeout"
       }
     },
     {

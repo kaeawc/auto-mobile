@@ -28,9 +28,24 @@ describe("boundSessionLossMessage (#10661)", () => {
     expect(message).toContain("Acquire a new device session");
   });
 
+  test("an owner disconnect says the owning connection closed (#10730)", () => {
+    const message = boundSessionLossMessage(loss("owner-disconnected"));
+
+    expect(message).toContain("(owner-disconnected)");
+    expect(message).toContain("connection that owned this session closed");
+    expect(message).not.toContain("idle");
+  });
+
+  test.each(["daemon-shutdown", "device-restart:Pixel_8"])(
+    "%s says the daemon or device restarted (#10730)",
+    (reason) => {
+      expect(boundSessionLossMessage(loss(reason))).toContain("shut down or restarted");
+    },
+  );
+
   test("other reasons keep the plain wording", () => {
-    expect(boundSessionLossMessage(loss("daemon-shutdown"))).toBe(
-      "Device session s-1 is no longer active (daemon-shutdown). " +
+    expect(boundSessionLossMessage(loss("explicit-release"))).toBe(
+      "Device session s-1 is no longer active (explicit-release). " +
         "Acquire a new device session before continuing.",
     );
   });

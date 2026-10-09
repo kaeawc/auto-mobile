@@ -1,4 +1,6 @@
 import { isSessionReleasing } from "./sessionReleaseState";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import {
   cancelAndReleaseSession,
   releaseSessionAndDevice,
@@ -84,6 +86,8 @@ export interface DaemonStateAccess {
     waitForSessionReleaseWithin?(sessionId: string, timeoutMs: number): Promise<boolean>;
     getAllSessions?(): Session[];
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
+    /** Why a session this daemon released was released; undefined for a never-issued UUID. */
+    getReleasedSessionReason?(sessionId: string): Promise<string | undefined>;
     recordHeartbeat?(sessionId: string): void;
     /** Claim the token permitted to refresh this session's liveness. */
     claimLivenessOwnership?(sessionId: string, ownerToken: string): Promise<LivenessClaimOutcome>;
@@ -163,6 +167,8 @@ export type DaemonMethodResult = {
   success: boolean;
   result?: Record<string, unknown>;
   error?: string;
+  /** With a session-not-found `code`: why a session the daemon knows is released was released. */
+  releaseReason?: string;
   code?:
     | typeof DAEMON_SESSION_NOT_FOUND_CODE
     | typeof DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
@@ -350,6 +356,37 @@ export function isTokenOwnedOrClaimPending(session: {
   return session.livenessOwnerToken !== undefined || !!session.livenessOwnershipClaims?.size;
 }
 
+/**
+ * Session-not-found answer. A session the daemon knows it released also says why
+ * (`releaseReason`, #10730) so a client can tell an idle release from a restart or lapsed owner;
+ * a UUID the daemon never issued stays a plain not-found.
+ */
+async function sessionNotFoundResult(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): Promise<DaemonMethodResult> {
+  const releaseReason = await lookupReleasedSessionReason(manager, sessionId);
+  return {
+    success: false,
+    error: `Session not found: ${sessionId}`,
+    code: DAEMON_SESSION_NOT_FOUND_CODE,
+    ...(releaseReason ? { releaseReason } : {}),
+  };
+}
+
+/** The recorded release reason, or undefined when unknown or the lookup fails (best-effort). */
+export async function lookupReleasedSessionReason(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): Promise<string | undefined> {
+  try {
+    return await manager.getReleasedSessionReason?.(sessionId);
+  } catch (error) {
+    logger.warn(`Release reason lookup failed for ${sessionId}: ${errorMessage(error)}`, error);
+    return undefined;
+  }
+}
+
 async function handleHeartbeat(
   request: DaemonRequest,
   state: DaemonStateAccess,
@@ -380,11 +417,7 @@ async function handleHeartbeat(
     ) {
       return { success: true, result: { sessionId } };
     }
-    return {
-      success: false,
-      error: `Session not found: ${sessionId}`,
-      code: DAEMON_SESSION_NOT_FOUND_CODE,
-    };
+    return sessionNotFoundResult(manager, sessionId);
   }
   const keeperRefusal = refuseCliKeeperOnProxySession(heartbeatParams?.livenessOwnerKind, session);
   if (keeperRefusal) {
@@ -660,11 +693,7 @@ export async function handleSessionInfo(
   const manager = state.getSessionManager();
   const session = manager.getSession(sessionId);
   if (!session) {
-    return {
-      success: false,
-      error: `Session not found: ${sessionId}`,
-      code: DAEMON_SESSION_NOT_FOUND_CODE,
-    };
+    return sessionNotFoundResult(manager, sessionId);
   }
   return {
     success: true,

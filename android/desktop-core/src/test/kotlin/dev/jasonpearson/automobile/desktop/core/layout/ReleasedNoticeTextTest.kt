@@ -24,6 +24,13 @@ class ReleasedNoticeTextTest {
   }
 
   @Test
+  fun `each daemon reason names its own cause (#10730)`() {
+    assertTrue(releasedNoticeText(SessionReleaseReason.IDLE).contains("2 minutes of inactivity"))
+    assertTrue(releasedNoticeText(SessionReleaseReason.HEARTBEAT_LAPSED).contains("lost contact"))
+    assertTrue(releasedNoticeText(SessionReleaseReason.DAEMON_RESTARTED).contains("restarted"))
+  }
+
+  @Test
   fun `an unknown reason falls back to the daemon wording`() {
     assertEquals(
       releasedNoticeText(SessionReleaseReason.DAEMON_RELEASED),

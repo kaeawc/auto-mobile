@@ -121,6 +121,59 @@ class DesktopDaemonSessionCompositionTest {
     }
 
   @Test
+  fun `the daemon's release reason selects the notice reason (#10730)`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport()
+    val host = start(transport, listOf(pixel))
+    assertTrue(input(host, pixel.deviceId))
+    tick()
+
+    transport.releasedSessions += "session-1"
+    transport.releaseReasons["session-1"] = "cleanup-expired"
+    tick()
+    settle()
+    repeat(2) { tick() }
+
+    assertEquals(SessionReleaseReason.IDLE, host.state().releaseReason)
+  }
+
+  @Test
+  fun `a not-found answer with no release reason keeps the generic daemon notice (#10730)`() =
+    runComposeUiTest {
+      val transport = RecordingDaemonTransport()
+      val host = start(transport, listOf(pixel))
+      assertTrue(input(host, pixel.deviceId))
+      tick()
+
+      transport.releasedSessions += "session-1"
+      transport.releaseReasons["session-1"] = ""
+      tick()
+      settle()
+      repeat(2) { tick() }
+
+      assertEquals(SessionReleaseReason.DAEMON_RELEASED, host.state().releaseReason)
+    }
+
+  @Test
+  fun `daemon release reasons map to notice reasons (#10730)`() {
+    val expected =
+      mapOf(
+        "cleanup-expired" to SessionReleaseReason.IDLE,
+        "lazy-expiry" to SessionReleaseReason.IDLE,
+        "autolock" to SessionReleaseReason.IDLE,
+        "heartbeat-timeout" to SessionReleaseReason.HEARTBEAT_LAPSED,
+        "owner-disconnected" to SessionReleaseReason.HEARTBEAT_LAPSED,
+        "daemon-shutdown" to SessionReleaseReason.DAEMON_RESTARTED,
+        "device-restart:Pixel_8" to SessionReleaseReason.DAEMON_RESTARTED,
+        "explicit-release" to SessionReleaseReason.DAEMON_RELEASED,
+        "something-new" to SessionReleaseReason.DAEMON_RELEASED,
+      )
+    expected.forEach { (daemonReason, reason) ->
+      assertEquals(reason, SessionReleaseReason.fromDaemon(daemonReason), daemonReason)
+    }
+    assertEquals(SessionReleaseReason.DAEMON_RELEASED, SessionReleaseReason.fromDaemon(null))
+  }
+
+  @Test
   fun `an idle-released session drops back to watching`() = runComposeUiTest {
     val transport = RecordingDaemonTransport()
     val host = start(transport, listOf(pixel))
@@ -134,7 +187,7 @@ class DesktopDaemonSessionCompositionTest {
 
     assertEquals(listOf("emulator-5554"), transport.boundDevices())
     assertEquals("emulator-5554", host.state().idleReleasedDeviceId)
-    assertEquals(SessionReleaseReason.DAEMON_RELEASED, host.state().releaseReason)
+    assertEquals(SessionReleaseReason.HEARTBEAT_LAPSED, host.state().releaseReason)
     assertEquals(5, transport.sessionsFor("daemon/heartbeat").count { it == "session-2" })
   }
 

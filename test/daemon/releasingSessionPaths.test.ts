@@ -194,7 +194,10 @@ describe("remaining paths during session release", () => {
       },
     });
     await finish();
-    expect(await h.request("daemon/sessionInfo")).toEqual(notFound);
+    expect(await h.request("daemon/sessionInfo")).toEqual({
+      ...notFound,
+      releaseReason: "explicit-release",
+    });
   });
 
   test("activeSessions keeps teardown busy and adds only a positive releasing count", async () => {

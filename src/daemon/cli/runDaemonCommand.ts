@@ -30,6 +30,7 @@ import {
   DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
   DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
+  releaseReasonFromError,
 } from "../types";
 import type { AcceptanceSessionRestartScope } from "../daemonRestartAdmission";
 import { parseDaemonArgs } from "./daemonArgs";
@@ -462,7 +463,9 @@ async function querySessionInfo(args: string[], manager: DaemonManager): Promise
         console.log(JSON.stringify(result));
         await client.close();
       } catch (error) {
-        throw new ActionableError(`Failed to get session info: ${errorMessage(error)}`);
+        throw new ActionableError(
+          `Failed to get session info: ${errorMessage(error)}${releasedSuffix(error)}`,
+        );
       }
     }
     return;
@@ -584,7 +587,13 @@ function heartbeatFailureMessage(sessionId: string, error: unknown): string {
     // The daemon's message names the proxy-owned session; keep the code visible for scripts.
     return `${errorMessage(error)} [${DAEMON_LIVENESS_OWNER_IS_PROXY_CODE}] Stop this keeper; heartbeat only works for one-shot CLI sessions.`;
   }
-  return `Failed to record session heartbeat: ${errorMessage(error)}`;
+  return `Failed to record session heartbeat: ${errorMessage(error)}${releasedSuffix(error)}`;
+}
+
+/** " (released: <reason>)" when the daemon said why a not-found session is gone (#10730). */
+function releasedSuffix(error: unknown): string {
+  const reason = releaseReasonFromError(error);
+  return reason ? ` (released: ${reason})` : "";
 }
 
 async function recordDaemonHeartbeat(args: string[], manager: DaemonManager): Promise<void> {

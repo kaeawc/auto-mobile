@@ -90,15 +90,39 @@ fun interface DesktopInputAllocation {
 }
 
 /**
- * Why the session stopped holding a device the user was not leaving (#10695, #10730). The daemon's
- * answer to a heartbeat is identical for an idle release, a daemon restart and an expired session
- * (the session is not found), so those share [DAEMON_RELEASED].
+ * Why the session stopped holding a device the user was not leaving (#10695, #10730). The daemon
+ * names the reason on its session-not-found answer to a heartbeat (`releaseReason`); an older
+ * daemon, or a UUID it never issued, sends none, which is [DAEMON_RELEASED].
  */
 enum class SessionReleaseReason {
   /** The host stayed hidden past [HIDDEN_RELEASE_GRACE_MS], so this desktop released it. */
   HIDDEN_WINDOW,
-  /** The daemon no longer had the session's hold: idle release, restart or expiry. */
-  DAEMON_RELEASED,
+  /** The session sat idle past the daemon's window (2 minutes without a tool call or input). */
+  IDLE,
+  /** The daemon stopped hearing this session's heartbeats, or its owner connection closed. */
+  HEARTBEAT_LAPSED,
+  /** The daemon restarted (or the device restarted) and did not restore the session. */
+  DAEMON_RESTARTED,
+  /** The daemon no longer had the session's hold, for a reason it did not say. */
+  DAEMON_RELEASED;
+
+  companion object {
+    /** Maps the daemon's `releaseReason` string (`src/daemon/sessionManager.ts`) to a notice. */
+    fun fromDaemon(daemonReason: String?): SessionReleaseReason =
+      when {
+        daemonReason == null -> DAEMON_RELEASED
+        daemonReason in IDLE_DAEMON_REASONS -> IDLE
+        daemonReason in LAPSED_DAEMON_REASONS -> HEARTBEAT_LAPSED
+        daemonReason == "daemon-shutdown" || daemonReason.startsWith("device-restart") ->
+          DAEMON_RESTARTED
+        else -> DAEMON_RELEASED
+      }
+
+    private val IDLE_DAEMON_REASONS =
+      setOf("cleanup-expired", "lazy-expiry", "cli-idle-timeout", "idle", "autolock", "expired")
+    private val LAPSED_DAEMON_REASONS =
+      setOf("heartbeat-timeout", "missing-first-heartbeat", "owner-disconnected")
+  }
 }
 
 data class DesktopDaemonSessionState(
@@ -541,12 +565,14 @@ fun rememberDesktopDaemonSession(
             }
             .getOrDefault(false)
       }
+      var lapse: Throwable? = null
       val alive = runCatching {
         delay(HEARTBEAT_INTERVAL_MS)
         withContext(ioDispatcher) { session.heartbeat() }
       }
         .onFailure { error ->
           if (error is CancellationException) throw error
+          lapse = error
           LOG.warn("Desktop daemon session lapsed, re-registering: ${error.message}")
         }
         .isSuccess
@@ -571,7 +597,8 @@ fun rememberDesktopDaemonSession(
         )
         heldDevice.set(null)
         idleReleasedDeviceId = target.deviceId
-        releaseReason = SessionReleaseReason.DAEMON_RELEASED
+        releaseReason =
+          SessionReleaseReason.fromDaemon((lapse as? DaemonSessionNotFoundException)?.releaseReason)
         inputDeviceId = null
         pendingRecoveryRefresh.set(true)
         sessionEpoch++

@@ -275,6 +275,13 @@ function livenessOwnerHoldFromResponse(response: DaemonResponse): LivenessOwnerH
   return parsed.success ? parsed.data : undefined;
 }
 
+/** The daemon's `releaseReason` on a session-not-found answer (#10730), as an error field. */
+function releaseReasonField(response: DaemonResponse): { releaseReason?: string } {
+  return typeof response.releaseReason === "string" && response.releaseReason.length > 0
+    ? { releaseReason: response.releaseReason }
+    : {};
+}
+
 /** The error a failed daemon response rejects with, carrying its structured code and details. */
 export function daemonResponseError(response: DaemonResponse): Error {
   const error =
@@ -297,7 +304,11 @@ export function daemonResponseError(response: DaemonResponse): Error {
     code === DAEMON_LIVENESS_OWNER_CONFLICT_CODE
       ? livenessOwnerHoldFromResponse(response)
       : undefined;
-  return Object.assign(error, { code, ...(livenessOwnerHold ? { livenessOwnerHold } : {}) });
+  return Object.assign(error, {
+    code,
+    ...(livenessOwnerHold ? { livenessOwnerHold } : {}),
+    ...releaseReasonField(response),
+  });
 }
 
 /**

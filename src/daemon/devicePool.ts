@@ -1284,6 +1284,7 @@ export class DevicePool {
       },
       this.timer,
       options.graceMs ?? OWNER_DISCONNECT_GRACE_MS,
+      () => this.sessionManager.sessionNow(),
     );
   }
 

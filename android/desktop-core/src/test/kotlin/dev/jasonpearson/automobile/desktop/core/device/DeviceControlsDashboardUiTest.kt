@@ -49,7 +49,12 @@ class DeviceControlsDashboardUiTest {
       }
     }
 
-    onNodeWithText("Applies to all connected devices.").assertIsDisplayed()
+    // The daemon applies appearance only to devices this session controls (#10831).
+    onNodeWithText(
+        "Applies to the devices this session controls; changing it takes control of the " +
+          "selected device.",
+      )
+      .assertIsDisplayed()
   }
 
   @Test

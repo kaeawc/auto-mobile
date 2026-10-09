@@ -39,9 +39,9 @@ data class AppearanceConfig(
 /**
  * Outcome of an appearance command.
  *
- * [appliedMode] is the concrete light/dark actually pushed to devices. It is **null when no devices
- * were connected** -- the daemon omits the field rather than failing, so a successful call with an
- * empty device pool still reports the stored config. It is never `auto`.
+ * [appliedMode] is the concrete light/dark actually pushed to devices. It is **null when the
+ * caller's session controls no device** -- the daemon omits the field rather than failing, so a
+ * successful call that reached no device still reports the stored config. It is never `auto`.
  */
 data class AppearanceResult(
   val config: AppearanceConfig,

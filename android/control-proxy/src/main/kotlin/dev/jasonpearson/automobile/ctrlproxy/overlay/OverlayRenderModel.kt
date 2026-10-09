@@ -557,24 +557,60 @@ internal fun isLayeredOverlayAnchor(node: OverlayRenderNode): Boolean =
   node.source?.anchor is OverlayBoundsAnchor
 
 /**
+ * An anchored node drawn in a window-level layer, with the [ancestors] it was authored under (the
+ * outermost first). The layer keeps it composed while any of them animates out, so it fades with
+ * them instead of vanishing when they hide (#10803).
+ */
+data class LayeredOverlayAnchor(
+  val node: OverlayRenderNode,
+  val ancestors: List<OverlayRenderNode> = emptyList(),
+) {
+  /** Every ancestor is shown; the node's own `visible` is left to the renderer. */
+  val ancestorsShown: Boolean
+    get() = ancestors.all { it.visible }
+
+  /**
+   * The ancestor whose `visibleWhen` transition the node follows: the outermost animated one that
+   * is hiding (its exit contains the others), else the nearest animated one. Null when no ancestor
+   * is animated, so the node appears and disappears with them instantly.
+   */
+  val animatedAncestor: OverlayRenderNode?
+    get() {
+      val animated = ancestors.filter { it.source?.visibleWhen != null }
+      return animated.firstOrNull { !it.visible } ?: animated.lastOrNull()
+    }
+}
+
+/**
  * The anchored nodes under [node] that the renderer draws in a window-level layer above the author
  * tree (#10803), in tree order. Drawn inside their parent they were clipped to its slot (a
- * wrap-content parent animating its size clips) and took a slot there. A node is listed when every
- * ancestor below [node] is shown: visible, on the settled pager page, and not inside a modal
- * (modals list their own through [layeredOverlayAnchorsIn]). The anchored node's own visibility is
+ * wrap-content parent animating its size clips) and took a slot there. Nodes under a hidden
+ * ancestor are listed too, flagged by [LayeredOverlayAnchor.ancestorsShown], so the layer can fade
+ * them with it; nodes on a pager page other than the settled one and nodes inside a modal (modals
+ * list their own through [layeredOverlayAnchorsIn]) are not. The anchored node's own visibility is
  * left to the renderer, so its `visibleWhen` transition still runs. [node] itself is never listed:
  * a window root keeps its own anchored placement.
  */
-fun layeredOverlayAnchors(node: OverlayRenderNode): List<OverlayRenderNode> {
-  if (!node.visible || node.role !in OVERLAY_INLINE_CONTAINER_ROLES) return emptyList()
-  val children =
-    if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page)) else node.children
-  return layeredOverlayAnchorsIn(children)
-}
+fun layeredOverlayAnchors(node: OverlayRenderNode): List<LayeredOverlayAnchor> =
+  anchorsBelow(node, listOf(node))
 
 /** [layeredOverlayAnchors] for content drawn as [children], such as a modal's body. */
-fun layeredOverlayAnchorsIn(children: List<OverlayRenderNode>): List<OverlayRenderNode> =
-  children.flatMap { child ->
-    (if (isLayeredOverlayAnchor(child)) listOf(child) else emptyList()) +
-      layeredOverlayAnchors(child)
-  }
+fun layeredOverlayAnchorsIn(children: List<OverlayRenderNode>): List<LayeredOverlayAnchor> =
+  anchorsAmong(children, emptyList())
+
+private fun anchorsBelow(parent: OverlayRenderNode, ancestors: List<OverlayRenderNode>) =
+  if (parent.role !in OVERLAY_INLINE_CONTAINER_ROLES) emptyList()
+  else
+    anchorsAmong(
+      if (parent.role == "pager") listOfNotNull(parent.children.getOrNull(parent.page))
+      else parent.children,
+      ancestors,
+    )
+
+private fun anchorsAmong(
+  children: List<OverlayRenderNode>,
+  ancestors: List<OverlayRenderNode>,
+): List<LayeredOverlayAnchor> = children.flatMap { child ->
+  (if (isLayeredOverlayAnchor(child)) listOf(LayeredOverlayAnchor(child, ancestors))
+  else emptyList()) + anchorsBelow(child, ancestors + child)
+}

@@ -1,6 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -97,17 +101,50 @@ fun OverlaySpecContent(
   interact: (OverlayInteraction) -> Unit = {},
 ) {
   OverlayTheme(root, theme) {
-    Box(Modifier.semantics { testTagsAsResourceId = true }) {
-      RenderOverlayNode(root, interact, windowRoot = true)
-      OverlayAnchorLayer(layeredOverlayAnchors(root), interact)
-      modalOverlaySheets(root).forEach { node ->
-        key(node.identity) {
-          RenderOverlayModal(node, interact)
-          OverlayAnchorLayer(layeredOverlayAnchorsIn(node.children), interact)
+    val anchorLocals = remember { OverlayAnchorLocals() }
+    CompositionLocalProvider(LocalOverlayAnchorLocals provides anchorLocals) {
+      Box(Modifier.semantics { testTagsAsResourceId = true }) {
+        RenderOverlayNode(root, interact, windowRoot = true)
+        OverlayAnchorLayer(layeredOverlayAnchors(root), interact)
+        modalOverlaySheets(root).forEach { node ->
+          key(node.identity) {
+            RenderOverlayModal(node, interact)
+            OverlayAnchorLayer(layeredOverlayAnchorsIn(node.children), interact)
+          }
         }
       }
     }
   }
+}
+
+/**
+ * The CompositionLocals in force where each anchored node was authored, by node identity (#10803).
+ * The anchored node is drawn in a window-level layer, away from the card (or other provider) it
+ * sits in, so it is composed with these again: Material's content colour, content alpha and text
+ * style would otherwise reset to the window's defaults.
+ */
+internal class OverlayAnchorLocals {
+  val byIdentity = mutableStateMapOf<String, CompositionLocalContext>()
+}
+
+private val LocalOverlayAnchorLocals = compositionLocalOf<OverlayAnchorLocals?> { null }
+
+/**
+ * Records the locals at an anchored node's authored position, where the node itself is not drawn.
+ */
+@Composable
+private fun CaptureAnchorLocals(identity: String) {
+  val registry = LocalOverlayAnchorLocals.current ?: return
+  // Written while composing, not in an effect: the layer composes after this in the same pass and
+  // must not draw the node a frame with the wrong locals first.
+  registry.byIdentity[identity] = currentCompositionLocalContext
+  DisposableEffect(registry, identity) { onDispose { registry.byIdentity.remove(identity) } }
+}
+
+@Composable
+private fun WithAnchorLocals(identity: String, content: @Composable () -> Unit) {
+  val captured = LocalOverlayAnchorLocals.current?.byIdentity?.get(identity)
+  if (captured != null) CompositionLocalProvider(captured, content = content) else content()
 }
 
 /**
@@ -120,14 +157,14 @@ fun OverlaySpecContent(
  */
 @Composable
 private fun OverlayAnchorLayer(
-  nodes: List<OverlayRenderNode>,
+  anchors: List<LayeredOverlayAnchor>,
   interact: (OverlayInteraction) -> Unit,
 ) {
-  if (nodes.isEmpty()) return
+  if (anchors.isEmpty()) return
   Layout(
     content = {
-      nodes.forEach { node ->
-        key(node.identity) { RenderOverlayNode(node, interact, anchorLayer = true) }
+      anchors.forEach { anchor ->
+        key(anchor.node.identity) { LayeredAnchorEntry(anchor, interact) }
       }
     },
   ) { measurables, constraints ->
@@ -135,6 +172,35 @@ private fun OverlayAnchorLayer(
     val placeables = measurables.map { it.measure(loose) }
     layout(constraints.minWidth, constraints.minHeight) { placeables.forEach { it.place(0, 0) } }
   }
+}
+
+/**
+ * One anchored node of the layer, composed with the locals of its authored position. While an
+ * ancestor with a `visibleWhen` hides, the node stays composed and fades out with it, and fades in
+ * with it again; without motion, or with no animated ancestor, it follows them instantly. Only a
+ * fade: a shrink would clip the node to the layer's zero-size slot, not to the ancestor it was
+ * authored in.
+ */
+@Composable
+private fun LayeredAnchorEntry(
+  anchor: LayeredOverlayAnchor,
+  interact: (OverlayInteraction) -> Unit,
+) {
+  val node = anchor.node
+  val content: @Composable () -> Unit = {
+    WithAnchorLocals(node.identity) { RenderOverlayNode(node, interact, anchorLayer = true) }
+  }
+  val ancestor = anchor.animatedAncestor
+  if (LocalOverlayMotion.current && ancestor != null) {
+    val none = ancestor.source?.transition == "none"
+    AnimatedVisibility(
+      visible = anchor.ancestorsShown,
+      enter = if (none) EnterTransition.None else fadeIn(),
+      exit = if (none) ExitTransition.None else fadeOut(),
+    ) {
+      content()
+    }
+  } else if (anchor.ancestorsShown) content()
 }
 
 @Composable
@@ -167,7 +233,10 @@ private fun RenderOverlayNode(
   anchorLayer: Boolean = false,
 ) {
   // An anchored node below the root is drawn by its window's anchor layer, not in its parent.
-  if (!windowRoot && !anchorLayer && isLayeredOverlayAnchor(node)) return
+  if (!windowRoot && !anchorLayer && isLayeredOverlayAnchor(node)) {
+    CaptureAnchorLocals(node.identity)
+    return
+  }
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
   if (LocalOverlayMotion.current && node.source?.visibleWhen != null) {
     // The row/column weight rides on the animated container: it is the Row/Column's direct child.

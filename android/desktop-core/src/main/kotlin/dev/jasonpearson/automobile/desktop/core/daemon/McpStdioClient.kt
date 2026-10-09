@@ -217,7 +217,7 @@ class McpStdioClient(
     return try {
       decodeToolResponse(json, response, serializer<StartDeviceResult>())
     } catch (e: Exception) {
-      StartDeviceResult(success = false, message = e.message ?: "Failed to start device")
+      startDeviceFailure(e)
     }
   }
 

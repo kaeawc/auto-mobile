@@ -71,6 +71,9 @@ class FakeAutoMobileClient : AutoMobileClient {
   var executePlanResult: ExecutePlanResult =
     ExecutePlanResult(success = true, executedSteps = 0, totalSteps = 0)
   var startDeviceResult: StartDeviceResult = StartDeviceResult(success = true)
+
+  /** Results returned (in order) before falling back to [startDeviceResult]. */
+  val queuedStartDeviceResults: ArrayDeque<StartDeviceResult> = ArrayDeque()
   var setActiveDeviceResult: SetActiveDeviceResult = SetActiveDeviceResult(success = true)
   var observeResult: ObserveResult = ObserveResult()
   var observeError: Throwable? = null
@@ -349,7 +352,7 @@ class FakeAutoMobileClient : AutoMobileClient {
 
   override fun startDevice(name: String, platform: String, deviceId: String?): StartDeviceResult {
     calls.add("startDevice")
-    return startDeviceResult
+    return queuedStartDeviceResults.removeFirstOrNull() ?: startDeviceResult
   }
 
   override fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult {

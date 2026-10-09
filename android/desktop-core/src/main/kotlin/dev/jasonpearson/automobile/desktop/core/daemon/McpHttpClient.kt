@@ -207,7 +207,7 @@ class McpHttpClient(
       decodeToolResponse(json, response, serializer<StartDeviceResult>())
     } catch (e: Exception) {
       if (e is CancellationException) throw e
-      StartDeviceResult(success = false, message = e.message ?: "Failed to start device")
+      startDeviceFailure(e)
     }
   }
 

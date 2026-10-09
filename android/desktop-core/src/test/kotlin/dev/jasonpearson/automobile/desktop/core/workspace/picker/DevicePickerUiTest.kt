@@ -27,7 +27,16 @@ class DevicePickerUiTest {
     selected: Set<String> = emptySet(),
     bootingIds: Set<String> = emptySet(),
     bootErrors: Map<String, String> = emptyMap(),
-  ) = DevicePickerUiState.Content(devices, PickerFilters(), selected, bootingIds, bootErrors)
+    finishing: Set<String> = emptySet(),
+  ) =
+    DevicePickerUiState.Content(
+      devices,
+      PickerFilters(),
+      selected,
+      bootingIds,
+      bootErrors,
+      finishing,
+    )
 
   // Stub the hoisted thumbnail so composing the grid never opens a video/observation socket.
   private fun ComposeUiTest.picker(
@@ -132,6 +141,13 @@ class DevicePickerUiTest {
     onNodeWithText("Click to boot").assertDoesNotExist()
     onNodeWithContentDescription("Boot iPhone 15").assertDoesNotExist()
     onNodeWithContentDescription("Retry boot iPhone 15").assertDoesNotExist()
+  }
+
+  @Test
+  fun `a card waiting on the previous session's cleanup says so`() = runComposeUiTest {
+    picker(content(bootingIds = setOf("ios:i15"), finishing = setOf("ios:i15")))
+    onNodeWithText("Finishing previous session…").assertIsDisplayed()
+    onNodeWithText("Booting…").assertDoesNotExist()
   }
 
   @Test

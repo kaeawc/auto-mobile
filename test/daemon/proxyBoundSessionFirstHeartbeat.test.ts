@@ -889,6 +889,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
             livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
             livenessOwnerToken: expect.any(String),
             reportIdleRelease: true,
+            reportDaemonInstance: true,
           },
         },
       ]);

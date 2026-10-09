@@ -254,10 +254,12 @@ import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerServ
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import {
   evaluateDeviceDisconnects,
+  OFFLINE_DEVICE_DISCONNECT_BUDGET_MS,
   pruneStaleOfflineRecoveryAttempts,
   recordingCandidateIncarnations,
   selectImmediateDisconnectCandidates,
   selectOfflineRecoveryCandidates,
+  type OfflineEpisode,
   type DisconnectCandidateIncarnation,
 } from "./disconnectMonitor";
 import {
@@ -545,6 +547,9 @@ export class Daemon {
   // a later episode for the same serial gets a fresh attempt.
   private offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
   private offlineRecoveryAttemptedIncarnations = new Map<string, number | string>();
+  // Start of each candidate's current ADB `offline` episode (#11090): offline
+  // sweeps run against OFFLINE_DEVICE_DISCONNECT_BUDGET_MS, not the miss count.
+  private offlineEpisodes = new Map<string, OfflineEpisode>();
   private stoppingRecordings: Set<string> = new Set();
   private observerSessionRegistry: ObserverSessionRegistry;
   private sessionManager: SessionManager;
@@ -3009,6 +3014,9 @@ export class Daemon {
             candidateIncarnations,
             deviceDisconnectMissIncarnations: this.deviceDisconnectMissIncarnations,
             forceDisconnectedDeviceIds: this.forceDisconnectedDeviceIds,
+            offlineDeviceIds,
+            offlineEpisodes: this.offlineEpisodes,
+            nowMs: this.timer.monotonicNow?.() ?? this.timer.now(),
             immediateDisconnectDeviceIds: selectImmediateDisconnectCandidates(
               candidateDeviceIds,
               candidatePlatforms,
@@ -3285,6 +3293,11 @@ export class Daemon {
         logger.info(message);
       }
     }
+    for (const { deviceId, offlineForMs } of disconnectResult.offline) {
+      logger.info(
+        `[DisconnectMonitor] Device ${deviceId} ADB-offline for ${Math.round(offlineForMs / 1000)}s (budget ${OFFLINE_DEVICE_DISCONNECT_BUDGET_MS / 1000}s); keeping session`,
+      );
+    }
   }
 
   private captureDisconnectCleanup(
@@ -3319,6 +3332,7 @@ export class Daemon {
     this.deviceDisconnectMissIncarnations.delete(deviceId);
     this.offlineRecoveryAttemptedDeviceIds.delete(deviceId);
     this.offlineRecoveryAttemptedIncarnations.delete(deviceId);
+    this.offlineEpisodes.delete(deviceId);
     if (this.forceDisconnectedDeviceGenerations.get(deviceId) === forceGenerationAtDisconnect) {
       this.forceDisconnectedDeviceIds.delete(deviceId);
       this.forceDisconnectedDeviceGenerations.delete(deviceId);

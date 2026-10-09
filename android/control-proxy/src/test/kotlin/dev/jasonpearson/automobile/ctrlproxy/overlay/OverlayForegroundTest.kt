@@ -196,6 +196,35 @@ class OverlayForegroundTest {
   }
 
   @Test
+  fun `a rejected show keeps the previous overlay suspended and anchored`() = runTest {
+    controller.show("s", spec())
+    tracker.onWindowEvent("com.android.settings", app)
+    settle()
+    assertTrue(tracker.suspended)
+
+    foreground = "com.android.settings"
+    host.accept = false
+    try {
+      controller.show("s2", spec("second"))
+    } catch (_: Exception) {}
+    host.accept = true
+
+    assertTrue("the previous overlay stays suspended", tracker.suspended)
+    assertTrue(controller.isSuspendedByForeground)
+    // Still anchored to the original app: Settings in front does not draw the overlay.
+    host.calls.clear()
+    tracker.onWindowEvent("com.android.settings", app)
+    settle()
+    controller.onConfigurationChanged()
+    assertFalse(host.isShowing)
+    assertTrue(host.calls.none { it == "show" || it == "replace" })
+
+    tracker.onWindowEvent("com.example.app", app)
+    settle()
+    assertTrue(host.isShowing)
+  }
+
+  @Test
   fun `an unknown foreground leaves the overlay unscoped`() = runTest {
     foreground = null
     controller.show("s", spec())

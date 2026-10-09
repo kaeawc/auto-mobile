@@ -70,6 +70,21 @@ class GboardCapturedTraceTest {
     assertEquals(postMoveCalls.last().composingStart, editor.composingStart)
   }
 
+  @Test
+  fun `a multi-character string in one call emits the captured bare commitText sequence`() {
+    val captured = load("gboard-phase1-typed.txt").filter { it.field == "plain" }
+    val word = captured.take(5)
+    val policy = ConfigurableTypingPolicy(KeyboardProfiles.GBOARD.behavior)
+    val editor = FakeEditor()
+
+    val ops = type(policy, editor, word.joinToString("") { it.args.commitTextArgument() })
+
+    assertEquals(word.map(::expectedOp), ops)
+    assertTrue("batch wrapper emitted: $ops", ops.none { it is ImeOp.BeginBatchEdit })
+    assertTrue("batch wrapper emitted: $ops", ops.none { it is ImeOp.EndBatchEdit })
+    assertEquals(word.last().text, editor.text)
+  }
+
   private fun type(
     policy: ConfigurableTypingPolicy,
     editor: FakeEditor,

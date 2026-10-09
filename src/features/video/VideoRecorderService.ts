@@ -127,6 +127,8 @@ export interface RecordingResult {
   startedAt?: string;
   endedAt?: string;
   durationMs?: number;
+  /** Container duration read from the finalized file; see VideoRecordingMetadata. */
+  videoDurationMs?: number;
   sizeBytes?: number;
   codec?: string;
   recordedPanel?: VideoRecordingPanel;
@@ -445,6 +447,9 @@ export class VideoRecorderService {
       format: containerFormatOf(outputPath, active.config.format),
       sizeBytes,
       durationMs,
+      ...(stopResult.videoDurationMs !== undefined && {
+        videoDurationMs: stopResult.videoDurationMs,
+      }),
       codec: stopResult.codec,
       outputName: active.outputName,
       createdAt: active.startedAt,

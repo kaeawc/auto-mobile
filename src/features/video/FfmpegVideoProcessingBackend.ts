@@ -618,6 +618,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       }
       // Probe the produced codec: the iOS copy path can preserve HEVC.
       const codec = await this.codecProbe.codec(outputPath);
+      const videoDurationMs = await this.codecProbe.durationMs?.(outputPath);
       if (outputPath !== backendHandle.capturePath) {
         await this.removeRawCapture(backendHandle.capturePath);
       }
@@ -632,6 +633,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         endedAt: backendHandle.captureTracker.exitState.endedAt ?? new Date().toISOString(),
         sizeBytes,
         codec,
+        ...(videoDurationMs !== undefined && { videoDurationMs }),
         ...(warnings.length > 0 && { warnings }),
       };
     } catch (error) {

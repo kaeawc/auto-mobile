@@ -18,6 +18,11 @@ export interface RecordingCodecProbe {
    * misleading label.
    */
   codec(filePath: string): Promise<string | undefined>;
+  /**
+   * Resolve the container duration (`mvhd`) of the recording in milliseconds,
+   * or `undefined` when it cannot be read. Optional so codec-only fakes stay valid.
+   */
+  durationMs?(filePath: string): Promise<number | undefined>;
 }
 
 // ISO-BMFF (MP4/MOV) container boxes that nest the ones below them. We only ever
@@ -140,13 +145,15 @@ function parseSampleDescription(buffer: Buffer, start: number, end: number): str
 }
 
 /**
- * Read only the `moov` box out of a recording file to determine its video
- * codec, seeking past the (potentially very large) `mdat` payload rather than
- * loading the whole file into memory. Both capture backends write
- * `-movflags +faststart`, so `moov` precedes `mdat`, but this walker does not
- * rely on that ordering — it scans top-level boxes until it finds `moov`.
+ * Read only the `moov` box out of a recording file, seeking past the
+ * (potentially very large) `mdat` payload rather than loading the whole file
+ * into memory. Both capture backends write `-movflags +faststart`, so `moov`
+ * precedes `mdat`, but this walker does not rely on that ordering — it scans
+ * top-level boxes until it finds `moov`. Returns the box and its header size.
  */
-async function readRecordingVideoCodec(filePath: string): Promise<string | undefined> {
+async function readMoovBox(
+  filePath: string,
+): Promise<{ moov: Buffer; headerSize: number } | undefined> {
   const handle = await fsPromises.open(filePath, "r");
   try {
     const { size: fileSize } = await handle.stat();
@@ -164,7 +171,7 @@ async function readRecordingVideoCodec(filePath: string): Promise<string | undef
         const available = Math.min(box.size, fileSize - position);
         const moov = Buffer.alloc(available);
         await handle.read(moov, 0, available, position);
-        return findVideoCodecInBoxes(moov, box.headerSize, available);
+        return { moov, headerSize: box.headerSize };
       }
 
       position += box.size;
@@ -173,6 +180,71 @@ async function readRecordingVideoCodec(filePath: string): Promise<string | undef
   } finally {
     await handle.close();
   }
+}
+
+async function readRecordingVideoCodec(filePath: string): Promise<string | undefined> {
+  const box = await readMoovBox(filePath);
+  return box && findVideoCodecInBoxes(box.moov, box.headerSize, box.moov.length);
+}
+
+// mvhd payload: version(1) + flags(3), then creation/modification times
+// (4 bytes each in v0, 8 in v1), timescale(4), duration (4 bytes in v0, 8 in v1).
+const MVHD_FULLBOX_PREAMBLE = 4;
+
+function readMvhdDurationMs(buffer: Buffer, start: number, end: number): number | undefined {
+  const version = buffer[start];
+  const timesSize = version === 1 ? 16 : 8;
+  const timescaleAt = start + MVHD_FULLBOX_PREAMBLE + timesSize;
+  const durationAt = timescaleAt + 4;
+  const durationSize = version === 1 ? 8 : 4;
+  if (durationAt + durationSize > end) {
+    return undefined;
+  }
+  const timescale = buffer.readUInt32BE(timescaleAt);
+  const duration =
+    version === 1
+      ? buffer.readUInt32BE(durationAt) * 2 ** 32 + buffer.readUInt32BE(durationAt + 4)
+      : buffer.readUInt32BE(durationAt);
+  if (timescale === 0) {
+    return undefined;
+  }
+  return Math.round((duration / timescale) * 1000);
+}
+
+/**
+ * Read the movie duration (`moov` > `mvhd`) of an in-memory ISO-BMFF buffer in
+ * milliseconds. Header-only: no sample tables are walked. Returns `undefined`
+ * when there is no `mvhd` or its timescale is zero.
+ */
+export function parseMp4DurationMs(buffer: Buffer): number | undefined {
+  return findDurationInBoxes(buffer, 0, buffer.length);
+}
+
+function findDurationInBoxes(buffer: Buffer, start: number, end: number): number | undefined {
+  let offset = start;
+  while (offset + BOX_HEADER_SIZE <= end) {
+    const header = readBoxHeader(buffer, offset, end - offset, end - offset);
+    if (!header || offset + header.size > end) {
+      return undefined;
+    }
+    const payloadStart = offset + header.headerSize;
+    const payloadEnd = offset + header.size;
+    if (header.type === "moov") {
+      const found = findDurationInBoxes(buffer, payloadStart, payloadEnd);
+      if (found !== undefined) {
+        return found;
+      }
+    } else if (header.type === "mvhd") {
+      return readMvhdDurationMs(buffer, payloadStart, payloadEnd);
+    }
+    offset += header.size;
+  }
+  return undefined;
+}
+
+async function readRecordingDurationMs(filePath: string): Promise<number | undefined> {
+  const box = await readMoovBox(filePath);
+  return box && findDurationInBoxes(box.moov, box.headerSize, box.moov.length);
 }
 
 export const defaultRecordingCodecProbe: RecordingCodecProbe = {
@@ -184,6 +256,16 @@ export const defaultRecordingCodecProbe: RecordingCodecProbe = {
       // persisted. A probe failure yields `undefined` (surfaced as "unknown"),
       // never a guessed codec. Warn so a systematic parse failure is visible.
       logger.warn(`[RecordingCodec] Failed to probe codec for ${filePath}: ${error}`, error);
+      return undefined;
+    }
+  },
+  async durationMs(filePath: string): Promise<number | undefined> {
+    try {
+      return await readRecordingDurationMs(filePath);
+    } catch (error) {
+      // Best-effort metadata, same contract as codec(): the recording is already
+      // persisted, so a probe miss yields undefined rather than a guessed duration.
+      logger.warn(`[RecordingCodec] Failed to probe duration for ${filePath}: ${error}`, error);
       return undefined;
     }
   },

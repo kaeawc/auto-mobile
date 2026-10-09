@@ -411,9 +411,15 @@ the harness only when recovery has failed. Recovery always fits inside the lease
 plus the grace window (8 s at the default 4 s timeout) at the default 2 s
 heartbeat cadence. The proxy applies this to every session it holds, one
 session at a time. The daemon does not hold its own stalls against owners: when
-its heartbeat monitor runs more than 2 s later than scheduled it moves every
+its heartbeat monitor runs more than 2 s later than scheduled it moves a
 session's lease forward by exactly that lateness, so a daemon stall of a few
-seconds cannot push a heartbeating owner past lease plus grace.
+seconds cannot push a heartbeating owner past lease plus grace. Only owners whose
+lease was still live when the stall began (within one lease of their last
+heartbeat) are excused (#11080): an owner that had already gone silent is
+released near the usual 10 s even while every scan runs late. Lease and idle
+time are measured on the monotonic clock, so stepping the wall clock (an NTP
+correction) neither extends nor shortens them; on macOS a forward step cannot
+be told from host sleep and counts as sleep.
 
 Idle time is wall-clock, host sleep included (owner decision 2026-10-08,
 #10661; classification of sleep versus a daemon stall in #10699). A stall that on its own outlasts a

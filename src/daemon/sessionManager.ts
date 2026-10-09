@@ -29,7 +29,7 @@ import {
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
 import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
-import { defaultTimer, Timer } from "../utils/SystemTimer";
+import { defaultTimer, SteadyWallClock, Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
@@ -65,6 +65,7 @@ import { effectiveLastToolActivity } from "./sessionClocks";
 import {
   effectiveLastHeartbeat,
   isLivenessOwnerLeaseLive,
+  ownerLeaseLiveAt,
   livenessLeaseState,
   livenessOwnerHold,
   sessionLeaseSnapshot,
@@ -1181,6 +1182,8 @@ export class SessionManager {
   private deviceSessionMap: Map<string, string> = new Map(); // deviceId -> sessionId (reverse lookup)
   private cleanupTimer: NodeJS.Timeout | null = null;
   private timer: Timer;
+  /** The clock every session timestamp is stamped and judged with (#11080); see {@link sessionNow}. */
+  private readonly sessionClock: SteadyWallClock;
   private releaseCallbacks: SessionReleaseCallback[] = [];
   private createdCallbacks: SessionCreatedCallback[] = [];
   private deviceUnboundCallbacks: SessionDeviceUnboundCallback[] = [];
@@ -1379,7 +1382,7 @@ export class SessionManager {
   async applyRecoveredTerminalReleaseIntents(deadlineAt?: number): Promise<string[]> {
     const applied: string[] = [];
     for (const intent of Array.from(this.recoveredTerminalReleaseIntents.values())) {
-      if (deadlineAt !== undefined && this.timer.now() >= deadlineAt) {
+      if (deadlineAt !== undefined && this.sessionNow() >= deadlineAt) {
         // The rest stay fenced in memory and are applied by the next startup.
         break;
       }
@@ -1676,6 +1679,7 @@ export class SessionManager {
     }),
   ) {
     this.timer = timer;
+    this.sessionClock = new SteadyWallClock(timer);
     this.deviceSessionRepository = deviceSessionRepository;
     this.getBarrier = getBarrier;
     this.keepScreenAwakeRestorerFactory = keepScreenAwakeRestorerFactory;
@@ -1756,6 +1760,16 @@ export class SessionManager {
    */
   getTimer(): Timer {
     return this.timer;
+  }
+
+  /**
+   * The current time on the clock every session timestamp (lease, idle, creation, release) is
+   * stamped and judged with (#11080): wall-anchored, but advancing with the monotonic clock plus
+   * measured host sleep, so a wall-clock step neither extends nor cuts a lease or an idle window.
+   * Anything compared with a session timestamp must read this rather than `getTimer().now()`.
+   */
+  sessionNow(): number {
+    return this.sessionClock.now();
   }
 
   /**
@@ -1840,7 +1854,7 @@ export class SessionManager {
     capMs?: number,
   ): void {
     if (capMs !== undefined) {
-      const settlesBy = this.timer.now() + capMs;
+      const settlesBy = this.sessionNow() + capMs;
       const previous = this.pendingDeviceCleanupSettlesBy.get(deviceId) ?? 0;
       this.pendingDeviceCleanupSettlesBy.set(deviceId, Math.max(previous, settlesBy));
     }
@@ -1853,7 +1867,7 @@ export class SessionManager {
    * teardown and persist phases, or a default polling hint when nothing bounds it.
    */
   getDeviceCleanupRetryAfterMs(deviceId: string): number {
-    const now = this.timer.now();
+    const now = this.sessionNow();
     const bounds = Array.from(this.activeReleasePromises)
       .filter((release) => !release.forced && release.session.assignedDevice === deviceId)
       .map(
@@ -1936,7 +1950,7 @@ export class SessionManager {
       new ActionableError(`Release of session ${sessionId} was forced; its teardown is abandoned`),
     );
     if (!this.terminalReleaseSnapshots.has(sessionId)) {
-      const releasedAtMs = this.timer.now();
+      const releasedAtMs = this.sessionNow();
       const releaseReason = isTerminalReleaseReason(operation.reason.value)
         ? operation.reason.value
         : "heartbeat-timeout";
@@ -2132,7 +2146,7 @@ export class SessionManager {
       return await this.withinCreateDeadline(sessionId, assignedDevice, pendingCreation.promise);
     }
 
-    const now = this.timer.now();
+    const now = this.sessionNow();
     const persistedRecovery = this.pendingPersistedRecoveries.get(sessionId);
     const liveness = sessionCreationLiveness(
       timeoutMs,
@@ -2301,7 +2315,7 @@ export class SessionManager {
   }
 
   private async retireAbandonedCreation(session: Session): Promise<never> {
-    const releasedAtMs = this.timer.now();
+    const releasedAtMs = this.sessionNow();
     await this.persistSessionRelease(
       {
         sessionId: session.sessionId,
@@ -2335,7 +2349,7 @@ export class SessionManager {
     if (this.acceptingSessionCreations && !cancellation?.aborted) {
       return;
     }
-    const releasedAtMs = this.timer.now();
+    const releasedAtMs = this.sessionNow();
     const snapshot: SessionReleaseSnapshot = {
       sessionId: session.sessionId,
       deviceId: session.assignedDevice,
@@ -2381,7 +2395,7 @@ export class SessionManager {
   private recordRestartRecoveryActivity(sessionId: string): void {
     const activityAt = Math.max(
       this.restartRecoveryActivityAt.get(sessionId) ?? 0,
-      this.timer.now(),
+      this.sessionNow(),
     );
     this.restartRecoveryActivityAt.set(sessionId, activityAt);
     void this.getBarrier()
@@ -2412,7 +2426,7 @@ export class SessionManager {
       return false;
     }
     const deadline = restartRecoveryDeadlineFromPersisted(persisted);
-    return deadline !== undefined && this.timer.now() < deadline;
+    return deadline !== undefined && this.sessionNow() < deadline;
   }
 
   private async getPersistedTerminalRelease(
@@ -2433,7 +2447,7 @@ export class SessionManager {
     return Boolean(
       persisted &&
       (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason)) &&
-      isRecoverableDeviceSession(persisted, this.timer.now()),
+      isRecoverableDeviceSession(persisted, this.sessionNow()),
     );
   }
 
@@ -2442,14 +2456,14 @@ export class SessionManager {
   ): Promise<void> {
     if (
       persisted &&
-      persisted.expires_at_ms <= this.timer.now() &&
+      persisted.expires_at_ms <= this.sessionNow() &&
       (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason))
     ) {
       this.restartRecoveryActivityAt.delete(persisted.session_uuid);
       await this.deviceSessionRepository.markReleased(
         persisted.session_uuid,
         "expired",
-        this.timer.now(),
+        this.sessionNow(),
         "expired",
       );
     }
@@ -2613,7 +2627,7 @@ export class SessionManager {
    * reclaimed by the call.
    */
   private async reclaimAndRefreshExistingSession(existing: Session): Promise<void> {
-    const now = this.timer.now();
+    const now = this.sessionNow();
     const previousActivity = {
       lastUsedAt: existing.lastUsedAt,
       lastHeartbeat: existing.lastHeartbeat,
@@ -2842,7 +2856,7 @@ export class SessionManager {
       timer: this.timer,
       timeoutMs:
         requestDeadlineMs !== undefined && Number.isFinite(requestDeadlineMs)
-          ? Math.max(0, requestDeadlineMs - (wait?.responseMarginMs ?? 0) - this.timer.now())
+          ? Math.max(0, requestDeadlineMs - (wait?.responseMarginMs ?? 0) - this.sessionNow())
           : undefined,
       signal: getAbortSignal(),
       label: "Session restart recovery",
@@ -2892,7 +2906,7 @@ export class SessionManager {
         timer: this.timer,
         timeoutMs:
           deadline !== undefined && deadline < (wait.restartDeadlineMs ?? Infinity)
-            ? Math.max(0, deadline - this.timer.now())
+            ? Math.max(0, deadline - this.sessionNow())
             : undefined,
         signal,
         label: "Session restart recovery",
@@ -3048,7 +3062,7 @@ export class SessionManager {
         );
       if (
         recoveryTarget?.restartRecoveryDeadlineMs !== undefined &&
-        this.timer.now() < recoveryTarget.restartRecoveryDeadlineMs
+        this.sessionNow() < recoveryTarget.restartRecoveryDeadlineMs
       ) {
         recoveryTarget.onRecoveryWait = (wait) => shared.recoveryWait.resolve(wait);
         await runWithAbortSignal(shared.controller.signal, assign);
@@ -3112,7 +3126,7 @@ export class SessionManager {
     options: { deadlineMs?: number } = {},
   ): Promise<RehydrationSummary> {
     const deadlineMs = options.deadlineMs ?? SESSION_REHYDRATION_DEADLINE_MS;
-    const deadlineAt = this.timer.now() + deadlineMs;
+    const deadlineAt = this.sessionNow() + deadlineMs;
     const summary: RehydrationSummary = {
       rehydrated: [],
       terminalized: [],
@@ -3157,13 +3171,13 @@ export class SessionManager {
         summary.skipped.push({ sessionUuid: sessionId, reason: skipReason });
         continue;
       }
-      if (this.timer.now() >= deadlineAt) {
+      if (this.sessionNow() >= deadlineAt) {
         markDeadline(index);
         break;
       }
       try {
         const recoveryPromise = this.registerRehydrationRecovery(sessionId, devicePool, persisted);
-        const remaining = Math.max(0, deadlineAt - this.timer.now());
+        const remaining = Math.max(0, deadlineAt - this.sessionNow());
         const recoveryResult = await raceWithDeadline(recoveryPromise, {
           timer: this.timer,
           timeoutMs: remaining,
@@ -3226,7 +3240,7 @@ export class SessionManager {
         ? {
             livenessOwnerToken: persisted.liveness_owner_token,
             livenessOwnershipClaims: new Set([persisted.liveness_owner_token]),
-            lastOwnerHeartbeat: this.timer.now(),
+            lastOwnerHeartbeat: this.sessionNow(),
           }
         : {}),
     };
@@ -3243,7 +3257,7 @@ export class SessionManager {
     try {
       result = await raceWithDeadline(recoverableSessions, {
         timer: this.timer,
-        timeoutMs: Math.max(0, deadlineAt - this.timer.now()),
+        timeoutMs: Math.max(0, deadlineAt - this.sessionNow()),
         label: "Recoverable session listing",
         timeoutError: () => deadlineWon,
       });
@@ -3296,7 +3310,7 @@ export class SessionManager {
     persisted: DeviceSession,
     error: Pick<SessionRecoveryIdentityLossError, "terminalReleaseReason">,
   ): Promise<void> {
-    const releasedAtMs = this.timer.now();
+    const releasedAtMs = this.sessionNow();
     await this.persistTerminalReleaseIfNeeded({
       sessionId,
       deviceId: persisted.device_id,
@@ -3700,7 +3714,7 @@ export class SessionManager {
       session,
       promise: Promise.resolve(null),
       reason,
-      startedAtMs: this.timer.now(),
+      startedAtMs: this.sessionNow(),
       forcedAbort: new AbortController(),
     };
     const run = () =>
@@ -3866,7 +3880,7 @@ export class SessionManager {
         persisted &&
         this.isRecoverablePersistedSession(persisted) &&
         deadline !== undefined &&
-        this.timer.now() < deadline
+        this.sessionNow() < deadline
       ) {
         const snapshot = this.terminalReleaseFromPersisted(sessionId, {
           ...persisted,
@@ -3874,7 +3888,7 @@ export class SessionManager {
           // ordinary superseded releases terminal outside restart recovery.
           release_reason:
             releaseReason === "superseded" ? "identity-recovery-superseded" : releaseReason,
-          released_at_ms: this.timer.now(),
+          released_at_ms: this.sessionNow(),
         })!;
         await this.persistTerminalReleaseIfNeeded(snapshot);
         this.notifySessionRelease(snapshot);
@@ -4096,7 +4110,7 @@ export class SessionManager {
       if (releaseSuperseded(shouldCommit)) {
         return this.abandonSupersededRelease(sessionId, deviceId, pendingCleanup);
       }
-      const releasedAtMs = this.timer.now();
+      const releasedAtMs = this.sessionNow();
       const releaseReason = reason.value;
       const terminalFenceHeldBefore = this.terminalReleaseSnapshots.has(sessionId);
       let releaseSnapshot: SessionReleaseSnapshot = {
@@ -4251,7 +4265,7 @@ export class SessionManager {
         });
       }
     }
-    const startedAtMs = this.timer.now();
+    const startedAtMs = this.sessionNow();
     const capHandle = this.timer.setTimeout(() => {
       shield.abort(new ActionableError("Session release teardown exceeded its budget"));
     }, SESSION_RELEASE_TEARDOWN_CAP_MS);
@@ -4308,7 +4322,7 @@ export class SessionManager {
     const capError = new Error("Session release teardown cap reached");
     return raceWithDeadline(tracked, {
       timer: this.timer,
-      timeoutMs: Math.max(0, SESSION_RELEASE_TEARDOWN_CAP_MS - (this.timer.now() - startedAtMs)),
+      timeoutMs: Math.max(0, SESSION_RELEASE_TEARDOWN_CAP_MS - (this.sessionNow() - startedAtMs)),
       label: "Session release teardown",
       timeoutError: () => capError,
       onTimeout: () => {
@@ -5937,7 +5951,7 @@ export class SessionManager {
   private allocateIosOwnerGeneration(): number {
     this.lastIosOwnerGeneration = Math.max(
       this.lastIosOwnerGeneration + 1,
-      Math.floor(this.timer.now()),
+      Math.floor(this.sessionNow()),
     );
     return this.lastIosOwnerGeneration;
   }
@@ -6242,7 +6256,7 @@ export class SessionManager {
     const effectiveGeneration = generation ?? this.currentNetworkConditionGeneration(sessionId);
     this.armNetworkConditionExpiryAt(
       session,
-      this.timer.now() + effectiveSeconds * 1000,
+      this.sessionNow() + effectiveSeconds * 1000,
       effectiveGeneration,
     );
   }
@@ -6264,7 +6278,7 @@ export class SessionManager {
     if (this.sessions.get(sessionId) !== session) {
       return;
     }
-    const remainingMs = Math.max(0, deadlineMs - this.timer.now());
+    const remainingMs = Math.max(0, deadlineMs - this.sessionNow());
     const handle = this.timer.setTimeout(() => {
       this.handleNetworkConditionExpiry(session, generation);
     }, remainingMs);
@@ -6522,7 +6536,7 @@ export class SessionManager {
   setLastHierarchy(sessionId: string, hierarchy: ViewHierarchyResult): void {
     this.updateSessionCache(sessionId, {
       lastHierarchy: hierarchy,
-      lastObserveTime: this.timer.now(),
+      lastObserveTime: this.sessionNow(),
     });
   }
 
@@ -6974,7 +6988,7 @@ export class SessionManager {
     if (!end.admitted || !session || this.releasingSessions.has(session)) {
       return;
     }
-    const now = this.timer.now();
+    const now = this.sessionNow();
     session.lastUsedAt = Math.max(session.lastUsedAt, now);
     session.lastHeartbeat = Math.max(session.lastHeartbeat, now);
     session.expiresAt = Math.max(session.expiresAt, now + session.sessionTimeoutMs);
@@ -7012,7 +7026,7 @@ export class SessionManager {
     if (!this.isAdmittedForAutomation(session)) {
       return;
     }
-    const now = this.timer.now();
+    const now = this.sessionNow();
     session.lastHeartbeat = now;
     // Only a heartbeat advances the owner lease; both the socket and HTTP routes admit one only
     // from the owner (or a tokenless client on a session no proxy owns).
@@ -7143,7 +7157,7 @@ export class SessionManager {
     // Stamp the lease in the same step as the takeover, still inside the claim mutex. The
     // request handler records the claimant's heartbeat several awaits later; until then a second
     // foreign claimant would read the previous, lapsed lease and displace this one (#10050).
-    session.lastOwnerHeartbeat = this.timer.now();
+    session.lastOwnerHeartbeat = this.sessionNow();
     try {
       await this.persistNewLivenessOwnershipClaim(
         session,
@@ -7166,7 +7180,7 @@ export class SessionManager {
       return false;
     }
     // The owner's own heartbeats decide this, not tool activity by whoever else names the session.
-    return isLivenessOwnerLeaseLive(sessionOwnerLeaseSnapshot(session, this.timer.now()));
+    return isLivenessOwnerLeaseLive(sessionOwnerLeaseSnapshot(session, this.sessionNow()));
   }
 
   /**
@@ -7179,7 +7193,7 @@ export class SessionManager {
     if (!session || session.livenessPolicy === "cli-idle") {
       return undefined;
     }
-    return livenessOwnerHold(sessionOwnerLeaseSnapshot(session, this.timer.now()));
+    return livenessOwnerHold(sessionOwnerLeaseSnapshot(session, this.sessionNow()));
   }
 
   /**
@@ -7192,21 +7206,21 @@ export class SessionManager {
     if (!session || session.livenessPolicy === "cli-idle") {
       return undefined;
     }
-    return livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now()));
+    return livenessLeaseState(sessionLeaseSnapshot(session, this.sessionNow()));
   }
 
   /** Whether the session is inside its suspect window (lease expired, grace running). */
   private isSessionSuspect(session: Session): boolean {
     return (
       session.livenessPolicy === "heartbeat" &&
-      livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now())).phase === "suspect"
+      livenessLeaseState(sessionLeaseSnapshot(session, this.sessionNow())).phase === "suspect"
     );
   }
 
   /** Reject a tool call against a suspect session; only its owner's heartbeat restores it. */
   private assertSessionNotSuspect(session: Session): void {
     if (this.isSessionSuspect(session)) {
-      const { remainingMs } = livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now()));
+      const { remainingMs } = livenessLeaseState(sessionLeaseSnapshot(session, this.sessionNow()));
       throw new SessionSuspectError(session.sessionId, remainingMs);
     }
   }
@@ -7228,7 +7242,7 @@ export class SessionManager {
    * Returns how many sessions were restarted.
    */
   startRehydratedOwnerWindows(): number {
-    const now = this.timer.now();
+    const now = this.sessionNow();
     let restarted = 0;
     for (const session of this.sessions.values()) {
       if (session.ownership === "awaiting-owner" && session.awaitingOwnerSince !== undefined) {
@@ -7256,10 +7270,17 @@ export class SessionManager {
    * Nothing moves past `resumedAt`, so time an owner genuinely missed before the gap still counts.
    * A `cli-idle` session has no lease; its wall-clock idle window moves forward by the same
    * `lostMs` (and never by `sleptMs`) through `idleStallForgivenAt`, so whether it survives a stall
-   * no longer depends on which timer fires first afterwards (#10835). Returns how many sessions
-   * were extended.
+   * no longer depends on which timer fires first afterwards (#10835).
+   *
+   * `gapBeganAt`, when given, narrows the lease forgiveness (#11080): an owned session's lease is
+   * excused only when the gap began within one lease of its owner's last heartbeat
+   * ({@link ownerLeaseLiveAt}); its idle deadline is still moved as above. An owner whose lease
+   * had already run out before the gap was not heartbeating, so the gap hid nothing from the
+   * daemon; forgiving it anyway let a dead owner keep its device for as long as the daemon's scans
+   * kept arriving late. A live owner is forgiven in full however long the gap. Returns how many
+   * sessions were extended.
    */
-  forgiveDaemonStall(resumedAt: number, lostMs: number, sleptMs = 0): number {
+  forgiveDaemonStall(resumedAt: number, lostMs: number, sleptMs = 0, gapBeganAt?: number): number {
     const leaseLostMs = lostMs + sleptMs;
     let forgiven = 0;
     for (const session of this.sessions.values()) {
@@ -7270,8 +7291,13 @@ export class SessionManager {
         forgiven++;
         continue;
       }
-      const leaseStart = effectiveLastHeartbeat(session);
-      session.stallForgivenAt = Math.max(leaseStart, Math.min(resumedAt, leaseStart + leaseLostMs));
+      if (ownerLeaseLiveAt(session, gapBeganAt)) {
+        const leaseStart = effectiveLastHeartbeat(session);
+        session.stallForgivenAt = Math.max(
+          leaseStart,
+          Math.min(resumedAt, leaseStart + leaseLostMs),
+        );
+      }
       // Shift, never reset (#10662): a full window per late tick would let a session whose
       // owner is gone outlive its lease for as long as the ticks keep arriving late.
       session.expiresAt = Math.max(
@@ -7331,7 +7357,7 @@ export class SessionManager {
       return false;
     }
     session.livenessOwnerToken = ownerToken;
-    session.lastOwnerHeartbeat = this.timer.now();
+    session.lastOwnerHeartbeat = this.sessionNow();
     return true;
   }
 
@@ -7517,12 +7543,12 @@ export class SessionManager {
     // window past its deadline (#10051), so an owner that missed a beat can
     // still restore it.
     const idleDeadline = session.expiresAt + suspectGraceMsFor(session);
-    if (this.timer.now() <= idleDeadline) {
+    if (this.sessionNow() <= idleDeadline) {
       return false;
     }
     return !isReleaseVetoedByExecutions({
       hasActiveExecutions: this.activeSessionExecutionChecker(session.sessionId),
-      now: this.timer.now(),
+      now: this.sessionNow(),
       ...this.idleExecutionVetoBoundInput(session),
     });
   }
@@ -7585,7 +7611,7 @@ export class SessionManager {
   ): string {
     if (
       suspectGraceMsFor(session) > 0 &&
-      livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now())).phase === "lapsed"
+      livenessLeaseState(sessionLeaseSnapshot(session, this.sessionNow())).phase === "lapsed"
     ) {
       return "heartbeat-timeout";
     }
@@ -7603,7 +7629,7 @@ export class SessionManager {
     if (execution === undefined) {
       return this.isSessionExpired(session);
     }
-    if (this.timer.now() <= session.expiresAt + suspectGraceMsFor(session)) {
+    if (this.sessionNow() <= session.expiresAt + suspectGraceMsFor(session)) {
       return false;
     }
     return execution.startTime > session.expiresAt;
@@ -7615,7 +7641,7 @@ export class SessionManager {
   ): boolean {
     return (
       execution !== undefined &&
-      this.timer.now() > session.expiresAt &&
+      this.sessionNow() > session.expiresAt &&
       execution.startTime > session.expiresAt &&
       this.activeSessionExecutionChecker(session.sessionId, {
         excludeExecutionId: execution.executionId,

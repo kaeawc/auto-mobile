@@ -141,6 +141,8 @@ const LEASE_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     "isLivenessOwnerLeaseLive",
     "effectiveLastHeartbeat",
     "ownerLeaseHeartbeat",
+    // #11080: whether an owner was live when a daemon stall began, for narrow forgiveness.
+    "ownerLeaseLiveAt",
   ],
   "src/daemon/SessionHeartbeatMonitor.ts": [
     "SessionHeartbeatMonitor.heartbeatLeaseStaleReason",
@@ -813,8 +815,10 @@ function rederivationProblems(model: FileModel, helper: string): string[] {
     if (ts.isPropertyAccessExpression(node) && node.name.text === "lastUsedAt") {
       readsLastUsedAt = true;
     }
+    // `sessionNow` is the session clock (#11080), a clock read like `now`.
     const readsClock =
-      (ts.isPropertyAccessExpression(node) && node.name.text === "now") ||
+      (ts.isPropertyAccessExpression(node) &&
+        (node.name.text === "now" || node.name.text === "sessionNow")) ||
       (ts.isIdentifier(node) && (node.text === "Date" || node.text === "now"));
     if (readsClock) {
       problems.push(`${helper} reads the current time at line ${lineOf(model.source, node)}`);

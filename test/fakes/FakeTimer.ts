@@ -66,6 +66,8 @@ export class FakeTimer implements Timer {
   private hostSleptMs: number = 0;
   /** The monotonic clock also runs while the host sleeps (Windows/Linux semantics). */
   private sleepCountingMonotonic = false;
+  /** Net wall-clock step (an NTP or manual clock change); only `now()` sees it (#11080). */
+  private wallClockStepMs: number = 0;
   private pendingTimeouts: PendingTimeout[] = [];
   private pendingIntervals: PendingInterval[] = [];
   private nextTimeoutId: number = 1;
@@ -248,7 +250,7 @@ export class FakeTimer implements Timer {
    * Get the current fake time.
    */
   now(): number {
-    return this.currentTime;
+    return this.currentTime + this.wallClockStepMs;
   }
 
   /**
@@ -281,6 +283,15 @@ export class FakeTimer implements Timer {
   simulateHostSleep(ms: number): void {
     this.currentTime += ms;
     this.hostSleptMs += ms;
+  }
+
+  /**
+   * Simulate the wall clock being stepped by `ms` (negative for a backward step), as an NTP
+   * correction or a manual clock change does (#11080): only `now()` moves. The monotonic clock and
+   * every pending timer are unaffected, as real timers are scheduled on the monotonic clock.
+   */
+  stepWallClock(ms: number): void {
+    this.wallClockStepMs += ms;
   }
 
   /**
@@ -378,6 +389,7 @@ export class FakeTimer implements Timer {
     this.sleepHistory = [];
     this.currentTime = 0;
     this.hostSleptMs = 0;
+    this.wallClockStepMs = 0;
     this.sleepCountingMonotonic = false;
     this.pendingTimeouts = [];
     this.pendingIntervals = [];

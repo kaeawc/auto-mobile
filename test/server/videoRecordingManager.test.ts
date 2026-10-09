@@ -871,6 +871,20 @@ describe("videoRecordingManager", () => {
     },
   );
 
+  test("names active recordings by owner and device from memory, dropping stopped ones (#10958)", async () => {
+    const active = await startVideoRecording({ device: testDevice, ownerSessionUuid: "owner-a" });
+    const { listActiveVideoRecordingIdsForOwner } = videoRecordingManager;
+
+    expect(listActiveVideoRecordingIdsForOwner("owner-a", testDevice.deviceId)).toEqual([
+      active.recordingId,
+    ]);
+    expect(listActiveVideoRecordingIdsForOwner("owner-b", testDevice.deviceId)).toEqual([]);
+    expect(listActiveVideoRecordingIdsForOwner("owner-a", "another-device")).toEqual([]);
+
+    await stopVideoRecording(active.recordingId);
+    expect(listActiveVideoRecordingIdsForOwner("owner-a", testDevice.deviceId)).toEqual([]);
+  });
+
   test("retains durable ownership when a generic backend stop failure has no exit confirmation", async () => {
     const active = await startVideoRecording({ device: testDevice });
 

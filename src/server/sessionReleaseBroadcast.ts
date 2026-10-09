@@ -10,8 +10,19 @@ import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
  */
 export const SESSION_RELEASED_NOTIFICATION_METHOD = "notifications/session/released";
 
+/** Additive facts about a release that the terminal snapshot does not carry. */
+export interface SessionReleaseExtras {
+  /** Recordings the release is finalizing; the previous owner can still fetch them by id (#10958). */
+  recordingIds?: string[];
+}
+
 export interface SessionReleaseListener {
-  (sessionId: string, reason?: string, snapshot?: SessionReleaseSnapshot): void;
+  (
+    sessionId: string,
+    reason?: string,
+    snapshot?: SessionReleaseSnapshot,
+    extras?: SessionReleaseExtras,
+  ): void;
 }
 
 /**
@@ -38,10 +49,15 @@ class SessionReleaseBroadcasterClass {
     };
   }
 
-  emit(sessionId: string, reason?: string, snapshot?: SessionReleaseSnapshot): void {
+  emit(
+    sessionId: string,
+    reason?: string,
+    snapshot?: SessionReleaseSnapshot,
+    extras?: SessionReleaseExtras,
+  ): void {
     for (const listener of this.listeners) {
       try {
-        listener(sessionId, reason, snapshot);
+        listener(sessionId, reason, snapshot, extras);
       } catch (error) {
         // Best-effort fan-out: one broken sink must not block the others or the
         // session release that triggered the emit.

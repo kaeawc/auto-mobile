@@ -119,6 +119,7 @@ import { registerNetworkStateSessionCleanup } from "../server/networkStateSessio
 import { registerPerformanceMonitorSessionCleanup } from "../server/performanceMonitorSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
+  takeRecordingIdsFinalizedByRelease,
   registerRecordingSessionCleanup,
 } from "../server/recordingSessionCleanup";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
@@ -907,7 +908,15 @@ export class Daemon {
       if (releaseReason === "daemon-shutdown") {
         this.shutdownReleaseNotifications?.add(sessionId);
       }
-      SessionReleaseBroadcaster.emit(sessionId, releaseReason, snapshot);
+      // Name the recordings this release is finalizing so the previous owner can fetch them
+      // (#10958); the recording cleanup captured them when the release began.
+      const recordingIds = takeRecordingIdsFinalizedByRelease(sessionId);
+      SessionReleaseBroadcaster.emit(
+        sessionId,
+        releaseReason,
+        snapshot,
+        recordingIds.length > 0 ? { recordingIds } : undefined,
+      );
       // A session that is gone for good takes its appearance config with it (#10976). A derived
       // `${base}:${label}` session stores none, so its release clears nothing.
       if (snapshot.terminal) {

@@ -719,7 +719,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
       `[DeviceSessionManager] ensureDeviceReady called with platform=${platform}, providedDeviceId=${providedDeviceId}`,
     );
     if (providedDeviceId) {
-      await throwIfProvisionedDeviceTransportRetired(providedDeviceId);
+      await throwIfProvisionedDeviceTransportRetired(providedDeviceId, {
+        currentIdentity: () => this.resolveCurrentAndroidIdentity(providedDeviceId),
+      });
     }
 
     // Detect all connected devices
@@ -1058,6 +1060,26 @@ export class DeviceSessionManager implements DeviceSessionManager {
    * rebuild the cached Window when another AVD takes over the serial (#7031).
    * Falls back to the raw entry when the runtime cannot be resolved.
    */
+  private async findLiveAndroidDevice(deviceId: string): Promise<BootedDevice | undefined> {
+    return (await this.deviceUtils.getBootedDevices("android")).find(
+      (candidate) => candidate.deviceId === deviceId,
+    );
+  }
+
+  /** AVD name currently attached to `deviceId`, or undefined when not resolvable. */
+  private async resolveCurrentAndroidIdentity(deviceId: string): Promise<string | undefined> {
+    try {
+      const live = await this.findLiveAndroidDevice(deviceId);
+      return live && !isUnresolvedAndroidEmulatorName(live) ? live.name : undefined;
+    } catch (error) {
+      logger.warn(
+        `[DeviceSessionManager] Could not resolve the live identity of ${deviceId} for the retired-transport check: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
+  }
+
   private async resolveAndroidReadinessIdentity(
     device: BootedDevice,
     signal?: AbortSignal,
@@ -1068,9 +1090,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     signal?.throwIfAborted();
     let enriched: BootedDevice | undefined;
     try {
-      enriched = (await this.deviceUtils.getBootedDevices("android")).find(
-        (candidate) => candidate.deviceId === device.deviceId,
-      );
+      enriched = await this.findLiveAndroidDevice(device.deviceId);
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn(

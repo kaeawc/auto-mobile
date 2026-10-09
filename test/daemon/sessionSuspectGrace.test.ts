@@ -11,7 +11,9 @@ import {
   SessionSuspectError,
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
+import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
 
@@ -197,6 +199,53 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
       await expect(sessionManager.getOrCreateSession(SESSION)).resolves.toMatchObject({
         sessionId: SESSION,
+      });
+    });
+
+    // #10824: the call's end used to restart the lease whether or not the call was admitted, so a
+    // refused call restored the session without its owner and an immediate retry was admitted.
+    describe("a tool call refused at admission (#10824)", () => {
+      let tracker: ExecutionTracker;
+
+      beforeEach(() => {
+        tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+        // Wired as the daemon wires it (daemon.ts subscribeToolCallEndActivity).
+        tracker.onSessionExecutionEnded((sessionUuids, end) => {
+          for (const sessionUuid of sessionUuids) {
+            sessionManager.recordToolCallEnded(sessionUuid, end);
+          }
+        });
+      });
+
+      /** Run one call the way the MCP server does: track, admit, mark admitted, end. */
+      async function trackedCall(): Promise<"admitted" | unknown> {
+        const execution = tracker.startExecution("observe", undefined, SESSION);
+        try {
+          await sessionManager.admitIssuedSessionForAutomation(SESSION, {
+            executionId: execution.id,
+            startTime: execution.startTime,
+          });
+          tracker.markSessionAdmitted(execution.id);
+          return "admitted";
+        } catch (error) {
+          return error;
+        } finally {
+          tracker.endExecution(execution.id);
+        }
+      }
+
+      test("leaves the session suspect, so the retry is refused too", async () => {
+        expect(await trackedCall()).toBeInstanceOf(SessionSuspectError);
+        expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("suspect");
+        expect(await trackedCall()).toBeInstanceOf(SessionSuspectError);
+        expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("suspect");
+      });
+
+      test("once the owner restores it, an admitted call's end still counts as use", async () => {
+        await heartbeat(OWNER);
+        timer.advanceTime(1_000);
+        expect(await trackedCall()).toBe("admitted");
+        expect(sessionManager.getSession(SESSION)?.lastUsedAt).toBe(timer.now());
       });
     });
 

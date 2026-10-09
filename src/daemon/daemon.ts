@@ -763,14 +763,16 @@ export class Daemon {
   private subscribeToolCallEndActivity(): void {
     this.unsubscribeSessionExecutionEnded?.();
     this.unsubscribeSessionExecutionEnded = executionTracker.onSessionExecutionEnded(
-      (sessionUuids) => {
+      (sessionUuids, { admitted }) => {
         const sessionIds = new Set(
           sessionUuids.map(
             (uuid) => resolveToolSelectionBaseSessionUuid(uuid, this.sessionManager) ?? uuid,
           ),
         );
+        // A call refused at admission is not use: it must not revive a suspect or expired session
+        // (#10824). It still re-arms the deferred releases its in-flight execution vetoed.
         for (const sessionId of sessionIds) {
-          this.sessionManager.recordToolCallEnded(sessionId);
+          this.sessionManager.recordToolCallEnded(sessionId, { admitted });
         }
         // A deferred owner-disconnect release may be keyed by either id (#10712).
         this.devicePool.sessionExecutionsEnded(new Set([...sessionUuids, ...sessionIds]));

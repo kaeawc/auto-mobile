@@ -234,6 +234,40 @@ describe("the idle window counts from the end of the last tool call", () => {
     }
   });
 
+  // #10824: a call refused because the session expired while earlier work still runs must not
+  // push the idle deadline out when it ends, or repeated refusals keep the session alive.
+  it("a late call refused while earlier work runs leaves the idle deadline where it was", async () => {
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+    tracker.onSessionExecutionEnded((sessionUuids, end) => {
+      for (const sessionUuid of sessionUuids) {
+        manager.recordToolCallEnded(sessionUuid, end);
+      }
+    });
+    await manager.getOrCreateSession(SESSION);
+    inFlight = true;
+    const idleDeadline = manager.getAllSessions()[0]!.expiresAt;
+    timer.setCurrentTime(idleDeadline + 10_000);
+
+    const late = tracker.startExecution("observe", undefined, SESSION);
+    await expect(
+      manager.admitIssuedSessionForAutomation(SESSION, {
+        executionId: late.id,
+        startTime: late.startTime,
+      }),
+    ).rejects.toThrow(/expired before this execution began/);
+    tracker.endExecution(late.id);
+    expect(manager.getAllSessions()[0]!.expiresAt).toBe(idleDeadline);
+
+    // The earlier, admitted work ending is use: it restarts the window from its end.
+    const earlier = tracker.startExecution("observe", undefined, SESSION);
+    tracker.markSessionAdmitted(earlier.id);
+    inFlight = false;
+    tracker.endExecution(earlier.id);
+    expect(manager.getAllSessions()[0]!.expiresAt).toBe(
+      timer.now() + DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+    );
+  });
+
   it("ignores an unknown session", () => {
     expect(() => manager.recordToolCallEnded("missing")).not.toThrow();
   });
@@ -296,6 +330,23 @@ describe("ExecutionTracker session execution-end notification", () => {
     const later = tracker.startExecution("tapOn", undefined, SESSION);
     tracker.endExecution(later.id);
     expect(ended).toHaveLength(1);
+  });
+
+  it("reports whether the ended execution was admitted under its session (#10824)", () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator());
+    const ended: { uuids: readonly string[]; admitted: boolean }[] = [];
+    tracker.onSessionExecutionEnded((uuids, { admitted }) => ended.push({ uuids, admitted }));
+
+    const refused = tracker.startExecution("tapOn", undefined, SESSION);
+    tracker.endExecution(refused.id);
+    const admitted = tracker.startExecution("tapOn", undefined, SESSION);
+    tracker.markSessionAdmitted(admitted.id);
+    tracker.endExecution(admitted.id);
+
+    expect(ended).toEqual([
+      { uuids: [SESSION], admitted: false },
+      { uuids: [SESSION], admitted: true },
+    ]);
   });
 
   it("does not report a read-only inventory call as session use", () => {

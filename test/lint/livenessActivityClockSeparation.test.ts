@@ -192,7 +192,8 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 2,
     reason:
       "Tool usage: the end of a tool call restarts the idle window (owner decision 2026-10-08), " +
-      "so idleness counts from the end of the last call; the execution tracker fires it.",
+      "so idleness counts from the end of the last call; the execution tracker fires it, and " +
+      "only a call admitted under the session writes (#10824).",
   },
   "src/daemon/sessionManager.ts widenIdleDeadlineFromLastActivity": {
     writes: 1,

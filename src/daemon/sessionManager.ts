@@ -5970,7 +5970,7 @@ export class SessionManager {
    * release its session the moment it ended. The end of a call is tool usage, so it also refreshes
    * the session's activity heartbeat, exactly as the start did (`reclaimAndRefreshExistingSession`).
    */
-  recordToolCallEnded(sessionId: string): void {
+  recordToolCallEnded(sessionId: string, end: { admitted: boolean } = { admitted: true }): void {
     const session = this.sessions.get(sessionId);
     if (!session && this.restartRecoveryActivityAt.has(sessionId)) {
       // A call that waited on, or failed because of, a device restart is still the client using
@@ -5978,7 +5978,9 @@ export class SessionManager {
       this.recordRestartRecoveryActivity(sessionId);
       return;
     }
-    if (!session || this.releasingSessions.has(session)) {
+    // A call refused at admission (suspect, expired, not the holder) never used the session, so
+    // its end must not restore a suspect lease or push an expired deadline out (#10824).
+    if (!end.admitted || !session || this.releasingSessions.has(session)) {
       return;
     }
     const now = this.timer.now();

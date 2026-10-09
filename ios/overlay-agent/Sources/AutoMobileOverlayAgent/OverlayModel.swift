@@ -17,8 +17,25 @@ final class OverlayModel: ObservableObject {
     /// Resigns keyboard focus inside the overlay window.
     var onEndEditing: (() -> Void)?
 
+    /// Closes snackbars that set `durationMs`; created with the model so it can call back into it.
+    private lazy var snackbarTimeouts = SnackbarTimeouts(clock: clock) { [weak self] node in
+        self?.closeModal(node)
+    }
+
+    private let clock: OverlayClock
+
+    init(clock: OverlayClock = SystemOverlayClock()) {
+        self.clock = clock
+    }
+
     var spec: OverlaySpec? {
         session.spec
+    }
+
+    /// Re-arms snackbar timeouts against the snackbars the session now has open.
+    private func syncSnackbarTimeouts() {
+        let open = session.spec?.root.openModals(state: session.state, pages: session.pages) ?? []
+        snackbarTimeouts.sync(openModals: open)
     }
 
     /// The safe-area insets `safeAreaPadding` sees inside the spec: a fullscreen spec sits below the
@@ -42,6 +59,7 @@ final class OverlayModel: ObservableObject {
         // Keep the touchable rects: SwiftUI re-reports a frame only when it changes, so clearing
         // them on a same-geometry re-show would leave the overlay passing every touch through.
         session.show(spec, reset: reset)
+        syncSnackbarTimeouts()
         onVisibilityChange?(true)
     }
 
@@ -133,6 +151,7 @@ final class OverlayModel: ObservableObject {
     private func apply(_ transition: (inout OverlaySession) -> [OverlayEvent]) {
         let wasShown = session.isShown
         let events = transition(&session)
+        syncSnackbarTimeouts()
         let timestamp = Int(Date().timeIntervalSince1970 * 1000)
         for event in events {
             onEvent?(event.wireObject(timestamp: timestamp))

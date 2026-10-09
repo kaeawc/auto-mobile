@@ -753,8 +753,8 @@ struct OverlayDialogView: View {
     }
 }
 
-/// A snackbar at the bottom of the window; not modal and never timed out. Its action, identified
-/// `<tag>.action`, closes it and runs `onTap`.
+/// A snackbar at the bottom of the window; not modal, and it stays until closed unless it sets
+/// `durationMs` (`SnackbarTimeouts`). Its action, identified `<tag>.action`, closes it and runs `onTap`.
 struct OverlaySnackbarView: View {
     @Environment(\.overlayPalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }

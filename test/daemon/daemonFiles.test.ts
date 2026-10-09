@@ -519,6 +519,58 @@ describe("listDaemonPidFilePathsOrThrow", () => {
     expect(discovered).toContain(defaultPidFile);
     expect(discovered).not.toContain(foreignUidPidFile);
   });
+
+  test("an aux-isolated PID file in the default directory lists only this uid's own names (#10906)", () => {
+    // #10881 puts an AUTOMOBILE_AUX_SOCKET_DIR daemon's PID file at
+    // /tmp/auto-mobile-daemon-<uid>-<hash>.pid, so its own-directory scan is /tmp.
+    const isolatedPidFile = "/tmp/auto-mobile-daemon-1000-0123456789.pid";
+    const defaultPidFile = "/tmp/auto-mobile-daemon-1000.pid";
+    const listed: string[] = [];
+    const discovered = listDaemonPidFilePathsOrThrow(isolatedPidFile, defaultPidFile, (dir) => {
+      listed.push(dir);
+      return [
+        "auto-mobile-daemon-1000.pid",
+        "auto-mobile-daemon-1000-0123456789.pid",
+        "auto-mobile-daemon-1000-abcdefabcd.pid",
+        "auto-mobile-daemon-1000-abcdefabcd.sock",
+        "auto-mobile-daemon-9999.pid",
+        "auto-mobile-daemon-9999-0123456789.pid",
+        "auto-mobile-daemon-10000.pid",
+        "auto-mobile-daemon-10000-0123456789.pid",
+      ];
+    });
+
+    expect(listed).toEqual(["/tmp"]);
+    expect([...discovered].sort()).toEqual([
+      "/tmp/auto-mobile-daemon-1000-0123456789.pid",
+      "/tmp/auto-mobile-daemon-1000-abcdefabcd.pid",
+      "/tmp/auto-mobile-daemon-1000.pid",
+    ]);
+  });
+
+  test("a foreign uid's unreadable PID file in /tmp cannot make isolated startup fatal (#10906)", () => {
+    const isolatedPidFile = "/tmp/auto-mobile-daemon-1000-0123456789.pid";
+    const defaultPidFile = "/tmp/auto-mobile-daemon-1000.pid";
+    const provider = new PidFileLiveDaemonSessionIdProvider({
+      listDaemonPidFiles: () =>
+        listDaemonPidFilePathsOrThrow(isolatedPidFile, defaultPidFile, () => [
+          "auto-mobile-daemon-1000.pid",
+          "auto-mobile-daemon-9999.pid",
+        ]),
+      readPidFile: (pidFilePath) => {
+        if (pidFilePath === "/tmp/auto-mobile-daemon-9999.pid") {
+          throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+        }
+        return pidFilePath === defaultPidFile
+          ? { status: "present", data: { pid: 7, daemonSessionId: "resident" } }
+          : { status: "absent" };
+      },
+      isProcessRunning: () => true,
+      readProcessGenerationToken: () => undefined,
+    });
+
+    expect(provider.collectLiveDaemonSessionIds()).toEqual(new Set(["resident"]));
+  });
 });
 
 describe("daemon file cleanup", () => {

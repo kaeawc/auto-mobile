@@ -547,7 +547,10 @@ export function listDaemonPidFilesSync(
  *
  * The caller's own explicitly-configured PID directory (`pidFilePath`'s
  * directory) IS scanned in full by prefix, as before: it is a location this
- * same principal chose, not a directory shared with other login users.
+ * same principal chose, not a directory shared with other login users. When
+ * that directory IS the default directory (an `AUTOMOBILE_AUX_SOCKET_DIR`
+ * daemon's suffixed PID file, #10881), the scan is narrowed to this uid's own
+ * filenames so the invariant above still holds (#10906).
  *
  * This deliberately does not claim to enumerate arbitrary third directories:
  * no process-local filesystem scan can discover an unconstrained custom path.
@@ -563,15 +566,38 @@ export function listDaemonPidFilesSync(
 export function listDaemonPidFilePathsOrThrow(
   pidFilePath: string = PID_FILE_PATH,
   defaultPidFilePath: string = DEFAULT_PID_FILE_PATH,
+  listDirectory: (dir: string) => string[] = readPidDirectoryEntriesOrThrow,
 ): string[] {
   const found = new Set<string>([pidFilePath, defaultPidFilePath]);
   const customDir = path.dirname(pidFilePath);
-  for (const entry of readPidDirectoryEntriesOrThrow(customDir)) {
-    if (entry.startsWith(DAEMON_PID_FILE_BASENAME_PREFIX) && entry.endsWith(".pid")) {
+  const isPeerEntry =
+    path.resolve(customDir) === path.resolve(path.dirname(defaultPidFilePath))
+      ? ownUidDefaultDirPidEntryMatcher(path.basename(defaultPidFilePath))
+      : isDaemonPidFileEntry;
+  for (const entry of listDirectory(customDir)) {
+    if (isPeerEntry(entry)) {
       found.add(path.join(customDir, entry));
     }
   }
   return [...found];
+}
+
+function isDaemonPidFileEntry(entry: string): boolean {
+  return entry.startsWith(DAEMON_PID_FILE_BASENAME_PREFIX) && entry.endsWith(".pid");
+}
+
+/**
+ * The isolated PID file of an `AUTOMOBILE_AUX_SOCKET_DIR` daemon lives in the
+ * shared default directory (`/tmp/auto-mobile-daemon-<uid>-<hash>.pid`, #10881),
+ * so its "own directory" scan would otherwise be the forbidden wildcard scan of
+ * `/tmp` described above (#10906). There, only this uid's own names match: the
+ * exact default basename or `<default stem>-*.pid`. The `-` separator keeps uid
+ * 50 from matching uid 501's `auto-mobile-daemon-501.pid`.
+ */
+function ownUidDefaultDirPidEntryMatcher(defaultBasename: string): (entry: string) => boolean {
+  const ownSuffixedPrefix = `${defaultBasename.replace(/\.pid$/, "")}-`;
+  return (entry) =>
+    entry === defaultBasename || (entry.startsWith(ownSuffixedPrefix) && entry.endsWith(".pid"));
 }
 
 function readPidDirectoryEntriesOrThrow(dir: string): string[] {

@@ -75,6 +75,12 @@ class OverlayController(
   private val offlineEvents: OverlayOfflineEventBuffer = OverlayOfflineEventBuffer(),
   /** Loaded custom fonts the rendered overlay draws `fontFamily: {asset}` text with. */
   private val fonts: OverlayFontCache? = null,
+  /**
+   * Ties a session overlay to the app it was shown over: while another app is in front the window
+   * is hidden (state kept, no `dismissed` event) and returns with the app (#10261). Separate from
+   * the lock-screen block and from any capture-time hide.
+   */
+  private val foreground: OverlayForegroundScope = NoOverlayForegroundScope,
 ) {
   val isShowing: Boolean
     get() = host.isShowing
@@ -102,6 +108,10 @@ class OverlayController(
       null
     }
   }
+
+  /** True while an overlay exists but is hidden because its app left the foreground. */
+  val isSuspendedByForeground: Boolean
+    get() = activeRuntime != null && foreground.suspended
 
   private val mutex = Mutex()
   @Volatile
@@ -223,6 +233,8 @@ class OverlayController(
           }
         },
       )
+    // A device-persistent overlay is a standalone mock with no app to follow.
+    if (isDevicePersistent(validated)) foreground.release() else foreground.anchor()
     val blocked = lifecycle.isBlocked()
     check(
       if (blocked) host.dismiss()
@@ -293,6 +305,7 @@ class OverlayController(
     if (!host.dismiss()) return false
     activeRuntime = null
     activeRequest = null
+    foreground.release()
     lifecycle.cancel()
     notifyDetached()
     releaseAssets()
@@ -428,6 +441,7 @@ class OverlayController(
       state = runtime.current.state.toMap(),
       pages = runtime.current.pages.toMap(),
       lastSequence = sequences[id] ?: 0L,
+      suspended = foreground.suspended,
     )
   }
 
@@ -547,6 +561,7 @@ class OverlayController(
   private suspend fun abandon(runtime: OverlayRuntime) {
     activeRuntime = null
     activeRequest = null
+    foreground.release()
     lifecycle.cancel()
     notifyDetached()
     releaseAssets()
@@ -595,6 +610,7 @@ class OverlayController(
       val runtime = activeRuntime
       activeRuntime = null
       activeRequest = null
+      foreground.release()
       releaseAssets()
       // Allocate the terminal sequence even when the last socket or service sink is gone.
       try {

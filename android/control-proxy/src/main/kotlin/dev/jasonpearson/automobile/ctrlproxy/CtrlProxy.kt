@@ -67,10 +67,13 @@ import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayBase64Decoder
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayController
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayEventSink
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayFontCache
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayForegroundTracker
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayForegroundWindow
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImageCache
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
 import dev.jasonpearson.automobile.ctrlproxy.overlay.isInteractiveOverlayWindow
+import dev.jasonpearson.automobile.ctrlproxy.overlay.overlayForegroundFromWindows
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
@@ -1006,6 +1009,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ViewHierarchyExtractor(
       recompositionStore,
       workStats,
+      overlaySuspended = {
+        ::overlayController.isInitialized && overlayController.isSuspendedByForeground
+      },
       ownOverlayMetadata = { windowPackage, title ->
         // The overlay-type check already ran in the extractor; this confirms the window is ours.
         if (
@@ -1076,6 +1082,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
   private lateinit var overlayController: OverlayController
+  // Hides the interactive overlay while another app is in front, restores it on return (#10261).
+  private val overlayForeground by lazy {
+    OverlayForegroundTracker(
+      CoroutineOverlayScheduler(serviceScope),
+      ownPackage = packageName,
+      foregroundNow = ::currentForegroundApp,
+      onChanged = { refreshOverlayWindowNow() },
+    )
+  }
   private val overlayResultSink =
     object : OverlayResultSink {
       override suspend fun send(requestId: String?, success: Boolean, error: String?) =
@@ -1821,6 +1836,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             },
             packageName = packageName,
             fonts = overlayFonts,
+            foreground = overlayForeground,
           )
         // Service start: drop anything a previous process left in the cache directory.
         overlayAssets.purgeLeftovers()
@@ -3468,7 +3484,37 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val power = getSystemService(Context.POWER_SERVICE) as? PowerManager
     // Missing safety services fail closed rather than allowing an overlay over an unknown lock
     // state.
-    return keyguard?.isKeyguardLocked != false || power?.isInteractive != true
+    return keyguard?.isKeyguardLocked != false ||
+      power?.isInteractive != true ||
+      // Another app is in front: hidden like a lock, but tracked separately (#10261).
+      overlayForeground.suspended
+  }
+
+  /** The application in front, from the accessibility windows; null when none qualifies. */
+  private fun currentForegroundApp(): String? =
+    try {
+      overlayForegroundFromWindows(
+        windows.map {
+          OverlayForegroundWindow(it.type, it.isActive, it.root?.packageName?.toString())
+        },
+        packageName,
+      )
+    } catch (error: Exception) {
+      // Unreadable windows leave the overlay unscoped (shown everywhere) rather than hiding it.
+      Log.w(TAG, "Foreground app unavailable for overlay scoping", error)
+      null
+    }
+
+  /** Feeds a window-state event to overlay foreground scoping, only while an overlay exists. */
+  private fun trackOverlayForeground(event: AccessibilityEvent, eventPackage: String?) {
+    if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+    if (!::overlayController.isInitialized) return
+    if (!overlayController.isShowing && !overlayController.isSuspendedByForeground) return
+    overlayForeground.onWindowEvent(eventPackage, ownEventWindowType(event))
+  }
+
+  private suspend fun refreshOverlayWindowNow() {
+    if (::overlayController.isInitialized) overlayController.onConfigurationChanged()
   }
 
   private fun refreshOverlayWindow() {
@@ -3508,6 +3554,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ) {
       storageSubscriptionManager.onPackageActivity(eventPackage)
     }
+    trackOverlayForeground(event, eventPackage)
     if (
       event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
         event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED

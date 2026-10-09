@@ -37,7 +37,9 @@ enum OverlayAgentProtocol {
     /// The agent restores on its own after `deadlineMs`, so a cancelled host cannot leave the
     /// overlay hidden.
     static let hideForCaptureRequest = "hide_for_capture"
-    /// Restores a `hide_for_capture` early; a no-op reply (`restored: false`) when nothing is hidden.
+    /// Releases one `hide_for_capture` hold by the `token` its reply carried (no token releases
+    /// every hold); the overlay returns with the last hold. `restored: false` means that hold was
+    /// no longer live (it expired), so the capture may have shown the overlay.
     static let restoreAfterCaptureRequest = "restore_after_capture"
     /// Advertised when both capture requests are handled; same name as the CtrlProxy capability.
     static let screenshotHideCapability = "screenshot_hide_overlay_v1"

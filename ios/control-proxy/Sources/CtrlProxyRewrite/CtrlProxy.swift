@@ -263,7 +263,7 @@ public final class CtrlProxy {
             } else {
                 elementLocator.setApplication(app)
             }
-            gesturePerformer.setApplication(app)
+            gesturePerformer.setApplication(app, bundleId: bundleId)
         }
 
         /// Activates an explicitly requested app and starts the service. Sampler start/stop is

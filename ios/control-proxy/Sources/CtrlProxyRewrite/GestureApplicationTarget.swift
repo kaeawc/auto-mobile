@@ -31,20 +31,32 @@ enum GestureApplicationTarget: Equatable {
     }
 }
 
-/// The app the runner pinned through `request_launch_app`, and only that app.
+/// The app the runner pinned: the one launched through `request_launch_app` or injected with its
+/// bundle id at startup (`CtrlProxy.setApplication(_:bundleId:)`), and only that app.
 ///
 /// A gesture on a different tracked app must not pin it. Before this type, the `XCUICoordinate`
 /// fallback for a rebound app stored that app as the pinned one, so after a single fallback every
 /// later gesture on an app launched with `simctl launch` resolved to `.keepPinned` and never
 /// reached the synthesized route again (#10858: `launchApp` Playground, `simctl launch`
 /// Settings, then a swipe on Settings logged `trackedApp=com.apple.Preferences` and still waited
-/// about 24 s in `xcuitestGesture`). Only `pin(_:)` (launch) and `clear()` (an injected app with
-/// no bundle id) change it; resolving a target never does.
+/// about 24 s in `xcuitestGesture`). Only `pin(_:)` (launch), `inject(bundleId:)` (startup app: pins
+/// its bundle id, or clears the pin when none is known) and `clear()` change it; resolving a
+/// target never does. A startup app that is never pinned would take the unpinned route on every
+/// gesture and build a fresh `XCUIApplication` each time (#10995).
 struct GesturePinnedApplication: Equatable {
     private(set) var bundleId: String?
 
     mutating func pin(_ bundleId: String) {
         self.bundleId = bundleId
+    }
+
+    /// An application handed to the performer from outside: pinned when its bundle id is known.
+    mutating func inject(bundleId: String?) {
+        if let bundleId {
+            pin(bundleId)
+        } else {
+            clear()
+        }
     }
 
     mutating func clear() {

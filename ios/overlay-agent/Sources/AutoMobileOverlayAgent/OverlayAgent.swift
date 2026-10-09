@@ -247,11 +247,14 @@ final class OverlayAgent {
             case "get_overlay_status":
                 result(true, extra: ["status": model.status()])
             case OverlayAgentProtocol.hideForCaptureRequest:
-                hideForCapture(deadlineMs: OverlayCaptureHold.clampedDeadlineMs(message["deadlineMs"])) { hidden in
-                    result(true, extra: ["hidden": hidden])
+                hideForCapture(
+                    deadlineMs: OverlayCaptureHold
+                        .clampedDeadlineMs(message["deadlineMs"])
+                ) { hidden, token in
+                    result(true, extra: ["hidden": hidden, "token": token])
                 }
             case OverlayAgentProtocol.restoreAfterCaptureRequest:
-                result(true, extra: ["restored": restoreAfterCapture()])
+                result(true, extra: ["restored": restoreAfterCapture(token: (message["token"] as? NSNumber)?.intValue)])
             default:
                 result(false, "Unknown request type \(type)")
             }
@@ -265,22 +268,27 @@ final class OverlayAgent {
     /// Hides the overlay window and replies once the hide has been committed to the render
     /// server, so the host's screenshot cannot still contain it. The hold restores itself at the
     /// deadline, which is what makes a cancelled host safe.
-    private func hideForCapture(deadlineMs: Int, committed: @escaping (Bool) -> Void) {
+    /// `committed` gets `hidden` (the overlay is off screen because of this hold: it was visible
+    /// and is now hidden, or another live hold already hid it) and this hold's token. `hidden:
+    /// false` means nothing was visible, so the capture holds no overlay either.
+    private func hideForCapture(deadlineMs: Int, committed: @escaping (Bool, Int) -> Void) {
+        let heldByOthers = captureHold.isHiding
         let ticket = captureHold.hide(deadlineMs: deadlineMs)
-        let wasVisible = window?.isHidden == false
+        let wasVisible = window?.isHidden == false || heldByOthers
         window?.isHidden = true
         CATransaction.flush()
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(deadlineMs)) { [weak self] in
             guard let self, self.captureHold.expire(ticket) else { return }
             self.showAfterCapture()
         }
-        FrameWaiter.nextFrame { committed(wasVisible) }
+        FrameWaiter.nextFrame { committed(wasVisible, ticket.token) }
     }
 
-    private func restoreAfterCapture() -> Bool {
-        guard captureHold.restore() else { return false }
-        showAfterCapture()
-        return true
+    /// `true` when a live hold was released. The overlay comes back only with the last hold.
+    private func restoreAfterCapture(token: Int?) -> Bool {
+        let release = captureHold.restore(token: token)
+        if release.shouldShow { showAfterCapture() }
+        return release.released
     }
 
     private func showAfterCapture() {

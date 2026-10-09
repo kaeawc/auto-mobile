@@ -72,10 +72,13 @@ describe("iOS screenshot with the overlay hidden (#9305)", () => {
 
   test("capability present: hides around the capture, restores, and reports the overlay hidden", async () => {
     const overlay = agent(HIDE_CAPS);
+    overlay.queueReplies({ hidden: true, token: 1 }, { restored: true });
     const result = await screenshotWith(overlay).execute({ format: "png", hideOverlays: true });
 
     expect(result.success).toBe(true);
     expect(result.overlaysHidden).toBe(true);
+    expect(overlay.requests[0]?.body.deadlineMs).toBe(11000);
+    expect(overlay.requests[1]?.body).toEqual({ token: 1 });
     expect(overlay.requests.map((request) => request.type)).toEqual([
       "hide_for_capture",
       "restore_after_capture",
@@ -85,7 +88,7 @@ describe("iOS screenshot with the overlay hidden (#9305)", () => {
 
   test("a hide that found nothing visible still returns the image as hidden", async () => {
     const overlay = agent(HIDE_CAPS);
-    overlay.queueReplies({ hidden: false });
+    overlay.queueReplies({ hidden: false, token: 1 }, { restored: true });
     const result = await screenshotWith(overlay).execute({ format: "png", hideOverlays: true });
 
     expect(result.success).toBe(true);
@@ -122,6 +125,36 @@ describe("iOS screenshot with the overlay hidden (#9305)", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("could not confirm");
     expect(result.overlaysHidden).toBeUndefined();
+  });
+
+  test("a hold that expired mid-capture (restored:false) fails the capture", async () => {
+    const overlay = agent(HIDE_CAPS);
+    overlay.queueReplies({ hidden: true, token: 1 }, { restored: false });
+    const result = await screenshotWith(overlay).execute({ format: "png", hideOverlays: true });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("could not confirm");
+    expect(result.overlaysHidden).toBeUndefined();
+  });
+
+  test("overlapping captures both succeed, each restoring its own token", async () => {
+    const overlay = agent(HIDE_CAPS);
+    overlay.queueReplies(
+      { hidden: true, token: 1 },
+      { hidden: true, token: 2 },
+      { restored: true },
+      { restored: true },
+    );
+    const screenshot = screenshotWith(overlay);
+    const [a, b] = await Promise.all([
+      screenshot.execute({ format: "png", hideOverlays: true }),
+      screenshot.execute({ format: "png", hideOverlays: true }),
+    ]);
+
+    expect(a.success).toBe(true);
+    expect(b.success).toBe(true);
+    const restores = overlay.requests.filter((r) => r.type === "restore_after_capture");
+    expect(restores.map((r) => r.body.token).sort()).toEqual([1, 2]);
   });
 
   test("agent gone by capture time fails rather than capturing the overlay", async () => {

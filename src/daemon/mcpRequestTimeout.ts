@@ -550,6 +550,20 @@ function resolveLegacyStartDeviceBudgetMs(
   );
 }
 
+const DEVICE_RESOURCE_TOOLS: ReadonlySet<string> = new Set([
+  "setDeviceResources",
+  "reconcileDeviceResources",
+]);
+
+function resolveDeviceResourceToolBudgetMs(
+  toolName: unknown,
+  argumentsRecord: Record<string, unknown>,
+): number | undefined {
+  return DEVICE_RESOURCE_TOOLS.has(String(toolName))
+    ? resolveDeviceResourceBudgetMs(argumentsRecord)
+    : undefined;
+}
+
 function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | undefined {
   if (request.method !== "tools/call") {
     return undefined;
@@ -573,11 +587,8 @@ function resolveDevicePreparationToolBudgetMs(request: DaemonRequest): number | 
         Math.min(timeoutMs, MAX_DEVICE_READY_TIMEOUT_MS) + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS
       );
     }
-    case "setDeviceResources":
-    case "reconcileDeviceResources":
-      return resolveDeviceResourceBudgetMs(argumentsRecord);
     default:
-      return undefined;
+      return resolveDeviceResourceToolBudgetMs(request.params?.name, argumentsRecord);
   }
 }
 

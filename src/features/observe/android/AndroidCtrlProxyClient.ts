@@ -25,6 +25,8 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 import { logger, type Logger } from "../../../utils/logger";
 import { displayTransitions } from "../DisplayTransition";
 import { linkWindowRoots } from "../linkWindowRoots";
+import { deriveSdkNavigationScreenIdentity } from "../sdkScreenIdentity";
+import type { ScreenIdentity } from "../../../models/ObserveResult";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import { CtrlProxyForwardingLeaseConflictError } from "../shared/CtrlProxyForwardingLeaseConflictError";
 import {
@@ -1639,6 +1641,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Hierarchy navigation detector
   private sdkNavigationAppIds: Set<string> = new Set();
+  /** Newest AutoMobile SDK navigation route per reporting package, as a screen identity. */
+  private sdkScreenIdentities = new Map<string, ScreenIdentity>();
   private navigationWriteTail: Promise<void> = Promise.resolve();
 
   // Screenshot backoff scheduler
@@ -2084,6 +2088,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   public getBootedDeviceIdentity(): BootedDevice {
     return { ...this.device };
+  }
+
+  /**
+   * The newest AutoMobile SDK navigation route the app reported, when the app embeds the SDK.
+   * Single-activity Compose apps name their screens only this way.
+   */
+  public getSdkScreenIdentity(applicationId?: string): ScreenIdentity | undefined {
+    return applicationId ? this.sdkScreenIdentities.get(applicationId) : undefined;
   }
 
   /**
@@ -6274,6 +6286,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         }
         if (event.applicationId) {
           this.sdkNavigationAppIds.add(event.applicationId);
+          const identity = deriveSdkNavigationScreenIdentity("android", event.applicationId, event);
+          if (identity) {
+            this.sdkScreenIdentities.set(event.applicationId, identity);
+          }
           // Eagerly resolve build/device provenance for this app (#4984).
           // Non-blocking: later events pick up the resolved build key; this
           // event may still record under the default key.

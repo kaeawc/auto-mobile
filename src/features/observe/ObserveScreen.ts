@@ -111,6 +111,7 @@ import {
   RealHierarchyPlatformValidator,
 } from "./HierarchyPlatformValidator";
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
+import { deriveAndroidScreenIdentity } from "./android/AndroidScreenIdentity";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { NotifyutilIosLockStateProbe, type IosLockStateProbe } from "./ios/IosLockStateProbe";
 import {
@@ -2952,6 +2953,7 @@ export class RealObserveScreen implements ObserveScreen {
         // display mapped from `result.display.key`. Only use it when
         // the activity belongs to the captured hierarchy's app.
         this.scopeActiveWindowToBackStack(result);
+        await this.applyAndroidScreenIdentity(result);
 
         if (result.notificationPermissionDetected && result.activeWindow) {
           result.activeWindow.type = "notification_permission_dialog";
@@ -2999,6 +3001,31 @@ export class RealObserveScreen implements ObserveScreen {
         perf.end();
         break;
       }
+    }
+  }
+
+  /**
+   * Name the Android screen when the activity does not (single-activity Compose apps): the SDK's
+   * navigation route for the captured app, else the foreground app window's pane title. Left unset
+   * when neither exists, so consumers fall back to the activity.
+   */
+  private async applyAndroidScreenIdentity(result: ObserveResult): Promise<void> {
+    const packageName = result.viewHierarchy?.packageName;
+    if (!packageName) {
+      return;
+    }
+    let sdkScreenIdentity: ScreenIdentity | undefined;
+    try {
+      sdkScreenIdentity = await this.viewHierarchy.getScreenIdentity?.(packageName);
+    } catch (error) {
+      // The SDK route is optional; the pane-title fallback still applies without it.
+      logger.debug(
+        `[Android] SDK screen identity read failed; using hierarchy identity: ${describeError(error)}`,
+      );
+    }
+    const identity = deriveAndroidScreenIdentity(result.viewHierarchy, sdkScreenIdentity);
+    if (identity) {
+      result.screenIdentity = identity;
     }
   }
 

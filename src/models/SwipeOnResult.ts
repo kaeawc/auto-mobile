@@ -45,9 +45,11 @@ export interface SwipeOnResult extends BaseActionResult {
 
   /**
    * Whether the swipe left the screen it started on (different app, activity, route, navigation
-   * title or presented modal) rather than only moving content within it. A swipe that navigated
-   * may have registered as a tap; `warning` explains. Omitted when the pre/post observations carry
-   * no comparable screen identity, and on `lookFor` searches.
+   * title, Android pane title or presented modal) rather than only moving content within it. A
+   * swipe that navigated may have registered as a tap; `warning` explains. Omitted when the
+   * pre/post observations carry no comparable screen identity (including an unchanged Android
+   * activity with no SDK route or pane title, as in a single-activity Compose app), and on
+   * `lookFor` searches.
    */
   navigated?: boolean;
 

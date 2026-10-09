@@ -116,6 +116,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   }
 
   async getScreenIdentity(applicationId?: string): Promise<ScreenIdentity | undefined> {
+    if (this.device.platform === "android") {
+      return this.accessibilityServiceClient.getSdkScreenIdentity(applicationId);
+    }
     if (this.device.platform !== "ios") {
       return undefined;
     }

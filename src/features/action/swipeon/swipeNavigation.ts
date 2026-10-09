@@ -2,6 +2,7 @@ import type { ObserveResult, ScreenIdentity } from "../../../models";
 import { SearchableHierarchy } from "../../utility/SearchableNode";
 import { hitEntries, uniqueBySource } from "../../observe/ApplicationWindowCover";
 import { deriveIosScreenIdentity } from "../../observe/ios/IosScreenIdentity";
+import { deriveAndroidScreenIdentity } from "../../observe/android/AndroidScreenIdentity";
 
 /** What a completed swipe did to the foreground screen, judged from its pre/post observations. */
 export interface SwipeNavigationAssessment {
@@ -71,6 +72,14 @@ function iosHierarchySignature(observation: ObserveResult): ScreenSignature | un
   );
 }
 
+/**
+ * Android: the foreground app window's pane title, derived from the captured hierarchy, for
+ * observations that do not report an identity themselves (a cached or replayed capture).
+ */
+function androidHierarchySignature(observation: ObserveResult): ScreenSignature | undefined {
+  return identitySignature(deriveAndroidScreenIdentity(observation.viewHierarchy), "hierarchy");
+}
+
 function reportedSignature(observation: ObserveResult): ScreenSignature | undefined {
   return identitySignature(observation.screenIdentity, "reported");
 }
@@ -83,7 +92,7 @@ function comparableSignatures(
   const signatures =
     platform === "ios"
       ? [iosHierarchySignature, reportedSignature, windowSignature]
-      : [reportedSignature, windowSignature];
+      : [reportedSignature, androidHierarchySignature, windowSignature];
   for (const signature of signatures) {
     const before = signature(previous);
     const after = signature(current);
@@ -158,7 +167,9 @@ export function assessSwipeNavigation(
   }
   const [before, after] = signatures;
   if (before.key === after.key) {
-    return { navigated: false };
+    // One activity hosts every screen of a single-activity (Compose) app, so an unchanged activity
+    // does not show the swipe stayed on its screen; only a screen-level identity does.
+    return before.kind === "window" ? undefined : { navigated: false };
   }
   const transition = `"${before.name}" to "${after.name}"`;
   const startLabel = after.title ? startPointLabelNaming(previous, start, after.title) : undefined;

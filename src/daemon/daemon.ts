@@ -115,6 +115,7 @@ import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import { NetworkState } from "../server/NetworkState";
 import { registerNetworkStateSessionCleanup } from "../server/networkStateSessionCleanup";
 import { registerPerformanceMonitorSessionCleanup } from "../server/performanceMonitorSessionCleanup";
+import { registerRecordingSessionCleanup } from "../server/recordingSessionCleanup";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   awaitInFlightMigrations,
@@ -780,6 +781,7 @@ export class Daemon {
     registerLocationRouteSessionCleanup(this.sessionManager);
     registerNetworkStateSessionCleanup(this.sessionManager);
     registerPerformanceMonitorSessionCleanup(this.sessionManager);
+    registerRecordingSessionCleanup(this.sessionManager);
     this.sessionManager.onDeviceOwnershipChange((deviceId, frameInvalidation) => {
       // Generation only for unchanged-screen acquire/release; full for runtime-changing rebinds.
       if (frameInvalidation === "full") {

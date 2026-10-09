@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BootedDevice } from "../../src/models";
+import { ActionableError } from "../../src/models/ActionableError";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { DevicectlDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
@@ -144,6 +145,25 @@ describe("DeviceSessionManager iOS readiness discovery (#11063)", () => {
       expect(scan.scannedSources?.["ios-physical"]).toBe(false);
       await expect(manager.ensureDeviceReady("ios", "absent-device")).rejects.toThrow("not found");
       expect(manager.getExplicitDevicePin()).toEqual(iphone);
+    });
+
+    test("sessionless automation readiness returns a typed getApple-first error (#11075)", async () => {
+      await expect(manager.verifyIosDevice(PHYSICAL_UDID)).rejects.toThrow(
+        "Acquire the iPhone with getApple first",
+      );
+      await expect(manager.verifyIosDevice(PHYSICAL_UDID)).rejects.toBeInstanceOf(ActionableError);
+    });
+
+    test("booted readiness accepts a connected physical iPhone without simctl", async () => {
+      await expect(
+        manager.verifyIosDevice(PHYSICAL_UDID, { readiness: "booted" }),
+      ).resolves.toBeUndefined();
+    });
+
+    test("an unlisted physical UDID reports it is not connected", async () => {
+      await expect(
+        manager.verifyIosDevice("00008120-FFFFFFFFFFFFFFFF", { readiness: "booted" }),
+      ).rejects.toThrow("not connected or not reachable through devicectl");
     });
   });
 });

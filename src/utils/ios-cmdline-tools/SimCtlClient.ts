@@ -2600,21 +2600,26 @@ export class SimCtlClient implements SimCtl {
     signal?: AbortSignal,
   ): Promise<string> {
     logger.debug(`Creating iOS simulator: ${name} (${deviceType}, ${runtime})`);
-    const result = await this.executeCommandArgs(
-      ["create", name, deviceType, runtime],
-      undefined,
-      signal,
-    );
+    let result: ExecResult;
+    try {
+      result = await this.executeCommandArgs(
+        ["create", name, deviceType, runtime],
+        undefined,
+        signal,
+      );
+    } finally {
+      // A freshly created simulator must be visible to the very next
+      // listSimulatorImages() call, otherwise the provisioning path boots off a
+      // snapshot that predates the device it just created. A cancelled or
+      // failed `simctl create` may still have created it, so invalidate on
+      // every outcome (#11100).
+      SimCtlClient.invalidateDeviceListCache();
+    }
     const simulatorUdid = result.stdout.trim();
 
     if (!simulatorUdid) {
       throw new ActionableError(`Failed to create iOS simulator ${name}`);
     }
-
-    // A freshly created simulator must be visible to the very next
-    // listSimulatorImages() call, otherwise the provisioning path boots off a
-    // snapshot that predates the device it just created.
-    SimCtlClient.invalidateDeviceListCache();
 
     logger.debug(`Created iOS simulator ${name} with UDID: ${simulatorUdid}`);
     return simulatorUdid;

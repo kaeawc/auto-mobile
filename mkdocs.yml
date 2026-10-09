@@ -141,6 +141,7 @@ nav:
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md
       - "CircleCI macOS migration": design-docs/ci/circleci-macos-migration.md
+      - "macOS CI capacity plan": design-docs/ci/macos-capacity-plan.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Daemon": design-docs/mcp/daemon.md
       - "Test runners": design-docs/plat/android/junit-runner/index.md

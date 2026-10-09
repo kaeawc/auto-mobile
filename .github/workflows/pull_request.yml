@@ -1051,8 +1051,8 @@ jobs:
         # BATS pass used to run inline inside the required Fast Validation job and
         # dominated its wall-clock. It now runs as a parallel matrix leg, matching
         # merge.yml, and is gated by the required "Shell Tests" roll-up.
-        # Keep the portable PR lane on Linux. The equivalent macOS lane runs in
-        # nightly.yml so slow hosted macOS capacity is off the merge path.
+        # Keep the portable PR lane on Linux. The equivalent macOS lane runs
+        # nightly on CircleCI (nightly-macos) so macOS capacity is off the merge path.
         os: [ubuntu-latest]
     steps:
       - name: "Git Checkout"
@@ -2572,9 +2572,10 @@ jobs:
           echo "build took ${SECONDS}s"
 
   # Advisory iOS simulator integration lane, off the default PR path (#10895):
-  # it runs nightly (nightly.yml) and on a PR only when the `run-ios-sim` label
-  # is applied (the `labeled` trigger above starts a fresh run). The job body
-  # lives in xctestrunner-simulator-tests.yml so PR and nightly share one copy.
+  # it runs nightly on CircleCI (nightly-macos, #11010) and on a PR only when the
+  # `run-ios-sim` label is applied (the `labeled` trigger above starts a fresh
+  # run). The PR job body lives in xctestrunner-simulator-tests.yml; a policy test
+  # keeps the CircleCI nightly copy's selected tests and daemon budget identical.
   ios-xctest-runner-simulator-tests:
     name: "XCTestRunner Simulator Tests"
     # The advisory simulator lane should not consume a scarce macOS runner for

@@ -3,21 +3,29 @@ version: 2.1
 # AutoMobile — CircleCI is used ONLY for macOS/iOS runners.
 #
 # Everything else (Node/TypeScript, Android/Gradle, Python, docs) stays on
-# GitHub Actions, where it runs free and fast on Linux. CircleCI exists here for
-# one reason: AutoMobile is a public repo, so GitHub-hosted macOS minutes are
-# free but capped at 5 CONCURRENT macOS jobs, and the per-PR iOS matrix competes
-# for that cap. Running iOS build/test on CircleCI's macOS executor adds
-# parallel lanes.
+# GitHub Actions, where it runs free and fast on Linux. CircleCI is one of three
+# macOS capacity pools (#11010, #11011, #11012); see
+# docs/design-docs/ci/macos-capacity-plan.md for which job runs where.
 #
-# DYNAMIC CONFIG (setup workflow): this file is a cheap Linux "setup" pipeline.
-# The path-filtering job diffs PR branches against main and continues to
-# .circleci/continue_config.yml, whose workflows run only when iOS sources (or the
-# Prototype Simulator's overlay-agent inputs) changed. Post-merge Swift coverage
-# has a separate parameter-gated path, triggered by GitHub Actions only for
-# coverage-input changes. Other pushes never spin up a macOS executor.
-# This replaces the old `halt_if_no_ios_changes`, which ran AFTER a full macOS checkout and
-# therefore still billed macOS minutes for every push. The heavier macOS jobs
-# live in continue_config.yml.
+# DYNAMIC CONFIG (setup workflow): this file is a cheap Linux "setup" pipeline
+# that continues to .circleci/continue_config.yml only when macOS work is needed.
+# CircleCI runs ONE macOS job at a time for this organization (#11010), so it carries:
+#
+# - Pull requests: path filtering against main sets `run-ios` (only the advisory
+#   Playground tests run on PRs); every other PR macOS job runs on GitHub Actions
+#   (self-hosted Mac pools for same-repo PRs, hosted macos-26 for forks).
+# - Post-merge (main): `detect-main-macos-changes` diffs HEAD~1..HEAD against
+#   .circleci/main-macos-paths.txt and sets `run-main-ios` / `run-main-desktop`.
+#   The continued jobs halt early when a newer main commit touches the same path
+#   group (scripts/ci/circleci-main-superseded.sh), so a merge burst runs once.
+# - Post-merge Swift coverage: merge.yml triggers a `run-swift-coverage-main`
+#   pipeline for coverage-input changes and downloads the badge.
+# - Nightly: a scheduled pipeline on main with `run-nightly-macos: true`.
+#
+# Other pushes never spin up a macOS executor. The heavier macOS jobs live in
+# continue_config.yml; docs/design-docs/ci/macos-capacity-plan.md maps every
+# macOS job to where it runs and lists the CircleCI UI steps (dynamic config,
+# the nightly schedule).
 #
 # ── REQUIRED ONE-TIME PROJECT SETTING ────────────────────────────────────────
 # CircleCI → Project Settings → Advanced → "Enable dynamic config using setup
@@ -25,19 +33,19 @@ version: 2.1
 # no config-file equivalent; it is a dashboard toggle.
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# Budget: CircleCI's open-source plan includes ~30,000 macOS credits/month
-# (~150 macOS minutes at ~200 credits/min); paid overflow is ~$0.12-0.24/min.
-# With path filtering on PRs and an explicit post-merge trigger, only relevant
-# pushes reach the macOS lanes; everything else costs a few Linux seconds.
-# Concurrency is the other ceiling: the Free plan runs 1 macOS job at a time
-# (pricing page; the open-source credits page says 2 per organization), versus 5
-# on GitHub-hosted. docs/design-docs/ci/circleci-macos-migration.md (#10887) has
-# the sourced numbers and what the full macOS move would cost.
+# Budget: open-source macOS usage is not capped by the 30,000-credit Free-plan
+# limit (#11010); concurrency (one macOS job) is the binding constraint, which is
+# why post-merge work is path-gated and coalesced. docs/design-docs/ci/
+# circleci-macos-migration.md (#10887) has the sourced plan numbers.
 
 setup: true
 
 parameters:
   run-swift-coverage-main:
+    type: boolean
+    default: false
+  # Set to true by the owner-configured nightly scheduled pipeline (CircleCI UI).
+  run-nightly-macos:
     type: boolean
     default: false
 
@@ -94,7 +102,8 @@ jobs:
           # smoke script and driver, and the TypeScript the driver imports.
           # run-webrtc (#10887) is the glob-for-glob regex translation of
           # pull_request.yml's filter-webrtc list (plus continue_config.yml itself);
-          # XCTestRunner Simulator Tests is not mirrored (nightly/label on GitHub, #10895);
+          # XCTestRunner Simulator Tests runs on PRs only via the GitHub run-ios-sim
+          # label (#10895) and nightly on CircleCI (nightly-macos);
           # test/scripts/circleciMacosMigrationPolicy.test.ts fails on any drift.
           # Comments cannot go inside the mapping block itself; the orb reads
           # every line.
@@ -176,6 +185,86 @@ jobs:
           configuration_path: .circleci/continue_config.yml
           parameters: /tmp/swift-coverage-parameters.json
 
+  # Post-merge path filter (#11010). On main the orb's merge-base with main is
+  # HEAD, so `same-base-run` (default true) diffs HEAD~1..HEAD: exactly this
+  # merge's changes. The mapping lives in a file because
+  # scripts/ci/circleci-main-superseded.sh reads the same path groups.
+  detect-main-macos-changes:
+    docker:
+      - image: cimg/base:current
+    environment:
+      GIT_LFS_SKIP_SMUDGE: "1"
+    steps:
+      # Keep this checkout identical to `checkout_without_lfs` in continue_config.yml.
+      - run:
+          name: "Checkout without Git LFS"
+          command: |
+            set -euo pipefail
+            # Neutralize the lfs filter so no git operation in this job invokes git-lfs.
+            git config --global filter.lfs.process ""
+            git config --global filter.lfs.smudge ""
+            git config --global filter.lfs.clean ""
+            git config --global filter.lfs.required false
+            # Public repo: clone over HTTPS so no checkout SSH key is needed. Blobless
+            # keeps it cheap; the default branch (main) comes along for path-filtering.
+            git clone --filter=blob:none --no-checkout \
+              "https://github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}.git" .
+            # Fetch the exact commit so fork PR heads (not on any origin branch) resolve.
+            git fetch --filter=blob:none origin "${CIRCLE_SHA1}"
+            git checkout --force --detach "${CIRCLE_SHA1}"
+            # Fail loudly if any LFS-tracked path holds real content instead of a pointer.
+            git ls-files -z ':(attr:filter=lfs)' | while IFS= read -r -d '' path; do
+              if ! head -c 40 "${path}" | grep -q '^version https://git-lfs'; then
+                echo "LFS content was downloaded for ${path}; checkout must stay LFS-free" >&2
+                exit 1
+              fi
+            done
+      - path-filtering/set-parameters:
+          base-revision: main
+          config-path: .circleci/continue_config.yml
+          mapping: .circleci/main-macos-paths.txt
+      - path-filtering/generate-config
+      - continuation/continue:
+          configuration_path: /tmp/generated-config.yml
+          parameters: /tmp/pipeline-parameters.json
+
+  continue-nightly-macos:
+    docker:
+      - image: cimg/base:current
+    environment:
+      GIT_LFS_SKIP_SMUDGE: "1"
+    steps:
+      # Keep this checkout identical to `checkout_without_lfs` in continue_config.yml.
+      - run:
+          name: "Checkout without Git LFS"
+          command: |
+            set -euo pipefail
+            # Neutralize the lfs filter so no git operation in this job invokes git-lfs.
+            git config --global filter.lfs.process ""
+            git config --global filter.lfs.smudge ""
+            git config --global filter.lfs.clean ""
+            git config --global filter.lfs.required false
+            # Public repo: clone over HTTPS so no checkout SSH key is needed. Blobless
+            # keeps it cheap; the default branch (main) comes along for path-filtering.
+            git clone --filter=blob:none --no-checkout \
+              "https://github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}.git" .
+            # Fetch the exact commit so fork PR heads (not on any origin branch) resolve.
+            git fetch --filter=blob:none origin "${CIRCLE_SHA1}"
+            git checkout --force --detach "${CIRCLE_SHA1}"
+            # Fail loudly if any LFS-tracked path holds real content instead of a pointer.
+            git ls-files -z ':(attr:filter=lfs)' | while IFS= read -r -d '' path; do
+              if ! head -c 40 "${path}" | grep -q '^version https://git-lfs'; then
+                echo "LFS content was downloaded for ${path}; checkout must stay LFS-free" >&2
+                exit 1
+              fi
+            done
+      - run:
+          name: "Select nightly macOS jobs"
+          command: echo '{"run-nightly-macos":true}' > /tmp/nightly-macos-parameters.json
+      - continuation/continue:
+          configuration_path: .circleci/continue_config.yml
+          parameters: /tmp/nightly-macos-parameters.json
+
 workflows:
   detect-ios-changes:
     jobs:
@@ -195,6 +284,20 @@ workflows:
             branches:
               ignore: main
 
+  # Post-merge macOS work (formerly merge.yml's hosted macOS jobs, #11010). Skipped
+  # for the API-triggered Swift coverage pipeline and the nightly schedule, which
+  # also run on main and select their own workflows.
+  detect-main-macos-changes:
+    when:
+      and:
+        - not: << pipeline.parameters.run-swift-coverage-main >>
+        - not: << pipeline.parameters.run-nightly-macos >>
+    jobs:
+      - detect-main-macos-changes:
+          filters:
+            branches:
+              only: main
+
   swift-coverage-main:
     when: << pipeline.parameters.run-swift-coverage-main >>
     jobs:
@@ -202,3 +305,11 @@ workflows:
           filters:
             branches:
               only: main
+
+  # Nightly macOS work (formerly nightly.yml's hosted macOS jobs, #11010). The
+  # schedule is configured in the CircleCI UI: Project Settings → Triggers →
+  # scheduled trigger on main with pipeline parameter run-nightly-macos=true.
+  nightly-macos:
+    when: << pipeline.parameters.run-nightly-macos >>
+    jobs:
+      - continue-nightly-macos

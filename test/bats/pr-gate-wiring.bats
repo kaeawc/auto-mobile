@@ -300,21 +300,20 @@ wiring_requires_yq() {
   [ "$output" = "windows-latest" ]
 }
 
-@test "nightly preserves the moved macOS portable test lanes" {
-  local workflow=".github/workflows/nightly.yml"
-  local bats_unit bats_integration unit host
-  bats_unit="$(job_block macos-bats-tests "$workflow")"
-  bats_integration="$(job_block macos-bats-integration-tests "$workflow")"
-  unit="$(job_block macos-node-unit-tests "$workflow")"
-  host="$(job_block macos-node-host-integration-tests "$workflow")"
-
-  for block in "$bats_unit" "$bats_integration" "$unit" "$host"; do
-    [[ "$block" == *"runs-on: macos-latest"* ]]
-    [[ "$block" == *"scripts/ci/install-bun-deps.sh"* ]]
+@test "nightly macOS portable test lanes run on CircleCI, not hosted GitHub (#11010)" {
+  wiring_requires_yq
+  local circle=".circleci/continue_config.yml"
+  local job host
+  for job in macos-bats-tests macos-bats-integration-tests macos-node-unit-tests macos-node-host-integration-tests; do
+    [[ -z "$(job_block "$job" ".github/workflows/nightly.yml")" ]]
+    run yq -r ".jobs.\"${job}\".steps[].run.command // \"\"" "$circle"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"scripts/ci/install-bun-deps.sh"* ]]
   done
-  [[ "$bats_unit" == *"scripts/ci/run-bats.sh unit"* ]]
-  [[ "$bats_integration" == *"scripts/ci/run-bats.sh integration"* ]]
-  [[ "$unit" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$(yq -r '.jobs."macos-bats-tests".steps[].run.command // ""' "$circle")" == *"scripts/ci/run-bats.sh unit"* ]]
+  [[ "$(yq -r '.jobs."macos-bats-integration-tests".steps[].run.command // ""' "$circle")" == *"scripts/ci/run-bats.sh integration"* ]]
+  [[ "$(yq -r '.jobs."macos-node-unit-tests".steps[].run.command // ""' "$circle")" == *"bash scripts/test-ts.sh unit"* ]]
+  host="$(yq -r '.jobs."macos-node-host-integration-tests".steps[].run.command // ""' "$circle")"
   [[ "$host" == *"bash scripts/test-ts.sh integration"* ]]
   [[ "$host" == *"bash scripts/test-ts.sh stress"* ]]
 }

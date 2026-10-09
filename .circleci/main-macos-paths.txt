@@ -1,0 +1,11 @@
+ios/.* run-main-ios true
+scripts/ios/.* run-main-ios true
+Package\.swift run-main-ios true
+\.swiftformat run-main-ios true
+\.swiftlint\.yml run-main-ios true
+\.circleci/.* run-main-ios true
+scripts/ci/circleci-main-superseded\.sh run-main-ios true
+android/desktop-app/.* run-main-desktop true
+android/desktop-core/.* run-main-desktop true
+\.circleci/.* run-main-desktop true
+scripts/ci/circleci-main-superseded\.sh run-main-desktop true

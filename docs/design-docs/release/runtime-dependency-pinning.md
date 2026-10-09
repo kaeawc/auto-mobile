@@ -73,7 +73,7 @@ manifest) and enforced by:
 | Guard                            | Where                                 | What it proves                                                                                                                        |
 | -------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `pin-runtime-deps.ts --check`    | Fast Validation (`runtime-pins`)      | `package.json` + manifest are in lock-step with `bun.lock` (hermetic)                                                                 |
-| `verify-pinned-runtime-graph.sh` | PR benchmarks job + release preflight | a clean-cache install of the **trimmed packed** artifact reproduces every runtime version and imports each importable bundled package |
+| `verify-pinned-runtime-graph.sh` | PR Node Checks job + release preflight | a clean-cache install of the **trimmed packed** artifact reproduces every runtime version and imports each importable bundled package |
 
 ## CI pack trimming
 

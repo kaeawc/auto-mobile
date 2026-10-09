@@ -164,7 +164,7 @@ wiring_requires_yq() {
     [[ $'\n'"$needs"$'\n' == *$'\n'"junit-runner-unit-tests"$'\n'* ]]
   done
   # The SDK Debug Inspector Consumer guard the smoke carried stays on PRs.
-  [[ "$(job_block build-junit-runner-library)" == *"validate-sdk-debug-inspector-consumer.sh --skip-publish"* ]]
+  [[ "$(job_block jvm-consumer-checks)" == *"validate-sdk-debug-inspector-consumer.sh --skip-publish"* ]]
 }
 
 @test "both emulator suites share one booted emulator with separate reports (#10891)" {
@@ -195,24 +195,27 @@ wiring_requires_yq() {
     [ "$status" -eq 0 ]
     [ "$output" = "ubuntu-latest" ]
   done
+  # The Windows host-integration leg runs inside the required Windows build job
+  # (#10894); the Linux unit run lives in ts-build-and-test (#10893).
   run yq -r '.jobs."node-host-integration-tests".strategy.matrix.os[]' "$WF"
   [ "$status" -eq 0 ]
-  [ "$output" = $'ubuntu-latest\nwindows-latest' ]
-  # The Linux unit run lives in the required ts-build-and-test job (#10893).
-  run yq -r '.jobs."node-unit-tests".strategy.matrix.os[]' "$WF"
-  [ "$status" -eq 0 ]
-  [ "$output" = "windows-latest" ]
+  [ "$output" = "ubuntu-latest" ]
+  [[ -z "$(job_block node-unit-tests)" ]]
 }
 
 @test "unit, integration, and stress jobs invoke their canonical lanes" {
-  local unit host bats_unit
-  unit="$(job_block node-unit-tests)"
+  local unit windows host bats_unit
+  unit="$(job_block ts-build-and-test)"
+  windows="$(job_block mcp-build-and-test)"
   host="$(job_block node-host-integration-tests)"
   bats_unit="$(job_block bats-tests)"
 
   [[ "$unit" == *"bash scripts/test-ts.sh unit"* ]]
   [[ "$host" == *"bash scripts/test-ts.sh integration"* ]]
   [[ "$host" == *"bash scripts/test-ts.sh stress"* ]]
+  [[ "$windows" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$windows" == *"bash scripts/test-ts.sh integration"* ]]
+  [[ "$windows" == *"bash scripts/test-ts.sh stress"* ]]
   [[ "$bats_unit" == *"scripts/ci/run-bats.sh unit"* ]]
   [[ "$bats_unit" == *"scripts/ci/run-bats.sh integration"* ]]
   [[ "$bats_unit" != *"AUTOMOBILE_BATS_SERIAL_ONLY"* ]]
@@ -390,11 +393,10 @@ wiring_requires_yq() {
   done
 }
 
-@test "runtime-graph-verification runs the clean-room pinned-graph check exactly once (#5421)" {
-  # The heavy pack+install verification must live in its own required-able job
-  # and NOT be duplicated back into the benchmarks job (it was extracted from
-  # there). Read parsed `run` fields so a commented-out command cannot satisfy
-  # the guard.
+@test "node-checks runs the clean-room pinned-graph check exactly once (#5421, #10894)" {
+  # The heavy pack+install verification runs exactly once per PR, as its own
+  # step of the combined Node Checks job. Read parsed `run` fields so a
+  # commented-out command cannot satisfy the guard.
   wiring_requires_yq
   run yq -r '
     [.jobs[] | .steps[]? | .run? | select(. == "bash scripts/ci/verify-pinned-runtime-graph.sh")]
@@ -404,27 +406,58 @@ wiring_requires_yq() {
   [ "$output" -eq 1 ]
 
   run yq -r '
-    .jobs."runtime-graph-verification".steps[]
+    .jobs."node-checks".steps[]
     | select(.name == "Verify pinned runtime dependency graph (#5421)")
     | .run
   ' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = "bash scripts/ci/verify-pinned-runtime-graph.sh" ]
 
-  # Gated to the same source/dependency surface as benchmarks, minus the
-  # automated sha256-only chores.
-  run yq -r '.jobs."runtime-graph-verification".if' "$WF"
+  # Gated to the source/dependency surface (ts_changed, via the job env), and
+  # the job skips the automated sha256-only chores.
+  run yq -r '.jobs."node-checks".if' "$WF"
   [ "$status" -eq 0 ]
-  [ "$output" = "needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'" ]
+  [[ "$output" == *"needs.detect-changes.outputs.sha256_only != 'true'"* ]]
+  run yq -r '.jobs."node-checks".env.TS_CHANGED' "$WF"
+  [ "$output" = '${{ needs.detect-changes.outputs.ts_changed }}' ]
+  run yq -r '.jobs."node-checks".steps[] | select(.name == "Verify pinned runtime dependency graph (#5421)") | .if' "$WF"
+  [[ "$output" == *"env.TS_CHANGED == 'true'"* ]]
 
   # Preserves the ci-logs artifact upload.
   run yq -r '
-    .jobs."runtime-graph-verification".steps[]
+    .jobs."node-checks".steps[]
     | select(.name == "Upload Pinned Runtime Graph Report")
     | .with.name
   ' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" = "pinned-runtime-graph-report" ]
+}
+
+@test "small Node and JVM checks share runner slots; each check still runs (#10894)" {
+  wiring_requires_yq
+  local job
+  for job in bun-audit memory-leak-detection benchmarks runtime-graph-verification junit-runner-kotlin-consumer-compatibility node-unit-tests build-junit-runner-library; do
+    [[ -z "$(job_block "$job")" ]]
+  done
+  [ "$(yq -r '.jobs."node-checks".name' "$WF")" = "Node Checks" ]
+  [ "$(yq -r '.jobs."jvm-consumer-checks".name' "$WF")" = "JVM Consumer Checks" ]
+  local checks
+  checks="$(job_block node-checks)"
+  [[ "$checks" == *"bun pm audit"* ]]
+  [[ "$checks" == *"bun run test:memory-leaks"* ]]
+  [[ "$checks" == *"bun run benchmark-context"* ]]
+  [[ "$checks" == *"verify-pinned-runtime-graph.sh"* ]]
+  checks="$(job_block jvm-consumer-checks)"
+  [[ "$checks" == *":junitRunner:assemble"* ]]
+  [[ "$checks" == *"validate-sdk-debug-inspector-consumer.sh"* ]]
+  [[ "$checks" == *"validate-junit-runner-kotlin-consumer.sh"* ]]
+  # A failed check must not skip the checks after it.
+  run yq -r '.jobs."node-checks".steps[] | select(.name == "Run Memory Leak Detection" or .name == "Run MCP Benchmarks" or .name == "Verify pinned runtime dependency graph (#5421)") | .if' "$WF"
+  [ "$(grep -c '!cancelled()' <<< "$output")" -eq 3 ]
+  run yq -r '.jobs."jvm-consumer-checks".steps[] | select(.name == "Validate Kotlin 2.2 consumer compatibility" or .name == "Publish SDK and check its public API") | .if' "$WF"
+  [ "$(grep -c '!cancelled()' <<< "$output")" -eq 2 ]
+  run yq -r '.jobs."mcp-build-and-test".steps[] | select(.name == "Run complete unit lane" or .name == "Run host integration lane" or .name == "Run stress lane") | .if' "$WF"
+  [ "$(grep -c "!cancelled() && steps.mcp-build.outcome == 'success'" <<< "$output")" -eq 3 ]
 }
 
 @test "runtime-graph verification runs when its workflow wiring changes (#5421)" {

@@ -1243,12 +1243,23 @@ jobs:
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/installer-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
-  bun-audit:
-    timeout-minutes: 20
-    name: "Bun Security Audit"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
+  # =============================================================================
+  # Node Checks (#10894)
+  # =============================================================================
+  # One runner slot for the small Node checks that each paid a checkout and an
+  # AutoMobile package setup: Bun Security Audit (every non-chore PR), and, when
+  # TypeScript changed, the clean-room Pinned Runtime Graph check (#5421),
+  # Memory Leak Detection and the MCP Benchmarks. Each check runs even when an
+  # earlier one failed, and any failure fails the job.
+  node-checks:
+    name: "Node Checks"
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
+    # Sum of the former per-job caps (20 + 30 + 20 + 20) less three setups.
+    timeout-minutes: 60
+    env:
+      TS_CHANGED: ${{ needs.detect-changes.outputs.ts_changed }}
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1269,52 +1280,494 @@ jobs:
           name: bun-audit-results
           path: bun-audit-results.json
 
+      - name: "Verify pinned runtime dependency graph (#5421)"
+        if: ${{ !cancelled() && env.TS_CHANGED == 'true' }}
+        shell: bash
+        run: bash scripts/ci/verify-pinned-runtime-graph.sh
+
+      - name: "Upload Pinned Runtime Graph Report"
+        uses: actions/upload-artifact@v6
+        if: ${{ always() && env.TS_CHANGED == 'true' }}
+        with:
+          name: pinned-runtime-graph-report
+          path: ci-logs/pinned-runtime-graph.log
+          retention-days: 90
+
+      - name: "Run Memory Leak Detection"
+        if: ${{ !cancelled() && env.TS_CHANGED == 'true' }}
+        run: bun run test:memory-leaks
+
+      - name: "Upload Heap Snapshots"
+        if: ${{ failure() && env.TS_CHANGED == 'true' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: heap-snapshots
+          path: "*.heapsnapshot"
+
+      - name: "Run MCP Benchmarks"
+        if: ${{ !cancelled() && env.TS_CHANGED == 'true' }}
+        shell: bash
+        run: |
+          mkdir -p reports
+
+          if ! bun run benchmark-context --output reports/context-benchmark.json; then
+            echo "CONTEXT_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
+          fi
+
+          if ! bun run benchmark-tools --output reports/tool-benchmark.json; then
+            echo "TOOL_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
+          fi
+
+          if ! timeout 60s bun run benchmark-startup --compare benchmark/startup-baseline.json --output reports/startup-benchmark.json; then
+            echo "STARTUP_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
+          fi
+
+          if ! bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json; then
+            echo "NPM_UNPACKED_SIZE_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: "Upload Context Benchmark Report"
+        uses: actions/upload-artifact@v6
+        if: ${{ always() && env.TS_CHANGED == 'true' }}
+        with:
+          name: context-benchmark-report
+          path: reports/context-benchmark.json
+          retention-days: 90
+
+      - name: "Upload Tool Benchmark Report"
+        uses: actions/upload-artifact@v6
+        if: ${{ always() && env.TS_CHANGED == 'true' }}
+        with:
+          name: tool-benchmark-report
+          path: reports/tool-benchmark.json
+          retention-days: 90
+
+      - name: "Upload Startup Benchmark Report"
+        uses: actions/upload-artifact@v6
+        if: ${{ always() && env.TS_CHANGED == 'true' }}
+        with:
+          name: startup-benchmark-report
+          path: reports/startup-benchmark.json
+          retention-days: 90
+
+      - name: "Upload NPM Unpacked Size Benchmark Report"
+        uses: actions/upload-artifact@v6
+        if: ${{ always() && env.TS_CHANGED == 'true' }}
+        with:
+          name: npm-unpacked-size-report
+          path: reports/npm-unpacked-size.json
+          retention-days: 90
+
+      - name: "Post Consolidated Comment"
+        if: ${{ !cancelled() && env.TS_CHANGED == 'true' && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+
+            const contextPath = 'reports/context-benchmark.json';
+            const toolPath = 'reports/tool-benchmark.json';
+            const startupPath = 'reports/startup-benchmark.json';
+            const npmPath = 'reports/npm-unpacked-size.json';
+
+            const readReport = (reportPath, label) => {
+              if (!fs.existsSync(reportPath)) {
+                return { label, report: null };
+              }
+              try {
+                const raw = fs.readFileSync(reportPath, 'utf8');
+                return { label, report: JSON.parse(raw) };
+              } catch (error) {
+                console.log(`Failed to read ${label} report: ${error.message}`);
+                return { label, report: null };
+              }
+            };
+
+            const contextReport = readReport(contextPath, 'Context Baselines');
+            const toolReport = readReport(toolPath, 'Tool Call Throughput');
+            const startupReport = readReport(startupPath, 'Startup Performance');
+            const npmReport = readReport(npmPath, 'NPM Unpacked Size');
+
+            if (!contextReport.report && !toolReport.report && !startupReport.report && !npmReport.report) {
+              console.log('No benchmark reports found. Skipping PR comment.');
+              return;
+            }
+
+            let body = '## MCP Benchmarks\n\n';
+
+            const statuses = [];
+            let hasFailures = false;
+            let hasMissing = false;
+            let hasBaselineOnly = false;
+
+            const trackStatus = (label, report) => {
+              if (!report) {
+                statuses.push(`${label}: ⚠️ missing`);
+                hasMissing = true;
+                return;
+              }
+              if (report.enforcement?.enabled === false) {
+                statuses.push(`${label}: 📏`);
+                hasBaselineOnly = true;
+                return;
+              }
+              const passed = report.passed !== false;
+              const icon = passed ? '✅' : '❌';
+              statuses.push(`${label}: ${icon}`);
+              if (!passed) {
+                hasFailures = true;
+              }
+            };
+
+            trackStatus('Context Baselines', contextReport.report);
+            trackStatus('Tool Call Throughput', toolReport.report);
+            trackStatus('Startup', startupReport.report);
+            trackStatus('NPM Unpacked Size', npmReport.report);
+
+            let overallStatus = '⚠️ PARTIAL';
+            if (!hasFailures && !hasMissing) {
+              overallStatus = hasBaselineOnly ? '📏 BASELINES RECORDED' : '✅ PASSED';
+            } else if (hasFailures) {
+              overallStatus = '❌ FAILED';
+            }
+
+            body += `**Overall Status:** ${overallStatus}\n`;
+            body += `**Status by Benchmark:** ${statuses.join(' | ')}\n\n`;
+
+            if (contextReport.report) {
+              const report = contextReport.report;
+              const formatRow = (label, result) => {
+                if (!result) {
+                  return `| ${label} | n/a | n/a | n/a | ⚠️ |`;
+                }
+                const status = report.enforcement?.enabled === false
+                  ? '📏'
+                  : result.passed ? '✅' : '❌';
+                const actual = typeof result.actual === 'number' ? result.actual.toLocaleString() : 'n/a';
+                const baseline = typeof result.baseline === 'number' ? result.baseline.toLocaleString() : 'n/a';
+                const delta = typeof result.delta === 'number'
+                  ? `${result.delta >= 0 ? '+' : ''}${result.delta.toLocaleString()}`
+                  : 'n/a';
+                return `| ${label} | ${actual} | ${baseline} | ${delta} | ${status} |`;
+              };
+
+              body += '### Context Baselines\n\n';
+              body += '| Category | Actual | Baseline | Delta | Status |\n';
+              body += '|----------|--------|----------|-------|--------|\n';
+              body += formatRow('Core Tools', report.results?.coreTools) + '\n';
+              body += formatRow('All Tools', report.results?.allTools) + '\n';
+              body += formatRow('Resources', report.results?.resources) + '\n';
+              body += formatRow('Resource Templates', report.results?.resourceTemplates) + '\n';
+              body += formatRow('**Core Total**', report.results?.coreTotal) + '\n';
+              body += formatRow('**All Total**', report.results?.allTotal) + '\n';
+
+              if (Array.isArray(report.violations) && report.violations.length > 0) {
+                body += '\n### ⚠️ Threshold Violations\n\n';
+                for (const violation of report.violations) {
+                  body += `- ${violation}\n`;
+                }
+              }
+
+              const contextStatus = report.enforcement?.enabled === false
+                ? '📏 BASELINES RECORDED (threshold enforcement pending)'
+                : report.passed ? '✅ PASSED' : '❌ FAILED';
+              body += `\n**Overall Status:** ${contextStatus}`;
+              if (report.timestamp) {
+                body += `\n\n_Generated at ${report.timestamp}_`;
+              }
+              body += '\n\n';
+            }
+
+            if (toolReport.report) {
+              const report = toolReport.report;
+              const summary = report.summary ?? {};
+              const sampleSize = report.sampleSize ?? 'n/a';
+              const totalDuration = typeof report.totalDuration === 'number'
+                ? `${(report.totalDuration / 1000).toFixed(2)}s`
+                : 'n/a';
+              const averageThroughput = typeof summary.averageThroughput === 'number'
+                ? `${summary.averageThroughput.toFixed(2)} ops/second`
+                : 'n/a';
+
+              body += '### Tool Call Throughput\n\n';
+              body += `**Sample Size:** ${sampleSize} iterations per tool\n`;
+              body += `**Total Duration:** ${totalDuration}\n`;
+              body += `**Average Throughput:** ${averageThroughput}\n\n`;
+
+              const categories = [
+                { name: 'Fast Operations', expectedLatency: '<100ms', tools: ['listDevices', 'getForegroundApp', 'pressButton'] },
+                { name: 'Medium Operations', expectedLatency: '100ms-1s', tools: ['observe', 'tapOn', 'inputText', 'swipe'] },
+                { name: 'Slow Operations', expectedLatency: '1s+', tools: ['launchApp', 'installApp'] }
+              ];
+
+              const results = Array.isArray(report.results) ? report.results : [];
+              let renderedAnyCategory = false;
+
+              for (const category of categories) {
+                const categoryResults = results.filter(r => category.tools.includes(r.toolName));
+                if (categoryResults.length === 0) continue;
+                renderedAnyCategory = true;
+
+                body += `#### ${category.name} (${category.expectedLatency})\n\n`;
+                body += '| Tool | P50 | P95 | Mean | Success | Status |\n';
+                body += '|------|-----|-----|------|---------|--------|\n';
+
+                for (const result of categoryResults) {
+                  const status = result.overallPassed === false ? '❌' : '✅';
+                  const p50 = typeof result.p50 === 'number' ? `${result.p50.toFixed(1)}ms` : 'n/a';
+                  const p95 = typeof result.p95 === 'number' ? `${result.p95.toFixed(1)}ms` : 'n/a';
+                  const mean = typeof result.mean === 'number' ? `${result.mean.toFixed(1)}ms` : 'n/a';
+                  const success = typeof result.successRate === 'number' ? `${result.successRate.toFixed(0)}%` : 'n/a';
+                  body += `| ${result.toolName} | ${p50} | ${p95} | ${mean} | ${success} | ${status} |\n`;
+
+                  if (Array.isArray(result.thresholdChecks) && result.overallPassed === false) {
+                    for (const check of result.thresholdChecks.filter(c => !c.passed)) {
+                      const metric = check.metric ? check.metric.toUpperCase() : 'METRIC';
+                      const actual = typeof check.actual === 'number' ? `${check.actual.toFixed(2)}ms` : 'n/a';
+                      const threshold = typeof check.threshold === 'number' ? `${check.threshold.toFixed(2)}ms` : 'n/a';
+                      const regression = typeof check.regression === 'number' ? `+${check.regression.toFixed(1)}%` : 'n/a';
+                      body += `| └─ ${metric} regression | ${actual} | | | ${threshold} | ${regression} | |\n`;
+                    }
+                  }
+                }
+                body += '\n';
+              }
+
+              if (!renderedAnyCategory) {
+                body += '_No tool results found._\n\n';
+              }
+
+              if (Array.isArray(report.violations) && report.violations.length > 0) {
+                body += '#### ⚠️ Performance Regressions\n\n';
+                for (const violation of report.violations) {
+                  body += `- ${violation}\n`;
+                }
+                body += '\n';
+              }
+
+              const passedTools = typeof summary.passedTools === 'number' ? summary.passedTools : 'n/a';
+              const totalTools = typeof summary.totalTools === 'number' ? summary.totalTools : 'n/a';
+              body += `**Summary:** ${passedTools}/${totalTools} tools passed\n`;
+              body += `**Overall Status:** ${report.passed ? '✅ PASSED' : '❌ FAILED'}\n\n`;
+              if (report.timestamp) {
+                body += `_Generated at ${report.timestamp}_\n\n`;
+              }
+            }
+
+            if (startupReport.report) {
+              const report = startupReport.report;
+              const formatMs = value => (typeof value === 'number' ? `${value.toFixed(1)}ms` : 'n/a');
+              const formatBytes = value => (typeof value === 'number' ? `${(value / (1024 * 1024)).toFixed(1)}MB` : 'n/a');
+              const formatNumber = value => (typeof value === 'number' ? value.toLocaleString() : 'n/a');
+
+              body += '### Startup Performance\n\n';
+
+              if (report.results?.mcpServer) {
+                body += '#### MCP Server (stdio)\n\n';
+                body += '| Mode | Ready | First Tool Call | Heap Used |\n';
+                body += '|------|-------|-----------------|-----------|\n';
+                for (const run of report.results.mcpServer.runs || []) {
+                  const heap = run.memoryUsage?.heapUsed ? formatBytes(run.memoryUsage.heapUsed) : 'n/a';
+                  body += `| ${run.mode} | ${formatMs(run.timeToReadyMs)} | ${formatMs(run.timeToFirstToolCallMs)} | ${heap} |\n`;
+                }
+                body += '\n';
+
+                const discovery = report.results.mcpServer.deviceDiscovery;
+                if (discovery) {
+                  if (discovery.skipped) {
+                    body += `Device discovery: skipped (${discovery.reason || 'no reason provided'})\n\n`;
+                  } else if (discovery.scenarios?.length) {
+                    body += 'Device discovery scenarios:\n';
+                    for (const scenario of discovery.scenarios) {
+                      body += `- ${scenario.name}: ${formatMs(scenario.durationMs)} (${scenario.deviceCount} device(s))\n`;
+                    }
+                    body += '\n';
+                  }
+                }
+              }
+
+              if (report.results?.daemon) {
+                body += '#### Daemon\n\n';
+                body += '| Mode | Spawn | Ready | Responsive | Heap Used |\n';
+                body += '|------|-------|-------|------------|-----------|\n';
+                for (const run of report.results.daemon.runs || []) {
+                  const heap = run.memoryUsage?.heapUsed ? formatBytes(run.memoryUsage.heapUsed) : 'n/a';
+                  body += `| ${run.mode} | ${formatMs(run.spawnMs)} | ${formatMs(run.timeToReadyMs)} | ${formatMs(run.timeToResponsiveMs)} | ${heap} |\n`;
+                }
+                body += '\n';
+              }
+
+              if (report.comparisons?.regressions?.length) {
+                body += '#### Startup Thresholds\n\n';
+                body += '| Metric | Actual | Threshold | Regression | Status |\n';
+                body += '|--------|--------|-----------|------------|--------|\n';
+                for (const regression of report.comparisons.regressions) {
+                  const actual = formatNumber(regression.actual);
+                  const threshold = formatNumber(regression.threshold);
+                  const regressionPct = typeof regression.regression === 'number'
+                    ? `${regression.regression >= 0 ? '+' : ''}${regression.regression.toFixed(1)}%`
+                    : 'n/a';
+                  const status = regression.passed ? '✅' : '❌';
+                  body += `| ${regression.metric} | ${actual} | ${threshold} | ${regressionPct} | ${status} |\n`;
+                }
+                body += '\n';
+              }
+
+              if (report.comparisons?.regressions?.length) {
+                const failures = report.comparisons.regressions.filter(r => !r.passed);
+                if (failures.length > 0) {
+                  body += '#### ⚠️ Regressions\n\n';
+                  for (const regression of failures) {
+                    body += `- ${regression.metric}: ${regression.actual.toFixed(2)} > ${regression.threshold.toFixed(2)} (+${regression.regression.toFixed(1)}%)\n`;
+                  }
+                  body += '\n';
+                }
+              }
+
+              if (report.skips?.length) {
+                body += '#### Skipped Checks\n\n';
+                for (const skip of report.skips) {
+                  body += `- ${skip}\n`;
+                }
+                body += '\n';
+              }
+
+              body += `**Overall Status:** ${report.passed ? '✅ PASSED' : '❌ FAILED'}\n`;
+              if (report.timestamp) {
+                body += `\n_Generated at ${report.timestamp}_`;
+              }
+              body += '\n\n';
+            }
+
+            if (npmReport.report) {
+              const report = npmReport.report;
+              const formatBytes = value => (typeof value === 'number' ? `${(value / (1024 * 1024)).toFixed(1)}MB` : 'n/a');
+              const result = report.results?.unpackedSize;
+              const actual = result && typeof result.actual === 'number' ? formatBytes(result.actual) : 'n/a';
+              const threshold = result && typeof result.threshold === 'number' ? formatBytes(result.threshold) : 'n/a';
+              const usage = result && typeof result.usage === 'number' ? `${result.usage}%` : 'n/a';
+              const status = result ? (result.passed ? '✅' : '❌') : '⚠️';
+              const packageName = report.package?.name ?? 'unknown';
+              const packageVersion = report.package?.version ?? 'unknown';
+              const tarballSize = typeof report.package?.tarballBytes === 'number'
+                ? formatBytes(report.package.tarballBytes)
+                : 'n/a';
+
+              body += '### NPM Unpacked Size\n\n';
+              body += '| Metric | Actual | Threshold | Usage | Status |\n';
+              body += '|--------|--------|-----------|-------|--------|\n';
+              body += `| Unpacked Size | ${actual} | ${threshold} | ${usage} | ${status} |\n`;
+              body += `\n**Package:** ${packageName}@${packageVersion}\n`;
+              body += `**Tarball Size:** ${tarballSize}\n`;
+              if (typeof result?.headroomBytes === 'number' && typeof result?.headroomPercent === 'number') {
+                body += `**Headroom:** ${result.headroomBytes} bytes (${result.headroomPercent}%)\n`;
+              }
+
+              if (Array.isArray(report.warnings) && report.warnings.length > 0) {
+                body += '\n#### ⚠️ Size Warning\n\n';
+                for (const warning of report.warnings) {
+                  body += `- ${warning}\n`;
+                }
+              }
+
+              if (report.package?.largestFiles?.length) {
+                body += '\n#### Largest Packed Files\n\n';
+                body += '| File | Bytes |\n|------|-------|\n';
+                for (const file of report.package.largestFiles) {
+                  body += `| ${file.path} | ${file.size} |\n`;
+                }
+              }
+
+              if (Array.isArray(report.violations) && report.violations.length > 0) {
+                body += '\n#### ⚠️ Size Violations\n\n';
+                for (const violation of report.violations) {
+                  body += `- ${violation}\n`;
+                }
+              }
+
+              body += `\n**Overall Status:** ${report.passed ? '✅ PASSED' : '❌ FAILED'}`;
+              if (report.timestamp) {
+                body += `\n\n_Generated at ${report.timestamp}_`;
+              }
+              body += '\n\n';
+            }
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('## MCP Benchmarks')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+      - name: "Check Benchmark Results"
+        if: ${{ always() && env.TS_CHANGED == 'true' }}
+        shell: bash
+        run: |
+          failed=false
+
+          if [ "${CONTEXT_BENCHMARK_FAILED:-false}" = "true" ]; then
+            echo "::error::MCP context threshold benchmark failed - one or more thresholds were exceeded"
+            cat reports/context-benchmark.json || true
+            failed=true
+          else
+            echo "::notice::MCP context threshold benchmark passed - all thresholds satisfied"
+          fi
+
+          if [ "${TOOL_BENCHMARK_FAILED:-false}" = "true" ]; then
+            echo "::error::MCP tool throughput benchmark failed - performance regressions detected"
+            cat reports/tool-benchmark.json || true
+            failed=true
+          else
+            echo "::notice::MCP tool throughput benchmark passed - no regressions"
+          fi
+
+          if [ "${STARTUP_BENCHMARK_FAILED:-false}" = "true" ]; then
+            echo "::error::MCP startup benchmark failed - regressions detected"
+            cat reports/startup-benchmark.json || true
+            failed=true
+          else
+            echo "::notice::MCP startup benchmark passed - no regressions"
+          fi
+
+          if [ "${NPM_UNPACKED_SIZE_BENCHMARK_FAILED:-false}" = "true" ]; then
+            echo "::error::NPM unpacked size benchmark failed - threshold exceeded"
+            cat reports/npm-unpacked-size.json || true
+            failed=true
+          else
+            echo "::notice::NPM unpacked size benchmark passed - within threshold"
+            if [ -f reports/npm-unpacked-size.json ] && jq -e '(.warnings // []) | length > 0' reports/npm-unpacked-size.json >/dev/null; then
+              echo "::warning::NPM unpacked size headroom is low - see the benchmark report and PR size summary"
+            fi
+          fi
+
+          if [ "$failed" = "true" ]; then
+            exit 1
+          fi
+
   # =============================================================================
   # Node TypeScript Build and Test (Skip for docs-only changes)
   # =============================================================================
-
-  node-unit-tests:
-    # The Linux unit run lives in ts-build-and-test (#10893); this leg is the
-    # Windows run. 1560s unit lane cap + setup and upload < 2220s.
-    timeout-minutes: 37
-    name: "Node Unit Tests (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
-    needs: [detect-changes, fast-validation]
-    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-          fetch-depth: 0
-
-      - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
-
-      - name: "Install Bun dependencies"
-        shell: bash
-        run: scripts/ci/install-bun-deps.sh
-
-      - name: "Run complete unit lane"
-        shell: bash
-        env:
-          AUTOMOBILE_TEST_MODE: "true"
-          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
-          # 2 x (720s budget + 60s attempt overhead): a shard that times out or
-          # is killed by a signal is retried once (#10583).
-          AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560"
-          AUTOMOBILE_UNIT_JUNIT_DIR: scratch/timing-unit-reports
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
-          fi
-          bash scripts/test-ts.sh unit
 
   node-host-integration-tests:
     timeout-minutes: 20
@@ -1329,7 +1782,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # The Windows leg runs inside Node TypeScript Build and Test
+        # (windows-latest) so it shares that job's checkout and install (#10894).
+        os: [ubuntu-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1350,31 +1805,14 @@ jobs:
         env:
           AUTOMOBILE_TEST_MODE: "true"
           AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "900"
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
-          fi
-          bash scripts/test-ts.sh integration
+        run: bash scripts/test-ts.sh integration
 
       - name: "Run stress lane"
         shell: bash
         env:
           AUTOMOBILE_TEST_MODE: "true"
           AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "300"
-        run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
-          fi
-          bash scripts/test-ts.sh stress
-
-      - name: "Upload Windows netstat capture (#10717)"
-        if: always() && !cancelled() && runner.os == 'Windows'
-        uses: actions/upload-artifact@v6
-        with:
-          name: windows-netstat-capture
-          path: scratch/netstat-capture/
-          if-no-files-found: ignore
-          retention-days: 14
+        run: bash scripts/test-ts.sh stress
 
   mcp-build-and-test:
     name: "Node TypeScript Build and Test (${{ matrix.os }})"
@@ -1382,8 +1820,11 @@ jobs:
     needs: detect-changes
     # macOS coverage runs after merge, where a scarce hosted macOS runner cannot
     # block PRs. Keep this required PR lane on Windows alongside the separate
-    # Ubuntu build-and-test job below.
-    timeout-minutes: 25
+    # Ubuntu build-and-test job below. It also runs the Windows unit, host
+    # integration and stress lanes (#10894): they were separate Windows jobs,
+    # each paying a slow Windows checkout + bun install. Budget: lint/build
+    # (~25) + unit lane cap (26) + integration and stress (~20).
+    timeout-minutes: 70
     env:
       RUN_MCP_BUILD_TEST: ${{ needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true' }}
     strategy:
@@ -1477,6 +1918,7 @@ jobs:
         run: bun run check:ios-ctrl-proxy-process-boundary
 
       - name: "Run Build"
+        id: mcp-build
         if: env.RUN_MCP_BUILD_TEST == 'true'
         shell: bash
         env:
@@ -1493,6 +1935,42 @@ jobs:
         if: env.RUN_MCP_BUILD_TEST == 'true' && matrix.os == 'windows-latest'
         run: bun run test:image:bun
 
+      # The test lanes below each run when the build succeeded, even if an
+      # earlier lane failed, so one red lane cannot hide another.
+      - name: "Run complete unit lane"
+        if: env.RUN_MCP_BUILD_TEST == 'true' && !cancelled() && steps.mcp-build.outcome == 'success'
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+          # 2 x (720s shard budget + 60s attempt overhead): a shard that times
+          # out or is killed by a signal is retried once (#10583). The per-file
+          # wall timeout stays off on Windows.
+          AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560"
+        run: bash scripts/test-ts.sh unit
+
+      - name: "Run host integration lane"
+        if: env.RUN_MCP_BUILD_TEST == 'true' && !cancelled() && steps.mcp-build.outcome == 'success'
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+        run: bash scripts/test-ts.sh integration
+
+      - name: "Run stress lane"
+        if: env.RUN_MCP_BUILD_TEST == 'true' && !cancelled() && steps.mcp-build.outcome == 'success'
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+        run: bash scripts/test-ts.sh stress
+
+      - name: "Upload Windows netstat capture (#10717)"
+        if: always() && !cancelled() && env.RUN_MCP_BUILD_TEST == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-netstat-capture
+          path: scratch/netstat-capture/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: "Upload Build/Test Logs"
         if: env.RUN_MCP_BUILD_TEST == 'true' && (failure() || cancelled() || matrix.os == 'windows-latest')
         continue-on-error: true
@@ -1501,31 +1979,6 @@ jobs:
           name: mcp-build-test-logs-${{ matrix.os }}
           path: ci-logs/*.log
           retention-days: 7
-
-  memory-leak-detection:
-    name: "Memory Leak Detection"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'
-    timeout-minutes: 30
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Run Memory Leak Detection"
-        run: bun run test:memory-leaks
-
-      - name: "Upload Heap Snapshots"
-        if: failure()
-        continue-on-error: true
-        uses: actions/upload-artifact@v6
-        with:
-          name: heap-snapshots
-          path: "*.heapsnapshot"
 
   # =============================================================================
   # Node TypeScript Lint, Typecheck, Build and Unit Tests (Ubuntu)
@@ -2218,36 +2671,6 @@ jobs:
           path: heap-dump
           if-no-files-found: ignore
 
-  junit-runner-kotlin-consumer-compatibility:
-    timeout-minutes: 20
-    name: "JUnit Runner Kotlin Consumer Compatibility"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.android_should_run == 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Install JDK"
-        uses: actions/setup-java@v5
-        with:
-          distribution: "zulu"
-          java-version: "21"
-
-      - name: "Validate Kotlin 2.2 consumer compatibility"
-        run: bash scripts/android/validate-junit-runner-kotlin-consumer.sh
-
-      - name: "Upload Compatibility Logs"
-        if: failure()
-        continue-on-error: true
-        uses: actions/upload-artifact@v6
-        with:
-          name: junit-runner-kotlin-consumer-compatibility-logs
-          path: scratch/junit-runner-kotlin-consumer/logs/
-          if-no-files-found: ignore
-
   # Test isolation issue resolved in #107 and #109
   # Re-enabled in #110
   # The JUnit Runner and Playground Automobile emulator suites share one booted
@@ -2408,9 +2831,14 @@ jobs:
           check_name: "JUnit Runner Emulator.wtf Test Report"
           report_paths: "**/build/test-results/**/*.xml"
 
-  build-junit-runner-library:
-    timeout-minutes: 25
-    name: "Build JUnitRunner Library"
+  # JVM Consumer Checks (#10894): one Gradle runner slot for the JUnitRunner
+  # library build, the SDK Debug Inspector Consumer publication + apiCheck guard
+  # and the JUnit Runner Kotlin 2.2 consumer compatibility check, which used to
+  # be three jobs each paying checkout + Gradle setup. Each check runs even when
+  # an earlier one failed.
+  jvm-consumer-checks:
+    timeout-minutes: 40
+    name: "JVM Consumer Checks"
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
@@ -2451,7 +2879,9 @@ jobs:
       # Check the public API here because publishing already compiles SDK
       # release classes.
       # Update the baseline with: cd android && ./gradlew :auto-mobile-sdk:apiDump
-      - uses: ./.github/actions/gradle-task-run
+      - name: "Publish SDK and check its public API"
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/gradle-task-run
         with:
           gradle-tasks: ":auto-mobile-sdk:publishToMavenLocal :auto-mobile-sdk:apiCheck"
           gradle-project-directory: "android"
@@ -2460,8 +2890,31 @@ jobs:
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: "Verify published debug inspection providers"
+        if: ${{ !cancelled() }}
         working-directory: .
         run: bash scripts/android/validate-sdk-debug-inspector-consumer.sh --skip-publish
+
+      # JUnit Runner Kotlin Consumer Compatibility (folded in by #10894).
+      - name: "Install JDK"
+        if: ${{ !cancelled() }}
+        uses: actions/setup-java@v5
+        with:
+          distribution: "zulu"
+          java-version: "21"
+
+      - name: "Validate Kotlin 2.2 consumer compatibility"
+        if: ${{ !cancelled() }}
+        working-directory: .
+        run: bash scripts/android/validate-junit-runner-kotlin-consumer.sh
+
+      - name: "Upload Compatibility Logs"
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: junit-runner-kotlin-consumer-compatibility-logs
+          path: scratch/junit-runner-kotlin-consumer/logs/
+          if-no-files-found: ignore
 
   build-android-control-proxy:
     timeout-minutes: 20
@@ -2545,518 +2998,6 @@ jobs:
         with:
           name: playground-app-apk
           path: android/playground/app/build/outputs/apk/debug/playground-app-debug.apk
-
-  # =============================================================================
-  # MCP Benchmarks
-  # =============================================================================
-
-  benchmarks:
-    timeout-minutes: 20
-    name: "MCP Benchmarks"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Run MCP Benchmarks"
-        shell: bash
-        run: |
-          mkdir -p reports
-
-          if ! bun run benchmark-context --output reports/context-benchmark.json; then
-            echo "CONTEXT_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
-          fi
-
-          if ! bun run benchmark-tools --output reports/tool-benchmark.json; then
-            echo "TOOL_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
-          fi
-
-          if ! timeout 60s bun run benchmark-startup --compare benchmark/startup-baseline.json --output reports/startup-benchmark.json; then
-            echo "STARTUP_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
-          fi
-
-          if ! bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json; then
-            echo "NPM_UNPACKED_SIZE_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
-          fi
-
-      - name: "Upload Context Benchmark Report"
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: context-benchmark-report
-          path: reports/context-benchmark.json
-          retention-days: 90
-
-      - name: "Upload Tool Benchmark Report"
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: tool-benchmark-report
-          path: reports/tool-benchmark.json
-          retention-days: 90
-
-      - name: "Upload Startup Benchmark Report"
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: startup-benchmark-report
-          path: reports/startup-benchmark.json
-          retention-days: 90
-
-      - name: "Upload NPM Unpacked Size Benchmark Report"
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: npm-unpacked-size-report
-          path: reports/npm-unpacked-size.json
-          retention-days: 90
-
-      - name: "Post Consolidated Comment"
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const fs = require('fs');
-
-            const contextPath = 'reports/context-benchmark.json';
-            const toolPath = 'reports/tool-benchmark.json';
-            const startupPath = 'reports/startup-benchmark.json';
-            const npmPath = 'reports/npm-unpacked-size.json';
-
-            const readReport = (reportPath, label) => {
-              if (!fs.existsSync(reportPath)) {
-                return { label, report: null };
-              }
-              try {
-                const raw = fs.readFileSync(reportPath, 'utf8');
-                return { label, report: JSON.parse(raw) };
-              } catch (error) {
-                console.log(`Failed to read ${label} report: ${error.message}`);
-                return { label, report: null };
-              }
-            };
-
-            const contextReport = readReport(contextPath, 'Context Baselines');
-            const toolReport = readReport(toolPath, 'Tool Call Throughput');
-            const startupReport = readReport(startupPath, 'Startup Performance');
-            const npmReport = readReport(npmPath, 'NPM Unpacked Size');
-
-            if (!contextReport.report && !toolReport.report && !startupReport.report && !npmReport.report) {
-              console.log('No benchmark reports found. Skipping PR comment.');
-              return;
-            }
-
-            let body = '## MCP Benchmarks\n\n';
-
-            const statuses = [];
-            let hasFailures = false;
-            let hasMissing = false;
-            let hasBaselineOnly = false;
-
-            const trackStatus = (label, report) => {
-              if (!report) {
-                statuses.push(`${label}: ⚠️ missing`);
-                hasMissing = true;
-                return;
-              }
-              if (report.enforcement?.enabled === false) {
-                statuses.push(`${label}: 📏`);
-                hasBaselineOnly = true;
-                return;
-              }
-              const passed = report.passed !== false;
-              const icon = passed ? '✅' : '❌';
-              statuses.push(`${label}: ${icon}`);
-              if (!passed) {
-                hasFailures = true;
-              }
-            };
-
-            trackStatus('Context Baselines', contextReport.report);
-            trackStatus('Tool Call Throughput', toolReport.report);
-            trackStatus('Startup', startupReport.report);
-            trackStatus('NPM Unpacked Size', npmReport.report);
-
-            let overallStatus = '⚠️ PARTIAL';
-            if (!hasFailures && !hasMissing) {
-              overallStatus = hasBaselineOnly ? '📏 BASELINES RECORDED' : '✅ PASSED';
-            } else if (hasFailures) {
-              overallStatus = '❌ FAILED';
-            }
-
-            body += `**Overall Status:** ${overallStatus}\n`;
-            body += `**Status by Benchmark:** ${statuses.join(' | ')}\n\n`;
-
-            if (contextReport.report) {
-              const report = contextReport.report;
-              const formatRow = (label, result) => {
-                if (!result) {
-                  return `| ${label} | n/a | n/a | n/a | ⚠️ |`;
-                }
-                const status = report.enforcement?.enabled === false
-                  ? '📏'
-                  : result.passed ? '✅' : '❌';
-                const actual = typeof result.actual === 'number' ? result.actual.toLocaleString() : 'n/a';
-                const baseline = typeof result.baseline === 'number' ? result.baseline.toLocaleString() : 'n/a';
-                const delta = typeof result.delta === 'number'
-                  ? `${result.delta >= 0 ? '+' : ''}${result.delta.toLocaleString()}`
-                  : 'n/a';
-                return `| ${label} | ${actual} | ${baseline} | ${delta} | ${status} |`;
-              };
-
-              body += '### Context Baselines\n\n';
-              body += '| Category | Actual | Baseline | Delta | Status |\n';
-              body += '|----------|--------|----------|-------|--------|\n';
-              body += formatRow('Core Tools', report.results?.coreTools) + '\n';
-              body += formatRow('All Tools', report.results?.allTools) + '\n';
-              body += formatRow('Resources', report.results?.resources) + '\n';
-              body += formatRow('Resource Templates', report.results?.resourceTemplates) + '\n';
-              body += formatRow('**Core Total**', report.results?.coreTotal) + '\n';
-              body += formatRow('**All Total**', report.results?.allTotal) + '\n';
-
-              if (Array.isArray(report.violations) && report.violations.length > 0) {
-                body += '\n### ⚠️ Threshold Violations\n\n';
-                for (const violation of report.violations) {
-                  body += `- ${violation}\n`;
-                }
-              }
-
-              const contextStatus = report.enforcement?.enabled === false
-                ? '📏 BASELINES RECORDED (threshold enforcement pending)'
-                : report.passed ? '✅ PASSED' : '❌ FAILED';
-              body += `\n**Overall Status:** ${contextStatus}`;
-              if (report.timestamp) {
-                body += `\n\n_Generated at ${report.timestamp}_`;
-              }
-              body += '\n\n';
-            }
-
-            if (toolReport.report) {
-              const report = toolReport.report;
-              const summary = report.summary ?? {};
-              const sampleSize = report.sampleSize ?? 'n/a';
-              const totalDuration = typeof report.totalDuration === 'number'
-                ? `${(report.totalDuration / 1000).toFixed(2)}s`
-                : 'n/a';
-              const averageThroughput = typeof summary.averageThroughput === 'number'
-                ? `${summary.averageThroughput.toFixed(2)} ops/second`
-                : 'n/a';
-
-              body += '### Tool Call Throughput\n\n';
-              body += `**Sample Size:** ${sampleSize} iterations per tool\n`;
-              body += `**Total Duration:** ${totalDuration}\n`;
-              body += `**Average Throughput:** ${averageThroughput}\n\n`;
-
-              const categories = [
-                { name: 'Fast Operations', expectedLatency: '<100ms', tools: ['listDevices', 'getForegroundApp', 'pressButton'] },
-                { name: 'Medium Operations', expectedLatency: '100ms-1s', tools: ['observe', 'tapOn', 'inputText', 'swipe'] },
-                { name: 'Slow Operations', expectedLatency: '1s+', tools: ['launchApp', 'installApp'] }
-              ];
-
-              const results = Array.isArray(report.results) ? report.results : [];
-              let renderedAnyCategory = false;
-
-              for (const category of categories) {
-                const categoryResults = results.filter(r => category.tools.includes(r.toolName));
-                if (categoryResults.length === 0) continue;
-                renderedAnyCategory = true;
-
-                body += `#### ${category.name} (${category.expectedLatency})\n\n`;
-                body += '| Tool | P50 | P95 | Mean | Success | Status |\n';
-                body += '|------|-----|-----|------|---------|--------|\n';
-
-                for (const result of categoryResults) {
-                  const status = result.overallPassed === false ? '❌' : '✅';
-                  const p50 = typeof result.p50 === 'number' ? `${result.p50.toFixed(1)}ms` : 'n/a';
-                  const p95 = typeof result.p95 === 'number' ? `${result.p95.toFixed(1)}ms` : 'n/a';
-                  const mean = typeof result.mean === 'number' ? `${result.mean.toFixed(1)}ms` : 'n/a';
-                  const success = typeof result.successRate === 'number' ? `${result.successRate.toFixed(0)}%` : 'n/a';
-                  body += `| ${result.toolName} | ${p50} | ${p95} | ${mean} | ${success} | ${status} |\n`;
-
-                  if (Array.isArray(result.thresholdChecks) && result.overallPassed === false) {
-                    for (const check of result.thresholdChecks.filter(c => !c.passed)) {
-                      const metric = check.metric ? check.metric.toUpperCase() : 'METRIC';
-                      const actual = typeof check.actual === 'number' ? `${check.actual.toFixed(2)}ms` : 'n/a';
-                      const threshold = typeof check.threshold === 'number' ? `${check.threshold.toFixed(2)}ms` : 'n/a';
-                      const regression = typeof check.regression === 'number' ? `+${check.regression.toFixed(1)}%` : 'n/a';
-                      body += `| └─ ${metric} regression | ${actual} | | | ${threshold} | ${regression} | |\n`;
-                    }
-                  }
-                }
-                body += '\n';
-              }
-
-              if (!renderedAnyCategory) {
-                body += '_No tool results found._\n\n';
-              }
-
-              if (Array.isArray(report.violations) && report.violations.length > 0) {
-                body += '#### ⚠️ Performance Regressions\n\n';
-                for (const violation of report.violations) {
-                  body += `- ${violation}\n`;
-                }
-                body += '\n';
-              }
-
-              const passedTools = typeof summary.passedTools === 'number' ? summary.passedTools : 'n/a';
-              const totalTools = typeof summary.totalTools === 'number' ? summary.totalTools : 'n/a';
-              body += `**Summary:** ${passedTools}/${totalTools} tools passed\n`;
-              body += `**Overall Status:** ${report.passed ? '✅ PASSED' : '❌ FAILED'}\n\n`;
-              if (report.timestamp) {
-                body += `_Generated at ${report.timestamp}_\n\n`;
-              }
-            }
-
-            if (startupReport.report) {
-              const report = startupReport.report;
-              const formatMs = value => (typeof value === 'number' ? `${value.toFixed(1)}ms` : 'n/a');
-              const formatBytes = value => (typeof value === 'number' ? `${(value / (1024 * 1024)).toFixed(1)}MB` : 'n/a');
-              const formatNumber = value => (typeof value === 'number' ? value.toLocaleString() : 'n/a');
-
-              body += '### Startup Performance\n\n';
-
-              if (report.results?.mcpServer) {
-                body += '#### MCP Server (stdio)\n\n';
-                body += '| Mode | Ready | First Tool Call | Heap Used |\n';
-                body += '|------|-------|-----------------|-----------|\n';
-                for (const run of report.results.mcpServer.runs || []) {
-                  const heap = run.memoryUsage?.heapUsed ? formatBytes(run.memoryUsage.heapUsed) : 'n/a';
-                  body += `| ${run.mode} | ${formatMs(run.timeToReadyMs)} | ${formatMs(run.timeToFirstToolCallMs)} | ${heap} |\n`;
-                }
-                body += '\n';
-
-                const discovery = report.results.mcpServer.deviceDiscovery;
-                if (discovery) {
-                  if (discovery.skipped) {
-                    body += `Device discovery: skipped (${discovery.reason || 'no reason provided'})\n\n`;
-                  } else if (discovery.scenarios?.length) {
-                    body += 'Device discovery scenarios:\n';
-                    for (const scenario of discovery.scenarios) {
-                      body += `- ${scenario.name}: ${formatMs(scenario.durationMs)} (${scenario.deviceCount} device(s))\n`;
-                    }
-                    body += '\n';
-                  }
-                }
-              }
-
-              if (report.results?.daemon) {
-                body += '#### Daemon\n\n';
-                body += '| Mode | Spawn | Ready | Responsive | Heap Used |\n';
-                body += '|------|-------|-------|------------|-----------|\n';
-                for (const run of report.results.daemon.runs || []) {
-                  const heap = run.memoryUsage?.heapUsed ? formatBytes(run.memoryUsage.heapUsed) : 'n/a';
-                  body += `| ${run.mode} | ${formatMs(run.spawnMs)} | ${formatMs(run.timeToReadyMs)} | ${formatMs(run.timeToResponsiveMs)} | ${heap} |\n`;
-                }
-                body += '\n';
-              }
-
-              if (report.comparisons?.regressions?.length) {
-                body += '#### Startup Thresholds\n\n';
-                body += '| Metric | Actual | Threshold | Regression | Status |\n';
-                body += '|--------|--------|-----------|------------|--------|\n';
-                for (const regression of report.comparisons.regressions) {
-                  const actual = formatNumber(regression.actual);
-                  const threshold = formatNumber(regression.threshold);
-                  const regressionPct = typeof regression.regression === 'number'
-                    ? `${regression.regression >= 0 ? '+' : ''}${regression.regression.toFixed(1)}%`
-                    : 'n/a';
-                  const status = regression.passed ? '✅' : '❌';
-                  body += `| ${regression.metric} | ${actual} | ${threshold} | ${regressionPct} | ${status} |\n`;
-                }
-                body += '\n';
-              }
-
-              if (report.comparisons?.regressions?.length) {
-                const failures = report.comparisons.regressions.filter(r => !r.passed);
-                if (failures.length > 0) {
-                  body += '#### ⚠️ Regressions\n\n';
-                  for (const regression of failures) {
-                    body += `- ${regression.metric}: ${regression.actual.toFixed(2)} > ${regression.threshold.toFixed(2)} (+${regression.regression.toFixed(1)}%)\n`;
-                  }
-                  body += '\n';
-                }
-              }
-
-              if (report.skips?.length) {
-                body += '#### Skipped Checks\n\n';
-                for (const skip of report.skips) {
-                  body += `- ${skip}\n`;
-                }
-                body += '\n';
-              }
-
-              body += `**Overall Status:** ${report.passed ? '✅ PASSED' : '❌ FAILED'}\n`;
-              if (report.timestamp) {
-                body += `\n_Generated at ${report.timestamp}_`;
-              }
-              body += '\n\n';
-            }
-
-            if (npmReport.report) {
-              const report = npmReport.report;
-              const formatBytes = value => (typeof value === 'number' ? `${(value / (1024 * 1024)).toFixed(1)}MB` : 'n/a');
-              const result = report.results?.unpackedSize;
-              const actual = result && typeof result.actual === 'number' ? formatBytes(result.actual) : 'n/a';
-              const threshold = result && typeof result.threshold === 'number' ? formatBytes(result.threshold) : 'n/a';
-              const usage = result && typeof result.usage === 'number' ? `${result.usage}%` : 'n/a';
-              const status = result ? (result.passed ? '✅' : '❌') : '⚠️';
-              const packageName = report.package?.name ?? 'unknown';
-              const packageVersion = report.package?.version ?? 'unknown';
-              const tarballSize = typeof report.package?.tarballBytes === 'number'
-                ? formatBytes(report.package.tarballBytes)
-                : 'n/a';
-
-              body += '### NPM Unpacked Size\n\n';
-              body += '| Metric | Actual | Threshold | Usage | Status |\n';
-              body += '|--------|--------|-----------|-------|--------|\n';
-              body += `| Unpacked Size | ${actual} | ${threshold} | ${usage} | ${status} |\n`;
-              body += `\n**Package:** ${packageName}@${packageVersion}\n`;
-              body += `**Tarball Size:** ${tarballSize}\n`;
-              if (typeof result?.headroomBytes === 'number' && typeof result?.headroomPercent === 'number') {
-                body += `**Headroom:** ${result.headroomBytes} bytes (${result.headroomPercent}%)\n`;
-              }
-
-              if (Array.isArray(report.warnings) && report.warnings.length > 0) {
-                body += '\n#### ⚠️ Size Warning\n\n';
-                for (const warning of report.warnings) {
-                  body += `- ${warning}\n`;
-                }
-              }
-
-              if (report.package?.largestFiles?.length) {
-                body += '\n#### Largest Packed Files\n\n';
-                body += '| File | Bytes |\n|------|-------|\n';
-                for (const file of report.package.largestFiles) {
-                  body += `| ${file.path} | ${file.size} |\n`;
-                }
-              }
-
-              if (Array.isArray(report.violations) && report.violations.length > 0) {
-                body += '\n#### ⚠️ Size Violations\n\n';
-                for (const violation of report.violations) {
-                  body += `- ${violation}\n`;
-                }
-              }
-
-              body += `\n**Overall Status:** ${report.passed ? '✅ PASSED' : '❌ FAILED'}`;
-              if (report.timestamp) {
-                body += `\n\n_Generated at ${report.timestamp}_`;
-              }
-              body += '\n\n';
-            }
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const botComment = comments.find(comment =>
-              comment.user.type === 'Bot' &&
-              comment.body.includes('## MCP Benchmarks')
-            );
-
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: body
-              });
-            }
-
-      - name: "Check Benchmark Results"
-        if: always()
-        shell: bash
-        run: |
-          failed=false
-
-          if [ "${CONTEXT_BENCHMARK_FAILED:-false}" = "true" ]; then
-            echo "::error::MCP context threshold benchmark failed - one or more thresholds were exceeded"
-            cat reports/context-benchmark.json || true
-            failed=true
-          else
-            echo "::notice::MCP context threshold benchmark passed - all thresholds satisfied"
-          fi
-
-          if [ "${TOOL_BENCHMARK_FAILED:-false}" = "true" ]; then
-            echo "::error::MCP tool throughput benchmark failed - performance regressions detected"
-            cat reports/tool-benchmark.json || true
-            failed=true
-          else
-            echo "::notice::MCP tool throughput benchmark passed - no regressions"
-          fi
-
-          if [ "${STARTUP_BENCHMARK_FAILED:-false}" = "true" ]; then
-            echo "::error::MCP startup benchmark failed - regressions detected"
-            cat reports/startup-benchmark.json || true
-            failed=true
-          else
-            echo "::notice::MCP startup benchmark passed - no regressions"
-          fi
-
-          if [ "${NPM_UNPACKED_SIZE_BENCHMARK_FAILED:-false}" = "true" ]; then
-            echo "::error::NPM unpacked size benchmark failed - threshold exceeded"
-            cat reports/npm-unpacked-size.json || true
-            failed=true
-          else
-            echo "::notice::NPM unpacked size benchmark passed - within threshold"
-            if [ -f reports/npm-unpacked-size.json ] && jq -e '(.warnings // []) | length > 0' reports/npm-unpacked-size.json >/dev/null; then
-              echo "::warning::NPM unpacked size headroom is low - see the benchmark report and PR size summary"
-            fi
-          fi
-
-          if [ "$failed" = "true" ]; then
-            exit 1
-          fi
-
-  # Clean-room pack+install proof that a consumer's
-  # `bun install -g @kaeawc/auto-mobile` reproduces the pinned runtime
-  # dependency graph (issue #5421, acceptance criterion 3). Extracted from the
-  # "MCP Benchmarks" job into its own job so "Pinned Runtime Graph" can be
-  # promoted to a required status check directly (it has no matrix, so it needs
-  # no roll-up gate) — the heavy pack+install still runs exactly once per PR. Same gating as
-  # benchmarks (ts_changed, minus the automated sha256-only PRs) so the
-  # verification exercises every source/dependency change without wedging the
-  # SHA256 bump chores.
-  runtime-graph-verification:
-    timeout-minutes: 20
-    name: "Pinned Runtime Graph"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Verify pinned runtime dependency graph (#5421)"
-        shell: bash
-        run: bash scripts/ci/verify-pinned-runtime-graph.sh
-
-      - name: "Upload Pinned Runtime Graph Report"
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: pinned-runtime-graph-report
-          path: ci-logs/pinned-runtime-graph.log
-          retention-days: 90
 
   # =============================================================================
   # WebRTC integration coverage (#4290 / #4328)

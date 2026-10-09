@@ -867,6 +867,13 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
   [[ "$output" == *"INVESTIGATE — unit shard hit its wall budget on both attempts of the in-job infra retry"* ]]
 }
 
+@test "investigates a Windows unit shard timeout in the required Windows build job (#10894)" {
+  runner_shutdown_fixture "Node TypeScript Build and Test (windows-latest)"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'TIMEOUT: unit shard 1 exceeded its wall-clock budget after a retry' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INVESTIGATE — unit shard hit its wall budget on both attempts of the in-job infra retry"* ]]
+}
+
 @test "investigates a unit shard killed by a signal on both attempts of its infra retry" {
   runner_shutdown_fixture "Node Unit Tests (ubuntu-latest)"
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'RETRY: unit shard 0 was killed by signal 9 (exit 137) after 300s; retrying once with the same budget\nFAIL: unit shard 0 exited with status 137 after a retry' bash "$SCRIPT" 123

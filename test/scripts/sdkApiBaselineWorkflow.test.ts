@@ -13,10 +13,10 @@ const build = readFileSync(
 for (const workflow of ["pull_request", "merge"]) {
   const path = `.github/workflows/${workflow}.yml`;
   const jobs = loadJobs(path);
-  // The PR lane runs the SDK consumer check inside Build JUnitRunner Library to
-  // save a runner slot (#10890); merge.yml still runs it as its own job.
+  // The PR lane runs the SDK consumer check inside JVM Consumer Checks to save a
+  // runner slot (#10890, #10894); merge.yml still runs it as its own job.
   const sdkJob =
-    workflow === "pull_request" ? "build-junit-runner-library" : "sdk-debug-inspector-consumer";
+    workflow === "pull_request" ? "jvm-consumer-checks" : "sdk-debug-inspector-consumer";
   const androidSteps = loadJobSteps(path, sdkJob);
   const isSdkStep = (step: { uses?: string; with?: Record<string, unknown> }): boolean =>
     step.uses === "./.github/actions/gradle-task-run" &&

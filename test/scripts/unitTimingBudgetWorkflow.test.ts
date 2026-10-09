@@ -68,10 +68,16 @@ test("timing budget runs on the leg that produced the reports, not a separate jo
   // A separate job cost a runner slot, queue wait, checkout and bun install
   // per PR just to download these JUnit reports.
   expect(prJobs["node-unit-timing-budget"]).toBeUndefined();
+  // No other PR job runs the timing validator (the Windows unit lane is in
+  // mcp-build-and-test, #10894).
   expect(
-    (prJobs["node-unit-tests"].steps ?? []).some((step) =>
-      step.run?.includes("scripts/validate-bun-test-timings.sh"),
-    ),
+    Object.entries(prJobs)
+      .filter(([id]) => id !== "ts-build-and-test")
+      .some(([, job]) =>
+        (job.steps ?? []).some((step) =>
+          step.run?.includes("scripts/validate-bun-test-timings.sh"),
+        ),
+      ),
   ).toBe(false);
   const laneIndex = budgetSteps.findIndex((step) =>
     step.run?.includes("bash scripts/test-ts.sh unit"),

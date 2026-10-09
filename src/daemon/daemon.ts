@@ -112,6 +112,8 @@ import {
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { clearSessionAppearanceConfig } from "../server/appearanceManager";
+import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { NetworkState } from "../server/NetworkState";
 import { registerNetworkStateSessionCleanup } from "../server/networkStateSessionCleanup";
 import { registerPerformanceMonitorSessionCleanup } from "../server/performanceMonitorSessionCleanup";
@@ -220,6 +222,7 @@ import {
   startAppearanceSyncScheduler,
   syncAppearanceForDevice,
   stopAppearanceSyncScheduler,
+  type AppearanceSyncTarget,
 } from "./AppearanceSyncScheduler";
 import {
   startPerformanceMonitor,
@@ -819,6 +822,7 @@ export class Daemon {
             name: device.id,
             platform: "android",
             incarnation: device.incarnation,
+            sessionKey: resolveAppearanceSessionKey(session.sessionId),
           });
         }
       }
@@ -877,7 +881,34 @@ export class Daemon {
         this.shutdownReleaseNotifications?.add(sessionId);
       }
       SessionReleaseBroadcaster.emit(sessionId, releaseReason, snapshot);
+      // A session that is gone for good takes its appearance config with it (#10976). A derived
+      // `${base}:${label}` session stores none, so its release clears nothing.
+      if (snapshot.terminal) {
+        clearSessionAppearanceConfig(sessionId).catch((error: unknown) => {
+          logger.warn(`[Appearance] Failed to drop config of released session ${sessionId}`, error);
+        });
+      }
     });
+  }
+
+  /** Devices host appearance sync may touch, each tagged with the session whose config applies. */
+  private getAppearanceSyncTargets(): AppearanceSyncTarget[] {
+    return this.devicePool
+      .getAllDevices()
+      .filter(
+        (device) =>
+          device.platform === "android" &&
+          this.passiveWorkPolicy.allows("android", "appearance-sync", device.id),
+      )
+      .map((device) => ({
+        deviceId: device.id,
+        name: device.id,
+        platform: "android",
+        incarnation: device.incarnation,
+        sessionKey: resolveAppearanceSessionKey(
+          this.sessionManager.getSessionForDevice(device.id) ?? undefined,
+        ),
+      }));
   }
 
   private applyRuntimeOptions(options: DaemonOptions): void {
@@ -1146,20 +1177,7 @@ export class Daemon {
     startupBenchmark.endPhase("auxiliarySocketServerStart");
 
     startAppearanceSyncScheduler({
-      getTargets: () =>
-        this.devicePool
-          .getAllDevices()
-          .filter(
-            (device) =>
-              device.platform === "android" &&
-              this.passiveWorkPolicy.allows("android", "appearance-sync", device.id),
-          )
-          .map((device) => ({
-            deviceId: device.id,
-            name: device.id,
-            platform: "android",
-            incarnation: device.incarnation,
-          })),
+      getTargets: () => this.getAppearanceSyncTargets(),
       isEnabled: () => this.passiveWorkPolicy.isAppearanceSyncEnabled(),
     });
     startPerformanceMonitor();

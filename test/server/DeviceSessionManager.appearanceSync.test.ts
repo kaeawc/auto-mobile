@@ -123,6 +123,26 @@ describe("appearance sync on device readiness", () => {
     expect(dependencies.apply).not.toHaveBeenCalled();
   });
 
+  test("applyOnConnect reads the connecting session's own config only (#10976)", async () => {
+    const { device, dependencies } = harness("android");
+    const configs: Record<string, AppearanceConfig> = {
+      "session-a": { syncWithHost: true, defaultMode: "dark", applyOnConnect: true },
+      "session-b": { syncWithHost: true, defaultMode: "dark", applyOnConnect: false },
+    };
+    const getConfig = mock(async (sessionKey?: string) => configs[sessionKey ?? ""]!);
+
+    expect(
+      await applyAppearanceOnConnect(device, { ...dependencies, getConfig }, "session-b"),
+    ).toBeNull();
+    expect(getConfig).toHaveBeenCalledWith("session-b");
+    expect(dependencies.apply).not.toHaveBeenCalled();
+
+    expect(
+      await applyAppearanceOnConnect(device, { ...dependencies, getConfig }, "session-a"),
+    ).toBe("dark");
+    expect(dependencies.apply).toHaveBeenCalledTimes(1);
+  });
+
   test("an injected switch disables connect without changing process.env", async () => {
     const { device, dependencies } = harness("android");
     expect(

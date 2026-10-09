@@ -52,11 +52,19 @@ export function resolveIsolatedDaemonStatePath(
   return `/tmp/auto-mobile-daemon-${userId}${resolveDaemonIsolationSuffix(env)}.${extension}`;
 }
 
-const DAEMON_STATE_PATH_OVERRIDE_ENV = {
-  sock: ["AUTOMOBILE_DAEMON_SOCKET_PATH", "AUTO_MOBILE_DAEMON_SOCKET_PATH"],
-  pid: ["AUTOMOBILE_DAEMON_PID_FILE_PATH", "AUTO_MOBILE_DAEMON_PID_FILE_PATH"],
-  lock: ["AUTOMOBILE_DAEMON_LOCK_FILE_PATH", "AUTO_MOBILE_DAEMON_LOCK_FILE_PATH"],
-} as const;
+function readDaemonStatePathOverride(
+  extension: "sock" | "pid" | "lock",
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  switch (extension) {
+    case "sock":
+      return env.AUTOMOBILE_DAEMON_SOCKET_PATH ?? env.AUTO_MOBILE_DAEMON_SOCKET_PATH;
+    case "pid":
+      return env.AUTOMOBILE_DAEMON_PID_FILE_PATH ?? env.AUTO_MOBILE_DAEMON_PID_FILE_PATH;
+    case "lock":
+      return env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH ?? env.AUTO_MOBILE_DAEMON_LOCK_FILE_PATH;
+  }
+}
 
 /**
  * Effective daemon state-file path: an explicit `AUTOMOBILE_DAEMON_*_PATH` override
@@ -70,8 +78,7 @@ export function resolveDaemonStatePath(
   env: NodeJS.ProcessEnv = process.env,
   userId: string = uid,
 ): string {
-  const [primary, legacy] = DAEMON_STATE_PATH_OVERRIDE_ENV[extension];
-  const override = env[primary] ?? env[legacy];
+  const override = readDaemonStatePathOverride(extension, env);
   return override
     ? resolvePathFromDaemonLaunchWorkingDirectory(override, env)
     : resolveIsolatedDaemonStatePath(extension, env, userId);

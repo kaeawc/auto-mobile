@@ -23,7 +23,10 @@ import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { KeyboardOcclusionError } from "../../../src/models/KeyboardOcclusionError";
-import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
+import type {
+  ViewHierarchyNode,
+  ViewHierarchyResult,
+} from "../../../src/models/ViewHierarchyResult";
 import {
   capturedBounds,
   iosKeyboardCapture,
@@ -37,7 +40,7 @@ import type {
   HierarchyDelegateContext,
 } from "../../../src/features/observe/android/types";
 import * as skeletonProjection from "../../../src/features/observe/output/SkeletonProjection";
-import retainedKeyboard from "../../fixtures/observe-output/ios-ipad-keyboard/observe-keyboard-up.json";
+import { iosKeyboardVisibleHierarchy } from "../../fixtures/observe/iosKeyboardStates";
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 
 const capturedImeHierarchy = () =>
@@ -191,6 +194,7 @@ async function executeAt(
     selectionStrategy,
     index,
     selectorText,
+    layer,
   }: {
     withIme?: boolean;
     platform?: "android" | "ios";
@@ -211,6 +215,7 @@ async function executeAt(
     index?: number;
     /** The text tapOn is given, when it differs from the `label` that locates the fixture node. */
     selectorText?: string;
+    layer?: "app" | "overlay";
   } = {},
 ) {
   const hierarchy = fixture ?? imeOcclusionHierarchy(withIme);
@@ -318,6 +323,7 @@ async function executeAt(
       display,
       selectionStrategy,
       index,
+      layer,
       searchUntil: { duration: 100 },
     },
     undefined,
@@ -687,64 +693,153 @@ test("iOS elementId selection behind the docked keyboard dispatches no tap", asy
   expect(points).toEqual([]);
 });
 
-describe("retained iPad keyboard with observe capture provenance", () => {
-  test.each([
-    { label: "Q", elementId: "s2-461eddd061a03b92", point: { x: 119, y: 937 } },
-    { label: "Tab", elementId: "tab", point: { x: 46, y: 937 } },
-    { label: "Emoji", elementId: "emoji", point: { x: 40, y: 1128 } },
-    { label: "Hide keyboard", elementId: "s2-457d0bcd3ce31237", point: { x: 769, y: 1128 } },
-  ])(
-    "$label uses the selected capture's keyboard ancestry",
-    async ({ label, elementId, point }) => {
-      const hierarchy = capturedIpadKeyboard();
-      const { result, points } = await executeAt(label, {
-        platform: "ios",
-        fixture: hierarchy,
-        screenSize: { width: 820, height: 1180 },
-        elementId,
-        realSelector: true,
+// ObserveScreen.identifyCapture registers each observed iOS capture, and the
+// selector then resolves elements from that registration's projected tree while
+// the observation keeps the original. The IME guard must recover the selected
+// key's ancestry from whichever tree the selection came from.
+describe("captured iOS keyboard selected through a registered observe capture", () => {
+  // `q` in ios-keyboard-visible.raw.json: UIKeyboard > UIKeyboardLayoutStar Preview > q.
+  const keyQ = { elementId: "s2-f4f27f88982be7ea", point: { x: 23, y: 624 } };
+  const appQ = "synthetic-app-q";
+  const overlayDismiss = "automobile-overlay-dismiss";
+
+  test("default layer taps the keyboard key", async () => {
+    const { result, points } = await executeAt("q", {
+      ...registeredIos(registeredKeyboardCapture()),
+      elementId: keyQ.elementId,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.element["view-id"]).toBe(keyQ.elementId);
+    expect(points).toEqual([keyQ.point]);
+  });
+
+  test.each([undefined, "app"] as const)(
+    "with an AutoMobile overlay showing, layer %p taps the keyboard key",
+    async (layer) => {
+      const { result, points } = await executeAt("q", {
+        ...registeredIos(registeredKeyboardCapture({ overlay: true })),
+        elementId: keyQ.elementId,
+        layer,
       });
       expect(result.error).toBeUndefined();
       expect(result.success).toBe(true);
-      expect(result.element["view-id"]).toBe(elementId);
-      expect(points).toEqual([point]);
+      expect(result.element["view-id"]).toBe(keyQ.elementId);
+      expect(points).toEqual([keyQ.point]);
     },
   );
 
-  test("an app Q sibling with the key's exact bounds is still refused without dispatch", async () => {
-    const { result, points, actionError } = await executeAt("Q", {
-      platform: "ios",
-      fixture: capturedIpadKeyboard(),
-      screenSize: { width: 820, height: 1180 },
-      elementId: "app-q",
-      realSelector: true,
+  test('with an AutoMobile overlay showing, layer "overlay" does not reach the keyboard key', async () => {
+    const { result, points } = await executeAt("q", {
+      ...registeredIos(registeredKeyboardCapture({ overlay: true })),
+      elementId: keyQ.elementId,
+      layer: "overlay",
     });
-    expect(actionError).toBeInstanceOf(KeyboardOcclusionError);
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Target "Q" is covered by the soft keyboard');
+    expect(result.error).not.toContain("covered by the soft keyboard");
     expect(points).toEqual([]);
   });
-});
 
-function capturedIpadKeyboard(): ViewHierarchyResult {
-  const hierarchy = structuredClone(retainedKeyboard.viewHierarchy) as ViewHierarchyResult;
-  // Synthetic app sibling deliberately shares Q's label, bounds and absent native ID.
-  // It follows the keyboard so a bounds-only match would wrongly exempt it.
-  hierarchy.hierarchy.node = [
-    ...retainedKeyboard.viewHierarchy.hierarchy.node.map((node) => structuredClone(node)),
-    {
-      className: "UIButton",
-      clickable: "true",
-      text: "Q",
-      "view-id": "app-q",
-      bounds: { left: 87, top: 905, right: 152, bottom: 969 },
+  // iOS keys carry no input-method package, so a text selector still resolves the key.
+  test.each([
+    { layer: undefined, overlay: false },
+    { layer: undefined, overlay: true },
+    { layer: "app", overlay: true },
+  ] as const)(
+    'text "q" taps the keyboard key (layer $layer, overlay $overlay)',
+    async ({ layer, overlay }) => {
+      const { result, points } = await executeAt("q", {
+        ...registeredIos(registeredKeyboardCapture({ overlay })),
+        layer,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.success).toBe(true);
+      expect(result.element["view-id"]).toBe(keyQ.elementId);
+      expect(points).toEqual([keyQ.point]);
     },
-  ];
-  // ObserveScreen registers this projection but retains the original hierarchy.
-  // The real selector uses snapshot nodes, which have different source identities.
-  identifyObservedHierarchy("ios", hierarchy, "fresh", new FakeTimer());
-  return hierarchy;
-}
+  );
+
+  test.each([
+    { layer: undefined, overlay: false },
+    { layer: undefined, overlay: true },
+    { layer: "app", overlay: true },
+  ] as const)(
+    "an app q sharing the key's bounds stays refused (layer $layer, overlay $overlay)",
+    async ({ layer, overlay }) => {
+      const { result, points, actionError } = await executeAt("q", {
+        ...registeredIos(registeredKeyboardCapture({ overlay, appQ: true })),
+        elementId: appQ,
+        layer,
+      });
+      expect(actionError).toBeInstanceOf(KeyboardOcclusionError);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Target "q" is covered by the soft keyboard');
+      expect(points).toEqual([]);
+    },
+  );
+
+  function registeredIos(fixture: ViewHierarchyResult) {
+    return {
+      platform: "ios" as const,
+      fixture,
+      screenSize: { width: 402, height: 874 },
+      realSelector: true,
+    };
+  }
+
+  /**
+   * The captured visible-keyboard hierarchy, registered as ObserveScreen registers it.
+   * `appQ` and `overlay` add SYNTHETIC scaffolding (no captured fixture has either):
+   * - `appQ`: an app button after the keyboard sharing the `q` key's label and bounds,
+   *   outside the keyboard subtree, so a bounds-only match would wrongly exempt it.
+   * - `overlay`: wraps the app's top-level nodes in a UIWindow and adds a second small
+   *   UIWindow holding the overlay agent's dismiss control, the unconverted XCUITest
+   *   shape `scopeHierarchyToLayer` recognizes as AutoMobile's own overlay.
+   */
+  function registeredKeyboardCapture({
+    overlay = false,
+    appQ: withAppQ = false,
+  }: { overlay?: boolean; appQ?: boolean } = {}): ViewHierarchyResult {
+    const hierarchy = structuredClone(iosKeyboardVisibleHierarchy);
+    const root = hierarchy.hierarchy as ViewHierarchyNode;
+    const children = Array.isArray(root.node) ? root.node : root.node ? [root.node] : [];
+    const app: ViewHierarchyNode[] = withAppQ
+      ? [
+          ...children,
+          {
+            className: "UIButton",
+            clickable: "true",
+            text: "q",
+            "view-id": appQ,
+            bounds: { left: 4, top: 597, right: 43, bottom: 651 },
+          },
+        ]
+      : children;
+    root.node = overlay
+      ? [
+          {
+            className: "UIWindow",
+            bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+            node: app,
+          },
+          {
+            className: "UIWindow",
+            bounds: { left: 300, top: 20, right: 390, bottom: 56 },
+            node: {
+              className: "UIButton",
+              clickable: "true",
+              text: "Dismiss",
+              "resource-id": overlayDismiss,
+              "view-id": overlayDismiss,
+              bounds: { left: 300, top: 20, right: 390, bottom: 56 },
+            },
+          },
+        ]
+      : app;
+    identifyObservedHierarchy("ios", hierarchy, "fresh", new FakeTimer());
+    return hierarchy;
+  }
+});
 
 // No existing captured fixture contains a dialog over a list: build this tree inline.
 function dialogOverRow(

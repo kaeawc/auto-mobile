@@ -17,7 +17,10 @@ const DEFAULT_RETRY_AFTER_MS = 5_000;
 const DEFAULT_SUSTAINED_SAMPLES = 3;
 
 export type CapacityDecision =
-  /** A compatible booted simulator exists; reuse it instead of booting. */
+  /**
+   * A compatible booted simulator exists; reuse it instead of booting. From
+   * `waitForCapacity` it is only returned once a new boot also fits the limit.
+   */
   | { outcome: "reuse-warm"; udid: string }
   /** A new boot fits within capacity. */
   | { outcome: "allow"; limits: CapacityLimits; bootedCount: number }
@@ -102,13 +105,25 @@ export class IosSimCapacityGate implements SimulatorCapacityGate {
   }
 
   async evaluateBoot(request: WarmDeviceRequest = {}): Promise<CapacityDecision> {
-    return this.decide(await this.refresh(), request);
+    return this.decide(await this.refresh(), request, "substitute");
   }
 
-  /** Synchronous so a waiter can decide and record its admission without an interleaving. */
-  private decide(report: FleetCostReport, request: WarmDeviceRequest = {}): CapacityDecision {
-    const warm = findWarmCompatibleDevices(report, request)[0];
-    if (warm) {
+  /**
+   * Synchronous so a waiter can decide and record its admission without an interleaving.
+   *
+   * `substitute` is for a caller that uses the warm device instead of booting, so
+   * a warm match wins even at capacity. `hint` is for a caller that boots its own
+   * device regardless (`waitForCapacity`): there the limit is checked first and a
+   * warm match is only reported once a boot fits, or it would push the fleet past
+   * `maxBooted` (#11100).
+   */
+  private decide(
+    report: FleetCostReport,
+    request: WarmDeviceRequest | undefined,
+    warmMatch: "substitute" | "hint",
+  ): CapacityDecision {
+    const warm = findWarmCompatibleDevices(report, request ?? {})[0];
+    if (warm && warmMatch === "substitute") {
       return { outcome: "reuse-warm", udid: warm.udid };
     }
     const limits = this.limitsFor(report);
@@ -124,7 +139,9 @@ export class IosSimCapacityGate implements SimulatorCapacityGate {
         message: queued.message,
       };
     }
-    return { outcome: "allow", limits, bootedCount };
+    return warm
+      ? { outcome: "reuse-warm", udid: warm.udid }
+      : { outcome: "allow", limits, bootedCount };
   }
 
   async waitForCapacity(
@@ -136,7 +153,7 @@ export class IosSimCapacityGate implements SimulatorCapacityGate {
       options.signal?.throwIfAborted();
       const report = await this.refreshWithin(options, startedAt);
       options.signal?.throwIfAborted();
-      const decision = this.decide(report, request);
+      const decision = this.decide(report, request, "hint");
       const waitedMs = this.timer.now() - startedAt;
       if (decision.outcome !== "queue") {
         return { decision, waitedMs, timedOut: false, releaseAdmission: this.admit(options) };

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { resolve } from "node:path";
 import type { BootedDevice } from "../../../src/models";
 import { DeviceState } from "../../../src/features/utility/DeviceState";
 import { CAMERA_POSTER_POSE_WARNING } from "../../../src/features/utility/DeviceCameraPoster";
@@ -8,8 +9,11 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 const emulator: BootedDevice = { platform: "android", deviceId: "emulator-5554", name: "Pixel" };
 const physical: BootedDevice = { platform: "android", deviceId: "R58M12ABCDE", name: "Phone" };
 const ios: BootedDevice = { platform: "ios", deviceId: "12345678-1234", name: "iPhone" };
+// The tool resolves the poster path on the host, so on Windows "/img/poster.png" becomes
+// "<drive>:\img\poster.png". Build the fixture the same way to stay platform-native.
+const POSTER_PATH = resolve("/img/poster.png");
 
-function setup(device: BootedDevice = emulator, files: string[] = ["/img/poster.png"]) {
+function setup(device: BootedDevice = emulator, files: string[] = [POSTER_PATH]) {
   const adbFactory = new FakeAdbClientFactory();
   const written: string[] = [];
   const state = new DeviceState(device, {
@@ -29,15 +33,15 @@ describe("setDeviceState cameraPoster", () => {
   test("sets an image poster on the wall through the emulator console", async () => {
     const { client, state } = setup();
     const result = await state.setState({
-      cameraPoster: { mode: "image", path: "/img/poster.png" },
+      cameraPoster: { mode: "image", path: POSTER_PATH },
     });
-    expect(client.getAllCommands()).toEqual(["emu virtualscene-image wall /img/poster.png"]);
+    expect(client.getAllCommands()).toEqual([`emu virtualscene-image wall ${POSTER_PATH}`]);
     expect(result.success).toBe(true);
     expect(result.cameraPoster).toMatchObject({
       supported: true,
       mode: "image",
       surface: "wall",
-      path: "/img/poster.png",
+      path: POSTER_PATH,
       method: "android_emulator_console",
       warning: CAMERA_POSTER_POSE_WARNING,
     });
@@ -66,11 +70,11 @@ describe("setDeviceState cameraPoster", () => {
   test("surfaces a console refusal with the virtualscene hint", async () => {
     const { client, state } = setup();
     client.setCommandResult(
-      "emu virtualscene-image wall /img/poster.png",
+      `emu virtualscene-image wall ${POSTER_PATH}`,
       "KO: virtual scene camera is not enabled\n",
     );
     const result = await state.setState({
-      cameraPoster: { mode: "image", path: "/img/poster.png" },
+      cameraPoster: { mode: "image", path: POSTER_PATH },
     });
     expect(result.success).toBe(false);
     expect(result.error).toContain("KO: virtual scene camera is not enabled");

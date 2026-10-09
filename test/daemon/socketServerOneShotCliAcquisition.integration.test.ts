@@ -45,6 +45,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const DEVICE_ID = "emulator-5554";
+const AVD_NAME = "Agent_AVD";
 
 interface Harness {
   db: Kysely<Database>;
@@ -75,7 +76,7 @@ async function createHarness(): Promise<Harness> {
   const manager = new SessionManager(timer, repository, () => barrier);
   const devices = new FakeDeviceManager(
     [],
-    [{ deviceId: DEVICE_ID, name: "Agent AVD", platform: "android" }],
+    [{ deviceId: DEVICE_ID, name: AVD_NAME, platform: "android" }],
   );
   const pool = new DevicePool(
     createDevicePoolDependencies(manager, "one-shot-cli-daemon", {
@@ -94,6 +95,16 @@ async function createHarness(): Promise<Harness> {
   const matcher = new FakeDeviceMatcher();
   const deviceUtils = new FakeDeviceUtils();
   deviceUtils.setBootedDevices("android", devices.bootedDevices);
+  // The booted emulator's AVD is in the image inventory, so acquisitions resolve its source
+  // image as they do on a real host (#11138).
+  const image = {
+    name: AVD_NAME,
+    platform: "android" as const,
+    isRunning: true,
+    source: "local" as const,
+  };
+  deviceUtils.setDeviceImages("android", [image]);
+  matcher.setImageResult(image);
   matcher.setBootedResult(devices.bootedDevices[0]);
   DaemonState.getInstance().initialize(manager, pool);
   setDeviceToolsDependencies({
@@ -138,11 +149,14 @@ function connect(h: Harness): DaemonClient {
 }
 
 /** A one-shot `--cli` invocation: its own connection, marked one-shot, closed afterwards. */
-async function oneShotCliGetAndroid(h: Harness): Promise<unknown> {
+async function oneShotCliGetAndroid(
+  h: Harness,
+  target: Record<string, unknown> = { deviceId: DEVICE_ID },
+): Promise<unknown> {
   const client = connect(h);
   try {
     return await client.callTool("getAndroid", {
-      deviceId: DEVICE_ID,
+      ...target,
       [DAEMON_ONE_SHOT_CLI_PARAM]: true,
     });
   } finally {
@@ -176,16 +190,39 @@ describe("one-shot CLI acquisition through the daemon socket (#11096)", () => {
     await h.db.destroy();
   });
 
-  test("a second one-shot CLI call for the same device reuses the first call's session", async () => {
-    const first = getDeviceSessionIdFromResult(await oneShotCliGetAndroid(h));
-    expect(first).toBeDefined();
+  // #11138: an acquisition that resolves a source image (an AVD name, or a booted serial the pool
+  // knows the AVD of) hit the "freshly started device" guard instead of the anonymous reuse.
+  test.each([
+    { name: "avdName", target: { avdName: AVD_NAME } },
+    { name: "deviceId of an already-booted AVD", target: { deviceId: DEVICE_ID } },
+  ])(
+    "a second one-shot CLI getAndroid by $name reuses the first call's session",
+    async ({ target }) => {
+      const first = getDeviceSessionIdFromResult(await oneShotCliGetAndroid(h, target));
+      expect(first).toBeDefined();
 
-    const second = await settle(oneShotCliGetAndroid(h));
+      const second = await settle(oneShotCliGetAndroid(h, target));
 
-    expect(second).not.toBeInstanceOf(Error);
-    expect(getDeviceSessionIdFromResult(second)).toBe(first);
-    expect(h.pool.getDevice(DEVICE_ID)?.sessionId).toBe(first);
-    expect(h.manager.getActiveSessionCount()).toBe(1);
+      expect(second).not.toBeInstanceOf(Error);
+      expect(getDeviceSessionIdFromResult(second)).toBe(first);
+      expect(h.pool.getDevice(DEVICE_ID)?.sessionId).toBe(first);
+      expect(h.manager.getActiveSessionCount()).toBe(1);
+    },
+  );
+
+  test("a device an MCP connection acquired by AVD name is refused to a one-shot CLI call", async () => {
+    const mcp = connect(h);
+    const held = getDeviceSessionIdFromResult(
+      await mcp.callTool("getAndroid", { avdName: AVD_NAME }),
+    );
+    expect(held).toBeDefined();
+
+    const refusal = await settle(oneShotCliGetAndroid(h, { avdName: AVD_NAME }));
+
+    expect(getDeviceSessionIdFromResult(refusal)).toBeUndefined();
+    const text = refusal instanceof Error ? refusal.message : errorText(refusal);
+    expect(text).toContain("already assigned to another session");
+    expect(h.pool.getDevice(DEVICE_ID)?.sessionId).toBe(held);
   });
 
   test("a device an MCP connection holds is refused to a one-shot CLI call", async () => {

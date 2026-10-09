@@ -161,6 +161,51 @@ class AllocatingDeviceActionsTest {
     assertNull(allocatingClientProvider(null, { allocation }, { DESKTOP_SESSION }))
   }
 
+  // -- Device-control session (taps, swipes, keys, text), #10730 --
+
+  @Test
+  fun `a control input allocates its device before it reaches the daemon`() {
+    val control = inputAllocatingClient({ client }) { allocation }!!
+
+    control.inputTap(1.0, 2.0, "android", "emulator-5554")
+
+    assertEquals(listOf("emulator-5554@0"), allocations)
+    assertEquals(1, client.inputTapCalls.size)
+  }
+
+  @Test
+  fun `a refused allocation drops the control input and sends nothing`() {
+    allowed = false
+    val control = inputAllocatingClient({ client }) { allocation }!!
+
+    val result = control.inputTap(1.0, 2.0, "android", "emulator-5554")
+
+    assertEquals(listOf("emulator-5554@0"), allocations)
+    assertTrue(client.inputTapCalls.isEmpty())
+    assertEquals(false, result.success)
+  }
+
+  @Test
+  fun `each minted control client reads the current allocation`() {
+    var current = allocation
+    val refusing = DesktopInputAllocation { false }
+
+    assertTrue(
+      inputAllocatingClient({ client }) { current }!!.inputTap(1.0, 2.0, "android", "e").success,
+    )
+    current = refusing
+    assertEquals(
+      false,
+      inputAllocatingClient({ client }) { current }!!.inputTap(1.0, 2.0, "android", "e").success,
+    )
+    assertEquals(1, client.inputTapCalls.size)
+  }
+
+  @Test
+  fun `no client provider means no control client`() {
+    assertNull(inputAllocatingClient(null) { allocation })
+  }
+
   // -- Appearance --
 
   private class RecordingAppearanceClient(private val log: MutableList<String>) : AppearanceClient {

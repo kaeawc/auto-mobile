@@ -338,6 +338,19 @@ wiring_requires_yq() {
   [[ ! -e ".github/workflows/webrtc-device-integration.yml" ]]
 }
 
+@test "iOS WHEP capture runs on Namespace macOS for same-repo PRs with heavy-lane and fork fallbacks (#11012)" {
+  wiring_requires_yq
+  run yq -r '.jobs."ios-device-webrtc"."runs-on"' "$WF"
+  [ "$status" -eq 0 ]
+  local same="github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository"
+  [ "$output" = "\${{ (${same} && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (${same} && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('[\"self-hosted\",\"automobile-mac-heavy\"]') || 'macos-26' }}" ]
+  run yq -r '.jobs."ios-device-webrtc"."timeout-minutes"' "$WF"
+  [ "$output" -le 30 ]
+  # No CircleCI copy (#11012).
+  run yq -r '.jobs | has("ios-device-webrtc")' .circleci/continue_config.yml
+  [ "$output" = "false" ]
+}
+
 @test "PR WebRTC device jobs share path and opt-in gating" {
   local block
   block="$(job_block android-device-webrtc)"

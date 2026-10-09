@@ -37,7 +37,13 @@ describe("root SPM toolchain floor workflow", () => {
       .map(([name]) => name);
 
     expect(selfHostedJobs.sort()).toEqual(
-      [...ORIGINAL_SELF_HOSTED_JOBS, ...SMALL_POOL_JOBS, ...HEAVY_LANE_JOBS].sort(),
+      [
+        ...ORIGINAL_SELF_HOSTED_JOBS,
+        ...SMALL_POOL_JOBS,
+        ...HEAVY_LANE_JOBS,
+        // Namespace macOS first; heavy lane only as its documented fallback (#11012).
+        "ios-device-webrtc",
+      ].sort(),
     );
   });
 
@@ -65,7 +71,7 @@ describe("root SPM toolchain floor workflow", () => {
     const heavy = Object.entries(jobs)
       .filter(([, job]) => JSON.stringify(job["runs-on"] ?? "").includes("automobile-mac-heavy"))
       .map(([name]) => name);
-    expect(heavy.sort()).toEqual([...HEAVY_LANE_JOBS].sort());
+    expect(heavy.sort()).toEqual([...HEAVY_LANE_JOBS, "ios-device-webrtc"].sort());
     for (const name of [...SMALL_POOL_JOBS, ...HEAVY_LANE_JOBS]) {
       const runsOn = String(jobs[name]?.["runs-on"]);
       const label = HEAVY_LANE_JOBS.includes(name) ? HEAVY_LABEL : SMALL_LABEL;

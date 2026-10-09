@@ -15,6 +15,7 @@ GitHub `macos-26` is the fallback for fork PRs only.
 | CircleCI `m4pro.medium`                | 1 macOS job at a time                  | PR Playground tests, all post-merge and nightly macOS work |
 | Self-hosted Mac `automobile-mac`       | N runner processes (N = 4 recommended) | Small, non-simulator PR jobs                               |
 | Self-hosted Mac `automobile-mac-heavy` | exactly 1 runner process               | PR xcodebuild and simulator jobs, one at a time            |
+| Namespace `auto-mobile-macos`          | 1 macOS job (trial)                    | iOS Device Capture to WHEP                                 |
 
 ## CircleCI (#11010)
 
@@ -134,6 +135,47 @@ own work. Memory (128 GiB) is not the limit. That is five runner processes in
 total: the existing `mac` runner plus three new small runners, and one heavy
 runner.
 
+## Namespace macOS (#11012)
+
+iOS Device Capture to WHEP (`ios-device-webrtc`) runs on the Namespace profile
+`namespace-profile-auto-mobile-macos` for owner-authored same-repository PRs.
+The Namespace trial allows one macOS job at a time (6 vCPU / 14 GB, billed at
+10× the Linux rate), and WHEP fires only on WebRTC changes, so it rarely waits
+for that slot. The CircleCI copy is gone.
+
+Routing, in order:
+
+1. Same-repo PR, `NAMESPACE_RUNNERS_DISABLED` not `true` and
+   `IOS_WEBRTC_HEAVY_LANE` not `true`: Namespace macOS.
+2. Same-repo PR otherwise, with `AUTOMOBILE_MAC_POOLS_ENABLED=true`: the heavy
+   self-hosted lane (the documented fallback, for example if ScreenCaptureKit
+   cannot capture on the Namespace VM).
+3. Everything else, including forks: hosted `macos-26`.
+
+The job keeps its one capture retry for the known ScreenCaptureKit flake and has
+a 30-minute timeout. On the heavy lane it isolates `HOME` like the other
+self-hosted jobs, but it still starts an AutoMobile daemon and MediaMTX on fixed
+ports, so use that fallback only with the heavy runner under a dedicated user.
+
+## Job → runner, before and after
+
+| Job                                                                            | Before (same-repo PR)                        | After (same-repo PR)                       | Fork PR        |
+| ------------------------------------------------------------------------------ | -------------------------------------------- | ------------------------------------------ | -------------- |
+| SwiftLint, Swift Code Coverage                                                 | self-hosted `automobile-mac`                 | self-hosted `automobile-mac`               | `macos-26`     |
+| Build Desktop App / Installer Minimal (macOS)                                  | self-hosted `automobile-mac`                 | self-hosted `automobile-mac`               | `macos-latest` |
+| Swift Packages (Xcode 26.5)                                                    | hosted `macos-26` + CircleCI mirror          | self-hosted `automobile-mac`               | `macos-26`     |
+| Build Root SPM Package                                                         | hosted `macos-26` + CircleCI mirror          | self-hosted `automobile-mac`               | `macos-26`     |
+| Build Xcode Projects (Playground, CtrlProxy)                                   | hosted `macos-26` + CircleCI mirror          | self-hosted `automobile-mac-heavy`         | `macos-26`     |
+| Prototype Simulator iOS 26                                                     | CircleCI                                     | self-hosted `automobile-mac-heavy`         | `macos-26`     |
+| iOS Playground Tests                                                           | CircleCI (GitHub `macos-26` if label-forced) | CircleCI (heavy lane if label-forced)      | CircleCI       |
+| iOS Device Capture to WHEP                                                     | hosted `macos-26` + CircleCI mirror          | Namespace `auto-mobile-macos`              | `macos-26`     |
+| XCTestRunner Simulator Tests (`run-ios-sim`)                                   | hosted `macos-26`                            | hosted `macos-26` (exception, see above)   | `macos-26`     |
+| merge.yml: Build Desktop App (macOS), Generate/Build Xcode Projects            | dormant (`if: false`)                        | CircleCI post-merge, path-gated, coalesced | n/a            |
+| nightly.yml: macOS BATS/Node, Xcode sweeps, TSan, XCTestRunner Simulator Tests | hosted `macos-latest` / `macos-26`           | CircleCI `nightly-macos`                   | n/a            |
+
+The "After" self-hosted and Namespace placements take effect once the owner steps
+below are done; until then the moved jobs run on hosted `macos-26`.
+
 ## Owner steps
 
 These need a login or a credential, so they were not done in the change.
@@ -216,3 +258,18 @@ the Mac as the user that owns `~/actions-runner`:
 
 6. Turn the routing on: `gh variable set AUTOMOBILE_MAC_POOLS_ENABLED --body true`.
    To fall back to hosted runners, set it to anything else.
+
+### Namespace macOS
+
+1. In the Namespace dashboard, create a macOS (Apple Silicon) runner profile
+   named `auto-mobile-macos`, so jobs can request
+   `namespace-profile-auto-mobile-macos`. Do this **before** merging: with the
+   kill switch off, a same-repo WebRTC PR otherwise waits for a profile that does
+   not exist.
+2. Run one WebRTC PR (or add the `webrtc` label) and confirm
+   `iOS Device Capture to WHEP` captures on the Namespace VM (ScreenCaptureKit
+   needs a window server session; the job's simulator-window probe fails loudly
+   if it is missing).
+3. If it cannot capture, set `gh variable set IOS_WEBRTC_HEAVY_LANE --body true`
+   (heavy self-hosted lane) and record why in #11012.
+4. Check the macOS minute cost against the trial/plan on the Namespace usage page.

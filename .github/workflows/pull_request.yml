@@ -3347,13 +3347,34 @@ jobs:
     name: "iOS Device Capture to WHEP"
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'
-    runs-on: macos-26
-    timeout-minutes: 35
+    # Same-repository owner PRs run on the Namespace macOS profile (#11012; one
+    # macOS job at a time on the trial, and WHEP fires only on WebRTC changes).
+    # Fallbacks, in order: vars.IOS_WEBRTC_HEAVY_LANE == 'true' or the
+    # NAMESPACE_RUNNERS_DISABLED kill switch move it to the heavy self-hosted lane
+    # when the Mac pools are enabled (#11011); otherwise, and for forks, hosted
+    # macos-26. No CircleCI copy runs.
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac-heavy"]') || 'macos-26' }}
+    timeout-minutes: 30
     steps:
+      - name: "Isolate self-hosted WHEP capture home"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          isolated_home="$RUNNER_TEMP/webrtc-capture-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          {
+            echo "HOME=$isolated_home"
+            echo "TMPDIR=$isolated_home/tmp"
+            echo "XDG_CONFIG_HOME=$isolated_home/config"
+            echo "XDG_DATA_HOME=$isolated_home/data"
+            echo "CFFIXED_USER_HOME=$isolated_home"
+          } >> "$GITHUB_ENV"
+
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          clean: true
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -3508,6 +3529,11 @@ jobs:
           path: scratch/webrtc-device-integration/
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: "Remove isolated WHEP capture home"
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/webrtc-capture-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   # =============================================================================
   # Gate Jobs for Branch Protection

@@ -12,7 +12,6 @@ import { loadJobSteps, loadWorkflow, stepNamed } from "../helpers/workflowSteps"
 // secrets).
 
 const repoRoot = join(import.meta.dir, "../..");
-const PR_WORKFLOW = ".github/workflows/pull_request.yml";
 const XCTESTRUNNER_WORKFLOW = ".github/workflows/xctestrunner-simulator-tests.yml";
 const SETUP = ".circleci/config.yml";
 const CONTINUE = ".circleci/continue_config.yml";
@@ -41,32 +40,6 @@ interface CircleConfig {
 
 function loadCircle(path: string): CircleConfig {
   return load(readFileSync(join(repoRoot, path), "utf8")) as CircleConfig;
-}
-
-/** Converts a dorny/paths-filter (picomatch) glob into the anchored-PCRE body the
- * path-filtering orb wraps as `^<regex>$`. Only the glob forms the mirrored
- * filters use are supported; anything else fails loudly. */
-function globToOrbRegex(glob: string): string {
-  if (/[?[\]{}!]/.test(glob)) {
-    throw new Error(`unsupported glob syntax: ${glob}`);
-  }
-  return glob
-    .replace(/\./g, "\\.")
-    .replace(/\*\*\//g, "\u0000")
-    .replace(/\/\*\*$/, "/\u0001")
-    .replace(/\*/g, "[^/]*")
-    .replace(/\u0000/g, "(.*/)?")
-    .replace(/\u0001/g, ".*");
-}
-
-function githubFilterGlobs(stepName: string, key: string): string[] {
-  const step = stepNamed(loadJobSteps(PR_WORKFLOW, "detect-changes"), stepName);
-  const filters = load(String(step?.with?.filters ?? "")) as Record<string, string[]>;
-  const globs = filters[key];
-  if (!globs) {
-    throw new Error(`${stepName} has no ${key} filter`);
-  }
-  return globs;
 }
 
 function parseMapping(text: string): Map<string, string[]> {
@@ -135,8 +108,7 @@ function onlyTesting(command: string): string[] {
   return [...command.matchAll(/-only-testing:(\S+)/g)].map((match) => match[1]!);
 }
 
-const CIRCLE_CONFIG_SELF_TRIGGER = "\\.circleci/continue_config\\.yml";
-const PR_PARAMETERS = ["run-ios", "run-webrtc"];
+const PR_PARAMETERS = ["run-ios"];
 const MAIN_PARAMETERS = ["run-main-ios", "run-main-desktop"];
 const NIGHTLY_ORDER = [
   "XCTestRunner Simulator Tests",
@@ -158,32 +130,14 @@ function workflowsGatedBy(parameters: string[]): CircleWorkflow[] {
 }
 
 describe("CircleCI macOS policy (#10887, #11010)", () => {
-  test("globToOrbRegex covers the glob forms the filters use", () => {
-    expect(globToOrbRegex("schemas/**")).toBe("schemas/.*");
-    expect(globToOrbRegex("src/index.ts")).toBe("src/index\\.ts");
-    expect(globToOrbRegex("src/utils/Ios*")).toBe("src/utils/Ios[^/]*");
-    expect(globToOrbRegex("src/utils/ios-*/**")).toBe("src/utils/ios-[^/]*/.*");
-    expect(globToOrbRegex("src/features/**/web/**")).toBe("src/features/(.*/)?web/.*");
-    expect(globToOrbRegex("src/daemon/webrtc*")).toBe("src/daemon/webrtc[^/]*");
-    expect(() => globToOrbRegex("src/{a,b}.ts")).toThrow("unsupported glob syntax");
-  });
-
-  test.each([["run-webrtc", "Check for WebRTC publisher changes", "webrtc"]])(
-    "%s mapping mirrors the GitHub %s filter",
-    (param, stepName, key) => {
-      const expected = [
-        ...githubFilterGlobs(stepName, key).map(globToOrbRegex),
-        CIRCLE_CONFIG_SELF_TRIGGER,
-      ];
-      expect(prMapping().get(param)).toEqual(expected);
-    },
-  );
-
-  test("pull requests schedule only the advisory Playground simulator job plus the unmoved advisory lanes", () => {
+  test("pull requests schedule only the advisory Playground simulator job", () => {
     const prJobs = workflowsGatedBy(PR_PARAMETERS).flatMap((workflow) =>
       invocations(workflow).map(([key]) => key),
     );
-    expect(prJobs.sort()).toEqual(["ios-device-webrtc", "ios-playground-tests"]);
+    expect(prJobs).toEqual(["ios-playground-tests"]);
+    // iOS Device Capture to WHEP moved to a Namespace macOS runner (#11012).
+    expect(loadCircle(CONTINUE).jobs?.["ios-device-webrtc"]).toBeUndefined();
+    expect(prMapping().has("run-webrtc")).toBe(false);
     // Prototype Simulator moved to the GitHub heavy self-hosted lane (#11011).
     expect(loadCircle(CONTINUE).jobs?.["prototype-simulator"]).toBeUndefined();
     expect(prMapping().has("run-prototype-simulator")).toBe(false);

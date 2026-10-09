@@ -28,18 +28,12 @@ version: 2.1
 # on GitHub (#10887, docs/design-docs/ci/circleci-macos-migration.md); no workflow
 # in this file references a context.
 #
-# Prototype Simulator moved to the GitHub self-hosted heavy lane (#11011). iOS
-# Device Capture to WHEP is still a PR-path CircleCI job here; it moves to a
-# Namespace macOS runner in #11012.
+# Prototype Simulator moved to the GitHub self-hosted heavy lane (#11011) and iOS
+# Device Capture to WHEP to a Namespace macOS runner (#11012); neither has a
+# CircleCI copy.
 
 parameters:
   run-ios:
-    type: boolean
-    default: false
-  # Set by path filtering in config.yml from the same paths as pull_request.yml's
-  # filter-webrtc (iOS Device Capture to WHEP). The GitHub label/title/body opt-ins
-  # are invisible to CircleCI path filtering.
-  run-webrtc:
     type: boolean
     default: false
   run-swift-coverage-main:
@@ -595,133 +589,6 @@ jobs:
           path: ci-logs/daemon-logs
           destination: automobile-daemon-logs-xctestrunner
 
-  # Mirror of pull_request.yml → "iOS Device Capture to WHEP" (GitHub: 35 min cap).
-  # The capture loop, retry and reap logic stay identical to GitHub's step.
-  ios-device-webrtc:
-    executor: ios
-    steps:
-      - checkout_without_lfs
-      - setup_auto_mobile_npm_package
-      - run:
-          name: "Ensure iOS Simulator runtime"
-          command: ./scripts/ios/ensure-simulator-runtime.sh
-      - run:
-          name: "Build iOS capture prerequisites"
-          no_output_timeout: 20m
-          command: |
-            brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
-            test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" || brew install --cask google-chrome
-            (cd ios/screen-capture && swift package resolve)
-            SECONDS=0
-            (cd ios/screen-capture && swift build)
-            echo "build took ${SECONDS}s"
-      - run:
-          name: "Boot and activate iOS Simulator"
-          no_output_timeout: 12m
-          command: |
-            result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000)"
-            simulator_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
-            if [[ -z "${simulator_udid}" || "${simulator_udid}" == "null" ]]; then
-              echo "AutoMobile product boot returned no deviceId." >&2
-              exit 1
-            fi
-            echo "export AUTOMOBILE_IOS_SIMULATOR_UDID=\"${simulator_udid}\"" >> "${BASH_ENV}"
-            if pgrep -x Simulator >/dev/null; then
-              killall Simulator
-              for _ in {1..30}; do
-                pgrep -x Simulator >/dev/null || break
-                sleep 1
-              done
-              if pgrep -x Simulator >/dev/null; then
-                echo "Simulator.app did not exit before activation." >&2
-                exit 1
-              fi
-            fi
-            open -a Simulator --args -CurrentDeviceUDID "${simulator_udid}"
-            helper_path="${PWD}/ios/screen-capture/.build/debug/screen-capture-helper"
-            simulator_name="$(xcrun simctl list devices --json | jq -r --arg udid "${simulator_udid}" \
-              '[.devices[][] | select(.udid == $udid) | .name] | first // empty')"
-            if [[ -z "${simulator_name}" ]]; then
-              echo "Could not resolve the selected Simulator name." >&2
-              exit 1
-            fi
-            simulator_window_ready=0
-            for _ in {1..30}; do
-              simulator_windows="$("${helper_path}" --list-simulators 2>/dev/null || true)"
-              if printf '%s' "${simulator_windows}" | jq -e --arg name "${simulator_name}" \
-                '.windows | map(select((.title // "") | ascii_downcase | contains($name | ascii_downcase))) | length == 1' \
-                >/dev/null; then
-                simulator_window_ready=1
-                break
-              fi
-              sleep 1
-            done
-            if [[ "${simulator_window_ready}" != "1" ]]; then
-              echo "Selected Simulator window did not become discoverable by ScreenCaptureKit." >&2
-              exit 1
-            fi
-      - run:
-          name: "Run iOS device capture integration"
-          no_output_timeout: 20m
-          environment:
-            AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION: "1"
-            AUTOMOBILE_WEBRTC_DEVICE_PLATFORM: ios
-            AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS: "15000"
-          command: |
-            set -uo pipefail
-            export AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER="${PWD}/ios/screen-capture/.build/debug/screen-capture-helper"
-            source ./scripts/ios/run_with_timeout.sh
-
-            reap_before_retry() {
-              pkill -f "index.js --daemon-mode" 2>/dev/null || true
-              pkill -x mediamtx 2>/dev/null || true
-              pkill -f "remote-debugging-port=9222" 2>/dev/null || true
-              sleep 2
-              pkill -KILL -x mediamtx 2>/dev/null || true
-              pkill -KILL -f "index.js --daemon-mode" 2>/dev/null || true
-              if [ -n "${AUTOMOBILE_IOS_SIMULATOR_UDID:-}" ]; then
-                if ! run_with_timeout 10 xcrun simctl bootstatus "${AUTOMOBILE_IOS_SIMULATOR_UDID}" -b >/dev/null 2>&1; then
-                  echo "Simulator did not report booted within 10s after cleanup; skipping reboot (best-effort re-verify only, #7605)." >&2
-                fi
-              fi
-              for _ in $(seq 1 15); do
-                lsof -nP -iTCP:8889 -sTCP:LISTEN >/dev/null 2>&1 || return 0
-                sleep 1
-              done
-              echo "Port 8889 still bound after cleanup; skipping retry to avoid a guaranteed conflict." >&2
-              return 1
-            }
-
-            attempts=2
-            for attempt in $(seq 1 "${attempts}"); do
-              echo "iOS device capture integration (attempt ${attempt}/${attempts})"
-              bun run test:integration:webrtc-device && rc=0 || rc=$?
-              if [ "${rc}" -eq 0 ]; then
-                if [ "${attempt}" -gt 1 ]; then
-                  echo "iOS device capture passed on retry (transient ScreenCaptureKit flake)."
-                fi
-                exit 0
-              fi
-              echo "iOS device capture attempt ${attempt} failed (exit ${rc})."
-              if [ "${attempt}" -lt "${attempts}" ]; then
-                echo "Reaping MediaMTX / daemon / Chrome before one retry."
-                reap_before_retry || exit 1
-              fi
-            done
-            echo "iOS device capture failed after ${attempts} attempts."
-            exit 1
-      - run:
-          name: "Explain WebRTC device results"
-          when: always
-          command: bash scripts/webrtc/explain-device-results.sh ios || true
-      - run:
-          name: "Collect screen-capture-helper crash reports"
-          when: always
-          command: bash scripts/webrtc/collect-helper-crash-reports.sh scratch/webrtc-device-integration || true
-      - store_artifacts:
-          path: scratch/webrtc-device-integration
-          destination: ios-webrtc-device-artifacts
-
 workflows:
   # PR path: exactly one macOS job (#11010). When `run-ios` is false (no iOS
   # changes) the workflow has no jobs and no macOS executor is used.
@@ -729,14 +596,6 @@ workflows:
     when: << pipeline.parameters.run-ios >>
     jobs:
       - ios-playground-tests
-
-  # #10887 mirror gated on its own GitHub path filter. No contexts: this runs
-  # on fork PRs, which must never see secrets.
-  ios-webrtc-macos:
-    when: << pipeline.parameters.run-webrtc >>
-    jobs:
-      - ios-device-webrtc:
-          name: "iOS Device Capture to WHEP"
 
   # ── Post-merge (main only; replaces merge.yml's macOS jobs) ─────────────────
   main-ios-macos:

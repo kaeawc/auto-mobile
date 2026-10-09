@@ -1,4 +1,5 @@
 import type { Environment } from "./poolConfig";
+import { DeviceCleanupInProgressError } from "./deviceAcquisitionRefusals";
 import {
   currentAllocationCancellationScope,
   withAllocationCancellationScope,
@@ -5941,8 +5942,10 @@ export class DevicePool {
       throw this.unhealthyDevicesError([device]);
     }
     if (this.sessionManager.hasDeviceCleanupInProgress(deviceId)) {
-      throw new ActionableError(
-        `Device '${deviceId}' is still completing session cleanup; retry after cleanup finishes.`,
+      // Typed and retryable: clients wait on it like a held device (#10960).
+      throw new DeviceCleanupInProgressError(
+        deviceId,
+        this.sessionManager.getDeviceCleanupRetryAfterMs(deviceId),
       );
     }
   }

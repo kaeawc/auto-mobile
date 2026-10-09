@@ -8,6 +8,7 @@ import {
 } from "../../src/cli";
 import { cliDeviceOwnershipHint } from "../../src/cli/deviceOwnershipHint";
 import { InputDeviceOwnedError, TOOL_CALL_REMEDY } from "../../src/daemon/inputDeviceOwnership";
+import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
 import { LIFECYCLE_TOOL_REMEDY } from "../../src/server/lifecycleDeviceOwnership";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { createTeardownFailureResponse } from "../../src/server/deviceTools";
@@ -24,6 +25,26 @@ describe("cliDeviceOwnershipHint (#10743, #10783, #10785)", () => {
     const hint = cliDeviceOwnershipHint({ code: "device_owned_by_other_session" }, "tapOn");
     expect(hint).toContain("--session-uuid <uuid>");
     expect(hint).not.toContain("--force");
+  });
+
+  test("tells the caller to retry after a device's cleanup finishes (#10960)", () => {
+    const hint = cliDeviceOwnershipHint({ code: "device_cleanup_in_progress" }, "startDevice");
+    expect(hint).toContain("retryAfterMs");
+    expect(hint).not.toContain("--session-uuid");
+  });
+
+  test("shapes the cleanup refusal with its code, retryable and retryAfterMs (#10960)", () => {
+    const result = shapeToolCallError(new DeviceCleanupInProgressError("emulator-5554", 4_000), {
+      toolName: "setActiveDevice",
+      source: "MCP",
+    });
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      success: false,
+      code: "device_cleanup_in_progress",
+      deviceId: "emulator-5554",
+      retryable: true,
+      retryAfterMs: 4_000,
+    });
   });
 
   test("offers --force true only for the tools that accept it", () => {

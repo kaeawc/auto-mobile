@@ -79,6 +79,7 @@ import {
   getSessionIdleTimeoutMs,
 } from "./sessionLivenessWindows";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "./deviceAcquisitionRefusals";
 import { DAEMON_SESSION_SUSPECT_CODE, isIdleReleaseReason } from "./types";
 
 /**
@@ -669,6 +670,8 @@ interface PendingSessionRelease {
 
 interface SessionReleaseOperation extends PendingSessionRelease {
   session: Session;
+  /** When the release started; bounds the retry hint for a bind it refuses (#10960). */
+  startedAtMs?: number;
 }
 
 interface PendingSessionRebind {
@@ -1116,6 +1119,8 @@ export class SessionManager {
    * late setup or keep-awake restore.
    */
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
+  /** The latest cap-bounded settle time of each device's pending cleanup, when one was given. */
+  private readonly pendingDeviceCleanupSettlesBy: Map<string, number> = new Map();
   /**
    * Active per-condition network TTLs (issue #6085 item 2), keyed by session id.
    * When a session degrades the network with an `expiresInSeconds`, a timer resets
@@ -1608,8 +1613,43 @@ export class SessionManager {
    * a concurrent session release observes the cleanup before returning the
    * device to the pool.
    */
-  registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
+  registerPendingDeviceCleanup(
+    deviceId: string,
+    cleanup: Promise<unknown>,
+    /** The cleanup's own cap, when it has one: it bounds the retry hint a refused bind gets. */
+    capMs?: number,
+  ): void {
+    if (capMs !== undefined) {
+      const settlesBy = this.timer.now() + capMs;
+      const previous = this.pendingDeviceCleanupSettlesBy.get(deviceId) ?? 0;
+      this.pendingDeviceCleanupSettlesBy.set(deviceId, Math.max(previous, settlesBy));
+    }
     this.trackPendingDeviceCleanup(deviceId, [cleanup]);
+  }
+
+  /**
+   * How long a bind refused by {@link hasDeviceCleanupInProgress} should wait before retrying
+   * (#10960): the remaining time of the cleanup's cap or of the in-flight release's bounded
+   * teardown and persist phases, or a default polling hint when nothing bounds it.
+   */
+  getDeviceCleanupRetryAfterMs(deviceId: string): number {
+    const now = this.timer.now();
+    const bounds = Array.from(this.activeReleasePromises)
+      .filter((release) => release.session.assignedDevice === deviceId)
+      .map(
+        (release) =>
+          (release.startedAtMs ?? now) +
+          SESSION_RELEASE_TEARDOWN_CAP_MS +
+          SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+      );
+    const cleanupBound = this.pendingDeviceCleanups.has(deviceId)
+      ? this.pendingDeviceCleanupSettlesBy.get(deviceId)
+      : undefined;
+    if (cleanupBound !== undefined) {
+      bounds.push(cleanupBound);
+    }
+    const remaining = Math.max(0, ...bounds.map((bound) => bound - now));
+    return remaining > 0 ? remaining : DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
   }
 
   /** Release owns the device until both bounded teardown and any overflow work settle. */
@@ -3202,7 +3242,7 @@ export class SessionManager {
             () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options),
           )
         : this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options);
-    const release = { session, promise, reason };
+    const release = { session, promise, reason, startedAtMs: this.timer.now() };
     this.releasePromises.set(sessionId, release);
     this.activeReleasePromises.add(release);
     try {
@@ -5816,6 +5856,7 @@ export class SessionManager {
     void cleanup.then(() => {
       if (this.pendingDeviceCleanups.get(deviceId) === cleanup) {
         this.pendingDeviceCleanups.delete(deviceId);
+        this.pendingDeviceCleanupSettlesBy.delete(deviceId);
       }
     });
   }

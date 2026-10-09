@@ -1452,10 +1452,21 @@ export class DeviceSessionManager implements DeviceSessionManager {
    */
   public async verifyIosDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void> {
     options?.signal?.throwIfAborted();
-    const readiness = options?.readiness ?? "automationReady";
     if (isIosPhysicalUdid(deviceId)) {
-      return await this.verifyPhysicalIosDevice(deviceId, readiness, options);
+      return await this.verifyPhysicalIosDevice(
+        deviceId,
+        options?.readiness ?? "automationReady",
+        options,
+      );
     }
+    return await this.verifySimulatorIosDevice(deviceId, options);
+  }
+
+  private async verifySimulatorIosDevice(
+    deviceId: string,
+    options?: DeviceReadyOptions,
+  ): Promise<void> {
+    const readiness = options?.readiness ?? "automationReady";
     // An explicit runner override that cannot be used must fail closed before any
     // other path, whatever the simulator/runner state. Every downstream branch
     // (already-connected, already-running, cached-start) skips the builder that
@@ -1508,18 +1519,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     readiness: DeviceReadinessLevel,
     options?: DeviceReadyOptions,
   ): Promise<void> {
-    const lister = this.provider.getIosPhysicalDeviceLister?.();
-    const discovery = lister ? await lister.listConnectedDevices() : undefined;
-    options?.signal?.throwIfAborted();
-    const device = discovery?.devices.find((candidate) => candidate.deviceId === deviceId);
-    if (!device) {
-      const incomplete =
-        discovery && !discovery.complete ? ` (devicectl: ${discovery.error.message})` : "";
-      throw new ActionableError(
-        `Physical iPhone ${deviceId} is not connected or not reachable through devicectl${incomplete}. ` +
-          "Connect, unlock, and trust the device, then acquire it with getApple.",
-      );
-    }
+    const device = await this.findConnectedPhysicalIosDevice(deviceId, options?.signal);
     if (readiness === "automationReady" && !options?.sessionId) {
       throw new ActionableError(
         `Physical iPhone ${deviceId} is connected but has no prepared CtrlProxy runner. ` +
@@ -1531,6 +1531,24 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
     this.assertUsableIosOverride(await checkIosCtrlProxyOverride());
     await this.ensureIosRunnerReady(deviceId, device, options);
+  }
+
+  private async findConnectedPhysicalIosDevice(
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<BootedDevice> {
+    const discovery = await this.provider.getIosPhysicalDeviceLister?.()?.listConnectedDevices();
+    signal?.throwIfAborted();
+    const device = discovery?.devices.find((candidate) => candidate.deviceId === deviceId);
+    if (device) {
+      return device;
+    }
+    const incomplete =
+      discovery && !discovery.complete ? ` (devicectl: ${discovery.error.message})` : "";
+    throw new ActionableError(
+      `Physical iPhone ${deviceId} is not connected or not reachable through devicectl${incomplete}. ` +
+        "Connect, unlock, and trust the device, then acquire it with getApple.",
+    );
   }
 
   private assertIosDeviceAvailable(

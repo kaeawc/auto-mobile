@@ -350,6 +350,16 @@ const NO_OVERLAY_SHOWING =
   'layer "overlay" was requested, but no AutoMobile overlay is showing. ' +
   "Show the overlay first, or omit layer to search the whole screen.";
 
+const OVERLAY_SUSPENDED =
+  'layer "overlay" was requested, but the AutoMobile overlay is hidden because the app it was ' +
+  "shown over is not in front. Bring that app back to the foreground (the overlay returns with " +
+  "its state), or omit layer.";
+
+/** The refusal for `layer: "overlay"` with no overlay window in the capture. */
+function noOverlayMessage(hierarchy: ViewHierarchyResult | undefined): string {
+  return hierarchy?.overlaySuspended === true ? OVERLAY_SUSPENDED : NO_OVERLAY_SHOWING;
+}
+
 /**
  * Scope a capture for selector resolution. `overlay` with no overlay window on
  * screen is an actionable error rather than an ordinary "not found".
@@ -359,7 +369,7 @@ export function scopeHierarchyForSelector(
   layer: HierarchyLayer | undefined,
 ): ViewHierarchyResult {
   if (layer === "overlay" && !hasOwnOverlay(hierarchy)) {
-    throw new ActionableError(NO_OVERLAY_SHOWING);
+    throw new ActionableError(noOverlayMessage(hierarchy));
   }
   return scopeHierarchyToLayer(hierarchy, layer);
 }
@@ -455,7 +465,7 @@ export function layerGestureRefusal(
     return covered ? appPointUnderOverlay(covered, action) : undefined;
   }
   if (!hasOwnOverlay(hierarchy)) {
-    return NO_OVERLAY_SHOWING;
+    return noOverlayMessage(hierarchy);
   }
   const outside = points.find((point) => !ownOverlayCoversPoint(hierarchy, point));
   return outside
@@ -493,7 +503,7 @@ export function focusedFieldLayerRefusal(
   }
   const overlayShowing = hasOwnOverlay(hierarchy);
   if (layer === "overlay" && !overlayShowing) {
-    return NO_OVERLAY_SHOWING;
+    return noOverlayMessage(hierarchy);
   }
   if (!overlayShowing || !findFlaggedElement(hierarchy, "focused")) {
     return undefined;

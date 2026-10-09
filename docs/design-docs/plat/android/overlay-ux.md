@@ -835,10 +835,44 @@ window while locked or noninteractive and restore the same runtime on unlock;
 no dismissal event is emitted for temporary hiding. Own-package accessibility
 events are dropped before hierarchy debouncing and navigation tracking.
 
-Deferred: foreground-package scoping needs a reliable application-window policy;
-`package_event` reports package installation/removal, while window-state events
-also include IME, dialogs and System UI. Secure app-window detection has no trusted
-existing signal. Automatic bottom-sheet IME movement/yield is also deferred:
+### Foreground scoping (#10261, owner decision 2026-10-09)
+
+A session overlay is tied to the app (package) it was shown over, matching the iOS
+agent, which lives inside the app. When that app leaves the foreground the window is
+hidden (state, pages and the idle TTL are kept; no `dismissed` event, no sequence
+allocation) and when the app returns the same runtime is shown again. A
+`window.persistence: "device"` overlay is a standalone mock and is not tied to an app.
+
+- **Anchor.** Each `show` (including an in-place replace) reads the application
+  window in front (the active application-type accessibility window, else the topmost)
+  and clears any suspension. If no application window qualifies, the overlay is
+  unscoped and stays up everywhere.
+- **Signal.** `TYPE_WINDOW_STATE_CHANGED` events already delivered to CtrlProxy; no new
+  poller. An event moves the foreground only when its window is `TYPE_APPLICATION`
+  and its package is not CtrlProxy's own and not in the ignore set. IME, dialogs of
+  type system, accessibility overlays (this overlay's own windows) and the shade
+  are therefore never candidates. Ignore set: `com.android.systemui`,
+  `com.google.android.permissioncontroller`, `com.android.permissioncontroller`,
+  `com.google.android.packageinstaller`, `com.android.packageinstaller`, `android`
+  (resolver, ANR and crash dialogs). A dialog of the same app is the same package.
+  An event whose window type cannot be read is ignored (fails open: nothing hides).
+- **Debounce.** A flip, either way, applies only after the new state holds for 400 ms
+  (`OVERLAY_FOREGROUND_DEBOUNCE_MILLIS`), so a transient window does not flicker it.
+- **Hidden means gone.** The window is removed, so it takes no touches and is absent
+  from `observe`. `inspect` reports `suspended: true` on the overlay entry, and the
+  hierarchy capture carries top-level `overlaySuspended: true`, so `layer: "overlay"`
+  calls fail with "hidden because the app it was shown over is not in front" instead
+  of "no overlay is showing".
+- **Separate from other hides.** Suspension is its own state
+  (`OverlayForegroundTracker.suspended`). The host's `isBlocked` is the lock-screen
+  check OR suspension, so any restore path (unlock, relayout, or a future capture-time
+  hide from #9305) that calls `show` while suspended is refused; a capture restore
+  can never re-show a suspended overlay, and ending suspension does not undo a
+  capture hide held by another component.
+- Dismissal, TTL expiry and teardown release the anchor. A hidden overlay still
+  expires on its idle TTL.
+
+Deferred: secure-window detection has no trusted existing signal. Automatic bottom-sheet IME movement/yield is also deferred:
 node-level inset selection exists, but smaller edge-to-edge sheet windows do not
 yet have verified keyboard geometry. Existing explicit `safeAreaPadding` behavior
 is preserved. Device checks must cover keyguard timing, daemon death, pager page 3

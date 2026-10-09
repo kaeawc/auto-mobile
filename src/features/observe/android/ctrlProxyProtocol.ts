@@ -502,6 +502,8 @@ export interface OverlayStatusEntry {
   pages: Record<string, number>;
   /** Highest `overlay_event` sequence the device allocated for this overlay; no rewind. */
   lastSequence: number;
+  /** True while the overlay's app is not in front: hidden, state kept, back with the app. */
+  suspended?: boolean;
 }
 
 /**

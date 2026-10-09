@@ -759,6 +759,11 @@ data class OverlayStatusEntry(
   val state: Map<String, OverlayScalar>,
   val pages: Map<String, Int> = emptyMap(),
   val lastSequence: Long,
+  /**
+   * True while the overlay's app is not in front: the window is hidden and untouchable, its state
+   * kept, and it returns with the app. Omitted when false and by older APKs.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val suspended: Boolean = false,
 )
 
 @Serializable

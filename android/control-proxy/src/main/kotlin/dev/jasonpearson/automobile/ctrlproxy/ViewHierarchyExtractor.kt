@@ -42,6 +42,8 @@ internal constructor(
     { _, _ ->
       null
     },
+  /** Whether an overlay is hidden because its app left the foreground (#10261). */
+  private val overlaySuspended: () -> Boolean = { false },
 ) {
 
   internal data class DisplayWindows(val displayId: Int, val windows: List<AccessibilityWindowInfo>)
@@ -258,6 +260,7 @@ internal constructor(
           accessibilityFocusedElement?.let { WireNodeCodec.materialize(it) },
         contentHiddenRegions = contentHiddenRegions?.takeIf { it.isNotEmpty() },
         truncationReasons = budget.truncationReasons().ifEmpty { null },
+        overlaySuspended = overlaySuspended().takeIf { it },
       )
     } catch (e: Exception) {
       Log.e(TAG, "Error extracting view hierarchy", e)
@@ -688,6 +691,7 @@ internal constructor(
         contentHiddenRegions =
           detectContentHiddenRegions(contentHiddenRegionRoots, screenDimensions),
         truncationReasons = budget.truncationReasons().ifEmpty { null },
+        overlaySuspended = overlaySuspended().takeIf { it },
       )
     } finally {
       accessibilityFocusedNode?.recycle()

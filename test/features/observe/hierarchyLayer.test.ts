@@ -153,6 +153,16 @@ describe("selector resolution with layer (#9305)", () => {
       /no AutoMobile overlay is showing/,
     );
   });
+
+  test('"overlay" while the overlay is suspended says the app is not in front', () => {
+    const suspended = { ...convertedCapture(), overlaySuspended: true };
+    expect(() => scopeHierarchyForSelector(suspended, "overlay")).toThrow(
+      /hidden because the app it was shown over is not in front/,
+    );
+    expect(() => scopeHierarchyForSelector(convertedCapture(), "overlay")).not.toThrow(
+      /not in front/,
+    );
+  });
 });
 
 describe("assertAppGestureNotUnderOverlay (#9305)", () => {

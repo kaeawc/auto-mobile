@@ -151,6 +151,27 @@ export type InputKeyIosClientFactory = (device: BootedDevice) => InputKeyIosClie
 const defaultInputKeyIosClientFactory: InputKeyIosClientFactory = (device) =>
   IOSCtrlProxyClient.getInstance(device);
 
+/** Shapes a runner reply that is not an indeterminate dispatch into an InputKeyResult. */
+function iosInputKeyResult(
+  key: InputKeyName,
+  result: Awaited<ReturnType<InputKeyIosClient["requestPressKey"]>>,
+): InputKeyResult {
+  if (!result.success && isRunnerFocusQueryFailed(result)) {
+    // A definite non-delivery: the runner answered before sending the key.
+    const error = result.error || RUNNER_FOCUS_QUERY_FAILED_FALLBACK_MESSAGE;
+    logger.warn(`iOS input/key ${key} not sent: ${error}`);
+    return { success: false, key, keyCode: key, error, errorCode: result.errorCode };
+  }
+  return {
+    success: result.success,
+    key,
+    keyCode: key,
+    ...(result.verified === undefined ? {} : { verified: result.verified }),
+    ...(result.warning === undefined ? {} : { warning: result.warning }),
+    ...(result.error ? { error: result.error } : {}),
+  };
+}
+
 export class InputKey {
   private readonly device: BootedDevice;
   private readonly adb: AdbExecutor;
@@ -370,20 +391,7 @@ export class InputKey {
     if (!result.success && result.dispatched && result.acknowledged === false) {
       throw InputKey.indeterminateError(result.error ?? "unknown error");
     }
-    if (!result.success && isRunnerFocusQueryFailed(result)) {
-      // A definite non-delivery: the runner answered before sending the key.
-      const error = result.error || RUNNER_FOCUS_QUERY_FAILED_FALLBACK_MESSAGE;
-      logger.warn(`iOS input/key ${key} not sent: ${error}`);
-      return { success: false, key, keyCode: key, error, errorCode: result.errorCode };
-    }
-    return {
-      success: result.success,
-      key,
-      keyCode: key,
-      ...(result.verified === undefined ? {} : { verified: result.verified }),
-      ...(result.warning === undefined ? {} : { warning: result.warning }),
-      ...(result.error ? { error: result.error } : {}),
-    };
+    return iosInputKeyResult(key, result);
   }
 
   private async validateFrameContext(

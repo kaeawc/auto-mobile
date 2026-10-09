@@ -553,6 +553,18 @@ export interface SendKeysInputKey {
   }>;
 }
 
+/** The optional outcome fields of an InputKey press, copied onto a sendKeys key result. */
+function inputKeyOutcomeFields(
+  result: Awaited<ReturnType<SendKeysInputKey["press"]>>,
+): Pick<SendKeysCommandResult, "verified" | "warning" | "error" | "errorCode"> {
+  return {
+    ...(result.verified === undefined ? {} : { verified: result.verified }),
+    ...(result.warning === undefined ? {} : { warning: result.warning }),
+    ...(result.error ? { error: result.error } : {}),
+    ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
+  };
+}
+
 interface ImeCommitRouting {
   focusedFieldClass?: string | null;
   /** The focused field is a password field: its typed text never reaches logs or diagnostics. */
@@ -931,10 +943,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       key: command.key,
       modifiers,
       success: result.success,
-      ...(result.verified === undefined ? {} : { verified: result.verified }),
-      ...(result.warning === undefined ? {} : { warning: result.warning }),
-      ...(result.error ? { error: result.error } : {}),
-      ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
+      ...inputKeyOutcomeFields(result),
     };
   }
 

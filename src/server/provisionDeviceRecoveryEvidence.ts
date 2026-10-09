@@ -157,12 +157,7 @@ function nextAction(
     };
   }
   if (cleanup.status === "failed_device_retained") {
-    return {
-      action: "perform_cleanup" as const,
-      reason:
-        "Cleanup failed and the device is retained; remove it by its exact identity (not its name) or reacquire it.",
-      automaticRetrySafe: false,
-    };
+    return retainedDeviceAction(input);
   }
   if (input.lifecycle?.state === "created_not_ready" && input.lifecycle.device) {
     return {
@@ -181,6 +176,26 @@ function nextAction(
     };
   }
   return evidenceGatedRetryAction(input, cleanup);
+}
+
+function retainedDeviceAction(
+  input: ProvisionDeviceRecoveryInput,
+): ProvisionDeviceRecoveryEvidence["nextAction"] {
+  if (!input.lifecycle?.device) {
+    // A creation may have landed, but its exact identity was never resolved.
+    return {
+      action: "obtain_further_evidence" as const,
+      reason:
+        "A device may have been created but its exact identity is unknown, so it was not removed; query inventory for it before acting.",
+      automaticRetrySafe: false,
+    };
+  }
+  return {
+    action: "perform_cleanup" as const,
+    reason:
+      "Cleanup failed and the device is retained; remove it by its exact identity (not its name) or reacquire it.",
+    automaticRetrySafe: false,
+  };
 }
 
 /** The retry path once settling, retained, and persistence evidence are ruled out. */
@@ -266,8 +281,10 @@ function creationFromLifecycle(
     return ownership === "adopted" ? "adopted" : "created";
   }
   switch (lifecycle?.state) {
-    case "created_not_ready":
+    // A retained outcome without an identity never resolved whether creation landed.
     case "retained":
+      return lifecycle.device ? "created" : "unknown";
+    case "created_not_ready":
     case "cleanup_in_progress":
       return "created";
     default:

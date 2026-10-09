@@ -1952,7 +1952,9 @@ absence), or `unknown`. `originalError` preserves the provisioning cause. Select
 operation ended `no_device_created`, `removed`, or `cleanup_in_progress`; the original `operationId` only
 replays the stored failure until the row expires, so a replay reports `error.retryable: false`; wait out
 `retryAfterMs` when cleanup is pending, then retry with a NEW `operationId`), `perform_cleanup` (use the exact
-identity), or `obtain_further_evidence` (inventory first, also used when a readiness or cleanup failure is not marked retryable; `automaticRetrySafe: false`). Missing
+identity), or `obtain_further_evidence` (inventory first, also used when a readiness or cleanup failure is not marked retryable, and when an iOS simulator
+create was still unsettled at rollback so the outcome is `retained` with no `device` identity and
+`deviceCreation: unknown`; `automaticRetrySafe: false`). Missing
 evidence stays `unknown`; the snapshot is stamped with `freshness.observedAtMs` and daemon build, and
 a response that is lost in transit leaves the caller without it. Gathering it reads only in-memory
 state and does not extend the request deadline.

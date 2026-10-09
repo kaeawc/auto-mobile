@@ -232,6 +232,23 @@ describe("buildProvisionDeviceRecoveryEvidence", () => {
     });
   });
 
+  test("a retained outcome with no resolved identity never claims creation or authorizes cleanup", () => {
+    const evidence = build({
+      boundary: "cleanup_failure",
+      retryable: true,
+      lifecycle: lifecycle("retained", {
+        device: undefined,
+        cleanup: { status: "failed", reason: "target_identity_unresolved" },
+      }),
+    });
+    expect(evidence.device).toBeUndefined();
+    expect(evidence.outcomes.deviceCreation).toBe("unknown");
+    expect(evidence.nextAction).toMatchObject({
+      action: "obtain_further_evidence",
+      automaticRetrySafe: false,
+    });
+  });
+
   test("ownership stays unknown without observation", () => {
     expect(build({ lifecycle: lifecycle("created_not_ready") }).device?.ownership).toBe("unknown");
   });

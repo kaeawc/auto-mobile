@@ -152,9 +152,17 @@ type ProvisioningHooks = {
 type ProvisionCleanupOptions = {
   lifecycleLease: VirtualDeviceLifecycleLease | undefined;
   pendingMutationSettlement?: Promise<unknown>;
+  /** Absolute rollback deadline already anchored by the caller (e.g. iOS identity discovery). */
+  rollbackDeadlineMs?: number;
   recordLifecycle?: RecordProvisionDeviceLifecycle;
   lifecycleDevice?: NonNullable<ProvisionDeviceLifecycleOutcome["device"]>;
 };
+
+/** Where a failed provision's rollback should aim; `unresolved` never means absent. */
+type ProvisionRollbackTarget =
+  | { kind: "device"; device: DeviceInfo }
+  | { kind: "absent" }
+  | { kind: "unresolved" };
 
 type ProvisionBootOptions = {
   provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>>;
@@ -363,6 +371,9 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
       // A rollback error's own lifecycle is newer than the last one recorded.
       lifecycle: lifecycle ?? operation.lifecycleEvidence?.lifecycle,
+      ...(operation.lifecycleEvidence?.lifecycleDurable === false
+        ? { lifecycleDurable: false }
+        : {}),
       ...(ownership ? { ownership } : {}),
       originalError: { code, message: errorMessage(failure) },
       ...(retryable !== undefined ? { retryable } : {}),
@@ -405,6 +416,9 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       nowMs: getDeviceToolsDependencies().timer.now(),
       daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
       lifecycle: operation.lifecycleEvidence?.lifecycle,
+      ...(operation.lifecycleEvidence?.lifecycleDurable === false
+        ? { lifecycleDurable: false }
+        : {}),
       ...(operation.lifecycleEvidence?.ownership
         ? { ownership: operation.lifecycleEvidence.ownership }
         : {}),
@@ -426,11 +440,16 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     // expiry sweep) must not stamp its result over the attempt that replaced
     // it.
     const attemptId = deps.idGenerator.next();
-    const recordLifecycle: RecordProvisionDeviceLifecycle = async (lifecycle) => {
-      if (!(await store.recordLifecycleOutcome(args.operationId, attemptId, lifecycle))) {
+    const recordLifecycle: RecordProvisionDeviceLifecycle = async (lifecycle, options) => {
+      const durable = options?.durable !== false;
+      if (
+        durable &&
+        !(await store.recordLifecycleOutcome(args.operationId, attemptId, lifecycle))
+      ) {
         throw new ProvisionDeviceOperationSupersededError(args.operationId);
       }
       lifecycleEvidence.lifecycle = lifecycle;
+      lifecycleEvidence.lifecycleDurable = durable;
       if (lifecycle.phase === "created" || lifecycle.phase === "adopted") {
         lifecycleEvidence.ownership =
           lifecycle.phase === "created" ? "created_by_operation" : "adopted";
@@ -1640,9 +1659,9 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       pendingMutationSettlement,
       recordLifecycle,
       lifecycleDevice,
+      rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
     }: ProvisionCleanupOptions,
   ): Promise<ProvisionDeviceRollbackError> {
-    const rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
     const stableId =
       createdDevice.platform === "android" ? createdDevice.name : createdDevice.deviceId;
     if (!stableId) {
@@ -1815,50 +1834,162 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
    * `onBeforeCreate` only fires once the provisioner has established that no
    * matching simulator existed, so a match found now is the one this operation
    * created — the iOS equivalent of Android's name-keyed fallback target.
+   *
+   * A `simctl create` still in flight can land after a discovery that ran too
+   * early, so discovery waits for that mutation to settle first, and both the
+   * wait and the discovery are bounded by the rollback deadline. Only a
+   * completed discovery that runs after the mutation settled may report
+   * `absent`; anything else is `unresolved` (#11064).
    */
   async function resolveCreatedIosProvisionDeviceRollbackTarget(
     args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
     deviceManager: PlatformDeviceManager,
-  ): Promise<DeviceInfo | undefined> {
+    pendingMutationSettlement: Promise<unknown> | undefined,
+    rollbackDeadlineMs: number,
+  ): Promise<ProvisionRollbackTarget> {
+    if (
+      pendingMutationSettlement &&
+      !(await provisionMutationSettledWithinRollbackBudget(
+        deps,
+        pendingMutationSettlement,
+        rollbackDeadlineMs,
+      ))
+    ) {
+      logger.warn(
+        `[DeviceTools] Cannot roll back iOS simulator '${args.device.name}': its creation did not settle within the rollback budget.`,
+      );
+      return { kind: "unresolved" };
+    }
     try {
-      const discovery = await deviceManager.getDeviceImagesDetailed("ios", {
-        bypassIosDeviceListCache: true,
-      });
+      const discovery = await runOperationWithinDeadline(
+        deps.timer,
+        rollbackDeadlineMs,
+        undefined,
+        () => new Error("iOS rollback identity discovery exceeded the rollback budget"),
+        async (deadlineSignal) =>
+          await deviceManager.getDeviceImagesDetailed("ios", {
+            bypassIosDeviceListCache: true,
+            signal: deadlineSignal,
+          }),
+      );
       if (!discovery.succeededPlatforms.has("ios")) {
         logger.warn(
           `[DeviceTools] Cannot roll back iOS simulator '${args.device.name}': identity discovery did not complete.`,
         );
-        return undefined;
+        return { kind: "unresolved" };
       }
-      return findExactIosProvisionDeviceCandidate(args, discovery.devices);
+      const device = findExactIosProvisionDeviceCandidate(args, discovery.devices);
+      return device ? { kind: "device", device } : { kind: "absent" };
     } catch (error) {
       logger.warn(
         `[DeviceTools] Failed to resolve the iOS rollback target for '${args.device.name}': ${errorMessage(error)}`,
         error,
       );
-      return undefined;
+      return { kind: "unresolved" };
     }
   }
 
   async function resolveProvisionDeviceRollbackTarget(
     args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
     deviceManager: PlatformDeviceManager,
-    provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined,
-    creationStarted: boolean,
-    observedRuntimeDevice: BootedDevice | undefined,
-  ): Promise<DeviceInfo | undefined> {
+    {
+      provisioned,
+      creationStarted,
+      observedRuntimeDevice,
+      pendingMutationSettlement,
+      rollbackDeadlineMs,
+    }: {
+      provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
+      creationStarted: boolean;
+      observedRuntimeDevice: BootedDevice | undefined;
+      pendingMutationSettlement: Promise<unknown> | undefined;
+      rollbackDeadlineMs: number;
+    },
+  ): Promise<ProvisionRollbackTarget> {
     if (!provisioned?.created && !creationStarted) {
-      return undefined;
+      return { kind: "absent" };
     }
-    const createdDevice =
-      provisioned?.device ??
-      (args.device.platform === "android"
-        ? { name: args.device.name, platform: "android" as const, isRunning: false }
-        : await resolveCreatedIosProvisionDeviceRollbackTarget(args, deviceManager));
-    if (!createdDevice || !observedRuntimeDevice?.deviceId) {
-      return createdDevice;
+    const target: ProvisionRollbackTarget = provisioned
+      ? { kind: "device", device: provisioned.device }
+      : args.device.platform === "android"
+        ? {
+            kind: "device",
+            device: { name: args.device.name, platform: "android" as const, isRunning: false },
+          }
+        : await resolveCreatedIosProvisionDeviceRollbackTarget(
+            args,
+            deps,
+            deviceManager,
+            pendingMutationSettlement,
+            rollbackDeadlineMs,
+          );
+    if (target.kind !== "device" || !observedRuntimeDevice?.deviceId) {
+      return target;
     }
-    return { ...createdDevice, deviceId: observedRuntimeDevice.deviceId };
+    return {
+      kind: "device",
+      device: { ...target.device, deviceId: observedRuntimeDevice.deviceId },
+    };
+  }
+
+  /**
+   * A simulator may exist that this operation created, but its identity is
+   * unknown: record it retained with unknown ownership (never
+   * `no_device_created`) and keep the lifecycle lease until the creating
+   * mutation settles, so no other operation can claim the name underneath it.
+   */
+  async function throwProvisionWithUnresolvedCreatedDevice(
+    args: ProvisionDeviceArgs,
+    deps: DeviceToolsDependencies,
+    provisionFailure: ProvisionDeviceError,
+    {
+      provisioned,
+      takeLifecycleLease,
+      pendingMutationSettlement,
+      recordRollbackLifecycle,
+    }: {
+      provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined;
+      takeLifecycleLease: () => VirtualDeviceLifecycleLease | undefined;
+      pendingMutationSettlement: Promise<unknown> | undefined;
+      recordRollbackLifecycle: RecordProvisionDeviceLifecycle;
+    },
+  ): Promise<never> {
+    retainPendingProvisionMutationLifecycle(
+      args,
+      provisioned,
+      takeLifecycleLease,
+      pendingMutationSettlement,
+    );
+    const rollbackError = new ProvisionDeviceRollbackError(provisionFailure, {
+      status: "failed",
+      operationId: deps.idGenerator.next(),
+      target: {
+        platform: args.device.platform,
+        isVirtual: true,
+        stableId: args.device.deviceId ?? args.device.name,
+        stableName: args.device.name,
+      },
+      failure: {
+        code: "target_identity_unresolved",
+        phase: "precondition",
+        message:
+          "A device may have been created, but its exact identity could not be resolved within the rollback budget; it was not removed.",
+      },
+    });
+    const lifecycle: ProvisionDeviceLifecycleOutcome = {
+      state: "retained",
+      phase: "cleanup",
+      reason: provisionDeviceLifecycleReason(provisionFailure),
+      cleanup: {
+        status: "failed",
+        reason: "target_identity_unresolved",
+        operationId: rollbackError.cleanup.operationId,
+      },
+    };
+    await recordRollbackLifecycle(lifecycle);
+    throw attachProvisionDeviceLifecycle(rollbackError, lifecycle);
   }
 
   async function throwProvisionWithoutCreatedDevice(
@@ -1920,21 +2051,37 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       );
       throw error;
     }
-    const createdDevice = await resolveProvisionDeviceRollbackTarget(
-      args,
-      deviceManager,
+    const rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
+    const target = await resolveProvisionDeviceRollbackTarget(args, deps, deviceManager, {
       provisioned,
       creationStarted,
       observedRuntimeDevice,
-    );
+      pendingMutationSettlement,
+      rollbackDeadlineMs,
+    });
     const provisionFailure = toProvisionDeviceError(args, error);
-    if (!createdDevice) {
+    // A cancelled attempt keeps its operation row retryable, so its cleanup is
+    // noted only in the in-memory evidence: the `request_cancelled` recovery
+    // must still report what this rollback did (#11064).
+    const recordRollbackLifecycle: RecordProvisionDeviceLifecycle = preserveRetryability
+      ? async (lifecycle) => await recordLifecycle(lifecycle, { durable: false })
+      : recordLifecycle;
+    if (target.kind === "unresolved") {
+      return await throwProvisionWithUnresolvedCreatedDevice(args, deps, provisionFailure, {
+        provisioned,
+        takeLifecycleLease,
+        pendingMutationSettlement,
+        recordRollbackLifecycle,
+      });
+    }
+    if (target.kind === "absent") {
       return await throwProvisionWithoutCreatedDevice(
         provisionFailure,
         preserveRetryability,
         recordLifecycle,
       );
     }
+    const createdDevice = target.device;
     // A destructive teardown of this AVD must not race the emulator process the
     // failed attempt is still killing.
     await unownedColdBootSettlement;
@@ -1943,20 +2090,19 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       createdDevice,
       observedRuntimeDevice,
     );
-    if (!preserveRetryability) {
-      await recordLifecycle({
-        state: "cleanup_in_progress",
-        phase: "cleanup",
-        device: lifecycleDevice,
-        reason: provisionDeviceLifecycleReason(provisionFailure),
-        cleanup: { status: "in_progress", reason: "readiness_timeout" },
-      });
-    }
+    await recordRollbackLifecycle({
+      state: "cleanup_in_progress",
+      phase: "cleanup",
+      device: lifecycleDevice,
+      reason: provisionDeviceLifecycleReason(provisionFailure),
+      cleanup: { status: "in_progress", reason: "readiness_timeout" },
+    });
     throw await cleanupFailedProvisionDevice(args, deps, createdDevice, provisionFailure, {
       lifecycleLease: takeLifecycleLease(),
       pendingMutationSettlement: pendingMutationSettlement,
-      recordLifecycle: preserveRetryability ? undefined : recordLifecycle,
-      lifecycleDevice: preserveRetryability ? undefined : lifecycleDevice,
+      recordLifecycle: recordRollbackLifecycle,
+      lifecycleDevice: lifecycleDevice,
+      rollbackDeadlineMs: rollbackDeadlineMs,
     });
   }
 
@@ -2889,7 +3035,10 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         error: {
           code: error.errorCode,
           message: error.message,
-          retryable: error.lifecycle.reason?.retryable ?? false,
+          // A stored terminal failure replays for every re-issue of this
+          // operationId, so retrying it cannot help; the provider's verdict
+          // still drives `recovery.nextAction` (retry with a new operationId).
+          retryable: false,
           ...provisionDeviceLifecycleDiagnosticFields(error.lifecycle.reason),
         },
       });

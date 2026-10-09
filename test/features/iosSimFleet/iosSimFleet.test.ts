@@ -316,6 +316,69 @@ describe("capacity gate", () => {
       gate.waitForCapacity(undefined, { signal: controller.signal, deadlineMs: 1000 }),
     ).rejects.toThrow();
   });
+
+  // #11064: the boot path's cancellation must end a queued capacity wait.
+  test("waitForCapacity aborts while sleeping between queued samples", async () => {
+    const { collector, timer } = setup([IOS27, IOS18]);
+    const gate = new IosSimCapacityGate(collector, timer, { env });
+    const controller = new AbortController();
+    let outcome: "pending" | "rejected" | "resolved" = "pending";
+    const wait = gate
+      .waitForCapacity(undefined, { signal: controller.signal, deadlineMs: timer.now() + 60_000 })
+      .then(
+        () => {
+          outcome = "resolved";
+        },
+        () => {
+          outcome = "rejected";
+        },
+      );
+    for (let drain = 0; drain < 20 && timer.getPendingSleepCount() === 0; drain++) {
+      await Promise.resolve();
+    }
+    expect(timer.getPendingSleepCount()).toBe(1);
+    controller.abort(new Error("boot cancelled"));
+    await wait;
+    expect(outcome).toBe("rejected");
+  });
+
+  test("waitForCapacity bounds a stalled fleet sample by its deadline", async () => {
+    const { collector, timer, source } = setup([IOS27]);
+    source.gate = new Promise<void>(() => {});
+    const gate = new IosSimCapacityGate(collector, timer, { env });
+    const wait = gate.waitForCapacity(undefined, { deadlineMs: timer.now() + 1_000 });
+    timer.advanceTime(1_000);
+    await expect(wait).rejects.toThrow("collecting iOS simulator capacity");
+  });
+
+  test("an admitted boot counts toward the limit until it is released", async () => {
+    const { collector, timer } = setup([IOS27]);
+    const gate = new IosSimCapacityGate(collector, timer, { env });
+    const deadlineMs = timer.now() + 1_000;
+    // One free slot (1 booted, limit 2): two concurrent boots must not both be admitted.
+    const [first, second] = await Promise.all([
+      gate.waitForCapacity(undefined, { deadlineMs, bootUdid: "NEW-A" }),
+      gate.waitForCapacity(undefined, { deadlineMs, bootUdid: "NEW-B" }),
+    ]);
+    expect([first.decision.outcome, second.decision.outcome].sort()).toEqual(["allow", "queue"]);
+    const admitted = first.decision.outcome === "allow" ? first : second;
+    expect(admitted.releaseAdmission).toBeDefined();
+    admitted.releaseAdmission?.();
+    const third = await gate.waitForCapacity(undefined, { deadlineMs, bootUdid: "NEW-C" });
+    expect(third.decision.outcome).toBe("allow");
+  });
+
+  test("an admitted boot is not double-counted once the fleet shows it Booted", async () => {
+    const { collector, timer, source } = setup([IOS27]);
+    const gate = new IosSimCapacityGate(collector, timer, {
+      env: { [IOS_SIM_MAX_BOOTED_ENV]: "3" },
+    });
+    const deadlineMs = timer.now() + 1_000;
+    const admitted = await gate.waitForCapacity(undefined, { deadlineMs, bootUdid: IOS18 });
+    expect(admitted.decision).toMatchObject({ outcome: "allow", bootedCount: 1 });
+    source.inventory = inventoryWithBooted(IOS27, IOS18);
+    expect(await gate.evaluateBoot()).toMatchObject({ outcome: "allow", bootedCount: 2 });
+  });
 });
 
 describe("fleet monitor", () => {

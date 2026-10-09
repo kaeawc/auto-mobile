@@ -2681,6 +2681,117 @@ describe("provisionDevice handler", () => {
     replacementLease.release();
   });
 
+  // #11064: a `simctl create` still in flight at the deadline must not be
+  // missed by an early rollback discovery and recorded as no_device_created.
+  describe("iOS rollback with simctl create in flight", () => {
+    const iosArgs = (operationId: string) => ({
+      ...provisionTestArgs("ios", operationId),
+      boot: false,
+      readiness: "none" as const,
+      timeoutMs: 1_000,
+    });
+
+    function inFlightIosCreate(timer: FakeTimer) {
+      const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+      const mutationStarted = Promise.withResolvers<void>();
+      const finishCreate = Promise.withResolvers<boolean>();
+      const created = provisionedTestDevice("ios", true);
+      configureProvisionBootAndTeardown(deviceManager, "ios");
+      setDeviceToolsDependencies({
+        timer,
+        lifecycleCoordinator,
+        exactDeviceProvisionerFactory: () => ({
+          provision: async (request) => {
+            await request.onBeforeCreate?.();
+            mutationStarted.resolve();
+            // The simulator only appears in inventory once the create lands.
+            if (await finishCreate.promise) {
+              deviceManager.setDeviceImages("ios", [created.device]);
+            }
+            throw request.signal?.reason ?? new Error("cancelled");
+          },
+        }),
+      });
+      registerDeviceTools();
+      const selectorReservation = async () =>
+        await lifecycleCoordinator.reserve(
+          { kind: "selector", platform: "ios", selector: created.device.name },
+          { operation: "provision", deadlineMs: timer.now() + 10_000 },
+        );
+      return { mutationStarted, finishCreate, created, selectorReservation };
+    }
+
+    test("waits for the create to settle, then rolls the simulator back", async () => {
+      const timer = new FakeTimer();
+      const { mutationStarted, finishCreate, created } = inFlightIosCreate(timer);
+      const args = iosArgs("operation-ios-create-in-flight-settles");
+
+      const responsePromise = ToolRegistry.getTool("provisionDevice")!.handler(args);
+      await mutationStarted.promise;
+      timer.advanceTime(1_000);
+      await flushMicrotasks();
+      // The create lands inside the rollback budget.
+      finishCreate.resolve(true);
+      const response = JSON.parse(
+        ((await responsePromise) as { content: { text: string }[] }).content[0].text,
+      );
+
+      expect(response).toMatchObject({
+        success: false,
+        provisionFailure: { code: "timeout" },
+        cleanup: { status: "succeeded" },
+        lifecycle: { state: "removed", device: { platform: "ios", stableId: "SIM-123" } },
+      });
+      expect(response.lifecycle.state).not.toBe("no_device_created");
+      expect(
+        deviceManager
+          .getExecutedOperations()
+          .filter((operation) => operation.startsWith("destroyDevice:")),
+      ).toHaveLength(1);
+      expect(await deviceManager.listDeviceImages("ios")).not.toContainEqual(created.device);
+    });
+
+    test("records an unresolved create as retained and keeps the lease until it settles", async () => {
+      const timer = new FakeTimer();
+      const { mutationStarted, finishCreate, selectorReservation } = inFlightIosCreate(timer);
+      const args = iosArgs("operation-ios-create-in-flight-unsettled");
+
+      const responsePromise = ToolRegistry.getTool("provisionDevice")!.handler(args);
+      await mutationStarted.promise;
+      timer.advanceTime(1_000);
+      await flushMicrotasks();
+      // The create outlives the whole rollback budget.
+      timer.advanceTime(60_000);
+      const response = JSON.parse(
+        ((await responsePromise) as { content: { text: string }[] }).content[0].text,
+      );
+
+      expect(response).toMatchObject({
+        success: false,
+        provisionFailure: { code: "timeout" },
+        cleanup: { status: "failed", failure: { code: "target_identity_unresolved" } },
+        lifecycle: { state: "retained", cleanup: { status: "failed" } },
+        recovery: {
+          outcomes: { deviceCreation: "unknown" },
+          nextAction: { action: "obtain_further_evidence", automaticRetrySafe: false },
+        },
+      });
+      expect(response.lifecycle.device).toBeUndefined();
+
+      let replacementAcquired = false;
+      const replacement = selectorReservation().then((lease) => {
+        replacementAcquired = true;
+        return lease;
+      });
+      await flushMicrotasks();
+      expect(replacementAcquired).toBe(false);
+
+      finishCreate.resolve(false);
+      (await replacement).release();
+      expect(replacementAcquired).toBe(true);
+    });
+  });
+
   test("keeps a committed provision when the post-commit resource notification fails", async () => {
     const created = provisionedTestDevice("android", true);
     configureProvisionBootAndTeardown(deviceManager, "android");
@@ -4836,6 +4947,58 @@ describe("provisionDevice handler", () => {
     expect(operationStore.getStoredResult(args.operationId)).toBeUndefined();
   });
 
+  // #11064: a cancelled attempt keeps its row retryable, so the rollback is not
+  // recorded durably -- but its response must not tell the caller to reacquire
+  // the device the rollback just destroyed.
+  test("a cancelled provision whose rollback removed the device reports it removed", async () => {
+    const platform = "android" as const;
+    const provisioned = provisionedTestDevice(platform, true);
+    configureProvisionBootAndTeardown(deviceManager, platform);
+    const readinessEntered = deferred();
+    const releaseReadiness = deferred();
+    setDeviceToolsDependencies({
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          await request.onBeforeCreate?.();
+          deviceManager.setDeviceImages(platform, [provisioned.device]);
+          return provisioned;
+        },
+      }),
+      ensureCtrlProxyReady: async () => {
+        readinessEntered.resolve();
+        await releaseReadiness.promise;
+        throw new Error("readiness aborted by cancellation");
+      },
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = provisionTestArgs(platform, "operation-cancelled-rollback-removed");
+
+    const caller = new AbortController();
+    const call = tool.handler(args, undefined, caller.signal);
+    await readinessEntered.promise;
+    caller.abort(new Error("client went away"));
+    releaseReadiness.resolve();
+    const response = JSON.parse(((await call) as { content: { text: string }[] }).content[0].text);
+
+    expect(response).toMatchObject({
+      error: { code: "request_cancelled" },
+      operationContinues: false,
+      recovery: {
+        boundary: "caller_cancellation",
+        phaseReached: "cleanup",
+        outcomes: { settlement: "settled" },
+        cleanup: { status: "reported_complete_unverified" },
+        // The row was never stamped terminal, so the original id is still admitted.
+        nextAction: { action: "retry_original_operation", automaticRetrySafe: true },
+      },
+    });
+    expect(response.recovery.nextAction.action).not.toBe("reacquire_retained_device");
+  });
+
   test("releases the stable lifecycle lease when the cold-boot settlement rejects", async () => {
     const platform = "android" as const;
     const timer = new FakeTimer();
@@ -5897,13 +6060,16 @@ describe("provisionDevice handler", () => {
         daemonBuild: expect.any(String),
       },
     });
-    const { recovery: firstRecovery, ...firstOutcome } = first;
+    const { recovery: firstRecovery, error: firstError, ...firstOutcome } = first;
     expect(replay).toMatchObject(firstOutcome);
+    // #11064: the stored terminal failure replays for every re-issue of this
+    // operationId, so the replay is not retryable under it.
+    expect(replay.error).toMatchObject({ ...firstError, retryable: false });
     // A replay has no live attempt: it reports the stored failure and never invents ownership.
     expect(replay.recovery).toMatchObject({
       boundary: "readiness_failure",
       originalError: { code: "device_lost" },
-      nextAction: { automaticRetrySafe: true },
+      nextAction: { action: "retry_with_new_operation", automaticRetrySafe: false },
     });
     expect(replay.recovery.device?.ownership ?? "unknown").toBe("unknown");
     expect(readinessCalls).toBe(1);
@@ -5914,7 +6080,7 @@ describe("provisionDevice handler", () => {
       outcomes: { deviceCreation: "not_created" },
       cleanup: { status: "unnecessary" },
       originalError: { code: "device_lost" },
-      nextAction: { action: "retry_original_operation", automaticRetrySafe: true },
+      nextAction: { action: "retry_with_new_operation", automaticRetrySafe: false },
     });
   });
 

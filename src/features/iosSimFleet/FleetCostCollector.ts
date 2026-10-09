@@ -13,7 +13,7 @@ import type {
   SimulatorProcessCost,
 } from "./types";
 
-const BOOTED_STATE = "Booted";
+export const BOOTED_STATE = "Booted";
 
 /** Narrow consumer-facing seam: anything that can produce a fleet cost report. */
 export interface FleetCostSource {

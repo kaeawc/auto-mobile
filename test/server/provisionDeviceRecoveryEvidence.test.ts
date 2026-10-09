@@ -82,13 +82,56 @@ describe("buildProvisionDeviceRecoveryEvidence", () => {
     });
   });
 
-  test("pending cleanup waits; a destroy that reported success is not verified absence", () => {
-    expect(build({ lifecycle: lifecycle("cleanup_in_progress") }).nextAction.action).toBe(
-      "wait_then_retry_original_operation",
-    );
+  test("pending cleanup is terminal for the original id; a destroy that reported success is not verified absence", () => {
+    const pending = build({ lifecycle: lifecycle("cleanup_in_progress"), retryAfterMs: 5_000 });
+    expect(pending.cleanup.status).toBe("pending");
+    expect(pending.nextAction).toMatchObject({
+      action: "retry_with_new_operation",
+      automaticRetrySafe: false,
+      retryAfterMs: 5_000,
+    });
     expect(build({ lifecycle: lifecycle("removed") }).cleanup.status).toBe(
       "reported_complete_unverified",
     );
+  });
+
+  // #11064: the operation row replays no_device_created/removed/cleanup_in_progress
+  // as a stored failure, so re-issuing the original operationId can never help.
+  test.each(["no_device_created", "removed", "cleanup_in_progress"] as const)(
+    "a retryable readiness failure recorded as %s says to retry with a new operationId",
+    (state) => {
+      const evidence = build({
+        boundary: "readiness_failure",
+        retryable: true,
+        lifecycle: lifecycle(state),
+      });
+      expect(evidence.nextAction).toMatchObject({
+        action: "retry_with_new_operation",
+        automaticRetrySafe: false,
+      });
+    },
+  );
+
+  test("a terminal lifecycle noted only in memory keeps the original operationId retryable", () => {
+    const evidence = build({
+      boundary: "caller_cancellation",
+      settled: true,
+      lifecycleDurable: false,
+      lifecycle: lifecycle("removed"),
+    });
+    expect(evidence.nextAction).toMatchObject({
+      action: "retry_original_operation",
+      automaticRetrySafe: true,
+    });
+  });
+
+  test("an unsettled cancellation still waits on the original operation even over a terminal lifecycle", () => {
+    const evidence = build({
+      boundary: "caller_cancellation",
+      settled: false,
+      lifecycle: lifecycle("cleanup_in_progress"),
+    });
+    expect(evidence.nextAction.action).toBe("wait_then_retry_original_operation");
   });
 
   test("a persistence failure reports the device outcome, an unconfirmed commit, and a released session", () => {
@@ -183,6 +226,23 @@ describe("buildProvisionDeviceRecoveryEvidence", () => {
       retryable: false,
       lifecycle: lifecycle("removed"),
     });
+    expect(evidence.nextAction).toMatchObject({
+      action: "obtain_further_evidence",
+      automaticRetrySafe: false,
+    });
+  });
+
+  test("a retained outcome with no resolved identity never claims creation or authorizes cleanup", () => {
+    const evidence = build({
+      boundary: "cleanup_failure",
+      retryable: true,
+      lifecycle: lifecycle("retained", {
+        device: undefined,
+        cleanup: { status: "failed", reason: "target_identity_unresolved" },
+      }),
+    });
+    expect(evidence.device).toBeUndefined();
+    expect(evidence.outcomes.deviceCreation).toBe("unknown");
     expect(evidence.nextAction).toMatchObject({
       action: "obtain_further_evidence",
       automaticRetrySafe: false,

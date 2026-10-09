@@ -1373,9 +1373,11 @@ export interface ActiveProvisionDeviceOperation {
   promise: Promise<Record<string, unknown>>;
   controller: AbortController;
   waiters: number;
-  /** Last lifecycle durably recorded by the running attempt; feeds recovery evidence. */
+  /** Last lifecycle recorded by the running attempt; feeds recovery evidence. */
   lifecycleEvidence?: {
     lifecycle?: ProvisionDeviceLifecycleOutcome;
+    /** False when `lifecycle` was noted in memory only and the operation row stays retryable. */
+    lifecycleDurable?: boolean;
     /** Whether this operation created the device or adopted it; sticky once observed. */
     ownership?: "created_by_operation" | "adopted";
   };
@@ -2298,8 +2300,14 @@ export interface ProvisionDeviceCleanup {
   };
 }
 
+/**
+ * Record a lifecycle outcome for the running attempt. `durable: false` updates
+ * only the in-memory recovery evidence: a cancelled rollback keeps the
+ * operation row retryable, but its response must still report what cleanup did.
+ */
 export type RecordProvisionDeviceLifecycle = (
   lifecycle: ProvisionDeviceLifecycleOutcome,
+  options?: { durable?: boolean },
 ) => Promise<void>;
 
 const provisionDeviceLifecycleByError = new WeakMap<object, ProvisionDeviceLifecycleOutcome>();

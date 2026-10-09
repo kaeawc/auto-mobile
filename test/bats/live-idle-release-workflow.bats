@@ -32,7 +32,7 @@ RUNNER="scripts/ci/run-live-idle-release.sh"
 @test "the runner rejects an unsupported scenario and a non-numeric window before touching anything" {
   IDLE_SCENARIO=two-devices run bash "${RUNNER}"
   [ "${status}" -eq 2 ]
-  IDLE_TIMEOUT_MS='20000; rm -rf /' run bash "${RUNNER}"
+  IDLE_TIMEOUT_MS='20000; echo injected' run bash "${RUNNER}"
   [ "${status}" -eq 2 ]
   [[ "${output}" == *"must be an integer"* ]]
 }

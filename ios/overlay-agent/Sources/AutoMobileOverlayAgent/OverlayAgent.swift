@@ -52,6 +52,8 @@ final class OverlayAgent {
     private var hiddenBeforeCovering: [ObjectIdentifier: Bool] = [:]
 
     private var testHooksEnabled = false
+    /// Hide-for-screenshot hold (#9305); the overlay window stays hidden while it is active.
+    private var captureHold = OverlayCaptureHold(now: { ProcessInfo.processInfo.systemUptime })
 
     func boot() {
         let configuration: OverlayAgentConfiguration
@@ -94,7 +96,7 @@ final class OverlayAgent {
     private func setVisible(_ visible: Bool) {
         if visible {
             attachWindow()
-            window?.isHidden = false
+            window?.isHidden = captureHold.isHiding
         } else {
             window?.isHidden = true
         }
@@ -224,12 +226,45 @@ final class OverlayAgent {
                 result(true)
             case "get_overlay_status":
                 result(true, extra: ["status": model.status()])
+            case OverlayAgentProtocol.hideForCaptureRequest:
+                hideForCapture(deadlineMs: OverlayCaptureHold.clampedDeadlineMs(message["deadlineMs"])) { hidden in
+                    result(true, extra: ["hidden": hidden])
+                }
+            case OverlayAgentProtocol.restoreAfterCaptureRequest:
+                result(true, extra: ["restored": restoreAfterCapture()])
             default:
                 result(false, "Unknown request type \(type)")
             }
         } catch {
             result(false, "Invalid overlay spec: \(error)")
         }
+    }
+
+    // MARK: Hide for capture
+
+    /// Hides the overlay window and replies once the hide has been committed to the render
+    /// server, so the host's screenshot cannot still contain it. The hold restores itself at the
+    /// deadline, which is what makes a cancelled host safe.
+    private func hideForCapture(deadlineMs: Int, committed: @escaping (Bool) -> Void) {
+        let ticket = captureHold.hide(deadlineMs: deadlineMs)
+        let wasVisible = window?.isHidden == false
+        window?.isHidden = true
+        CATransaction.flush()
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(deadlineMs)) { [weak self] in
+            guard let self, self.captureHold.expire(ticket) else { return }
+            self.showAfterCapture()
+        }
+        FrameWaiter.nextFrame { committed(wasVisible) }
+    }
+
+    private func restoreAfterCapture() -> Bool {
+        guard captureHold.restore() else { return false }
+        showAfterCapture()
+        return true
+    }
+
+    private func showAfterCapture() {
+        window?.isHidden = model.spec == nil
     }
 
     /// One warning per shown spec: an uploaded font cannot be loaded on iOS, so its text uses the
@@ -429,5 +464,33 @@ extension View {
             if !now { model.hitRects[key] = nil }
         }
         .onDisappear { model.hitRects[key] = nil }
+    }
+}
+
+/// Calls back after the next display frame, so a visual change made just before is on screen.
+/// Falls back after 100 ms if no frame is delivered (backgrounded app, paused display link).
+private final class FrameWaiter: NSObject {
+    private var link: CADisplayLink?
+    private var completion: (() -> Void)?
+
+    static func nextFrame(_ completion: @escaping () -> Void) {
+        let waiter = FrameWaiter()
+        waiter.completion = completion
+        let link = CADisplayLink(target: waiter, selector: #selector(tick))
+        link.add(to: .main, forMode: .common)
+        waiter.link = link
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(100)) { waiter.finish() }
+    }
+
+    @objc private func tick() {
+        finish()
+    }
+
+    private func finish() {
+        link?.invalidate()
+        link = nil
+        let done = completion
+        completion = nil
+        done?()
     }
 }

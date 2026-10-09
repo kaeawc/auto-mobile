@@ -20,11 +20,22 @@ enum OverlayAgentProtocol {
         "remove_overlay_asset",
         "get_overlay_status",
         anchorCapability,
+        hideForCaptureRequest,
+        restoreAfterCaptureRequest,
+        screenshotHideCapability,
     ]
     /// Positions `{type: "bounds"}` node anchors (#9316). The host refuses anchors on an agent that
     /// does not advertise it, which would draw the node at its normal position. Same name as the
     /// CtrlProxy capability.
     static let anchorCapability = "overlay_anchor_v1"
+    /// Hides the overlay window so the host's simulator screenshot shows the app alone (#9305).
+    /// The agent restores on its own after `deadlineMs`, so a cancelled host cannot leave the
+    /// overlay hidden.
+    static let hideForCaptureRequest = "hide_for_capture"
+    /// Restores a `hide_for_capture` early; a no-op reply (`restored: false`) when nothing is hidden.
+    static let restoreAfterCaptureRequest = "restore_after_capture"
+    /// Advertised when both capture requests are handled; same name as the CtrlProxy capability.
+    static let screenshotHideCapability = "screenshot_hide_overlay_v1"
     static let portEnvironmentKey = "AUTOMOBILE_OVERLAY_PORT"
     static let tokenEnvironmentKey = "AUTOMOBILE_OVERLAY_TOKEN"
     /// Shortest token the agent accepts, so a stray or empty value cannot open the server.

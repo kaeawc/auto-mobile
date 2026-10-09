@@ -692,7 +692,12 @@ internal fun InteractiveOverlayWindowContent(
           .alpha(chrome.contentAlpha)
           .background(fullscreen?.scrim ?: Color.Transparent),
       ) {
-        CompositionLocalProvider(LocalOverlayInsetFloor provides floor) { request.content() }
+        CompositionLocalProvider(
+          LocalOverlayInsetFloor provides floor,
+          LocalOverlayFillsWindow provides true,
+        ) {
+          request.content()
+        }
       }
     }
   } else if (chrome.closeVisible) {

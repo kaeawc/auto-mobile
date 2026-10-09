@@ -101,7 +101,13 @@ fun OverlaySpecContent(
   OverlayTheme(root, theme) {
     val anchorLocals = remember { OverlayAnchorLocals() }
     CompositionLocalProvider(LocalOverlayAnchorLocals provides anchorLocals) {
-      Box(Modifier.semantics { testTagsAsResourceId = true }.fillWhenEmpty()) {
+      val fillsWindow = LocalOverlayFillsWindow.current
+      Box(
+        Modifier.semantics { testTagsAsResourceId = true }
+          .then(
+            if (fillsWindow) Modifier.fillWhenEmpty() else Modifier,
+          ),
+      ) {
         RenderOverlayNode(root, interact, windowRoot = true)
         OverlayAnchorLayer(layeredOverlayAnchors(root), interact)
         modalOverlaySheets(root).forEach { node ->
@@ -116,11 +122,19 @@ fun OverlaySpecContent(
 }
 
 /**
+ * True where the overlay content sits in a window that already covers the screen (fullscreen
+ * placement), so [fillWhenEmpty] cannot change what the window occupies. False for floating and
+ * sheet windows, which wrap their content: filling there would grow the window over the app, which
+ * it would then block from touches and from `observe`.
+ */
+internal val LocalOverlayFillsWindow = compositionLocalOf { false }
+
+/**
  * Gives a content box that measured empty the whole bounded space it was offered. A root whose
  * children are all anchored (#10814) measures 0x0 because the anchor layer takes no space, and
  * Compose clips every descendant's accessibility bounds to its ancestors, so the anchored nodes
  * reported empty, invisible bounds and `observe` dropped them (#10870). A non-empty box keeps its
- * measured size, so a floating window still wraps its content.
+ * measured size. Apply only inside a window that is already full-size ([LocalOverlayFillsWindow]).
  */
 internal fun Modifier.fillWhenEmpty(): Modifier = layout { measurable, constraints ->
   val placeable = measurable.measure(constraints)

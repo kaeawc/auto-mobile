@@ -155,6 +155,26 @@ class OverlayAnchorLayerTest {
   }
 
   @Test
+  fun `a wrap-content window keeps its measured size when every child of the root is anchored`() {
+    // Filling a zero-size root would grow a floating or sheet window to the screen, where it would
+    // block touches on the app below (#10870). Only a fullscreen window is already that size.
+    val placements =
+      listOf(
+        OverlayPlacement.Floating(offsetXDp = 24f, offsetYDp = 120f),
+        OverlayPlacement.Sheet(OverlayPlacement.Edge.BOTTOM, 200f),
+      )
+    for (placement in placements) {
+      val rendered = render(wrapRoot(small, large), placement)
+      val content = checkNotNull(rendered.root.tagged("root").layoutInfo.parentInfo)
+      assertEquals("$placement width", 0, content.width)
+      assertEquals("$placement height", 0, content.height)
+    }
+    val fullscreen =
+      checkNotNull(render(wrapRoot(small, large)).root.tagged("root").layoutInfo.parentInfo)
+    assertEquals(true, fullscreen.width > 0 && fullscreen.height > 0)
+  }
+
+  @Test
   fun `anchors under a wrap-content root are drawn and reported where they are anchored`() {
     val rendered = render(wrapRoot(small, large))
     for ((tag, expected) in

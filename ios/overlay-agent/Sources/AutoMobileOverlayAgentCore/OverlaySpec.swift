@@ -203,6 +203,8 @@ struct Style: Decodable {
     let cornerRadius: CornerRadius?
     let border: Border?
     let alpha: Double?
+    /// Scale (0.5-1) a tappable node shrinks to while pressed.
+    let pressScale: Double?
     let alignment: String?
     let arrangement: String?
     let spacing: Double?
@@ -234,6 +236,7 @@ struct Style: Decodable {
             cornerRadius: overlay.cornerRadius ?? cornerRadius,
             border: overlay.border ?? border,
             alpha: overlay.alpha ?? alpha,
+            pressScale: overlay.pressScale ?? pressScale,
             alignment: overlay.alignment ?? alignment,
             arrangement: overlay.arrangement ?? arrangement,
             spacing: overlay.spacing ?? spacing,
@@ -253,6 +256,11 @@ struct Style: Decodable {
             overflow: overlay.overflow ?? overflow,
             textStyle: overlay.textStyle ?? textStyle
         )
+    }
+
+    /// The scale a tappable node draws at: `pressScale` while pressed, 1 otherwise.
+    func scale(pressed: Bool) -> Double {
+        pressed ? pressScale ?? 1 : 1
     }
 }
 

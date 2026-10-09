@@ -89,6 +89,7 @@ private fun OverlayStyle.mergedOver(overlay: OverlayStyle): OverlayStyle =
     aspectRatio = overlay.aspectRatio ?: aspectRatio,
     offset = overlay.offset ?: offset,
     alpha = overlay.alpha ?: alpha,
+    pressScale = overlay.pressScale ?: pressScale,
     alignment = overlay.alignment ?: alignment,
     arrangement = overlay.arrangement ?: arrangement,
     spacing = overlay.spacing ?: spacing,

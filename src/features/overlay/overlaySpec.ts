@@ -250,6 +250,7 @@ const styleSchema = z
     aspectRatio: z.number().finite().min(1e-6).optional(),
     offset: offsetSchema.optional(),
     alpha: z.number().finite().min(0).max(1).optional(),
+    pressScale: z.number().finite().min(0.5).max(1).optional(),
     alignment: z
       .enum([
         "topStart",

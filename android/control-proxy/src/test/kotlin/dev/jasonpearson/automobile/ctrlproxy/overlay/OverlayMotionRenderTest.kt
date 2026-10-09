@@ -4,8 +4,12 @@ import android.content.ContentResolver
 import android.os.Looper
 import android.provider.Settings
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.test.down
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.up
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -126,6 +130,81 @@ class OverlayMotionRenderTest {
     runtime.tapThenAdvance(hide)
 
     assertEquals(0, shown("detail"))
+  }
+
+  private fun pressSpec(pressScale: Double?, motion: String? = null): OverlaySpec =
+    OverlaySpec(
+      "panel",
+      OverlayWindow(OverlayFullscreenPlacement()),
+      motion = motion,
+      root =
+        OverlayBoxNode(
+          testTag = "target",
+          onTap = listOf(OverlayEmitAction("tap")),
+          style =
+            OverlayStyle(
+              width = OverlayDimension.Dp(100.0),
+              height = OverlayDimension.Dp(100.0),
+              pressScale = pressScale,
+            ),
+          children = listOf(OverlayTextNode(text = "go")),
+        ),
+    )
+
+  private fun targetWidth(): Float =
+    compose.onNodeWithTag("target", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.width
+
+  private fun press() = compose.onNodeWithTag("target").performTouchInput { down(center) }
+
+  @Test
+  fun `pressScale shrinks a pressed tappable node and restores it on release`() {
+    setDurationScale(1f)
+    show(pressSpec(0.8))
+    val rest = targetWidth()
+
+    press()
+    settle()
+    assertEquals(rest * 0.8f, targetWidth(), 1f)
+
+    compose.onNodeWithTag("target").performTouchInput { up() }
+    settle()
+    assertEquals(rest, targetWidth(), 0.5f)
+  }
+
+  @Test
+  fun `pressScale snaps within one frame when the animator scale is zero`() {
+    setDurationScale(0f)
+    show(pressSpec(0.8))
+    val rest = targetWidth()
+
+    press()
+    repeat(2) { compose.mainClock.advanceTimeByFrame() }
+
+    assertEquals(rest * 0.8f, targetWidth(), 1f)
+  }
+
+  @Test
+  fun `pressScale snaps within one frame under spec motion none`() {
+    setDurationScale(1f)
+    show(pressSpec(0.8, motion = "none"))
+    val rest = targetWidth()
+
+    press()
+    repeat(2) { compose.mainClock.advanceTimeByFrame() }
+
+    assertEquals(rest * 0.8f, targetWidth(), 1f)
+  }
+
+  @Test
+  fun `a pressed node without pressScale keeps its size`() {
+    setDurationScale(0f)
+    show(pressSpec(null))
+    val rest = targetWidth()
+
+    press()
+    repeat(2) { compose.mainClock.advanceTimeByFrame() }
+
+    assertEquals(rest, targetWidth(), 0.5f)
   }
 
   private fun pagerSpec(): OverlaySpec =

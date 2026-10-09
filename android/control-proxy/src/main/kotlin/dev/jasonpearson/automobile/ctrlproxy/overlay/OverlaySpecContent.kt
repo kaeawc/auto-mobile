@@ -5,6 +5,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -623,6 +624,7 @@ private fun overlayNodeModifier(
       node.role !in OVERLAY_COMPONENT_ROLES &&
       node.role !in OVERLAY_SELECTION_ROLES &&
       node.role !in OVERLAY_MATERIAL_ROLES
+  val presses = remember { MutableInteractionSource() }
   var modifier: Modifier = Modifier
   // Outermost: the anchor fixes where the whole node, offset and touch target included, lands on
   // screen (#9316). The host resolved element anchors to screen dp bounds before sending.
@@ -633,6 +635,11 @@ private fun overlayNodeModifier(
   // A draw-time shift of the whole node (shadow, touch target and semantics included); siblings
   // keep the layout slot it would have had.
   style.offset?.let { modifier = modifier.offset(it.x.toFloat().dp, it.y.toFloat().dp) }
+  // Outside the touch target and drawing, so the whole node (shadow included) shrinks as one.
+  val pressScale = style.pressScale
+  if (tappable && pressScale != null) {
+    modifier = modifier.overlayPressScale(presses, pressScale.toFloat())
+  }
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).
   if (tappable) modifier = modifier.minimumInteractiveComponentSize()
@@ -660,7 +667,12 @@ private fun overlayNodeModifier(
   }
   // Click handling and semantics go before the inset and authored padding, so the whole drawn node
   // is tappable, its ripple covers it, and its accessibility bounds are its drawn bounds (#10435).
-  if (tappable) modifier = modifier.clickable { interact(OverlayInteraction.Tap(actions)) }
+  if (tappable) {
+    modifier =
+      modifier.clickable(interactionSource = presses, indication = LocalIndication.current) {
+        interact(OverlayInteraction.Tap(actions))
+      }
+  }
   val description =
     overlayContentDescription(
       node.role,

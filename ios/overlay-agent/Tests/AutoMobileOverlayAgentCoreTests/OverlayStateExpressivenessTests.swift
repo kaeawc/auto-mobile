@@ -20,6 +20,34 @@ final class OverlayStateExpressivenessTests: XCTestCase {
         try JSONDecoder().decode(OverlayNode.self, from: Data(json.utf8))
     }
 
+    // MARK: pressScale
+
+    func testPressScaleDecodesAndOnlyScalesWhilePressed() throws {
+        let spec = try sharedFixture("press-scale")
+        let style = try XCTUnwrap(spec.root.resolvedStyle(state: [:]))
+        XCTAssertEqual(style.pressScale, 0.95)
+        XCTAssertEqual(style.scale(pressed: true), 0.95)
+        XCTAssertEqual(style.scale(pressed: false), 1)
+        let child = try XCTUnwrap(spec.root.children?.first)
+        XCTAssertEqual(try XCTUnwrap(child.resolvedStyle(state: [:])).scale(pressed: true), 1)
+    }
+
+    func testStyleWithoutPressScaleNeverScales() throws {
+        let style = try XCTUnwrap(node(#"{"type":"box","style":{"alpha":1},"children":[]}"#).resolvedStyle(state: [:]))
+        XCTAssertNil(style.pressScale)
+        XCTAssertEqual(style.scale(pressed: true), 1)
+    }
+
+    func testStyleWhenMergesPressScale() throws {
+        let json = #"""
+        {"type":"box","style":{"pressScale":0.9},"children":[],
+         "styleWhen":[{"when":{"key":"on","equals":true},"style":{"pressScale":0.7}}]}
+        """#
+        let box = try node(json)
+        XCTAssertEqual(box.resolvedStyle(state: ["on": .bool(true)])?.pressScale, 0.7)
+        XCTAssertEqual(box.resolvedStyle(state: ["on": .bool(false)])?.pressScale, 0.9)
+    }
+
     // MARK: styleWhen
 
     func testMatchingStyleWhenEntriesMergeOverTheBaseStyleInOrder() throws {

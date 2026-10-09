@@ -114,6 +114,8 @@ data class OverlayStyle(
   /** A dp draw offset; it moves the drawn and touchable node without changing its layout slot. */
   val offset: OverlayOffset? = null,
   val alpha: Double? = null,
+  /** Scale (0.5-1) a tappable node shrinks to while pressed; absent leaves it unscaled. */
+  val pressScale: Double? = null,
   val alignment: String? = null,
   val arrangement: String? = null,
   val spacing: Double? = null,

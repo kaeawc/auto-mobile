@@ -1,0 +1,10 @@
+{
+  "id": "press-scale",
+  "window": { "placement": { "type": "fullscreen" } },
+  "root": {
+    "type": "box",
+    "style": { "pressScale": 0.95 },
+    "onTap": [{ "type": "emit", "name": "tap" }],
+    "children": [{ "type": "text", "text": "x", "style": { "pressScale": 1 } }]
+  }
+}

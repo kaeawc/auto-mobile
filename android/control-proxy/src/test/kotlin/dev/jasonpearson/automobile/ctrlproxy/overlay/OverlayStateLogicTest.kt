@@ -148,6 +148,7 @@ class OverlayStateLogicTest {
         aspectRatio = 1.5,
         offset = OverlayOffset(2.0, -3.0),
         alpha = 0.5,
+        pressScale = 0.9,
         alignment = "center",
         arrangement = "spaceBetween",
         spacing = 4.0,

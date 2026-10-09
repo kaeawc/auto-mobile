@@ -629,6 +629,15 @@
           },
           "optional": true
         },
+        "pressScale": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0.5,
+            "max": 1
+          },
+          "optional": true
+        },
         "alignment": {
           "rule": {
             "kind": "enum",

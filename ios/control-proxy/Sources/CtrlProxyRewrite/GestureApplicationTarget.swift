@@ -133,3 +133,37 @@ enum GestureDeliveryRoute: Equatable {
         return Decision(route: .xcuiCoordinate, fallback: fallback)
     }
 }
+
+/// The gesture a route decision is for. `GestureDeliveryRoute.decide` takes the same inputs for
+/// every kind (#10858: drag and pinch hit the same app-lookup and idle-wait stalls as tap and
+/// swipe), so the kind only labels the `gesture_route` log line.
+enum GestureKind: String, CaseIterable, Equatable {
+    case tap
+    case swipe
+    case drag
+    case pinch
+}
+
+/// Pure construction of the app-free drag event path, so the timing semantics are testable on
+/// the host. The synthesized record presses for `press`, moves for `move`, then rests at the end
+/// point for `hold` before lifting, the same press, drag and hold the `XCUICoordinate` drag has.
+enum UnpinnedGestureSynthesis {
+    /// Non-finite or negative durations become 0, matching the event helper's own clamp.
+    static func drag(
+        start: GesturePoint, end: GesturePoint, press: TimeInterval, move: TimeInterval, hold: TimeInterval,
+        displayId: UInt64, interfaceOrientation: Int
+    )
+        -> DisplayTouch
+    {
+        func clamp(_ value: TimeInterval) -> TimeInterval { value.isFinite && value > 0 ? value : 0 }
+        return DisplayTouch(
+            start: start, end: end, pressDuration: clamp(press), moveDuration: clamp(move),
+            holdDuration: clamp(hold), displayId: displayId, interfaceOrientation: interfaceOrientation
+        )
+    }
+
+    /// The main display's id from a display inventory; nil when none is marked main.
+    static func mainDisplayId(screens: [TapDiagnostics.DisplayScreen]) -> UInt64? {
+        screens.first(where: { $0.isMain })?.displayId
+    }
+}

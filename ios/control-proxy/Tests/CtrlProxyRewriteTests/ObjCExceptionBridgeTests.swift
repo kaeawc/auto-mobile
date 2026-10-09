@@ -14,6 +14,15 @@ final class ObjCExceptionBridgeTests: XCTestCase {
             XCTAssertEqual(message as String?, "XCTest private display-targeted synthesis is only available on iOS")
         }
 
+        func testDisplayPinchOffIOSReportsSymbolsUnavailable() {
+            var unavailable: ObjCBool = false
+            var message: NSString?
+            let points = ObjCExceptionCatcher_computePinchPoints(508, 202, 100, 300, 0)
+            XCTAssertFalse(ObjCExceptionCatcher_synthesizeDisplayPinch(points, 0.3, 2, 1, &unavailable, &message))
+            XCTAssertTrue(unavailable.boolValue)
+            XCTAssertEqual(message as String?, "XCTest private display-targeted synthesis is only available on iOS")
+        }
+
         func testDisplayInventoryOffIOSIsEmptyAndNSObjectHasNoDisplayID() {
             XCTAssertTrue((ObjCExceptionCatcher_displayInventory() ?? []).isEmpty)
             XCTAssertNil(ObjCExceptionCatcher_displayID(NSObject()))

@@ -1333,11 +1333,32 @@ public final class GesturePerformer: GesturePerforming {
 
             return try catchingObjCException {
                 GesturePhaseDiagnostics.current?.begin("coordinateResolution")
+                // An unfolded iPhone Duo shows the app on the inner panel, which a pinch synthesized
+                // against the main (cover) screen misses; the display-targeted route reaches it.
+                let factory = try DisplayGestureFactory(
+                    provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
+                )
+                defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
+                let delivery = try factory.deliverPinch(
+                    center: GesturePoint(x: centerX, y: centerY), distanceStart: distanceStart,
+                    distanceEnd: distanceEnd, rotationDegrees: rotationDegrees, duration: duration
+                ) { delivery in
+                    logRelativeCoordinate(delivery.selection, gesture: "pinch")
+                    GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
+                }
+                if factory.mismatch {
+                    var sample = TapDiagnostics(requested: .init(
+                        x: centerX, y: centerY, durationMs: Self.diagnosticDurationMs(duration), mode: "pinch"
+                    ))
+                    factory.annotate(&sample, delivery: delivery)
+                    logger.warning("\(sample.logLine(gesture: "pinch"), privacy: .public)")
+                }
+                if delivery.synthesizedPoint != nil { return .eventPath }
+
                 let orientation = DeviceRotation.currentGestureInterfaceOrientation()
                 var errorMessage: NSString?
                 var symbolsUnavailable: ObjCBool = false
                 GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
-                defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
                 let succeeded = ObjCExceptionCatcher_synthesizePinch(
                     CGFloat(centerX),
                     CGFloat(centerY),

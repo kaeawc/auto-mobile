@@ -126,6 +126,15 @@ FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeDisplayTouch(
     BOOL *_Nullable symbolsUnavailable, NSString *_Nullable *_Nullable errorMessage
 );
 
+/// Two-finger pinch on an explicit display. The caller supplies display-space endpoints (already
+/// mapped from observed space), so the rotated inner panel of an unfolded iPhone Duo receives the
+/// pinch axis the host observed. Unavailable symbols permit the main-screen pinch fallback.
+FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeDisplayPinch(
+    ObjCPinchPoints points, NSTimeInterval duration,
+    unsigned long long displayID, NSInteger interfaceOrientation,
+    BOOL *_Nullable symbolsUnavailable, NSString *_Nullable *_Nullable errorMessage
+);
+
 /// Runtime-only reads: this target does not link XCTest. Missing/throwing reads return nil.
 FOUNDATION_EXPORT NSArray<NSDictionary<NSString *, NSNumber *> *> *_Nullable ObjCExceptionCatcher_displayInventory(void);
 FOUNDATION_EXPORT NSNumber *_Nullable ObjCExceptionCatcher_displayID(NSObject *object);

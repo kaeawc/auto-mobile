@@ -274,6 +274,8 @@ private final class FakeReferenceDisplayGestureProvider: DisplayGestureProviding
         return true
     }
 
+    func synthesizePinch(_: DisplayPinch) throws -> Bool { true }
+
     func coordinate(selection: GestureCoordinateSelection) throws -> GestureCoordinateSelection { selection }
 
     func tap(_: GestureCoordinateSelection, duration _: TimeInterval) throws { taps += 1 }
@@ -648,7 +650,10 @@ extension GestureCoordinateStrategyTests {
     func testCapturedUnfoldedDuoWindowIsTransposedFromTheAppFrameSoItIsNotAMismatchByItself() {
         // The app window reads 951x669 beside the 669x951 app frame; the check treats a transpose as rotation.
         XCTAssertFalse(
-            hasMultiPanelMismatch(app: GestureSize(width: 669, height: 951), screen: GestureSize(width: 951, height: 669))
+            hasMultiPanelMismatch(
+                app: GestureSize(width: 669, height: 951),
+                screen: GestureSize(width: 951, height: 669)
+            )
         )
     }
 }

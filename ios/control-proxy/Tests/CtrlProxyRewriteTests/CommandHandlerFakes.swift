@@ -318,6 +318,14 @@ final class FakeDisplayGestureProvider: DisplayGestureProviding {
         return symbolsAvailable
     }
 
+    var pinches: [DisplayPinch] = []
+
+    func synthesizePinch(_ pinch: DisplayPinch) throws -> Bool {
+        pinches.append(pinch)
+        if let synthesisError { throw synthesisError }
+        return symbolsAvailable
+    }
+
     func coordinate(selection: GestureCoordinateSelection) throws -> GestureCoordinateSelection {
         selections.append(selection)
         return selection

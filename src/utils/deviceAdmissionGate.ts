@@ -11,6 +11,8 @@ export interface DeviceAdmissionGate {
    * group whose canonical transport is gone (e.g. USB unplugged, Wi-Fi alive).
    */
   mapAndroidReadinessDiscovery?(devices: readonly BootedDevice[]): BootedDevice[];
+  /** The pooled canonical id for a known Android alias serial (identity otherwise). */
+  resolveAndroidCanonicalId?(deviceId: string): string;
 }
 
 /** Direct mode has no pooled identity quarantine. */
@@ -39,5 +41,8 @@ export const daemonDeviceAdmissionGate: DeviceAdmissionGate = {
   },
   mapAndroidReadinessDiscovery(devices): BootedDevice[] {
     return admissionGate?.mapAndroidReadinessDiscovery?.(devices) ?? [...devices];
+  },
+  resolveAndroidCanonicalId(deviceId): string {
+    return admissionGate?.resolveAndroidCanonicalId?.(deviceId) ?? deviceId;
   },
 };

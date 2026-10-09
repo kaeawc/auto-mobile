@@ -131,3 +131,39 @@ describe("Android dual-transport readiness (#11133)", () => {
     expect(h.timer.getSleepHistory()).toEqual([]);
   });
 });
+
+describe("Android dual-transport readiness by alias id (#11133)", () => {
+  test.each([
+    ["both transports attached", false, USB],
+    ["USB unplugged", true, WIFI],
+  ])(
+    "%s: a caller naming the Wi-Fi alias resolves to the canonical USB id",
+    async (_label, unplug, liveTransport) => {
+      const h = harness();
+      h.discovery.setBootedDevices("android", await h.scan());
+      await h.pool.refreshDevices();
+      expect(await h.pool.assignDeviceToSession("owner", "android")).toBe(USB);
+      if (unplug) {
+        h.unplugUsb();
+      }
+      const window = new FakeWindow();
+      window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
+      const manager = DeviceSessionManager.createInstance(
+        new FakeDeviceClientProvider(h.client(null), new FakeDeviceUtils(), undefined, { window }),
+        { create: (device) => h.client(device ?? null) },
+        {
+          admissionGate: h.pool,
+          executionBinding: { bindDeviceExecution: () => {} },
+          appearanceOnConnectDependencies: { isSyncEnabled: () => false },
+          runnerReadinessTimer: h.timer,
+        },
+      );
+
+      const ready = await manager.ensureDeviceReady("android", WIFI, { readiness: "booted" });
+      expect(ready.deviceId).toBe(USB);
+      await h.client(ready).execute(["shell", "input", "tap", "1", "2"]);
+      expect(h.dispatched.at(-1)).toEqual(["-s", liveTransport, "shell", "input", "tap", "1", "2"]);
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    },
+  );
+});

@@ -7790,6 +7790,10 @@ export class DevicePool {
     return this.androidTransportAliases.mapDiscovery(devices, true);
   }
 
+  resolveAndroidCanonicalId(deviceId: string): string {
+    return this.androidTransportAliases.canonicalFor(deviceId);
+  }
+
   private isPooledAndroidEmulator(deviceId: string): boolean {
     return (
       isAndroidEmulatorSerial(deviceId) ||

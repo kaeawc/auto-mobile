@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import cartAItem44Focused from "../../fixtures/ios/nested-selection/cart-a-item-44-quantity-focused.json";
 import cartBItem41Focused from "../../fixtures/ios/nested-selection/cart-b-item-41-quantity-focused.json";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import type { BootedDevice } from "../../../src/models/DeviceInfo";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
@@ -111,6 +112,13 @@ async function focusOnIos(
 }
 
 describe("iOS focus confirmation waits for the tapped field to report focus (#10266)", () => {
+  // One throwaway run pays the one-time module/JIT warm-up of the resolver over the large
+  // captures; beforeAll time is outside the per-test budget, so the tests measure steady state.
+  beforeAll(async () => {
+    const capture = cartAItem44Focused as Capture;
+    await focusOnIos(capture, { text: "item_44 qty" }, [focusedCapture(capture)]);
+  });
+
   test("a text selector confirms the field once a fresh read shows it focused", async () => {
     const focused = focusedCapture(cartAItem44Focused as Capture);
     const { result, taps } = await focusOnIos(
@@ -167,5 +175,22 @@ describe("iOS focus confirmation waits for the tapped field to report focus (#10
     expect(refreshesAfterTap).toBeLessThanOrEqual(10);
     expect(result.success).toBe(false);
     expect(result.error).toContain("the focused field could not be matched to the target");
+  });
+
+  test("focus confirmation projects each captured hierarchy once, not once per candidate field", async () => {
+    const original = DefaultElementParser.prototype.extractRootNodes;
+    let projections = 0;
+    DefaultElementParser.prototype.extractRootNodes = function (...args) {
+      projections += 1;
+      return original.apply(this, args);
+    };
+    try {
+      const capture = cartAItem44Focused as Capture;
+      await focusOnIos(capture, { text: "item_44 qty" }, [focusedCapture(capture)]);
+    } finally {
+      DefaultElementParser.prototype.extractRootNodes = original;
+    }
+    // Measured 63 with the shared projection and per-node label cache; 144 without.
+    expect(projections).toBeLessThan(100);
   });
 });

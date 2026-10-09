@@ -112,8 +112,7 @@ class OverlaySpecContentScreenshotTest {
 
   /** Shadow colour, offset, per-corner radii and the text polish styles (#10441). */
   @Test
-  fun stylePolish() =
-    overlayScreenshotTest("style_polish", validOverlayFixture("style-polish"))
+  fun stylePolish() = overlayScreenshotTest("style_polish", validOverlayFixture("style-polish"))
 
   /** Component labels, titles and button actions bound from repeat items. */
   @Test

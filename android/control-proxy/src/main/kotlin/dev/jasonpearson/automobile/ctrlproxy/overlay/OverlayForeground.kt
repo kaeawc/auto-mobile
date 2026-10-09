@@ -48,19 +48,18 @@ internal data class OverlayForegroundWindow(
 
 /**
  * The foreground app among [windows] (z-ordered, topmost first): the active application window if
- * it qualifies, otherwise the topmost qualifying one. Null when no application window qualifies,
- * in which case the overlay is not scoped to any app.
+ * it qualifies, otherwise the topmost qualifying one. Null when no application window qualifies, in
+ * which case the overlay is not scoped to any app.
  */
 internal fun overlayForegroundFromWindows(
   windows: List<OverlayForegroundWindow>,
   ownPackage: String,
 ): String? {
-  val candidates =
-    windows.mapNotNull { window ->
-      overlayForegroundCandidate(window.packageName, window.type, ownPackage)?.let {
-        it to window.active
-      }
+  val candidates = windows.mapNotNull { window ->
+    overlayForegroundCandidate(window.packageName, window.type, ownPackage)?.let {
+      it to window.active
     }
+  }
   return (candidates.firstOrNull { it.second } ?: candidates.firstOrNull())?.first
 }
 

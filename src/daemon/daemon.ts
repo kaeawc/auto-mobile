@@ -838,7 +838,12 @@ export class Daemon {
       this.hasActiveSessionExecution(sessionId, query),
     );
     this.sessionManager.setSessionExecutionDeadlineLookup((sessionId) =>
-      this.latestSessionExecutionDeadlineMs(sessionId),
+      this.latestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true }),
+    );
+    // Deadlines are stamped on the wall clock; remember how far the session clock stood from it
+    // so the idle veto can judge them without a later wall step (#11105).
+    executionTracker.setSessionClockOffsetProvider(
+      () => this.sessionManager.sessionNow() - this.timer.now(),
     );
     this.sessionManager.setExpiryReleaseExecutionCanceller((sessionId, reason, query) =>
       this.cancelExecutionsForExpiryRelease(sessionId, reason, query),
@@ -2759,14 +2764,17 @@ export class Daemon {
   }
 
   /** Mirrors {@link hasActiveSessionExecution}; a recovery in flight carries no deadline. */
-  private latestSessionExecutionDeadlineMs(sessionId: string): number | undefined {
+  private latestSessionExecutionDeadlineMs(
+    sessionId: string,
+    options: { onSessionClock?: boolean } = {},
+  ): number | undefined {
     if (this.devicePool.isSessionRecoveryInFlight(sessionId)) {
       return Number.POSITIVE_INFINITY;
     }
     const executionSessionId =
       resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
     const deadlines = [...new Set([sessionId, executionSessionId])]
-      .map((id) => executionTracker.getLatestSessionExecutionDeadlineMs(id))
+      .map((id) => executionTracker.getLatestSessionExecutionDeadlineMs(id, options))
       .filter((deadline): deadline is number => deadline !== undefined);
     return deadlines.length === 0 ? undefined : Math.max(...deadlines);
   }

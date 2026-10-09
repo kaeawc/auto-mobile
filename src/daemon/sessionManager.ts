@@ -1779,6 +1779,14 @@ export class SessionManager {
   }
 
   /**
+   * An instant on the session clock as wall-clock epoch ms, for reporting to other processes
+   * (#11105): wall now + (instant - session now). Differs from the stamp only after a wall step.
+   */
+  sessionClockToWall(sessionClockMs: number): number {
+    return this.timer.now() + (sessionClockMs - this.sessionNow());
+  }
+
+  /**
    * Register a callback to be invoked when a session is released.
    * Used for centralized cleanup of session-scoped state (e.g., NavigationGraphManager).
    */

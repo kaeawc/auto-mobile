@@ -179,6 +179,11 @@ export class OwnerDisconnectRelease {
     private readonly port: OwnerDisconnectReleasePort,
     private readonly timer: Timer,
     private readonly graceMs: number = OWNER_DISCONNECT_GRACE_MS,
+    /**
+     * The clock `closedAt` is stamped with. It is compared with the session's heartbeat
+     * timestamps, so it must be the session clock (#11080), not the raw wall clock a step moves.
+     */
+    private readonly now: () => number = () => timer.now(),
   ) {}
 
   /** The connection `mcpSessionId` that owned `sessionId` closed and no other connection owns it. */
@@ -187,7 +192,7 @@ export class OwnerDisconnectRelease {
     if (!session) {
       return;
     }
-    const closedAt = this.timer.now();
+    const closedAt = this.now();
     const blocker = ownerDisconnectReleaseBlocker(session, closedAt);
     if (blocker) {
       logger.debug(
@@ -266,7 +271,7 @@ export class OwnerDisconnectRelease {
     if (!pending.deferred) {
       logger.info(
         `[OwnerDisconnectRelease] Releasing session ${sessionId} on device ${session.assignedDevice}: ` +
-          `its owning connection ${mcpSessionId} closed ${this.timer.now() - closedAt} ms ago and ` +
+          `its owning connection ${mcpSessionId} closed ${this.now() - closedAt} ms ago and ` +
           `no other client owns it (reason=${OWNER_DISCONNECTED_RELEASE_REASON})`,
       );
     }

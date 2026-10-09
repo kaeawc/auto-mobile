@@ -126,6 +126,21 @@ describe("DevicePool owner-disconnect release (#10503)", () => {
     expect(releaseReasons).toEqual([]);
   });
 
+  test("a backward wall-clock step between the owner's heartbeat and its disconnect does not block the release (#11080)", async () => {
+    fakeTimer.advanceTime(1_000);
+    sessionManager.recordHeartbeat(OWNER_SESSION);
+    // An NTP correction an hour back: a wall-stamped close time would now predate the heartbeat
+    // and read as "owner heartbeated after the connection closed".
+    fakeTimer.stepWallClock(-3_600_000);
+    devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
+
+    fakeTimer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    await awaitOwnerRelease();
+
+    expect(sessionManager.getSession(OWNER_SESSION)).toBeNull();
+    expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
+  });
+
   test("a CLI-idle session survives its one-shot client's exit", async () => {
     sessionManager.adoptCliLivenessPolicy(OWNER_SESSION);
     devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);

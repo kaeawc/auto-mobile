@@ -1198,7 +1198,8 @@ export class DaemonMcpProxy {
   private readonly livenessAcks = new Map<string, number>();
   /**
    * When the daemon said each held session would be idle-released: the heartbeat ack's
-   * `idleReleaseAt`, an epoch-ms instant both processes read from the same wall clock (#10823). The daemon's window comes
+   * `idleReleaseAt`, an epoch-ms instant on the wall clock both processes read; the daemon converts it from its steady
+   * session clock when reporting (#10823, #11105). The daemon's window comes
    * from its own environment, so this - not `boundSessionReplayTtlMs` - decides while the daemon
    * answers. Absent for a daemon that reports nothing.
    */

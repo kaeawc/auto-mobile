@@ -40,8 +40,10 @@ class GboardCapturedTraceTest {
 
   @Test
   fun `gboard profile matches captured typing then caret move then typing`() {
-    val captured = (load("gboard-phase1-typed.txt") + load("gboard-phase2-caretmove-type.txt"))
-      .filter { it.field == "plain" && it.index <= LAST_PLAIN_CALL }
+    val captured =
+      (load("gboard-phase1-typed.txt") + load("gboard-phase2-caretmove-type.txt")).filter {
+        it.field == "plain" && it.index <= LAST_PLAIN_CALL
+      }
     val caretMoveIndex = captured.indexOfFirst { it.name == "finishComposingText" }
     val typedCalls = captured.take(caretMoveIndex)
     val postMoveCalls = captured.drop(caretMoveIndex + 1)
@@ -49,7 +51,9 @@ class GboardCapturedTraceTest {
     val policy = ConfigurableTypingPolicy(KeyboardProfiles.GBOARD.behavior)
     val editor = FakeEditor()
 
-    val typedOps = typedCalls.flatMap { call -> type(policy, editor, call.args.commitTextArgument()) }
+    val typedOps = typedCalls.flatMap { call ->
+      type(policy, editor, call.args.commitTextArgument())
+    }
     assertEquals(typedCalls.map(::expectedOp), typedOps)
     assertEquals(typedCalls.last().text, editor.text)
 
@@ -66,8 +70,11 @@ class GboardCapturedTraceTest {
     assertEquals(postMoveCalls.last().composingStart, editor.composingStart)
   }
 
-  private fun type(policy: ConfigurableTypingPolicy, editor: FakeEditor, text: String): List<ImeOp> =
-    policy.onText(text, editor.snapshot()).also(editor::apply)
+  private fun type(
+    policy: ConfigurableTypingPolicy,
+    editor: FakeEditor,
+    text: String,
+  ): List<ImeOp> = policy.onText(text, editor.snapshot()).also(editor::apply)
 
   private fun expectedOp(call: TraceCall): ImeOp {
     require(call.name == "commitText") { "unsupported captured call ${call.name}" }
@@ -99,7 +106,7 @@ class GboardCapturedTraceTest {
     const val LAST_PLAIN_CALL = 16
     val LINE =
       Regex(
-        """.* DVIC\s*: (\w+) #(\d+) (\w+)\((.*?)\)(?:=\w+)? sel=(\d+)\.\.\d+ comp=(-?\d+)\.\.(-?\d+) text=\[(.*)]"""
+        """.* DVIC\s*: (\w+) #(\d+) (\w+)\((.*?)\)(?:=\w+)? sel=(\d+)\.\.\d+ comp=(-?\d+)\.\.(-?\d+) text=\[(.*)]""",
       )
   }
 }

@@ -51,7 +51,7 @@ import {
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { executionTracker } from "../server/executionTracker";
-import { sessionHoldDiagnostics } from "./sessionHoldDiagnostics";
+import { sessionHoldDiagnostics, vetoedIdleReleaseAt } from "./sessionHoldDiagnostics";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
 import {
   daemonDeviceLeaseActivitySources,
@@ -402,6 +402,7 @@ async function handleHeartbeat(
         idleTimeoutMs?: number;
         livenessOwnerToken?: string;
         claimLivenessOwnership?: boolean;
+        reportIdleRelease?: boolean;
         livenessOwnerKind?: string;
       }
     | undefined;
@@ -462,7 +463,7 @@ async function handleHeartbeat(
       // A verified keeper proves only that its current owner is still
       // alive. Policy changes are explicit claims, never recurring ticks.
       manager.recordHeartbeat?.(sessionId);
-      return { success: true, result: { sessionId } };
+      return heartbeatAck(manager, sessionId, heartbeatParams?.reportIdleRelease === true);
     }
   }
   // A one-shot `--cli` client declares itself here (issue #6870) so the
@@ -496,14 +497,40 @@ async function handleHeartbeat(
     // `restoreHeartbeatLivenessPolicy` records the heartbeat itself as part
     // of re-stamping the deadlines off the restored timeouts.
     if (manager.restoreHeartbeatLivenessPolicy?.(sessionId)) {
-      return {
-        success: true,
-        result: { sessionId, livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY },
-      };
+      return heartbeatAck(manager, sessionId, heartbeatParams?.reportIdleRelease === true, {
+        livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+      });
     }
   }
   manager.recordHeartbeat?.(sessionId);
-  return { success: true, result: { sessionId } };
+  return heartbeatAck(manager, sessionId, heartbeatParams?.reportIdleRelease === true);
+}
+
+/**
+ * A heartbeat acknowledgement that also reports when the daemon would idle-release the session
+ * when the heartbeat asks (`reportIdleRelease`, so other clients' wire fixtures stay as they are)
+ * (`idleReleaseAt`, an epoch-ms instant from the daemon's own idle window, veto included, the same
+ * value `session-info` reports). It reports without extending anything: the proxy judges idleness
+ * by the daemon's clock instead of its own (#10823). The value only moves when a tool call does,
+ * so consecutive acks of an idle session are identical.
+ */
+function heartbeatAck(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+  reportIdleRelease: boolean,
+  extra: Record<string, unknown> = {},
+): DaemonMethodResult {
+  const session = manager.getSession(sessionId);
+  const idle =
+    reportIdleRelease && session
+      ? {
+          idleReleaseAt: vetoedIdleReleaseAt(
+            session,
+            manager.getIdleReleaseExecutionVeto?.(sessionId),
+          ),
+        }
+      : {};
+  return { success: true, result: { sessionId, ...extra, ...idle } };
 }
 
 /**

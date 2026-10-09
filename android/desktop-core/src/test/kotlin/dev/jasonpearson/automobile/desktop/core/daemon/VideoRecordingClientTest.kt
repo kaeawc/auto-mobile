@@ -240,6 +240,22 @@ class VideoRecordingClientTest {
   }
 
   @Test
+  fun `a stop by recording id names no device so the daemon allocates none (#10978)`() {
+    val client = FakeAutoMobileClient()
+    client.callToolResult =
+      toolResponse(
+        """{"action":"stop","count":1,"recordings":[{"recordingId":"rec-1","filePath":"/tmp/rec-1.mp4"}]}""",
+      )
+
+    McpVideoRecordingActions { client }.stopRecording("emulator-5554", "rec-1", "session-a")
+
+    val arguments = client.toolCalls.last().arguments
+    assertNull(arguments["deviceId"])
+    assertEquals("rec-1", arguments["recordingId"]?.jsonPrimitive?.content)
+    assertEquals("session-a", arguments["sessionUuid"]?.jsonPrimitive?.content)
+  }
+
+  @Test
   fun `a segmented stop keeps every segment and the manifest path`() {
     val client = FakeAutoMobileClient()
     client.callToolResult =

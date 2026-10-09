@@ -117,7 +117,10 @@ import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { NetworkState } from "../server/NetworkState";
 import { registerNetworkStateSessionCleanup } from "../server/networkStateSessionCleanup";
 import { registerPerformanceMonitorSessionCleanup } from "../server/performanceMonitorSessionCleanup";
-import { registerRecordingSessionCleanup } from "../server/recordingSessionCleanup";
+import {
+  createOwnerlessRecordingAcquisitionCleanup,
+  registerRecordingSessionCleanup,
+} from "../server/recordingSessionCleanup";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   awaitInFlightMigrations,
@@ -804,10 +807,13 @@ export class Daemon {
     );
     // A sessionless call admitted while the device was free must not keep driving it for the new
     // holder (#10829). The call performing the acquisition is spared.
+    // A sessionless recording on the device is stopped and finalized the same way (#10961).
+    const stopOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(this.sessionManager);
     this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
       executionTracker.cancelSessionlessDeviceUse(deviceId, {
         excludeExecutionId: getToolSelectionContext()?.execution?.executionId,
       });
+      stopOwnerlessRecordings(deviceId);
     });
     this.sessionManager.onSessionCreated((session) => {
       NavigationGraphManager.clearReleasedSession(session.sessionId);

@@ -710,6 +710,24 @@ class DesktopDaemonSessionCompositionTest {
     }
 
   @Test
+  fun `hiding the host while recording never releases the device (#10978)`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport()
+    val host = start(transport, listOf(pixel))
+    assertTrue(input(host, pixel.deviceId))
+    repeat(2) { tick() }
+    host.recordings.begin(TrackedRecording(pixel.deviceId, "rec-1", "session-1"))
+
+    host.visible.value = false
+    mainClock.advanceTimeByFrame()
+    repeat((HIDDEN_RELEASE_GRACE_MS / HEARTBEAT_MS).toInt() * 3) { tick() }
+    settle()
+
+    assertEquals(0, transport.count("daemon/releaseSession"))
+    assertEquals("emulator-5554", host.state().boundDeviceId)
+    assertEquals(null, host.state().idleReleasedDeviceId)
+  }
+
+  @Test
   fun `a hide shorter than the grace keeps the device bound`() = runComposeUiTest {
     val transport = RecordingDaemonTransport()
     val host = start(transport, listOf(pixel))
@@ -811,6 +829,7 @@ class DesktopDaemonSessionCompositionTest {
   ) {
     val panes: MutableState<List<DesktopDaemonSessionBinding>> = mutableStateOf(panes)
     val visible: MutableState<Boolean> = mutableStateOf(visible)
+    val recordings = ActiveRecordingTracker()
     private var state: DesktopDaemonSessionState? = null
 
     fun state(): DesktopDaemonSessionState = requireNotNull(state)
@@ -822,6 +841,7 @@ class DesktopDaemonSessionCompositionTest {
           socketPath = "in-memory",
           panes = panes,
           hostVisible = visible.value,
+          activeRecordings = recordings,
           inputAllocationTimeoutMs = inputAllocationTimeoutMs,
           bindRetryBackoff = bindRetryBackoff,
           sessionFactory = {

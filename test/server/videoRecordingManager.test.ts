@@ -36,6 +36,7 @@ import {
   getVideoRecordingMetadata,
   listVideoRecordings,
   interruptVideoRecording,
+  markVideoRecordingIncomplete,
   recordVideoRecordingHighlightAdded,
   resetVideoRecordingManagerDependencies,
   resolveVideoRetentionPolicy,
@@ -1231,6 +1232,18 @@ describe("videoRecordingManager", () => {
     expect(record?.status).toBe("interrupted");
     expect(record?.endedAt).toBe(new Date(fakeTimer.now()).toISOString());
     expect(record?.durationMs).toBe(1000);
+  });
+
+  test("markVideoRecordingIncomplete force-stops the capture and keeps the row readable (#10957)", async () => {
+    const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 3 });
+
+    await markVideoRecordingIncomplete(active.recordingId);
+
+    expect((await fakeRepository.getRecording(active.recordingId))?.status).toBe("incomplete");
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    expect((await listVideoRecordings()).map((entry) => entry.recordingId)).toContain(
+      active.recordingId,
+    );
   });
 
   test("in-memory ownership blocks a second start when durable status is stale", async () => {

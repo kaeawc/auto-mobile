@@ -10,10 +10,12 @@ import {
   VideoRecordingHighlightEntry,
   VideoRecordingHighlightInput,
   VideoQualityPreset,
+  VideoRecordingMetadata,
 } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 import {
+  getVideoRecordingMetadata,
   IOS_MAX_DURATION_SECONDS,
   listActiveVideoRecordings,
   rollbackVideoRecordingStart,
@@ -109,13 +111,33 @@ async function writeSegmentedResult(
  * than scattered globals. Recordings whose duration fits within a single
  * `screenrecord` are NOT registered here.
  */
+const MAX_FINISHED_SEGMENTED_SESSIONS = 32;
+
 const segmentedSessions = (() => {
   const byHandle = new Map<string, AndroidSegmentedPlanVideoSession>();
   // Undefined in production (sessions fall back to their own defaultTimer); tests
   // inject a FakeTimer so the rotation timer is controllable/inspectable.
   let injectedTimer: Timer | undefined;
   let recordingDependencies: SegmentedSessionRecordingDependencies = {};
+  // Finalized sessions, so a previous owner can fetch the stop result by handle after a
+  // release-time stop (#10958). Bounded: the oldest entry is dropped first.
+  const finished = new Map<
+    string,
+    { owner: string | undefined; stopped: StoppedSegmentedSession }
+  >();
   return {
+    /** A finalized session's stop result, when `ownerSessionUuid` may see it (unset = unscoped). */
+    getFinished(handle: string, ownerSessionUuid?: string): StoppedSegmentedSession | undefined {
+      const entry = finished.get(handle);
+      if (!entry) {
+        return undefined;
+      }
+      const visible =
+        ownerSessionUuid === undefined ||
+        entry.owner === undefined ||
+        entry.owner === ownerSessionUuid;
+      return visible ? entry.stopped : undefined;
+    },
     get timer(): Timer | undefined {
       return injectedTimer;
     },
@@ -136,7 +158,7 @@ const segmentedSessions = (() => {
     },
     /** Tracked sessions a daemon session owns on a device (used when that session is released). */
     forOwner(
-      sessionUuid: string,
+      sessionUuid: string | undefined,
       deviceId: string,
     ): Array<[string, AndroidSegmentedPlanVideoSession]> {
       return [...byHandle.entries()].filter(([, session]) =>
@@ -167,7 +189,15 @@ const segmentedSessions = (() => {
       const result = await session.stop();
       byHandle.delete(handle);
       const { segments, manifestPath } = await persistSegmentedResult(handle, result);
-      return { sessionId: handle, segments, manifestPath, highlights: result.highlights };
+      const stopped = { sessionId: handle, segments, manifestPath, highlights: result.highlights };
+      finished.set(handle, { owner: session.ownerSession, stopped });
+      if (finished.size > MAX_FINISHED_SEGMENTED_SESSIONS) {
+        const oldest = finished.keys().next();
+        if (!oldest.done) {
+          finished.delete(oldest.value);
+        }
+      }
+      return stopped;
     },
     async abortAndRemove(handle: string, session: AndroidSegmentedPlanVideoSession): Promise<void> {
       await session.abort();
@@ -186,6 +216,7 @@ const segmentedSessions = (() => {
       injectedTimer = undefined;
       recordingDependencies = {};
       byHandle.clear();
+      finished.clear();
     },
   };
 })();
@@ -231,7 +262,7 @@ export async function stopSegmentedVideoRecordingsForDevice(
 
 /** Whether a daemon session owns a timer-driven segmented recording on the device. */
 export function hasSegmentedVideoRecordingsForOwner(
-  sessionUuid: string,
+  sessionUuid: string | undefined,
   deviceId: string,
 ): boolean {
   return segmentedSessions.forOwner(sessionUuid, deviceId).length > 0;
@@ -243,7 +274,7 @@ export function hasSegmentedVideoRecordingsForOwner(
  * not be blocked by a recording that cannot be stopped.
  */
 export async function stopSegmentedVideoRecordingsForOwner(
-  sessionUuid: string,
+  sessionUuid: string | undefined,
   deviceId: string,
 ): Promise<void> {
   for (const [handle, session] of segmentedSessions.forOwner(sessionUuid, deviceId)) {
@@ -450,6 +481,20 @@ function selectLatestRecording(records: VideoRecordingRecord[]): VideoRecordingR
  * segment file path/recordingId in order. Returns null otherwise so callers
  * fall through to the single-recording stop path.
  */
+function segmentedStopResponse(stopped: StoppedSegmentedSession) {
+  const { sessionId, segments, manifestPath, highlights } = stopped;
+  return createJSONToolResponse({
+    action: "stop",
+    count: segments.length,
+    manifestPath,
+    // Each segment carries sessionId + segmentIndex, so `recordings[]` has the same shape
+    // whether it came from a by-handle or a bare (multi-session) stop.
+    recordings: segments.map((segment) => ({ ...segment, sessionId })),
+    segmented: true,
+    highlights: highlights?.map((highlight): SessionHighlight => ({ ...highlight, sessionId })),
+  });
+}
+
 async function tryStopSegmentedSession(recordingId: string) {
   const session = segmentedSessions.get(recordingId);
   if (!session) {
@@ -457,26 +502,57 @@ async function tryStopSegmentedSession(recordingId: string) {
   }
 
   try {
-    const { sessionId, segments, manifestPath, highlights } = await segmentedSessions.stopAndRemove(
-      recordingId,
-      session,
-    );
-    return createJSONToolResponse({
-      action: "stop",
-      count: segments.length,
-      manifestPath,
-      // Each segment carries sessionId + segmentIndex, so `recordings[]` has the same shape
-      // whether it came from a by-handle or a bare (multi-session) stop.
-      recordings: segments.map((segment) => ({ ...segment, sessionId })),
-      segmented: true,
-      highlights: highlights?.map((highlight): SessionHighlight => ({ ...highlight, sessionId })),
-    });
+    return segmentedStopResponse(await segmentedSessions.stopAndRemove(recordingId, session));
   } catch (error) {
     throw toActionableError(error, `Failed to stop segmented video recording`);
   }
 }
 
-async function stopRecordingById(recordingId: string) {
+function stopResultEntry(
+  metadata: VideoRecordingMetadata,
+  device?: { deviceId?: string; platform?: string },
+): Record<string, unknown> {
+  const codec = metadata.codec ?? "unknown";
+  const durationMs = metadata.durationMs ?? 0;
+  const sizeBytes = metadata.sizeBytes ?? 0;
+  return {
+    recordingId: metadata.recordingId,
+    filePath: metadata.filePath,
+    durationMs,
+    videoDurationMs: metadata.videoDurationMs,
+    sizeBytes,
+    codec,
+    recordedPanel: metadata.recordedPanel,
+    transitions: metadata.transitions,
+    metadata: { ...metadata, durationMs, sizeBytes, codec },
+    deviceId: device?.deviceId,
+    platform: device?.platform,
+  };
+}
+
+/**
+ * A recording that is not active any more but was finalized (a release-time stop, #10826)
+ * is returned to its owner instead of failing: the owner-scoped lookup needs no device, so a
+ * stop by id never allocates one (#10958).
+ */
+async function finalizedStopResponse(recordingId: string, ownerSessionUuid?: string) {
+  const finishedSegmented = segmentedSessions.getFinished(recordingId, ownerSessionUuid);
+  if (finishedSegmented) {
+    return segmentedStopResponse(finishedSegmented);
+  }
+  const metadata = await getVideoRecordingMetadata(recordingId, { ownerSessionUuid });
+  if (!metadata) {
+    return null;
+  }
+  return createJSONToolResponse({
+    action: "stop",
+    count: 1,
+    recordings: [stopResultEntry(metadata)],
+    alreadyStopped: true,
+  });
+}
+
+async function stopRecordingById(recordingId: string, ownerSessionUuid?: string) {
   const segmented = await tryStopSegmentedSession(recordingId);
   if (segmented) {
     return segmented;
@@ -486,26 +562,16 @@ async function stopRecordingById(recordingId: string) {
   const evictedRecordingIds: string[] = [];
   const activeRecords = await listActiveVideoRecordings();
   const matching = activeRecords.find((record) => record.recordingId === recordingId);
+  if (!matching) {
+    const finalized = await finalizedStopResponse(recordingId, ownerSessionUuid);
+    if (finalized) {
+      return finalized;
+    }
+  }
 
   try {
     const { metadata, evictedRecordingIds: evicted } = await stopVideoRecording(recordingId);
-    const codec = metadata.codec ?? "unknown";
-    const durationMs = metadata.durationMs ?? 0;
-    const sizeBytes = metadata.sizeBytes ?? 0;
-
-    results.push({
-      recordingId: metadata.recordingId,
-      filePath: metadata.filePath,
-      durationMs,
-      videoDurationMs: metadata.videoDurationMs,
-      sizeBytes,
-      codec,
-      recordedPanel: metadata.recordedPanel,
-      transitions: metadata.transitions,
-      metadata: { ...metadata, durationMs, sizeBytes, codec },
-      deviceId: matching?.deviceId,
-      platform: matching?.platform,
-    });
+    results.push(stopResultEntry(metadata, matching));
 
     for (const evictedId of evicted) {
       evictedRecordingIds.push(evictedId);
@@ -729,7 +795,7 @@ function createVideoStopResponse(output: {
 
 async function stopDeviceRecordings(device: BootedDevice, args: VideoRecordingArgs) {
   if (args.recordingId) {
-    return stopRecordingById(args.recordingId);
+    return stopRecordingById(args.recordingId, args.sessionUuid);
   }
 
   const results: Array<Record<string, unknown>> = [];
@@ -857,7 +923,7 @@ export function registerVideoRecordingTools(): void {
   ) => {
     signal?.throwIfAborted();
     if (args.action === "stop" && args.recordingId) {
-      return stopRecordingById(args.recordingId);
+      return stopRecordingById(args.recordingId, args.sessionUuid);
     }
 
     throw new ActionableError(

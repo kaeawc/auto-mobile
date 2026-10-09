@@ -8,6 +8,7 @@ import { Platform } from "../models";
 import { addSessionUuidToSchema, DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHelpers";
 import {
   startTestRecording,
+  getStoppedTestRecording,
   stopTestRecording,
   getTestRecordingStatus,
 } from "./testRecordingManager";
@@ -309,10 +310,27 @@ const exportPlanResultSchema = z.object({
 const exportPlanTool = async (params: {
   recordingId?: string;
   planName?: string;
+  sessionUuid?: string;
 }): Promise<any> => {
   try {
     // Check if there's an active recording
     const status = getTestRecordingStatus();
+    // After a release-time stop the owner fetches the retained plan by id (#10958).
+    const retained =
+      !status && params.recordingId
+        ? getStoppedTestRecording(params.recordingId, params.sessionUuid)
+        : undefined;
+    if (retained) {
+      return createStructuredToolResponse({
+        success: true,
+        recordingId: retained.recordingId,
+        planName: retained.planName,
+        planContent: retained.planContent,
+        stepCount: retained.stepCount,
+        durationMs: retained.durationMs,
+        ...(retained.error ? { error: retained.error } : {}),
+      });
+    }
     if (!status) {
       return withIsErrorOnFailure(
         createStructuredToolResponse({

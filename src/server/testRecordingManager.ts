@@ -68,6 +68,44 @@ let stoppingRecording: {
   promise: Promise<TestRecordingStopResult>;
 } | null = null;
 
+const MAX_RETAINED_STOPPED_PLANS = 16;
+
+/**
+ * Finalized plans of owned recordings by recording id (#10958), so a plan produced by a
+ * release-time stop is not lost: the previous owner fetches it with the id. Bounded, oldest
+ * dropped first.
+ */
+const stoppedPlans = new Map<string, { owner: string; result: TestRecordingStopResult }>();
+
+function retainStoppedPlan(session: RecordingSession, result: TestRecordingStopResult): void {
+  if (!session.ownerSessionUuid) {
+    return;
+  }
+  stoppedPlans.set(session.recordingId, { owner: session.ownerSessionUuid, result });
+  if (stoppedPlans.size > MAX_RETAINED_STOPPED_PLANS) {
+    const oldest = stoppedPlans.keys().next();
+    if (!oldest.done) {
+      stoppedPlans.delete(oldest.value);
+    }
+  }
+}
+
+/** The retained plan of a stopped recording, only for the session that owned it. */
+export function getStoppedTestRecording(
+  recordingId: string,
+  ownerSessionUuid: string | undefined,
+): TestRecordingStopResult | undefined {
+  const entry = stoppedPlans.get(recordingId);
+  return entry && ownerSessionUuid !== undefined && entry.owner === ownerSessionUuid
+    ? entry.result
+    : undefined;
+}
+
+/** Test seam: forget retained plans. */
+export function resetStoppedTestRecordings(): void {
+  stoppedPlans.clear();
+}
+
 export function getTestRecordingStatus(timer: Timer = defaultTimer): TestRecordingStatus | null {
   if (!activeRecording) {
     return null;
@@ -252,11 +290,16 @@ export async function stopTestRecording(
   }
 
   activeRecording = null;
-  const promise = stopAndBuildResult(session, planName, timer).finally(() => {
-    if (stoppingRecording?.session === session) {
-      stoppingRecording = null;
-    }
-  });
+  const promise = stopAndBuildResult(session, planName, timer)
+    .then((result) => {
+      retainStoppedPlan(session, result);
+      return result;
+    })
+    .finally(() => {
+      if (stoppingRecording?.session === session) {
+        stoppingRecording = null;
+      }
+    });
   stoppingRecording = { session, promise };
   return promise;
 }

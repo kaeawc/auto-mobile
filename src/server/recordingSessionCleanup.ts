@@ -129,9 +129,9 @@ async function stopOwnedRecordings(
       `stop test recording of released session ${sessionId} on ${deviceId}`,
       async () => {
         await deps.stopTestRecording();
-        // The recorded plan is only returned to the stop caller; no API retrieves it later.
-        logger.warn(
-          `[recording] Test recording on ${deviceId} stopped and its plan discarded: owning session ${sessionId} was released`,
+        // The plan is retained by recording id for the owning session (#10958).
+        logger.info(
+          `[recording] Test recording on ${deviceId} stopped: owning session ${sessionId} was released; its plan stays fetchable by the owner`,
         );
       },
     );

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ActionableError, type BootedDevice, type PlanStep } from "../../src/models";
 import {
+  getStoppedTestRecording,
   getTestRecordingStatus,
   isTestRecordingOwnedBy,
   startTestRecording,
@@ -97,6 +98,30 @@ describe("testRecordingManager ownership", () => {
     recorder.steps.push(capturedStep);
     await stopTestRecording(undefined, "owned", timer);
     expect(isTestRecordingOwnedBy("session-a", device.deviceId)).toBe(false);
+  });
+});
+
+describe("testRecordingManager retained plan (#10958)", () => {
+  test("an owned recording's plan stays fetchable by its owner after the stop, and only by it", async () => {
+    const timer = new FakeTimer();
+    const recorder = new FakeRecorder();
+    const pending = startTestRecording(
+      device,
+      timer,
+      new CountingIdGenerator("recording"),
+      () => recorder,
+      "session-a",
+    );
+    await Promise.resolve();
+    recorder.startGate.resolve();
+    const { recordingId } = await pending;
+    recorder.steps.push(capturedStep);
+
+    const stopped = await stopTestRecording(undefined, "owned", timer);
+
+    expect(getStoppedTestRecording(recordingId, "session-a")).toEqual(stopped);
+    expect(getStoppedTestRecording(recordingId, "session-b")).toBeUndefined();
+    expect(getStoppedTestRecording(recordingId, undefined)).toBeUndefined();
   });
 });
 

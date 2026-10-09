@@ -43,6 +43,15 @@ public enum HierarchyMerger {
     /// 1. **Enrich** — annotate existing XCUITest nodes with `sdk.*` extras from matched SDK nodes.
     /// 2. **Inject** — add SDK-only nodes (views absent from the XCUITest tree) as children
     ///    of their nearest matched parent. Injected nodes carry `sdk.source=sdkWalker`.
+    ///    An SDK node that matches an XCUITest node (same class family, or the same
+    ///    accessibility identifier across class families, within the bounds tolerance)
+    ///    is never injected; its SDK-only descendants are placed under that XCUITest
+    ///    node instead (#10851).
+    ///
+    /// When the SDK snapshot predates the XCUITest capture, an SDK node whose identifier
+    /// XCUITest reports at a different position is a stale copy: XCUITest positions win,
+    /// so neither the copy (with its subtree) nor the SDK children of an XCUITest node's
+    /// moved identifier-only match are injected (#10851).
     public static func merge(xcuitest: ViewHierarchy, sdk: SdkViewHierarchy?) -> ViewHierarchy {
         merge(xcuitest: xcuitest, sdk: sdk, matchCounter: nil)
     }
@@ -140,20 +149,21 @@ public enum HierarchyMerger {
 
         // Single match pass: resolve each XCUITest node's SDK match once and cache both
         // the direct match (for injection placement) and the full match (direct or the
-        // smallest enclosing node, for enrichment) on a mirror tree.
-        let matched = matchTree(xcuitestRoot, context: context)
-        var xcuitestNodesByClass: [String: [UIElementInfo]] = [:]
-        indexXcuitestNodes(xcuitestRoot, into: &xcuitestNodesByClass)
+        // smallest enclosing node, for enrichment) on a mirror tree. The same pass
+        // indexes every XCUITest node by pre-order position.
+        var xcuitestIndex = XcuitestIndex()
+        let matched = matchTree(xcuitestRoot, context: context, index: &xcuitestIndex)
+
+        // Plan every SDK-only injection before building, because an SDK node matched to
+        // an XCUITest node elsewhere in the tree places its descendants under that node.
+        var planner = InjectionPlanner(
+            xcuitest: xcuitestIndex,
+            staleSnapshot: sdk.timestamp < xcuitest.updatedAt
+        )
+        planner.plan(matched)
 
         // Build the enriched + injected output tree from the cached matches.
-        var injectedParentKeys = Set<InjectionKey>()
-        var injectedNodeKeys = Set<InjectionKey>()
-        let injectedRoot = buildNode(
-            matched,
-            xcuitestNodesByClass: xcuitestNodesByClass,
-            injectedParentKeys: &injectedParentKeys,
-            injectedNodeKeys: &injectedNodeKeys
-        ).element
+        let injectedRoot = buildNode(matched, injections: planner.injections).element
 
         return ViewHierarchy(
             updatedAt: xcuitest.updatedAt,
@@ -220,26 +230,22 @@ public enum HierarchyMerger {
         switch className {
         case "UIKitTextField", "UITextField": return "UITextField"
         case "UIKitSearchBar", "UISearchBar": return "UISearchBar"
-        default: return className
+        default:
+            // SwiftUI hosts a ScrollView in a private UIScrollView subclass
+            // (`HostingScrollView`), which XCUITest reports as UIScrollView (#10851).
+            return className.hasSuffix("ScrollView") ? "UIScrollView" : className
         }
     }
 
-    private static func indexXcuitestNodes(_ node: UIElementInfo, into index: inout [String: [UIElementInfo]]) {
-        if let className = node.className {
-            index[classFamily(className), default: []].append(node)
-        }
-        for child in node.node ?? [] {
-            indexXcuitestNodes(child, into: &index)
-        }
+    private static func sameIdentifier(_ sdkNode: SdkViewNode, _ identifier: String?) -> Bool {
+        guard let sdkId = sdkNode.accessibilityIdentifier, !sdkId.isEmpty else { return false }
+        return sdkId == identifier
     }
 
-    private static func isCounterpart(_ sdkNode: SdkViewNode, of element: UIElementInfo) -> Bool {
-        guard let className = element.className,
-              let bounds = element.bounds
-        else { return false }
-        return isCounterpart(sdkNode, className: className, identifier: element.resourceId, bounds: bounds)
-    }
-
+    /// An SDK node is the counterpart of an XCUITest node when their bounds agree within
+    /// the tolerance, their identifiers do not conflict, and they are the same class
+    /// family or carry the same identifier. The identifier rule spans class families:
+    /// XCUITest reports a link-bearing UITextView as `UILink`, a tab button as `UIButton`.
     private static func isCounterpart(
         _ sdkNode: SdkViewNode,
         className: String,
@@ -248,21 +254,16 @@ public enum HierarchyMerger {
     )
         -> Bool
     {
-        guard classFamily(className) == classFamily(sdkNode.className) else { return false }
-        if let sdkId = sdkNode.accessibilityIdentifier, !sdkId.isEmpty,
-           let identifier, !identifier.isEmpty, sdkId != identifier
-        {
-            return false
-        }
-        let sdkBounds = sdkNode.bounds
-        return coordinateDistance(bounds.left, sdkBounds.left) <= boundsTolerance &&
-            coordinateDistance(bounds.top, sdkBounds.top) <= boundsTolerance &&
-            coordinateDistance(bounds.right, sdkBounds.right) <= boundsTolerance &&
-            coordinateDistance(bounds.bottom, sdkBounds.bottom) <= boundsTolerance
+        guard sameIdentifier(sdkNode, identifier) || classFamily(className) == classFamily(sdkNode.className)
+        else { return false }
+        guard identifiersCompatible(sdkNode, identifier) else { return false }
+        return boundsDistance(sdkNode.bounds, bounds) <= boundsTolerance
     }
 
-    private static func isRepresented(_ sdkNode: SdkViewNode, by index: [String: [UIElementInfo]]) -> Bool {
-        index[classFamily(sdkNode.className)]?.contains { isCounterpart(sdkNode, of: $0) } == true
+    /// Frames that disagree beyond the tolerance. Between a stale SDK snapshot and the
+    /// XCUITest capture this means the view moved or resized (scroll, keyboard avoidance).
+    private static func isDisplaced(_ sdkBounds: SdkBounds, from bounds: ElementBounds) -> Bool {
+        boundsDistance(sdkBounds, bounds) > boundsTolerance
     }
 
     private static func identifiersCompatible(_ sdkNode: SdkViewNode, _ resourceId: String?) -> Bool {
@@ -577,6 +578,58 @@ public enum HierarchyMerger {
         }
     }
 
+    // MARK: - XCUITest index
+
+    /// Every XCUITest node by pre-order position, plus class-family and identifier
+    /// lookups, so an SDK node resolves the XCUITest node that represents it.
+    private struct XcuitestIndex {
+        private(set) var elements: [UIElementInfo] = []
+        private var byFamily: [String: [Int]] = [:]
+        private var byIdentifier: [String: [Int]] = [:]
+
+        mutating func add(_ element: UIElementInfo) -> Int {
+            let position = elements.count
+            elements.append(element)
+            if let className = element.className {
+                byFamily[classFamily(className), default: []].append(position)
+            }
+            if let identifier = element.resourceId, !identifier.isEmpty {
+                byIdentifier[identifier, default: []].append(position)
+            }
+            return position
+        }
+
+        /// The XCUITest node an SDK node duplicates: a same-identifier counterpart first,
+        /// then the nearest, then document order.
+        func representative(of sdkNode: SdkViewNode) -> Int? {
+            var candidates = byFamily[classFamily(sdkNode.className)] ?? []
+            if let identifier = sdkNode.accessibilityIdentifier, !identifier.isEmpty {
+                candidates += byIdentifier[identifier] ?? []
+            }
+            var best: (rank: Int, distance: Int, position: Int)?
+            for position in candidates {
+                let element = elements[position]
+                guard let className = element.className, let bounds = element.bounds,
+                      isCounterpart(sdkNode, className: className, identifier: element.resourceId, bounds: bounds)
+                else { continue }
+                let rank = sameIdentifier(sdkNode, element.resourceId) ? 0 : 1
+                let candidate = (rank: rank, distance: boundsDistance(sdkNode.bounds, bounds), position: position)
+                if best.map({ candidate < $0 }) ?? true {
+                    best = candidate
+                }
+            }
+            return best?.position
+        }
+
+        /// Whether XCUITest reports this SDK node's identifier at a different position.
+        func hasDisplacedCounterpart(_ sdkNode: SdkViewNode) -> Bool {
+            guard let identifier = sdkNode.accessibilityIdentifier, !identifier.isEmpty else { return false }
+            return byIdentifier[identifier]?.contains { position in
+                elements[position].bounds.map { isDisplaced(sdkNode.bounds, from: $0) } ?? false
+            } ?? false
+        }
+    }
+
     // MARK: - Match context
 
     /// Cache key for a direct match query. Direct matches depend only on the query's
@@ -592,7 +645,8 @@ public enum HierarchyMerger {
     private final class MatchContext {
         let geometryIndex: GeometryIndex
         let identifierLookup: [String: SdkViewNode]
-        let sdkNodesByClass: [String: [SdkViewNode]]
+        let sdkIDsByFamily: [String: [NodeID]]
+        let sdkIDsByIdentifier: [String: [NodeID]]
         let counter: MatchCounter?
         let tieBreak: ToleranceTieBreak
 
@@ -610,7 +664,16 @@ public enum HierarchyMerger {
             geometryIndex = GeometryIndex(allNodes: allSdkNodes)
             self.tieBreak = tieBreak
             self.identifierLookup = identifierLookup
-            sdkNodesByClass = Dictionary(grouping: allSdkNodes, by: { classFamily($0.className) })
+            var byFamily: [String: [NodeID]] = [:]
+            var byIdentifier: [String: [NodeID]] = [:]
+            for (id, node) in allSdkNodes.enumerated() {
+                byFamily[classFamily(node.className), default: []].append(id)
+                if let identifier = node.accessibilityIdentifier, !identifier.isEmpty {
+                    byIdentifier[identifier, default: []].append(id)
+                }
+            }
+            sdkIDsByFamily = byFamily
+            sdkIDsByIdentifier = byIdentifier
             self.counter = counter
         }
 
@@ -625,9 +688,14 @@ public enum HierarchyMerger {
             // which can pick a colocated UIKit wrapper instead of its text field.
             var strict: SdkViewNode?
             if let className, let bounds {
-                let candidates = sdkNodesByClass[classFamily(className)]?.filter {
+                // Same class family, plus same-identifier nodes of any class, in document order.
+                var ids = sdkIDsByFamily[classFamily(className)] ?? []
+                if let resourceId, !resourceId.isEmpty, let sameIdIDs = sdkIDsByIdentifier[resourceId] {
+                    ids = Set(ids).union(sameIdIDs).sorted()
+                }
+                let candidates = ids.map { geometryIndex.allNodes[$0] }.filter {
                     isCounterpart($0, className: className, identifier: resourceId, bounds: bounds)
-                } ?? []
+                }
                 func exactBounds(_ node: SdkViewNode) -> Bool {
                     node.bounds.left == bounds.left && node.bounds.top == bounds.top &&
                         node.bounds.right == bounds.right && node.bounds.bottom == bounds.bottom
@@ -669,6 +737,8 @@ public enum HierarchyMerger {
     /// phases read cached results instead of re-matching.
     private struct MatchedNode {
         let element: UIElementInfo
+        /// Pre-order position in `XcuitestIndex`.
+        let position: Int
         /// `findDirectMatch` result — used for SDK-only injection placement.
         let directMatch: SdkViewNode?
         /// `findMatch` result (direct, else smallest enclosing) — used for enrichment.
@@ -678,8 +748,15 @@ public enum HierarchyMerger {
 
     /// Single match pass. Resolves the direct and full match for `element` once, records
     /// the resolution, and recurses. Every node is matched exactly once here.
-    private static func matchTree(_ element: UIElementInfo, context: MatchContext) -> MatchedNode {
+    private static func matchTree(
+        _ element: UIElementInfo,
+        context: MatchContext,
+        index: inout XcuitestIndex
+    )
+        -> MatchedNode
+    {
         context.counter?.record()
+        let position = index.add(element)
         let direct = context.directMatch(
             className: element.className,
             resourceId: element.resourceId,
@@ -689,8 +766,14 @@ public enum HierarchyMerger {
         // mirroring the old `findMatch` (direct ?? enclosing).
         let enclosing = context.enclosingMatch(bounds: element.bounds)
         let full = direct ?? enclosing.flatMap { identifiersCompatible($0, element.resourceId) ? $0 : nil }
-        let children = element.node?.map { matchTree($0, context: context) }
-        return MatchedNode(element: element, directMatch: direct, fullMatch: full, children: children)
+        let children = element.node?.map { matchTree($0, context: context, index: &index) }
+        return MatchedNode(
+            element: element,
+            position: position,
+            directMatch: direct,
+            fullMatch: full,
+            children: children
+        )
     }
 
     /// Find a direct SDK counterpart for an XCUITest element.
@@ -741,52 +824,26 @@ public enum HierarchyMerger {
     /// `UIElementInfo` copy is skipped for untouched nodes.
     private static func buildNode(
         _ node: MatchedNode,
-        xcuitestNodesByClass: [String: [UIElementInfo]],
-        injectedParentKeys: inout Set<InjectionKey>,
-        injectedNodeKeys: inout Set<InjectionKey>
+        injections: [Int: [UIElementInfo]]
     )
         -> (element: UIElementInfo, changed: Bool)
     {
         let element = node.element
 
-        // Recurse into existing children first, mirroring the old post-order traversal so
-        // `injectedParentKeys` dedup order (deepest-first) is preserved.
         var processedChildren: [UIElementInfo]?
         var childrenChanged = false
         if let children = node.children {
             var out = [UIElementInfo]()
             out.reserveCapacity(children.count)
             for child in children {
-                let built = buildNode(
-                    child,
-                    xcuitestNodesByClass: xcuitestNodesByClass,
-                    injectedParentKeys: &injectedParentKeys,
-                    injectedNodeKeys: &injectedNodeKeys
-                )
+                let built = buildNode(child, injections: injections)
                 out.append(built.element)
                 if built.changed { childrenChanged = true }
             }
             processedChildren = out
         }
 
-        // SDK children of the direct match that have no XCUITest counterpart get injected.
-        // Prune matched descendants too: an unmatched wrapper can contain UIKit views
-        // that XCUITest already exposed elsewhere in its hierarchy.
-        var injected: [UIElementInfo] = []
-        if let currentSdk = node.directMatch,
-           injectedParentKeys.insert(injectionKey(for: currentSdk)).inserted,
-           let sdkChildren = currentSdk.children
-        {
-            for sdkChild in sdkChildren {
-                if let converted = convertSdkNode(
-                    sdkChild,
-                    xcuitestNodesByClass: xcuitestNodesByClass,
-                    injectedNodeKeys: &injectedNodeKeys
-                ) {
-                    injected.append(converted)
-                }
-            }
-        }
+        let injected = injections[node.position] ?? []
 
         // Enrichment from the full match (direct or smallest enclosing).
         let enrichedExtras = buildExtras(existing: element.extras, sdkNode: node.fullMatch)
@@ -955,45 +1012,89 @@ public enum HierarchyMerger {
         return false
     }
 
-    /// Convert an SDK node (and its subtree) to a UIElementInfo for injection.
-    private static func convertSdkNode(
-        _ node: SdkViewNode,
-        xcuitestNodesByClass: [String: [UIElementInfo]],
-        injectedNodeKeys: inout Set<InjectionKey>
-    )
-        -> UIElementInfo?
-    {
-        if isRepresented(node, by: xcuitestNodesByClass) { return nil }
-        let key = injectionKey(for: node)
-        if !injectedNodeKeys.insert(key).inserted { return nil }
-        let convertedChildren = node.children?.compactMap { child in
-            convertSdkNode(
-                child,
-                xcuitestNodesByClass: xcuitestNodesByClass,
-                injectedNodeKeys: &injectedNodeKeys
+    /// Plans SDK-only injections, keyed by the receiving XCUITest node's pre-order position.
+    private struct InjectionPlanner {
+        let xcuitest: XcuitestIndex
+        /// The SDK snapshot predates the XCUITest capture, so XCUITest positions win.
+        let staleSnapshot: Bool
+        private(set) var injections: [Int: [UIElementInfo]] = [:]
+        /// SDK nodes whose children were already expanded (once, under one parent).
+        private var expandedKeys = Set<InjectionKey>()
+        /// SDK-only subtrees already injected, so a repeated subtree appears once.
+        private var injectedNodeKeys = Set<InjectionKey>()
+
+        init(xcuitest: XcuitestIndex, staleSnapshot: Bool) {
+            self.xcuitest = xcuitest
+            self.staleSnapshot = staleSnapshot
+        }
+
+        /// Post-order, so the deepest direct match claims a shared SDK subtree first.
+        mutating func plan(_ node: MatchedNode) {
+            for child in node.children ?? [] {
+                plan(child)
+            }
+            guard let direct = node.directMatch else { return }
+            // A stale identifier-fallback match at a moved position would inject its
+            // children at the old layout; keep the XCUITest node as captured.
+            if staleSnapshot, let bounds = node.element.bounds, isDisplaced(direct.bounds, from: bounds) {
+                return
+            }
+            expandChildren(of: direct, under: node.position)
+        }
+
+        /// Inject the SDK-only children of `sdkNode` under the XCUITest node at `parent`.
+        /// Matched descendants are pruned too: an unmatched wrapper can contain UIKit
+        /// views that XCUITest already exposed elsewhere in its hierarchy.
+        private mutating func expandChildren(of sdkNode: SdkViewNode, under parent: Int) {
+            guard expandedKeys.insert(injectionKey(for: sdkNode)).inserted,
+                  let children = sdkNode.children
+            else { return }
+            for child in children {
+                if let converted = convert(child) {
+                    injections[parent, default: []].append(converted)
+                }
+            }
+        }
+
+        /// Convert an SDK-only node (and its subtree) to a UIElementInfo for injection.
+        /// Returns nil for a node XCUITest already represents — its SDK-only descendants
+        /// are placed under that XCUITest node — and for a stale moved copy.
+        private mutating func convert(_ node: SdkViewNode) -> UIElementInfo? {
+            if let representative = xcuitest.representative(of: node) {
+                expandChildren(of: node, under: representative)
+                return nil
+            }
+            if staleSnapshot, xcuitest.hasDisplacedCounterpart(node) { return nil }
+            let key = injectionKey(for: node)
+            if !injectedNodeKeys.insert(key).inserted { return nil }
+            var convertedChildren: [UIElementInfo] = []
+            for child in node.children ?? [] {
+                if let converted = convert(child) {
+                    convertedChildren.append(converted)
+                }
+            }
+            if !hasMeaningfulContent(node), convertedChildren.isEmpty { return nil }
+            // `sdk.source` marks injected nodes and is always present; the remaining sdk.*
+            // fields are appended only when non-default (issue #5475).
+            let extras = appendSdkExtras(to: ["sdk.source": "sdkWalker"], from: node) ?? ["sdk.source": "sdkWalker"]
+
+            return UIElementInfo(
+                text: node.accessibilityLabel,
+                resourceId: node.accessibilityIdentifier,
+                className: node.className,
+                bounds: ElementBounds(
+                    left: node.bounds.left,
+                    top: node.bounds.top,
+                    right: node.bounds.right,
+                    bottom: node.bounds.bottom
+                ),
+                // Preserve the VoiceOver cursor flag on SDK-only nodes that are injected
+                // into the tree without an XCUITest counterpart (#3924).
+                accessibilityFocused: node.isAccessibilityFocused ? "true" : nil,
+                extras: extras,
+                node: convertedChildren.isEmpty ? nil : convertedChildren
             )
         }
-        if !hasMeaningfulContent(node), convertedChildren?.isEmpty ?? true { return nil }
-        // `sdk.source` marks injected nodes and is always present; the remaining sdk.*
-        // fields are appended only when non-default (issue #5475).
-        let extras = appendSdkExtras(to: ["sdk.source": "sdkWalker"], from: node) ?? ["sdk.source": "sdkWalker"]
-
-        return UIElementInfo(
-            text: node.accessibilityLabel,
-            resourceId: node.accessibilityIdentifier,
-            className: node.className,
-            bounds: ElementBounds(
-                left: node.bounds.left,
-                top: node.bounds.top,
-                right: node.bounds.right,
-                bottom: node.bounds.bottom
-            ),
-            // Preserve the VoiceOver cursor flag on SDK-only nodes that are injected
-            // into the tree without an XCUITest counterpart (#3924).
-            accessibilityFocused: node.isAccessibilityFocused ? "true" : nil,
-            extras: extras,
-            node: convertedChildren?.isEmpty == true ? nil : convertedChildren
-        )
     }
 
     /// Build the exact (no tolerance) lookup key for an SDK node.

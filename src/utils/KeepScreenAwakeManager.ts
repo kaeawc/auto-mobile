@@ -111,22 +111,22 @@ export class KeepScreenAwakeManager {
     };
   }
 
-  async restore(state: KeepScreenAwakeState): Promise<void> {
+  async restore(state: KeepScreenAwakeState): Promise<boolean> {
     if (!state.applied || this.device.platform !== "android") {
-      return;
+      return true;
     }
 
     if (state.method === "svc") {
-      await this.restoreSvcStayon(state);
-      return;
+      return await this.restoreSvcStayon(state);
     }
 
     if (state.method !== "settings" || !state.appliedSettings) {
-      return;
+      return false;
     }
 
+    let restored = true;
     if (state.appliedSettings.stayOnWhilePluggedIn) {
-      await this.restoreSetting(
+      restored = await this.restoreSetting(
         "global",
         "stay_on_while_plugged_in",
         state.originalStayOnWhilePluggedIn,
@@ -135,16 +135,18 @@ export class KeepScreenAwakeManager {
     }
 
     if (state.appliedSettings.screenOffTimeout) {
-      await this.restoreSetting(
-        "system",
-        "screen_off_timeout",
-        state.originalScreenOffTimeout,
-        "long",
-      );
+      restored =
+        (await this.restoreSetting(
+          "system",
+          "screen_off_timeout",
+          state.originalScreenOffTimeout,
+          "long",
+        )) && restored;
     }
+    return restored;
   }
 
-  private async restoreSvcStayon(state: KeepScreenAwakeState): Promise<void> {
+  private async restoreSvcStayon(state: KeepScreenAwakeState): Promise<boolean> {
     if (state.originalStayOnWhilePluggedIn !== undefined) {
       const originalEnabled = this.parseStayOnWhilePluggedIn(state.originalStayOnWhilePluggedIn);
       const restored = await this.restoreSetting(
@@ -154,7 +156,7 @@ export class KeepScreenAwakeManager {
         "int",
       );
       if (restored) {
-        return;
+        return true;
       }
       if (originalEnabled !== false) {
         if (originalEnabled === undefined) {
@@ -162,34 +164,36 @@ export class KeepScreenAwakeManager {
             `[KeepScreenAwake] Skipping svc stayon restore on ${this.device.deviceId}: prior state unknown`,
           );
         }
-        return;
+        return false;
       }
       try {
         await this.adb.executeCommand("shell svc power stayon false");
+        return true;
       } catch (error) {
         logger.warn(
           `[KeepScreenAwake] Failed to disable svc stayon on ${this.device.deviceId}: ${error}`,
         );
       }
-      return;
+      return false;
     }
     if (state.svcWasEnabled === undefined) {
       logger.warn(
         `[KeepScreenAwake] Skipping svc stayon restore on ${this.device.deviceId}: prior state unknown`,
       );
-      return;
+      return false;
     }
     if (state.svcWasEnabled) {
-      return;
+      return true;
     }
     try {
       await this.adb.executeCommand("shell svc power stayon false");
+      return true;
     } catch (error) {
       logger.warn(
         `[KeepScreenAwake] Failed to disable svc stayon on ${this.device.deviceId}: ${error}`,
       );
     }
-    return;
+    return false;
   }
 
   private async detectDeviceType(): Promise<DeviceType> {

@@ -1,4 +1,9 @@
 import { isSessionReleasing } from "./sessionReleaseState";
+import {
+  SESSION_CLEANUP_RECEIPT_METHOD,
+  sessionCleanupReceiptParams,
+  type SessionCleanupReceipts,
+} from "./sessionCleanupReceipts";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
@@ -81,6 +86,7 @@ export interface DaemonStateAccess {
   getDeviceLeaseRelinquishPort?(): DeviceLeaseRelinquishPort;
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   getSessionManager(): {
+    cleanupReceipts?: Pick<SessionCleanupReceipts, "getGeneration" | "query">;
     hasSession(sessionId: string): boolean;
     getSession(sessionId: string): Session | null;
     getReleasingSession?(sessionId: string): Session | null;
@@ -249,6 +255,9 @@ export async function handleDaemonRequest(
   // This is daemon self-description, not a pool operation. Keep it available while startup is
   // still settling so a client can decide whether to issue an optional request before forwarding.
   if (request.method === DAEMON_CAPABILITIES_METHOD) {
+    const daemonGeneration = state.isInitialized()
+      ? state.getSessionManager().cleanupReceipts?.getGeneration()
+      : undefined;
     return {
       success: true,
       result: {
@@ -256,7 +265,9 @@ export async function handleDaemonRequest(
           INPUT_TYPE_TEXT_APPEND_CAPABILITY,
           INPUT_GESTURE_STREAM_CAPABILITY,
           DAEMON_REGISTER_SESSION_METHOD,
+          ...(daemonGeneration ? [SESSION_CLEANUP_RECEIPT_METHOD] : []),
         ],
+        ...(daemonGeneration ? { daemonGeneration } : {}),
       },
     };
   }
@@ -268,6 +279,9 @@ export async function handleDaemonRequest(
     };
   }
 
+  if (request.method === SESSION_CLEANUP_RECEIPT_METHOD) {
+    return handleSessionCleanupReceipt(request, state);
+  }
   return handleInitializedDaemonRequest(request, state, executions);
 }
 
@@ -305,6 +319,23 @@ async function handleInitializedDaemonRequest(
         error: `Unsupported daemon method: ${request.method}`,
       };
   }
+}
+
+function handleSessionCleanupReceipt(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): DaemonMethodResult {
+  const parsed = sessionCleanupReceiptParams.safeParse(request.params);
+  if (!parsed.success) {
+    return { success: false, error: `Invalid cleanup receipt parameters: ${parsed.error.message}` };
+  }
+  const receipts = state.getSessionManager().cleanupReceipts;
+  return {
+    success: true,
+    result: receipts
+      ? receipts.query(parsed.data)
+      : { ...parsed.data, state: "unknown", reason: "receipts_unavailable" },
+  };
 }
 
 async function handleReleaseLivenessOwnership(

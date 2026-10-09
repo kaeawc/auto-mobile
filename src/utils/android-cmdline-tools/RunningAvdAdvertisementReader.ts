@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { logger } from "../logger";
 import { sortedReaddirSync } from "../io";
+import { isProcessRunning } from "../processLiveness";
 
 /**
  * Reads the host-side advertisement an emulator process writes while it owns an
@@ -151,13 +152,9 @@ function parsePidFromAdvertisementFileName(file: string): number | undefined {
 }
 
 function defaultIsProcessAlive(pid: number): boolean {
-  try {
-    // Signal 0 probes for existence without delivering a signal.
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    // ESRCH is the expected answer for a stale advertisement.
-    logger.debug(`Advertised PID ${pid} is not alive: ${error}`);
-    return false;
-  }
+  // EPERM means the PID exists but belongs to another user, so only a
+  // confirmed ESRCH (or a Linux zombie) reads as dead (#11103).
+  return isProcessRunning(pid, {
+    debugLog: (message, error) => logger.debug(`Advertised PID ${pid}: ${message}`, error),
+  });
 }

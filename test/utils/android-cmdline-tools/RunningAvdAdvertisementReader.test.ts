@@ -113,3 +113,17 @@ describe("runningAvdAdvertisementDirs (#11103)", () => {
     expect(await reader.isAvdAdvertisedRunning(AVD)).toBe(true);
   });
 });
+
+describe("default advertised-PID liveness (#11103)", () => {
+  // PID 1 always exists; a non-root probe gets EPERM, which proves existence.
+  test.skipIf(process.platform === "win32")(
+    "treats a PID owned by another user (EPERM) as alive",
+    async () => {
+      const dir = createRunningDir();
+      writeAdvertisement(dir, 1, AVD);
+      const reader = new TmpdirRunningAvdAdvertisementReader(dir);
+
+      expect(await reader.isAvdAdvertisedRunning(AVD)).toBe(true);
+    },
+  );
+});

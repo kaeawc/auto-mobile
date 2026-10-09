@@ -1,6 +1,6 @@
 ---
 name: ci-failure-triage
-description: "Classify failed pull-request workflow runs, distinguish hard from advisory roll-ups, and avoid re-fixing documented non-fixes."
+description: "Classify failed pull-request workflow runs, distinguish required from advisory jobs, and avoid re-fixing documented non-fixes."
 ---
 
 # CI Failure Triage

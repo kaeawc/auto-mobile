@@ -1039,6 +1039,33 @@ test("admitted viewer survives owner release, ends on removal and re-subscribes"
   const again = await h.subscribe("a");
   expect(messages(again)[0]).toMatchObject({ success: true, subscriptionKind: "viewer" });
 });
+test("ownership churn never interrupts a viewer's frames or the shared capture (#8902)", async () => {
+  const h = await harness({ owner: "b" });
+  const owner = await h.subscribe("b");
+  const viewer = await h.subscribe("a");
+  const frames = () => binary(viewer).length;
+  for (const next of ["c", null, "b", null]) {
+    h.state.owner = next;
+    h.ownership.changed();
+    const before = frames();
+    h.emit();
+    expect(frames()).toBeGreaterThan(before);
+    expect(viewer.destroyed).toBe(false);
+  }
+  // The owner's own identity ending leaves the viewer on the same shared capture.
+  h.state.live.delete("b");
+  h.released("b");
+  h.ownership.changed();
+  terminal(owner, "session_ended");
+  const before = frames();
+  h.emit();
+  expect(frames()).toBeGreaterThan(before);
+  expect(h.sources).toHaveLength(1);
+  expect(h.sources[0].stopped).toBe(false);
+  expect(h.server.subscriberCount(device.deviceId)).toBe(1);
+  h.lifecycle.deviceRemoved(device.deviceId);
+  terminal(viewer, "device_removed");
+});
 test.each([
   { owner: "a", joiner: "b", authOff: false, kind: "viewer", reconfigure: false },
   { owner: null, joiner: "b", authOff: false, kind: "viewer", reconfigure: true },

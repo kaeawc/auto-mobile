@@ -71,6 +71,17 @@ path cannot silently fall back to Android. The stream reconnects after transient
 network failures; browser viewers may need to reconnect too.
 With `AUTOMOBILE_DAEMON_STREAM_AUTH=0`, lease ownership enforcement is advisory only and is not enforced.
 
+## Viewers and device ownership
+
+Watching never requires owning the device. A WebRTC or video-relay stream keeps
+streaming when another session acquires, releases, or idle-releases the device; an
+owner whose session loses the device is downgraded to a read-only viewer. A stream ends
+only when its own session ends, the viewer disconnects, or the device goes away
+(removed, restored from a snapshot, quarantined, or daemon shutdown), and the end is
+reported with a typed reason. The capture is shared, so remaining viewers keep
+receiving frames when other subscribers leave. Changing stream parameters and input
+still require ownership.
+
 ## Troubleshooting
 
 - `No WHIP endpoint configured`: set `AUTOMOBILE_WEBRTC_WHIP_ENDPOINT` or pass

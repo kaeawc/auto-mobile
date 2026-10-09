@@ -84,6 +84,7 @@ describe("DevicePool autolock", () => {
   it("restores persisted autolock identity before a recovered session is published", async () => {
     const persistence = new FakeDeviceSessionPersistence();
     const recoveringManager = new SessionManager(timer, persistence);
+    recoveringManager.attachDaemonSessionId("daemon-session-2");
     const recoveringPool = new DevicePool(
       createDevicePoolDependencies(recoveringManager, "daemon-session-2", {
         timer: timer,
@@ -121,7 +122,8 @@ describe("DevicePool autolock", () => {
         source: "autolock",
         autolock_enabled: 1,
         mcp_session_id: "previous-mcp-session",
-        daemon_session_id: "previous-daemon-session",
+        // The restarted daemon owns the recovered row, not the dead one (#11114).
+        daemon_session_id: "daemon-session-2",
       });
       await expect(
         recoveringPool.attachAutolockSessionToMcpSession("recovered-autolock", "reconnected-mcp"),

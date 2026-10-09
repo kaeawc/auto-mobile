@@ -1378,6 +1378,11 @@ export class SessionManager {
     this.daemonSessionId = daemonSessionId;
   }
 
+  /** A recovered row's dead owner is replaced by this daemon (#11114). */
+  private recoveredRowOwner(): string | null {
+    return this.daemonSessionId ?? null;
+  }
+
   /**
    * Attach the terminal release journal (#10959) and adopt the intents a previous daemon left
    * unconfirmed. From here those UUIDs read as terminally released; startup rehydration then
@@ -3258,7 +3263,8 @@ export class SessionManager {
         source: persisted.source,
         autolockEnabled: persisted.autolock_enabled === 1,
         mcpSessionId: persisted.mcp_session_id,
-        daemonSessionId: persisted.daemon_session_id,
+        // The persisted owner is the dead daemon; this daemon now owns the row (#11114).
+        daemonSessionId: this.recoveredRowOwner(),
       },
       ...(persisted.liveness_owner_token
         ? {
@@ -7919,7 +7925,7 @@ export class SessionManager {
         source: persisted.source,
         autolockEnabled: persisted.autolock_enabled === 1,
         mcpSessionId: persisted.mcp_session_id,
-        daemonSessionId: persisted.daemon_session_id,
+        daemonSessionId: this.recoveredRowOwner(),
       },
       ...(persisted.platform === "android"
         ? { androidEmulator: isAndroidEmulatorSerial(persisted.device_id) }

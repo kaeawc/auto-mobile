@@ -29,6 +29,10 @@ version: 2.1
 # (~150 macOS minutes at ~200 credits/min); paid overflow is ~$0.12-0.24/min.
 # With path filtering on PRs and an explicit post-merge trigger, only relevant
 # pushes reach the macOS lanes; everything else costs a few Linux seconds.
+# Concurrency is the other ceiling: the Free plan runs 1 macOS job at a time
+# (pricing page; the open-source credits page says 2 per organization), versus 5
+# on GitHub-hosted. docs/design-docs/ci/circleci-macos-migration.md (#10887) has
+# the sourced numbers and what the full macOS move would cost.
 
 setup: true
 
@@ -87,8 +91,13 @@ jobs:
           # revalidate. Keep this in sync with `filter-ios` in pull_request.yml.
           # The run-prototype-simulator lines gate the advisory "Prototype Simulator"
           # (overlay agent smoke) workflow on its own inputs: the overlay agent, its
-          # smoke script and driver, and the TypeScript the driver imports. Comments
-          # cannot go inside the mapping block itself; the orb reads every line.
+          # smoke script and driver, and the TypeScript the driver imports.
+          # run-webrtc (#10887) is the glob-for-glob regex translation of
+          # pull_request.yml's filter-webrtc list (plus continue_config.yml itself);
+          # XCTestRunner Simulator Tests is not mirrored (nightly/label on GitHub, #10895);
+          # test/scripts/circleciMacosMigrationPolicy.test.ts fails on any drift.
+          # Comments cannot go inside the mapping block itself; the orb reads
+          # every line.
           mapping: |
             ios/.* run-ios true
             scripts/ios/.* run-ios true
@@ -104,6 +113,27 @@ jobs:
             src/utils/SystemTimer\.ts run-prototype-simulator true
             test/bats/overlay-agent-smoke\.bats run-prototype-simulator true
             \.circleci/continue_config\.yml run-prototype-simulator true
+            src/features/webrtc/.* run-webrtc true
+            src/features/screen-stream/.* run-webrtc true
+            src/server/webrtcStreamManager\.ts run-webrtc true
+            src/daemon/webrtc[^/]* run-webrtc true
+            src/daemon/videoStreamSocket[^/]* run-webrtc true
+            src/daemon/videoStreamFraming\.ts run-webrtc true
+            src/daemon/daemonFiles\.ts run-webrtc true
+            src/daemon/socketServer/.* run-webrtc true
+            examples/mediamtx/.* run-webrtc true
+            test/integration/mediamtxWebRtcPublisher\.integration\.test\.ts run-webrtc true
+            test/integration/webrtcDeviceCapture\.integration\.test\.ts run-webrtc true
+            test/helpers/captureStageTimeline\.ts run-webrtc true
+            test/helpers/whepSubscriptionRecovery\.ts run-webrtc true
+            test/helpers/webrtcDeviceCaptureHelpers\.ts run-webrtc true
+            test/bats/mediamtx-webrtc-integration\.bats run-webrtc true
+            scripts/webrtc/.* run-webrtc true
+            android/video-server/.* run-webrtc true
+            ios/screen-capture/.* run-webrtc true
+            \.github/workflows/pull_request\.yml run-webrtc true
+            \.github/workflows/merge\.yml run-webrtc true
+            \.circleci/continue_config\.yml run-webrtc true
       - path-filtering/generate-config
       - continuation/continue:
           configuration_path: /tmp/generated-config.yml

@@ -21,9 +21,27 @@ version: 2.1
 # Signing: the scripts only sign when IOS_SIGNING_ENABLED / MACOS_SIGNING_ENABLED
 # are "true" (derived from cert-secret presence). No secrets are configured on
 # CircleCI, so these build unsigned — correct for a simulator build+test lane.
+# The `ios` executor pins both flags to "false" so a project-level environment
+# variable added later can never turn signing on in a pull-request lane. Signing
+# belongs only in a restricted context attached to main/tag-filtered workflows
+# (#10887, docs/design-docs/ci/circleci-macos-migration.md); no workflow in this
+# file references a context.
+#
+# #10887 migration mirrors (job `name:`s match the GitHub job names so the status
+# reads `ci/circleci: <GitHub name>`): "Build Root SPM Package" and "iOS Device
+# Capture to WHEP". They run ALONGSIDE the GitHub jobs until the owner flips the
+# gates; see the migration doc. XCTestRunner Simulator Tests is deliberately NOT
+# mirrored: GitHub runs it nightly and on PRs only with the `run-ios-sim` label
+# (#10895), so a PR-triggered CircleCI run would re-add the cost that was cut.
 
 parameters:
   run-ios:
+    type: boolean
+    default: false
+  # Set by path filtering in config.yml from the same paths as pull_request.yml's
+  # filter-webrtc (iOS Device Capture to WHEP). The GitHub label/title/body opt-ins
+  # are invisible to CircleCI path filtering.
+  run-webrtc:
     type: boolean
     default: false
   run-swift-coverage-main:
@@ -48,6 +66,8 @@ executors:
     resource_class: m4pro.medium
     environment:
       GIT_LFS_SKIP_SMUDGE: "1"
+      IOS_SIGNING_ENABLED: "false"
+      MACOS_SIGNING_ENABLED: "false"
 
 commands:
   # CircleCI's native `checkout` ignores GIT_LFS_SKIP_SMUDGE (git-lfs does not
@@ -92,6 +112,43 @@ commands:
             - spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
             - spm-v1-
 
+  install_bun:
+    steps:
+      - run:
+          name: "Install Bun"
+          # Pin to package.json's packageManager so CircleCI runs the same Bun as GitHub.
+          command: |
+            bun_version="$(jq -r '.packageManager | sub("^bun@"; "")' package.json)"
+            curl -fsSL https://bun.sh/install | bash -s "bun-v${bun_version}"
+            echo 'export PATH="${HOME}/.bun/bin:${PATH}"' >> "${BASH_ENV}"
+
+  # Mirror of .github/actions/setup-auto-mobile-npm-package: Bun, ripgrep,
+  # dependencies, a turbo build, and the global `auto-mobile` install.
+  setup_auto_mobile_npm_package:
+    steps:
+      - install_bun
+      - run:
+          name: "Install ripgrep"
+          command: |
+            if ! command -v rg >/dev/null 2>&1; then
+              bash .github/actions/setup-ripgrep/install-ripgrep.sh --install-dir "${HOME}/.local/bin"
+              echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
+            fi
+      - run:
+          name: "Install dependencies"
+          command: bash scripts/ci/install-bun-deps.sh
+      - run:
+          name: "Build AutoMobile"
+          environment:
+            TURBO_TELEMETRY_DISABLED: "1"
+            TURBO_NO_UPDATE_NOTIFIER: "1"
+            DO_NOT_TRACK: "1"
+            NO_COLOR: "1"
+          command: bunx turbo run build --output-logs=errors-only
+      - run:
+          name: "Globally Install AutoMobile"
+          command: bun add -g .
+
 jobs:
   ios-swift-packages:
     executor: ios
@@ -101,6 +158,21 @@ jobs:
       - run:
           name: "Report toolchain"
           command: xcodebuild -version && swift --version
+      - run:
+          name: "Resolve Swift package dependencies"
+          command: |
+            for package in ios/screen-capture ios/network-filter ios/highlight-core ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
+              (cd "${package}" && swift package resolve)
+            done
+      # Part of the required "iOS Build" roll-up on GitHub, so the CircleCI mirror
+      # must enforce it too before it can feed that gate (#10887).
+      - run:
+          name: "Check iOS SDK public API baseline"
+          command: |
+            if ! bash scripts/ios/api-dump.sh --check; then
+              echo "Update the iOS SDK API baseline: scripts/ios/api-dump.sh > ios/auto-mobile-sdk/api/auto-mobile-sdk.api" >&2
+              exit 1
+            fi
       - run:
           name: "Build Swift packages"
           command: ./scripts/ios/swift-build.sh
@@ -187,13 +259,7 @@ jobs:
       - run:
           name: "Report toolchain"
           command: xcodebuild -version && xcrun simctl list runtimes iOS
-      - run:
-          name: "Install Bun"
-          # Pin to package.json's packageManager so CircleCI runs the same Bun as GitHub.
-          command: |
-            bun_version="$(jq -r '.packageManager | sub("^bun@"; "")' package.json)"
-            curl -fsSL https://bun.sh/install | bash -s "bun-v${bun_version}"
-            echo 'export PATH="${HOME}/.bun/bin:${PATH}"' >> "${BASH_ENV}"
+      - install_bun
       - run:
           name: "Install dependencies"
           command: bash scripts/ci/install-bun-deps.sh
@@ -210,6 +276,152 @@ jobs:
           path: scratch/overlay-agent-smoke
           destination: overlay-agent-smoke-ios-<< parameters.ios >>
 
+  # Mirror of pull_request.yml → "Build Root SPM Package" (GitHub: 20 min cap).
+  # The root manifest declares swift-tools-version 6.3, so it needs Xcode 26.5.
+  ios-spm-root-package-build:
+    executor: ios
+    steps:
+      - checkout_without_lfs
+      - restore_spm_cache
+      - run:
+          name: "Resolve root Swift package dependencies"
+          command: swift package resolve
+          no_output_timeout: 10m
+      - run:
+          name: "Build root Package.swift"
+          command: |
+            SECONDS=0
+            swift build -c release 2>&1
+            echo "build took ${SECONDS}s"
+          no_output_timeout: 15m
+
+  # Mirror of pull_request.yml → "iOS Device Capture to WHEP" (GitHub: 35 min cap).
+  # The capture loop, retry and reap logic stay identical to GitHub's step.
+  ios-device-webrtc:
+    executor: ios
+    steps:
+      - checkout_without_lfs
+      - setup_auto_mobile_npm_package
+      - run:
+          name: "Ensure iOS Simulator runtime"
+          command: ./scripts/ios/ensure-simulator-runtime.sh
+      - run:
+          name: "Build iOS capture prerequisites"
+          no_output_timeout: 20m
+          command: |
+            brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+            test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" || brew install --cask google-chrome
+            (cd ios/screen-capture && swift package resolve)
+            SECONDS=0
+            (cd ios/screen-capture && swift build)
+            echo "build took ${SECONDS}s"
+      - run:
+          name: "Boot and activate iOS Simulator"
+          no_output_timeout: 12m
+          command: |
+            result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000)"
+            simulator_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
+            if [[ -z "${simulator_udid}" || "${simulator_udid}" == "null" ]]; then
+              echo "AutoMobile product boot returned no deviceId." >&2
+              exit 1
+            fi
+            echo "export AUTOMOBILE_IOS_SIMULATOR_UDID=\"${simulator_udid}\"" >> "${BASH_ENV}"
+            if pgrep -x Simulator >/dev/null; then
+              killall Simulator
+              for _ in {1..30}; do
+                pgrep -x Simulator >/dev/null || break
+                sleep 1
+              done
+              if pgrep -x Simulator >/dev/null; then
+                echo "Simulator.app did not exit before activation." >&2
+                exit 1
+              fi
+            fi
+            open -a Simulator --args -CurrentDeviceUDID "${simulator_udid}"
+            helper_path="${PWD}/ios/screen-capture/.build/debug/screen-capture-helper"
+            simulator_name="$(xcrun simctl list devices --json | jq -r --arg udid "${simulator_udid}" \
+              '[.devices[][] | select(.udid == $udid) | .name] | first // empty')"
+            if [[ -z "${simulator_name}" ]]; then
+              echo "Could not resolve the selected Simulator name." >&2
+              exit 1
+            fi
+            simulator_window_ready=0
+            for _ in {1..30}; do
+              simulator_windows="$("${helper_path}" --list-simulators 2>/dev/null || true)"
+              if printf '%s' "${simulator_windows}" | jq -e --arg name "${simulator_name}" \
+                '.windows | map(select((.title // "") | ascii_downcase | contains($name | ascii_downcase))) | length == 1' \
+                >/dev/null; then
+                simulator_window_ready=1
+                break
+              fi
+              sleep 1
+            done
+            if [[ "${simulator_window_ready}" != "1" ]]; then
+              echo "Selected Simulator window did not become discoverable by ScreenCaptureKit." >&2
+              exit 1
+            fi
+      - run:
+          name: "Run iOS device capture integration"
+          no_output_timeout: 20m
+          environment:
+            AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION: "1"
+            AUTOMOBILE_WEBRTC_DEVICE_PLATFORM: ios
+            AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS: "15000"
+          command: |
+            set -uo pipefail
+            export AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER="${PWD}/ios/screen-capture/.build/debug/screen-capture-helper"
+            source ./scripts/ios/run_with_timeout.sh
+
+            reap_before_retry() {
+              pkill -f "index.js --daemon-mode" 2>/dev/null || true
+              pkill -x mediamtx 2>/dev/null || true
+              pkill -f "remote-debugging-port=9222" 2>/dev/null || true
+              sleep 2
+              pkill -KILL -x mediamtx 2>/dev/null || true
+              pkill -KILL -f "index.js --daemon-mode" 2>/dev/null || true
+              if [ -n "${AUTOMOBILE_IOS_SIMULATOR_UDID:-}" ]; then
+                if ! run_with_timeout 10 xcrun simctl bootstatus "${AUTOMOBILE_IOS_SIMULATOR_UDID}" -b >/dev/null 2>&1; then
+                  echo "Simulator did not report booted within 10s after cleanup; skipping reboot (best-effort re-verify only, #7605)." >&2
+                fi
+              fi
+              for _ in $(seq 1 15); do
+                lsof -nP -iTCP:8889 -sTCP:LISTEN >/dev/null 2>&1 || return 0
+                sleep 1
+              done
+              echo "Port 8889 still bound after cleanup; skipping retry to avoid a guaranteed conflict." >&2
+              return 1
+            }
+
+            attempts=2
+            for attempt in $(seq 1 "${attempts}"); do
+              echo "iOS device capture integration (attempt ${attempt}/${attempts})"
+              bun run test:integration:webrtc-device && rc=0 || rc=$?
+              if [ "${rc}" -eq 0 ]; then
+                if [ "${attempt}" -gt 1 ]; then
+                  echo "iOS device capture passed on retry (transient ScreenCaptureKit flake)."
+                fi
+                exit 0
+              fi
+              echo "iOS device capture attempt ${attempt} failed (exit ${rc})."
+              if [ "${attempt}" -lt "${attempts}" ]; then
+                echo "Reaping MediaMTX / daemon / Chrome before one retry."
+                reap_before_retry || exit 1
+              fi
+            done
+            echo "iOS device capture failed after ${attempts} attempts."
+            exit 1
+      - run:
+          name: "Explain WebRTC device results"
+          when: always
+          command: bash scripts/webrtc/explain-device-results.sh ios || true
+      - run:
+          name: "Collect screen-capture-helper crash reports"
+          when: always
+          command: bash scripts/webrtc/collect-helper-crash-reports.sh scratch/webrtc-device-integration || true
+      - store_artifacts:
+          path: scratch/webrtc-device-integration
+          destination: ios-webrtc-device-artifacts
+
 workflows:
   ios-macos:
     # Gate the whole workflow on the parameter path-filtering set. When false
@@ -219,6 +431,16 @@ workflows:
       - ios-swift-packages
       - ios-xcode-build
       - ios-playground-tests
+      - ios-spm-root-package-build:
+          name: "Build Root SPM Package"
+
+  # #10887 mirror gated on its own GitHub path filter. No contexts: this runs
+  # on fork PRs, which must never see secrets.
+  ios-webrtc-macos:
+    when: << pipeline.parameters.run-webrtc >>
+    jobs:
+      - ios-device-webrtc:
+          name: "iOS Device Capture to WHEP"
 
   swift-coverage-main:
     when: << pipeline.parameters.run-swift-coverage-main >>

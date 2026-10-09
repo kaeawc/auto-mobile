@@ -206,9 +206,11 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
       case "status": {
         // Status reveals the active recording's device/id; require a live
         // session so it is not readable by an unauthenticated caller (issue #4752).
+        // It is a read, so a live non-owner watches a held device (#10970).
         this.authenticator.authorize({
           sessionUuid: request.sessionUuid,
           deviceId: request.deviceId,
+          admitViewer: true,
         });
         const recording = getTestRecordingStatus();
         if (!recording) {

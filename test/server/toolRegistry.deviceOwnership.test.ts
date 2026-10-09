@@ -374,6 +374,53 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     });
   }
 
+  // #10970: a sessionless read was never marked, so a session acquiring its device during the
+  // read's readiness cancelled nothing and readiness pinned and configured the new holder's device.
+  for (const [label, args] of [
+    ["an explicit deviceId", { deviceId: free.deviceId }],
+    ["the predicted target", {}],
+  ] as Array<[string, Record<string, unknown>]>) {
+    test(`a sessionless observe inside readiness on ${label} is cancelled when a session acquires it`, async () => {
+      devices.setConnectedDevices([free]);
+      const call = await startInReadiness("observe", { platform: "android", ...args });
+      await sessionManager.createSession("late-holder", free.deviceId, "android");
+      call.release();
+      const error = await call.outcome;
+
+      expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+      expect(ran).toEqual([]);
+    });
+  }
+
+  test("a read that names another device than its session's watches that device (#10970)", async () => {
+    await call("observe", { platform: "android", sessionUuid: agent, deviceId: free.deviceId });
+    expect(ran).toEqual([{ name: "observe", deviceId: free.deviceId }]);
+    expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
+    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
+  });
+
+  test("a control call naming another device than its session's is still refused", async () => {
+    const error = await refusal("rotate", {
+      orientation: "landscape",
+      sessionUuid: agent,
+      deviceId: free.deviceId,
+    });
+    expect((error as Error).message).toContain("does not match session");
+    expect(ran).toEqual([]);
+  });
+
+  test("the multiple-device ambiguity asks a read for deviceId and a control call for a session", async () => {
+    const read = await refusal("observe", { platform: "android" });
+    expect((read as Error).message).toBe(
+      "Multiple Android devices detected. Provide deviceId to target a specific device.",
+    );
+    const control = await refusal("rotate", { orientation: "landscape", platform: "android" });
+    expect((control as Error).message).toBe(
+      "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
+    );
+  });
+
   test("a call whose readiness settles on another device than predicted moves its mark", async () => {
     const third: BootedDevice = { name: "Pixel C", deviceId: "emulator-5558", platform: "android" };
     devices.setConnectedDevices([free]);

@@ -50,10 +50,14 @@ internal class BackgroundHeartbeatManager(
   }
 
   fun removeSession(sessionId: String) {
-    sessions.remove(sessionId)
-    // Prune per-id bookkeeping so a long-lived JVM does not grow with every plan UUID. `losses`
-    // stays: it is the terminal marker that keeps a released id from being heartbeated again.
-    clearProgress(sessionId)
+    // Under startLock so an in-flight heartbeat's bookkeeping (taken under the same lock) cannot
+    // interleave with the prune and re-create state for the removed id.
+    synchronized(startLock) {
+      sessions.remove(sessionId)
+      // Prune per-id bookkeeping so a long-lived JVM does not grow with every plan UUID. `losses`
+      // stays: it is the terminal marker that keeps a released id from being heartbeated again.
+      clearProgress(sessionId)
+    }
   }
 
   private fun clearProgress(sessionId: String) {
@@ -109,6 +113,8 @@ internal class BackgroundHeartbeatManager(
   }
 
   private fun recordReleaseLocked(sessionId: String, released: DaemonSessionReleasedException) {
+    // removeSession ran while this heartbeat was in flight; do not resurrect its pruned state.
+    if (!sessions.contains(sessionId)) return
     val sure = released.releaseReason != null || confirmed.contains(sessionId)
     if (!sure) {
       val misses = unconfirmedMisses.merge(sessionId, 1, Int::plus) ?: 1
@@ -127,16 +133,22 @@ internal class BackgroundHeartbeatManager(
     println("Warning: ${loss.describe()}; no longer heartbeating it")
   }
 
+  private fun recordAcknowledged(sessionId: String, loopRunning: AtomicBoolean) {
+    synchronized(startLock) {
+      if (loopRunning.get() && sessions.contains(sessionId)) {
+        confirmed.add(sessionId)
+        unconfirmedMisses.remove(sessionId)
+      }
+    }
+  }
+
   private fun runLoop(loopRunning: AtomicBoolean) {
     while (loopRunning.get()) {
       val snapshot = sessions.toList()
       snapshot.forEach { sessionId ->
         try {
           sendHeartbeat(sessionId)
-          if (loopRunning.get() && sessions.contains(sessionId)) {
-            confirmed.add(sessionId)
-            unconfirmedMisses.remove(sessionId)
-          }
+          recordAcknowledged(sessionId, loopRunning)
         } catch (released: DaemonSessionReleasedException) {
           recordRelease(sessionId, released, loopRunning)
         } catch (_: Exception) {

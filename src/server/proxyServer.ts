@@ -35,8 +35,8 @@ import {
 } from "../daemon/deviceControlTransportFailure";
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
-  DEVICE_SESSION_RECOVERY_TOOLS,
   sessionOwnershipLostPayload,
+  terminalSessionRefusalFields,
 } from "./deviceSessionResult";
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../daemon/constants";
 import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSelectionService";
@@ -114,11 +114,7 @@ function noActiveDeviceSessionPayload(error: DaemonConnectionSessionReleasedErro
       code: "no_active_device_session",
       message: error.message,
       reason: error.reason,
-      retryable: true,
-      recovery: {
-        action: "acquire_replacement_session",
-        tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
-      },
+      ...terminalSessionRefusalFields(),
     },
   };
 }

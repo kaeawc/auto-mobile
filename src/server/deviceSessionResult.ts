@@ -1,4 +1,7 @@
-import { DEVICE_SESSION_RECOVERY_TOOLS } from "../models/deviceSessionRecovery";
+import {
+  ACQUIRE_NEW_SESSION_NEXT_ACTION,
+  DEVICE_SESSION_RECOVERY_TOOLS,
+} from "../models/deviceSessionRecovery";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
 import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
@@ -44,6 +47,22 @@ export function appendHeartbeatExpiryMessage(
   return `${message} No heartbeat for ${ageMs} ms (limit ${timeoutMs} ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).`;
 }
 
+/**
+ * The fields every terminal-session refusal shares (#11098). The session UUID cannot be retried, so
+ * `retryable` is false and `nextAction` says what to do instead.
+ */
+export function terminalSessionRefusalFields(ownerPid?: number) {
+  return {
+    retryable: false as const,
+    nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
+    ...(ownerPid === undefined ? {} : { ownerPid }),
+    recovery: {
+      action: "acquire_replacement_session" as const,
+      tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
+    },
+  };
+}
+
 /** Build the ownership-loss envelope shared by the direct MCP server and daemon proxy. */
 export function sessionOwnershipLostPayload({
   message,
@@ -62,11 +81,7 @@ export function sessionOwnershipLostPayload({
       message: appendHeartbeatExpiryMessage(message, release),
       sessionUuid,
       reason,
-      retryable: true,
-      recovery: {
-        action: "acquire_replacement_session",
-        tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
-      },
+      ...terminalSessionRefusalFields(release?.ownerPid),
       ...(release ? { release } : {}),
     },
   };

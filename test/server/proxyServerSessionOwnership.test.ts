@@ -211,7 +211,8 @@ describe("proxy server session ownership errors", () => {
                     "No heartbeat for 11000 ms (limit 10000 ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).",
                   sessionUuid: "session-123",
                   reason: releaseReason,
-                  retryable: true,
+                  retryable: false,
+                  nextAction: "acquire_new_session",
                   recovery: {
                     action: "acquire_replacement_session",
                     tools: ["getAndroid", "getApple"],
@@ -294,7 +295,8 @@ describe("proxy server session ownership errors", () => {
                 "Call getAndroid or getApple to acquire a new device session.",
               sessionUuid: "released-uuid",
               reason: "explicit-release",
-              retryable: true,
+              retryable: false,
+              nextAction: "acquire_new_session",
               recovery: {
                 action: "acquire_replacement_session",
                 tools: ["getAndroid", "getApple"],
@@ -431,7 +433,8 @@ describe("proxy server session ownership errors", () => {
                   "(the previous session was released: device-killed). " +
                   "Call getAndroid or getApple to acquire a new device session.",
                 reason: "device-killed",
-                retryable: true,
+                retryable: false,
+                nextAction: "acquire_new_session",
                 recovery: {
                   action: "acquire_replacement_session",
                   tools: ["getAndroid", "getApple"],

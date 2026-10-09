@@ -299,6 +299,9 @@ function sanitizeSessionReleaseSnapshot(
     releaseReason: record.releaseReason,
     releasedAtMs: record.releasedAtMs,
     terminal: record.terminal,
+    ...(typeof record.ownerPid === "number" && Number.isInteger(record.ownerPid)
+      ? { ownerPid: record.ownerPid }
+      : {}),
     heartbeat: record.heartbeat,
   };
 }

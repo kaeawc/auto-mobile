@@ -37,6 +37,11 @@
     <array>
         <string>ShantellSans.ttf</string>
     </array>
+    <!-- CallKit phoneCall (#1580) needs the voip background mode. -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>voip</string>
+    </array>
     <key>UIFileSharingEnabled</key>
     <true/>
     <key>UILaunchScreen</key>

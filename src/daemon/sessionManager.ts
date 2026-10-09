@@ -84,6 +84,11 @@ import {
   SessionCreationTimeoutError,
 } from "./deviceAcquisitionRefusals";
 import { DAEMON_SESSION_SUSPECT_CODE, isIdleReleaseReason } from "./types";
+import {
+  NoopTerminalReleaseJournal,
+  type TerminalReleaseIntent,
+  type TerminalReleaseJournal,
+} from "./terminalReleaseJournal";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -1148,6 +1153,13 @@ export class SessionManager {
    */
   private releaseDrainStarted = false;
   private terminalReleaseRetryBackoff: BackoffPolicy = DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF;
+  /** Crash-safe sidecar of terminal releases whose row write has not landed (#10959). */
+  private terminalReleaseJournal: TerminalReleaseJournal = new NoopTerminalReleaseJournal();
+  /**
+   * Terminal releases a previous daemon recorded but never persisted. Until its row write lands, a
+   * listed UUID reads as terminally released, so nothing can revive it.
+   */
+  private readonly recoveredTerminalReleaseIntents: Map<string, TerminalReleaseIntent> = new Map();
   /** Finalized release state retained only while its exact Session identity is referenced. */
   private readonly finalizedSessionReleases: WeakMap<Session, ReleaseReasonState> = new WeakMap();
   /** Serializes durable liveness claims within one exact session incarnation. */
@@ -1292,6 +1304,95 @@ export class SessionManager {
   /** Retry delays for terminal release writes that failed after their deadline (#10959). */
   setTerminalReleaseRetryBackoff(backoff: BackoffPolicy): void {
     this.terminalReleaseRetryBackoff = backoff;
+  }
+
+  /**
+   * Attach the terminal release journal (#10959) and adopt the intents a previous daemon left
+   * unconfirmed. From here those UUIDs read as terminally released; startup rehydration then
+   * writes their rows ({@link applyRecoveredTerminalReleaseIntents}).
+   */
+  attachTerminalReleaseJournal(journal: TerminalReleaseJournal): void {
+    this.terminalReleaseJournal = journal;
+    for (const intent of journal.loadUnconfirmed()) {
+      this.recoveredTerminalReleaseIntents.set(intent.sessionId, intent);
+    }
+  }
+
+  /**
+   * Write the terminal row of every recovered intent whose row is not terminal yet, and drop the
+   * intents whose rows already are. A write that fails keeps its intent (and the UUID fenced) for
+   * the next startup.
+   */
+  async applyRecoveredTerminalReleaseIntents(deadlineAt?: number): Promise<string[]> {
+    const applied: string[] = [];
+    for (const intent of Array.from(this.recoveredTerminalReleaseIntents.values())) {
+      if (deadlineAt !== undefined && this.timer.now() >= deadlineAt) {
+        // The rest stay fenced in memory and are applied by the next startup.
+        break;
+      }
+      try {
+        const persisted = await this.deviceSessionRepository.getSession?.(intent.sessionId);
+        if (
+          persisted &&
+          !(persisted.release_reason && isTerminalReleaseReason(persisted.release_reason))
+        ) {
+          await raceWithDeadline(
+            this.deviceSessionRepository.markReleased(
+              intent.sessionId,
+              EXPIRY_RELEASE_REASONS.has(intent.reason) ? "expired" : "released",
+              intent.at,
+              intent.reason,
+            ),
+            {
+              timer: this.timer,
+              timeoutMs: SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+              unref: true,
+              label: "Recovered terminal session release",
+              timeoutError: () =>
+                new SessionReleasePersistTimeoutError(
+                  intent.sessionId,
+                  intent.reason,
+                  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+                ),
+            },
+          );
+          applied.push(intent.sessionId);
+        }
+      } catch (error) {
+        logger.warn(
+          `[SessionManager] Failed to apply the unconfirmed terminal release of session ` +
+            `${intent.sessionId} (${intent.reason}); it stays fenced: ${errorMessage(error)}`,
+          error,
+        );
+        continue;
+      }
+      this.recoveredTerminalReleaseIntents.delete(intent.sessionId);
+      this.terminalReleaseJournal.resolve(intent.sessionId, intent.reason);
+    }
+    if (applied.length > 0) {
+      logger.warn(
+        `[SessionManager] Terminalized ${applied.length} session(s) whose terminal release a ` +
+          `previous daemon never persisted: ${applied.join(", ")}`,
+      );
+    }
+    return applied;
+  }
+
+  /** A row a previous daemon terminally released without persisting it reads as released. */
+  private withRecoveredTerminalRelease(persisted: DeviceSession): DeviceSession {
+    const intent = this.recoveredTerminalReleaseIntents.get(persisted.session_uuid);
+    if (
+      !intent ||
+      (persisted.release_reason !== null && isTerminalReleaseReason(persisted.release_reason))
+    ) {
+      return persisted;
+    }
+    return {
+      ...persisted,
+      status: EXPIRY_RELEASE_REASONS.has(intent.reason) ? "expired" : "released",
+      released_at_ms: intent.at,
+      release_reason: intent.reason,
+    };
   }
 
   /** Optional daemon wiring; existing constructors and device-session lookups stay unchanged. */
@@ -2193,7 +2294,8 @@ export class SessionManager {
 
   /** The persisted row, with tool activity during a device-restart recovery applied to its expiry. */
   private async readPersistedSession(sessionId: string): Promise<DeviceSession | undefined> {
-    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const stored = await this.deviceSessionRepository.getSession?.(sessionId);
+    const persisted = stored && this.withRecoveredTerminalRelease(stored);
     const activityAt = this.restartRecoveryActivityAt.get(sessionId);
     if (!persisted || activityAt === undefined || !isDeviceRestartReleasedRow(persisted)) {
       return persisted;
@@ -2952,7 +3054,11 @@ export class SessionManager {
       skipped: [],
       timedOut: false,
     };
-    const persistedSessions = await this.listRecoverableSessionsBeforeDeadline(deadlineAt, summary);
+    // Terminalize what a previous daemon released but never persisted before reviving anything.
+    await this.applyRecoveredTerminalReleaseIntents(deadlineAt);
+    const persistedSessions = (
+      await this.listRecoverableSessionsBeforeDeadline(deadlineAt, summary)
+    ).map((persisted) => this.withRecoveredTerminalRelease(persisted));
     const markDeadline = (startIndex: number): void => {
       for (const remaining of persistedSessions.slice(startIndex)) {
         const sessionId = remaining.session_uuid;
@@ -4315,6 +4421,8 @@ export class SessionManager {
   ): null {
     if (liftTerminalFence) {
       this.terminalReleaseSnapshots.delete(sessionId);
+      // The session lives on; a restart must not terminalize it from this release's intent.
+      this.terminalReleaseJournal.resolve(sessionId);
     }
     if (pendingCleanup.length > 0) {
       this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
@@ -4509,6 +4617,14 @@ export class SessionManager {
       const terminalStatus = EXPIRY_RELEASE_REASONS.has(snapshot.releaseReason)
         ? "expired"
         : "released";
+      if (snapshot.terminal) {
+        // Durable before the write is issued: a crash while it is parked must not revive the UUID.
+        this.terminalReleaseJournal.record({
+          sessionId: snapshot.sessionId,
+          reason: snapshot.releaseReason,
+          at: snapshot.releasedAtMs,
+        });
+      }
       const write = this.deviceSessionRepository.markReleased(
         snapshot.sessionId,
         terminalStatus,
@@ -4530,6 +4646,7 @@ export class SessionManager {
         // database closes, and if it lands later it writes the same row.
         onTimeout: () => this.trackLateReleaseWrite(write, snapshot),
       });
+      this.confirmTerminalReleaseWrite(snapshot);
       if (this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot) {
         this.pendingNonTerminalReleaseSnapshots.delete(snapshot.sessionId);
       }
@@ -4553,7 +4670,7 @@ export class SessionManager {
 
   private trackLateReleaseWrite(write: Promise<void>, snapshot: SessionReleaseSnapshot): void {
     const settled = write.then(
-      () => undefined,
+      () => this.confirmTerminalReleaseWrite(snapshot),
       (error: unknown) => {
         logger.warn(`[SessionManager] Late session release write failed: ${errorMessage(error)}`);
         // The row is still active: without a retry a restart would revive the released UUID.
@@ -4565,10 +4682,18 @@ export class SessionManager {
     this.trackReleaseDrainWrite(settled);
   }
 
+  /** A terminal row landed: its journal intent is no longer needed (#10959). */
+  private confirmTerminalReleaseWrite(snapshot: SessionReleaseSnapshot): void {
+    if (snapshot.terminal) {
+      this.terminalReleaseJournal.resolve(snapshot.sessionId, snapshot.releaseReason);
+    }
+  }
+
   /** Queue another write of a terminal release row, after the next backoff delay (#10959). */
   private scheduleTerminalReleaseRetry(snapshot: SessionReleaseSnapshot): void {
     if (!this.isTerminalReleaseRetryCurrent(snapshot)) {
       this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
+      this.terminalReleaseJournal.resolve(snapshot.sessionId, snapshot.releaseReason);
       return;
     }
     const pending = this.pendingTerminalReleaseRetries.get(snapshot.sessionId);
@@ -4642,6 +4767,7 @@ export class SessionManager {
     }
     if (!this.isTerminalReleaseRetryCurrent(snapshot)) {
       this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
+      this.terminalReleaseJournal.resolve(snapshot.sessionId, snapshot.releaseReason);
       return;
     }
     try {
@@ -4675,6 +4801,7 @@ export class SessionManager {
       }
       return;
     }
+    this.confirmTerminalReleaseWrite(snapshot);
     if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) === entry) {
       this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
     }

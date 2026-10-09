@@ -7,6 +7,7 @@ import {
   SessionManager,
   TerminalSessionError,
 } from "../../src/daemon/sessionManager";
+import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import type { DeviceSessionStatus } from "../../src/db/types";
@@ -17,6 +18,7 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceHealthMarkers } from "../fakes/FakeDeviceHealthMarkers";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
@@ -272,5 +274,145 @@ describe("a terminal release write that times out and then fails is retried (#10
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe("a crash while a terminal release write is parked does not revive the UUID (#10959)", () => {
+  const JOURNAL = "/data/terminal-release-intents.jsonl";
+
+  async function journaledHarness() {
+    const h = await harness();
+    const files = new FakeTerminalReleaseJournalFileSystem();
+    h.manager.attachTerminalReleaseJournal(new FileTerminalReleaseJournal(JOURNAL, files));
+    return { ...h, files };
+  }
+
+  /** A new daemon process on the same database and data directory. */
+  function restart(h: Harness, files: FakeTerminalReleaseJournalFileSystem): SessionManager {
+    const restarted = new SessionManager(h.timer, h.persistence, () => new FakeDbWriteBarrier());
+    managers.push(restarted);
+    restarted.attachTerminalReleaseJournal(new FileTerminalReleaseJournal(JOURNAL, files));
+    return restarted;
+  }
+
+  test("a crash after the intent, before the write lands, restarts with the UUID terminal", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await journaledHarness();
+      h.persistence.park = new Promise<void>(() => {});
+      const pending = reap(h);
+      await flush();
+      await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      await pending.done;
+      // The daemon dies here: the write never lands and the row is still active.
+      h.persistence.park = undefined;
+      expect((await h.persistence.getSession!("old"))?.status).toBe("active");
+
+      const restarted = restart(h, h.files);
+      // Refused before rehydration has written anything.
+      await expect(restarted.admitIssuedSessionForAutomation("old")).rejects.toBeInstanceOf(
+        TerminalSessionError,
+      );
+      await expect(
+        restarted.getOrCreateSession("old", h.pool, "android", undefined, true),
+      ).rejects.toBeInstanceOf(TerminalSessionError);
+      expect(h.pool.getDevice(device.deviceId)?.sessionId).toBeNull();
+
+      const summary = await restarted.rehydratePersistedSessions(h.pool);
+      expect(summary.rehydrated).not.toContain("old");
+      const row = await h.persistence.getSession!("old");
+      expect(row?.status).not.toBe("active");
+      expect(row?.release_reason).toBe("heartbeat-timeout");
+      expect(h.files.files.has(JOURNAL)).toBe(false);
+
+      // A third daemon refuses it from the row alone.
+      const third = new SessionManager(h.timer, h.persistence, () => new FakeDbWriteBarrier());
+      managers.push(third);
+      await expect(third.admitIssuedSessionForAutomation("old")).rejects.toBeInstanceOf(
+        TerminalSessionError,
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("the intent is written before the DB write and compacted once it lands", async () => {
+    const h = await journaledHarness();
+    let journalAtWrite: string | undefined;
+    const markReleased = h.persistence.markReleased.bind(h.persistence);
+    h.persistence.markReleased = async (...args) => {
+      journalAtWrite = h.files.files.get(JOURNAL);
+      await markReleased(...args);
+    };
+
+    await reap(h).done;
+
+    expect(journalAtWrite).toContain('"sessionId":"old"');
+    expect(h.files.appends).toHaveLength(1);
+    expect(h.files.files.has(JOURNAL)).toBe(false);
+  });
+
+  test("a parked write that lands late compacts its intent", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await journaledHarness();
+      const gate = Promise.withResolvers<void>();
+      h.persistence.park = gate.promise;
+      const pending = reap(h);
+      await flush();
+      await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      await pending.done;
+      expect(h.files.files.has(JOURNAL)).toBe(true);
+
+      h.persistence.park = undefined;
+      gate.resolve();
+      await flush();
+
+      expect(h.files.files.has(JOURNAL)).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a torn tail after the intent is ignored and the UUID is still refused", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await journaledHarness();
+      h.persistence.park = new Promise<void>(() => {});
+      const pending = reap(h);
+      await flush();
+      await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      await pending.done;
+      h.persistence.park = undefined;
+      // The crash tore a second append mid-line.
+      h.files.files.set(JOURNAL, `${h.files.files.get(JOURNAL)}{"sessionId":"oth`);
+
+      const restarted = restart(h, h.files);
+      await expect(restarted.admitIssuedSessionForAutomation("old")).rejects.toBeInstanceOf(
+        TerminalSessionError,
+      );
+      await restarted.rehydratePersistedSessions(h.pool);
+      expect((await h.persistence.getSession!("old"))?.release_reason).toBe("heartbeat-timeout");
+      expect(h.files.files.has(JOURNAL)).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("an intent whose row is already terminal is dropped without a second write", async () => {
+    const h = await journaledHarness();
+    await reap(h).done;
+    h.files.files.set(
+      JOURNAL,
+      `${JSON.stringify({ sessionId: "old", reason: "explicit-release", at: 1 })}\n`,
+    );
+    const writes = h.persistence.releaseWrites.length;
+
+    const restarted = restart(h, h.files);
+    expect(await restarted.applyRecoveredTerminalReleaseIntents()).toEqual([]);
+
+    expect(h.persistence.releaseWrites).toHaveLength(writes);
+    expect((await h.persistence.getSession!("old"))?.release_reason).toBe("heartbeat-timeout");
+    expect(h.files.files.has(JOURNAL)).toBe(false);
   });
 });

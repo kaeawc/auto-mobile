@@ -54,6 +54,10 @@ const executePlanSchema = z
     testMetadata: testMetadataSchema.optional().describe("Test metadata"),
     cleanupAppId: z.string().optional().describe("Cleanup app ID"),
     cleanupClearAppData: z.boolean().optional().describe("Clear app data"),
+    holdSessionOnFailure: z
+      .boolean()
+      .optional()
+      .describe("Keep session and device after a failed run (caller recovers, then releases)"),
     captureObserveSteps: z
       .enum(["summary", "full"])
       .optional()
@@ -207,6 +211,7 @@ const executePlanTool = async (
     testMetadata?: PlanExecutionRequest["testMetadata"];
     cleanupAppId?: string;
     cleanupClearAppData?: boolean;
+    holdSessionOnFailure?: boolean;
     captureObserveSteps?: "summary" | "full";
   },
   progress?: ProgressCallback,

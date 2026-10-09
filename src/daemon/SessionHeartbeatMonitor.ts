@@ -8,6 +8,7 @@ import {
 } from "./sessionManager";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { effectiveLastHeartbeat, suspectGraceMsFor } from "./livenessOwnerLease";
+import { effectiveLastToolActivity } from "./sessionClocks";
 import {
   UNSETTLED_EXECUTION_VETO_CEILING_MS,
   UnsettledExecutionVeto,
@@ -458,7 +459,8 @@ export class SessionHeartbeatMonitor {
     // not hold the device with no tool calls (owner decision 2026-10-08).
     if (session.livenessPolicy === "cli-idle") {
       const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
-      return now - session.lastUsedAt > timeoutMs ? "cli-idle-timeout" : undefined;
+      // The daemon's own stall is not idleness either (#10835): see `idleStallForgivenAt`.
+      return now - effectiveLastToolActivity(session) > timeoutMs ? "cli-idle-timeout" : undefined;
     }
     return this.heartbeatLeaseStaleReason(session, now);
   }

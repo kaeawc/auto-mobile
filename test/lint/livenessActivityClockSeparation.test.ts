@@ -162,11 +162,12 @@ interface Classified {
  */
 const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
   "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
-    writes: 1,
+    writes: 2,
     reason:
       "#10662: stall forgiveness compensates for time the daemon itself lost. It shifts " +
       "expiresAt by at most the lost interval (never to a full window from resume), so it grants " +
-      "no hold time a non-stalled session would not have had.",
+      "no hold time a non-stalled session would not have had. #10835: a cli-idle session's " +
+      "idleStallForgivenAt moves by the same bounded lost interval.",
   },
 };
 
@@ -204,9 +205,10 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     reason: "Policy: heartbeat restoration re-derives expiresAt from lastUsedAt (rule 2).",
   },
   "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
-    writes: 1,
+    writes: 2,
     reason:
-      "Stall compensation (shift by the lost interval), listed in KNOWN_LIVENESS_WRITES (#10662).",
+      "Stall compensation (shift by the lost interval), listed in KNOWN_LIVENESS_WRITES " +
+      "(#10662, #10835).",
   },
 
   // --- Proxy replay lease (DaemonMcpProxy) ---------------------------------
@@ -1011,6 +1013,10 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
         const heartbeatReads: string[] = [];
         const scan = (inner: ts.Node): void => {
           if (ts.isPropertyAccessExpression(inner) && inner.name.text === "lastUsedAt") {
+            readsActivity = true;
+          }
+          // The stall-forgiven tool-activity clock (#10835) reads only activity clocks.
+          if (ts.isIdentifier(inner) && inner.text === "effectiveLastToolActivity") {
             readsActivity = true;
           }
           if (

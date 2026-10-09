@@ -48,10 +48,11 @@ private val LOG = LoggerFactory.getLogger("DeviceControlsDashboard")
 /**
  * Device appearance, video recording, and screen sharing.
  *
- * Appearance is a *global* control: `appearance.sock` takes no device id and applies to every
- * pooled device, so it is presented that way rather than as a per-device toggle. Recording is
- * per-device and spans two transports -- the start/stop verbs are MCP tool calls, while quality and
- * retention live on `video-recording.sock`.
+ * Appearance is a stored daemon setting, not a per-device toggle: `appearance.sock` takes no device
+ * id, saves the mode, and applies it only to the devices this session controls (#10831). A change
+ * takes control of the selected device first so it reaches that device. Recording is per-device and
+ * spans two transports -- the start/stop verbs are MCP tool calls, while quality and retention live
+ * on `video-recording.sock`.
  *
  * Screen sharing starts the daemon's WebRTC publisher, which pushes the device's screen to a
  * coordination server for browsers and CI dashboards to watch over WHEP. There is deliberately no
@@ -147,7 +148,8 @@ fun DeviceControlsDashboard(
       Hint("Appearance control is unavailable on this daemon.", colors.text.normal)
     } else {
       Text(
-        "Applies to all connected devices.",
+        "Applies to the devices this session controls; changing it takes control of the " +
+          "selected device.",
         fontSize = 9.sp,
         color = colors.text.normal.copy(alpha = 0.5f),
       )
@@ -164,9 +166,9 @@ fun DeviceControlsDashboard(
               appearance = result.config
               appliedMode = result.appliedMode
               if (result.appliedMode == null) {
-                // The daemon omits appliedMode when the device pool is empty; saying "applied"
-                // would be a lie.
-                "Saved ${mode.wireName} — no connected devices to apply it to yet"
+                // The daemon omits appliedMode when this session controls no device; saying
+                // "applied" would be a lie.
+                "Saved ${mode.wireName} — this session controls no device to apply it to yet"
               } else {
                 "Applied ${result.appliedMode.wireName}"
               }

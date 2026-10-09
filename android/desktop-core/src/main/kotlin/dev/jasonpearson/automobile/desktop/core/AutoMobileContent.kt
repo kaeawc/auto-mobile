@@ -63,6 +63,7 @@ import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.control.DeviceControlSession
 import dev.jasonpearson.automobile.desktop.core.control.DeviceKeyboardEventTranslator
 import dev.jasonpearson.automobile.desktop.core.control.GestureStreamingConfig
+import dev.jasonpearson.automobile.desktop.core.daemon.AllocatingAppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
@@ -88,8 +89,10 @@ import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfigClien
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamSocketClient
+import dev.jasonpearson.automobile.desktop.core.daemon.allocatingClientProvider
 import dev.jasonpearson.automobile.desktop.core.daemon.isStreamSessionRejection
 import dev.jasonpearson.automobile.desktop.core.daemon.rememberDesktopDaemonSession
+import dev.jasonpearson.automobile.desktop.core.daemon.screenshotObserveArguments
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
@@ -871,6 +874,22 @@ fun AutoMobileContent(
       }
     }
 
+  // Input is active tool use and watching is not (#10730): each input allocates its device to the
+  // desktop session before it is sent, on the dispatch thread, and is dropped when it cannot be.
+  val inputAllocation by rememberUpdatedState(desktopSessionState.inputAllocation)
+  val latestActiveDeviceId by rememberUpdatedState(activeDeviceId)
+  // Dashboard controls that act on a device (snapshots, recording, storage SQL, screenshot) are
+  // input too (#10831): they allocate the device to the desktop session first and run as it, as
+  // the desktop app's controls do. Their reads still only watch.
+  val deviceActingClientProvider: (() -> AutoMobileClient)? =
+    remember(clientProvider, desktopDaemonSession) {
+      allocatingClientProvider(
+        clientProvider,
+        allocation = { inputAllocation },
+        sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+      )
+    }
+
   val shownPanes =
     desktopSessionPanesFor(
       isRealMode = dataSourceMode == DataSourceMode.Real && clientProvider != null,
@@ -890,7 +909,9 @@ fun AutoMobileContent(
   // retention config is its own Unix socket. Both are null in Fake mode so the dashboard renders
   // its empty state instead of reaching for a daemon that isn't there.
   val snapshotActions: DeviceSnapshotActions? =
-    remember(clientProvider) { clientProvider?.let { McpDeviceSnapshotActions(it) } }
+    remember(deviceActingClientProvider) {
+      deviceActingClientProvider?.let { McpDeviceSnapshotActions(it) }
+    }
   val snapshotConfigClient: DeviceSnapshotConfigClient? =
     remember(dataSourceMode) {
       if (dataSourceMode == DataSourceMode.Real) DeviceSnapshotSocketClient() else null
@@ -901,8 +922,12 @@ fun AutoMobileContent(
   val appearanceClient: AppearanceClient? =
     remember(dataSourceMode, desktopDaemonSession) {
       if (dataSourceMode == DataSourceMode.Real) {
-        AppearanceSocketClient(
-          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+        AllocatingAppearanceClient(
+          AppearanceSocketClient(
+            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+          ),
+          allocation = { inputAllocation },
+          activeDeviceId = { latestActiveDeviceId },
         )
       } else {
         null
@@ -913,7 +938,9 @@ fun AutoMobileContent(
       if (dataSourceMode == DataSourceMode.Real) VideoRecordingSocketClient() else null
     }
   val recordingActions: VideoRecordingActions? =
-    remember(clientProvider) { clientProvider?.let { McpVideoRecordingActions(it) } }
+    remember(deviceActingClientProvider) {
+      deviceActingClientProvider?.let { McpVideoRecordingActions(it) }
+    }
   // Screen sharing is daemon-side publishing, so it needs no MCP client -- just the socket.
   val webRtcStreamClient: WebRtcStreamClient? =
     remember(dataSourceMode, desktopDaemonSession, desktopSessionReady) {
@@ -976,9 +1003,6 @@ fun AutoMobileContent(
   // client once it unblocked, and that session's independent error claim could publish a banner
   // into the new context.
   val controlClientProvider by rememberUpdatedState(clientProvider)
-  // Input is active tool use and watching is not (#10730): each input allocates its device to the
-  // desktop session before it is sent, on the dispatch thread, and is dropped when it cannot be.
-  val inputAllocation by rememberUpdatedState(desktopSessionState.inputAllocation)
   val deviceControlSession =
     remember(screenshotScope) {
       DeviceControlSession(
@@ -1010,13 +1034,16 @@ fun AutoMobileContent(
   var deviceCanvasFocused by remember { mutableStateOf(false) }
 
   val takeScreenshot: () -> Unit =
-    remember(clientProvider, screenshotScope) {
+    remember(deviceActingClientProvider, screenshotScope) {
       takeScreenshot@{
-        val provider = clientProvider ?: return@takeScreenshot
+        val provider = deviceActingClientProvider ?: return@takeScreenshot
+        val deviceId = latestActiveDeviceId ?: return@takeScreenshot
+        val platform = controlPlatform.value
         screenshotScope.launch(Dispatchers.IO) {
           val client = provider()
           try {
-            client.callTool("screenshot", buildJsonObject {})
+            // There is no `screenshot` tool (#10831): `observe` captures the screen and saves it.
+            client.callTool("observe", screenshotObserveArguments(deviceId, platform))
           } catch (e: Exception) {
             LOG.warn("Screenshot request failed: ${e.message}")
           } finally {
@@ -2181,7 +2208,7 @@ fun AutoMobileContent(
                   "storage" ->
                     StorageDashboard(
                       dataSourceMode = dataSourceMode,
-                      clientProvider = clientProvider,
+                      clientProvider = deviceActingClientProvider,
                       deviceId = activeDeviceId,
                       packageName = selectedAppId,
                       platform = storagePlatform,

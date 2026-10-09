@@ -164,6 +164,56 @@ class PlanRecoveryInteractionTest {
     assertEquals(failedAttemptSession, daemon.sessionUuidArgs[1])
   }
 
+  // ── #10834: the device stays held between the failed attempt and recovery ──
+
+  @Test
+  fun `a failed attempt keeps its session for recovery and the resume takes it over`() {
+    daemon.cannedFailure = failedPayload { it }
+    val result = executeSimplePlan()
+
+    assertTrue(result.success)
+    assertEquals(
+      "only the attempt recovery may follow asks the daemon to hold its session",
+      listOf(true, null),
+      daemon.holdSessionOnFailureArgs,
+    )
+    assertEquals(
+      "the resumed plan releases the session itself, the runner does not",
+      emptyList<Pair<String, String?>>(),
+      daemon.daemonMethodCalls,
+    )
+  }
+
+  @Test
+  fun `a failed recovery releases the held session`() {
+    daemon.cannedFailure = failedPayload { it }
+    recordingAgent.recoverySucceeds = false
+
+    val result = executeSimplePlan()
+
+    assertFalse(result.success)
+    assertTrue(result.aiRecoveryAttempted)
+    assertEquals(
+      listOf("daemon/releaseSession" to daemon.sessionUuidArgs[0]),
+      daemon.daemonMethodCalls,
+    )
+  }
+
+  @Test
+  fun `a failure with no recovery to follow holds nothing`() {
+    daemon.cannedFailure = failedPayload { it }
+    val result =
+      AutoMobilePlanExecutor.execute(
+        "test-plans/launch-clock-app.yaml",
+        emptyMap(),
+        AutoMobilePlanExecutionOptions(aiAssistance = false),
+      )
+
+    assertFalse(result.success)
+    assertEquals(listOf<Boolean?>(null), daemon.holdSessionOnFailureArgs)
+    assertEquals(emptyList<Pair<String, String?>>(), daemon.daemonMethodCalls)
+  }
+
   @Test
   fun `a multi-device failure pins the label's mapped device id`() {
     daemon.cannedFailure = failedPayload { payload ->
@@ -347,6 +397,8 @@ private class PlanInteractionDaemon : DaemonToolClient {
   val startSteps = mutableListOf<Int>()
   val deviceIdArgs = mutableListOf<String?>()
   val sessionUuidArgs = mutableListOf<String?>()
+  val holdSessionOnFailureArgs = mutableListOf<Boolean?>()
+  val daemonMethodCalls = mutableListOf<Pair<String, String?>>()
   private var calls = 0
   override var sessionUuid: String = "plan-interaction-session"
 
@@ -370,6 +422,9 @@ private class PlanInteractionDaemon : DaemonToolClient {
     startSteps.add(startStep)
     deviceIdArgs.add((arguments["deviceId"] as? JsonPrimitive)?.contentOrNull)
     sessionUuidArgs.add((arguments["sessionUuid"] as? JsonPrimitive)?.contentOrNull)
+    holdSessionOnFailureArgs.add(
+      (arguments["holdSessionOnFailure"] as? JsonPrimitive)?.contentOrNull?.toBoolean(),
+    )
     val steps = decodeSteps(arguments)
     sentPlans.add(steps)
 
@@ -383,6 +438,15 @@ private class PlanInteractionDaemon : DaemonToolClient {
 
   override fun readResource(uri: String, timeoutMs: Long): DaemonResponse {
     throw IllegalStateException("readResource not configured for $uri")
+  }
+
+  override fun callDaemonMethod(
+    method: String,
+    params: JsonObject,
+    timeoutMs: Long,
+  ): DaemonResponse {
+    daemonMethodCalls.add(method to (params["sessionId"] as? JsonPrimitive)?.contentOrNull)
+    return DaemonResponse(id = "method", type = "daemon_response", success = true)
   }
 
   private fun decodeSteps(arguments: JsonObject): List<Map<*, *>> {
@@ -482,13 +546,18 @@ private class PlanInteractionDaemon : DaemonToolClient {
 private class PlanInteractionRecordingAgent :
   AutoMobileAgent(recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = true)) {
   val contexts = mutableListOf<FailedStepContext>()
+  var recoverySucceeds = true
 
   override fun attemptAiRecovery(
     context: FailedStepContext,
     secretValues: List<String>,
   ): RecoveryOutcome {
     contexts.add(context)
-    return RecoveryOutcome(success = true, recoveryTimeMs = 1, observeResultAfterRecovery = "{}")
+    return RecoveryOutcome(
+      success = recoverySucceeds,
+      recoveryTimeMs = 1,
+      observeResultAfterRecovery = "{}",
+    )
   }
 }
 

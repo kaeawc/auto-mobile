@@ -11,6 +11,7 @@
  */
 
 import { suspectGraceMsFor } from "./livenessOwnerLease";
+import { effectiveLastToolActivity } from "./sessionClocks";
 import type { Session } from "./sessionManager";
 import { unsettledExecutionVetoExpiresAt } from "./unsettledExecutionVeto";
 
@@ -38,6 +39,7 @@ export interface SessionHoldDiagnostics {
 export type SessionHoldSnapshot = Pick<
   Session,
   | "lastUsedAt"
+  | "idleStallForgivenAt"
   | "lastOwnerHeartbeat"
   | "expiresAt"
   | "livenessPolicy"
@@ -90,7 +92,7 @@ export function classifySessionHolderKind(
  */
 export function idleReleaseAt(session: SessionHoldSnapshot): number {
   if (session.livenessPolicy === "cli-idle") {
-    return session.lastUsedAt + session.heartbeatTimeoutMs;
+    return effectiveLastToolActivity(session) + session.heartbeatTimeoutMs;
   }
   return session.expiresAt + suspectGraceMsFor(session);
 }

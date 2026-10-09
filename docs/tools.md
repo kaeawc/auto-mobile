@@ -2042,6 +2042,9 @@ enclosing plan's session/device."
 `cleanupAppId` selects the app for cleanup and `cleanupClearAppData` requests
 clearing its data. `captureObserveSteps` attaches `summary` or `full` observe
 snapshots to the step debug trace; multi-device plans ignore this capture option.
+`holdSessionOnFailure` keeps the session and its device after a failed run instead
+of auto-releasing them, so the caller can recover and resume on the same device;
+the caller then releases the session (plans with device labels are always released).
 
 `barrier.deviceCount` specifies how many devices must arrive before the barrier
 lifts. `criticalSection.deviceCount` specifies the devices required at its

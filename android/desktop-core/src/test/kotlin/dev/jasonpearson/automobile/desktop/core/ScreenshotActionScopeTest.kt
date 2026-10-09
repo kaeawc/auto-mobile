@@ -24,7 +24,8 @@ class ScreenshotActionScopeTest {
 
   @Test
   fun `screenshot action is launched on the composition scope, not GlobalScope`() {
-    val marker = "callTool(\"screenshot\""
+    // There is no `screenshot` tool; the action runs `observe` on the selected device (#10831).
+    val marker = SCREENSHOT_CALL
     val occurrences = source.indicesOf(marker)
     assertTrue(occurrences.isNotEmpty(), "the screenshot handler should still exist")
 
@@ -55,9 +56,13 @@ class ScreenshotActionScopeTest {
     // screenshot callTool appears exactly once.
     assertEquals(
       1,
-      source.indicesOf("callTool(\"screenshot\"").size,
+      source.indicesOf(SCREENSHOT_CALL).size,
       "the two screenshot entry points should share one handler",
     )
+  }
+
+  private companion object {
+    const val SCREENSHOT_CALL = "callTool(\"observe\", screenshotObserveArguments("
   }
 
   private fun String.indicesOf(needle: String): List<Int> {

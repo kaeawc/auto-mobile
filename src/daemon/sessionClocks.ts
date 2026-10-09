@@ -15,6 +15,7 @@ import type { Session } from "./sessionManager";
 export const SESSION_ACTIVITY_CLOCKS = [
   "lastUsedAt",
   "expiresAt",
+  "idleStallForgivenAt",
 ] as const satisfies readonly (keyof Session)[];
 
 /** Session liveness clocks: timestamps of the owner's last proof of life. */
@@ -33,3 +34,14 @@ export const PROXY_ACTIVITY_CLOCKS = ["boundSessionUuidAt"] as const;
 
 /** A session field that records the owner's liveness. */
 export type SessionLivenessClock = (typeof SESSION_LIVENESS_CLOCKS)[number];
+
+/**
+ * The moment a `cli-idle` session's idle window is measured from: its last tool activity, or the
+ * daemon's resume point after a stall of its own when that is later (#10835). The stalled interval
+ * is the daemon's lost time, not the CLI's idleness.
+ */
+export function effectiveLastToolActivity(
+  session: Pick<Session, "lastUsedAt" | "idleStallForgivenAt">,
+): number {
+  return Math.max(session.lastUsedAt, session.idleStallForgivenAt ?? Number.NEGATIVE_INFINITY);
+}

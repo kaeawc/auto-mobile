@@ -61,6 +61,7 @@ import {
 } from "../utils/deviceTimeouts";
 import {
   type ExactDeviceProvisioner,
+  ProvisionDeviceCreateRejectedError,
   type ProvisionDeviceFailureCode,
   ProvisionDeviceError,
 } from "../devices/exactDeviceProvisioning";
@@ -1132,7 +1133,9 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     const rollbackDeadlineMs = deps.timer.now() + DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
     const target = await resolveProvisionDeviceRollbackTarget(args, deps, deviceManager, {
       provisioned,
-      creationStarted,
+      // The platform tool reported it created nothing, so the requested name is
+      // not this request's to delete — it may be a foreign device (#11100).
+      creationStarted: creationStarted && !(error instanceof ProvisionDeviceCreateRejectedError),
       observedRuntimeDevice,
       pendingMutationSettlement,
       rollbackDeadlineMs,

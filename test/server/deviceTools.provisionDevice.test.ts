@@ -1898,6 +1898,59 @@ describe("provisionDevice handler", () => {
     expect(await deviceManager.listDeviceImages("android")).toEqual([]);
   });
 
+  test("does not delete an AVD whose creation avdmanager rejected (#11100)", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      exactDeviceProvisionerFactory: (manager, creationGate) =>
+        new DefaultExactDeviceProvisioner({
+          listDeviceImages: async (platform) => await manager.listDeviceImages(platform),
+          isCreationAllowed: (createIfMissing) => creationGate.isCreationAllowed(createIfMissing),
+          avdManager: {
+            createAvd: async ({ name }) => {
+              // A racing external create landed after the provisioner's listing.
+              deviceManager.setDeviceImages("android", [
+                { name, platform: "android", isRunning: false },
+              ]);
+              return { success: false, message: `An AVD with the name '${name}' already exists.` };
+            },
+          },
+          androidConfigReader: {
+            readConfig: async () => undefined,
+          },
+          androidConfigWriter: {
+            setMemoryMb: async () => {
+              throw new Error("unexpected AVD config write");
+            },
+          },
+          iosSimulator: {
+            createSimulator: async () => {
+              throw new Error("unexpected iOS simulator creation");
+            },
+          },
+          lifecycleCoordinator,
+          timer,
+        }),
+      idGenerator: new FakeIdGenerator(["cleanup-rejected-create"]),
+    });
+    registerDeviceTools();
+    const args = { ...provisionTestArgs("android"), boot: false, readiness: "none" as const };
+
+    const response = JSON.parse(await provisionResponseText(args));
+
+    expect(response).toMatchObject({
+      success: false,
+      error: { code: "platform_command_failed" },
+    });
+    expect(response.cleanup).toBeUndefined();
+    expect(await deviceManager.listDeviceImages("android")).toEqual([
+      { name: args.device.name, platform: "android", isRunning: false },
+    ]);
+  });
+
   test("cancelled exact configuration cannot overwrite a replacement AVD after rollback", async () => {
     const timer = new FakeTimer();
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);

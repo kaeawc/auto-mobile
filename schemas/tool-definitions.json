@@ -1564,6 +1564,10 @@
           "description": "Clear app data",
           "type": "boolean"
         },
+        "holdSessionOnFailure": {
+          "description": "Keep session and device after a failed run (caller recovers, then releases)",
+          "type": "boolean"
+        },
         "captureObserveSteps": {
           "description": "Attach observe snapshots",
           "type": "string",

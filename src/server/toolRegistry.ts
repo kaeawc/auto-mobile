@@ -634,6 +634,8 @@ export interface PlanLifecycleInput {
   shouldResolveDevice: boolean;
   /** An enclosing plan owns cleanup and release for this invocation. */
   nestedInPlan?: boolean;
+  /** The tool call returned a successful response (false when it failed or threw). */
+  succeeded?: boolean;
   // Injected teardown for the server-side per-transport SessionToolBinding
   // (issue #4611 Gap D). Invoked AFTER a real release for every session freed —
   // base and derived label sessions alike — never optimistically.
@@ -1777,6 +1779,34 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
     }
   }
 
+  /**
+   * A failed executePlan whose caller asked to keep its session (`holdSessionOnFailure`) keeps the
+   * session and its device, so the caller's recovery and the resumed plan run on a device no other
+   * session can take in between (#10834). The caller owns the session from here: the resumed plan
+   * releases it, or the caller releases it (or stops heartbeating) when it gives up. A plan with
+   * device labels is released as before: its derived label sessions have no caller-side owner.
+   */
+  private holdsFailedPlanSessionForRecovery(
+    input: PlanLifecycleInput,
+    releaseSessionUuid: string,
+  ): boolean {
+    if (input.args?.holdSessionOnFailure !== true || input.succeeded !== false) {
+      return false;
+    }
+    if (Object.keys(getDeviceLabelMap(releaseSessionUuid) ?? {}).length > 0) {
+      logger.info(
+        `[PlanLifecycle] holdSessionOnFailure ignored for ${releaseSessionUuid}: a plan with ` +
+          "device labels is always released",
+      );
+      return false;
+    }
+    logger.info(
+      `[PlanLifecycle] Keeping session ${releaseSessionUuid} and its device after a failed ` +
+        "executePlan (holdSessionOnFailure) for the caller's recovery",
+    );
+    return true;
+  }
+
   async afterExecution(input: PlanLifecycleInput): Promise<void> {
     if (input.name === "executePlan" && input.nestedInPlan) {
       // The enclosing plan is still using these sessions and devices.
@@ -1808,7 +1838,8 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       shouldResolveDevice &&
       sessionUuid &&
       name === "executePlan" &&
-      DaemonState.getInstance().isInitialized()
+      DaemonState.getInstance().isInitialized() &&
+      !this.holdsFailedPlanSessionForRecovery(input, baseSessionUuid ?? sessionUuid)
     ) {
       try {
         const sessionManager = DaemonState.getInstance().getSessionManager();
@@ -2255,6 +2286,21 @@ export class ToolRegistryClass {
     return recovery;
   }
 
+  /** Run the plan lifecycle (cleanup, auto-release) after a device-aware call settles. */
+  private async afterPlanLifecycle(
+    input: Omit<
+      PlanLifecycleInput,
+      "cleanupService" | "sessionBindingReleaseHandler" | "sessionToolSelectionService"
+    >,
+  ): Promise<void> {
+    await this.planLifecycleManager.afterExecution({
+      ...input,
+      cleanupService: this.cleanupService,
+      sessionBindingReleaseHandler: this.sessionBindingReleaseNotifier,
+      sessionToolSelectionService: getToolSelectionContext()?.sessionToolSelectionService,
+    });
+  }
+
   // Register a device-aware tool
   registerDeviceAware(
     name: string,
@@ -2311,6 +2357,7 @@ export class ToolRegistryClass {
               selectionContext?.explicitObserveDeviceRead === true && !handlerArgs.sessionUuid,
           },
           captures(async () => {
+            let succeeded = false;
             try {
               let response: any | undefined;
               if (!resolvedTarget.shouldResolveDevice) {
@@ -2360,6 +2407,7 @@ export class ToolRegistryClass {
               if (isToolResponseFailure(afterToolCallResult.finalizedResponse)) {
                 throwDeviceLostFromAbortSignal(signal);
               }
+              succeeded = !isToolResponseFailure(afterToolCallResult.finalizedResponse);
               return afterToolCallResult.finalizedResponse;
             } catch (error) {
               throwDeviceLostFromAbortSignal(signal);
@@ -2371,14 +2419,12 @@ export class ToolRegistryClass {
                 : "";
               throw toActionableError(error, `Failed to execute tool ${name}${deviceContext}`);
             } finally {
-              await this.planLifecycleManager.afterExecution({
+              await this.afterPlanLifecycle({
                 ...resolvedTarget,
                 name,
                 args: handlerArgs,
                 nestedInPlan: selectionContext?.planRequest !== undefined,
-                cleanupService: this.cleanupService,
-                sessionBindingReleaseHandler: this.sessionBindingReleaseNotifier,
-                sessionToolSelectionService: getToolSelectionContext()?.sessionToolSelectionService,
+                succeeded,
               });
             }
           }),

@@ -55,6 +55,14 @@ internal object DaemonSocketClientManager {
     return getOrCreateClient().readResource(uri, timeoutMs)
   }
 
+  fun callDaemonMethod(method: String, params: JsonObject, timeoutMs: Long): DaemonResponse {
+    val overrideClient = testClient
+    if (overrideClient != null) {
+      return overrideClient.callDaemonMethod(method, params, timeoutMs)
+    }
+    return getOrCreateClient().callDaemonMethod(method, params, timeoutMs)
+  }
+
   fun sessionUuid(): String {
     return testClient?.sessionUuid ?: getOrCreateClient().sessionUuid
   }
@@ -994,6 +1002,12 @@ internal class DaemonSocketClient(
     return awaitResponse(requestId, responseFuture, timeoutMs)
   }
 
+  override fun callDaemonMethod(
+    method: String,
+    params: JsonObject,
+    timeoutMs: Long,
+  ): DaemonResponse = callDaemonMethod(method, timeoutMs, params)
+
   fun callDaemonMethod(
     method: String,
     timeoutMs: Long,
@@ -1242,6 +1256,18 @@ internal interface DaemonToolClient {
   fun callTool(toolName: String, arguments: JsonObject, timeoutMs: Long): DaemonResponse
 
   fun readResource(uri: String, timeoutMs: Long): DaemonResponse
+
+  /**
+   * Call a `daemon/...` control method. Clients that cannot reach the daemon's control methods
+   * answer with a failed response rather than throwing, so a best-effort caller degrades cleanly.
+   */
+  fun callDaemonMethod(method: String, params: JsonObject, timeoutMs: Long): DaemonResponse =
+    DaemonResponse(
+      id = "",
+      type = "daemon_response",
+      success = false,
+      error = "$method is not supported by this client",
+    )
 
   var sessionUuid: String
 }

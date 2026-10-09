@@ -206,6 +206,51 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
+  describe("holdSessionOnFailure (#10834)", () => {
+    const hold = (overrides: Partial<PlanLifecycleInput> = {}): PlanLifecycleInput =>
+      input({ args: { holdSessionOnFailure: true }, ...overrides });
+
+    test("a failed plan with recovery pending keeps its session and device", async () => {
+      await acquire([devices[0]], false);
+      pool.getDevice("device-A")!.sessionId = "base";
+      const session = sessionManager.getSession("base");
+
+      await lifecycle.afterExecution(hold({ succeeded: false }));
+
+      expect(sessionManager.getSession("base")).toBe(session);
+      expect(pool.getDevice("device-A")!.sessionId).toBe("base");
+      expect(events).toEqual([]);
+    });
+
+    test("a successful plan is released even when it asked to hold on failure", async () => {
+      await acquire([devices[0]], false);
+
+      await lifecycle.afterExecution(hold({ succeeded: true }));
+
+      expect(sessionManager.getSession("base")).toBeNull();
+      expect(events).toEqual(["session-release:base", "release:device-A"]);
+    });
+
+    test("a failed plan without the flag is released as before", async () => {
+      await acquire([devices[0]], false);
+
+      await lifecycle.afterExecution(input({ args: {}, succeeded: false }));
+
+      expect(sessionManager.getSession("base")).toBeNull();
+      expect(events).toEqual(["session-release:base", "release:device-A"]);
+    });
+
+    test("a failed plan with device labels is always released", async () => {
+      await acquire(devices.slice(0, 2));
+
+      await lifecycle.afterExecution(hold({ succeeded: false }));
+
+      for (const id of ["base", "base:B"]) {
+        expect(sessionManager.getSession(id)).toBeNull();
+      }
+    });
+  });
+
   test("nested executePlan leaves every label session for the outer lifecycle", async () => {
     await acquire(devices.slice(0, 3));
     const releaseLabels = spyOn(deviceLabelMapping, "releaseDeviceLabelSessions");

@@ -447,9 +447,7 @@ export class VideoRecorderService {
       format: containerFormatOf(outputPath, active.config.format),
       sizeBytes,
       durationMs,
-      ...(stopResult.videoDurationMs !== undefined && {
-        videoDurationMs: stopResult.videoDurationMs,
-      }),
+      videoDurationMs: stopResult.videoDurationMs,
       codec: stopResult.codec,
       outputName: active.outputName,
       createdAt: active.startedAt,

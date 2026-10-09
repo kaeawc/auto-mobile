@@ -31,7 +31,11 @@ import {
   trackDeviceRecorderPid,
   type DeviceRecorderPid,
 } from "./androidRecorderPid";
-import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordingCodec";
+import {
+  defaultRecordingCodecProbe,
+  probeDurationMs,
+  type RecordingCodecProbe,
+} from "./recordingCodec";
 import {
   probeScreenrecordDisplayFlag,
   resolveAndroidRecordingDisplay,
@@ -388,7 +392,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       logger.info(`[VideoCapture] Final file size: ${sizeBytes} bytes`);
       logger.debug(`[VideoCapture] Output file at ${handle.outputPath}`);
       const codec = await this.codecProbe.codec(handle.outputPath);
-      const videoDurationMs = await this.codecProbe.durationMs?.(handle.outputPath);
+      const videoDurationMs = await probeDurationMs(this.codecProbe, handle.outputPath);
 
       this.logRecordingExit(backendHandle);
       const earlyExit = this.earlyExitDescription(backendHandle);
@@ -399,7 +403,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
         endedAt: backendHandle.exitState.endedAt ?? new Date().toISOString(),
         sizeBytes,
         codec,
-        ...(videoDurationMs !== undefined && { videoDurationMs }),
+        videoDurationMs,
         ...(earlyExit && {
           warnings: [
             `The Android recorder ${earlyExit} before the stop was requested; the recording may end sooner than requested.`,

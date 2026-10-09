@@ -247,6 +247,14 @@ async function readRecordingDurationMs(filePath: string): Promise<number | undef
   return box && findDurationInBoxes(box.moov, box.headerSize, box.moov.length);
 }
 
+/** Container duration via an optional probe capability; `undefined` when unsupported or unreadable. */
+export function probeDurationMs(
+  probe: RecordingCodecProbe,
+  filePath: string,
+): Promise<number | undefined> {
+  return probe.durationMs?.(filePath) ?? Promise.resolve(undefined);
+}
+
 export const defaultRecordingCodecProbe: RecordingCodecProbe = {
   async codec(filePath: string): Promise<string | undefined> {
     try {

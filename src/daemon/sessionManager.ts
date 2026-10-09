@@ -38,6 +38,7 @@ import {
   DeviceSessionRepository,
   isDeviceRestartReleaseReason,
   isRecoverableDeviceSession,
+  type DeviceSessionActivityUpdate,
   type DeviceSessionPersistence,
 } from "../db/deviceSessionRepository";
 import type { DeviceSession } from "../db/types";
@@ -1198,6 +1199,12 @@ export class SessionManager {
   private readonly finalizedSessionReleases: WeakMap<Session, ReleaseReasonState> = new WeakMap();
   /** Serializes durable liveness claims within one exact session incarnation. */
   private readonly livenessOwnershipClaimMutexes = new WeakMap<Session, Mutex>();
+  /**
+   * The newest activity row issued for each session incarnation, until that write fails (#11079).
+   * A heartbeat whose persisted fields match it has nothing to write, so steady-state heartbeats
+   * do no DB work and a peer daemon holding the write lock cannot stall them.
+   */
+  private readonly issuedActivityWrites = new WeakMap<Session, IssuedActivityWrite>();
   /** Latest finalized incarnation, weakly retained until a same-UUID replacement publishes. */
   private readonly latestFinalizedSessionIdentities: Map<string, WeakRef<Session>> = new Map();
   private readonly finalizedSessionIdentityRegistry = new FinalizationRegistry<{
@@ -6982,32 +6989,31 @@ export class SessionManager {
       return;
     }
     const now = this.timer.now();
-    const previousLiveness = {
-      lastHeartbeat: session.lastHeartbeat,
-      lastOwnerHeartbeat: session.lastOwnerHeartbeat,
-      hasReceivedHeartbeat: session.hasReceivedHeartbeat,
-      ownership: session.ownership,
-      awaitingOwnerSince: session.awaitingOwnerSince,
-    };
     session.lastHeartbeat = now;
     // Only a heartbeat advances the owner lease; both the socket and HTTP routes admit one only
     // from the owner (or a tokenless client on a session no proxy owns).
     session.lastOwnerHeartbeat = now;
     session.activityGeneration++;
-    const capturedGeneration = session.activityGeneration;
     session.hasReceivedHeartbeat = true;
     if (session.ownership === "awaiting-owner") {
       session.ownership = "owned";
       session.awaitingOwnerSince = undefined;
     }
+    // The heartbeat's own clocks are in-memory only; the row changes only when a persisted field
+    // does (the first heartbeat, or a state an earlier write failed to store). Skipping the rest
+    // keeps a contended or failing database off the heartbeat path entirely (#11079).
+    if (!this.hasUnissuedActivity(session)) {
+      return;
+    }
     void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
       .catch((error) => {
-        if (session.activityGeneration === capturedGeneration) {
-          Object.assign(session, previousLiveness);
-        }
+        // The heartbeat was acknowledged and the owner really is alive: rolling the lease back
+        // here would release a healthy owner after lease + grace whenever writes fail (disk
+        // full, read-only, busy peer) (#11079). The lease is in-memory; the unstored fields are
+        // retried by the next heartbeat or tool call because the failed write is forgotten.
         logger.warn(
-          `[SessionManager] Failed to record session activity: ${errorMessage(error)}`,
+          `[SessionManager] Failed to record heartbeat activity for ${sessionId}: ${errorMessage(error)}`,
           error,
         );
       });
@@ -7887,22 +7893,25 @@ export class SessionManager {
   // fire-and-forget callers above wrap this in `getBarrier().track(...)`; the awaited
   // caller must not. See #2885 — do not wrap the awaited call in `track()`.
   private async recordSessionActivity(session: Session): Promise<void> {
+    const update = sessionActivityUpdate(session);
+    const issued: IssuedActivityWrite = { key: activityUpdateKey(update) };
+    this.issuedActivityWrites.set(session, issued);
     try {
-      await this.deviceSessionRepository.recordActivity(session.sessionId, {
-        lastUsedAtMs: session.lastUsedAt,
-        expiresAtMs: session.expiresAt,
-        sessionTimeoutMs: session.sessionTimeoutMs,
-        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
-        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
-        heartbeatTimeoutSource: session.heartbeatTimeoutSource,
-        livenessPolicy: session.livenessPolicy,
-        preCliHeartbeatTimeoutMs: session.preCliLiveness?.heartbeatTimeoutMs,
-        preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
-        preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
-      });
+      await this.deviceSessionRepository.recordActivity(session.sessionId, update);
     } catch (error) {
+      // Forget a failed write only while it is still the newest one, so a later write that
+      // carries the same row is not undone; a stale entry only costs one redundant write.
+      if (this.issuedActivityWrites.get(session) === issued) {
+        this.issuedActivityWrites.delete(session);
+      }
       throw new SessionActivityPersistenceError(session.sessionId, error);
     }
+  }
+
+  /** Whether the session's persisted activity fields differ from the newest issued write. */
+  private hasUnissuedActivity(session: Session): boolean {
+    const issued = this.issuedActivityWrites.get(session);
+    return issued?.key !== activityUpdateKey(sessionActivityUpdate(session));
   }
 
   /**
@@ -7924,6 +7933,32 @@ export class SessionManager {
       assignedDevices: this.getAssignedDevices().size,
     };
   }
+}
+
+/** One issued activity write; compared by identity so a newer write is never forgotten. */
+interface IssuedActivityWrite {
+  key: string;
+}
+
+/** The activity row persisted for a session: copied from the session, never computed. */
+function sessionActivityUpdate(session: Session): DeviceSessionActivityUpdate {
+  return {
+    lastUsedAtMs: session.lastUsedAt,
+    expiresAtMs: session.expiresAt,
+    sessionTimeoutMs: session.sessionTimeoutMs,
+    heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+    hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+    heartbeatTimeoutSource: session.heartbeatTimeoutSource,
+    livenessPolicy: session.livenessPolicy,
+    preCliHeartbeatTimeoutMs: session.preCliLiveness?.heartbeatTimeoutMs,
+    preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
+    preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
+  };
+}
+
+/** Stable identity of an activity row: the update's fields in declaration order. */
+function activityUpdateKey(update: DeviceSessionActivityUpdate): string {
+  return JSON.stringify(update);
 }
 
 /**

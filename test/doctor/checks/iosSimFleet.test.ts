@@ -17,7 +17,7 @@ const GIB = 1024 ** 3;
 function fleet(booted: string[]): FleetCostSource {
   const source = new FakeFleetHostSource();
   source.inventory = parseSimctlInventory(
-    readFileSync(join(FIXTURES, "simctl-list-devices.json"), "utf8"),
+    readFileSync(join(FIXTURES, "../ios-simctl/list-devices.json"), "utf8"),
   ).map((entry) => (booted.includes(entry.udid) ? { ...entry, state: "Booted" } : entry));
   source.snapshot = {
     takenAtMs: 0,

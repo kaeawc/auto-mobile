@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeFleetHostSource } from "../../fakes/FakeFleetHostSource";
@@ -31,7 +32,10 @@ import type { HostResources, HostSnapshot } from "../../../src/features/iosSimFl
 
 const FIXTURES = join(import.meta.dir, "../../fixtures/ios-sim-fleet");
 const PS = readFileSync(join(FIXTURES, "ps-snapshot-two-booted-simulators.txt"), "utf8");
-const SIMCTL = readFileSync(join(FIXTURES, "simctl-list-devices.json"), "utf8");
+const SIMCTL = readFileSync(
+  join(import.meta.dir, "../../fixtures/ios-simctl/list-devices.json"),
+  "utf8",
+);
 const IOS27 = "2300914A-231E-4874-8F8A-40C3D2F1E24B";
 const IOS18 = "BCC31307-1A19-4D67-A7F0-44FC98F78921";
 const DUO = "490BEBFF-5F82-43CF-B7BC-59AE24229520";
@@ -339,12 +343,18 @@ describe("command-backed host source", () => {
     const executor = new FakeHostCommandExecutor();
     executor.setCommandResponse("ps -axo", { stdout: PS, stderr: "" } as never);
     executor.setCommandResponse("sysctl", { stdout: "2\n", stderr: "" } as never);
-    executor.setCommandResponse("simctl list devices -j", { stdout: SIMCTL, stderr: "" } as never);
-    const source = new CommandFleetHostSource(executor, new FakeTimer(), {
-      totalMemoryBytes: () => 64 * GIB,
-      cpuCount: () => 10,
-      loadAverage1m: () => null,
-    });
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandArgsResult(["list", "devices", "--json"], SIMCTL);
+    const source = new CommandFleetHostSource(
+      executor,
+      new FakeTimer(),
+      {
+        totalMemoryBytes: () => 64 * GIB,
+        cpuCount: () => 10,
+        loadAverage1m: () => null,
+      },
+      simctl,
+    );
     const host = await source.readHostSnapshot();
     expect(host.resources).toEqual({
       totalMemoryBytes: 64 * GIB,
@@ -352,11 +362,13 @@ describe("command-backed host source", () => {
       loadAverage1m: null,
       memoryPressure: "warn",
     });
-    expect(await source.readInventory()).toHaveLength(3);
+    expect(await source.readInventory()).toHaveLength(21);
     expect(executor.getExecutedCommands().sort()).toEqual([
       "ps -axo pid=,ppid=,rss=,pcpu=,command=",
       "sysctl -n kern.memorystatus_vm_pressure_level",
-      "xcrun simctl list devices -j",
+    ]);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
+      { args: ["list", "devices", "--json"], timeoutMs: undefined },
     ]);
   });
 

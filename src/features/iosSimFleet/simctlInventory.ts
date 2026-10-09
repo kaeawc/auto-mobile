@@ -1,30 +1,25 @@
 import type { SimulatorInventoryEntry } from "./types";
+import { parseSimctlDeviceList } from "../../utils/ios-cmdline-tools/simctlDeviceList";
+import type { AppleDevice } from "../../utils/ios-cmdline-tools/SimCtlClient";
 
-/** Read-only argv (after `xcrun`) for the device inventory including data sizes. */
-export const SIMCTL_LIST_DEVICES_ARGS = ["simctl", "list", "devices", "-j"];
+/** Read-only simctl args for the device inventory including data sizes. */
+export const SIMCTL_LIST_DEVICES_ARGS = ["list", "devices", "--json"];
 
-interface RawDevice {
-  udid?: unknown;
-  name?: unknown;
-  state?: unknown;
-  isAvailable?: unknown;
-  deviceTypeIdentifier?: unknown;
-  dataPathSize?: unknown;
-}
-
-/** Parses `simctl list devices -j`; throws on malformed JSON so callers report the failure. */
+/**
+ * Projects `simctl list devices --json` (parsed by the shared SimCtl reader) into
+ * fleet inventory entries; throws on malformed JSON so callers report the failure.
+ */
 export function parseSimctlInventory(stdout: string): SimulatorInventoryEntry[] {
-  const parsed = JSON.parse(stdout) as { devices?: Record<string, RawDevice[]> | null };
-  const devices = parsed.devices;
+  const devices = parseSimctlDeviceList(stdout).devices as unknown;
   if (devices === null || typeof devices !== "object") {
     throw new Error("simctl list output has no devices map");
   }
-  return Object.entries(devices).flatMap(([runtime, list]) =>
-    (Array.isArray(list) ? list : []).flatMap((raw) => toEntry(runtime, raw)),
+  return Object.entries(devices as Record<string, AppleDevice[] | null>).flatMap(
+    ([runtime, list]) => (Array.isArray(list) ? list : []).flatMap((raw) => toEntry(runtime, raw)),
   );
 }
 
-function toEntry(runtime: string, raw: RawDevice): SimulatorInventoryEntry[] {
+function toEntry(runtime: string, raw: Partial<AppleDevice>): SimulatorInventoryEntry[] {
   if (typeof raw.udid !== "string" || typeof raw.state !== "string") {
     return [];
   }

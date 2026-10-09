@@ -31,22 +31,6 @@ export const SCREENSHOT_INVENTORY_RECONCILE_RATIO = 0.9;
 const screenshotName =
   /^(?:screenshot_.+\.(?:png|jpe?g|webp)(?:\.temp)?|snapshot-of-.+\.png|crop-[A-Za-z0-9_-]+\.png)$/;
 
-export class ScreenshotRetentionCapacityError extends ActionableError {
-  readonly code = "SCREENSHOT_RETENTION_CAPACITY";
-  override readonly name = "ScreenshotRetentionCapacityError";
-  constructor(
-    readonly liveBytes: number,
-    readonly liveCount: number,
-    readonly earliestExpiresAt: number,
-    readonly cap = SCREENSHOT_CACHE_MAX_SIZE_BYTES,
-    readonly countCap = MAX_SCREENSHOT_PATH_PROTECTIONS,
-  ) {
-    super(
-      `Screenshot retention capacity reached (${cap} bytes / ${countCap} files; ${liveBytes} bytes / ${liveCount} files retained). Retry after ${new Date(earliestExpiresAt).toISOString()} when the earliest guarantee expires; cleanup failures or cache references may delay space becoming available.`,
-    );
-  }
-}
-
 export interface ScreenshotRetentionWrite {
   size: number;
   write(): Promise<void>;
@@ -549,14 +533,4 @@ export async function writeRetainedScreenshot(
     write: () => writer.write(path, bytes),
     remove: () => writer.remove(path),
   });
-}
-
-/** Preserve typed capture failures when a caller explicitly requires a screenshot. */
-export function requireScreenshotSuccess(
-  result: { actionableError?: ActionableError },
-  required: boolean,
-): void {
-  if (required && result.actionableError) {
-    throw result.actionableError;
-  }
 }

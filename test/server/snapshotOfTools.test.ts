@@ -1,5 +1,4 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { ScreenshotRetentionCapacityError } from "../../src/features/observe/ScreenshotRetention";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../src/features/observe/ScreenshotRetention";
@@ -178,30 +177,4 @@ describe("snapshotOf tool", () => {
     ).rejects.toThrow("ambiguous");
     expect(captures).toBe(1);
   });
-});
-
-test("snapshotOf preserves a typed screenshot capacity failure", async () => {
-  const failure = new ScreenshotRetentionCapacityError(128 * 1024 * 1024, 2, 600_000);
-  registerSnapshotOfTools({
-    hierarchyCaptureFactory: () => ({
-      capture: async () => ({
-        captureId: "capture",
-        platform: "android",
-        requestedFreshness: "fresh",
-        receivedAt: 0,
-        hierarchy,
-        nodes: new SearchableHierarchy().project(hierarchy),
-      }),
-    }),
-    screenshotFactory: () => ({
-      execute: async () => ({ success: false, error: failure.message, actionableError: failure }),
-    }),
-  });
-  const tool = ToolRegistry.getTool("snapshotOf")!;
-  await expect(
-    tool.deviceAwareHandler!(
-      device,
-      tool.schema.parse({ rectangle: { left: 1, top: 1, right: 3, bottom: 3 } }),
-    ),
-  ).rejects.toBe(failure);
 });

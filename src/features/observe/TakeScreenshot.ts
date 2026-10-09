@@ -26,7 +26,7 @@ import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
-import { ScreenshotRetentionCapacityError, writeRetainedScreenshot } from "./ScreenshotRetention";
+import { writeRetainedScreenshot } from "./ScreenshotRetention";
 import {
   screenshotPathProtection,
   type ScreenshotPathProtection,
@@ -202,7 +202,6 @@ export class TakeScreenshot implements ScreenshotService {
       return {
         success: false,
         error: callerSignal?.aborted ? OPERATION_CANCELLED_MESSAGE : errorMessage(error),
-        actionableError: error instanceof ScreenshotRetentionCapacityError ? error : undefined,
       };
     } finally {
       // Fence a late lock waiter or capture after timeout/cancellation.
@@ -397,7 +396,6 @@ export class TakeScreenshot implements ScreenshotService {
       return {
         success: false,
         error: `Failed to take screenshot: ${errorMsg}`,
-        actionableError: err instanceof ScreenshotRetentionCapacityError ? err : undefined,
       };
     }
   }
@@ -464,7 +462,7 @@ export class TakeScreenshot implements ScreenshotService {
           options.format === undefined,
         );
       } catch (error) {
-        if (error instanceof ScreenshotRetentionCapacityError || options.displayId !== undefined) {
+        if (options.displayId !== undefined) {
           throw error;
         }
         logger.info(`[SCREENSHOT] CtrlProxy capture failed, falling back to ADB: ${error}`);
@@ -646,7 +644,6 @@ export class TakeScreenshot implements ScreenshotService {
       return {
         success: false,
         error: errorMsg,
-        actionableError: error instanceof ScreenshotRetentionCapacityError ? error : undefined,
       };
     }
   }

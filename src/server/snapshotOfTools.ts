@@ -118,9 +118,6 @@ export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {
         const screenshot = await (
           dependencies.screenshotFactory?.(device) ?? new TakeScreenshot(device)
         ).execute({ format: "png" });
-        if (screenshot.actionableError) {
-          throw screenshot.actionableError;
-        }
         if (!screenshot.success || !screenshot.path) {
           throw new ActionableError(
             `snapshotOf screenshot capture failed: ${screenshot.error ?? "no path"}`,

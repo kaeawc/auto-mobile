@@ -1,10 +1,6 @@
 import { recordObservationRead, wasIosHierarchyAcquiredFromDevice } from "./observationReadScope";
 import { displayPinFailure } from "./SessionDisplayContext";
-import {
-  publishScreenshotPaths,
-  requireScreenshotSuccess,
-  ScreenshotRetentionCapacityError,
-} from "./ScreenshotRetention";
+import { publishScreenshotPaths } from "./ScreenshotRetention";
 import { resolveIosObserveRotation } from "./iosObserveRotation";
 import {
   screenshotPathProtection,
@@ -1009,7 +1005,6 @@ export class RealObserveScreen implements ObserveScreen {
   ): boolean {
     if (
       error instanceof StrictSettledScreenshotCaptureError ||
-      error instanceof ScreenshotRetentionCapacityError ||
       error instanceof DisplaySelectionError
     ) {
       return true;
@@ -1086,7 +1081,6 @@ export class RealObserveScreen implements ObserveScreen {
       result.screenshotSettled = true;
       return;
     }
-    requireScreenshotSuccess(capture, requireFreshScreenshot);
     await this.handleDeviceReadScreenshotFailure(
       result,
       capture.error ?? "Screenshot capture failed",
@@ -2543,9 +2537,6 @@ export class RealObserveScreen implements ObserveScreen {
       observation.screenshotSettled = true;
     } catch (error) {
       signal?.throwIfAborted();
-      if (strict && error instanceof ScreenshotRetentionCapacityError) {
-        throw error;
-      }
       if (strict) {
         throw new StrictSettledScreenshotCaptureError(error, this.device.deviceId);
       }

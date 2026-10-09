@@ -51,6 +51,9 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
   /** Methods that fail like an unreachable daemon on every call until removed (#11072). */
   val unavailable: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
+  /** Runs at the start of each request with its key, to model a slow call on the fake clock. */
+  @Volatile var onSend: (String) -> Unit = {}
+
   fun failNext(key: String) {
     failures.add(key)
   }
@@ -73,6 +76,7 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
       } else {
         null
       }
+    onSend(key)
     calls.add(request.method to device)
     val sessionId = request.params["sessionId"]?.jsonPrimitive?.content
     sessionCalls.add(request.method to sessionId)

@@ -1,3 +1,5 @@
+import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { observeConfiguredDeviceResources } from "./deviceResourceTools";
 import { computeDeviceResourceDrift } from "../utils/deviceResourceDrift";
@@ -317,7 +319,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
             `${errorMessage(error)}`,
           error,
         );
-        return createToolErrorResponse(
+        const cancelledResponse = createToolErrorResponse(
           "request_cancelled",
           cancelledOperation
             ? `provisionDevice request for operationId '${args.operationId}' was cancelled by ` +
@@ -334,6 +336,10 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
             }),
           },
         );
+        // The daemon answered the abandoned request already; hand it this result so that reply
+        // can carry the typed envelope and recovery evidence.
+        provisionCancellationOutcomes.publish(args.operationId, cancelledResponse);
+        return cancelledResponse;
       }
       logger.warn(
         `[DeviceTools] provisionDevice ${args.operationId} failed: ${errorMessage(error)}`,
@@ -394,14 +400,19 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     error: unknown,
     lifecycle: ProvisionDeviceLifecycleOutcome | undefined,
   ): ProvisionDeviceFailureBoundary | undefined {
-    if (error instanceof ProvisionDeviceRollbackError) {
+    if (error instanceof ProvisionDeviceRollbackError && error.cleanup.status !== "succeeded") {
       return "cleanup_failure";
     }
+    // A rollback that removed the device is a provisioning failure with a clean
+    // cleanup, so it is classified by the failure that triggered it.
     const readiness =
       (error instanceof ProvisionDeviceError && error.diagnostics.readinessPhase) ||
       lifecycle?.reason?.readinessPhase ||
       lifecycle?.phase === "readiness";
-    return readiness ? "readiness_failure" : undefined;
+    if (readiness || error instanceof ProvisionDeviceRollbackError) {
+      return "readiness_failure";
+    }
+    return undefined;
   }
 
   function provisionDeviceRecovery(
@@ -1361,6 +1372,14 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     const knownError = knownProvisionDeviceError(error);
     if (knownError) {
       return knownError;
+    }
+    if (error instanceof InputDeviceOwnedError) {
+      return new ProvisionDeviceError(
+        "device_owned_by_other_session",
+        `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
+        true,
+        { deviceId: error.deviceId },
+      );
     }
     if (error instanceof RunnerReadinessError) {
       const cause = error.diagnosticCause;

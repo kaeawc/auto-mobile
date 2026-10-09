@@ -76,6 +76,7 @@ import {
 } from "./socketServer/BaseSocketServer";
 import { readDeviceLeaseActivity } from "./deviceLeaseActivity";
 import { daemonDeviceLeaseActivitySources } from "./deviceLeaseActivitySources";
+import { writePrivateDaemonOrphanExitRecord } from "./privateDaemonOrphanExitRecord";
 import {
   PrivateDaemonOrphanWatchdog,
   isHarnessPrivateDaemon,
@@ -2703,6 +2704,11 @@ export class Daemon {
           this.httpRequestsSeen,
         liveSessionCount: () => this.sessionManager.getAllSessions().length,
         shutdown: () => {
+          // A client that auto-starts the replacement without --port must rebind this port (#11074).
+          writePrivateDaemonOrphanExitRecord(SOCKET_PATH, {
+            port: this.port,
+            exitedAtMs: this.timer.now(),
+          });
           setImmediate(() => process.kill(process.pid, "SIGTERM"));
         },
       },

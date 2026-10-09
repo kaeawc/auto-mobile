@@ -43,7 +43,10 @@ import {
   type SessionRecoveryTarget,
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
-import { deviceAssignedToOtherSessionError } from "./inputDeviceOwnership";
+import {
+  deviceAlreadyAssignedToAnotherSessionError,
+  deviceAssignedToOtherSessionError,
+} from "./inputDeviceOwnership";
 import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import {
   SessionRecoveryAssignmentError,
@@ -7489,10 +7492,7 @@ export class DevicePool {
       !this.isSessionAssignmentCurrent(device, session) ||
       !this.sessionManager.isAdmittedForAutomation(session)
     ) {
-      throw new ActionableError(
-        `Device '${device.id}' is already assigned to another session. ` +
-          "Acquire a different device or wait for its owner to release it.",
-      );
+      throw deviceAlreadyAssignedToAnotherSessionError(device.id);
     }
     return true;
   }

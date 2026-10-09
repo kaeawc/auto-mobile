@@ -66,6 +66,24 @@ export function deviceAssignedToOtherSessionError(
   );
 }
 
+/**
+ * The autolock/pool-bind refusal for a device another session holds, typed so callers (e.g.
+ * `provisionDevice`) can report a retryable `device_owned_by_other_session` rather than a generic
+ * failure. The message keeps its long-standing wording.
+ */
+export function deviceAlreadyAssignedToAnotherSessionError(
+  deviceId: string,
+): InputDeviceOwnedError {
+  return new InputDeviceOwnedError(
+    "acquire",
+    deviceId,
+    undefined,
+    undefined,
+    `Device '${deviceId}' is already assigned to another session. ` +
+      "Acquire a different device or wait for its owner to release it.",
+  );
+}
+
 /** Throws {@link InputDeviceOwnedError} unless the requester may drive the device. */
 export function assertInputRequesterHoldsDevice(input: {
   action: string;

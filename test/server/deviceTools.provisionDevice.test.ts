@@ -1,3 +1,5 @@
+import { provisionCancellationOutcomes } from "../../src/server/provisionCancellationOutcomes";
+import { deviceAlreadyAssignedToAnotherSessionError } from "../../src/daemon/inputDeviceOwnership";
 import { FakeDeviceResourceObserver } from "../fakes/FakeDeviceResourceObserver";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { warmedTests } from "../helpers/warmedTests";
@@ -1384,6 +1386,8 @@ describe("provisionDevice handler", () => {
       { resource: "wallpaperRendering", kind: "unsupported" },
     ]);
     expect(payload.cleanup).toMatchObject({ status: "succeeded", state: "destroyed" });
+    // A clean rollback is not a cleanup failure.
+    expect(payload.recovery.boundary).not.toBe("cleanup_failure");
     expect(readinessCalls).toBe(0);
     expect(await deviceManager.listDeviceImages("ios")).toEqual([]);
   });
@@ -4920,10 +4924,17 @@ describe("provisionDevice handler", () => {
     };
 
     const caller = new AbortController();
+    const published: unknown[] = [];
+    const awaited = provisionCancellationOutcomes
+      .await(args.operationId, 60_000, new FakeTimer())
+      .then((outcome) => published.push(outcome));
     const call = tool.handler(args, undefined, caller.signal);
     await Promise.resolve();
     caller.abort(new Error("client went away"));
     const response = await call;
+    await awaited;
+    // The socket layer's abandoned-request reply receives the same typed result (#11074).
+    expect(published).toEqual([response]);
     for (let attempt = 0; attempt < 10; attempt++) {
       await Promise.resolve();
     }
@@ -6017,6 +6028,31 @@ describe("provisionDevice handler", () => {
       expect(timer.getSleepHistory()).toEqual([]);
     },
   );
+
+  test("a device held by another session is a typed retryable device_owned_by_other_session failure", async () => {
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        throw deviceAlreadyAssignedToAnotherSessionError("emulator-5554");
+      },
+    });
+
+    const response = JSON.parse(
+      await provisionResponseText(provisionTestArgs("android", "held-by-other-session")),
+    );
+
+    expect(response).toMatchObject({
+      error: {
+        code: "device_owned_by_other_session",
+        retryable: true,
+        deviceId: "emulator-5554",
+      },
+    });
+    expect(operationStore.failCodes).toEqual(["device_owned_by_other_session"]);
+  });
 
   test("preserves missing-device diagnostics and reuses the failed operation identity", async () => {
     deviceManager.setBootedDevices("android", [

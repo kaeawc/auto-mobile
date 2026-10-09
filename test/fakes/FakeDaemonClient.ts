@@ -21,7 +21,8 @@ export interface FakeDaemonClientOptions {
   // Same seam for callDaemonMethod (tools/list, resources/list, ...), so a test
   // can simulate a list_changed / session-released push arriving WHILE a
   // session-scoped discovery request is in flight (issue #4655).
-  onCallDaemonMethod?: (method: string, params: Record<string, any>) => void | Promise<void>;
+  /** A returned value (other than undefined) is the method's result. */
+  onCallDaemonMethod?: (method: string, params: Record<string, any>) => unknown;
 }
 
 export class FakeDaemonClient implements DaemonClientLike {
@@ -39,10 +40,7 @@ export class FakeDaemonClient implements DaemonClientLike {
     toolName: string,
     params: Record<string, any>,
   ) => void | Promise<void>;
-  private readonly onCallDaemonMethod?: (
-    method: string,
-    params: Record<string, any>,
-  ) => void | Promise<void>;
+  private readonly onCallDaemonMethod?: (method: string, params: Record<string, any>) => unknown;
   private readonly notificationHandlers = new Set<(notification: DaemonNotification) => void>();
   private readonly connectionClosedHandlers = new Set<() => void>();
   subscribeToNotificationsCalls = 0;
@@ -116,7 +114,10 @@ export class FakeDaemonClient implements DaemonClientLike {
     delete recordedParams[DAEMON_BOUND_SESSION_PARAM];
     this.callDaemonMethodCalls.push({ method, params: recordedParams });
     if (this.onCallDaemonMethod) {
-      await this.onCallDaemonMethod(method, params);
+      const result = await this.onCallDaemonMethod(method, params);
+      if (result !== undefined) {
+        return result;
+      }
     }
     return this.daemonMethodResults.get(method) ?? {};
   }

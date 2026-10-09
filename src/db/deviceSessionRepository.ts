@@ -80,8 +80,23 @@ export interface DeviceSessionActivityUpdate {
   preCliSessionTimeoutMs?: number;
 }
 
+/**
+ * Optional precondition for {@link DeviceSessionPersistence.markReleased} (#11129): apply the
+ * release only to the row incarnation it was captured from. `stable_identity_generation` advances
+ * on every upsert of the UUID (create, rebind, resume, rehydrate) and on nothing else, so a delayed
+ * or retried release of an earlier incarnation cannot clobber a re-acquired row.
+ */
+export interface MarkReleasedOptions {
+  expectedRowGeneration?: number;
+}
+
 export interface DeviceSessionPersistence {
-  upsertActiveSession(record: DeviceSessionRecord): Promise<void>;
+  /**
+   * Resolves with the row's `stable_identity_generation` after the write when the implementation
+   * reports it; that is the value a later release of this incarnation passes as
+   * {@link MarkReleasedOptions.expectedRowGeneration}.
+   */
+  upsertActiveSession(record: DeviceSessionRecord): Promise<number | void>;
   getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
   listRecoverableSessions?(): Promise<DeviceSession[]>;
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
@@ -98,6 +113,7 @@ export interface DeviceSessionPersistence {
     status: DeviceSessionStatus,
     releasedAtMs: number,
     reason: string,
+    options?: MarkReleasedOptions,
   ): Promise<void>;
 }
 
@@ -161,6 +177,53 @@ function livenessColumnsFromRow(
   };
 }
 
+/**
+ * SET value for an activity column that only an activity at least as recent as the row's may
+ * overwrite (#11129). A BUSY-retried write can land after a later one; keying on
+ * `last_used_at_ms` (which only tool activity advances) lets the older write leave the newer
+ * lease alone while still matching the row, so a stale write is not mistaken for a missing row.
+ * SQLite evaluates every SET expression against the pre-update row.
+ */
+function activityColumnsUnlessStale(update: DeviceSessionActivityUpdate) {
+  const at = update.lastUsedAtMs;
+  const liveness = livenessColumns(update);
+  return {
+    expires_at_ms: unlessStale("expires_at_ms", at, update.expiresAtMs),
+    session_timeout_ms: unlessStale("session_timeout_ms", at, update.sessionTimeoutMs),
+    heartbeat_timeout_ms: unlessStale("heartbeat_timeout_ms", at, update.heartbeatTimeoutMs),
+    heartbeat_timeout_source: unlessStale(
+      "heartbeat_timeout_source",
+      at,
+      liveness.heartbeat_timeout_source,
+    ),
+    has_received_heartbeat: unlessStale(
+      "has_received_heartbeat",
+      at,
+      liveness.has_received_heartbeat,
+    ),
+    liveness_policy: unlessStale("liveness_policy", at, liveness.liveness_policy),
+    pre_cli_heartbeat_timeout_ms: unlessStale(
+      "pre_cli_heartbeat_timeout_ms",
+      at,
+      liveness.pre_cli_heartbeat_timeout_ms,
+    ),
+    pre_cli_heartbeat_timeout_source: unlessStale(
+      "pre_cli_heartbeat_timeout_source",
+      at,
+      liveness.pre_cli_heartbeat_timeout_source,
+    ),
+    pre_cli_session_timeout_ms: unlessStale(
+      "pre_cli_session_timeout_ms",
+      at,
+      liveness.pre_cli_session_timeout_ms,
+    ),
+  };
+}
+
+function unlessStale<T>(column: string, lastUsedAtMs: number, value: T) {
+  return sql<T>`CASE WHEN last_used_at_ms > ${lastUsedAtMs} THEN ${sql.ref(column)} ELSE ${value} END`;
+}
+
 export class DeviceSessionRepository {
   private db: Kysely<Database> | null;
 
@@ -183,7 +246,7 @@ export class DeviceSessionRepository {
     return new Date(this.timer.now()).toISOString();
   }
 
-  async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+  async upsertActiveSession(record: DeviceSessionRecord): Promise<number> {
     // A cheap, unconditional, indexed range
     // delete run before the write rather than gated behind amortization —
     // session starts are far less frequent than the amortized-per-insert
@@ -216,7 +279,7 @@ export class DeviceSessionRepository {
         updated_at: now,
       };
 
-      await db
+      const written = await db
         .insertInto("device_sessions")
         .values(row)
         .onConflict((oc) =>
@@ -244,7 +307,9 @@ export class DeviceSessionRepository {
             updated_at: now,
           }),
         )
-        .execute();
+        .returning("stable_identity_generation")
+        .executeTakeFirstOrThrow();
+      return written.stable_identity_generation ?? 0;
     } catch (error) {
       logger.warn(
         `[DeviceSessionRepository] Failed to upsert device session ${record.sessionUuid}: ${error}`,
@@ -259,11 +324,8 @@ export class DeviceSessionRepository {
       await db
         .updateTable("device_sessions")
         .set({
-          last_used_at_ms: update.lastUsedAtMs,
-          expires_at_ms: update.expiresAtMs,
-          session_timeout_ms: update.sessionTimeoutMs,
-          heartbeat_timeout_ms: update.heartbeatTimeoutMs,
-          ...livenessColumns(update),
+          last_used_at_ms: sql<number>`max(last_used_at_ms, ${update.lastUsedAtMs})`,
+          ...activityColumnsUnlessStale(update),
           // Mark every current liveness write. The forward-compatibility trigger
           // clears this contract only when an older binary updates legacy
           // liveness columns without advancing this generation.
@@ -370,10 +432,12 @@ export class DeviceSessionRepository {
     status: DeviceSessionStatus,
     releasedAtMs: number,
     reason: string,
+    options: MarkReleasedOptions = {},
   ): Promise<void> {
+    const { expectedRowGeneration } = options;
     try {
       const db = await this.getDb();
-      await db
+      let update = db
         .updateTable("device_sessions")
         .set({
           status,
@@ -382,8 +446,19 @@ export class DeviceSessionRepository {
           ...(shouldRetainLivenessOwner(reason) ? {} : { liveness_owner_token: null }),
           updated_at: this.nowIso(),
         })
-        .where("session_uuid", "=", sessionUuid)
-        .execute();
+        .where("session_uuid", "=", sessionUuid);
+      if (expectedRowGeneration !== undefined) {
+        update = update.where("stable_identity_generation", "=", expectedRowGeneration);
+      }
+      const result = await update.executeTakeFirst();
+      if (expectedRowGeneration !== undefined && Number(result.numUpdatedRows) === 0) {
+        // Expected outcome of the precondition: the UUID was re-upserted (or removed) after this
+        // release was captured, so the row is not this release's to change.
+        logger.info(
+          `[DeviceSessionRepository] Skipped ${reason} release of ${sessionUuid}: the row is no ` +
+            `longer generation ${expectedRowGeneration}`,
+        );
+      }
     } catch (error) {
       logger.warn(
         `[DeviceSessionRepository] Failed to mark session ${sessionUuid} ${status}: ${error}`,
@@ -459,7 +534,7 @@ export class DeviceSessionRepository {
     const reasons = Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS);
     const expired = await db
       .selectFrom("device_sessions")
-      .select("session_uuid")
+      .select(["session_uuid", "stable_identity_generation"])
       .where((eb) =>
         eb.or([
           eb("release_reason", "in", reasons),
@@ -470,7 +545,9 @@ export class DeviceSessionRepository {
       .execute();
     for (const row of expired) {
       try {
-        await this.markReleased(row.session_uuid, "expired", nowMs, "expired");
+        await this.markReleased(row.session_uuid, "expired", nowMs, "expired", {
+          expectedRowGeneration: row.stable_identity_generation ?? 0,
+        });
       } catch (error) {
         logger.warn(
           `[DeviceSessionRepository] Failed to terminalize expired recoverable session ${row.session_uuid}: ${errorMessage(error)}`,

@@ -11,7 +11,10 @@ import {
 } from "../../src/db/deviceSessionRepository";
 import { logger } from "../../src/utils/logger";
 import { createTestDatabase } from "./testDbHelper";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import {
+  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+  SessionManager,
+} from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -192,6 +195,7 @@ describe("DeviceSessionRepository", () => {
         "expired",
         10_000,
         "expired",
+        { expectedRowGeneration: 0 },
       );
       expect(await repo.getSession("remaining-expired")).toMatchObject({ status: "expired" });
     } finally {
@@ -814,6 +818,118 @@ describe("DeviceSessionRepository", () => {
     expect(row!.release_reason).toBe("explicit-release");
     expect(row!.last_used_at_ms).toBe(1000);
     expect(row!.expires_at_ms).toBe(61_000);
+  });
+
+  test("an older activity write landing after a newer one keeps the newer lease (#11129)", async () => {
+    await repo.upsertActiveSession({
+      sessionUuid: "session-1",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: false,
+    });
+    const activity = {
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: true,
+    };
+    // A tool-call end lands first; the heartbeat write issued before it lands second (BUSY retry).
+    await repo.recordActivity("session-1", {
+      ...activity,
+      lastUsedAtMs: 5000,
+      expiresAtMs: 65_000,
+    });
+    await repo.recordActivity("session-1", {
+      ...activity,
+      lastUsedAtMs: 3000,
+      expiresAtMs: 63_000,
+      hasReceivedHeartbeat: false,
+    });
+
+    let row = await repo.getSession("session-1");
+    expect(row!.last_used_at_ms).toBe(5000);
+    expect(row!.expires_at_ms).toBe(65_000);
+    expect(row!.has_received_heartbeat).toBe(1);
+
+    // A write from the same activity may still shorten the lease (an idle-window rebase).
+    await repo.recordActivity("session-1", {
+      ...activity,
+      lastUsedAtMs: 5000,
+      expiresAtMs: 20_000,
+    });
+    row = await repo.getSession("session-1");
+    expect(row!.expires_at_ms).toBe(20_000);
+  });
+
+  test("a delayed non-terminal release of an earlier incarnation leaves the re-acquired row (#11129)", async () => {
+    const record: DeviceSessionRecord = {
+      sessionUuid: "session-1",
+      deviceId: "emulator-5554",
+      platform: "android",
+      createdAtMs: 1000,
+      lastUsedAtMs: 1000,
+      expiresAtMs: 61_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 60_000,
+      hasReceivedHeartbeat: false,
+    };
+    const released = await repo.upsertActiveSession(record);
+    const reacquired = await repo.upsertActiveSession({ ...record, lastUsedAtMs: 2000 });
+    expect(reacquired).toBe(released + 1);
+
+    await repo.markReleased("session-1", "released", 1500, "daemon-shutdown", {
+      expectedRowGeneration: released,
+    });
+    expect((await repo.getSession("session-1"))!.status).toBe("active");
+
+    await repo.markReleased("session-1", "released", 3000, "daemon-shutdown", {
+      expectedRowGeneration: reacquired,
+    });
+    expect((await repo.getSession("session-1"))!.release_reason).toBe("daemon-shutdown");
+  });
+
+  test("SessionManager's late non-terminal release cannot release the resumed session (#11129)", async () => {
+    const timer = new FakeTimer();
+    let releaseGate: (() => void) | undefined;
+    let lateWrite: Promise<void> | undefined;
+    class DelayedReleaseRepository extends DeviceSessionRepository {
+      override async markReleased(
+        ...args: Parameters<DeviceSessionRepository["markReleased"]>
+      ): Promise<void> {
+        if (args[3] === "daemon-shutdown" && releaseGate === undefined) {
+          lateWrite = new Promise<void>((resolve) => {
+            releaseGate = resolve;
+          }).then(() => super.markReleased(...args));
+          return await lateWrite;
+        }
+        await super.markReleased(...args);
+      }
+    }
+    const delayed = new DelayedReleaseRepository(db, timer);
+    const sessionManager = new SessionManager(timer, delayed);
+    try {
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      const release = sessionManager.releaseSession("session-1", "daemon-shutdown");
+      while (releaseGate === undefined) {
+        await Promise.resolve();
+      }
+      await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      await release.catch(() => undefined);
+
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      releaseGate!();
+      await lateWrite;
+
+      const row = await repo.getSession("session-1");
+      expect(row!.status).toBe("active");
+      expect(row!.release_reason).toBeNull();
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
   });
 
   test("SessionManager persists create, activity, and release", async () => {

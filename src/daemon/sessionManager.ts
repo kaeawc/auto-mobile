@@ -40,6 +40,7 @@ import {
   isRecoverableDeviceSession,
   type DeviceSessionActivityUpdate,
   type DeviceSessionPersistence,
+  type MarkReleasedOptions,
 } from "../db/deviceSessionRepository";
 import type { DeviceSession } from "../db/types";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
@@ -1240,6 +1241,13 @@ export class SessionManager {
    * do no DB work and a peer daemon holding the write lock cannot stall them.
    */
   private readonly issuedActivityWrites = new WeakMap<Session, IssuedActivityWrite>();
+  /**
+   * The row generation each session incarnation's latest upsert produced (#11129). A non-terminal
+   * release captures it so its write cannot land on a row a later incarnation re-upserted.
+   */
+  private readonly persistedRowGenerations = new WeakMap<Session, number>();
+  /** The row generation a non-terminal release snapshot may overwrite (#11129). */
+  private readonly releaseRowGenerations = new WeakMap<SessionReleaseSnapshot, number>();
   /** Latest finalized incarnation, weakly retained until a same-UUID replacement publishes. */
   private readonly latestFinalizedSessionIdentities: Map<string, WeakRef<Session>> = new Map();
   private readonly finalizedSessionIdentityRegistry = new FinalizationRegistry<{
@@ -2296,7 +2304,7 @@ export class SessionManager {
     }
     this.assertCreationNotAbandoned(session, creation);
     await this.rejectCreationAfterShutdownFence(session);
-    await this.persistSession(session);
+    await this.persistSession(session, session);
     await this.retireCreationIfAbandoned(session, creation);
     await this.rejectCreationAfterShutdownFence(session);
     this.assertTerminalReleaseAdmission(session.sessionId, session);
@@ -2354,22 +2362,21 @@ export class SessionManager {
 
   private async retireAbandonedCreation(session: Session): Promise<never> {
     const releasedAtMs = this.sessionNow();
-    await this.persistSessionRelease(
-      {
-        sessionId: session.sessionId,
-        deviceId: session.assignedDevice,
-        releaseReason: SESSION_CREATION_TIMEOUT_REASON,
-        releasedAtMs,
-        terminal: false,
-        heartbeat: {
-          lastHeartbeatMs: session.lastHeartbeat,
-          hasReceivedHeartbeat: session.hasReceivedHeartbeat,
-          timeoutMs: session.heartbeatTimeoutMs,
-          ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
-        },
+    const snapshot: SessionReleaseSnapshot = {
+      sessionId: session.sessionId,
+      deviceId: session.assignedDevice,
+      releaseReason: SESSION_CREATION_TIMEOUT_REASON,
+      releasedAtMs,
+      terminal: false,
+      heartbeat: {
+        lastHeartbeatMs: session.lastHeartbeat,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        timeoutMs: session.heartbeatTimeoutMs,
+        ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
       },
-      true,
-    ).catch((error: unknown) => {
+    };
+    this.captureReleaseRowGeneration(snapshot, this.persistedRowGenerations.get(session));
+    await this.persistSessionRelease(snapshot, true).catch((error: unknown) => {
       logger.warn(
         `[SessionManager] Failed to release abandoned creation of ${session.sessionId}: ` +
           errorMessage(error),
@@ -2498,11 +2505,15 @@ export class SessionManager {
       (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason))
     ) {
       this.restartRecoveryActivityAt.delete(persisted.session_uuid);
+      // Only the row judged expired: a peer may re-upsert the UUID after this read (#11129).
       await this.deviceSessionRepository.markReleased(
         persisted.session_uuid,
         "expired",
         this.sessionNow(),
         "expired",
+        persisted.stable_identity_generation === undefined
+          ? {}
+          : { expectedRowGeneration: persisted.stable_identity_generation },
       );
     }
   }
@@ -2549,7 +2560,7 @@ export class SessionManager {
     releaseReason: string,
   ): SessionReleaseSnapshot {
     const releasedAtMs = persisted.released_at_ms ?? persisted.last_used_at_ms;
-    return {
+    const snapshot: SessionReleaseSnapshot = {
       sessionId,
       deviceId: persisted.device_id,
       releaseReason,
@@ -2567,6 +2578,8 @@ export class SessionManager {
         ageMs: Math.max(0, releasedAtMs - persisted.last_used_at_ms),
       },
     };
+    this.captureReleaseRowGeneration(snapshot, persisted.stable_identity_generation);
+    return snapshot;
   }
 
   /**
@@ -3533,6 +3546,7 @@ export class SessionManager {
     await this.livenessOwnershipClaimMutexFor(existing).runExclusive(async () => {
       await this.persistSession(
         this.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
+        existing,
       );
     });
     const pendingKeepScreenAwakeRestoration = (
@@ -4251,6 +4265,7 @@ export class SessionManager {
           ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
         },
       };
+      this.captureReleaseRowGeneration(releaseSnapshot, this.persistedRowGenerations.get(session));
 
       // A non-terminal release must not yield after freezing its reason: a
       // concurrent terminal release can only upgrade the shared reason while
@@ -4668,7 +4683,7 @@ export class SessionManager {
     releaseReason: string,
     session: Session,
   ): SessionReleaseSnapshot {
-    return {
+    const upgraded: SessionReleaseSnapshot = {
       ...snapshot,
       releaseReason,
       terminal: isTerminalReleaseReason(releaseReason),
@@ -4677,6 +4692,29 @@ export class SessionManager {
         timeoutMs: this.releaseHeartbeatTimeoutMs(releaseReason, session),
       },
     };
+    this.captureReleaseRowGeneration(upgraded, this.releaseRowGenerations.get(snapshot));
+    return upgraded;
+  }
+
+  private captureReleaseRowGeneration(
+    snapshot: SessionReleaseSnapshot,
+    rowGeneration: number | undefined,
+  ): void {
+    if (rowGeneration !== undefined) {
+      this.releaseRowGenerations.set(snapshot, rowGeneration);
+    }
+  }
+
+  /**
+   * The precondition a release write carries (#11129). A terminal release is a fence that must win
+   * over any row state, so it is unconditional; a non-terminal one applies only to the incarnation
+   * it released, so a delayed or retried write cannot release a re-acquired row.
+   */
+  private releaseWritePrecondition(snapshot: SessionReleaseSnapshot): MarkReleasedOptions {
+    const expectedRowGeneration = snapshot.terminal
+      ? undefined
+      : this.releaseRowGenerations.get(snapshot);
+    return expectedRowGeneration === undefined ? {} : { expectedRowGeneration };
   }
 
   private async completeReleasePersistence(
@@ -4828,6 +4866,7 @@ export class SessionManager {
         terminalStatus,
         snapshot.releasedAtMs,
         snapshot.releaseReason,
+        this.releaseWritePrecondition(snapshot),
       );
       await raceWithDeadline(write, {
         timer: this.timer,
@@ -7941,8 +7980,8 @@ export class SessionManager {
   // (issue #2885) only drains fire-and-forget writers at graceful shutdown; an
   // awaited write is already sequenced by its caller and must not be wrapped in
   // `track()`. Do not "fix" this by adding a barrier — that would be a non-bug fix.
-  private async persistSession(session: Session): Promise<void> {
-    await this.deviceSessionRepository.upsertActiveSession({
+  private async persistSession(session: Session, incarnation: Session): Promise<void> {
+    const rowGeneration = await this.deviceSessionRepository.upsertActiveSession({
       sessionUuid: session.sessionId,
       deviceId: session.assignedDevice,
       stableDeviceId: session.stableDeviceId,
@@ -7963,10 +8002,18 @@ export class SessionManager {
       preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
       preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
     });
+    // Recorded before the ownership write, which can fail after the row already advanced.
+    this.recordPersistedRowGeneration(incarnation, rowGeneration);
     await this.deviceSessionRepository.replaceLivenessOwnership?.(
       session.sessionId,
       session.livenessOwnerToken ?? null,
     );
+  }
+
+  private recordPersistedRowGeneration(incarnation: Session, rowGeneration: number | void): void {
+    if (typeof rowGeneration === "number") {
+      this.persistedRowGenerations.set(incarnation, rowGeneration);
+    }
   }
 
   private async recoveryTargetFromPersisted(

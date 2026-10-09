@@ -5284,6 +5284,8 @@ export class DaemonMcpProxy {
     const claimLivenessOwnership = !held.claimSent;
     try {
       await this.heartbeatWithStallDetection(sessionUuid, async (isCurrent) => {
+        // A skipped send proved nothing, so it must not be recorded as a success.
+        let sent = false;
         // Fencing the latest binding must not silence its siblings, hence
         // allowReleasedSession. Not-found is not proof of loss here, as on the
         // latest binding's tick: the release notification is authoritative.
@@ -5295,6 +5297,7 @@ export class DaemonMcpProxy {
             async () => {
               if (this.otherHeldSessions.get(sessionUuid) === held) {
                 await this.sendHeldSessionHeartbeat(sessionUuid, claimLivenessOwnership);
+                sent = true;
               }
             },
             sessionUuid,
@@ -5302,7 +5305,7 @@ export class DaemonMcpProxy {
             false,
           ),
         );
-        if (isCurrent()) {
+        if (sent && isCurrent()) {
           this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
         }
       });

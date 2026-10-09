@@ -48,6 +48,6 @@ export function registerDoctorTools(
 
       return createJSONToolResponse(report);
     },
-    { defaultEnabled: true },
+    { defaultEnabled: true, readOnly: true },
   );
 }

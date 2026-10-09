@@ -4420,6 +4420,54 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("a plain read in flight does not hold the session it names (#11107)", async () => {
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const doctorRunning = Promise.withResolvers<void>();
+      const callTool = client.callTool.bind(client);
+      client.callTool = async (toolName, params) => {
+        const result = await callTool(toolName, params);
+        if (toolName === "doctor") {
+          await doctorRunning.promise;
+        }
+        return result;
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        staticToolDefinitionsProvider: () => [
+          {
+            name: "doctor",
+            inputSchema: { type: "object", properties: {} },
+            _meta: { "automobile/deviceReadOnly": true },
+          },
+        ],
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a" });
+        const doctor = proxy.callTool("doctor", { sessionUuid: "session-a" });
+        await drainMicrotasks(32);
+        expect(client.callToolCalls.at(-1)).toEqual({
+          toolName: "doctor",
+          params: { sessionUuid: "session-a" },
+        });
+
+        // A read only watches the session it names: unlike a control call in flight, it does not
+        // keep that session's idle window from running out.
+        expect(proxy["hasSessionCallInFlight"]("session-a")).toBe(false);
+        doctorRunning.resolve();
+        await doctor;
+      } finally {
+        doctorRunning.resolve();
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("keeps the prior binding when an unissued session UUID is rejected", async () => {
       const client = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },

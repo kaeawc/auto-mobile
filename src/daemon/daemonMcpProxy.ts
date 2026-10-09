@@ -4193,11 +4193,14 @@ export class DaemonMcpProxy {
 
   /**
    * Count a forwarded call against the sessions it uses; returns the UUIDs to pass to
-   * {@link endSessionCall}. Inventory observation never uses the session it names, so it neither
-   * holds nor refreshes it.
+   * {@link endSessionCall}. Inventory observation and every other plain (non-device) read never
+   * use the session they name, so they neither hold nor refresh it (#11107).
    */
   private beginSessionCall(name: string, sessionUuids: readonly string[]): readonly string[] {
-    if (isDeviceInventoryTool(name)) {
+    if (
+      isDeviceInventoryTool(name) ||
+      (this.isDeviceReadOnlyTool(name) && !this.toolTargetsDevice(name))
+    ) {
       return [];
     }
     for (const sessionUuid of sessionUuids) {

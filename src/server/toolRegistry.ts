@@ -378,6 +378,17 @@ interface ToolRegistrationOptions {
   appUiResourceUri?: string;
 }
 
+/** Options for a plain (non-device) tool. */
+interface PlainToolOptions extends ToolRegistrationOptions {
+  /**
+   * The plain tool's read/control classification (#11107): true for a read, a per-args classifier
+   * for a mixed tool, absent for control. A read naming a session is admitted read-only: it never
+   * counts as session activity (owner decision 2026-10-09). Enumerated by
+   * `test/lint/toolReadControlClassification.test.ts`.
+   */
+  readOnly?: boolean | ((args: any) => boolean);
+}
+
 /** Resolves a device for a read without acquiring, readying or changing a device session. */
 interface SessionlessDeviceRead {
   resolve(deviceId: string, signal?: AbortSignal): Promise<BootedDevice>;
@@ -444,8 +455,8 @@ export interface RegisteredTool {
   outputSchema?: any;
   appUiResourceUri?: string;
   /**
-   * A device-aware tool's read/control classification (#10965): true for a read, a per-args
-   * classifier for a mixed tool, absent for control. Enumerated by
+   * The tool's read/control classification (#10965; plain tools' `readOnly`, #11107): true for a
+   * read, a per-args classifier for a mixed tool, absent for control. Enumerated by
    * `test/lint/toolReadControlClassification.test.ts`. Only `true` (a read for every call) is
    * advertised as `_meta["automobile/deviceReadOnly"]`, so a proxy can forward such reads without
    * a session (#10971); a per-args tool (sqlQuery, keyboard, clipboard, ...) is not marked.
@@ -722,9 +733,14 @@ async function resolveSessionlessDeviceRead(
 }
 
 function isDeviceReadOnlyCall(options: DeviceAwareToolOptions, args: unknown): boolean {
-  return typeof options.deviceReadOnly === "function"
-    ? options.deviceReadOnly(args)
-    : options.deviceReadOnly === true;
+  return isReadOnlyCall(options.deviceReadOnly, args);
+}
+
+function isReadOnlyCall(
+  classification: boolean | ((args: any) => boolean) | undefined,
+  args: unknown,
+): boolean {
+  return typeof classification === "function" ? classification(args) : classification === true;
 }
 
 /** Reads never require a session (#10970): an ambiguous read is asked for its deviceId. */
@@ -2503,7 +2519,7 @@ export class ToolRegistryClass {
     description: string,
     schema: any,
     handler: ToolHandler,
-    options: ToolRegistrationOptions = {},
+    options: PlainToolOptions = {},
   ): void {
     this.invalidateToolDefinitionSchemaCache();
     if (this === ToolRegistry) {
@@ -2519,6 +2535,8 @@ export class ToolRegistryClass {
       supportsProgress: options.supportsProgress ?? false,
       transportRecovery: options.transportRecovery,
       requiresDevice: false,
+      isDeviceReadOnlyCall: (args) => isReadOnlyCall(options.readOnly, args),
+      deviceReadOnly: options.readOnly,
       debugOnly: options.debugOnly ?? false,
       hidden: options.hidden ?? false,
       embeddedSdkOnly: false,

@@ -1046,12 +1046,13 @@ malformed recursive containers are rejected.
 #### Hierarchy layer
 
 `observe`, `tapOn`, `tapAny`, `sendKeys`, `highlight`, `dragAndDrop`, `swipeOn`,
-`pinchOn`, `tapAt`, and `selectAllText` accept an optional top-level `layer`
+`pinchOn`, `tapAt`, `selectAllText`, and `identifyInteractions` accept an optional top-level `layer`
 (`"app"` or `"overlay"`) that scopes the call to one layer of the screen. `app`
 excludes AutoMobile's own overlay window; `overlay` keeps only overlay nodes and
 fails with an actionable error when no overlay is showing. Omit it to search both,
 topmost first. `observe` applies it to the returned hierarchy and to `waitFor`
-element conditions. `dragAndDrop.layer` scopes both the `source` and the `target`
+element conditions. `identifyInteractions.layer` analyzes only that layer's
+elements. `dragAndDrop.layer` scopes both the `source` and the `target`
 drop-target resolution; `swipeOn.layer` scopes `container`, auto-target, and
 `lookFor` resolution; `pinchOn.layer` scopes `container` and auto-target resolution.
 The device cannot hide its own overlay for a capture, so an `observe` screenshot

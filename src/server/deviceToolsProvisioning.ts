@@ -394,14 +394,19 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     error: unknown,
     lifecycle: ProvisionDeviceLifecycleOutcome | undefined,
   ): ProvisionDeviceFailureBoundary | undefined {
-    if (error instanceof ProvisionDeviceRollbackError) {
+    if (error instanceof ProvisionDeviceRollbackError && error.cleanup.status !== "succeeded") {
       return "cleanup_failure";
     }
+    // A rollback that removed the device is a provisioning failure with a clean
+    // cleanup, so it is classified by the failure that triggered it.
     const readiness =
       (error instanceof ProvisionDeviceError && error.diagnostics.readinessPhase) ||
       lifecycle?.reason?.readinessPhase ||
       lifecycle?.phase === "readiness";
-    return readiness ? "readiness_failure" : undefined;
+    if (readiness || error instanceof ProvisionDeviceRollbackError) {
+      return "readiness_failure";
+    }
+    return undefined;
   }
 
   function provisionDeviceRecovery(

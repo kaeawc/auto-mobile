@@ -1384,6 +1384,8 @@ describe("provisionDevice handler", () => {
       { resource: "wallpaperRendering", kind: "unsupported" },
     ]);
     expect(payload.cleanup).toMatchObject({ status: "succeeded", state: "destroyed" });
+    // A clean rollback is not a cleanup failure.
+    expect(payload.recovery.boundary).not.toBe("cleanup_failure");
     expect(readinessCalls).toBe(0);
     expect(await deviceManager.listDeviceImages("ios")).toEqual([]);
   });

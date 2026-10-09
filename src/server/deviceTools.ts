@@ -49,6 +49,12 @@ import {
   DefaultDeviceResourceController,
   type DeviceResourceController,
 } from "../utils/deviceResourceController";
+import {
+  DefaultDeviceResourceReconciler,
+  type DeviceResourceReconciler,
+} from "../utils/deviceResourceReconciler";
+import { IosDeviceResourceReader } from "../utils/iosDeviceResourceReader";
+import { DeviceResourceApplicationRepository } from "../db/deviceResourceApplicationRepository";
 import type {
   DeviceResourceConfiguration,
   DeviceResourceConfigurationResult,
@@ -1318,6 +1324,7 @@ export interface DeviceToolsDependencies {
   env?: Environment;
   deviceResourceControllerFactory: () => DeviceResourceController;
   deviceResourceObserverFactory: () => DeviceResourceObserver;
+  deviceResourceReconcilerFactory: () => DeviceResourceReconciler;
   deviceManagerFactory: () => PlatformDeviceManager;
   avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
   deviceMatcherFactory: () => DeviceMatcher;
@@ -3532,9 +3539,27 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
   if (!moduleDependencies) {
     moduleDependencies = {
       androidAdbFactory: unadmittedAdbClientFactory,
-      deviceResourceControllerFactory: () => new DefaultDeviceResourceController(),
+      deviceResourceControllerFactory: () =>
+        new DefaultDeviceResourceController(
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          new DeviceResourceApplicationRepository(),
+        ),
       deviceResourceObserverFactory: () =>
         new DefaultDeviceResourceObserver({ timer: getDeviceToolsDependencies().timer }),
+      deviceResourceReconcilerFactory: () => {
+        const deps = getDeviceToolsDependencies();
+        return new DefaultDeviceResourceReconciler({
+          controller: deps.deviceResourceControllerFactory(),
+          observer: deps.deviceResourceObserverFactory(),
+          identity: new IosDeviceResourceReader({ timer: deps.timer }),
+          store: new DeviceResourceApplicationRepository(),
+          timer: deps.timer,
+        });
+      },
       deviceManagerFactory: () => new MultiPlatformDeviceManager(),
       avdManagerFactory: () => new AvdManagerService(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
@@ -3618,6 +3643,8 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
       deps.deviceResourceObserverFactory ?? currentDeps.deviceResourceObserverFactory,
     deviceResourceControllerFactory:
       deps.deviceResourceControllerFactory ?? currentDeps.deviceResourceControllerFactory,
+    deviceResourceReconcilerFactory:
+      deps.deviceResourceReconcilerFactory ?? currentDeps.deviceResourceReconcilerFactory,
     deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,
     avdManagerFactory: deps.avdManagerFactory ?? currentDeps.avdManagerFactory,
     deviceMatcherFactory: deps.deviceMatcherFactory ?? currentDeps.deviceMatcherFactory,

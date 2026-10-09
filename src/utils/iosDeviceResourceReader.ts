@@ -10,6 +10,15 @@ import { defaultTimer, type Timer } from "./SystemTimer";
 import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
 import { iosDeviceResourceCatalog, iosDeviceResourcePlistNames } from "./iosDeviceResourceCatalog";
+import { sequenceBackoff, type BackoffPolicy } from "./Backoff";
+import type { SimulatorResourceIdentity } from "../models/DeviceResourceReconciliation";
+import type { SimulatorResourceIdentityReader } from "./deviceResourceReconciler";
+
+/** Upper bound for any single native command; the request deadline still applies. */
+export const IOS_RESOURCE_COMMAND_TIMEOUT_MS = 30_000;
+/** Idempotent inventory/override reads are retried at most this many extra times. */
+export const IOS_RESOURCE_READ_RETRIES = 2;
+const defaultReadBackoff = sequenceBackoff([100, 400]);
 
 export interface ServiceDefinition {
   label: string;
@@ -18,9 +27,40 @@ export interface ServiceDefinition {
 const deviceInventorySchema = z.object({
   devices: z.record(
     z.string(),
-    z.array(z.object({ udid: z.string(), state: z.string(), isAvailable: z.boolean().optional() })),
+    z.array(
+      z.object({
+        udid: z.string(),
+        state: z.string(),
+        isAvailable: z.boolean().optional(),
+        deviceTypeIdentifier: z.string().optional(),
+      }),
+    ),
   ),
 });
+type DeviceInventory = z.infer<typeof deviceInventorySchema>;
+
+function findBootedSimulator(inventory: DeviceInventory, udid: string) {
+  for (const [runtimeId, entries] of Object.entries(inventory.devices)) {
+    if (!runtimeId.startsWith("com.apple.CoreSimulator.SimRuntime.iOS-")) {
+      continue;
+    }
+    const device = entries.find(
+      (entry) => entry.udid === udid && entry.state === "Booted" && entry.isAvailable !== false,
+    );
+    if (device) {
+      return { runtimeId, device };
+    }
+  }
+  return undefined;
+}
+
+/** Reads that change nothing and are safe to repeat after a transient failure. */
+function isRetryableRead(args: readonly string[]): boolean {
+  if (args[0] === "list") {
+    return true;
+  }
+  return args[0] === "spawn" && args[2] === "launchctl" && args[3] === "print-disabled";
+}
 const runtimeInventorySchema = z.object({
   runtimes: z.array(
     z.object({ identifier: z.string(), runtimeRoot: z.string(), isAvailable: z.boolean() }),
@@ -52,23 +92,26 @@ function disabledOverrides(output: string): Map<string, boolean> {
 }
 
 /** Shared Simulator inventory and launchd reads; command is also used by the controller. */
-export class IosDeviceResourceReader {
+export class IosDeviceResourceReader implements SimulatorResourceIdentityReader {
   private readonly simctl: Pick<SimCtl, "executeCommandArgs">;
   private readonly plist: Pick<PlistReader, "readJsonFile">;
-  private readonly timer: Pick<Timer, "now">;
+  private readonly timer: Pick<Timer, "now" | "sleep">;
   private readonly readDirectory: (path: string) => Promise<string[]>;
+  private readonly readBackoff: BackoffPolicy;
   constructor(
     options: {
       simctl?: Pick<SimCtl, "executeCommandArgs">;
       plist?: Pick<PlistReader, "readJsonFile">;
-      timer?: Pick<Timer, "now">;
+      timer?: Pick<Timer, "now" | "sleep">;
       readDirectory?: (path: string) => Promise<string[]>;
+      readBackoff?: BackoffPolicy;
     } = {},
   ) {
     this.simctl = options.simctl ?? new SimCtlClient(null);
     this.plist = options.plist ?? new PlistClient();
     this.timer = options.timer ?? defaultTimer;
     this.readDirectory = options.readDirectory ?? readdir;
+    this.readBackoff = options.readBackoff ?? defaultReadBackoff;
   }
   private readonly observationReads = new WeakMap<
     DeviceResourceObservationRequest,
@@ -140,9 +183,34 @@ export class IosDeviceResourceReader {
     request: DeviceResourceObservationRequest,
     args: string[],
   ): Promise<string> {
+    const retries = isRetryableRead(args) ? IOS_RESOURCE_READ_RETRIES : 0;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.executeOnce(request, args);
+      } catch (error) {
+        request.signal?.throwIfAborted();
+        if (attempt > retries) {
+          throw error;
+        }
+        const delayMs = this.readBackoff.delayForAttempt(attempt);
+        if (delayMs >= request.deadlineMs - this.timer.now()) {
+          throw error;
+        }
+        logger.warn(
+          `Retrying simulator read ${args.slice(0, 4).join(" ")} after: ${errorMessage(error)}`,
+        );
+        await this.timer.sleep(delayMs);
+      }
+    }
+  }
+
+  private async executeOnce(
+    request: DeviceResourceObservationRequest,
+    args: string[],
+  ): Promise<string> {
     const result = await this.simctl.executeCommandArgs(
       args,
-      this.remaining(request),
+      Math.min(this.remaining(request), IOS_RESOURCE_COMMAND_TIMEOUT_MS),
       request.signal,
     );
     if (result.error) {
@@ -170,19 +238,10 @@ export class IosDeviceResourceReader {
   async readRuntimeInventory(
     request: DeviceResourceObservationRequest,
   ): Promise<Map<string, string>> {
-    const inventory = deviceInventorySchema.parse(
-      JSON.parse(await this.execute(request, ["list", "devices", "--json"])),
-    );
-    const runtimeId = Object.entries(inventory.devices).find(
-      ([id, entries]) =>
-        id.startsWith("com.apple.CoreSimulator.SimRuntime.iOS-") &&
-        entries.some(
-          (device) =>
-            device.udid === request.device.deviceId &&
-            device.state === "Booted" &&
-            device.isAvailable !== false,
-        ),
-    )?.[0];
+    const runtimeId = findBootedSimulator(
+      await this.readDeviceInventory(request),
+      request.device.deviceId,
+    )?.runtimeId;
     if (!runtimeId) {
       return new Map();
     }
@@ -196,6 +255,33 @@ export class IosDeviceResourceReader {
       return new Map();
     }
     return this.readServicePaths(request, runtime.runtimeRoot);
+  }
+
+  private async readDeviceInventory(
+    request: DeviceResourceObservationRequest,
+  ): Promise<DeviceInventory> {
+    return deviceInventorySchema.parse(
+      JSON.parse(await this.execute(request, ["list", "devices", "--json"])),
+    );
+  }
+
+  /** The booted incarnation: UDID, runtime and device type together; null when not booted. */
+  async readIdentity(
+    request: DeviceResourceObservationRequest,
+  ): Promise<SimulatorResourceIdentity | null> {
+    const booted = findBootedSimulator(
+      await this.readDeviceInventory(request),
+      request.device.deviceId,
+    );
+    if (!booted?.device.deviceTypeIdentifier) {
+      return null;
+    }
+    return {
+      platform: "ios",
+      udid: booted.device.udid,
+      runtimeId: booted.runtimeId,
+      deviceTypeId: booted.device.deviceTypeIdentifier,
+    };
   }
 
   private async readServicePaths(

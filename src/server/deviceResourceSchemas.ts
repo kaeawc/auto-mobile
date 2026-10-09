@@ -66,3 +66,34 @@ export const setDeviceResourcesSchema = withJsonSchemaOverride(
     jsonSchema.else = { required: ["restore"] };
   },
 );
+
+export const reconcileDeviceResourcesSchema = addDeviceTargetingToSchema(
+  z
+    .object({
+      resources: deviceResourceConfigurationSchema.describe(
+        "Requested workload profile: the resource map the simulator should match. It has no name; its identity is the returned profileFingerprint.",
+      ),
+      repair: z
+        .boolean()
+        .optional()
+        .describe(
+          "Apply only the drifted requested entries, then re-read and fail closed. Defaults to false (report only).",
+        ),
+      releaseOwnedExtras: z
+        .boolean()
+        .optional()
+        .describe(
+          "With repair, re-enable services AutoMobile disabled earlier that this profile omits. Never touches overrides AutoMobile did not apply.",
+        ),
+      timeoutMs: z
+        .number()
+        .int()
+        .positive()
+        .max(MAX_DEVICE_READY_TIMEOUT_MS)
+        .optional()
+        .describe(
+          `Total reconciliation budget in milliseconds. Defaults to ${DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS}.`,
+        ),
+    })
+    .strict(),
+);

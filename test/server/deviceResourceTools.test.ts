@@ -9,8 +9,11 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   deviceResourceConfigurationSchema,
+  reconcileDeviceResourcesSchema,
   setDeviceResourcesSchema,
 } from "../../src/server/deviceResourceSchemas";
+import { FakeDeviceResourceReconciler } from "../fakes/FakeDeviceResourceReconciler";
+import { DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
@@ -398,5 +401,119 @@ describe("setDeviceResources", () => {
       ),
     ).rejects.toThrow("cancelled");
     expect(controller.requests).toHaveLength(0);
+  });
+});
+
+describe("reconcileDeviceResources", () => {
+  let controller: FakeDeviceResourceController;
+  let reconciler: FakeDeviceResourceReconciler;
+  let timer: FakeTimer;
+  const device = {
+    platform: "ios" as const,
+    name: "iPhone",
+    deviceId: "12345678-1234-1234-1234-123456789ABC",
+  };
+  beforeEach(() => {
+    controller = new FakeDeviceResourceController();
+    reconciler = new FakeDeviceResourceReconciler();
+    timer = new FakeTimer();
+    setDeviceToolsDependencies({
+      deviceResourceControllerFactory: () => controller,
+      deviceResourceObserverFactory: () => new FakeDeviceResourceObserver(),
+      deviceResourceReconcilerFactory: () => reconciler,
+      timer,
+    });
+    registerDeviceTools();
+  });
+  afterEach(() => resetDeviceToolsDependencies());
+  const handler = () => ToolRegistry.getTool("reconcileDeviceResources")!.deviceAwareHandler!;
+
+  test("registers a device-aware opt-in tool", () => {
+    expect(ToolRegistry.getTool("reconcileDeviceResources")).toMatchObject({
+      defaultEnabled: false,
+      requiresDevice: true,
+    });
+  });
+
+  test("defaults to a report-only run with a bounded deadline", async () => {
+    const response = await handler()(device, { resources: { wallpaperRendering: "disabled" } });
+    expect(reconciler.requests[0]).toMatchObject({
+      device,
+      profile: { resources: { wallpaperRendering: "disabled" } },
+      repair: false,
+      releaseOwnedExtras: false,
+      deadlineMs: timer.now() + DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS,
+    });
+    expect(JSON.parse(response.content[0].text)).toEqual({ device, ...reconciler.result });
+    expect(response.isError).toBeUndefined();
+  });
+
+  test("forwards repair options and reports unproven results as tool errors", async () => {
+    reconciler.result = {
+      ...reconciler.result,
+      success: false,
+      remainingDrift: [
+        {
+          resource: "wallpaperRendering",
+          kind: "commandFailure",
+          expected: "disabled",
+          observed: { state: "unknown", reason: "read failed" },
+        },
+      ],
+    };
+    const response = await handler()(device, {
+      resources: { wallpaperRendering: "disabled" },
+      repair: true,
+      releaseOwnedExtras: true,
+      timeoutMs: 5_000,
+    });
+    expect(reconciler.requests[0]).toMatchObject({
+      repair: true,
+      releaseOwnedExtras: true,
+      deadlineMs: timer.now() + 5_000,
+    });
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text).remainingDrift[0].kind).toBe("commandFailure");
+  });
+
+  test("shares the per-device lease with setDeviceResources", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    reconciler.onRequest = () => pending;
+    const first = handler()(device, { resources: { wallpaperRendering: "disabled" } });
+    for (let i = 0; i < 20 && reconciler.requests.length === 0; i++) {
+      await Promise.resolve();
+    }
+    const configure = ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(device, {
+      resources: { wallpaperRendering: "enabled" },
+    });
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+    expect(controller.requests).toHaveLength(0);
+    release();
+    await Promise.all([first, configure]);
+    expect(controller.requests).toHaveLength(1);
+  });
+
+  test.each([{}, { profile: "efficient" }, { "com.apple.PosterBoard": "disabled" }])(
+    "rejects invalid profiles %j",
+    (resources) => {
+      expect(reconcileDeviceResourcesSchema.safeParse({ resources }).success).toBe(false);
+    },
+  );
+
+  test("caller cancellation never reaches the reconciler", async () => {
+    await expect(
+      handler()(
+        device,
+        { resources: { wallpaperRendering: "disabled" } },
+        undefined,
+        AbortSignal.abort(new Error("cancelled")),
+      ),
+    ).rejects.toThrow("cancelled");
+    expect(reconciler.requests).toHaveLength(0);
   });
 });

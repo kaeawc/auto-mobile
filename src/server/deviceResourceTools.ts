@@ -8,7 +8,8 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { z } from "zod/v4";
 import type { DeviceToolsDependencies } from "./deviceTools";
-import { setDeviceResourcesSchema } from "./deviceResourceSchemas";
+import { reconcileDeviceResourcesSchema, setDeviceResourcesSchema } from "./deviceResourceSchemas";
+import type { BootedDevice } from "../models/DeviceInfo";
 import { ToolRegistry } from "./toolRegistry";
 import { INTERNAL_NO_DIFF_PARAM } from "./internalToolCall";
 import { createJSONToolResponse } from "../utils/toolUtils";
@@ -38,52 +39,131 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
       delete external[INTERNAL_NO_DIFF_PARAM];
       const parsed = setDeviceResourcesSchema.parse(external);
       const deps = dependencies();
-      const requestedDeadline =
-        deps.timer.now() + (parsed.timeoutMs ?? DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS);
-      const deadlineMs =
-        typeof transportDeadline === "number" && Number.isFinite(transportDeadline)
-          ? Math.min(requestedDeadline, transportDeadline - START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS)
-          : requestedDeadline;
-      const lease = await deps.lifecycleCoordinator.reserve(
-        {
-          kind: "stable",
-          platform: device.platform,
-          stableId: device.platform === "ios" ? device.deviceId : device.name,
-        },
-        { operation: "configure", deadlineMs, signal: callerSignal },
-      );
-      try {
-        const operationSignal = callerSignal
-          ? AbortSignal.any([callerSignal, lease.signal])
-          : lease.signal;
-        const configured = await trackDeviceAcquisitionReadiness(
-          deviceReadinessLockKey(device.platform, device.deviceId),
-          async () => {
-            operationSignal.throwIfAborted();
-            return deps.deviceResourceControllerFactory().setResources({
+      const deadlineMs = resolveResourceDeadline(deps, parsed.timeoutMs, transportDeadline);
+      return withDeviceResourceLease(
+        deps,
+        device,
+        deadlineMs,
+        callerSignal,
+        async (operationSignal) => {
+          const configured = await withDeviceReadiness(device, operationSignal, () =>
+            deps.deviceResourceControllerFactory().setResources({
               device,
               resources: parsed.resources ?? {},
               restore: parsed.restore,
               deadlineMs,
               signal: operationSignal,
-            });
-          },
-        );
-        const result = await observeConfiguredDeviceResources(deps, configured, {
-          device,
-          deadlineMs,
-          signal: operationSignal,
-        });
-        return {
-          ...createJSONToolResponse({ device, ...result }),
-          ...(result.success ? {} : { isError: true }),
-        };
-      } finally {
-        lease.release();
-      }
+            }),
+          );
+          const result = await observeConfiguredDeviceResources(deps, configured, {
+            device,
+            deadlineMs,
+            signal: operationSignal,
+          });
+          return {
+            ...createJSONToolResponse({ device, ...result }),
+            ...(result.success ? {} : { isError: true }),
+          };
+        },
+      );
     },
     { defaultEnabled: false },
   );
+
+  ToolRegistry.registerDeviceAware(
+    "reconcileDeviceResources",
+    "Compare an iOS Simulator with a requested resource map (workload profile) and report typed drift: missingRequested, ownedExtra (overrides AutoMobile applied earlier), unsupported, commandFailure. Report-only by default; repair applies only the drifted delta, re-reads, and succeeds only when every requested resource is proven.",
+    reconcileDeviceResourcesSchema,
+    async (device, args: z.infer<typeof reconcileDeviceResourcesSchema>, _progress, signal) => {
+      const callerSignal = signal ?? getAbortSignal();
+      callerSignal?.throwIfAborted();
+      const external: Record<string, unknown> = { ...args };
+      const transportDeadline = external[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+      deleteInternalToolParams(external);
+      delete external[INTERNAL_NO_DIFF_PARAM];
+      const parsed = reconcileDeviceResourcesSchema.parse(external);
+      const deps = dependencies();
+      const deadlineMs = resolveResourceDeadline(deps, parsed.timeoutMs, transportDeadline);
+      return withDeviceResourceLease(
+        deps,
+        device,
+        deadlineMs,
+        callerSignal,
+        async (operationSignal) => {
+          const result = await withDeviceReadiness(device, operationSignal, () =>
+            deps.deviceResourceReconcilerFactory().reconcile({
+              device,
+              profile: { resources: parsed.resources },
+              repair: parsed.repair ?? false,
+              releaseOwnedExtras: parsed.releaseOwnedExtras ?? false,
+              deadlineMs,
+              signal: operationSignal,
+            }),
+          );
+          return {
+            ...createJSONToolResponse({ device, ...result }),
+            ...(result.success ? {} : { isError: true }),
+          };
+        },
+      );
+    },
+    { defaultEnabled: false },
+  );
+}
+
+function resolveResourceDeadline(
+  deps: Pick<DeviceToolsDependencies, "timer">,
+  timeoutMs: number | undefined,
+  transportDeadline: unknown,
+): number {
+  const requestedDeadline = deps.timer.now() + (timeoutMs ?? DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS);
+  return typeof transportDeadline === "number" && Number.isFinite(transportDeadline)
+    ? Math.min(requestedDeadline, transportDeadline - START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS)
+    : requestedDeadline;
+}
+
+/** Resource writes join the device readiness transaction, like acquisition setup. */
+function withDeviceReadiness<T>(
+  device: BootedDevice,
+  signal: AbortSignal,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return trackDeviceAcquisitionReadiness(
+    deviceReadinessLockKey(device.platform, device.deviceId),
+    async () => {
+      signal.throwIfAborted();
+      return operation();
+    },
+  );
+}
+
+/**
+ * Resource operations hold the device's lifecycle lease, so they serialize per device
+ * with boot, shutdown, teardown and other configuration.
+ */
+async function withDeviceResourceLease<T>(
+  deps: Pick<DeviceToolsDependencies, "lifecycleCoordinator">,
+  device: BootedDevice,
+  deadlineMs: number,
+  callerSignal: AbortSignal | undefined,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const lease = await deps.lifecycleCoordinator.reserve(
+    {
+      kind: "stable",
+      platform: device.platform,
+      stableId: device.platform === "ios" ? device.deviceId : device.name,
+    },
+    { operation: "configure", deadlineMs, signal: callerSignal },
+  );
+  try {
+    const operationSignal = callerSignal
+      ? AbortSignal.any([callerSignal, lease.signal])
+      : lease.signal;
+    return await operation(operationSignal);
+  } finally {
+    lease.release();
+  }
 }
 
 // Preserve abort identity and cancellation routing while retaining completed mutation evidence.

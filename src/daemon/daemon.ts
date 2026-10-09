@@ -9,6 +9,7 @@ import {
 } from "./releaseSessionAndDevice";
 import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
+import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
 import { republishOwnedIdentity } from "./identityRecovery";
 import {
@@ -681,6 +682,8 @@ export class Daemon {
         clearSessionAppearanceConfig(sessionId).catch((error: unknown) => {
           logger.warn(`[Appearance] Failed to drop config of observer ${sessionId}`, error);
         });
+        // So do the viewer streams its registration admitted (#11076).
+        ObserverReleaseBroadcaster.emit(sessionId);
       },
     );
     this.configureSessionLifecycleCallbacks();

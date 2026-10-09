@@ -12,6 +12,7 @@ import {
   type StreamDeviceLifecycleEvents,
 } from "./streamDeviceLifecycleEvents";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { ObserverReleaseBroadcaster, type ObserverReleaseSource } from "./observerReleaseBroadcast";
 import { WebRtcSubscriptionEndedError } from "../server/WebRtcSubscriptionEndedError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
@@ -71,6 +72,8 @@ export interface WebRtcStreamSocketServerDependencies {
   endStreamsForDevice?: typeof endWebRtcStreamsForDevice;
   deviceLifecycle?: () => StreamDeviceLifecycleEvents | null;
   sessionReleases?: { subscribe(callback: (sessionId: string) => void): () => void };
+  /** Released or expired observer registrations, which change no device owner (#11076). */
+  observerReleases?: ObserverReleaseSource;
 }
 
 interface WebRtcRequestContext {
@@ -218,13 +221,21 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     const sessionReleases = this.injectedDeps
       ? this.injectedDeps.sessionReleases
       : SessionReleaseBroadcaster;
-    const removeRelease = sessionReleases?.subscribe(() => {
+    const reconcileAll = () => {
       for (const deviceId of this.resolvedDeps?.liveDeviceIds?.() ?? []) {
         this.onOwnershipChanged(deviceId);
       }
-    });
-    if (removeRelease) {
-      this.removeListeners.push(removeRelease);
+    };
+    const observerReleases = this.injectedDeps
+      ? this.injectedDeps.observerReleases
+      : ObserverReleaseBroadcaster;
+    for (const remove of [
+      sessionReleases?.subscribe(reconcileAll),
+      observerReleases?.subscribe(reconcileAll),
+    ]) {
+      if (remove) {
+        this.removeListeners.push(remove);
+      }
     }
     this.registerLifecycleListeners();
   }

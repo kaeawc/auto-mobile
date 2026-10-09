@@ -343,7 +343,7 @@ wiring_requires_yq() {
   run yq -r '.jobs."ios-device-webrtc"."runs-on"' "$WF"
   [ "$status" -eq 0 ]
   local same="github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository"
-  [ "$output" = "\${{ (${same} && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (${same} && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('[\"self-hosted\",\"automobile-mac-heavy\"]') || 'macos-26' }}" ]
+  [ "$output" = "\${{ (${same} && vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (${same} && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('[\"self-hosted\",\"automobile-mac-heavy\"]') || 'macos-26' }}" ]
   run yq -r '.jobs."ios-device-webrtc"."timeout-minutes"' "$WF"
   [ "$output" -le 30 ]
   # No CircleCI copy (#11012).

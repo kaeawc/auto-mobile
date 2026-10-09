@@ -145,7 +145,8 @@ for that slot. The CircleCI copy is gone.
 
 Routing, in order:
 
-1. Same-repo PR, `NAMESPACE_RUNNERS_DISABLED` not `true` and
+1. Same-repo PR, `AUTOMOBILE_NAMESPACE_MACOS_ENABLED` is `true` (opt-in; set it after
+   creating the profile), `NAMESPACE_RUNNERS_DISABLED` not `true` and
    `IOS_WEBRTC_HEAVY_LANE` not `true`: Namespace macOS.
 2. Same-repo PR otherwise, with `AUTOMOBILE_MAC_POOLS_ENABLED=true`: the heavy
    self-hosted lane (the documented fallback, for example if ScreenCaptureKit

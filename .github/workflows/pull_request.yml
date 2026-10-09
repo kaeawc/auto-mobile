@@ -3347,13 +3347,15 @@ jobs:
     name: "iOS Device Capture to WHEP"
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.webrtc_should_run == 'true' && needs.fast-validation.result == 'success'
-    # Same-repository owner PRs run on the Namespace macOS profile (#11012; one
+    # Same-repository owner PRs run on the Namespace macOS profile once
+    # vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' (opt-in until the profile
+    # exists; until then hosted macos-26) (#11012; one
     # macOS job at a time on the trial, and WHEP fires only on WebRTC changes).
     # Fallbacks, in order: vars.IOS_WEBRTC_HEAVY_LANE == 'true' or the
     # NAMESPACE_RUNNERS_DISABLED kill switch move it to the heavy self-hosted lane
     # when the Mac pools are enabled (#11011); otherwise, and for forks, hosted
     # macos-26. No CircleCI copy runs.
-    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac-heavy"]') || 'macos-26' }}
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_NAMESPACE_MACOS_ENABLED == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && vars.IOS_WEBRTC_HEAVY_LANE != 'true') && 'namespace-profile-auto-mobile-macos' || (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac-heavy"]') || 'macos-26' }}
     timeout-minutes: 30
     steps:
       - name: "Isolate self-hosted WHEP capture home"

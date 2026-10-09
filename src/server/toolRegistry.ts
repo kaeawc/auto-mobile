@@ -71,6 +71,7 @@ import {
   getDeviceLabelMap,
   releaseDeviceLabelSessions,
 } from "./deviceLabelMapping";
+import { deferHeldPlanAppCleanup, takeHeldPlanAppCleanup } from "./heldPlanAppCleanup";
 import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import type { Environment } from "../daemon/poolConfig";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
@@ -2094,27 +2095,60 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       sessionBindingReleaseHandler,
       sessionToolSelectionService,
     } = input;
+    const lifecycleSessionUuid = baseSessionUuid ?? sessionUuid;
+    const ownsPoolSession =
+      shouldResolveDevice &&
+      sessionUuid !== undefined &&
+      lifecycleSessionUuid !== undefined &&
+      name === "executePlan" &&
+      DaemonState.getInstance().isInitialized();
+    const heldForRecovery =
+      ownsPoolSession && this.holdsFailedPlanSessionForRecovery(input, lifecycleSessionUuid);
+    // A cleanup deferred by an earlier failed run on this session (#11139) is superseded once
+    // this run's own lifecycle cleans and releases it.
+    const deferredCleanup =
+      ownsPoolSession && !heldForRecovery
+        ? takeHeldPlanAppCleanup(
+            DaemonState.getInstance().getSessionManager(),
+            lifecycleSessionUuid,
+          )
+        : undefined;
+
     if (device && name === "executePlan" && args?.cleanupAppId) {
       // Resolved under the request signal: a device-loss abort names the lost device
       // to skip. A deadline or client cancel aborts it too but names no device, so
       // those plans still clean every device they own (#10022).
-      const devices = this.getCleanupDevices(device, baseSessionUuid ?? sessionUuid);
+      const devices = this.getCleanupDevices(device, lifecycleSessionUuid);
       const cleanupConfig = { appId: args.cleanupAppId, clearAppData: args.cleanupClearAppData };
-      const outcome = await this.cleanupDevicesShielded(devices, cleanupService, cleanupConfig);
-      this.reportIncompleteCleanup(outcome, args.cleanupAppId, baseSessionUuid ?? sessionUuid);
-      this.markIncompleteCleanupDevices(outcome, devices, cleanupService, cleanupConfig);
+      const runCleanup = async (): Promise<void> => {
+        const outcome = await this.cleanupDevicesShielded(devices, cleanupService, cleanupConfig);
+        this.reportIncompleteCleanup(outcome, cleanupConfig.appId, lifecycleSessionUuid);
+        this.markIncompleteCleanupDevices(outcome, devices, cleanupService, cleanupConfig);
+      };
+      if (heldForRecovery) {
+        // The caller's recovery and resumed plan need the app as the failure left it (#11139):
+        // clean up only once the held session is finally released.
+        logger.info(
+          `[PlanLifecycle] Deferring app cleanup for ${cleanupConfig.appId} until held session ` +
+            `${lifecycleSessionUuid} is released`,
+        );
+        deferHeldPlanAppCleanup(
+          DaemonState.getInstance().getSessionManager(),
+          lifecycleSessionUuid,
+          runCleanup,
+          PLAN_APP_CLEANUP_CAP_MS,
+        );
+      } else {
+        await runCleanup();
+      }
+    } else if (deferredCleanup) {
+      await deferredCleanup();
     }
 
-    if (
-      shouldResolveDevice &&
-      sessionUuid &&
-      name === "executePlan" &&
-      DaemonState.getInstance().isInitialized() &&
-      !this.holdsFailedPlanSessionForRecovery(input, baseSessionUuid ?? sessionUuid)
-    ) {
+    if (ownsPoolSession && !heldForRecovery) {
       const sessionManager = DaemonState.getInstance().getSessionManager();
       const devicePool = DaemonState.getInstance().getDevicePool();
-      const releaseSessionUuid = baseSessionUuid ?? sessionUuid;
+      const releaseSessionUuid = lifecycleSessionUuid;
       // Track exactly which sessions this release actually frees so the
       // server-side transport binding is torn down for each (issue #4611 Gap
       // D) — coupled to the REAL release, never cleared optimistically. Each

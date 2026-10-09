@@ -284,17 +284,14 @@ export class TakeScreenshot implements ScreenshotService {
   private readonly pathProtection: ScreenshotPathProtection;
   private readonly iosOverlayHider: IosCaptureOverlayHiderResolver;
   private readonly physicalDisplayIdResolver: PhysicalDisplayIdResolver;
-  private static cacheDir: string | null = null;
-
   /**
    * Get the cache directory, creating it with secure permissions if needed.
-   * Uses lazy initialization to ensure the directory is created securely.
+   * Resolved on every call rather than memoised process-wide: the directory
+   * follows `AUTOMOBILE_DATA_DIR`, so a cached path would keep pointing at a
+   * data dir that a test (or a reconfigured process) has since removed.
    */
   private static getCacheDir(): string {
-    if (!TakeScreenshot.cacheDir) {
-      TakeScreenshot.cacheDir = ensureSecureTempDirSync(TEMP_SUBDIRS.SCREENSHOTS);
-    }
-    return TakeScreenshot.cacheDir;
+    return ensureSecureTempDirSync(TEMP_SUBDIRS.SCREENSHOTS);
   }
 
   /**

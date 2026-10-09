@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   getObserveCacheStore,
   resetObserveCacheStore,
@@ -7,6 +7,11 @@ import {
 import { FakeObserveCacheStore } from "../../../fakes/FakeObserveCacheStore";
 
 describe("ObserveCacheRegistry", function () {
+  // Sibling files may leave a fake installed; every test here starts from the default.
+  beforeEach(function () {
+    resetObserveCacheStore();
+  });
+
   afterEach(function () {
     resetObserveCacheStore();
   });

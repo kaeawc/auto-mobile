@@ -38,6 +38,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
 const bounds = (left: number, top: number, right: number, bottom: number) => ({
   left,
@@ -119,6 +120,10 @@ describe("posture wait inventory classification", () => {
     expect(canDisplayExist(inventory, panels, requested)).toBe(expected);
   });
 });
+
+// The published-schema suites below reset and fill the shared ToolRegistry; restore it
+// afterwards so a registered real `observe` tool cannot leak into sibling files.
+isolateToolRegistry();
 
 afterEach(() => {
   if (originalWaitForScreenshotPolicy === undefined) {

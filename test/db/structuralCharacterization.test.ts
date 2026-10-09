@@ -412,33 +412,35 @@ describe("structural SQLite characterization", () => {
     },
   );
 
-  test.each([navigationUp, failuresUp])(
-    "migration schema before, after and repeated up",
-    async (up) => {
-      const raw = new BunDatabase(":memory:");
-      const db = new Kysely<unknown>({ dialect: new BunSqliteDialect({ database: raw }) });
-      try {
-        const catalog = () =>
-          sql`select type, name, tbl_name, sql from sqlite_master order by rowid`.execute(db);
-        expect((await catalog()).rows).toMatchSnapshot();
-        await up(db);
-        expect((await catalog()).rows).toMatchSnapshot();
-        const tables = await sql<{
-          name: string;
-        }>`select name from sqlite_master where type = 'table' order by rowid`.execute(db);
-        const columns = [];
-        for (const { name } of tables.rows) {
-          columns.push({
-            name,
-            rows: (await sql`pragma table_info(${sql.lit(name)})`.execute(db)).rows,
-          });
-        }
-        expect(columns).toMatchSnapshot();
-        await up(db);
-        expect((await catalog()).rows).toMatchSnapshot();
-      } finally {
-        await db.destroy();
+  // Snapshot keys are the test title plus a per-title counter, so each migration
+  // needs its own title or the keys swap when the order is randomized.
+  test.each([
+    ["navigation", navigationUp],
+    ["failures", failuresUp],
+  ] as const)("migration schema before, after and repeated up (%s)", async (_label, up) => {
+    const raw = new BunDatabase(":memory:");
+    const db = new Kysely<unknown>({ dialect: new BunSqliteDialect({ database: raw }) });
+    try {
+      const catalog = () =>
+        sql`select type, name, tbl_name, sql from sqlite_master order by rowid`.execute(db);
+      expect((await catalog()).rows).toMatchSnapshot();
+      await up(db);
+      expect((await catalog()).rows).toMatchSnapshot();
+      const tables = await sql<{
+        name: string;
+      }>`select name from sqlite_master where type = 'table' order by rowid`.execute(db);
+      const columns = [];
+      for (const { name } of tables.rows) {
+        columns.push({
+          name,
+          rows: (await sql`pragma table_info(${sql.lit(name)})`.execute(db)).rows,
+        });
       }
-    },
-  );
+      expect(columns).toMatchSnapshot();
+      await up(db);
+      expect((await catalog()).rows).toMatchSnapshot();
+    } finally {
+      await db.destroy();
+    }
+  });
 });

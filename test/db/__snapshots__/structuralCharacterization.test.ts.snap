@@ -1,8 +1,8 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
-exports[`structural SQLite characterization migration schema before, after and repeated up 1`] = `[]`;
+exports[`structural SQLite characterization migration schema before, after and repeated up (navigation) 1`] = `[]`;
 
-exports[`structural SQLite characterization migration schema before, after and repeated up 2`] = `
+exports[`structural SQLite characterization migration schema before, after and repeated up (navigation) 2`] = `
 [
   {
     "name": "navigation_apps",
@@ -115,7 +115,7 @@ exports[`structural SQLite characterization migration schema before, after and r
 ]
 `;
 
-exports[`structural SQLite characterization migration schema before, after and repeated up 3`] = `
+exports[`structural SQLite characterization migration schema before, after and repeated up (navigation) 3`] = `
 [
   {
     "name": "navigation_apps",
@@ -156,7 +156,7 @@ exports[`structural SQLite characterization migration schema before, after and r
 ]
 `;
 
-exports[`structural SQLite characterization migration schema before, after and repeated up 4`] = `
+exports[`structural SQLite characterization migration schema before, after and repeated up (navigation) 4`] = `
 [
   {
     "name": "navigation_apps",
@@ -269,9 +269,9 @@ exports[`structural SQLite characterization migration schema before, after and r
 ]
 `;
 
-exports[`structural SQLite characterization migration schema before, after and repeated up 5`] = `[]`;
+exports[`structural SQLite characterization migration schema before, after and repeated up (failures) 1`] = `[]`;
 
-exports[`structural SQLite characterization migration schema before, after and repeated up 6`] = `
+exports[`structural SQLite characterization migration schema before, after and repeated up (failures) 2`] = `
 [
   {
     "name": "failure_groups",
@@ -396,7 +396,7 @@ exports[`structural SQLite characterization migration schema before, after and r
 ]
 `;
 
-exports[`structural SQLite characterization migration schema before, after and repeated up 7`] = `
+exports[`structural SQLite characterization migration schema before, after and repeated up (failures) 3`] = `
 [
   {
     "name": "failure_groups",
@@ -425,7 +425,7 @@ exports[`structural SQLite characterization migration schema before, after and r
 ]
 `;
 
-exports[`structural SQLite characterization migration schema before, after and repeated up 8`] = `
+exports[`structural SQLite characterization migration schema before, after and repeated up (failures) 4`] = `
 [
   {
     "name": "failure_groups",

@@ -4440,8 +4440,14 @@ export class DaemonMcpProxy {
    */
   private holdTokenOwnedSession(session: TokenOwnedSession): boolean {
     const { sessionId } = session;
+    if (sessionId === this.boundSessionUuid) {
+      // The startup-bound session (--initial-session-uuid) is bound without a device, and calls
+      // naming it carry none: the daemon's answer is the only place the proxy learns it, and
+      // loss reports need it (#11028).
+      this.rememberSessionDevice(sessionId, session.deviceId);
+      return false;
+    }
     if (
-      sessionId === this.boundSessionUuid ||
       sessionId === this.terminalBoundSession?.sessionUuid ||
       this.otherHeldSessions.has(sessionId) ||
       this.stallHandovers.has(sessionId)

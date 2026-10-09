@@ -56,6 +56,8 @@ import {
   DAEMON_RELEASED_SESSION_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  DAEMON_ONE_SHOT_CLI_PARAM,
+  INTERNAL_ONE_SHOT_CLI_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
@@ -7314,6 +7316,7 @@ export class UnixSocketServer {
     if (args === null || args === undefined) {
       return {
         __mcpSessionId: socketSessionId,
+        ...this.oneShotCliMarker(socketSessionId),
         [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
         [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: deadlineMs,
       };
@@ -7326,6 +7329,9 @@ export class UnixSocketServer {
     const forwardedArgs = { ...args } as Record<string, unknown>;
     delete forwardedArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
     delete forwardedArgs[DAEMON_OWNED_SESSIONS_PARAM];
+    this.recordOneShotCliConnection(socketSessionId, forwardedArgs);
+    // Only the daemon asserts the loopback marker, from the connection's own declaration.
+    delete forwardedArgs[INTERNAL_ONE_SHOT_CLI_PARAM];
     const boundSessionUuid = this.getSessionUuid(forwardedArgs);
     const usesBoundSession = forwardedArgs[DAEMON_BOUND_SESSION_PARAM] === boundSessionUuid;
     delete forwardedArgs[DAEMON_BOUND_SESSION_PARAM];
@@ -7339,9 +7345,32 @@ export class UnixSocketServer {
     return {
       ...forwardedArgs,
       __mcpSessionId: socketSessionId,
+      ...this.oneShotCliMarker(socketSessionId),
       [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
       [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: deadlineMs,
     };
+  }
+
+  /**
+   * Consume a one-shot `--cli` connection's declaration (#11096) and remember it for the
+   * connection: every later call on the socket is forwarded with the loopback marker.
+   */
+  private recordOneShotCliConnection(
+    socketSessionId: string,
+    forwardedArgs: Record<string, unknown>,
+  ): void {
+    const declared = forwardedArgs[DAEMON_ONE_SHOT_CLI_PARAM] === true;
+    delete forwardedArgs[DAEMON_ONE_SHOT_CLI_PARAM];
+    const session = this.sessions.get(socketSessionId);
+    if (declared && session) {
+      session.oneShotCli = true;
+    }
+  }
+
+  private oneShotCliMarker(socketSessionId: string): Record<string, true> {
+    return this.sessions.get(socketSessionId)?.oneShotCli
+      ? { [INTERNAL_ONE_SHOT_CLI_PARAM]: true }
+      : {};
   }
 
   /**

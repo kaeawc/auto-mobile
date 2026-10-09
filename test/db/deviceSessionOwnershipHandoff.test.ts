@@ -67,7 +67,7 @@ describe("liveness handoff through the real repository without a schema change",
     await db.destroy();
   });
 
-  test.each(["heartbeat", "cli"])(
+  test.each(["heartbeat"])(
     "released %s row remains unowned across two rehydrations",
     async (policy) => {
       if (policy === "cli") {
@@ -116,7 +116,46 @@ describe("liveness handoff through the real repository without a schema change",
     },
   );
 
-  test.each(["heartbeat", "cli"])(
+  // Owner decision 2026-10-09 (#11096): a keeper heartbeat on a cli-idle session is a no-op.
+  test.each([
+    { name: "tokenless", token: undefined },
+    { name: "former-owner", token: "owner" },
+  ])(
+    "a $name keeper tick on a released cli row after restart changes nothing",
+    async ({ token }) => {
+      manager.adoptCliLivenessPolicy("handoff", 60_000);
+      expect(await manager.releaseLivenessOwnership("handoff", "owner")).toBe("released");
+      await rehydrate();
+      timer.advanceTime(500);
+      const before = { ...manager.getSession("handoff")! };
+      const row = await repo.getSession("handoff");
+
+      expect(
+        await handleDaemonRequest(
+          {
+            id: "keeper-tick",
+            type: "daemon_request",
+            method: "daemon/heartbeat",
+            params: {
+              sessionId: "handoff",
+              livenessOwnerKind: "cli-keeper",
+              livenessPolicy: "cli",
+              ...(token ? { livenessOwnerToken: token } : {}),
+            },
+          },
+          state(),
+        ),
+      ).toEqual({
+        success: true,
+        result: { sessionId: "handoff", livenessPolicy: "cli-idle", livenessUnchanged: true },
+      });
+      expect(manager.hasLivenessOwnership("handoff", "owner")).toBe(false);
+      expect(manager.getSession("handoff")).toEqual(before);
+      expect(await repo.getSession("handoff")).toEqual(row);
+    },
+  );
+
+  test.each(["heartbeat"])(
     "a former-owner keeper tick re-adopts a released %s row after restart",
     async (policy) => {
       if (policy === "cli") {

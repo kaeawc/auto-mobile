@@ -760,7 +760,7 @@ describe("handleDaemonRequest", () => {
       expect(snapshotOf()).toEqual(before);
     });
 
-    test("keeps a one-shot CLI session on the keeper's claim and ticks as before", async () => {
+    test("moves a heartbeat-contract session onto the CLI policy on the keeper's first claim", async () => {
       const state = await stateWithSession();
 
       expect(await handleDaemonRequest(keeperRequest("keeper", true), state)).toMatchObject({
@@ -771,18 +771,42 @@ describe("handleDaemonRequest", () => {
         livenessPolicy: "cli-idle",
         livenessOwnerToken: "keeper",
       });
+    });
 
-      fakeTimer.advanceTime(30_000);
-      expect(await handleDaemonRequest(keeperRequest("keeper", false), state)).toMatchObject({
+    // Owner decision 2026-10-09 (#11096): keepers are dropped for CLI sessions. Every one-shot
+    // `--cli` call re-claims a cli-idle session's liveness, so a keeper that claimed it was
+    // displaced by the next call and its next tick failed liveness_owner_superseded.
+    test("a keeper on a one-shot CLI session no-ops instead of being superseded by the next call", async () => {
+      const state = await stateWithSession();
+      expect((await handleDaemonRequest(proxyClaim("cli-call-1", "cli"), state)).success).toBe(
+        true,
+      );
+      const noop = {
         success: true,
-      });
-      expect(snapshotOf()).toMatchObject({ lastHeartbeat: fakeTimer.now() });
+        result: { sessionId, livenessPolicy: "cli-idle", livenessUnchanged: true },
+      };
 
-      // A later one-shot keeper with a new token claims the cli-idle session.
-      expect(await handleDaemonRequest(keeperRequest("keeper-2", true), state)).toMatchObject({
-        success: true,
-      });
-      expect(snapshotOf()).toMatchObject({ livenessOwnerToken: "keeper-2" });
+      fakeTimer.advanceTime(1_000);
+      let before = snapshotOf();
+      expect(await handleDaemonRequest(keeperRequest("keeper", true), state)).toEqual(noop);
+      // The keeper claims nothing and touches nothing.
+      expect(snapshotOf()).toEqual(before);
+
+      fakeTimer.advanceTime(1_000);
+      expect((await handleDaemonRequest(proxyClaim("cli-call-2", "cli"), state)).success).toBe(
+        true,
+      );
+      fakeTimer.advanceTime(1_000);
+      before = snapshotOf();
+      expect(before.livenessOwnerToken).toBe("cli-call-2");
+      for (const request of [
+        keeperRequest("keeper", false),
+        keeperRequest("keeper", true),
+        keeperRequest(undefined, false),
+      ]) {
+        expect(await handleDaemonRequest(request, state)).toEqual(noop);
+        expect(snapshotOf()).toEqual(before);
+      }
     });
 
     test("does not refuse a one-shot --cli proxy's own declaration without the keeper marker", async () => {

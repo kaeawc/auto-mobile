@@ -31,6 +31,18 @@ describe("cliDeviceOwnershipHint (#10743, #10783, #10785)", () => {
     expect(hint).not.toContain("--force");
   });
 
+  // #11096: the CLI drops --session-uuid for acquisition tools, so "re-run with it" was a no-op.
+  test.each(["getAndroid", "getApple", "startDevice", "provisionDevice"])(
+    "gives %s a remedy the CLI honours instead of re-running with --session-uuid",
+    (toolName) => {
+      const hint = cliDeviceOwnershipHint({ code: "device_owned_by_other_session" }, toolName);
+      expect(hint).toContain("pass --session-uuid <uuid> to your follow-up calls");
+      expect(hint).toContain("--daemon release-session <uuid>");
+      expect(hint).not.toContain("Re-run with --session-uuid");
+      expect(hint).not.toContain("--force");
+    },
+  );
+
   test("tells the caller to retry after a device's cleanup finishes (#10960)", () => {
     const hint = cliDeviceOwnershipHint({ code: "device_cleanup_in_progress" }, "startDevice");
     expect(hint).toContain("retryAfterMs");

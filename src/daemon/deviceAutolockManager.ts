@@ -23,7 +23,12 @@ import type {
   TargetDeviceValidationOptions,
 } from "./devicePool";
 
-export type AutolockClient = { mcpSessionId?: string; expectedSessionId?: string };
+export type AutolockClient = {
+  mcpSessionId?: string;
+  expectedSessionId?: string;
+  /** A one-shot `--cli` caller: anonymous, so it may act only on anonymous sessions (#11096). */
+  oneShotCli?: boolean;
+};
 
 export class McpSessionRecoveryInProgressError extends ActionableError {
   constructor(mcpSessionId: string) {

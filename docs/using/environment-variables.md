@@ -278,18 +278,21 @@ minute after the conflict began counts as a live owner; the new proxy then stops
 claiming and its tool calls report the session as lost (#10701). A harness that restarts
 its proxy passes a stable token with `--liveness-owner-token <token>` (alongside
 `--initial-session-uuid`); the restarted proxy then claims with the same token
-and resumes the session without a conflict. Use a distinct token per harness. A
-keeper for a one-shot CLI session can claim with
-`--daemon heartbeat S --liveness-owner-token T --claim-liveness-ownership`;
-that CLI claim adopts the CLI idle policy described below, and is refused on a
-proxy-owned session (see "Supported liveness stack"). Ordinary ticks from the
-current owner renew its lease without changing the policy or the idle deadline.
+and resumes the session without a conflict. Use a distinct token per harness.
+One-shot CLI sessions need no keeper (owner decision 2026-10-09, #11096): every
+`--cli` call re-declares the session's CLI idle policy, and its idle window runs
+from tool calls, not heartbeats. `--daemon heartbeat S` on a CLI idle session is a
+successful no-op whatever token or `--claim-liveness-ownership` it carries: it
+claims nothing, changes nothing and says so. It is refused on a proxy-owned
+session (see "Supported liveness stack"). Ordinary ticks from the current owner
+renew its lease without changing the policy or the idle deadline.
 
 A displaced token's non-claiming `daemon/heartbeat` returns
 `{ success: false, code: "liveness_owner_superseded", error: "..." }` and changes
 no activity, heartbeat, expiry or policy. The heartbeat CLI exits non-zero with
-guidance to re-claim or stop, instead of printing `heartbeat recorded`. There is
-no co-ownership.
+guidance to re-claim or stop, instead of printing `heartbeat recorded`; it never
+does so for a CLI idle session, where the heartbeat is a no-op. There is no
+co-ownership.
 
 The proxy reports lost ownership once at warn level and continues without
 fencing, reconnecting or re-claiming the session. This acknowledgement proves
@@ -308,8 +311,8 @@ An independent MCP proxy can immediately adopt that session with
 `--initial-session-uuid S`: CLI idle sessions do not block a different token's
 claim. That claim switches the session back to heartbeat policy.
 
-A harness that owns liveness through a proxy or a CLI keeper can deliberately
-hand the session to another client:
+A harness that owns liveness through a proxy can deliberately hand the session
+to another client:
 
 ```bash
 auto-mobile --daemon release-liveness-ownership S --liveness-owner-token T
@@ -331,7 +334,8 @@ unowned rehydration path. A tokenless keeper tick does not adopt ownership.
 While the daemon keeps running, former-owner ticks cannot adopt the released
 session: they return `liveness_owner_unowned` with guidance to make an explicit
 claim. After a daemon restart, a released session can be re-adopted by its former
-owner's token-bearing keeper tick, because the daemon's claim history is empty.
+owner's token-bearing keeper tick, because the daemon's claim history is empty;
+on a CLI idle row that tick is a no-op like any keeper heartbeat.
 Legacy recovery of rows without ownership continues to follow the existing rules.
 
 Stop the old keeper after release. The next proxy's explicit claim succeeds and
@@ -354,8 +358,7 @@ proves liveness to its proxy over stdio; the proxy is the only liveness owner of
 the sessions it holds, and heartbeats and claims them at the daemon with its
 owner token. Nothing else should heartbeat a proxy's session.
 
-`--daemon heartbeat` is the keeper for one-shot `--cli` sessions only, and it
-refuses a proxy-owned session. A session is proxy-owned when a token has
+`--daemon heartbeat` refuses a proxy-owned session. A session is proxy-owned when a token has
 claimed it under the strict `heartbeat` policy. The command sends a keeper
 marker, and the daemon answers every claim or tick against such a session with
 `{ success: false, code: "liveness_owner_is_proxy", error: "..." }` before
@@ -365,10 +368,10 @@ every deadline stay as the proxy left them. The command exits non-zero and print
 the message, the `[liveness_owner_is_proxy]` code, and the instruction to stop
 the keeper. This is distinct from `liveness_owner_conflict`, which is a
 different token's claim on a live lease and can succeed once the lease expires.
-On a one-shot CLI session `--daemon heartbeat` still proves its owner is alive,
-but it no longer holds the device: the CLI idle timeout counts from the end of
-the last tool call, so a session with no tool calls is released when it elapses
-however often the keeper ticks.
+On a one-shot CLI session `--daemon heartbeat` is a successful no-op (#11096): the
+CLI idle timeout counts from the end of the last tool call, so a session with no
+tool calls is released when it elapses however often anything heartbeats. Do not
+run a keeper loop for CLI sessions.
 
 A harness checks a session's state with `--daemon session-info <session-id>`. It
 prints the session's `assignedDevice`, `platform`, `lastUsedAt`, `expiresAt` and,
@@ -547,8 +550,8 @@ export AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS=600000
 ```
 
 The default is 2 minutes, the same as the ordinary idle window, and the ceiling
-is 1 hour. Heartbeats do not refresh it: a `--daemon heartbeat` loop keeps the
-owner live but does not hold the device without tool calls. The value is read from the
+is 1 hour. Heartbeats do not refresh it, and `--daemon heartbeat` on such a
+session is a no-op, so no keeper loop is needed (#11096). The value is read from the
 `--cli` process, not the daemon's, and travels with the invocation, so changing
 it takes effect on the very next call — no daemon restart. Sessions owned by a
 long-lived MCP client (stdio or HTTP) are unaffected and keep the heartbeat

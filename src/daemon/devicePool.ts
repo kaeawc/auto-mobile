@@ -914,20 +914,26 @@ interface StopDiscoveredEmulatorOptions {
 
 /**
  * The persisted creator kind of a session a pool bind creates (#11071): an acquisition (not a
- * caller-chosen session rebind or a recovery) with no MCP connection id is anonymous, and only
+ * caller-chosen session rebind or a recovery) by an anonymous caller is anonymous, and only
  * another anonymous acquisition may reuse it, keeping repeated `--cli` startDevice idempotent
- * (#2421).
+ * (#2421). A one-shot `--cli` connection is anonymous by its explicit marker even though the
+ * socket forwards a per-connection MCP id (#11096); a caller with no MCP id at all cannot prove
+ * any ownership and is anonymous too. Every other MCP connection is identified.
  */
 function creatorPersistenceSource(
-  mcpSessionId: string | undefined,
+  caller: AutolockClient,
   allowSessionRebind: boolean,
   expectedExistingSessionDeviceId: string | undefined,
 ): string | undefined {
-  return mcpSessionId === undefined &&
+  return isAnonymousCaller(caller) &&
     !allowSessionRebind &&
     expectedExistingSessionDeviceId === undefined
     ? ANONYMOUS_ACQUISITION_SESSION_SOURCE
     : undefined;
+}
+
+function isAnonymousCaller(caller: AutolockClient | undefined): boolean {
+  return caller?.oneShotCli === true || caller?.mcpSessionId === undefined;
 }
 
 export class DevicePool {
@@ -6919,7 +6925,7 @@ export class DevicePool {
       this.autolockManager.getOwnedAutolockSession(device, client);
       return;
     }
-    this.assertMcpSessionOwnsDeviceSession(client?.mcpSessionId, session, device);
+    this.assertCallerOwnsDeviceSession(client, session, device);
   }
 
   private assertAndroidRecoveryExclusionForReadinessReservation(
@@ -7116,7 +7122,9 @@ export class DevicePool {
     verifiedAndroidAvdIdentity?: DeviceInfo,
     expectedExistingSessionDeviceId?: string,
     mcpSessionId?: string,
+    oneShotCli = false,
   ): Promise<string> {
+    const caller: AutolockClient = { mcpSessionId, oneShotCli };
     await this.assertNotClaimedByForeignDaemon(deviceId, platform);
     const heldBefore = this.devices.get(deviceId)?.sessionId ?? null;
     const boundSessionId = await this.withTargetDeviceDiscovery({
@@ -7188,8 +7196,8 @@ export class DevicePool {
               deviceId,
               expectedExistingSessionDeviceId,
             );
-            const confirmedSameOwner = this.assertMcpSessionOwnsDeviceSession(
-              mcpSessionId,
+            const confirmedSameOwner = this.assertCallerOwnsDeviceSession(
+              caller,
               existingSession,
               device,
             );
@@ -7239,7 +7247,7 @@ export class DevicePool {
             {
               stableDeviceId: this.stableDeviceIdFor(device),
               persistenceSource: creatorPersistenceSource(
-                mcpSessionId,
+                caller,
                 allowSessionRebind,
                 expectedExistingSessionDeviceId,
               ),
@@ -7592,12 +7600,24 @@ export class DevicePool {
     return refreshedSession.sessionId;
   }
 
-  /** Assert any supplied MCP identity and return whether same-owner reuse was proven. */
-  private assertMcpSessionOwnsDeviceSession(
-    mcpSessionId: string | undefined,
+  /**
+   * Assert the caller may act on `session` and return whether same-owner reuse was proven. An
+   * identified MCP connection must have acquired it; a one-shot `--cli` caller may act only on a
+   * session another anonymous acquisition created (#11096); a caller with no identity is left to
+   * the anonymous reuse check.
+   */
+  private assertCallerOwnsDeviceSession(
+    caller: AutolockClient | undefined,
     session: Session,
     device: PooledDevice,
   ): boolean {
+    if (caller?.oneShotCli === true) {
+      if (!isAnonymousAcquisitionSession(session)) {
+        throw deviceAlreadyAssignedToAnotherSessionError(device.id);
+      }
+      return false;
+    }
+    const mcpSessionId = caller?.mcpSessionId;
     if (mcpSessionId === undefined) {
       return false;
     }

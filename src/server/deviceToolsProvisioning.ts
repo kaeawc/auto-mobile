@@ -1581,6 +1581,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       name: args.device.name,
       timeoutMs: args.timeoutMs,
       __mcpSessionId: args.__mcpSessionId,
+      ...(args.__oneShotCli ? { __oneShotCli: true } : {}),
     };
   }
 
@@ -1944,7 +1945,11 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         boot.device,
         boot.sourceImage?.name ?? boot.device.name,
         undefined,
-        args.__mcpSessionId ? { mcpSessionId: args.__mcpSessionId } : undefined,
+        args.__oneShotCli
+          ? { oneShotCli: true }
+          : args.__mcpSessionId
+            ? { mcpSessionId: args.__mcpSessionId }
+            : undefined,
       );
   }
 

@@ -48,6 +48,7 @@ import {
   INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
+  INTERNAL_ONE_SHOT_CLI_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
 } from "../daemon/constants";
@@ -452,6 +453,15 @@ function extractInternalMcpSessionId(params: unknown): string | undefined {
 
   const value = (params as Record<string, unknown>)[INTERNAL_MCP_SESSION_PARAM];
   return typeof value === "string" ? value : undefined;
+}
+
+function extractInternalOneShotCli(params: unknown): boolean {
+  return (
+    !!params &&
+    typeof params === "object" &&
+    !Array.isArray(params) &&
+    (params as Record<string, unknown>)[INTERNAL_ONE_SHOT_CLI_PARAM] === true
+  );
 }
 
 function extractInternalMcpRequestTimeoutMs(params: unknown): number | undefined {
@@ -940,6 +950,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // Forwarded identity is trusted only on the daemon's internal transport.
     // Direct callers cannot override their connection's autolock ownership.
     const requestMcpSessionId = daemonMode ? extractInternalMcpSessionId(toolParams) : undefined;
+    // Trusted only on the daemon's internal transport, like the connection identity (#11096).
+    const requestOneShotCli = daemonMode && extractInternalOneShotCli(toolParams);
     const implicitAutolockMcpSessionId =
       requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
     let routingSessionUuid: string | undefined;
@@ -1326,6 +1338,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             ...(implicitAutolockMcpSessionId
               ? { [INTERNAL_MCP_SESSION_PARAM]: implicitAutolockMcpSessionId }
               : {}),
+            ...(requestOneShotCli ? { [INTERNAL_ONE_SHOT_CLI_PARAM]: true } : {}),
             [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
             [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
             // Forwarded back onto handlerParams (rather than only used locally

@@ -12,6 +12,7 @@ import {
   TerminalSessionError,
   PLAN_AUTO_RELEASE_REASON,
   SessionActivityPersistenceError,
+  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SessionRecoveryIdentityLossError,
   type SessionReleaseSnapshot,
   type BiometricEnrollmentRestorer,
@@ -466,7 +467,8 @@ describe("SessionManager.waitForSessionReleaseWithin", () => {
       });
       await expect(manager.waitForSessionReleaseWithin("unrelated", 5000)).resolves.toBe(true);
       expect(settled).toBe(false);
-      expect(timer.getPendingTimeouts()).toEqual([5000]);
+      // The release's own write deadline (#10836) is pending alongside the wait's.
+      expect(timer.getPendingTimeouts()).toEqual([SESSION_RELEASE_PERSIST_TIMEOUT_MS, 5000]);
       persistence.finishRelease.resolve();
       await release;
       await expect(wait).resolves.toBe(true);
@@ -492,7 +494,8 @@ describe("SessionManager.waitForSessionReleaseWithin", () => {
       expect(settled).toBe(false);
       timer.advanceTime(1);
       await expect(wait).resolves.toBe(false);
-      expect(timer.getPendingTimeoutCount()).toBe(0);
+      // Only the still-running release's own write deadline (#10836) remains.
+      expect(timer.getPendingTimeouts()).toEqual([SESSION_RELEASE_PERSIST_TIMEOUT_MS]);
     } finally {
       persistence.finishRelease.resolve();
       await expect(release).resolves.toBe("device-a");

@@ -383,8 +383,9 @@ describe("session clock restoration", () => {
         .then((deviceId) => {
           releasedDevice = deviceId;
         });
-      // Measured against HEAD~1 using these same persistence and timer fakes.
-      for (let tick = 0; tick < 8; tick++) {
+      // Measured against HEAD~1 using these same persistence and timer fakes; one more tick
+      // since the release write races its deadline (#10836).
+      for (let tick = 0; tick < 9; tick++) {
         expect(h.manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
         await Promise.resolve();
       }

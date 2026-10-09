@@ -4474,7 +4474,9 @@ describe("killDevice handler", () => {
     timer.advanceTime(30_000);
 
     await expect(result).rejects.toThrow("session ownership retirement did not complete");
-    expect(pool.getDevice(image.deviceId!)).toBe(pooled);
+    // The release's write deadline (#10836) passed in the same advance, so the late retirement
+    // finishes without waiting on the wedged write.
+    expect(pool.getDevice(image.deviceId!)).toBeNull();
 
     deviceSessionRepository.finishMarkReleased();
     await new Promise((resolve) => setImmediate(resolve));

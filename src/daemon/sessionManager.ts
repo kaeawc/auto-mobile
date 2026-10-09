@@ -524,6 +524,23 @@ export interface SessionReleaseSnapshot {
   };
 }
 
+/** A release's `markReleased` write did not settle within its deadline (#10836). */
+export class SessionReleasePersistTimeoutError extends ActionableError {
+  readonly reason = RELEASE_PERSIST_TIMEOUT_REASON;
+
+  constructor(
+    readonly sessionId: string,
+    readonly releaseReason: string,
+    readonly timeoutMs: number,
+  ) {
+    super(
+      `Persisting the ${releaseReason} release of session ${sessionId} did not finish within ` +
+        `${timeoutMs}ms (reason=${RELEASE_PERSIST_TIMEOUT_REASON}).`,
+    );
+    this.name = "SessionReleasePersistTimeoutError";
+  }
+}
+
 export class TerminalSessionError extends Error {
   constructor(
     readonly sessionUuid: string,
@@ -896,6 +913,17 @@ const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
  * retries, below the screen-reader budget (#10198).
  */
 export const SESSION_RELEASE_TEARDOWN_CAP_MS = 10_000;
+/**
+ * Bound on one release's `markReleased` write (#10836). It is the only await on the release
+ * path that has no budget of its own, so a wedged DB write would otherwise hold the session's
+ * device forever. A terminal release that reaches it keeps the session fenced in memory, frees
+ * the device, and leaves the row for a later release to persist. It is longer than the shutdown
+ * release drain, so a write wedged at shutdown still keeps the database open and the release on
+ * the drain's daemon-shutdown fallback path.
+ */
+export const SESSION_RELEASE_PERSIST_TIMEOUT_MS = 10_000;
+/** Logged reason when a release write outlives {@link SESSION_RELEASE_PERSIST_TIMEOUT_MS}. */
+export const RELEASE_PERSIST_TIMEOUT_REASON = "release-persist-timeout";
 const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 export const SESSION_REHYDRATION_DEADLINE_MS = 15_000;
 const EXPIRY_RELEASE_REASONS = new Set([
@@ -1042,6 +1070,8 @@ export class SessionManager {
   private readonly releasePromises: Map<string, SessionReleaseOperation> = new Map();
   /** Every release still running, including an older session that reused a UUID. */
   private readonly activeReleasePromises: Set<SessionReleaseOperation> = new Set();
+  /** Release writes that outlived their deadline but may still land (#10836). */
+  private readonly lateReleaseWrites: Set<Promise<void>> = new Set();
   /** Finalized release state retained only while its exact Session identity is referenced. */
   private readonly finalizedSessionReleases: WeakMap<Session, ReleaseReasonState> = new WeakMap();
   /** Serializes durable liveness claims within one exact session incarnation. */
@@ -3337,6 +3367,7 @@ export class SessionManager {
   ): Promise<boolean> {
     const releases = [
       ...Array.from(this.activeReleasePromises, (release) => release.promise),
+      ...this.lateReleaseWrites,
       ...additionalReleases,
     ];
     try {
@@ -3457,12 +3488,10 @@ export class SessionManager {
       // A non-terminal release must not yield after freezing its reason: a
       // concurrent terminal release can only upgrade the shared reason while
       // this operation is awaiting teardown above.
+      let terminalPersisted = true;
       if (releaseSnapshot.terminal) {
-        releaseSnapshot = await this.persistTerminalReleaseWithUpgrade(
-          releaseSnapshot,
-          reason,
-          session,
-        );
+        ({ snapshot: releaseSnapshot, persisted: terminalPersisted } =
+          await this.persistTerminalReleaseWithinDeadline(releaseSnapshot, reason, session));
       }
       // Final fence: evaluated synchronously right before the commit, with no
       // await in between, so the persistence awaits above cannot hide a newer
@@ -3495,7 +3524,12 @@ export class SessionManager {
       this.notifySessionRelease(releaseSnapshot, options);
       let persistedSnapshot: SessionReleaseSnapshot;
       try {
-        persistedSnapshot = await this.completeReleasePersistence(releaseSnapshot, reason, session);
+        persistedSnapshot = await this.completeReleasePersistence(
+          releaseSnapshot,
+          reason,
+          session,
+          terminalPersisted,
+        );
       } catch (error) {
         // Removal committed before persistence. Retain its identity and reason
         // while the pending release snapshot is retried by the recovery owner.
@@ -3725,6 +3759,37 @@ export class SessionManager {
     return upgradedSnapshot;
   }
 
+  /**
+   * Persist a terminal release before its session is removed, bounded by
+   * {@link SESSION_RELEASE_PERSIST_TIMEOUT_MS} (#10836). At the deadline the in-memory terminal
+   * fence (raised before the write) keeps the UUID from routing again, so the release goes on to
+   * free the device instead of holding it for as long as the write stays wedged.
+   */
+  private async persistTerminalReleaseWithinDeadline(
+    snapshot: SessionReleaseSnapshot,
+    reason: ReleaseReasonState,
+    session: Session,
+  ): Promise<{ snapshot: SessionReleaseSnapshot; persisted: boolean }> {
+    try {
+      return {
+        snapshot: await this.persistTerminalReleaseWithUpgrade(snapshot, reason, session),
+        persisted: true,
+      };
+    } catch (error) {
+      if (!(error instanceof SessionReleasePersistTimeoutError)) {
+        throw error;
+      }
+      const fenced = this.terminalReleaseSnapshots.get(snapshot.sessionId) ?? snapshot;
+      logger.warn(
+        `Freeing device ${fenced.deviceId} of session ${fenced.sessionId} before its terminal ` +
+          `release row was written (reason=${RELEASE_PERSIST_TIMEOUT_REASON}); the session stays ` +
+          "fenced and the next release of it retries the write",
+        error,
+      );
+      return { snapshot: fenced, persisted: false };
+    }
+  }
+
   private abandonSupersededRelease(
     sessionId: string,
     deviceId: string,
@@ -3795,10 +3860,12 @@ export class SessionManager {
     snapshot: SessionReleaseSnapshot,
     reason: ReleaseReasonState,
     session: Session,
+    terminalPersisted: boolean,
   ): Promise<SessionReleaseSnapshot> {
     if (snapshot.terminal) {
       reason.finalizedSnapshot = snapshot;
-      reason.terminalPersisted = true;
+      // A timed-out terminal write leaves the row for the next terminal release to persist.
+      reason.terminalPersisted = terminalPersisted;
       this.terminalReleaseReasonStates.set(snapshot.sessionId, reason);
       return snapshot;
     }
@@ -3925,12 +3992,27 @@ export class SessionManager {
       const terminalStatus = EXPIRY_RELEASE_REASONS.has(snapshot.releaseReason)
         ? "expired"
         : "released";
-      await this.deviceSessionRepository.markReleased(
+      const write = this.deviceSessionRepository.markReleased(
         snapshot.sessionId,
         terminalStatus,
         snapshot.releasedAtMs,
         snapshot.releaseReason,
       );
+      await raceWithDeadline(write, {
+        timer: this.timer,
+        timeoutMs: SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+        unref: true,
+        label: "Session release persistence",
+        timeoutError: () =>
+          new SessionReleasePersistTimeoutError(
+            snapshot.sessionId,
+            snapshot.releaseReason,
+            SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+          ),
+        // The write is not cancelled; shutdown's release drain still waits on it before the
+        // database closes, and if it lands later it writes the same row.
+        onTimeout: () => this.trackLateReleaseWrite(write),
+      });
       if (this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot) {
         this.pendingNonTerminalReleaseSnapshots.delete(snapshot.sessionId);
       }
@@ -3950,6 +4032,17 @@ export class SessionManager {
       }
       return false;
     }
+  }
+
+  private trackLateReleaseWrite(write: Promise<void>): void {
+    const settled = write.then(
+      () => undefined,
+      (error: unknown) => {
+        logger.warn(`[SessionManager] Late session release write failed: ${errorMessage(error)}`);
+      },
+    );
+    this.lateReleaseWrites.add(settled);
+    void settled.then(() => this.lateReleaseWrites.delete(settled));
   }
 
   private isSessionBeingRecreated(sessionId: string): boolean {

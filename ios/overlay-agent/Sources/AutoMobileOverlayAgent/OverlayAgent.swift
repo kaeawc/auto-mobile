@@ -1,3 +1,4 @@
+import Combine
 import os
 import SwiftUI
 import UIKit
@@ -47,9 +48,13 @@ final class OverlayAgent {
     let model = OverlayModel()
     private var window: PassthroughWindow?
     private var server: OverlayServer?
+    private var layers: OverlayLayersViewController?
     private var sceneObserver: NSObjectProtocol?
-    /// App windows' own `accessibilityElementsHidden` while a fullscreen overlay covers them.
+    private var sessionObserver: AnyCancellable?
+    /// App windows' own `accessibilityElementsHidden` while the overlay covers them.
     private var hiddenBeforeCovering: [ObjectIdentifier: Bool] = [:]
+    /// The flags last applied, so an unrelated state change posts no accessibility notification.
+    private var appliedAccessibility = OverlayHostAccessibility.hidden
 
     private var testHooksEnabled = false
     /// Hide-for-screenshot hold (#9305); the overlay window stays hidden while it is active.
@@ -82,6 +87,11 @@ final class OverlayAgent {
         model.onEvent = { [weak server] event in server?.broadcast(event) }
         model.onVisibilityChange = { [weak self] visible in self?.setVisible(visible) }
         model.onEndEditing = { [weak self] in _ = self?.window?.endEditing(true) }
+        // `$session` publishes the new value before `model.session` holds it, so the flags are
+        // computed from the published value: a dialog opening or closing re-applies them.
+        sessionObserver = model.$session.sink { [weak self] session in
+            self?.updateAccessibility(session: session)
+        }
         server.start()
         self.server = server
     }
@@ -100,14 +110,25 @@ final class OverlayAgent {
         } else {
             window?.isHidden = true
         }
-        updateAppAccessibility()
+        // Every show re-applies, so an app window opened since the last one is covered too.
+        updateAccessibility(session: model.session, force: true)
     }
 
-    /// A fullscreen overlay covers the app, so the app's windows leave the accessibility tree:
-    /// observe then lists only overlay nodes, and the app's own toolbars cannot be mistaken for
-    /// chrome above the overlay. Floating and sheet overlays leave the app reachable.
-    func updateAppAccessibility() {
-        let covering = model.spec?.window.placement.type == "fullscreen" && window?.isHidden == false
+    /// Applies `OverlayHostAccessibility` for `session`. A fullscreen overlay, or an open dialog's
+    /// scrim, covers the app, so the app's windows leave the accessibility tree: observe then lists
+    /// only overlay nodes, and the app's own toolbars cannot be mistaken for chrome above the
+    /// overlay. An open dialog also hides the overlay's own page (#10899) with the UIKit flags the
+    /// XCUITest snapshot honours; SwiftUI's `accessibilityHidden` inside one hosting view is not.
+    private func updateAccessibility(session: OverlaySession, force: Bool = false) {
+        let flags = OverlayHostAccessibility(session: session, windowShown: window?.isHidden == false)
+        guard force || flags != appliedAccessibility else { return }
+        appliedAccessibility = flags
+        layers?.apply(flags)
+        updateAppAccessibility(covering: flags.coversApp)
+        UIAccessibility.post(notification: .screenChanged, argument: nil)
+    }
+
+    private func updateAppAccessibility(covering: Bool) {
         let appWindows = (window?.windowScene?.windows ?? []).filter { $0 !== window }
         if covering {
             for appWindow in appWindows {
@@ -128,7 +149,6 @@ final class OverlayAgent {
             }
             hiddenBeforeCovering = [:]
         }
-        UIAccessibility.post(notification: .screenChanged, argument: nil)
     }
 
     private func attachWindow() {
@@ -148,9 +168,9 @@ final class OverlayAgent {
         let window = PassthroughWindow(windowScene: scene)
         window.model = model
         window.windowLevel = .alert + 1
-        let host = UIHostingController(rootView: OverlayRootView(model: model))
-        host.view.backgroundColor = .clear
-        window.rootViewController = host
+        let layers = OverlayLayersViewController(model: model)
+        window.rootViewController = layers
+        self.layers = layers
         window.isHidden = false
         model.safeInsets = window.safeAreaInsets
         model.windowOrigin = window.screenOrigin
@@ -265,6 +285,7 @@ final class OverlayAgent {
 
     private func showAfterCapture() {
         window?.isHidden = model.spec == nil
+        updateAccessibility(session: model.session)
     }
 
     /// One warning per shown spec: an uploaded font cannot be loaded on iOS, so its text uses the
@@ -293,50 +314,135 @@ final class OverlayAgent {
     }
 }
 
-/// Lays out the shown spec by placement and records the touchable rects for the window.
+/// The overlay window's root: the page's hosting view with the top layer's above it (see
+/// `OverlayHostLayer`). Each lays out the whole window the same way and draws only its own layer,
+/// so their `.global` frames, and the hit rects reported from them, are both window coordinates.
+final class OverlayLayersViewController: UIViewController {
+    private let model: OverlayModel
+    private let page: UIHostingController<OverlayRootView>
+    private let top: UIHostingController<OverlayRootView>
+
+    init(model: OverlayModel) {
+        self.model = model
+        page = UIHostingController(rootView: OverlayRootView(model: model, layer: .page))
+        top = UIHostingController(rootView: OverlayRootView(model: model, layer: .top))
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func loadView() {
+        view = OverlayLayersView(model: model)
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .clear
+        for host in [page, top] {
+            addChild(host)
+            host.view.backgroundColor = .clear
+            host.view.frame = view.bounds
+            host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            view.addSubview(host.view)
+            host.didMove(toParent: self)
+        }
+        (view as? OverlayLayersView)?.hosts = (page.view, top.view)
+    }
+
+    /// Sets the UIKit flags an open dialog needs: the page leaves the accessibility tree and the top
+    /// layer is modal, so the XCUITest snapshot lists only the dialog and the host dismiss control.
+    func apply(_ flags: OverlayHostAccessibility) {
+        loadViewIfNeeded()
+        page.view.accessibilityElementsHidden = flags.pageElementsHidden
+        top.view.accessibilityViewIsModal = flags.topIsModal
+    }
+}
+
+/// Routes each touch to the hosting view that drew what is under it. Both views fill the window,
+/// so without this the top one would take every touch, including those meant for the page.
+private final class OverlayLayersView: UIView {
+    weak var model: OverlayModel?
+    var hosts: (page: UIView, top: UIView)?
+
+    init(model: OverlayModel) {
+        self.model = model
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let model, let hosts,
+              let owner = OverlayHostLayer.owner(of: convert(point, to: nil), hitRects: model.hitRects)
+        else { return nil }
+        let target = owner == .top ? hosts.top : hosts.page
+        return target.hitTest(convert(point, to: target), with: event)
+    }
+}
+
+/// Lays out the shown spec by placement and records the touchable rects for the window. `layer`
+/// picks what this hosting view draws: the page (the spec's tree and anchor layer) or the top
+/// layer (open dialogs and snackbars and the host dismiss control).
 struct OverlayRootView: View {
     @ObservedObject var model: OverlayModel
+    let layer: OverlayHostLayer
     @Environment(\.colorScheme) private var systemScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let palette = OverlayPalette.make(theme: model.spec?.theme, systemDark: systemScheme == .dark)
-        // An open dialog makes the page behind it inert for accessibility, as it is for touches (#10899).
-        let layer = model.spec?.root.layerAccessibility(state: model.state, pages: model.pages) ?? .container
+        // An open dialog makes the page behind it inert for accessibility, as it is for touches
+        // (#10899). VoiceOver honours this collapse; the XCUITest snapshot needs the UIKit flags
+        // `OverlayLayersViewController.apply` sets on the page's hosting view.
+        let pageAccessibility = model.spec?.root.layerAccessibility(state: model.state, pages: model.pages)
+            ?? .container
         ZStack {
             if let spec = model.spec {
                 let chrome = OverlayHostChrome(placementType: spec.window.placement.type)
+                let opacity = Double(spec.window.opacity ?? 100) / 100
                 if chrome.reservesDismissBar {
                     // Like Android's fullscreen window: the bar takes the top of the screen and the
                     // spec and its dialogs are laid out and clipped below it, so the control never
-                    // covers authored content and a dialog scrim never covers the control.
+                    // covers authored content and a dialog scrim never covers the control. The page
+                    // layer keeps the bar's space empty; the top layer draws the bar.
                     VStack(spacing: 0) {
-                        dismissBar(chrome, dark: palette.dark)
+                        if layer == .top {
+                            dismissBar(chrome, dark: palette.dark)
+                        } else {
+                            Color.clear.frame(height: chrome.dismissBarHeight(safeTop: model.safeInsets.top))
+                        }
                         // The clear base fixes the content area to the space left under the bar;
                         // the spec and the modal layer are laid out in it separately, so a dialog
                         // taller than that area neither pushes the bar up nor moves the spec.
                         Color.clear
                             .overlay {
-                                placed(spec, layer: layer).opacity(Double(spec.window.opacity ?? 100) / 100)
+                                if layer == .page {
+                                    placed(spec, layer: pageAccessibility).opacity(opacity)
+                                }
                             }
                             .overlay {
-                                anchorLayer(spec).opacity(Double(spec.window.opacity ?? 100) / 100)
-                                    .overlayLayerAccessibility(layer)
+                                if layer == .page {
+                                    anchorLayer(spec).opacity(opacity).overlayLayerAccessibility(pageAccessibility)
+                                }
                             }
                             .overlay {
-                                OverlayModalLayer(model: model)
-                                    .opacity(Double(spec.window.opacity ?? 100) / 100)
+                                if layer == .top {
+                                    OverlayModalLayer(model: model).opacity(opacity)
+                                }
                             }
                             .clipped()
                     }
+                } else if layer == .page {
+                    placed(spec, layer: pageAccessibility).opacity(opacity)
+                    anchorLayer(spec).opacity(opacity).overlayLayerAccessibility(pageAccessibility)
                 } else {
-                    placed(spec, layer: layer)
-                        .opacity(Double(spec.window.opacity ?? 100) / 100)
-                    anchorLayer(spec)
-                        .opacity(Double(spec.window.opacity ?? 100) / 100)
-                        .overlayLayerAccessibility(layer)
-                    OverlayModalLayer(model: model)
-                        .opacity(Double(spec.window.opacity ?? 100) / 100)
+                    OverlayModalLayer(model: model).opacity(opacity)
                     dismissControl()
                         .padding(.top, model.safeInsets.top)
                         .padding(.trailing, max(model.safeInsets.right, 8))

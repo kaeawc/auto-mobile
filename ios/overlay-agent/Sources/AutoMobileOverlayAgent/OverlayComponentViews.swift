@@ -780,9 +780,13 @@ struct OverlayDialogView: View {
             if let child = node.child {
                 // A child taller than the screen scrolls, so the title and buttons stay on screen
                 // (the alarm fixture's wheel and calendar overflow an iPhone below the host bar).
+                // The scroll view is named after the dialog, and its indicator is hidden: UIKit
+                // exposes a visible indicator as its own "Vertical scroll bar" element (#10899).
                 ViewThatFits(in: .vertical) {
                     NodeView(node: child, model: model)
                     ScrollView(.vertical) { NodeView(node: child, model: model) }
+                        .scrollIndicators(.hidden)
+                        .accessibilityLabel(node.dialogContentLabel(title: title, text: text))
                 }
             }
         case .button:

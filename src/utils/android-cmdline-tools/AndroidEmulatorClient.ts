@@ -509,6 +509,7 @@ export interface AndroidEmulatorForDeviceManager extends Pick<
   | "getBootedDevicesChecked"
   | "getBootedDevices"
   | "getOfflineDeviceIdsAmong"
+  | "getListedNonDeviceStatesAmong"
   | "recoverOfflineDevices"
   | "launchEmulator"
   | "killDevice"
@@ -1550,22 +1551,41 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     candidateIds: Iterable<string>,
     options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<Set<string>> {
+    const listed = await this.getListedNonDeviceStatesAmong(candidateIds, options);
+    return new Set([...listed].filter(([, state]) => state === "offline").map(([id]) => id));
+  }
+
+  /**
+   * Among the given candidate serials, every one adb devices -l lists in a
+   * state other than `device` (offline, authorizing, connecting,
+   * unauthorized, recovery, bootloader, sideload, no permissions), keyed to
+   * that state. A listed serial is still attached even though the online-only
+   * getBootedDevices filter drops it, so the disconnect monitor must not treat
+   * it as unplugged (#11090).
+   *
+   * Probe failures throw AndroidOfflineProbeError so callers can distinguish
+   * unavailable evidence from an authoritative empty result.
+   */
+  async getListedNonDeviceStatesAmong(
+    candidateIds: Iterable<string>,
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<Map<string, string>> {
     const candidates = new Set(candidateIds);
     if (candidates.size === 0) {
-      return new Set();
+      return new Map();
     }
     let states: AdbDeviceState[];
     try {
       states = (await this.adbFactory.create(null).getDeviceStates?.(options)) ?? [];
     } catch (error) {
-      throw new AndroidOfflineProbeError(`Offline-state probe failed: ${errorMessage(error)}`, {
+      throw new AndroidOfflineProbeError(`Device-state probe failed: ${errorMessage(error)}`, {
         cause: error,
       });
     }
-    return new Set(
+    return new Map(
       states
-        .filter((state) => state.state === "offline" && candidates.has(state.deviceId))
-        .map((state) => state.deviceId),
+        .filter((state) => state.state !== "device" && candidates.has(state.deviceId))
+        .map((state) => [state.deviceId, state.state]),
     );
   }
 

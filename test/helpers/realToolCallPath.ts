@@ -42,10 +42,12 @@ export class RealToolCallPath {
   readonly deviceSessionManager = new FakeDeviceSessionManager();
   /** Tool bodies that reached the device boundary, in order. */
   readonly runs: DeviceToolRun[] = [];
+  /** Devices the read-only (watcher) path resolved from the booted list (#10830). */
+  watcherResolutions = 0;
   private body: DeviceToolBody = async () => SUCCESS;
   private readonly restorers: Array<() => void> = [];
 
-  constructor(devices: BootedDevice[]) {
+  constructor(private readonly devices: BootedDevice[]) {
     this.deviceSessionManager.setConnectedDevices(devices);
   }
 
@@ -54,6 +56,14 @@ export class RealToolCallPath {
     this.restorers.push(
       ToolRegistry.setPipelineOverridesForTesting({
         displayInventory: new FakeDisplayInventoryProvider(),
+        // The watcher path lists booted devices itself; never reach adb from a unit test.
+        deviceReadAccess: {
+          listBooted: async () => {
+            this.watcherResolutions++;
+            return this.devices;
+          },
+          isAuthorized: () => true,
+        },
         auditRunner: {
           run: async (input: AuditRunnerInput) => {
             this.runs.push({

@@ -74,8 +74,7 @@ class HeldDeviceWaitingMCPClientTest {
 
   @Test
   fun `calls after the first success pass straight through without waiting`() {
-    val delegate =
-      ScriptedClient(mutableListOf({ "ok" }, refusal("device_owned_by_other_session")))
+    val delegate = ScriptedClient(mutableListOf({ "ok" }, refusal("device_owned_by_other_session")))
     val client = client(delegate)
 
     assertEquals("ok", client.callTool("observe", emptyMap()))

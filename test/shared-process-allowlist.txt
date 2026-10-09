@@ -28,6 +28,7 @@ test/daemon/adbResetSessionRecovery.test.ts
 test/daemon/adbServerResetDetection.test.ts
 test/daemon/adbServerResetQuarantine.test.ts
 test/daemon/androidRecoveryRecordLedger.test.ts
+test/daemon/appearanceConfigPerSession.test.ts
 test/daemon/appearanceSocketServer.test.ts
 test/daemon/appearanceSocketServerCharacterization.test.ts
 test/daemon/appearanceSyncOff.test.ts
@@ -100,7 +101,6 @@ test/daemon/inputDeviceOwnership.test.ts
 test/daemon/liveDeadlineRegistry.test.ts
 test/daemon/livenessKeeperSuspectInteractions.test.ts
 test/daemon/livenessOwnerLease.test.ts
-test/daemon/livenessScenarioMatrix.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
 test/daemon/observationRequestBatch.test.ts
 test/daemon/observerSessionRegistry.test.ts
@@ -137,6 +137,7 @@ test/daemon/socketServer/PushSubscriptionSocketServer.test.ts
 test/daemon/socketServer/RequestResponseSocketServer.test.ts
 test/daemon/socketServer/inboundFrameLimit.test.ts
 test/daemon/socketServerCloseTerminalResponses.test.ts
+test/daemon/socketServerDeviceReadLane.test.ts
 test/daemon/socketServerForwardBudgetTimeoutVsOverload.test.ts
 test/daemon/socketServerProgressDeadlineExtension.test.ts
 test/daemon/socketServerSessionIdGenerator.test.ts
@@ -179,6 +180,7 @@ test/devices/physicalIosDeviceResolution.test.ts
 test/devices/waitForDeviceReadyOrCancel.test.ts
 test/docs/claudeMdToolReference.test.ts
 test/doctor/checks/daemonConnectivity.test.ts
+test/doctor/checks/iosSimFleet.test.ts
 test/doctor/checks/orphanedDaemons.test.ts
 test/doctor/checks/workProfileAccessibility.test.ts
 test/doctor/iosExecResultConsolidation.test.ts
@@ -215,6 +217,7 @@ test/features/action/DisplayTransitionGesture.test.ts
 test/features/action/FieldTypeDetector.test.ts
 test/features/action/GrantAndroidPermissions.test.ts
 test/features/action/HandleIntentChooser.test.ts
+test/features/action/InstallApp.signingGuard.test.ts
 test/features/action/IosLockScreenUnlocker.test.ts
 test/features/action/IosSdkTriggerReadiness.test.ts
 test/features/action/IosSelectionScreenSize.test.ts
@@ -321,6 +324,8 @@ test/features/featureFlags/FeatureFlagService.test.ts
 test/features/featureFlags/FeatureFlagService.toolListChanged.test.ts
 test/features/featureFlags/persistedOutputReductionOverrides.test.ts
 test/features/featureFlags/toolDefinitionAffectingFlags.drift.test.ts
+test/features/iosSimFleet/IosBootInstrumentation.test.ts
+test/features/iosSimFleet/iosSimFleet.test.ts
 test/features/memory/MemoryAudit.characterization.test.ts
 test/features/memory/MemoryMetricsCollector.test.ts
 test/features/navigation/DefaultPathOptimizer.test.ts
@@ -365,6 +370,7 @@ test/features/observe/HierarchyHitTest.test.ts
 test/features/observe/HierarchyPlatformValidator.test.ts
 test/features/observe/IdentifyInteractions.test.ts
 test/features/observe/IdentifyMediaViews.test.ts
+test/features/observe/InspectPackageSigning.test.ts
 test/features/observe/IosLockStateProbe.test.ts
 test/features/observe/ObserveElementsBuilder.test.ts
 test/features/observe/ObserveError.property.test.ts
@@ -838,6 +844,7 @@ test/server/planHealthSummary.test.ts
 test/server/platform/PlatformClient.test.ts
 test/server/prompts/list.test.ts
 test/server/provisionDevice.property.test.ts
+test/server/provisionDeviceRecoveryEvidence.test.ts
 test/server/queryParamValidation.property.test.ts
 test/server/queryParamValidation.test.ts
 test/server/resourceUriLoneSurrogate.test.ts
@@ -954,9 +961,11 @@ test/utils/android-cmdline-tools/RunningAvdAdvertisementReader.test.ts
 test/utils/android-cmdline-tools/SdkManagerClient.test.ts
 test/utils/android-cmdline-tools/adbFailureOutput.test.ts
 test/utils/android-cmdline-tools/androidSdkRoot.test.ts
+test/utils/android-cmdline-tools/apkSigningBlock.test.ts
 test/utils/android-cmdline-tools/appendBounded.test.ts
 test/utils/android-cmdline-tools/detection.test.ts
 test/utils/android-cmdline-tools/isAndroidFrameworkUnavailable.test.ts
+test/utils/android-cmdline-tools/parseDumpsysPackagePresence.test.ts
 test/utils/android-cmdline-tools/parseWindowManagerRotation.test.ts
 test/utils/android-cmdline-tools/readAndroidDeviceApiLevel.test.ts
 test/utils/android-cmdline-tools/readAndroidDeviceApiLevelBudget.test.ts
@@ -970,6 +979,7 @@ test/utils/android-cmdline-tools/vmSnapshot.test.ts
 test/utils/androidDeviceResourceController.test.ts
 test/utils/androidDeviceResourceReader.packageState.test.ts
 test/utils/androidDeviceResourceReader.test.ts
+test/utils/androidPackageMutationLock.test.ts
 test/utils/androidSystemImageRuntime.test.ts
 test/utils/androidTransientLoading.property.test.ts
 test/utils/androidTransientLoading.test.ts
@@ -996,6 +1006,7 @@ test/utils/deviceBootService.test.ts
 test/utils/deviceMatcher.property.test.ts
 test/utils/deviceReadinessLock.test.ts
 test/utils/deviceResourceController.test.ts
+test/utils/deviceResourceDrift.test.ts
 test/utils/deviceResourceObservationCommands.test.ts
 test/utils/deviceSnapshotStore.property.test.ts
 test/utils/deviceTeardownService.test.ts
@@ -1100,6 +1111,7 @@ test/utils/redactPath.test.ts
 test/utils/redactTypedTextArguments.test.ts
 test/utils/retry/RetryExecutor.property.test.ts
 test/utils/retry/RetryExecutor.test.ts
+test/utils/runtimeCompatibility.test.ts
 test/utils/screenBounds.property.test.ts
 test/utils/screenshot-cache.test.ts
 test/utils/screenshot-utils.test.ts
@@ -1107,6 +1119,7 @@ test/utils/screenshot/ScreenshotComparator.test.ts
 test/utils/screenshot/imageHeaderDimensions.property.test.ts
 test/utils/screenshot/screenshotFormats.test.ts
 test/utils/shellQuote.property.test.ts
+test/utils/signingIdentity.test.ts
 test/utils/snapshotNameValidation.property.test.ts
 test/utils/snapshotNameValidation.test.ts
 test/utils/sortedListing.test.ts

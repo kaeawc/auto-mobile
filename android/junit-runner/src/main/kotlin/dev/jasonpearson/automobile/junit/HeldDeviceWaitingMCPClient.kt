@@ -7,10 +7,10 @@ package dev.jasonpearson.automobile.junit
  * the session that held the device through the failed attempt is idle-released and a parallel
  * runner can take the device in the gap. The first call then comes back `device_owned_by_other_
  * session` (or `device_cleanup_in_progress` while the daemon is still releasing it). This is the
- * same held-device wait [AutoMobilePlanExecutor] applies to `executePlan`: exponential sleeps within
- * [AutoMobilePlanExecutor.deviceOwnedWaitBudgetMs], cancellable (an interrupt ends the wait), never
- * an exception that skips the bound. Once any call succeeds the device is ours and calls pass
- * straight through.
+ * same held-device wait [AutoMobilePlanExecutor] applies to `executePlan`: exponential sleeps
+ * within [AutoMobilePlanExecutor.deviceOwnedWaitBudgetMs], cancellable (an interrupt ends the
+ * wait), never an exception that skips the bound. Once any call succeeds the device is ours and
+ * calls pass straight through.
  *
  * A `session_ownership_lost` answer means the daemon released the held session and will not reuse
  * its UUID for ordinary calls; it is reported as a clear failure rather than retried.

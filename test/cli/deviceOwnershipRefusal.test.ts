@@ -11,6 +11,7 @@ import { InputDeviceOwnedError, TOOL_CALL_REMEDY } from "../../src/daemon/inputD
 import {
   DeviceCleanupInProgressError,
   DeviceOwnedByOtherDaemonError,
+  DeviceShuttingDownError,
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import { LIFECYCLE_TOOL_REMEDY } from "../../src/server/lifecycleDeviceOwnership";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
@@ -34,6 +35,23 @@ describe("cliDeviceOwnershipHint (#10743, #10783, #10785)", () => {
     const hint = cliDeviceOwnershipHint({ code: "device_cleanup_in_progress" }, "startDevice");
     expect(hint).toContain("retryAfterMs");
     expect(hint).not.toContain("--session-uuid");
+  });
+
+  test("tells the caller a shutting-down device will become available (#11088)", () => {
+    const hint = cliDeviceOwnershipHint({ code: "device_shutting_down" }, "startDevice");
+    expect(hint).toContain("shut down");
+    expect(hint).not.toContain("--session-uuid");
+    const result = shapeToolCallError(new DeviceShuttingDownError("emulator-5554"), {
+      toolName: "startDevice",
+      source: "MCP",
+    });
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      success: false,
+      code: "device_shutting_down",
+      deviceId: "emulator-5554",
+      retryable: true,
+      retryAfterMs: 2_000,
+    });
   });
 
   test("tells the caller another daemon holds the device (#10980)", () => {

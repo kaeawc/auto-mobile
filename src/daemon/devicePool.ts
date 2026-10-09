@@ -2,6 +2,7 @@ import type { Environment } from "./poolConfig";
 import {
   DeviceCleanupInProgressError,
   DeviceOwnedByOtherDaemonError,
+  DeviceShuttingDownError,
 } from "./deviceAcquisitionRefusals";
 import {
   currentAllocationCancellationScope,
@@ -2486,7 +2487,7 @@ export class DevicePool {
                     `[DevicePool] Waiting for ${requiredCount - assigned.size} more device(s) (${assignResult.totalDevices} total, all currently busy)...`,
                   );
                 }
-                await this.rollbackAssignments(assignmentsToRollback);
+                await this.rollbackAssignmentsIndependently(assignmentsToRollback);
                 assignmentsToRollback.clear();
                 assignments.clear();
                 assigned.clear();
@@ -2503,12 +2504,12 @@ export class DevicePool {
       try {
         result = await allocate();
       } catch (error) {
-        await this.rollbackAssignments(assignmentsToRollback);
+        await this.rollbackAssignmentsIndependently(assignmentsToRollback);
         throw error;
       }
 
       if (!result.success) {
-        await this.rollbackAssignments(assignmentsToRollback);
+        await this.rollbackAssignmentsIndependently(assignmentsToRollback);
         throwIfRequestAborted();
 
         // Timeout case
@@ -2739,7 +2740,7 @@ export class DevicePool {
         allocationCompleted = true;
       } finally {
         if (!allocationCompleted) {
-          await this.rollbackCriteriaAssignments(assignmentsToRollback);
+          await this.rollbackAssignmentsIndependently(assignmentsToRollback);
         }
       }
 
@@ -3301,7 +3302,11 @@ export class DevicePool {
     }
   }
 
-  private async rollbackCriteriaAssignments(
+  /**
+   * Roll back each entry of a failed multi-device allocation on its own, so one failed release
+   * cannot strand the remaining claims (#11091). Used by both the criteria and platform paths.
+   */
+  private async rollbackAssignmentsIndependently(
     assignments: ReadonlyMap<string, RollbackAssignment>,
   ): Promise<void> {
     for (const [sessionId, allocation] of assignments) {
@@ -3309,7 +3314,7 @@ export class DevicePool {
         await this.rollbackAssignments(new Map([[sessionId, allocation]]));
       } catch (error) {
         logger.warn(
-          `[DevicePool] Failed to roll back criteria allocation for ${sessionId} on ${allocation.deviceId}`,
+          `[DevicePool] Failed to roll back multi-device allocation for ${sessionId} on ${allocation.deviceId}`,
           error,
         );
       }
@@ -6865,11 +6870,13 @@ export class DevicePool {
     deviceId: string,
     abortSignal?: AbortSignal,
     autolockClient?: AutolockClient,
+    assertHolder?: () => void,
   ): Promise<ShutdownDeviceReservation | undefined> {
     return this.shutdownReservationCoordinator.reserveDeviceForShutdown(
       deviceId,
       abortSignal,
       autolockClient,
+      assertHolder,
     );
   }
 
@@ -7077,9 +7084,9 @@ export class DevicePool {
     );
   }
 
-  private assertNotReservedForShutdown(device: PooledDevice, unavailableMessage: string): void {
+  private assertNotReservedForShutdown(device: PooledDevice, detail: string): void {
     if (this.isReservedForShutdown(device)) {
-      throw new ActionableError(unavailableMessage);
+      throw new DeviceShuttingDownError(device.id, detail);
     }
   }
 
@@ -7117,10 +7124,7 @@ export class DevicePool {
           throw new ActionableError(`Device '${deviceId}' is not available in the device pool.`);
         }
         this.runtimeIdentity.assertRuntimeIdentity(device, expectedIdentity);
-        this.assertNotReservedForShutdown(
-          device,
-          `Device '${deviceId}' is shutting down and cannot be assigned.`,
-        );
+        this.assertNotReservedForShutdown(device, "and cannot be assigned");
         if (alreadyPooled) {
           this.recordSourceAndroidAvd(deviceId, androidAvdIdentity);
           this.notifyTargetDeviceReady({ device, snapshot });

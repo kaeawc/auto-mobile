@@ -200,6 +200,7 @@ export class DeviceShutdownReservations {
     deviceId: string,
     abortSignal?: AbortSignal,
     autolockClient?: AutolockClient,
+    assertHolder?: () => void,
   ): Promise<ShutdownDeviceReservation | undefined> {
     if (abortSignal?.aborted) {
       throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
@@ -213,6 +214,7 @@ export class DeviceShutdownReservations {
       abortSignal,
       autolockClient,
       recoveryRouteLease,
+      assertHolder,
     );
     if (!expectedDevice) {
       identity.releaseSession?.();
@@ -249,6 +251,7 @@ export class DeviceShutdownReservations {
     abortSignal: AbortSignal | undefined,
     autolockClient: AutolockClient | undefined,
     recoveryRouteLease: symbol | undefined,
+    assertHolder: (() => void) | undefined,
   ): Promise<PooledDevice | undefined> {
     const releaseSessionOnAbort = () => identity.releaseSession?.();
     abortSignal?.addEventListener("abort", releaseSessionOnAbort, { once: true });
@@ -259,6 +262,7 @@ export class DeviceShutdownReservations {
         abortSignal,
         autolockClient,
         recoveryRouteLease,
+        assertHolder,
       );
       if (abortSignal?.aborted) {
         if (expectedDevice && this.shutdownReservations.get(deviceId) === expectedDevice) {
@@ -282,6 +286,7 @@ export class DeviceShutdownReservations {
     abortSignal: AbortSignal | undefined,
     autolockClient: AutolockClient | undefined,
     recoveryRouteLease: symbol | undefined,
+    assertHolder: (() => void) | undefined,
   ): Promise<PooledDevice | undefined> {
     return await this.pool.getAssignmentMutex().runExclusive(() => {
       if (abortSignal?.aborted) {
@@ -303,6 +308,9 @@ export class DeviceShutdownReservations {
       // A readiness await can outlive this client's ownership. Check it while
       // reserving shutdown so a stale request cannot reboot another session's device.
       this.pool.getOwnedAutolockSession(currentDevice, autolockClient);
+      // The caller's entry-time ownership check predates its lifecycle-lease wait; a start can
+      // bind another session meanwhile, so the holder is re-checked under the assignment mutex.
+      assertHolder?.();
       if (this.shutdownReservations.get(deviceId) === currentDevice) {
         throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
       }

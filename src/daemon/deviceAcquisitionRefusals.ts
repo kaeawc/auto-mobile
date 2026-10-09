@@ -20,11 +20,19 @@ export const SESSION_CREATION_TIMEOUT_CODE = "session_creation_timeout";
  */
 export const DEVICE_OWNED_BY_OTHER_DAEMON_CODE = "device_owned_by_other_daemon";
 
+/**
+ * The device is under a kill/shutdown reservation, so an acquisition or readiness step cannot
+ * proceed. The reservation clears once the shutdown finishes (or fails), after which the device
+ * can be acquired again, so clients wait on it like a held device.
+ */
+export const DEVICE_SHUTTING_DOWN_CODE = "device_shutting_down";
+
 /** Wire codes of acquisition refusals a client should wait out rather than fail on. */
 export const RETRYABLE_DEVICE_ACQUISITION_CODES: ReadonlySet<string> = new Set([
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   SESSION_CREATION_TIMEOUT_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+  DEVICE_SHUTTING_DOWN_CODE,
 ]);
 
 /** Retry hint when nothing bounds the remaining wait more precisely. */
@@ -99,5 +107,22 @@ export class DeviceOwnedByOtherDaemonError extends RetryableDeviceAcquisitionErr
         "device. Retry after that daemon releases it, or pick another device.",
     );
     this.name = "DeviceOwnedByOtherDaemonError";
+  }
+}
+
+/** Retry hint for a device under shutdown: a kill normally finishes within a few seconds. */
+export const DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS = 2_000;
+
+export class DeviceShuttingDownError extends RetryableDeviceAcquisitionError {
+  /** @param detail what the refused step was trying to do, e.g. "and cannot be assigned" */
+  constructor(deviceId: string, detail?: string) {
+    super(
+      DEVICE_SHUTTING_DOWN_CODE,
+      deviceId,
+      DEVICE_SHUTTING_DOWN_RETRY_AFTER_MS,
+      `Device '${deviceId}' is shutting down${detail ? ` ${detail}` : ""} ` +
+        `(code ${DEVICE_SHUTTING_DOWN_CODE}); retry once the shutdown has finished.`,
+    );
+    this.name = "DeviceShuttingDownError";
   }
 }

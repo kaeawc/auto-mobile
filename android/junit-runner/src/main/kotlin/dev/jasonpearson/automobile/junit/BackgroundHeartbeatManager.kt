@@ -15,6 +15,9 @@ internal class BackgroundHeartbeatManager(
 ) {
   private val sessions = ConcurrentHashMap.newKeySet<String>()
   private val losses = ConcurrentHashMap<String, DaemonSessionLoss>()
+  // Sessions the daemon has acknowledged at least once; only then is a bare 404 a real loss.
+  private val confirmed = ConcurrentHashMap.newKeySet<String>()
+  private val unconfirmedMisses = ConcurrentHashMap<String, Int>()
   @Volatile private var running = AtomicBoolean(false)
   private val startLock = Any()
   private val refCount = AtomicInteger(0)
@@ -76,24 +79,39 @@ internal class BackgroundHeartbeatManager(
     }
   }
 
+  /**
+   * A 404 for an id the daemon never acknowledged is usually a session it has not created yet
+   * (registration precedes executePlan), so keep heartbeating it, bounded. A 404 after a successful
+   * heartbeat, or carrying a `releaseReason`, means the daemon released it (#11072).
+   */
+  private fun recordRelease(sessionId: String, released: DaemonSessionReleasedException) {
+    val sure = released.releaseReason != null || confirmed.contains(sessionId)
+    if (!sure) {
+      val misses = unconfirmedMisses.merge(sessionId, 1, Int::plus) ?: 1
+      if (misses < MAX_UNCONFIRMED_MISSES) return
+    }
+    val loss =
+      DaemonSessionLoss(
+        sessionId,
+        released.releaseReason,
+        released.message ?: "Session not found",
+        confirmed = sure,
+      )
+    losses[sessionId] = loss
+    sessions.remove(sessionId)
+    println("Warning: ${loss.describe()}; no longer heartbeating it")
+  }
+
   private fun runLoop(loopRunning: AtomicBoolean) {
     while (loopRunning.get()) {
       val snapshot = sessions.toList()
       snapshot.forEach { sessionId ->
         try {
           sendHeartbeat(sessionId)
+          confirmed.add(sessionId)
+          unconfirmedMisses.remove(sessionId)
         } catch (released: DaemonSessionReleasedException) {
-          // The daemon no longer holds this session (#11072): record why, so recovery fails fast
-          // with the daemon's reason instead of driving a device it lost, and stop heartbeating.
-          val loss =
-            DaemonSessionLoss(
-              sessionId,
-              released.releaseReason,
-              released.message ?: "Session not found",
-            )
-          losses[sessionId] = loss
-          sessions.remove(sessionId)
-          println("Warning: ${loss.describe()}; no longer heartbeating it")
+          recordRelease(sessionId, released)
         } catch (_: Exception) {
           // A missed heartbeat is transient (daemon restarting, socket busy); the next tick
           // retries.
@@ -106,5 +124,10 @@ internal class BackgroundHeartbeatManager(
         // Allow loop to exit if stopped.
       }
     }
+  }
+
+  private companion object {
+    /** About 30 s at the 1 s cadence: how long a never-acknowledged id may 404 before giving up. */
+    const val MAX_UNCONFIRMED_MISSES = 30
   }
 }

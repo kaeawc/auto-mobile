@@ -368,6 +368,17 @@ public final class AutoMobilePlanExecutor: Sendable {
             }
         }
 
+        // The daemon reports whether it actually kept the session it was asked to hold (#11091): a plan
+        // with derived device-label sessions is always released, so recovery would drive a device this
+        // runner no longer holds. Fail clearly, with nothing to release.
+        if sessionHeld, result.sessionHeld == false {
+            logger.warn("Daemon released session \(sessionUuid) after the failed plan; skipping AI recovery")
+            throw ExecutorError.executionFailed(
+                "\(failureMessage)\n  AI recovery skipped: the daemon released session \(sessionUuid) " +
+                    "(sessionHeld: false; plans with derived device-label sessions are always released)."
+            )
+        }
+
         // Cheap local gates first; the feature-flag read (which may hit the daemon) is last and runs
         // only when a handler is present, so the no-recovery path adds zero daemon traffic.
         guard configuration.aiAssistance,

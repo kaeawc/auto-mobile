@@ -38,6 +38,7 @@ import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/Android
 import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "./sessionManager";
+import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
 import { hasActiveSessionExecution, subscribeToolCallEndActivity } from "./toolCallActivity";
 import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
@@ -254,10 +255,12 @@ import { AvdManagerService } from "../utils/android-cmdline-tools/AvdManagerServ
 import type { AvdManager } from "../utils/android-cmdline-tools/interfaces/AvdManager";
 import {
   evaluateDeviceDisconnects,
+  OFFLINE_DEVICE_DISCONNECT_BUDGET_MS,
   pruneStaleOfflineRecoveryAttempts,
   recordingCandidateIncarnations,
   selectImmediateDisconnectCandidates,
   selectOfflineRecoveryCandidates,
+  type OfflineEpisode,
   type DisconnectCandidateIncarnation,
 } from "./disconnectMonitor";
 import {
@@ -545,6 +548,9 @@ export class Daemon {
   // a later episode for the same serial gets a fresh attempt.
   private offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
   private offlineRecoveryAttemptedIncarnations = new Map<string, number | string>();
+  // Start of each candidate's current ADB `offline` episode (#11090): offline
+  // sweeps run against OFFLINE_DEVICE_DISCONNECT_BUDGET_MS, not the miss count.
+  private offlineEpisodes = new Map<string, OfflineEpisode>();
   private stoppingRecordings: Set<string> = new Set();
   private observerSessionRegistry: ObserverSessionRegistry;
   private sessionManager: SessionManager;
@@ -890,6 +896,11 @@ export class Daemon {
       // heartbeat, device-switch, and derived `${base}:${label}` sessions alike.
       AndroidCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
       IOSCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
+    });
+    // A released base takes its derived `${base}:${label}` sessions with it (#11091).
+    // The pool is created after these callbacks are wired, so resolve it per release.
+    registerDerivedLabelSessionReleaseCascade(this.sessionManager, {
+      releaseDevice: (deviceId, sessionId) => this.devicePool.releaseDevice(deviceId, sessionId),
     });
     // A rebind keeps the session live, but its navigation state was collected on
     // the old device and must not follow it to the new one.
@@ -2907,7 +2918,10 @@ export class Daemon {
   private startDeviceDisconnectMonitor(
     deviceManager: Pick<
       MultiPlatformDeviceManager,
-      "getBootedDevicesDetailed" | "getAndroidOfflineDeviceIds" | "recoverAndroidOfflineDevices"
+      | "getBootedDevicesDetailed"
+      | "getAndroidOfflineDeviceIds"
+      | "getAndroidListedDeviceStates"
+      | "recoverAndroidOfflineDevices"
     > = new MultiPlatformDeviceManager(),
     listRecordings: typeof listActiveVideoRecordings = listActiveVideoRecordings,
     transportRestarts: AdbTransportRestartLookup = defaultAdbTransportRestartRegistry,
@@ -2944,34 +2958,13 @@ export class Daemon {
           const missingByDevice = new Map<string, string[]>();
           const { candidateDeviceIds, candidatePlatforms, candidateIncarnations } =
             this.collectDisconnectCandidates(activeRecordings);
-          // Online-ness is otherwise binary: an in-session Android emulator
-          // that dropped to ADB `offline` looks identical to one that is
-          // fully gone, since bootedDeviceIds only ever contains `device`
-          // -state serials. Ask only about candidates already missing from
-          // that list, so a fully-healthy sweep never pays for this extra
-          // `devices -l` probe (#7536).
-          let offlineDeviceIds: Set<string> | undefined;
-          try {
-            if (!planActive) {
-              const missingAndroidCandidateIds = this.findMissingAndroidCandidates(
-                candidateDeviceIds,
-                bootedDeviceIds,
-                candidatePlatforms,
-              );
-              offlineDeviceIds =
-                missingAndroidCandidateIds.size > 0
-                  ? await deviceManager.getAndroidOfflineDeviceIds(missingAndroidCandidateIds)
-                  : new Set<string>();
-            }
-          } catch (error) {
-            if (!(error instanceof AndroidOfflineProbeError)) {
-              throw error;
-            }
-            // Auxiliary probe failure supplies no evidence that an offline episode ended.
-            logger.warn(
-              `[DisconnectMonitor] Retaining offline recovery attempts: ${errorMessage(error)}`,
-            );
-          }
+          const { offlineDeviceIds, listedNonDeviceIds } = await this.probeListedAndroidStates(
+            deviceManager,
+            planActive,
+            candidateDeviceIds,
+            bootedDeviceIds,
+            candidatePlatforms,
+          );
           if (!planActive) {
             const { dispatchTargets, offlineRecoveryTargets } = this.prepareOfflineRecovery(
               candidateDeviceIds,
@@ -3009,11 +3002,14 @@ export class Daemon {
             candidateIncarnations,
             deviceDisconnectMissIncarnations: this.deviceDisconnectMissIncarnations,
             forceDisconnectedDeviceIds: this.forceDisconnectedDeviceIds,
+            offlineDeviceIds,
+            offlineEpisodes: this.offlineEpisodes,
+            nowMs: this.timer.monotonicNow?.() ?? this.timer.now(),
             immediateDisconnectDeviceIds: selectImmediateDisconnectCandidates(
               candidateDeviceIds,
               candidatePlatforms,
               bootedDeviceIds,
-              offlineDeviceIds,
+              listedNonDeviceIds,
               transportRestarts,
             ),
           });
@@ -3140,6 +3136,54 @@ export class Daemon {
       );
       logger.debug("[DisconnectMonitor] Deferring actions — plan execution active");
     };
+  }
+
+  /**
+   * Online-ness is otherwise binary: an in-session Android emulator that
+   * dropped to ADB `offline` looks identical to one that is fully gone, since
+   * bootedDeviceIds only ever contains `device`-state serials. Ask only about
+   * candidates already missing from that list, so a fully-healthy sweep never
+   * pays for this extra `devices -l` probe (#7536). Every non-`device` row
+   * counts as still attached for the immediate physical-device path; only
+   * `offline` drives reconnect and the offline budget (#11090). Both sets are
+   * undefined when the probe is skipped (plan active) or fails.
+   */
+  private async probeListedAndroidStates(
+    deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidListedDeviceStates">,
+    planActive: boolean,
+    candidateDeviceIds: Set<string>,
+    bootedDeviceIds: Set<string>,
+    candidatePlatforms: Map<string, "android" | "ios">,
+  ): Promise<{ offlineDeviceIds?: Set<string>; listedNonDeviceIds?: Set<string> }> {
+    if (planActive) {
+      return {};
+    }
+    const missingAndroidCandidateIds = this.findMissingAndroidCandidates(
+      candidateDeviceIds,
+      bootedDeviceIds,
+      candidatePlatforms,
+    );
+    try {
+      const listedStates =
+        missingAndroidCandidateIds.size > 0
+          ? await deviceManager.getAndroidListedDeviceStates(missingAndroidCandidateIds)
+          : new Map<string, string>();
+      return {
+        listedNonDeviceIds: new Set(listedStates.keys()),
+        offlineDeviceIds: new Set(
+          [...listedStates].filter(([, state]) => state === "offline").map(([id]) => id),
+        ),
+      };
+    } catch (error) {
+      if (!(error instanceof AndroidOfflineProbeError)) {
+        throw error;
+      }
+      // Auxiliary probe failure supplies no evidence that an offline episode ended.
+      logger.warn(
+        `[DisconnectMonitor] Retaining offline recovery attempts: ${errorMessage(error)}`,
+      );
+      return {};
+    }
   }
 
   private findMissingAndroidCandidates(
@@ -3285,6 +3329,11 @@ export class Daemon {
         logger.info(message);
       }
     }
+    for (const { deviceId, offlineForMs } of disconnectResult.offline) {
+      logger.info(
+        `[DisconnectMonitor] Device ${deviceId} ADB-offline for ${Math.round(offlineForMs / 1000)}s (budget ${OFFLINE_DEVICE_DISCONNECT_BUDGET_MS / 1000}s); keeping session`,
+      );
+    }
   }
 
   private captureDisconnectCleanup(
@@ -3319,6 +3368,7 @@ export class Daemon {
     this.deviceDisconnectMissIncarnations.delete(deviceId);
     this.offlineRecoveryAttemptedDeviceIds.delete(deviceId);
     this.offlineRecoveryAttemptedIncarnations.delete(deviceId);
+    this.offlineEpisodes.delete(deviceId);
     if (this.forceDisconnectedDeviceGenerations.get(deviceId) === forceGenerationAtDisconnect) {
       this.forceDisconnectedDeviceIds.delete(deviceId);
       this.forceDisconnectedDeviceGenerations.delete(deviceId);

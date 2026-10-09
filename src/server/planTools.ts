@@ -15,6 +15,8 @@ import {
 import { startMcpRecording, stopMcpRecording, getMcpRecordingStatus } from "./mcpRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";
+import { failedPlanSessionHoldable } from "./deviceLabelMapping";
+import type { ExecutePlanResult } from "../models/ExecutePlanResult";
 import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import {
   INTERNAL_MCP_SESSION_PARAM,
@@ -193,8 +195,27 @@ const executePlanResultSchema = z
       .describe(
         "Present only when the plan-wide toolResults budget ran out: omittedSteps is how many completed steps with a payload have no toolResults entry.",
       ),
+    sessionHeld: z
+      .boolean()
+      .optional()
+      .describe(
+        "Present only on a failed run with holdSessionOnFailure: true when the session and device were kept for recovery, false when they were released (plans with derived label sessions are always released).",
+      ),
   })
   .passthrough();
+
+/**
+ * The plan lifecycle decides whether a failed plan keeps its session after this response is
+ * finalized, from the same predicate, so the result reports that decision here: a runner must not
+ * recover on a session the daemon released (#11091). Only a failed run that asked to hold carries it.
+ */
+export const withReportedSessionHold = (
+  result: ExecutePlanResult,
+  params: { holdSessionOnFailure?: boolean; sessionUuid?: string },
+): ExecutePlanResult =>
+  params.holdSessionOnFailure === true && !result.success && params.sessionUuid
+    ? { ...result, sessionHeld: failedPlanSessionHoldable(params.sessionUuid) }
+    : result;
 
 const executePlanTool = async (
   device: BootedDevice,
@@ -239,7 +260,8 @@ const executePlanTool = async (
     },
     () => orchestrator.execute(),
   );
-  return withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
+  const reported = withReportedSessionHold(result, params);
+  return withIsErrorOnFailure(createStructuredToolResponse(reported), reported.success);
 };
 
 // Start test recording tool schema (empty - uses active device)

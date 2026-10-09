@@ -19,6 +19,9 @@ export function createFakeAndroidEmulator(
     getOfflineDeviceIdsAmong: async () => {
       throw notImplemented("getOfflineDeviceIdsAmong");
     },
+    getListedNonDeviceStatesAmong: async () => {
+      throw notImplemented("getListedNonDeviceStatesAmong");
+    },
     recoverOfflineDevices: async () => {
       throw notImplemented("recoverOfflineDevices");
     },

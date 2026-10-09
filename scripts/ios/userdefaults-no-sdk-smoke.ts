@@ -113,6 +113,27 @@ try {
     );
   }
 
+  await simctl.executeCommandArgs(["terminate", deviceId, appId], 10_000);
+  await rm(snapshotPath);
+  await simctl.executeCommandArgs(["launch", deviceId, appId, "--remove-sentinel"], 30_000);
+  const expectedWithoutSentinel = {
+    standard: Object.fromEntries(
+      Object.entries(expected.standard).filter(([key]) => key !== "sentinel"),
+    ),
+    custom: Object.fromEntries(
+      Object.entries(expected.custom).filter(([key]) => key !== "sentinel"),
+    ),
+  };
+  // Confirm the probe-only control removed the sentinel from both stores.
+  assert.deepEqual(await readSnapshot(snapshotPath), expectedWithoutSentinel);
+  await simctl.executeCommandArgs(["terminate", deviceId, appId], 10_000);
+  await rm(snapshotPath);
+  await simctl.executeCommandArgs(["launch", deviceId, appId], 30_000);
+  // A normal cold launch must observe the deletion instead of restoring the fixture.
+  assert.deepEqual(await readSnapshot(snapshotPath), expectedWithoutSentinel);
+  expected = expectedWithoutSentinel;
+  console.log("PASS sentinel deletion: both stores remain absent after another cold launch");
+
   const ambiguous = new AppPreferences(device, {
     iosKeyValueClientProvider: () => refusingClient("connection_lost"),
   });

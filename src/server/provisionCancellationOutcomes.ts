@@ -1,6 +1,9 @@
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import type { Timer } from "../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+
+/** How long an outcome published before its waiter registered stays claimable (#11092). */
+export const EARLY_OUTCOME_RETENTION_MS = 10_000;
 
 /**
  * Hands the `request_cancelled` result of a `provisionDevice` call whose caller aborted from the
@@ -14,12 +17,26 @@ import type { Timer } from "../utils/SystemTimer";
  */
 export class ProvisionCancellationOutcomes {
   private readonly waiters = new Map<string, Array<(outcome: unknown) => void>>();
+  private readonly early = new Map<string, { outcome: unknown; expiresAtMs: number }>();
+
+  constructor(private readonly clock: Pick<Timer, "now"> = defaultTimer) {}
 
   /** Called by the handler once it has built its cancellation result. */
   publish(requestKey: string, outcome: unknown): void {
     const waiting = this.waiters.get(requestKey);
     this.waiters.delete(requestKey);
-    waiting?.forEach((resolve) => resolve(outcome));
+    if (!waiting || waiting.length === 0) {
+      // The reply may not be waiting yet (a fast rollback): keep the outcome briefly.
+      const now = this.clock.now();
+      this.early.forEach((held, key) => {
+        if (held.expiresAtMs <= now) {
+          this.early.delete(key);
+        }
+      });
+      this.early.set(requestKey, { outcome, expiresAtMs: now + EARLY_OUTCOME_RETENTION_MS });
+      return;
+    }
+    waiting.forEach((resolve) => resolve(outcome));
   }
 
   /** Whether a reply is currently waiting for this call's outcome. */
@@ -29,6 +46,13 @@ export class ProvisionCancellationOutcomes {
 
   /** Resolves with the published outcome, or undefined when none arrives within `timeoutMs`. */
   async await(requestKey: string, timeoutMs: number, timer: Timer): Promise<unknown> {
+    const held = this.early.get(requestKey);
+    if (held) {
+      this.early.delete(requestKey);
+      if (held.expiresAtMs > this.clock.now()) {
+        return held.outcome;
+      }
+    }
     let resolveOutcome: (outcome: unknown) => void = () => {};
     const outcome = new Promise<unknown>((resolve) => {
       resolveOutcome = resolve;

@@ -99,6 +99,22 @@ class AutoMobilePlanExecutorTest {
   }
 
   @Test
+  fun `a device that is shutting down is waited on like a held device`() {
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    fakeDaemonClient.queueExecutePlanResponse(
+      buildDaemonResponse(shuttingDownDevicePayload(), isError = true),
+    )
+    fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+
+    assertEquals(true, result.success)
+    assertEquals(listOf(500L), waits)
+    assertEquals(2, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
   fun `a held device that never frees fails with a clear error after the wait budget`() {
     val waits = mutableListOf<Long>()
     AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
@@ -633,6 +649,12 @@ class AutoMobilePlanExecutorTest {
   private fun otherDaemonPayload(): JsonObject =
     payload(
       """{"success":false,"error":"Device 'emulator-5554' is claimed by another AutoMobile daemon (PID 4242)","code":"device_owned_by_other_daemon","deviceId":"emulator-5554","retryable":true,"retryAfterMs":2000}""",
+    )
+
+  // Shape of shapeToolCallError for a DeviceShuttingDownError (#11088).
+  private fun shuttingDownDevicePayload(): JsonObject =
+    payload(
+      """{"success":false,"error":"Device 'emulator-5554' is shutting down (code device_shutting_down)","code":"device_shutting_down","deviceId":"emulator-5554","retryable":true,"retryAfterMs":2000}""",
     )
 
   private fun deviceLostPayload(): JsonObject =

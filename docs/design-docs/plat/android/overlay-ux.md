@@ -876,10 +876,38 @@ allocation) and when the app returns the same runtime is shown again. A
 - Dismissal, TTL expiry and teardown release the anchor. A hidden overlay still
   expires on its idle TTL.
 
-Deferred: secure-window detection has no trusted existing signal. Automatic bottom-sheet IME movement/yield is also deferred:
-node-level inset selection exists, but smaller edge-to-edge sheet windows do not
-yet have verified keyboard geometry. Existing explicit `safeAreaPadding` behavior
-is preserved. Device checks must cover keyguard timing, daemon death, pager page 3
+Deferred: secure-window detection has no trusted existing signal.
+
+### Bottom sheet and the keyboard (#10262)
+
+Owner decision 2026-10-09: a bottom sheet moves above the keyboard whenever the keyboard
+is shown and returns to the screen edge when it hides.
+
+- **Scope.** Only a `sheet` window with `edge: "bottom"`. Fullscreen, floating, dialog,
+  top and side sheet windows never move. A `bottomSheet` node lives inside its window
+  and rides with it; it needs no separate handling.
+- **Source.** The input-method window's bounds from the accessibility window list
+  (`TYPE_INPUT_METHOD`), not the overlay window's `WindowInsets.Type.ime()`. Overlay
+  windows are `TYPE_ACCESSIBILITY_OVERLAY` windows that are not the IME target, and the
+  platform dispatches the IME inset only to the IME target, so a sheet over another app's
+  field would read 0. The service sees the keyboard window whichever app owns the field.
+  The lift is `screenBottom - ime.top` (0 when no input-method window has bounds).
+  This follows from platform behaviour and is unit-tested with fake bounds; the API
+  30/34/36 device check in the issue is still open.
+- **Mechanism.** The host relayouts on the window events it already receives
+  (`TYPE_WINDOWS_CHANGED`), setting the bottom-gravity window's `y` to the lift (a positive
+  `y` raises a bottom-gravity window). Moving the window moves its touch region with it;
+  touch-through and the foreground-suspension and capture hides are unchanged because
+  they act on the same params and `isBlocked`.
+- **No system panning.** A bottom sheet sets `SOFT_INPUT_ADJUST_NOTHING`, so a sheet that
+  owns the focused text field is not also resized or panned by the platform.
+- **Motion.** The position jumps. The accessibility source reports no per-frame values,
+  so it cannot follow the keyboard's slide (`WindowInsetsAnimation` only reaches the IME
+  target). `motion: "none"` therefore has nothing to disable here.
+- **Explicit padding.** `safeAreaPadding` with `ime` still applies inside the window;
+  on a lifted sheet it reads 0 for a non-IME-target window, so it does not double-count.
+
+Device checks must cover keyguard timing, daemon death, pager page 3
 across rotation, fold/display removal, and API 30/34/36 keyboard/cutout geometry.
 
 ## Rejection paths and deterministic first error

@@ -3506,11 +3506,13 @@ export class DevicePool {
             platform: device.platform,
             stableId: device.platform === "android" ? device.name : device.deviceId!,
           };
-    const lifecycleLease = await this.lifecycleCoordinator.reserve(identity, {
-      operation,
-      deadlineMs,
-      signal: controller.signal,
-    });
+    const lifecycleLease = await this.lifecycleCoordinator
+      .reserve(identity, { operation, deadlineMs, signal: controller.signal })
+      .catch((error: unknown) => {
+        // The finally below only owns the timer once the lease is held (#11123).
+        this.timer.clearTimeout(timeoutHandle);
+        throw error;
+      });
     const signal = AbortSignal.any([controller.signal, lifecycleLease.signal]);
     let retainedLeaseSettlement: Promise<unknown> | undefined;
     const retainLeaseUntil = (settlement: Promise<unknown>): void => {

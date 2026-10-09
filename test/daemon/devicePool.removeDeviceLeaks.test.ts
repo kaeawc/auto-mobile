@@ -94,4 +94,26 @@ describe("DevicePool removeDevice / start leaks (#11123)", () => {
 
     expect(internals(pool).releasedDeviceCaptures.size).toBe(0);
   });
+
+  it("clears the start deadline timer when lifecycle reserve throws", async () => {
+    const reserveError = new Error("reserve failed");
+    pool = await build({
+      lifecycleCoordinator: {
+        reserve: async () => {
+          throw reserveError;
+        },
+      } as unknown as DevicePoolDependencies["lifecycleCoordinator"],
+    });
+    const before = timer.getPendingTimeoutCount();
+
+    await expect(
+      internals(pool).runCoordinatedDeviceStart(
+        { name: "Pixel 7", platform: "android" } as DeviceInfo,
+        timer.now() + 60_000,
+        "start",
+      ),
+    ).rejects.toBe(reserveError);
+
+    expect(timer.getPendingTimeoutCount()).toBe(before);
+  });
 });

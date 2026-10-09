@@ -61,8 +61,8 @@ describe("optimized sourcemaps under the Bun runtime", () => {
       const { stderr, exitCode } = outputs[name];
       expect(exitCode).toBe(0);
       expect(stderr).not.toContain("InvalidSourceMap");
-      expect(stderr).toMatch(/src\/thrower\.ts:2:13/);
-      expect(stderr).toMatch(new RegExp(`src/${name}\\.ts:3:`));
+      expect(stderr).toMatch(/src[\\/]thrower\.ts:2:13/);
+      expect(stderr).toMatch(new RegExp(`src[\\\\/]${name}\\.ts:3:`));
     });
   }
 });

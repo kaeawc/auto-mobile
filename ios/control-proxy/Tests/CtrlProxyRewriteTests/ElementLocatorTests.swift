@@ -1136,6 +1136,44 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertEqual(resolved.height, 852)
     }
 
+    func testResolveScreenDimensions_swapsDuoRootWhenListRowsExtendPastThePanelBottom() {
+        // Frames captured from the unfolded iPhone Duo Playground Demos list (#8379): the
+        // collection view is exactly the swapped frame and its last row sits below it.
+        let root = ElementBounds(left: 0, top: 0, right: 669, bottom: 951)
+        let list = UIElementInfo(
+            bounds: ElementBounds(left: 0, top: 0, right: 951, bottom: 669),
+            node: [UIElementInfo(bounds: ElementBounds(left: 20, top: 651, right: 867, bottom: 729))]
+        )
+        let navigationBar = UIElementInfo(bounds: ElementBounds(left: 0, top: 24, right: 951, bottom: 82))
+        let resolved = ElementLocator.resolveScreenDimensions(
+            rootBounds: root, fallbackWidth: 466, fallbackHeight: 678, elements: [navigationBar, list]
+        )
+        XCTAssertEqual(resolved.width, 951)
+        XCTAssertEqual(resolved.height, 669)
+    }
+
+    func testResolveScreenDimensions_keepsPortraitWhenWideChildIsNotExactlySwapped() {
+        let root = ElementBounds(left: 0, top: 0, right: 669, bottom: 951)
+        let carousel = UIElementInfo(bounds: ElementBounds(left: 0, top: 0, right: 951, bottom: 700))
+        let row = UIElementInfo(bounds: ElementBounds(left: 0, top: 800, right: 669, bottom: 900))
+        let resolved = ElementLocator.resolveScreenDimensions(
+            rootBounds: root, fallbackWidth: 669, fallbackHeight: 951, elements: [carousel, row]
+        )
+        XCTAssertEqual(resolved.width, 669)
+        XCTAssertEqual(resolved.height, 951)
+    }
+
+    func testResolveScreenDimensions_exactSwappedChildStillRejectsOverflowPastSwappedRightEdge() {
+        let root = ElementBounds(left: 0, top: 0, right: 669, bottom: 951)
+        let swapped = UIElementInfo(bounds: ElementBounds(left: 0, top: 0, right: 951, bottom: 669))
+        let wide = UIElementInfo(bounds: ElementBounds(left: 0, top: 700, right: 1200, bottom: 760))
+        let resolved = ElementLocator.resolveScreenDimensions(
+            rootBounds: root, fallbackWidth: 669, fallbackHeight: 951, elements: [swapped, wide]
+        )
+        XCTAssertEqual(resolved.width, 669)
+        XCTAssertEqual(resolved.height, 951)
+    }
+
     func testResolveScreenDimensions_usesRootBoundsWithNonZeroOrigin() {
         let root = ElementBounds(left: 10, top: 20, right: 410, bottom: 820)
         let resolved = ElementLocator.resolveScreenDimensions(

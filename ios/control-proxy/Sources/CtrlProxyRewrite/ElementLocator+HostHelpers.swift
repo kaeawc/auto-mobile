@@ -478,22 +478,26 @@ extension ElementLocator {
     {
         if let bounds = rootBounds, bounds.width > 0, bounds.height > 0 {
             var exceedsRoot = false
-            var fitsSwapped = true
+            var fitsSwappedWidth = true
+            var fitsSwappedHeight = true
             var fullLandscapeFrame = false
+            var exactSwappedFrame = false
             func visit(_ element: UIElementInfo) {
                 if let frame = element.bounds {
                     if frame.right > bounds.right || frame.bottom > bounds.bottom {
                         exceedsRoot = true
                     }
-                    if frame.right > bounds.left + bounds.height ||
-                        frame.bottom > bounds.top + bounds.width
-                    {
-                        fitsSwapped = false
-                    }
+                    if frame.right > bounds.left + bounds.height { fitsSwappedWidth = false }
+                    if frame.bottom > bounds.top + bounds.width { fitsSwappedHeight = false }
                     if frame.left <= bounds.left, frame.top <= bounds.top,
                        frame.right > bounds.right, frame.bottom >= bounds.top + bounds.width
                     {
                         fullLandscapeFrame = true
+                    }
+                    if frame.left == bounds.left, frame.top == bounds.top,
+                       frame.right == bounds.left + bounds.height, frame.bottom == bounds.top + bounds.width
+                    {
+                        exactSwappedFrame = true
                     }
                 }
                 for child in element.node ?? [] {
@@ -503,7 +507,9 @@ extension ElementLocator {
             for element in elements {
                 visit(element)
             }
-            if exceedsRoot, fitsSwapped, fullLandscapeFrame {
+            // A container exactly the swapped frame proves landscape; rows below it are scroll
+            // content past the panel's bottom edge, not portrait evidence (#8379).
+            if exceedsRoot, fullLandscapeFrame, fitsSwappedWidth, fitsSwappedHeight || exactSwappedFrame {
                 return (bounds.height, bounds.width)
             }
             return (bounds.width, bounds.height)

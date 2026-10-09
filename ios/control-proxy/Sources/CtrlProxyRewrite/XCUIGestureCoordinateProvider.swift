@@ -70,7 +70,7 @@ import os
             var message: NSString?
             let succeeded = ObjCExceptionCatcher_synthesizeDisplayTouch(
                 CGFloat(touch.start.x), CGFloat(touch.start.y), CGFloat(touch.end.x), CGFloat(touch.end.y),
-                touch.pressDuration, touch.moveDuration, touch.displayId, touch.interfaceOrientation,
+                touch.pressDuration, touch.moveDuration, touch.holdDuration, touch.displayId, touch.interfaceOrientation,
                 &unavailable, &message
             )
             if succeeded { return true }

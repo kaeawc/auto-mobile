@@ -1106,14 +1106,18 @@ public final class GesturePerformer: GesturePerforming {
                 } else if delivery.selection.strategy != .legacy || (forced != nil && forced != .legacy) || factory
                     .mismatch
                 {
-                    let durationMs = duration
-                        .isFinite && abs(duration * 1000) < Double(Int.max) ? Int(duration * 1000) : 0
-                    var sample = TapDiagnostics(requested: .init(x: x, y: y, durationMs: durationMs))
+                    var sample = TapDiagnostics(requested: .init(
+                        x: x, y: y, durationMs: Self.diagnosticDurationMs(duration)
+                    ))
                     factory.annotate(&sample, delivery: delivery)
                     logger.warning("\(sample.logLine(), privacy: .public)")
                 }
                 return diagnostics
             }
+        }
+
+        static func diagnosticDurationMs(_ duration: TimeInterval) -> Int {
+            duration.isFinite && abs(duration * 1000) < Double(Int.max) ? Int(duration * 1000) : 0
         }
 
         private static func diagnosticPoint(_ point: CGPoint) throws -> TapDiagnostics.Point {
@@ -1166,7 +1170,10 @@ public final class GesturePerformer: GesturePerforming {
                     GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
                 }
                 if factory.mismatch {
-                    var sample = TapDiagnostics(requested: .init(x: startX, y: startY, durationMs: 0))
+                    // The line describes the swipe's start point; it is not a tap (#8379).
+                    var sample = TapDiagnostics(requested: .init(
+                        x: startX, y: startY, durationMs: Self.diagnosticDurationMs(duration), mode: "swipe"
+                    ))
                     factory.annotate(&sample, delivery: delivery)
                     logger.warning("\(sample.logLine(gesture: "swipe"), privacy: .public)")
                 }
@@ -1273,13 +1280,11 @@ public final class GesturePerformer: GesturePerforming {
 
             try catchingObjCException {
                 GesturePhaseDiagnostics.current?.begin("coordinateResolution")
-                let factory = try GestureCoordinateFactory(
+                // The display-targeted route reaches an unfolded iPhone Duo's inner panel, which
+                // an XCUICoordinate drag synthesized against the main (cover) screen misses.
+                let factory = try DisplayGestureFactory(
                     provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
                 )
-                let start = try factory.resolve(x: startX, y: startY)
-                let end = try factory.resolve(x: endX, y: endY)
-                logRelativeCoordinate(start.selection, gesture: "drag")
-                logRelativeCoordinate(end.selection, gesture: "dragEnd")
 
                 // XCUICoordinate's drag API takes a velocity (points/second), not a duration,
                 // so honor the caller's dragDuration by converting it into the velocity that
@@ -1290,11 +1295,21 @@ public final class GesturePerformer: GesturePerforming {
                 let velocity: Double? = (dragDuration > 0 && distance > 0) ? distance / dragDuration : nil
 
                 // Press, drag, and hold
-                GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
                 defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
-                try factory.provider.drag(
-                    start.coordinate, to: end.coordinate, press: pressDuration, velocity: velocity, hold: holdDuration
-                )
+                let delivery = try factory.deliver(
+                    start: GesturePoint(x: startX, y: startY), end: GesturePoint(x: endX, y: endY),
+                    press: pressDuration, move: dragDuration, hold: holdDuration, velocity: velocity
+                ) { delivery in
+                    logRelativeCoordinate(delivery.selection, gesture: "drag")
+                    GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
+                }
+                if factory.mismatch {
+                    var sample = TapDiagnostics(requested: .init(
+                        x: startX, y: startY, durationMs: Self.diagnosticDurationMs(dragDuration), mode: "drag"
+                    ))
+                    factory.annotate(&sample, delivery: delivery)
+                    logger.warning("\(sample.logLine(gesture: "drag"), privacy: .public)")
+                }
             }
         }
 

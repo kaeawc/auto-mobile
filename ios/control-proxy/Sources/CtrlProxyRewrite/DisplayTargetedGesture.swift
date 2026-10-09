@@ -27,6 +27,7 @@ struct DisplayTouch: Equatable, Sendable {
     let end: GesturePoint
     let pressDuration: TimeInterval
     let moveDuration: TimeInterval
+    var holdDuration: TimeInterval = 0
     let displayId: UInt64
     let interfaceOrientation: Int
 }
@@ -51,8 +52,8 @@ struct DisplayGestureDelivery<Coordinate> {
     }
 }
 
-/// Taps and single-finger swipes use this route. The host sends long presses as taps with
-/// a press duration and double taps as two taps. Other gestures keep their existing paths.
+/// Taps, single-finger swipes and drags use this route. The host sends long presses as taps
+/// with a press duration and double taps as two taps. Other gestures keep their existing paths.
 @MainActor
 struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
     let provider: Provider
@@ -113,7 +114,7 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
 
     func deliver(
         start: GesturePoint, end: GesturePoint? = nil, press: TimeInterval, move: TimeInterval = 0,
-        velocity: Double? = nil, forced: TapCoordinateStrategy? = nil,
+        hold: TimeInterval = 0, velocity: Double? = nil, forced: TapCoordinateStrategy? = nil,
         beforeAction: (DisplayGestureDelivery<Provider.Coordinate>) -> Void = { _ in }
     )
         throws -> DisplayGestureDelivery<Provider.Coordinate>
@@ -136,7 +137,7 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
                 beforeAction(candidate)
                 if try provider.synthesize(DisplayTouch(
                     start: startPoint, end: endPoint, pressDuration: press, moveDuration: move,
-                    displayId: displayId, interfaceOrientation: orientation
+                    holdDuration: hold, displayId: displayId, interfaceOrientation: orientation
                 )) { return candidate }
             }
             fallback = selected.strategy
@@ -153,7 +154,7 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
             let selectedEnd = GestureCoordinateSelection.choose(point: end, geometry: geometry)
             let endCoordinate = try provider.coordinate(selection: selectedEnd)
             beforeAction(delivery)
-            try provider.drag(coordinate, to: endCoordinate, press: press, velocity: velocity, hold: 0)
+            try provider.drag(coordinate, to: endCoordinate, press: press, velocity: velocity, hold: hold)
         } else {
             beforeAction(delivery)
             try provider.tap(coordinate, duration: press)

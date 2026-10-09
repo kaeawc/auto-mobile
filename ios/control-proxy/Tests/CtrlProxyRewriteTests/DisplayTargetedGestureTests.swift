@@ -469,4 +469,39 @@ final class DisplayTargetedGestureTests: XCTestCase {
             XCTAssertEqual(delivery.route, available ? .displayTargetedRecord : .xcuiCoordinate)
         }
     }
+
+    func testDragTargetsInnerDisplayWithPressMoveAndHold() throws {
+        let provider = provider()
+        let factory = try DisplayGestureFactory(provider: provider)
+        let delivery = try factory.deliver(
+            start: point, end: GesturePoint(x: 500, y: 250), press: 0.6, move: 0.3, hold: 0.1, velocity: 200
+        )
+        let touch = try XCTUnwrap(provider.touches.first)
+        XCTAssertEqual(touch.start.x, 202, accuracy: 1e-9)
+        XCTAssertEqual(touch.start.y, 508, accuracy: 1e-9)
+        XCTAssertEqual(touch.end.x, 250, accuracy: 1e-9)
+        XCTAssertEqual(touch.end.y, 451, accuracy: 1e-9)
+        XCTAssertEqual(touch.pressDuration, 0.6)
+        XCTAssertEqual(touch.moveDuration, 0.3)
+        XCTAssertEqual(touch.holdDuration, 0.1)
+        XCTAssertEqual(touch.displayId, 2)
+        XCTAssertEqual(delivery.route, .displayTargetedRecord)
+        XCTAssertTrue(provider.actions.isEmpty)
+    }
+
+    func testDragUnavailableSymbolsAndFoldedKeepCoordinateDragWithHold() throws {
+        for (geometry, available) in [(unfolded, false), (folded, true)] {
+            let provider = provider(geometry: geometry)
+            provider.symbolsAvailable = available
+            let factory = try DisplayGestureFactory(provider: provider)
+            let delivery = try factory.deliver(
+                start: GesturePoint(x: 201, y: 222), end: GesturePoint(x: 250, y: 300),
+                press: 0.6, move: 0.3, hold: 0.1, velocity: 200
+            )
+            XCTAssertEqual(provider.actions, ["drag"])
+            XCTAssertEqual(provider.dragHolds, [0.1])
+            XCTAssertEqual(provider.dragPresses, [0.6])
+            XCTAssertEqual(delivery.route, .xcuiCoordinate)
+        }
+    }
 }

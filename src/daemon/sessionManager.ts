@@ -1185,6 +1185,9 @@ export class SessionManager {
   /** The clock every session timestamp is stamped and judged with (#11080); see {@link sessionNow}. */
   private readonly sessionClock: SteadyWallClock;
   private releaseCallbacks: SessionReleaseCallback[] = [];
+  // Base session → its derived `${base}:${label}` sessions (#11091), outside the base's cache so
+  // it survives the base's removal. Consumed by takeDerivedLabelSessions.
+  private readonly derivedLabelSessionsByBase = new Map<string, Set<string>>();
   private createdCallbacks: SessionCreatedCallback[] = [];
   private deviceUnboundCallbacks: SessionDeviceUnboundCallback[] = [];
   private readonly deviceOwnershipCallbacks = new Set<
@@ -6948,7 +6951,26 @@ export class SessionManager {
    * and read on the `device:`-label routing hot path (`resolveDeviceLabelSession`).
    */
   setDeviceLabels(sessionId: string, labels: DeviceLabelMap): void {
+    if (this.getSession(sessionId)) {
+      const derived = Object.values(labels).filter((labelSession) => labelSession !== sessionId);
+      if (derived.length > 0) {
+        const indexed = this.derivedLabelSessionsByBase.get(sessionId) ?? [];
+        this.derivedLabelSessionsByBase.set(sessionId, new Set([...indexed, ...derived]));
+      }
+    }
     this.updateSessionCache(sessionId, { deviceLabels: labels });
+  }
+
+  /**
+   * Remove and return every derived `${base}:${label}` session ever published for `baseSessionId`
+   * (#11091). Unlike the base's `deviceLabels` cache slot, this index survives the base's removal,
+   * so a release of the base can still cascade to its derived sessions. Entries may name sessions
+   * that are already gone; the caller checks each one.
+   */
+  takeDerivedLabelSessions(baseSessionId: string): string[] {
+    const derived = this.derivedLabelSessionsByBase.get(baseSessionId);
+    this.derivedLabelSessionsByBase.delete(baseSessionId);
+    return derived ? [...derived] : [];
   }
 
   /**

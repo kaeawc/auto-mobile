@@ -1932,6 +1932,10 @@
           },
           "required": ["omittedSteps"],
           "additionalProperties": false
+        },
+        "sessionHeld": {
+          "description": "Present only on a failed run with holdSessionOnFailure: true when the session and device were kept for recovery, false when they were released (plans with derived label sessions are always released).",
+          "type": "boolean"
         }
       },
       "required": ["success", "executedSteps", "totalSteps"],

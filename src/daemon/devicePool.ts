@@ -2487,7 +2487,7 @@ export class DevicePool {
                     `[DevicePool] Waiting for ${requiredCount - assigned.size} more device(s) (${assignResult.totalDevices} total, all currently busy)...`,
                   );
                 }
-                await this.rollbackAssignments(assignmentsToRollback);
+                await this.rollbackAssignmentsIndependently(assignmentsToRollback);
                 assignmentsToRollback.clear();
                 assignments.clear();
                 assigned.clear();
@@ -2504,12 +2504,12 @@ export class DevicePool {
       try {
         result = await allocate();
       } catch (error) {
-        await this.rollbackAssignments(assignmentsToRollback);
+        await this.rollbackAssignmentsIndependently(assignmentsToRollback);
         throw error;
       }
 
       if (!result.success) {
-        await this.rollbackAssignments(assignmentsToRollback);
+        await this.rollbackAssignmentsIndependently(assignmentsToRollback);
         throwIfRequestAborted();
 
         // Timeout case
@@ -2740,7 +2740,7 @@ export class DevicePool {
         allocationCompleted = true;
       } finally {
         if (!allocationCompleted) {
-          await this.rollbackCriteriaAssignments(assignmentsToRollback);
+          await this.rollbackAssignmentsIndependently(assignmentsToRollback);
         }
       }
 
@@ -3302,7 +3302,11 @@ export class DevicePool {
     }
   }
 
-  private async rollbackCriteriaAssignments(
+  /**
+   * Roll back each entry of a failed multi-device allocation on its own, so one failed release
+   * cannot strand the remaining claims (#11091). Used by both the criteria and platform paths.
+   */
+  private async rollbackAssignmentsIndependently(
     assignments: ReadonlyMap<string, RollbackAssignment>,
   ): Promise<void> {
     for (const [sessionId, allocation] of assignments) {
@@ -3310,7 +3314,7 @@ export class DevicePool {
         await this.rollbackAssignments(new Map([[sessionId, allocation]]));
       } catch (error) {
         logger.warn(
-          `[DevicePool] Failed to roll back criteria allocation for ${sessionId} on ${allocation.deviceId}`,
+          `[DevicePool] Failed to roll back multi-device allocation for ${sessionId} on ${allocation.deviceId}`,
           error,
         );
       }

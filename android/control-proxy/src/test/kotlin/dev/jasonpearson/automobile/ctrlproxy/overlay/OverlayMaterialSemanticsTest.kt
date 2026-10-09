@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import android.os.Looper
+import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
@@ -44,7 +45,16 @@ class OverlayMaterialSemanticsTest {
     hasInfiniteAnimation: Boolean = false,
   ): SemanticsNode {
     val spec = OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), state, root)
+    // An indeterminate progress indicator runs an infinite transition, and idle() on the paused
+    // main looper keeps drawing its frames until the heap runs out (a ten-minute test whose
+    // OutOfMemoryError then fails the next class's runTest with UncaughtExceptionsBeforeTest).
+    // A zero animator duration scale parks infinite transitions after their first frame.
     val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
+    Settings.Global.putFloat(
+      activity.contentResolver,
+      Settings.Global.ANIMATOR_DURATION_SCALE,
+      0f,
+    )
     activity.setContent { OverlaySpecContent(mapOverlaySpec(spec).root) { interactions += it } }
     // An indeterminate progress indicator reschedules a frame forever. Robolectric's Choreographer
     // posts each frame at the current virtual time, so idle() (and idleFor) never gets past it and

@@ -37,7 +37,10 @@ class OverlayAnchorLayerLocalsTest {
     shadowOf(Looper.getMainLooper()).idle()
   }
 
-  private fun show(root: OverlayNode, state: Map<String, OverlayScalar> = emptyMap()): OverlayRuntime {
+  private fun show(
+    root: OverlayNode,
+    state: Map<String, OverlayScalar> = emptyMap(),
+  ): OverlayRuntime {
     val spec = OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), state, root)
     val runtime = OverlayRuntime(spec, nextSequence = { ++sequence })
     compose.setContent {
@@ -75,7 +78,10 @@ class OverlayAnchorLayerLocalsTest {
             OverlayCardNode(
               style = OverlayStyle(background = "#6750A4"),
               children =
-                listOf(OverlayTextNode(text = "plain", testTag = "plain"), anchoredText("anchored")),
+                listOf(
+                  OverlayTextNode(text = "plain", testTag = "plain"),
+                  anchoredText("anchored"),
+                ),
             ),
           ),
       ),

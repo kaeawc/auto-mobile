@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import type {
+  AppleDeviceRuntime,
+  AppleDeviceType,
+} from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { parseAvdConfig } from "../../src/utils/android-cmdline-tools/AvdConfigReader";
 import type { DeviceInfo } from "../../src/models";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
@@ -12,6 +17,7 @@ import {
   DEFAULT_PROVISION_DEVICE_RETRYABILITY,
   type AndroidAvdConfigWriter,
   type ExactAndroidAvdClient,
+  type ExactIosRuntimeCatalog,
   type ExactIosSimulatorClient,
 } from "../../src/devices/exactDeviceProvisioning";
 
@@ -42,6 +48,8 @@ describe("ProvisionDeviceError retryability", () => {
       unsupported: false,
       platform_command_failed: false,
       resource_profile_unproven: false,
+      runtime_incompatible: false,
+      result_persistence_failed: true,
     });
   });
 
@@ -948,5 +956,153 @@ describe("DefaultExactDeviceProvisioner", () => {
       code: "unsupported",
       message: expect.stringContaining("unknown"),
     });
+  });
+});
+
+describe("exact iOS provisioning runtime compatibility", () => {
+  const fixtures = join(import.meta.dir, "../fixtures/ios-simctl");
+  const runtimes = (
+    JSON.parse(readFileSync(join(fixtures, "list-runtimes.json"), "utf8")) as {
+      runtimes: AppleDeviceRuntime[];
+    }
+  ).runtimes;
+  const deviceTypes = (
+    JSON.parse(readFileSync(join(fixtures, "list-devicetypes.json"), "utf8")) as {
+      devicetypes: AppleDeviceType[];
+    }
+  ).devicetypes;
+  const RUNTIME = (version: string) =>
+    `com.apple.CoreSimulator.SimRuntime.iOS-${version.replace(".", "-")}`;
+  const IPHONE_17_PRO = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro";
+  const IPHONE_8 = "com.apple.CoreSimulator.SimDeviceType.iPhone-8";
+
+  function harness(catalog?: Partial<ExactIosRuntimeCatalog>) {
+    const events: string[] = [];
+    const provisioner = new DefaultExactDeviceProvisioner({
+      listDeviceImages: async () => [],
+      isCreationAllowed: () => true,
+      avdManager: {} as ExactAndroidAvdClient,
+      androidConfigReader: { readConfig: async () => null },
+      androidConfigWriter: {} as AndroidAvdConfigWriter,
+      iosSimulator: {
+        createSimulator: async () => {
+          events.push("create");
+          return "new-udid";
+        },
+      },
+      iosRuntimeCatalog: {
+        getRuntimesChecked: async () => runtimes,
+        getDeviceTypesChecked: async () => deviceTypes,
+        ...catalog,
+      },
+    });
+    const provision = (deviceType: string, runtime: string, signal?: AbortSignal) =>
+      provisioner.provision({
+        platform: "ios",
+        name: "phone-a",
+        signal,
+        spec: { runtime, deviceType },
+        onBeforeCreate: async () => {
+          events.push("before-create");
+        },
+      });
+    return { events, provision };
+  }
+
+  test("rejects a proven-incompatible pair before the hook or creator run", async () => {
+    const { events, provision } = harness();
+    const error = await provision(IPHONE_17_PRO, RUNTIME("18.6")).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ProvisionDeviceError);
+    const failure = error as ProvisionDeviceError;
+    expect(failure.code).toBe("runtime_incompatible");
+    expect(failure.retryable).toBe(false);
+    expect(failure.diagnostics.runtimeCompatibility).toEqual({
+      requestedRuntime: RUNTIME("18.6"),
+      requestedDeviceType: IPHONE_17_PRO,
+      bounds: { minVersion: "26.0.0", maxVersion: null },
+      compatibleRuntimes: [
+        { id: RUNTIME("26.2"), version: "26.2" },
+        { id: RUNTIME("26.5"), version: "26.5" },
+        { id: RUNTIME("27.0"), version: "27.0" },
+        { id: RUNTIME("27.1"), version: "27.1" },
+      ],
+    });
+    expect(failure.message).toContain(RUNTIME("26.5"));
+    expect(events).toEqual([]);
+  });
+
+  test("rejects a model whose maximum is below the runtime", async () => {
+    const { events, provision } = harness();
+    const error = (await provision(IPHONE_8, RUNTIME("17.5")).catch(
+      (e: unknown) => e,
+    )) as ProvisionDeviceError;
+    expect(error.code).toBe("runtime_incompatible");
+    expect(error.diagnostics.runtimeCompatibility?.bounds).toEqual({
+      minVersion: "11.0.0",
+      maxVersion: "16.9.0",
+    });
+    expect(error.diagnostics.runtimeCompatibility?.compatibleRuntimes).toEqual([
+      { id: RUNTIME("16.4"), version: "16.4" },
+    ]);
+    expect(events).toEqual([]);
+  });
+
+  test("creates the exact requested pair when it is supported, including an endpoint", async () => {
+    const { events, provision } = harness();
+    const result = await provision(IPHONE_17_PRO, RUNTIME("26.2"));
+    expect(result.created).toBe(true);
+    expect(result.device.runtime).toBe(RUNTIME("26.2"));
+    expect(events).toEqual(["before-create", "create"]);
+  });
+
+  test("rejects an unavailable runtime without creating", async () => {
+    const unavailable = runtimes.map((runtime) =>
+      runtime.version === "26.5"
+        ? { ...runtime, isAvailable: false, availabilityError: "runtime image missing" }
+        : runtime,
+    );
+    const { events, provision } = harness({ getRuntimesChecked: async () => unavailable });
+    const error = (await provision(IPHONE_17_PRO, RUNTIME("26.5")).catch(
+      (e: unknown) => e,
+    )) as ProvisionDeviceError;
+    expect(error.code).toBe("runtime_incompatible");
+    expect(error.message).toContain("runtime image missing");
+    expect(
+      error.diagnostics.runtimeCompatibility?.compatibleRuntimes.map((r) => r.id),
+    ).not.toContain(RUNTIME("26.5"));
+    expect(events).toEqual([]);
+  });
+
+  test("unknown evidence does not block creation: malformed bounds, unlisted pair, failed discovery", async () => {
+    const malformed = deviceTypes.map((deviceType) =>
+      deviceType.identifier === IPHONE_17_PRO
+        ? { ...deviceType, minRuntimeVersionString: "garbage" }
+        : deviceType,
+    );
+    for (const catalog of [
+      { getDeviceTypesChecked: async () => malformed },
+      { getDeviceTypesChecked: async () => [] },
+      {
+        getRuntimesChecked: async (): Promise<AppleDeviceRuntime[]> => {
+          throw new Error("simctl timed out");
+        },
+      },
+    ]) {
+      const { events, provision } = harness(catalog);
+      await provision(IPHONE_17_PRO, RUNTIME("18.6"));
+      expect(events).toEqual(["before-create", "create"]);
+    }
+  });
+
+  test("an aborted discovery propagates cancellation instead of being treated as unknown", async () => {
+    const controller = new AbortController();
+    const { events, provision } = harness({
+      getRuntimesChecked: async () => {
+        controller.abort();
+        throw new Error("aborted");
+      },
+    });
+    await expect(provision(IPHONE_17_PRO, RUNTIME("18.6"), controller.signal)).rejects.toThrow();
+    expect(events).toEqual([]);
   });
 });

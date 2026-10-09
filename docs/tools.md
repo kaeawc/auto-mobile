@@ -1875,7 +1875,40 @@ every requested resource is observed in its requested state and no owned extra r
 `releaseOwnedExtras: true` (with `repair`) re-enables services AutoMobile disabled
 earlier that the profile omits; services AutoMobile never changed are never touched.
 
+The iOS catalog (`automobile:devices/images/ios`, `provisioningCatalog.deviceTypes[]`) adds
+`runtimeCompatibility` per model: `knowledge: "known"` with inclusive normalized
+`minRuntimeVersion`/`maxRuntimeVersion` (`null` is an unbounded maximum) and
+`compatibleRuntimeIds` (installed, available runtimes inside the bounds; empty is an authoritative
+"none"), or `knowledge: "unknown"` with a `reason` when CoreSimulator evidence is missing or
+malformed (it says nothing about which runtimes work). Exact iOS `provisionDevice` checks the
+requested pair against the same evidence before any creation side effect and fails a proven
+mismatch (or an unavailable runtime) with non-retryable `runtime_incompatible`; its
+`runtimeCompatibility` diagnostic carries the requested pair, known `bounds`, and installed
+`compatibleRuntimes`. Unknown evidence or failed discovery does not block creation. The requested
+runtime or model is never substituted.
+
 `provisionDevice.operationId` is a caller-generated idempotency key.
+`provisionDevice` error responses for daemon handoff (`daemon_handoff_interrupted`), caller
+cancellation (`request_cancelled`), and final-result persistence failure
+(`result_persistence_failed`, or `timeout` when the request deadline expired while persisting) carry a
+top-level `recovery` snapshot (`schemaVersion: 1`) next to the existing `operationId`, `error`, and
+`lifecycle` fields. `boundary` names where the call failed; `phaseReached` is the last durably recorded
+lifecycle phase; `device` is the exact identity (`stableId`, `runtimeDeviceId`) with `ownership`
+(`created_by_operation`, `adopted`, or `unknown`); a display name alone never authorizes destructive
+recovery. `outcomes` reports independent facts: `deviceCreation` (`created`, `adopted`, `not_created`,
+`unknown`), `resultPersistence` (`unconfirmed` means the commit may or may not have landed),
+`session` (`release_requested` means the session must not be used) and `settlement` (cancellation:
+`settling` or `settled` within the bounded 5 s wait). `cleanup.status` is `unnecessary`, `pending`,
+`failed_device_retained`, `reported_complete_unverified` (a successful destroy is not verified
+absence), or `unknown`. `originalError` preserves the provisioning cause. Select the recovery from
+`nextAction.action`: `retry_original_operation` or `reacquire_retained_device` (replaying the same
+`operationId` adopts the retained device without creating another),
+`wait_then_retry_original_operation` (honor `retryAfterMs`), `perform_cleanup` (use the exact
+identity), or `obtain_further_evidence` (inventory first; `automaticRetrySafe: false`). Missing
+evidence stays `unknown`; the snapshot is stamped with `freshness.observedAtMs` and daemon build, and
+a response that is lost in transit leaves the caller without it. Gathering it reads only in-memory
+state and does not extend the request deadline.
+
 `deleteDevice.operationId` is a caller-generated idempotency and diagnostic
 correlation ID. `verifyAbsence` requires a complete inventory observation proving
 durable absence. `cancellationPolicy: "cancel-on-request-abort"` cancels accepted teardown when

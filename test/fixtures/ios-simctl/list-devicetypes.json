@@ -1,0 +1,48 @@
+{
+  "devicetypes": [
+    {
+      "productFamily": "iPhone",
+      "bundlePath": "/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 17 Pro.simdevicetype",
+      "maxRuntimeVersion": 4294967295,
+      "maxRuntimeVersionString": "65535.255.255",
+      "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+      "modelIdentifier": "iPhone18,1",
+      "minRuntimeVersionString": "26.0.0",
+      "minRuntimeVersion": 1703936,
+      "name": "iPhone 17 Pro"
+    },
+    {
+      "productFamily": "iPhone",
+      "bundlePath": "/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 15 Pro.simdevicetype",
+      "maxRuntimeVersion": 4294967295,
+      "maxRuntimeVersionString": "65535.255.255",
+      "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro",
+      "modelIdentifier": "iPhone16,1",
+      "minRuntimeVersionString": "17.0.0",
+      "minRuntimeVersion": 1114112,
+      "name": "iPhone 15 Pro"
+    },
+    {
+      "productFamily": "iPhone",
+      "bundlePath": "/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 8.simdevicetype",
+      "maxRuntimeVersion": 1050880,
+      "maxRuntimeVersionString": "16.9.0",
+      "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-8",
+      "modelIdentifier": "iPhone10,4",
+      "minRuntimeVersionString": "11.0.0",
+      "minRuntimeVersion": 720896,
+      "name": "iPhone 8"
+    },
+    {
+      "productFamily": "iPad",
+      "bundlePath": "/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPad Pro 11-inch (M4).simdevicetype",
+      "maxRuntimeVersion": 4294967295,
+      "maxRuntimeVersionString": "65535.255.255",
+      "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-11-inch-M4-8GB",
+      "modelIdentifier": "iPad16,4",
+      "minRuntimeVersionString": "17.4.0",
+      "minRuntimeVersion": 1115136,
+      "name": "iPad Pro 11-inch (M4)"
+    }
+  ]
+}

@@ -114,6 +114,19 @@ final class GestureDeliveryRouteTests: XCTestCase {
         XCTAssertEqual(pinned.target(trackedBundleId: nil), .keepPinned)
     }
 
+    /// The startup app is injected with its bundle id (`CtrlProxy.start`): it is pinned, so its
+    /// gestures resolve `.keepPinned`; an injection without one clears the pin (#10995).
+    func testStartupAppWithBundleIdIsPinned() {
+        var pinned = GesturePinnedApplication()
+        pinned.inject(bundleId: playground)
+        XCTAssertEqual(pinned.bundleId, playground)
+        XCTAssertEqual(pinned.target(trackedBundleId: playground), .keepPinned)
+        XCTAssertEqual(pinned.target(trackedBundleId: settings), .rebind(bundleId: settings))
+        pinned.inject(bundleId: nil)
+        XCTAssertNil(pinned.bundleId)
+        XCTAssertEqual(pinned.target(trackedBundleId: settings), .rebind(bundleId: settings))
+    }
+
     func testFallbackNamesWhyTheSynthesizedRouteWasSkipped() {
         let cases: [(GestureCoordinateGeometry?, TapCoordinateStrategy?, GestureDeliveryRoute.Fallback)] = [
             (nil, nil, .noObservation),

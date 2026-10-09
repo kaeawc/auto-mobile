@@ -98,7 +98,9 @@ run_with_timeout() {
         fi
         # Escalate for anything that ignores SIGTERM, so a descendant cannot
         # hold the caller's command substitution open indefinitely.
-        sleep 2
+        # AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS shortens the TERM-to-KILL window
+        # (default 2s) so tests of the escalation path do not each pay it.
+        sleep "${AUTOMOBILE_WATCHDOG_KILL_GRACE_SECONDS:-2}"
         kill -KILL -"${cmd_pid}" 2> /dev/null || kill -KILL "${cmd_pid}" 2> /dev/null || true
       fi
     # The watcher never reports through the caller's output. Closing its output

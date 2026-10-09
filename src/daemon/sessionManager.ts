@@ -1913,6 +1913,20 @@ export class SessionManager {
     return this.releaseSnapshotFromPersisted(sessionId, persisted, persisted.release_reason);
   }
 
+  /**
+   * An idle-window release is non-terminal by design, but its UUID was issued: report the release
+   * (`session_ownership_lost` with its snapshot) instead of "never issued" (#10832).
+   */
+  private assertNotIdleReleased(sessionId: string, persisted: DeviceSession | undefined): void {
+    if (!persisted || this.isRecoverablePersistedSession(persisted)) {
+      return;
+    }
+    const idleRelease = this.idleReleaseFromPersisted(sessionId, persisted);
+    if (idleRelease) {
+      throw new TerminalSessionError(sessionId, idleRelease);
+    }
+  }
+
   /** The release of a row this daemon idle-released (`lazy-expiry`/`cleanup-expired`), if it was. */
   private idleReleaseFromPersisted(
     sessionId: string,
@@ -2415,16 +2429,11 @@ export class SessionManager {
     // never-issued sessionUuid (e.g. "kumquat-D") whenever the #6045 admit guard
     // was bypassed by the call path — the ownership bypass this closes. The
     // pool-less `if (!devicePool)` throw below stays as a secondary safety net.
-    const recoverable = this.isRecoverablePersistedSession(persisted);
-    // An idle-window release is non-terminal by design, but this UUID was issued: report the
-    // release (session_ownership_lost with its snapshot) instead of "never issued" (#10832).
-    // Checked before terminalization, which would overwrite the recorded idle reason.
-    const idleRelease =
-      persisted && !recoverable ? this.idleReleaseFromPersisted(sessionId, persisted) : undefined;
-    if (idleRelease && (requireIssuedSession || !devicePool)) {
-      throw new TerminalSessionError(sessionId, idleRelease);
+    if (requireIssuedSession || !devicePool) {
+      // Before terminalization, which would overwrite the recorded idle reason.
+      this.assertNotIdleReleased(sessionId, persisted);
     }
-    if (requireIssuedSession && !recoverable) {
+    if (requireIssuedSession && !this.isRecoverablePersistedSession(persisted)) {
       await this.terminalizeExpiredPersistedSession(persisted);
       throw new UnissuedSessionError(
         `Session ${sessionId} is not an active daemon session (not found). ` +

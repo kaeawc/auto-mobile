@@ -863,7 +863,8 @@ export class CtrlProxyHierarchy {
     if (node.text) {
       attrs["text"] = node.text;
     }
-    if (node.value) {
+    // The runner sends "" for an empty editable (vs. omitting an unreadable one), so keep it (#9078).
+    if (typeof node.value === "string") {
       attrs["value"] = node.value;
     }
     const fields = this.readConversionFields(node);
@@ -1096,8 +1097,9 @@ export class CtrlProxyHierarchy {
     ];
 
     for (const [key, value] of Object.entries(attrs)) {
-      // Skip empty values
-      if (value === "" || value === null || value === undefined) {
+      // Skip empty values, except `value`: the runner only sends "" for an empty editable, where it
+      // distinguishes "empty" from "unreadable" (#9078).
+      if ((value === "" && key !== "value") || value === null || value === undefined) {
         continue;
       }
 

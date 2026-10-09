@@ -1206,6 +1206,48 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertEqual(resolved.height, 874)
     }
 
+    // MARK: - Empty editable value (#9078)
+
+    func testEnteredTextValue_emptyEditableEmitsExplicitEmptyString() {
+        XCTAssertEqual(
+            ElementLocator.enteredTextValue(rawValue: "", isTextInput: true, isPassword: false),
+            ""
+        )
+    }
+
+    func testEnteredTextValue_unreadableEditableIsOmitted() {
+        XCTAssertNil(
+            ElementLocator.enteredTextValue(rawValue: nil, isTextInput: true, isPassword: false)
+        )
+    }
+
+    func testEnteredTextValue_nonEmptyEditableIsPassedThrough() {
+        XCTAssertEqual(
+            ElementLocator.enteredTextValue(rawValue: "draft", isTextInput: true, isPassword: false),
+            "draft"
+        )
+    }
+
+    func testEnteredTextValue_nonEditableEmptyValueIsOmitted() {
+        XCTAssertNil(
+            ElementLocator.enteredTextValue(rawValue: "", isTextInput: false, isPassword: false)
+        )
+        XCTAssertNil(
+            ElementLocator.enteredTextValue(rawValue: "1", isTextInput: false, isPassword: false)
+        )
+    }
+
+    func testEnteredTextValue_secureFieldNeverExposesContentOrEmptiness() {
+        XCTAssertNil(
+            ElementLocator.enteredTextValue(rawValue: "", isTextInput: true, isPassword: true)
+        )
+        let masked = ElementLocator.enteredTextValue(
+            rawValue: "hunter2", isTextInput: true, isPassword: true
+        )
+        XCTAssertEqual(masked, "•••••••")
+        XCTAssertFalse(masked?.contains("hunter2") ?? true)
+    }
+
     // MARK: - Typed text input fallback (#4644)
 
     func testMergeMissingTextInputCandidates_appendsIdentifierlessTextViewWithNativeFields() {

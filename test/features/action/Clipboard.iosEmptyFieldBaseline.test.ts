@@ -64,6 +64,16 @@ describe("Clipboard iOS paste into an empty field (#9078)", () => {
     });
   });
 
+  test("a runner-emitted empty value reads as an empty baseline without the fallback", () => {
+    expect(getFocusedTextField(withFocusedValue(""))).toEqual({ value: "", secure: false });
+  });
+
+  test("a paste into a field the runner reports as empty succeeds once the value changes", async () => {
+    hierarchy.setResults([withFocusedValue(""), withFocusedValue("Z1")]);
+    const result = await clipboard.execute("paste");
+    expect(result.success).toBe(true);
+  });
+
   test("a value equal to the placeholder is an empty baseline", () => {
     expect(
       getFocusedTextField(withFocusedValue(PLACEHOLDER), undefined, { iosEmptyAsBlank: true })

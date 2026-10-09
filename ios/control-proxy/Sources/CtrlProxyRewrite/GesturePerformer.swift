@@ -388,11 +388,28 @@ public final class GesturePerformer: GesturePerforming {
         }
     }
 
+    /// Shared by native fields and custom text wrappers. Each snapshot can require an IPC query.
+    nonisolated static func firstFocusedCandidate<Elements: Sequence>(
+        in elements: Elements,
+        checkBudget: () throws -> Void,
+        hasFocus: (Elements.Element) throws -> Bool
+    ) rethrows
+        -> Elements.Element?
+    {
+        for element in elements {
+            // XCTest calls are synchronous; stop between queries rather than waiting
+            // for the entire tree to resolve before noticing the arrow budget expired.
+            try checkBudget()
+            if try hasFocus(element) { return element }
+        }
+        return nil
+    }
+
     /// The runner supplies XCUITest operations; host tests supply fast clock-driven fakes.
     nonisolated static func performHorizontalArrow<C: Clock, Element>(
         clock: C, key: String,
         requireFocus: () throws -> Void,
-        resolveInput: () throws -> (Element?, String?),
+        resolveInput: (_ checkBudget: () throws -> Void) throws -> (Element?, String?),
         probeCaret: (Element, String?) throws -> Int?,
         sendKey: () throws -> Void,
         retryKey: (Element) throws -> Void,
@@ -408,7 +425,9 @@ public final class GesturePerformer: GesturePerforming {
         // element and its value below is the budgeted "focus check".
         let budget = ArrowBudget(clock: clock)
         _ = try budget.check(step: .initialProbe, consumedBy: "focus check")
-        let (element, original) = try resolveInput()
+        let (element, original) = try resolveInput {
+            _ = try budget.check(step: .initialProbe, consumedBy: "focus check")
+        }
         _ = try budget.check(step: .initialProbe, consumedBy: "focus check")
         let caretBefore: Int?
         let baselineIsMemo: Bool
@@ -1597,7 +1616,16 @@ public final class GesturePerformer: GesturePerforming {
         /// Returns nil if no element can be identified (caller falls back to
         /// Cmd+A+Delete which works for native inputs).
         private func resolveFocusedTextElement(app: XCUIApplication) -> XCUIElement? {
-            (try? catchingObjCException {
+            try? resolveFocusedTextElement(app: app, checkBudget: {})
+        }
+
+        private func resolveFocusedTextElement(
+            app: XCUIApplication, checkBudget: () throws -> Void
+        )
+            throws -> XCUIElement?
+        {
+            try catchingObjCException {
+                try checkBudget()
                 let byPredicate = app.descendants(matching: .any)
                     .matching(NSPredicate(format: "hasKeyboardFocus == true"))
                     .firstMatch
@@ -1612,26 +1640,28 @@ public final class GesturePerformer: GesturePerforming {
                     app.searchFields,
                 ]
                 for query in queries {
+                    try checkBudget()
                     let candidates = query.allElementsBoundByIndex
-                    guard !candidates.isEmpty else { continue }
-                    for candidate in candidates {
-                        guard let snap = try? candidate.snapshot() else { continue }
-                        if snap.hasFocus { return candidate }
+                    if let focused = try Self.firstFocusedCandidate(
+                        in: candidates, checkBudget: checkBudget,
+                        hasFocus: { (try? $0.snapshot())?.hasFocus == true }
+                    ) {
+                        return focused
                     }
                 }
 
+                try checkBudget()
                 let otherQuery = app.otherElements
                 let otherCount = otherQuery.count
-                for i in 0 ..< otherCount {
-                    let candidate = otherQuery.element(boundBy: i)
-                    guard let snap = try? candidate.snapshot() else { continue }
-                    if snap.hasFocus, GesturePerformer.snapshotLooksLikeTextInput(snap) {
-                        return candidate
+                return try Self.firstFocusedCandidate(
+                    in: (0 ..< otherCount).lazy.map { otherQuery.element(boundBy: $0) },
+                    checkBudget: checkBudget,
+                    hasFocus: { candidate in
+                        guard let snap = try? candidate.snapshot() else { return false }
+                        return snap.hasFocus && GesturePerformer.snapshotLooksLikeTextInput(snap)
                     }
-                }
-
-                return nil
-            }) ?? nil
+                )
+            }
         }
 
         /// Clear text from a focused element, choosing the strategy based on
@@ -1939,9 +1969,10 @@ public final class GesturePerformer: GesturePerforming {
                             app: app, context: "ensure a text field is focused before pressing a key", forKeyPress: true
                         )
                     },
-                    resolveInput: {
+                    resolveInput: { checkBudget in
                         GesturePhaseDiagnostics.current?.begin("elementResolution")
-                        let element = self.resolveFocusedTextElement(app: app)
+                        let element = try self.resolveFocusedTextElement(app: app, checkBudget: checkBudget)
+                        try checkBudget()
                         GesturePhaseDiagnostics.current?.begin("valueRead")
                         let original = try element.map { element in
                             try catchingObjCException { self.fieldText(element) }

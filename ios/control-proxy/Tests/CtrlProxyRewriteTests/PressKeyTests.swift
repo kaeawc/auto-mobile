@@ -44,6 +44,10 @@ private final class ArrowKeyScenario {
     var restorations = 0
     var focusChecks = 0
     var resolutions = 0
+    var scanCandidateCount: Int?
+    var candidateDuration: Duration = .zero
+    var focusedCandidate: Int?
+    var scannedCandidates: [Int] = []
 
     func run(
         knownCaret: (String) -> Int? = { _ in nil },
@@ -57,9 +61,20 @@ private final class ArrowKeyScenario {
                 self.focusChecks += 1
                 self.clock.advance(by: self.focusDuration)
             },
-            resolveInput: {
+            resolveInput: { checkBudget in
                 self.resolutions += 1
                 self.clock.advance(by: self.lookupDuration)
+                if let count = self.scanCandidateCount {
+                    let match = try GesturePerformer.firstFocusedCandidate(
+                        in: 0 ..< count, checkBudget: checkBudget,
+                        hasFocus: { index in
+                            self.scannedCandidates.append(index)
+                            self.clock.advance(by: self.candidateDuration)
+                            return index == self.focusedCandidate
+                        }
+                    )
+                    return match.map { ("field-\($0)", "abc") } ?? (nil, nil)
+                }
                 return ("field", "abc")
             },
             probeCaret: { _, _ in
@@ -313,6 +328,34 @@ final class PressKeyTests: XCTestCase {
         }
         XCTAssertEqual(scenario.sends, 0)
         XCTAssertEqual(scenario.probes, 0)
+    }
+
+    func testArrowStopsScanningUnfocusedCandidatesWhenResolutionBudgetExpires() {
+        // Retained iPad input failure: the runner kept resolving Other indices 0...253
+        // for over a minute after the host's 9s timeout. No live device is needed here.
+        let scenario = ArrowKeyScenario()
+        scenario.scanCandidateCount = 254
+        scenario.candidateDuration = .milliseconds(250)
+        XCTAssertThrowsError(try scenario.run()) { error in
+            guard case let GesturePerformer.GestureError.arrowBudgetExhausted(step, elapsedMs) = error else {
+                return XCTFail("Expected pre-send budget error, got \(error)")
+            }
+            XCTAssertEqual(step, "focus check")
+            XCTAssertEqual(elapsedMs, 3500)
+        }
+        XCTAssertEqual(scenario.scannedCandidates, Array(0 ..< 14))
+        XCTAssertEqual(scenario.sends, 0)
+        XCTAssertEqual(scenario.probes, 0)
+    }
+
+    func testArrowStillUsesFocusedCandidateWithinResolutionBudget() throws {
+        let scenario = ArrowKeyScenario()
+        scenario.scanCandidateCount = 254
+        scenario.candidateDuration = .milliseconds(250)
+        scenario.focusedCandidate = 2
+        XCTAssertTrue(try scenario.run())
+        XCTAssertEqual(scenario.scannedCandidates, [0, 1, 2])
+        XCTAssertEqual(scenario.sends, 1)
     }
 
     func testArrowBudgetExhaustedDuringCaretProbeDoesNotSendKey() {

@@ -247,7 +247,10 @@ final class OverlayAgent {
             case "get_overlay_status":
                 result(true, extra: ["status": model.status()])
             case OverlayAgentProtocol.hideForCaptureRequest:
-                hideForCapture(deadlineMs: OverlayCaptureHold.clampedDeadlineMs(message["deadlineMs"])) { hidden, token in
+                hideForCapture(
+                    deadlineMs: OverlayCaptureHold
+                        .clampedDeadlineMs(message["deadlineMs"])
+                ) { hidden, token in
                     result(true, extra: ["hidden": hidden, "token": token])
                 }
             case OverlayAgentProtocol.restoreAfterCaptureRequest:

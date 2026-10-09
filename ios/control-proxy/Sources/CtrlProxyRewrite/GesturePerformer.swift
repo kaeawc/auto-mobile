@@ -1110,7 +1110,8 @@ public final class GesturePerformer: GesturePerforming {
             }
             let screens = (ObjCExceptionCatcher_displayInventory() ?? []).compactMap { entry in
                 entry["displayId"].flatMap { id in
-                    entry["isMain"].map { TapDiagnostics.DisplayScreen(displayId: id.uint64Value, isMain: $0.boolValue) }
+                    entry["isMain"]
+                        .map { TapDiagnostics.DisplayScreen(displayId: id.uint64Value, isMain: $0.boolValue) }
                 }
             }
             guard let displayId = UnpinnedGestureSynthesis.mainDisplayId(screens: screens) else {

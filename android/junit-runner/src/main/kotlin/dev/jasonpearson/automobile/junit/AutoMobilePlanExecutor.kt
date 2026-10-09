@@ -1122,9 +1122,16 @@ internal object AutoMobilePlanExecutor {
    */
   internal const val DEVICE_CLEANUP_IN_PROGRESS_CODE = "device_cleanup_in_progress"
 
+  /** Typed code for a bind refused because another AutoMobile daemon claims the device (#10980). */
+  internal const val DEVICE_OWNED_BY_OTHER_DAEMON_CODE = "device_owned_by_other_daemon"
+
   /** Refusals the runner waits out with the bounded held-device wait. */
   private val DEVICE_WAIT_CODES =
-    setOf(DEVICE_OWNED_BY_OTHER_SESSION_CODE, DEVICE_CLEANUP_IN_PROGRESS_CODE)
+    setOf(
+      DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+      DEVICE_CLEANUP_IN_PROGRESS_CODE,
+      DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+    )
 
   private const val DEVICE_OWNED_INITIAL_DELAY_MS = 500L
   private const val DEVICE_OWNED_MAX_DELAY_MS = 4_000L
@@ -1151,10 +1158,12 @@ internal object AutoMobilePlanExecutor {
   private const val RELEASE_SESSION_TIMEOUT_MS = 10_000L
 
   private fun deviceOwnedGiveUpMessage(parsed: ParsedToolResult, waitedMs: Long): String =
-    (if (parsed.code == DEVICE_CLEANUP_IN_PROGRESS_CODE) {
-      "Device is still finishing its previous session's cleanup ($DEVICE_CLEANUP_IN_PROGRESS_CODE)"
-    } else {
-      "Device is held by another session ($DEVICE_OWNED_BY_OTHER_SESSION_CODE)"
+    (when (parsed.code) {
+      DEVICE_CLEANUP_IN_PROGRESS_CODE ->
+        "Device is still finishing its previous session's cleanup ($DEVICE_CLEANUP_IN_PROGRESS_CODE)"
+      DEVICE_OWNED_BY_OTHER_DAEMON_CODE ->
+        "Device is claimed by another AutoMobile daemon ($DEVICE_OWNED_BY_OTHER_DAEMON_CODE)"
+      else -> "Device is held by another session ($DEVICE_OWNED_BY_OTHER_SESSION_CODE)"
     }) +
       (parsed.daemonMessage?.let { ": $it" } ?: "") +
       "\nThe runner waited ${waitedMs}ms for it to be released. Another test attempt or tool " +

@@ -9,7 +9,7 @@ import XCTest
     /// renderer's node wrappers are UIKit-bound; these use the same layout with stand-in rows.
     @MainActor
     final class OverlayLayeredLayoutTests: XCTestCase {
-        private final class Probe {
+        private final class Probe: @unchecked Sendable {
             var frame: CGRect = .zero
         }
 

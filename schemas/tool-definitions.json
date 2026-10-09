@@ -2414,6 +2414,9 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -2492,6 +2495,9 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3136,7 +3142,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/embeddedSdkOnly": true
+      "automobile/embeddedSdkOnly": true,
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3215,6 +3222,9 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3535,6 +3545,9 @@
       "required": ["x", "y"],
       "additionalProperties": false,
       "description": "Preview which hierarchy nodes sit beneath one absolute point without dispatching input."
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -3649,7 +3662,8 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/debugOnly": true
+      "automobile/debugOnly": true,
+      "automobile/deviceReadOnly": true
     }
   },
   {

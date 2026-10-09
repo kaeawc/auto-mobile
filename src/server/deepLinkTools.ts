@@ -66,6 +66,7 @@ export function registerDeepLinkTools() {
     "Query app deep links",
     getDeepLinksSchema,
     createGetDeepLinksHandler(),
-    { defaultEnabled: false },
+    // Reads only; read-only access never requires a session (#10965).
+    { defaultEnabled: false, deviceReadOnly: true },
   );
 }

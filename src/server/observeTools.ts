@@ -27,7 +27,10 @@ import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { SCREENSHOT_HIDE_OVERLAY_CAPABILITY } from "../features/observe/android/ctrlProxyProtocol";
 import { ToolRegistry } from "./toolRegistry";
 import { stripInternalToolParams } from "./internalToolParams";
-import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import {
+  getToolSelectionContext,
+  isSessionlessDeviceRead,
+} from "../features/toolSelection/toolSelectionContext";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
 import { assertAllDisplayObserveSupported } from "../features/observe/DisplaySelection";
 import { sessionlessDeviceReadFor, type DeviceObservationAccess } from "./deviceObservationAccess";
@@ -2355,8 +2358,11 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     args: IdentifyInteractionsOptions,
   ) => {
     try {
-      const observeScreen = dependencies.createScreen?.(device) ?? new RealObserveScreen(device);
-      const cachedResult = await readObservationForInteractions(observeScreen);
+      const cachedResult = isSessionlessDeviceRead()
+        ? await readWatchedObservationForInteractions(device, dependencies)
+        : await readObservationForInteractions(
+            dependencies.createScreen?.(device) ?? new RealObserveScreen(device),
+          );
       const navigationGraph = args.sessionUuid
         ? NavigationGraphManager.getInstanceForSession(args.sessionUuid)
         : NavigationGraphManager.getInstance();
@@ -2410,10 +2416,30 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     "Suggest likely interactions",
     identifyInteractionsSchema,
     identifyInteractionsHandler,
-    // Not `deviceReadOnly` (#10828, #10830): like hitTest it reads through the session observe
-    // pipeline and cache, not the observer capture the read-only device path needs.
-    { defaultEnabled: true, debugOnly: true },
+    // Suggests, never acts: a read (#10965). On a held device it reads through the observer
+    // capture (`readWatchedObservationForInteractions`), never the holder's session pipeline.
+    { defaultEnabled: true, debugOnly: true, deviceReadOnly: true },
   );
+}
+
+/**
+ * identifyInteractions on the read-only device path (#10965): a fresh observer capture of the
+ * watched device, connect-only like `observe {deviceId}`, instead of the session pipeline's cache.
+ */
+async function readWatchedObservationForInteractions(
+  device: BootedDevice,
+  dependencies: ObserveToolDependencies,
+): Promise<ObserveResult> {
+  const screen =
+    dependencies.createScreen?.(device) ??
+    new RealObserveScreen(device, undefined, { deviceReadOnly: true });
+  const result = await screen.executeDeviceRead(undefined, "none");
+  if (!result.viewHierarchy || result.viewHierarchy.hierarchy.error) {
+    throw new ActionableError("Unable to observe screen to identify interactions.", {
+      cause: new Error(result.viewHierarchy?.hierarchy.error ?? "No view hierarchy returned."),
+    });
+  }
+  return result;
 }
 
 function createSettledGate({

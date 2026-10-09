@@ -88,11 +88,31 @@ describe("getStaticToolDefinitions", () => {
       getStaticToolDefinitions().find((tool) => tool.name === name)?._meta?.[
         "automobile/deviceReadOnly"
       ] === true;
-    for (const name of ["observe", "snapshotOf", "listApps", "getDeviceState"]) {
+    // Pure reads, including the owner-listed ones (#10965).
+    for (const name of [
+      "observe",
+      "snapshotOf",
+      "listApps",
+      "getDeviceState",
+      "hitTest",
+      "identifyInteractions",
+      "getAppPermissions",
+      "getDeepLinks",
+    ]) {
       expect(readOnly(name)).toBe(true);
     }
-    // sqlQuery is read-only only for some statements, so it keeps the session fence.
-    for (const name of ["tapOn", "pressButton", "identifyInteractions", "sqlQuery"]) {
+    // Control tools, and per-args tools (a read only for some arguments), keep the session
+    // fence: a per-args read cannot be marked statically (#10965).
+    for (const name of [
+      "tapOn",
+      "pressButton",
+      "sqlQuery",
+      "keyboard",
+      "clipboard",
+      "displayConfig",
+      "accessibility",
+      "prototype",
+    ]) {
       expect(readOnly(name)).toBe(false);
     }
   });

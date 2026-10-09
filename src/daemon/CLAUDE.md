@@ -167,14 +167,24 @@ themselves; control calls, the holder's own reads and reads of a free device (wh
 readiness) stay on the control lane.
 A `deviceReadOnly` call whose `sessionUuid` names no device session this
 daemon issued (the IDE injects its observer session UUID into every call) is
-handled as sessionless rather than refused as unissued (#10968). Read-only tools: `observe`, `snapshotOf`, `listApps`, `getDeviceState`,
-`getNetworkGraph`, `getPreference`, `listDataStores`, `getDataStore`, and
-`sqlQuery` when `isReadOnlySqlQuery` accepts the statement (a write, or anything
-the classifier cannot prove read-only, needs the holder). The classifier lexes the
-query first (`src/features/database/sqlLexer.ts`), so a `)` or `;` inside a string
-literal, quoted identifier or comment cannot end a CTE or a statement (#10966). `identifyInteractions`
-and `hitTest` read through the session observe pipeline and its shared caches,
-so they are not `deviceReadOnly`. An autolocked device keeps autolock's
+handled as sessionless rather than refused as unissued (#10968). Read-only tools
+(owner decisions 2026-10-09, #10965: anything that changes visible UI or starts a
+device-side process is control; read-only access never requires a session):
+`observe`, `snapshotOf`, `hitTest`, `identifyInteractions`, `listApps`,
+`getDeviceState`, `getNetworkGraph`, `getPreference`, `listDataStores`,
+`getDataStore`, `getAppPermissions`, `getNotificationPolicy`, `getDeepLinks`,
+`getNavigationGraph`; per call, `keyboard` detect/listImes/listProfiles,
+`clipboard` get, `displayConfig` with no set field, `accessibility` with no
+toggle, `prototype` status/inspect, and `sqlQuery` when `isReadOnlySqlQuery`
+accepts the statement (a write, or anything the classifier cannot prove
+read-only, needs the holder). The classifier lexes the query first
+(`src/features/database/sqlLexer.ts`), so a `)` or `;` inside a string literal,
+quoted identifier or comment cannot end a CTE or a statement (#10966).
+`systemTray`, `videoRecording` and `deviceSnapshot` stay control. On the
+read-only device path `hitTest` and `identifyInteractions` read through the
+observer capture (`executeDeviceRead`), not the holder's session pipeline or
+cache. `test/lint/toolReadControlClassification.test.ts` enumerates every
+registered device-aware tool against its declared classification. An autolocked device keeps autolock's
 own refusal. Plain lifecycle tools that stop a running device (`killDevice`, and
 `deleteDevice` on a booted target) never reach that resolver, so they apply the
 same code through `assertLifecycleCallerHoldsDevice`

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -133,9 +133,25 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
     return result;
   }
 
+  // Walking and reading the Swift/Kotlin trees is IO, not the guard: do it once here so a
+  // loaded runner's disk latency is not charged to the tests.
+  let unbalancedPairs = new Map<string, Set<string>>();
+  const filesPerDir = new Map<string, number>();
+  beforeAll(() => {
+    unbalancedPairs = unbalanced();
+    for (const scope of SCOPES) {
+      for (const dir of scope.dirs) {
+        filesPerDir.set(
+          `${scope.ext}:${dir}`,
+          walk(join(ROOT, dir), scope.ext, scope.excludes).length,
+        );
+      }
+    }
+  }, 20_000);
+
   test("every registration is balanced by a teardown in the same file", () => {
     const offenders: string[] = [];
-    for (const [rel, pairs] of unbalanced()) {
+    for (const [rel, pairs] of unbalancedPairs) {
       for (const pairName of pairs) {
         offenders.push(
           `${rel} registers a ${pairName} but has no matching teardown in the same file. ` +
@@ -155,7 +171,7 @@ describe("OS-listener registration has a matching teardown (issue #3599 class)",
     const empty: string[] = [];
     for (const scope of SCOPES) {
       for (const dir of scope.dirs) {
-        if (walk(join(ROOT, dir), scope.ext, scope.excludes).length === 0) {
+        if (filesPerDir.get(`${scope.ext}:${dir}`) === 0) {
           empty.push(`${dir} (*${scope.ext}) matched no files`);
         }
       }

@@ -5,7 +5,7 @@ import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { spyOn } from "bun:test";
-import Ajv2020 from "ajv/dist/2020";
+import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   crashAppResultSchema,
@@ -659,7 +659,7 @@ describe("app permission tools", () => {
     const setAppPermissions = ToolRegistry.getToolDefinitions({ includeUnavailable: true }).find(
       (tool) => tool.name === "setAppPermissions",
     );
-    const validate = new Ajv2020({ strict: false }).compile(setAppPermissions!.inputSchema);
+    const validate = compileAjv2020(setAppPermissions!.inputSchema);
 
     expect(
       validate({

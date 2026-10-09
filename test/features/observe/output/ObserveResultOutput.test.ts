@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../../src/models/ViewHierarchyResult";
 import {
@@ -16,6 +16,12 @@ import {
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
 import scrollBeforeFixture from "../../../fixtures/observe/diff/scroll-before.json";
 import { computeFreshness } from "../../../../src/features/observe/observationFreshness";
+
+// The first cl100k encode in a process pays the tokenizer's JIT warm-up (~20 ms on the
+// baseline fixture); pay it here rather than in whichever test measures first.
+beforeAll(() => {
+  measureValue(loadAndroidHomeObserve().observe);
+});
 
 /**
  * Unit tests for `sanitizeObserveResult` — the output-only transform for issue

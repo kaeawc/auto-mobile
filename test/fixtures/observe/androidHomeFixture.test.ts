@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import { loadAndroidHomeObserve, measureObserveBreakdown, measureValue } from "./observeFixture";
 
@@ -18,6 +18,12 @@ import { loadAndroidHomeObserve, measureObserveBreakdown, measureValue } from ".
  * illustrative earlier sample; this committed capture is the authoritative
  * baseline.)
  */
+// The first cl100k encode in a process pays the tokenizer's JIT warm-up (~20 ms on the
+// baseline fixture); pay it here rather than in whichever test measures first.
+beforeAll(() => {
+  measureValue(loadAndroidHomeObserve().observe);
+});
+
 describe("android-home observe baseline fixture", () => {
   const { raw, observe } = loadAndroidHomeObserve();
 

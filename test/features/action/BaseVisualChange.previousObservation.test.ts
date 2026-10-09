@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { SendKeys } from "../../../src/features/action/SendKeys";
 import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
@@ -280,7 +280,7 @@ function harness(initiallyVerified = true, revealAfterAction = false) {
 let ctrlProxySpy: ReturnType<typeof spyOn>;
 let originalMode: string | undefined;
 let originalActionPolicy: string | undefined;
-beforeEach(() => {
+function setUpEnvironment(): void {
   ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
     new FakeCtrlProxy() as AndroidCtrlProxyClient,
   );
@@ -289,8 +289,8 @@ beforeEach(() => {
   process.env[OBSERVE_SETTLED_SCREENSHOT_ENV] = "1";
   process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV] = "0";
   serverConfig.setAccessibilityAuditConfig(null);
-});
-afterEach(() => {
+}
+function restoreEnvironment(): void {
   ctrlProxySpy.mockRestore();
   spyOn(defaultAdbClientFactory, "create").mockRestore();
   if (originalMode === undefined) {
@@ -306,7 +306,21 @@ afterEach(() => {
   resetObserveCacheStore();
   resetScreenshotStateStore();
   displayTransitions.reset(device.deviceId);
+}
+// The first observe -> tapOn -> settle in a process pays one-time module and JIT warm-up that
+// is not the behaviour under test; pay it here so it is not charged to the first test.
+beforeAll(async () => {
+  setUpEnvironment();
+  try {
+    const h = harness();
+    await h.observe();
+    await h.run("tapOn");
+  } finally {
+    restoreEnvironment();
+  }
 });
+beforeEach(setUpEnvironment);
+afterEach(restoreEnvironment);
 
 describe("BaseVisualChange previous observation with real ObserveScreen", () => {
   test("async automatic screenshot skip remains effective after a resolution refetch", async () => {

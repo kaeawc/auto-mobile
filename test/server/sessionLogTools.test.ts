@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import Ajv2020 from "ajv/dist/2020";
+import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerSessionLogTools } from "../../src/server/sessionLogTools";
@@ -21,7 +21,7 @@ describe("resetAppLogs tool (#7006)", () => {
     expect(definition!.inputSchema.properties.paths).toBeDefined();
     expect(definition!.inputSchema.properties.container).toBeDefined();
 
-    const validate = new Ajv2020({ strict: false }).compile(definition!.inputSchema);
+    const validate = compileAjv2020(definition!.inputSchema);
     expect(validate({ appId: "com.example.app", paths: ["logs/app.log"] })).toBe(true);
     expect(validate({ appId: "com.example.app", paths: [] })).toBe(false);
     expect(validate({ appId: "com.example.app" })).toBe(false);

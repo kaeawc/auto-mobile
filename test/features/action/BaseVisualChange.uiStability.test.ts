@@ -69,6 +69,22 @@ describe("BaseVisualChange UI stability platform guard", () => {
     expect(fakeAwaitIdle.getInitializeSignal()).toBe(controller.signal);
   });
 
+  test("the default gfxinfo stability wait polls on the injected timer, not the wall clock", async () => {
+    const device: BootedDevice = {
+      name: "test-device",
+      platform: "android",
+      deviceId: "device-123",
+    };
+    const instance = new BaseVisualChange(device, fakeAdb, fakeTimer);
+    instance.observeScreen = fakeObserveScreen;
+    instance.window.getCachedActiveWindow = fakeWindow.getCachedActiveWindow.bind(fakeWindow);
+
+    await instance.observedInteraction(async () => ({ success: true }), { changeExpected: false });
+
+    // AwaitIdle's 17ms gfxinfo poll ran on the real clock before it shared this timer.
+    expect(fakeTimer.wasSleepCalled(17)).toBe(true);
+  });
+
   test("preserves explicit success:false when changeExpected is true", async () => {
     const instance = createVisualChange("ios");
 

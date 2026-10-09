@@ -24,7 +24,7 @@ import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 import { FakeToolSelectionRepository } from "../fakes/FakeToolSelectionRepository";
 import { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
-import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { McpTestFixture, precompileMcpOutputSchemas } from "../fixtures/mcpTestFixture";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { compileJsonSchema } from "../helpers/jsonSchemaCompile";
 import { initializeCliTools } from "../../src/cli/cliToolRegistration";
@@ -1011,6 +1011,10 @@ describe("overlay discovery over MCP", () => {
     unsubscribe = registerOverlayTools();
     registerHighlightTools();
     registerToolSelectionTools();
+    // Compile the advertised output schemas once here, not on the test's first re-list.
+    precompileMcpOutputSchemas(
+      ToolRegistry.getToolDefinitions().map((definition) => definition.outputSchema),
+    );
   });
   afterAll(async () => {
     unsubscribe();

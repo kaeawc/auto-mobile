@@ -63,6 +63,25 @@ export function hitEntries(entries: readonly SearchableEntry[], point: { x: numb
 export type OwnOverlayCoverRule = "none" | "touch";
 
 /**
+ * The per-hierarchy work of the cover test: the deduplicated projection and each node's owning
+ * window type. Both depend only on the hierarchy, so a caller testing many rows of one capture
+ * builds this once instead of re-projecting the whole tree per row.
+ */
+export interface ApplicationWindowCoverIndex {
+  readonly entries: readonly SearchableEntry[];
+  readonly types: ReadonlyMap<SearchableEntry["source"], number | undefined>;
+}
+
+export function applicationWindowCoverIndex(
+  hierarchy: ViewHierarchyResult,
+): ApplicationWindowCoverIndex {
+  return {
+    entries: uniqueBySource(new SearchableHierarchy().project(hierarchy)),
+    types: windowTypesBySource(hierarchy),
+  };
+}
+
+/**
  * Reuse preview ordering and source identity; system-window dispatch remains unchanged.
  *
  * With `ownOverlays` other than `"none"`, AutoMobile's own node-hosting overlay windows ranked
@@ -77,13 +96,42 @@ export function applicationWindowSafeTapPoint(
   imeBounds?: ElementBounds,
   ownOverlays: OwnOverlayCoverRule = "none",
 ): { point: { x: number; y: number } | null; coveredBy?: string } {
-  const entries = uniqueBySource(new SearchableHierarchy().project(hierarchy));
+  return safeTapPoint({
+    hierarchy,
+    target,
+    bounds,
+    point,
+    imeBounds,
+    ownOverlays,
+    index: applicationWindowCoverIndex(hierarchy),
+  });
+}
+
+interface SafeTapPointQuery {
+  hierarchy: ViewHierarchyResult;
+  target: Element;
+  bounds: ElementBounds;
+  point: { x: number; y: number };
+  imeBounds?: ElementBounds;
+  ownOverlays: OwnOverlayCoverRule;
+  index: ApplicationWindowCoverIndex;
+}
+
+function safeTapPoint({
+  hierarchy,
+  target,
+  bounds,
+  point,
+  imeBounds,
+  ownOverlays,
+  index,
+}: SafeTapPointQuery): { point: { x: number; y: number } | null; coveredBy?: string } {
+  const { entries, types } = index;
   const source = getHierarchyNodeSource(target);
   const owner = entries.find((entry) => entry.source === source);
   if (!owner) {
     return { point };
   }
-  const types = windowTypesBySource(hierarchy);
   // A deserialized merged-tree copy is not an owning window. Its fallback rank
   // cannot establish that an application window is above the target's window.
   if (!types.has(owner.source)) {
@@ -218,14 +266,14 @@ export function isFullyCoveredByApplicationWindow(
   target: Element,
   bounds: ElementBounds,
   ownOverlays: OwnOverlayCoverRule = "none",
+  index: ApplicationWindowCoverIndex = applicationWindowCoverIndex(hierarchy),
 ): boolean {
   const center = {
     x: Math.floor((bounds.left + bounds.right) / 2),
     y: Math.floor((bounds.top + bounds.bottom) / 2),
   };
   return (
-    applicationWindowSafeTapPoint(hierarchy, target, bounds, center, undefined, ownOverlays)
-      .point === null
+    safeTapPoint({ hierarchy, target, bounds, point: center, ownOverlays, index }).point === null
   );
 }
 

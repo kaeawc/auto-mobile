@@ -37,7 +37,14 @@ export const testDirectoryRoot = mkdtempSync(path.join(os.tmpdir(), "am-test-"))
 for (const [, , child] of DIRECTORY_OVERRIDES) {
   mkdirSync(path.join(testDirectoryRoot, child), { mode: 0o700 });
 }
-Object.assign(process.env, isolatedTestDirectoryEnv(process.env, testDirectoryRoot));
+const isolatedEnv = isolatedTestDirectoryEnv(process.env, testDirectoryRoot);
+// Name the data directory this preload assigned (mirrors UNIT_TEST_ISOLATED_DATA_DIR_ENV in
+// src/features/observe/Window.ts, which cannot be imported before production modules bind
+// paths): process isolation must not opt every unit test into the window disk cache (#9487).
+if (isolatedEnv.AUTOMOBILE_DATA_DIR !== process.env.AUTOMOBILE_DATA_DIR) {
+  process.env.AUTOMOBILE_UNIT_TEST_ISOLATED_DATA_DIR = isolatedEnv.AUTOMOBILE_DATA_DIR;
+}
+Object.assign(process.env, isolatedEnv);
 // Object.assign cannot remove a blank primary that shadows a legacy override.
 for (const [primary, twin] of DIRECTORY_OVERRIDES) {
   if (!process.env[primary]?.trim() && process.env[twin]?.trim()) {

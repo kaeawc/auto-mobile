@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "fs";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -50,17 +50,22 @@ describe("resource URI encoders accept lone surrogates (#10135)", () => {
     );
   });
 
-  test("no resource URI builder calls encodeURIComponent directly", () => {
+  // Reading every src/server file is IO, not the behaviour under test: scan once in
+  // beforeAll so a loaded runner's disk latency is not charged to the test.
+  let offenders: string[] = [];
+  beforeAll(() => {
     const roots = [
       ...readdirSync(`${import.meta.dir}/../../src/server`).map((name) => `src/server/${name}`),
       "src/utils/navigationResourceUri.ts",
     ].filter((path) => path.endsWith(".ts"));
-    const offenders = roots.filter((path) =>
+    offenders = roots.filter((path) =>
       /(?<![`\w.])encodeURIComponent\(/.test(
         readFileSync(`${import.meta.dir}/../../${path}`, "utf8"),
       ),
     );
+  });
 
+  test("no resource URI builder calls encodeURIComponent directly", () => {
     expect(offenders).toEqual([]);
   });
 });

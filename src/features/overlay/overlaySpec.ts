@@ -9,15 +9,19 @@ export type OverlayJson =
   | boolean
   | OverlayJson[]
   | { [key: string]: OverlayJson };
-const jsonValueSchema: z.ZodType<OverlayJson> = z.lazy(() =>
-  z.union([
-    z.null(),
-    z.string(),
-    z.number().finite(),
-    z.boolean(),
-    z.array(jsonValueSchema),
-    z.record(jsonValueSchema),
-  ]),
+// zod v3 calls a lazy schema's getter on every parse, so each getter builds its schema once and
+// returns that same instance afterwards instead of rebuilding it for every nested value.
+let jsonValueUnion: z.ZodType<OverlayJson> | undefined;
+const jsonValueSchema: z.ZodType<OverlayJson> = z.lazy(
+  () =>
+    (jsonValueUnion ??= z.union([
+      z.null(),
+      z.string(),
+      z.number().finite(),
+      z.boolean(),
+      z.array(jsonValueSchema),
+      z.record(jsonValueSchema),
+    ])),
 );
 // Preserve arbitrary JSON keys: Zod record decoding deliberately drops __proto__.
 const overlayJsonSchema = z.custom<OverlayJson>(
@@ -41,19 +45,21 @@ const boundsSchema = z
   })
   .strict();
 // Reuse the existing interaction contract's type; anchors reject ambiguous selection.
-const containerSchema: z.ZodType<ElementContainerSelector> = z.lazy(() =>
-  z
-    .object({
-      elementId: z.string().min(1).optional(),
-      text: z
-        .string()
-        .refine((value) => value.trim().length > 0)
-        .optional(),
-      index: z.number().finite().int().min(0).max(2147483647).optional(),
-      selectionStrategy: z.literal("unique").optional(),
-      container: containerSchema.optional(),
-    })
-    .strict(),
+let containerObject: z.ZodType<ElementContainerSelector> | undefined;
+const containerSchema: z.ZodType<ElementContainerSelector> = z.lazy(
+  () =>
+    (containerObject ??= z
+      .object({
+        elementId: z.string().min(1).optional(),
+        text: z
+          .string()
+          .refine((value) => value.trim().length > 0)
+          .optional(),
+        index: z.number().finite().int().min(0).max(2147483647).optional(),
+        selectionStrategy: z.literal("unique").optional(),
+        container: containerSchema.optional(),
+      })
+      .strict()),
 );
 const selectorSchema = z
   .object({
@@ -73,16 +79,18 @@ export type OverlayCondition =
   | { all: OverlayCondition[] }
   | { any: OverlayCondition[] }
   | { not: OverlayCondition };
-const conditionSchema: z.ZodType<OverlayCondition> = z.lazy(() =>
-  z.union([
-    z.object({ key: stateKeySchema, equals: scalarSchema }).strict(),
-    z.object({ key: stateKeySchema, notEquals: scalarSchema }).strict(),
-    z.object({ key: stateKeySchema, gt: z.number().finite() }).strict(),
-    z.object({ key: stateKeySchema, lt: z.number().finite() }).strict(),
-    z.object({ all: z.array(conditionSchema).min(1).max(16) }).strict(),
-    z.object({ any: z.array(conditionSchema).min(1).max(16) }).strict(),
-    z.object({ not: conditionSchema }).strict(),
-  ]),
+let conditionUnion: z.ZodType<OverlayCondition> | undefined;
+const conditionSchema: z.ZodType<OverlayCondition> = z.lazy(
+  () =>
+    (conditionUnion ??= z.union([
+      z.object({ key: stateKeySchema, equals: scalarSchema }).strict(),
+      z.object({ key: stateKeySchema, notEquals: scalarSchema }).strict(),
+      z.object({ key: stateKeySchema, gt: z.number().finite() }).strict(),
+      z.object({ key: stateKeySchema, lt: z.number().finite() }).strict(),
+      z.object({ all: z.array(conditionSchema).min(1).max(16) }).strict(),
+      z.object({ any: z.array(conditionSchema).min(1).max(16) }).strict(),
+      z.object({ not: conditionSchema }).strict(),
+    ])),
 );
 const sheetConditionSchema = z
   .object({ key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/), equals: z.boolean() })
@@ -720,41 +728,43 @@ export type OverlayNode =
   | z.infer<typeof tabBarBaseSchema>
   | z.infer<typeof bottomNavBaseSchema>
   | (z.infer<typeof bottomSheetBaseSchema> & { child: OverlayNode });
-export const overlayNodeSchema: z.ZodType<OverlayNode, z.ZodTypeDef, unknown> = z.lazy(() =>
-  z.discriminatedUnion("type", [
-    boxBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
-    rowBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
-    columnBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
-    textBaseSchema,
-    imageBaseSchema,
-    iconBaseSchema,
-    spacerBaseSchema,
-    textFieldBaseSchema,
-    switchBaseSchema,
-    checkboxBaseSchema,
-    buttonBaseSchema,
-    radioGroupBaseSchema,
-    listItemBaseSchema,
-    sliderBaseSchema,
-    chipBaseSchema,
-    cardBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
-    iconButtonBaseSchema,
-    fabBaseSchema,
-    segmentedButtonBaseSchema,
-    topAppBarBaseSchema,
-    dividerBaseSchema,
-    badgeBaseSchema,
-    progressBaseSchema,
-    dialogBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema).optional() }),
-    snackbarBaseSchema,
-    timePickerBaseSchema,
-    datePickerBaseSchema,
-    scrollBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
-    pagerBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(1) }),
-    tabBarBaseSchema,
-    bottomNavBaseSchema,
-    bottomSheetBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
-  ]),
+let overlayNodeUnion: z.ZodType<OverlayNode, z.ZodTypeDef, unknown> | undefined;
+export const overlayNodeSchema: z.ZodType<OverlayNode, z.ZodTypeDef, unknown> = z.lazy(
+  () =>
+    (overlayNodeUnion ??= z.discriminatedUnion("type", [
+      boxBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
+      rowBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
+      columnBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
+      textBaseSchema,
+      imageBaseSchema,
+      iconBaseSchema,
+      spacerBaseSchema,
+      textFieldBaseSchema,
+      switchBaseSchema,
+      checkboxBaseSchema,
+      buttonBaseSchema,
+      radioGroupBaseSchema,
+      listItemBaseSchema,
+      sliderBaseSchema,
+      chipBaseSchema,
+      cardBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
+      iconButtonBaseSchema,
+      fabBaseSchema,
+      segmentedButtonBaseSchema,
+      topAppBarBaseSchema,
+      dividerBaseSchema,
+      badgeBaseSchema,
+      progressBaseSchema,
+      dialogBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema).optional() }),
+      snackbarBaseSchema,
+      timePickerBaseSchema,
+      datePickerBaseSchema,
+      scrollBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
+      pagerBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(1) }),
+      tabBarBaseSchema,
+      bottomNavBaseSchema,
+      bottomSheetBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
+    ])),
 );
 const windowSchema = z
   .object({

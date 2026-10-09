@@ -1,5 +1,11 @@
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
+import type {
+  JsonSchemaType,
+  JsonSchemaValidator,
+  jsonSchemaValidator,
+} from "@modelcontextprotocol/sdk/validation";
 import type { AnySchema, SchemaOutput } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import type { createMcpServer } from "../../src/server/index";
 
@@ -21,6 +27,39 @@ class BoundedMcpTestClient extends Client {
       ...options,
       timeout: options?.timeout ?? MCP_TEST_REQUEST_TIMEOUT_MS,
     });
+  }
+}
+
+// The SDK client recompiles every advertised output schema with Ajv on each
+// `listTools()`, and a large one (prototype's is ~70 KB) costs tens of ms per
+// compile. Memoize the SAME Ajv validator by schema content for the whole test
+// process, so a re-list reuses it; validation itself is unchanged.
+class MemoizedJsonSchemaValidator implements jsonSchemaValidator {
+  private readonly ajv = new AjvJsonSchemaValidator();
+  private readonly validators = new Map<string, JsonSchemaValidator<unknown>>();
+
+  getValidator<T>(schema: JsonSchemaType): JsonSchemaValidator<T> {
+    const key = JSON.stringify(schema);
+    let validator = this.validators.get(key);
+    if (!validator) {
+      validator = this.ajv.getValidator<unknown>(schema);
+      this.validators.set(key, validator);
+    }
+    return validator as JsonSchemaValidator<T>;
+  }
+}
+
+const fixtureOutputSchemaValidator = new MemoizedJsonSchemaValidator();
+
+/**
+ * Compile `schemas` into the fixture clients' shared validator cache ahead of time (e.g. in
+ * `beforeAll`), so the first `listTools()` that advertises them does not pay the Ajv compile.
+ */
+export function precompileMcpOutputSchemas(schemas: readonly (object | undefined)[]): void {
+  for (const schema of schemas) {
+    if (schema) {
+      fixtureOutputSchemaValidator.getValidator(schema as JsonSchemaType);
+    }
   }
 }
 
@@ -65,10 +104,13 @@ export class McpTestFixture {
 
     await this.server.connect(this.serverTransport);
 
-    this.client = new BoundedMcpTestClient({
-      name: "test-client",
-      version: "0.0.1",
-    });
+    this.client = new BoundedMcpTestClient(
+      {
+        name: "test-client",
+        version: "0.0.1",
+      },
+      { jsonSchemaValidator: fixtureOutputSchemaValidator },
+    );
 
     await this.client.connect(this.clientTransport);
   }

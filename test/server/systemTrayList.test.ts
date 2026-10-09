@@ -1,7 +1,7 @@
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import Ajv2020 from "ajv/dist/2020";
+import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import generatedDefinitions from "../../schemas/tool-definitions.json";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -153,15 +153,15 @@ class FakeTrayApps {
     });
   }
 }
-let validateAdvertised: ReturnType<Ajv2020["compile"]>;
-let validateGenerated: ReturnType<Ajv2020["compile"]>;
+let validateAdvertised: ReturnType<typeof compileAjv2020>;
+let validateGenerated: ReturnType<typeof compileAjv2020>;
 beforeAll(() => {
   registerInteractionTools();
   const definition = ToolRegistry.getToolDefinitions({ includeUnavailable: true }).find(
     (tool) => tool.name === "systemTray",
   )!;
-  validateAdvertised = new Ajv2020({ strict: false }).compile(definition.inputSchema);
-  validateGenerated = new Ajv2020({ strict: false }).compile(
+  validateAdvertised = compileAjv2020(definition.inputSchema);
+  validateGenerated = compileAjv2020(
     generatedDefinitions.find((tool) => tool.name === "systemTray")!.inputSchema,
   );
   ToolRegistry.clearTools();

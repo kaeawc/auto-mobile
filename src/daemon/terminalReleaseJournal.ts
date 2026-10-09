@@ -87,21 +87,35 @@ function parseLine(line: string): JournalLine | undefined {
   if (typeof value !== "object" || value === null) {
     return undefined;
   }
-  const { sessionId, reason, at, lifted } = value as Record<string, unknown>;
-  if (lifted === true && typeof sessionId === "string" && sessionId.length > 0) {
-    return { kind: "lifted", sessionId };
-  }
-  if (
-    typeof sessionId !== "string" ||
-    sessionId.length === 0 ||
-    typeof reason !== "string" ||
-    reason.length === 0 ||
-    typeof at !== "number" ||
-    !Number.isFinite(at)
-  ) {
+  const fields = value as Record<string, unknown>;
+  const { sessionId } = fields;
+  if (typeof sessionId !== "string" || sessionId.length === 0) {
     return undefined;
   }
-  return { kind: "intent", intent: { sessionId, reason, at } };
+  if (fields.lifted === true) {
+    return { kind: "lifted", sessionId };
+  }
+  const { reason, at } = fields;
+  if (typeof reason !== "string" || reason.length === 0 || !Number.isFinite(at)) {
+    return undefined;
+  }
+  return { kind: "intent", intent: { sessionId, reason, at: at as number } };
+}
+
+/** Replay lines in order; returns whether any line was unusable. */
+function replayLines(lines: string[], intents: Map<string, TerminalReleaseIntent>): boolean {
+  let discarded = false;
+  for (const line of lines) {
+    const parsed = parseLine(line);
+    if (parsed?.kind === "intent") {
+      intents.set(parsed.intent.sessionId, parsed.intent);
+    } else if (parsed?.kind === "lifted") {
+      intents.delete(parsed.sessionId);
+    } else {
+      discarded = true;
+    }
+  }
+  return discarded;
 }
 
 function serializeLifted(sessionId: string): string {
@@ -191,17 +205,7 @@ export class FileTerminalReleaseJournal implements TerminalReleaseJournal {
     const lines = text.split("\n");
     // Everything after the last newline is a torn append (or empty when the file ends cleanly).
     const tornTail = lines.pop() ?? "";
-    let discarded = tornTail.length > 0;
-    for (const line of lines) {
-      const parsed = parseLine(line);
-      if (parsed?.kind === "intent") {
-        intents.set(parsed.intent.sessionId, parsed.intent);
-      } else if (parsed?.kind === "lifted") {
-        intents.delete(parsed.sessionId);
-      } else {
-        discarded = true;
-      }
-    }
+    const discarded = replayLines(lines, intents) || tornTail.length > 0;
     if (discarded) {
       logger.warn(
         `[TerminalReleaseJournal] Discarded a torn or corrupt tail of ${this.filePath}; ` +

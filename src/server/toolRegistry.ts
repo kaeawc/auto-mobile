@@ -855,9 +855,12 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     signal?.throwIfAborted();
     let connectedPlatformsPromise: Promise<ConnectedPlatformScan> | undefined;
     const getConnectedPlatforms = (): Promise<ConnectedPlatformScan> => {
-      connectedPlatformsPromise ??= deviceSessionManager.detectConnectedPlatformsWithStatus(signal, {
-        platform: args.platform,
-      });
+      connectedPlatformsPromise ??= deviceSessionManager.detectConnectedPlatformsWithStatus(
+        signal,
+        {
+          platform: args.platform,
+        },
+      );
       return connectedPlatformsPromise;
     };
     const shouldResolveDevice = options.shouldEnsureDevice

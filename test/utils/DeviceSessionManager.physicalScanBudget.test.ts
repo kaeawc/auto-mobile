@@ -27,9 +27,14 @@ describe("DeviceSessionManager physical iOS scan budget (#11077)", () => {
     };
     const timer = new FakeTimer();
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils(), new FakeSimctl() as never, {
-        iosPhysicalDeviceLister: lister,
-      }),
+      new FakeDeviceClientProvider(
+        new FakeAdbExecutor(),
+        new FakeDeviceUtils(),
+        new FakeSimctl() as never,
+        {
+          iosPhysicalDeviceLister: lister,
+        },
+      ),
       undefined,
       { runnerReadinessTimer: timer, physicalIosScanBudgetMs: 1_000 },
     );

@@ -156,9 +156,8 @@ fun AutoMobileDesktopApp(
       desktopSocketPath,
       desktopSessionPanes,
       hostVisible = windowVisible,
-    ) {
-      refreshAfterDaemonRecovery()
-    }
+      onDaemonRecovered = { refreshAfterDaemonRecovery() },
+    )
   val desktopDaemonSession = desktopSessionState.session
   // Identity changes only with the session or its registration (#10231), never on an unrelated
   // root recomposition, so the facets' sockets stay connected while a divider is dragged.

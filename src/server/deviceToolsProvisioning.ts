@@ -331,8 +331,66 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         `[DeviceTools] provisionDevice ${args.operationId} failed: ${errorMessage(error)}`,
         error,
       );
-      return provisionDeviceErrorResponse(error, args.operationId);
+      return provisionDeviceErrorResponse(
+        error,
+        args.operationId,
+        failureBoundaryRecovery(error, args.operationId, operation),
+      );
     }
+  }
+
+  /** Readiness and cleanup failures carry the same evidence envelope as the other boundaries. */
+  function failureBoundaryRecovery(
+    error: unknown,
+    operationId: string,
+    operation: ActiveProvisionDeviceOperation,
+  ): ProvisionDeviceRecoveryEvidence | undefined {
+    if (recoveryFromError(error)) {
+      return undefined;
+    }
+    const lifecycle = lifecycleForProvisionResponseError(error);
+    const boundary = failureBoundaryFor(error, lifecycle);
+    if (!boundary) {
+      return undefined;
+    }
+    const failure = error instanceof ProvisionDeviceRollbackError ? error.provisionFailure : error;
+    const { code, retryable } = failureCodeAndRetryability(failure);
+    const { ownership } = operation.lifecycleEvidence ?? {};
+    return buildProvisionDeviceRecoveryEvidence({
+      operationId,
+      boundary,
+      nowMs: getDeviceToolsDependencies().timer.now(),
+      daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
+      // A rollback error's own lifecycle is newer than the last one recorded.
+      lifecycle: lifecycle ?? operation.lifecycleEvidence?.lifecycle,
+      ...(ownership ? { ownership } : {}),
+      originalError: { code, message: errorMessage(failure) },
+      ...(retryable !== undefined ? { retryable } : {}),
+    });
+  }
+
+  function failureCodeAndRetryability(failure: unknown): { code: string; retryable?: boolean } {
+    if (failure instanceof ProvisionDeviceError) {
+      return { code: failure.code, retryable: failure.retryable };
+    }
+    if (failure instanceof ProvisionDeviceOperationFailedError) {
+      return { code: failure.errorCode, retryable: failure.lifecycle.reason?.retryable };
+    }
+    return { code: "platform_command_failed" };
+  }
+
+  function failureBoundaryFor(
+    error: unknown,
+    lifecycle: ProvisionDeviceLifecycleOutcome | undefined,
+  ): ProvisionDeviceFailureBoundary | undefined {
+    if (error instanceof ProvisionDeviceRollbackError) {
+      return "cleanup_failure";
+    }
+    const readiness =
+      (error instanceof ProvisionDeviceError && error.diagnostics.readinessPhase) ||
+      lifecycle?.reason?.readinessPhase ||
+      lifecycle?.phase === "readiness";
+    return readiness ? "readiness_failure" : undefined;
   }
 
   function provisionDeviceRecovery(
@@ -347,6 +405,9 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       nowMs: getDeviceToolsDependencies().timer.now(),
       daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
       lifecycle: operation.lifecycleEvidence?.lifecycle,
+      ...(operation.lifecycleEvidence?.ownership
+        ? { ownership: operation.lifecycleEvidence.ownership }
+        : {}),
       ...extra,
     });
   }
@@ -370,6 +431,10 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         throw new ProvisionDeviceOperationSupersededError(args.operationId);
       }
       lifecycleEvidence.lifecycle = lifecycle;
+      if (lifecycle.phase === "created" || lifecycle.phase === "adopted") {
+        lifecycleEvidence.ownership =
+          lifecycle.phase === "created" ? "created_by_operation" : "adopted";
+      }
     };
     // ONE absolute deadline for the whole request, anchored here and sliced
     // across every phase below. A replay runs up to three phases (waiting for

@@ -112,4 +112,84 @@ describe("buildProvisionDeviceRecoveryEvidence", () => {
         .outcomes,
     ).toMatchObject({ deviceCreation: "adopted", session: "none" });
   });
+
+  describe("iOS simulators", () => {
+    const SIM = {
+      platform: "ios" as const,
+      stableId: "6F1E0C52-0000-4000-8000-000000000001",
+      name: "iPhone 16",
+      runtimeDeviceId: "6F1E0C52-0000-4000-8000-000000000001",
+    };
+
+    test("a handoff after simulator creation names the exact UDID and the observed ownership", () => {
+      const evidence = build({
+        ownership: "created_by_operation",
+        lifecycle: lifecycle("created_not_ready", { device: SIM }),
+      });
+      expect(evidence).toMatchObject({
+        device: { ...SIM, ownership: "created_by_operation" },
+        outcomes: { deviceCreation: "created" },
+        nextAction: { action: "reacquire_retained_device" },
+      });
+    });
+
+    test("an adopted simulator that fails readiness is never reported as created", () => {
+      const evidence = build({
+        boundary: "readiness_failure",
+        retryable: true,
+        ownership: "adopted",
+        originalError: { code: "device_lost", message: "simulator vanished" },
+        lifecycle: lifecycle("created_not_ready", { device: SIM, phase: "readiness" }),
+      });
+      expect(evidence).toMatchObject({
+        device: { ownership: "adopted", stableId: SIM.stableId },
+        outcomes: { deviceCreation: "adopted" },
+        originalError: { code: "device_lost" },
+      });
+    });
+
+    test("a simulator whose cleanup failed is retained and unsafe to auto-retry", () => {
+      const evidence = build({
+        boundary: "cleanup_failure",
+        retryable: true,
+        ownership: "created_by_operation",
+        lifecycle: lifecycle("retained", {
+          device: SIM,
+          cleanup: { status: "failed", operationId: "cleanup-ios" },
+        }),
+      });
+      expect(evidence.cleanup).toEqual({
+        status: "failed_device_retained",
+        operationId: "cleanup-ios",
+      });
+      expect(evidence.nextAction).toMatchObject({
+        action: "perform_cleanup",
+        automaticRetrySafe: false,
+      });
+    });
+
+    test("a persistence failure keeps the created simulator visible", () => {
+      const evidence = build({
+        boundary: "result_persistence",
+        result: { created: true, hasSession: true, device: SIM },
+      });
+      expect(evidence.device).toMatchObject({ platform: "ios", ownership: "created_by_operation" });
+    });
+  });
+
+  test("a non-retryable readiness failure forbids automatic retry", () => {
+    const evidence = build({
+      boundary: "readiness_failure",
+      retryable: false,
+      lifecycle: lifecycle("removed"),
+    });
+    expect(evidence.nextAction).toMatchObject({
+      action: "obtain_further_evidence",
+      automaticRetrySafe: false,
+    });
+  });
+
+  test("ownership stays unknown without observation", () => {
+    expect(build({ lifecycle: lifecycle("created_not_ready") }).device?.ownership).toBe("unknown");
+  });
 });

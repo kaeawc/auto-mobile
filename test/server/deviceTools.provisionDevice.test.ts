@@ -2961,6 +2961,8 @@ describe("provisionDevice handler", () => {
       boundary: "daemon_handoff",
       operationId: args.operationId,
       originalError: { code: "daemon_handoff_interrupted" },
+      device: { ownership: "created_by_operation" },
+      outcomes: { deviceCreation: "created" },
       freshness: { source: "snapshot" },
     });
     expect(failed.recovery.nextAction.automaticRetrySafe).toBe(true);
@@ -3140,6 +3142,14 @@ describe("provisionDevice handler", () => {
     expect(initial).toMatchObject({
       success: false,
       cleanup: { status: "failed", operationId: "cleanup-partial-first-android" },
+      recovery: {
+        boundary: "cleanup_failure",
+        operationId: args.operationId,
+        originalError: { message: expect.stringContaining("writing AVD memory configuration") },
+        outcomes: { deviceCreation: "created" },
+        cleanup: { status: "failed_device_retained", operationId: "cleanup-partial-first-android" },
+        nextAction: { action: "perform_cleanup", automaticRetrySafe: false },
+      },
     });
     expect(retried).toMatchObject({
       success: false,
@@ -5887,8 +5897,25 @@ describe("provisionDevice handler", () => {
         daemonBuild: expect.any(String),
       },
     });
-    expect(replay).toMatchObject(first);
+    const { recovery: firstRecovery, ...firstOutcome } = first;
+    expect(replay).toMatchObject(firstOutcome);
+    // A replay has no live attempt: it reports the stored failure and never invents ownership.
+    expect(replay.recovery).toMatchObject({
+      boundary: "readiness_failure",
+      originalError: { code: "device_lost" },
+      nextAction: { automaticRetrySafe: true },
+    });
+    expect(replay.recovery.device?.ownership ?? "unknown").toBe("unknown");
     expect(readinessCalls).toBe(1);
+    expect(firstRecovery).toMatchObject({
+      boundary: "readiness_failure",
+      operationId: "missing-device-operation-reuse",
+      // The recorded lifecycle says this operation created nothing.
+      outcomes: { deviceCreation: "not_created" },
+      cleanup: { status: "unnecessary" },
+      originalError: { code: "device_lost" },
+      nextAction: { action: "retry_original_operation", automaticRetrySafe: true },
+    });
   });
 
   test("reports a non-retryable identity conflict from the provisioning path", async () => {

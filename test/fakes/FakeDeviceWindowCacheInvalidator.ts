@@ -3,6 +3,7 @@ import type { DeviceWindowCacheInvalidator } from "../../src/features/action/Ter
 
 export class FakeDeviceWindowCacheInvalidator implements DeviceWindowCacheInvalidator {
   public calls: BootedDevice[] = [];
+  public retiredProcesses: Array<{ device: BootedDevice; packageName: string }> = [];
 
   constructor(
     private readonly onInvalidate?: (device: BootedDevice, preserveAppIdentity?: boolean) => void,
@@ -11,5 +12,9 @@ export class FakeDeviceWindowCacheInvalidator implements DeviceWindowCacheInvali
   invalidate(device: BootedDevice, preserveAppIdentity?: boolean): void {
     this.calls.push(device);
     this.onInvalidate?.(device, preserveAppIdentity);
+  }
+
+  retireAppProcess(device: BootedDevice, packageName: string): void {
+    this.retiredProcesses.push({ device, packageName });
   }
 }

@@ -749,6 +749,11 @@ interface WsLaunchIntentResultMessage extends WsMessageBase {
   totalTimeMs?: number;
 }
 
+interface SdkRouteWaiter {
+  sinceMs: number;
+  settle(identity: ScreenIdentity | undefined): void;
+}
+
 interface WsNavigationEventMessage extends WsMessageBase {
   type: "navigation_event";
   event?: NavigationEvent;
@@ -1642,7 +1647,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Hierarchy navigation detector
   private sdkNavigationAppIds: Set<string> = new Set();
   /** Newest AutoMobile SDK navigation route per reporting package, as a screen identity. */
-  private sdkScreenIdentities = new Map<string, ScreenIdentity>();
+  private sdkScreenIdentities = new Map<
+    string,
+    { identity: ScreenIdentity; receivedAtMs: number }
+  >();
+  /** Callers waiting for a route newer than a given host time, keyed by reporting package. */
+  private sdkScreenIdentityWaiters = new Map<string, Set<SdkRouteWaiter>>();
   private navigationWriteTail: Promise<void> = Promise.resolve();
 
   // Screenshot backoff scheduler
@@ -2095,7 +2105,69 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * Single-activity Compose apps name their screens only this way.
    */
   public getSdkScreenIdentity(applicationId?: string): ScreenIdentity | undefined {
-    return applicationId ? this.sdkScreenIdentities.get(applicationId) : undefined;
+    return applicationId ? this.sdkScreenIdentities.get(applicationId)?.identity : undefined;
+  }
+
+  /** Host time (this client's timer) at which the app's newest SDK route arrived. */
+  public getSdkScreenIdentityReceivedAtMs(applicationId: string): number | undefined {
+    return this.sdkScreenIdentities.get(applicationId)?.receivedAtMs;
+  }
+
+  /**
+   * Resolve with the app's SDK route once one newer than `sinceMs` has arrived, or undefined after
+   * `timeoutMs` (or when the app's route is cleared first). Returns at once for a route that
+   * already postdates `sinceMs`.
+   */
+  public awaitSdkScreenIdentityAfter(
+    applicationId: string,
+    sinceMs: number,
+    timeoutMs: number,
+  ): Promise<ScreenIdentity | undefined> {
+    const current = this.sdkScreenIdentities.get(applicationId);
+    if (current && current.receivedAtMs > sinceMs) {
+      return Promise.resolve(current.identity);
+    }
+    return new Promise((resolve) => {
+      const waiters = this.sdkScreenIdentityWaiters.get(applicationId) ?? new Set();
+      this.sdkScreenIdentityWaiters.set(applicationId, waiters);
+      const waiter: SdkRouteWaiter = {
+        sinceMs,
+        settle: (identity) => {
+          this.timer.clearTimeout(handle);
+          waiters.delete(waiter);
+          resolve(identity);
+        },
+      };
+      const handle = this.timer.setTimeout(() => waiter.settle(undefined), timeoutMs);
+      waiters.add(waiter);
+    });
+  }
+
+  /**
+   * Forget the SDK navigation route of an app whose process was replaced (terminated, relaunched
+   * cold, data cleared, crashed), or of every app when none is named (the SDK link was lost). The
+   * next route event the new process reports is the only thing that names its screen again.
+   */
+  public clearSdkScreenIdentity(applicationId?: string): void {
+    const applicationIds = applicationId
+      ? [applicationId]
+      : [...new Set([...this.sdkScreenIdentities.keys(), ...this.sdkScreenIdentityWaiters.keys()])];
+    for (const id of applicationIds) {
+      this.sdkScreenIdentities.delete(id);
+      for (const waiter of [...(this.sdkScreenIdentityWaiters.get(id) ?? [])]) {
+        waiter.settle(undefined);
+      }
+    }
+  }
+
+  private recordSdkScreenIdentity(applicationId: string, identity: ScreenIdentity): void {
+    const receivedAtMs = this.timer.now();
+    this.sdkScreenIdentities.set(applicationId, { identity, receivedAtMs });
+    for (const waiter of [...(this.sdkScreenIdentityWaiters.get(applicationId) ?? [])]) {
+      if (receivedAtMs > waiter.sinceMs) {
+        waiter.settle(identity);
+      }
+    }
   }
 
   /**
@@ -2720,6 +2792,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // Mirrors IOSCtrlProxyClient.onConnectionClosed() clearing `cachedHierarchy`.
     this.cachedHierarchy = null;
     this._hierarchy?.resetConnectionScopedState();
+    // The SDK reports through this link: after a reconnect the app process may be a new one, and a
+    // route from before the gap cannot be told apart from the new process's.
+    this.clearSdkScreenIdentity();
     if (this.transientObserver) {
       return;
     }
@@ -6288,7 +6363,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           this.sdkNavigationAppIds.add(event.applicationId);
           const identity = deriveSdkNavigationScreenIdentity("android", event.applicationId, event);
           if (identity) {
-            this.sdkScreenIdentities.set(event.applicationId, identity);
+            this.recordSdkScreenIdentity(event.applicationId, identity);
           }
           // Eagerly resolve build/device provenance for this app (#4984).
           // Non-blocking: later events pick up the resolved build key; this
@@ -6387,6 +6462,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     crash_event: async (message) => {
       const event = message.event;
       if (event) {
+        // A crash ends the app's process; its last route no longer names anything on screen.
+        if (event.packageName) {
+          this.clearSdkScreenIdentity(event.packageName);
+        }
         await this.handleCrashEvent(
           withResolvedTimestamp(event, message.timestamp, this.timer.now()),
         );

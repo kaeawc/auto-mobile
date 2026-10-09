@@ -118,6 +118,20 @@ describe("TerminateApp (Android install listing)", () => {
     expect(usersSpy).toHaveBeenCalledTimes(1);
   });
 
+  test("retires the app's process state after a force-stop and for an already-dead process", async () => {
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
+    const retiring = app as unknown as { cacheInvalidator: FakeDeviceWindowCacheInvalidator };
+    retiring.cacheInvalidator = cacheInvalidator;
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
+    adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
+    await app.execute("com.example.app", { skipObservation: true });
+    expect(cacheInvalidator.retiredProcesses).toEqual([{ device, packageName: "com.example.app" }]);
+
+    adb.setCommandResult("shell dumpsys activity processes", "");
+    await app.execute("com.example.app", { skipObservation: true });
+    expect(cacheInvalidator.retiredProcesses).toHaveLength(2);
+  });
+
   test("force-stops an installed running package", async () => {
     adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
     adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
@@ -906,6 +920,7 @@ describe("TerminateApp (Android)", () => {
       invalidate: (device: BootedDevice) => {
         invalidated.push(device);
       },
+      retireAppProcess: () => {},
     };
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
@@ -937,6 +952,7 @@ describe("TerminateApp (Android)", () => {
       invalidate: (device: BootedDevice) => {
         invalidated.push(device);
       },
+      retireAppProcess: () => {},
     };
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
@@ -961,6 +977,7 @@ describe("TerminateApp (Android)", () => {
       invalidate: (device: BootedDevice) => {
         invalidated.push(device);
       },
+      retireAppProcess: () => {},
     };
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {

@@ -643,6 +643,33 @@ describe("host sleep longer than the idle window (#10661)", () => {
   }
 });
 
+describe("desktop actor driven from the checked-in wire fixtures (#10669)", () => {
+  test("a watch-only desktop's recorded frames hold nothing for ten minutes, and the daemon answers as recorded", async () => {
+    scenario = await LivenessScenario.start();
+
+    const replay = await scenario.replayDesktopFixture("watching-allocates-nothing");
+
+    expect(replay.skipped).toEqual([]);
+    expect(replay.mismatches).toEqual([]);
+    expect(scenario.poolState()).toEqual({
+      status: "idle",
+      sessionId: null,
+      autolockSessionId: undefined,
+    });
+    expect(scenario.releases).toEqual([]);
+  });
+
+  test("a desktop that registers and heartbeats without a click starts holding no device", async () => {
+    scenario = await LivenessScenario.start();
+
+    const replay = await scenario.replayDesktopFixture("no-click-start");
+
+    expect(replay.skipped).toEqual([]);
+    expect(replay.mismatches).toEqual([]);
+    expect(scenario.releases).toEqual([]);
+  });
+});
+
 describe("daemon event-loop stall: the ticks arrive late (#10662)", () => {
   // Far past the 10 s heartbeat lease and its suspect grace, well inside the idle window.
   const STALL_MS = SUSPECT_GRACE_MS + 20_000;

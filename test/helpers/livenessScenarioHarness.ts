@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { spyOn } from "bun:test";
 import { DaemonClient, daemonResponseError } from "../../src/daemon/client";
 import {
@@ -18,6 +20,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import type { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import {
@@ -42,6 +45,7 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { WireFixture } from "../daemon/helpers/desktopWireHarness";
 import { drainMicrotasks } from "./fakeTimerStepping";
 import { RealToolCallPath, type DeviceToolRun } from "./realToolCallPath";
 
@@ -320,6 +324,10 @@ export class LivenessScenario {
       getSessionManager: () => manager,
       getDevicePool: () => pool,
       getDeviceSessionRegistry: () => DaemonState.getInstance().getDeviceSessionRegistry(),
+      // The daemon's own observer registry: a desktop that only watches registers one (#10730).
+      getObserverSessionRegistry: () =>
+        (daemon as unknown as { observerSessionRegistry: ObserverSessionRegistry })
+          .observerSessionRegistry,
     };
     const internals = daemon as unknown as DaemonStartInternals;
     internals.subscribeToolCallEndActivity();
@@ -560,6 +568,49 @@ export class LivenessScenario {
         await drainMicrotasks(TURNS_PER_EVENT);
       },
     };
+  }
+
+  /**
+   * The desktop/IDE client as `test/fixtures/desktop-wire/<name>.json` records it (#10669): replays
+   * the fixture's `daemon/*` frames from the desktop and the probe, at the recorded times (a
+   * repeated frame at its `everyMs`), against this scenario's real daemon, so the cadence and
+   * shape are the checked-in wire contract rather than a hand-written loop. Returns each
+   * response that differs from the recorded one (`expiresAtMs` is relative to the replay start)
+   * and the labels of the frames it could not drive (`tools/call`, `input/*`), which need the
+   * socket and tool-call path of the wire harness.
+   */
+  async replayDesktopFixture(
+    name: string,
+  ): Promise<{ mismatches: string[]; skipped: string[]; finishedAtMs: number }> {
+    const fixture = JSON.parse(
+      readFileSync(join(import.meta.dir, "..", "fixtures", "desktop-wire", `${name}.json`), "utf8"),
+    ) as WireFixture;
+    const startedAt = this.timer.now();
+    const mismatches: string[] = [];
+    const skipped: string[] = [];
+    for (const exchange of fixture.exchanges) {
+      const method = exchange.request.method;
+      if (!method.startsWith("daemon/") || exchange.actor === "agent") {
+        skipped.push(exchange.label);
+        continue;
+      }
+      for (let beat = 0; beat < (exchange.repeat ?? 1); beat++) {
+        const dueAt = startedAt + exchange.atMs + beat * (exchange.everyMs ?? 0);
+        if (dueAt > this.timer.now()) {
+          await this.idle(dueAt - this.timer.now());
+        }
+        const response = await this.daemonMethod(method, exchange.request.params);
+        const actual = JSON.parse(JSON.stringify(response)) as Record<string, unknown>;
+        const result = actual.result as Record<string, unknown> | undefined;
+        if (typeof result?.expiresAtMs === "number") {
+          result.expiresAtMs -= startedAt;
+        }
+        if (JSON.stringify(actual) !== JSON.stringify(exchange.response)) {
+          mismatches.push(`${exchange.label}#${beat}: ${JSON.stringify(actual)}`);
+        }
+      }
+    }
+    return { mismatches, skipped, finishedAtMs: this.timer.now() - startedAt };
   }
 
   /**

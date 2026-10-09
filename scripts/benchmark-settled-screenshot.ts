@@ -38,6 +38,7 @@ import {
   formatReportTable,
   helpText,
   parseBenchmarkArgs,
+  platformFromDeviceList,
   settledAsyncDelta,
   type BenchmarkReport,
   type ScreenshotMode,
@@ -162,6 +163,14 @@ export async function runBenchmark(
     }
     const results: BenchmarkReport["results"] = { observe: {}, pressButton: {} };
     let detectedPlatform = options.platform ?? "unknown";
+    if (options.deviceId && !options.platform) {
+      const listed = envelopeState(await call("listDevices", {}));
+      detectedPlatform =
+        platformFromDeviceList(listed.payload, options.deviceId) ?? detectedPlatform;
+      if (detectedPlatform === "unknown") {
+        deps.log(`Warning: listDevices did not report a platform for ${options.deviceId}`);
+      }
+    }
     const measure = async (name: string, args: Record<string, unknown>, mode?: ScreenshotMode) => {
       const values: number[] = [];
       const failureMessages: string[] = [];

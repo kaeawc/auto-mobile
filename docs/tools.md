@@ -323,14 +323,23 @@ observation, call `observe({ screenshot: "settled" })` and read its
 
 Every returned full-screen fresh (settled or device-read), cached fallback, per-display,
 and crop (`crop-*` and `snapshot-of-*`) path exists for **at least 10 minutes after
-return**. A flat `<x>Path` has a sibling `<x>ExpiresAt`: top-level and per-display
+return**, unless it is evicted at capacity (below). A flat `<x>Path` has a sibling `<x>ExpiresAt`: top-level and per-display
 `screenshotExpiresAt`; objects owning a path have `expiresAt` (`crop.expiresAt`
 and snapshotOf's `expiresAt`). These optional numbers are host-clock epoch milliseconds.
 Returning a cached path again extends its guarantee and recomputes the deadline.
 
 Admission enforces a hard cap of **128 MiB and 4096 files** for the shared screenshots
-directory across all devices and sessions in a process. New captures fail at capacity; no live path is deleted to
-make room. An oversized new frame is removed before publication. Default screenshot
+directory across all devices and sessions in a process. When a new capture would
+exceed either cap, the least recently written or returned screenshots are evicted early,
+inside their guarantee, until it fits. Evicting is preferred to refusing because a refused
+capture fails `observe` outright: large-screen devices (iPhone Pro at ~3.3 MB per frame, a
+foldable's inner panel) reach 128 MiB within one benchmark run. Eviction never removes a
+file referenced by a live observe cache entry or screenshot state, or a file written or
+returned in the last 5 seconds (it may be another process's unpublished frame). Copy a
+returned path promptly when a session captures many large frames.
+
+Only when those kept files alone fill the cap is a new capture refused. An oversized new
+frame is removed before publication. Default screenshot
 provenance degrades to an observation without a path and with a failure reason; an
 existing cached path can still be returned. Explicit `screenshot: "settled"`, `crop`,
 `includeScreenshotImage`, and `snapshotOf` requests surface an actionable capacity error
@@ -351,7 +360,7 @@ leases and only honor the ten-minute mtime floor; re-return leases are guarantee
 the returning process's cleaners, with this cross-process limitation.
 
 Expired, unreferenced files are swept at initial inventory, near capacity, and every
-minute on an unref'd host Timer while idle; size eviction also skips live files. Session
+minute on an unref'd host Timer while idle; the idle sweep skips live files. Session
 release and device removal only drop cache references: their files remain until expiry and a subsequent
 sweep. Abandoned files are recovered after restart and swept when the grace expires.
 Copy files needed beyond the reported window; no copy is needed within that window

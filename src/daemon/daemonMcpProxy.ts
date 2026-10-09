@@ -4396,13 +4396,20 @@ export class DaemonMcpProxy {
     }
   }
 
-  /** Hold a token-owned session this proxy does not track yet; false when there is nothing to do. */
+  /**
+   * Hold a token-owned session this proxy does not track yet; false when there is nothing to do.
+   * A session with a pending stall handover is not this resume's to adopt (#11018): only the stall
+   * probe, pinned to the daemon process that stalled, or a tool call naming the session resumes
+   * it. Otherwise a reconnect to a restarted daemon would re-claim and heartbeat it behind the
+   * harness before the probe learns the daemon changed.
+   */
   private holdTokenOwnedSession(session: TokenOwnedSession): boolean {
     const { sessionId } = session;
     if (
       sessionId === this.boundSessionUuid ||
       sessionId === this.terminalBoundSession?.sessionUuid ||
-      this.otherHeldSessions.has(sessionId)
+      this.otherHeldSessions.has(sessionId) ||
+      this.stallHandovers.has(sessionId)
     ) {
       return false;
     }
@@ -5241,7 +5248,14 @@ export class DaemonMcpProxy {
         // latest binding's tick: the release notification is authoritative.
         await runWithoutDaemonLifecycle(() =>
           this.withRecoverableReconnect(
-            () => this.sendHeldSessionHeartbeat(sessionUuid, claimLivenessOwnership),
+            // A reconnect retry runs after the hold may have ended: a session handed over while
+            // this heartbeat waited on a stalled daemon must not be heartbeated on the daemon
+            // that replaced it (#11018), and a dropped one not at all.
+            async () => {
+              if (this.otherHeldSessions.get(sessionUuid) === held) {
+                await this.sendHeldSessionHeartbeat(sessionUuid, claimLivenessOwnership);
+              }
+            },
             sessionUuid,
             true,
             false,

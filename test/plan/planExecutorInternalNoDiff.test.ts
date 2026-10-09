@@ -5,6 +5,7 @@ import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { DaemonState } from "../../src/daemon/daemonState";
 
 /**
  * Regression guard for issue #3053 part 2: PlanExecutor must mark its tool-to-tool
@@ -26,6 +27,9 @@ describe("PlanExecutor internal no-diff marker (#3053)", () => {
   });
 
   beforeEach(() => {
+    // These tests exercise the daemon-less direct path; an initialized DaemonState left by another
+    // file would route sess-1 through a real SessionManager and its file-backed database.
+    DaemonState.getInstance().reset();
     planExecutor = new DefaultPlanExecutor();
     capturedArgs = [];
   });

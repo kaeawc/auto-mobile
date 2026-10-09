@@ -668,6 +668,15 @@ interface ReleaseReasonState {
   terminalPersisted?: boolean;
 }
 
+/** A terminal release write waiting to be retried (#10959). */
+interface TerminalReleaseRetry {
+  snapshot: SessionReleaseSnapshot;
+  attempt: number;
+  handle?: NodeJS.Timeout;
+  /** Already retried during shutdown's drain; a further failure is not retried again (#11058). */
+  shutdownAttempted?: boolean;
+}
+
 interface PendingSessionRelease {
   promise: Promise<string | null>;
   reason: ReleaseReasonState;
@@ -1132,10 +1141,12 @@ export class SessionManager {
   /** Release writes that outlived their deadline but may still land (#10836). */
   private readonly lateReleaseWrites: Set<Promise<void>> = new Set();
   /** Terminal release rows a late write failed to persist, awaiting a retry (#10959). */
-  private readonly pendingTerminalReleaseRetries: Map<
-    string,
-    { snapshot: SessionReleaseSnapshot; attempt: number; handle?: NodeJS.Timeout }
-  > = new Map();
+  private readonly pendingTerminalReleaseRetries: Map<string, TerminalReleaseRetry> = new Map();
+  /**
+   * Set once shutdown starts draining releases (#11058): a terminal write that fails from then on
+   * is retried at once and tracked by the drain, since a backoff timer would outlive the database.
+   */
+  private releaseDrainStarted = false;
   private terminalReleaseRetryBackoff: BackoffPolicy = DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF;
   /** Finalized release state retained only while its exact Session identity is referenced. */
   private readonly finalizedSessionReleases: WeakMap<Session, ReleaseReasonState> = new WeakMap();
@@ -1839,8 +1850,7 @@ export class SessionManager {
         }
       },
     );
-    this.lateReleaseWrites.add(write);
-    void write.then(() => this.lateReleaseWrites.delete(write));
+    this.trackReleaseDrainWrite(write);
   }
 
   /**
@@ -3795,6 +3805,7 @@ export class SessionManager {
     timeoutMs: number,
     additionalReleases: ReadonlyArray<Promise<unknown>> = [],
   ): Promise<boolean> {
+    this.releaseDrainStarted = true;
     const releases = [
       ...Array.from(this.activeReleasePromises, (release) => release.promise),
       ...this.lateReleaseWrites,
@@ -3809,15 +3820,12 @@ export class SessionManager {
       }
       const deadline = new Error("Release drain timed out");
       try {
-        return await raceWithDeadline(
-          Promise.allSettled(releases).then(() => true),
-          {
-            timer: this.timer,
-            timeoutMs,
-            label: "Release drain",
-            timeoutError: () => deadline,
-          },
-        );
+        return await raceWithDeadline(this.settleReleaseDrain(releases), {
+          timer: this.timer,
+          timeoutMs,
+          label: "Release drain",
+          timeoutError: () => deadline,
+        });
       } catch (error) {
         if (error === deadline) {
           return false;
@@ -3827,6 +3835,20 @@ export class SessionManager {
     } finally {
       this.pendingNonTerminalReleaseSnapshots.clear();
     }
+  }
+
+  /**
+   * Settle the drain's releases, then any release write that started meanwhile: a write that
+   * timed out or failed while the drain ran is tracked only after it began (#11058).
+   */
+  private async settleReleaseDrain(releases: ReadonlyArray<Promise<unknown>>): Promise<true> {
+    let pending: ReadonlyArray<Promise<unknown>> = releases;
+    while (pending.length > 0) {
+      const settled = new Set(pending);
+      await Promise.allSettled(pending);
+      pending = Array.from(this.lateReleaseWrites).filter((write) => !settled.has(write));
+    }
+    return true;
   }
 
   /** Wait for a release already admitted for this session, if any. */
@@ -4540,8 +4562,7 @@ export class SessionManager {
         }
       },
     );
-    this.lateReleaseWrites.add(settled);
-    void settled.then(() => this.lateReleaseWrites.delete(settled));
+    this.trackReleaseDrainWrite(settled);
   }
 
   /** Queue another write of a terminal release row, after the next backoff delay (#10959). */
@@ -4555,10 +4576,11 @@ export class SessionManager {
     if (pending?.handle !== undefined) {
       this.timer.clearTimeout(pending.handle);
     }
-    const entry: { snapshot: SessionReleaseSnapshot; attempt: number; handle?: NodeJS.Timeout } = {
-      snapshot,
-      attempt,
-    };
+    if (this.releaseDrainStarted) {
+      this.retryTerminalReleaseDuringDrain(snapshot, attempt, pending);
+      return;
+    }
+    const entry: TerminalReleaseRetry = { snapshot, attempt };
     entry.handle = this.timer.setTimeout(() => {
       entry.handle = undefined;
       void this.retryTerminalReleaseWrite(entry);
@@ -4571,6 +4593,38 @@ export class SessionManager {
     );
   }
 
+  /**
+   * Shutdown is draining (#11058): retry the write now and let the drain await it. One attempt per
+   * snapshot during the drain, so a database that keeps failing cannot spin the drain.
+   */
+  private retryTerminalReleaseDuringDrain(
+    snapshot: SessionReleaseSnapshot,
+    attempt: number,
+    pending: TerminalReleaseRetry | undefined,
+  ): void {
+    if (pending?.snapshot === snapshot && pending.shutdownAttempted) {
+      this.pendingTerminalReleaseRetries.delete(snapshot.sessionId);
+      logger.warn(
+        `[SessionManager] Terminal release of session ${snapshot.sessionId} is still not ` +
+          `persisted at shutdown; the session stays fenced only until this process exits`,
+      );
+      return;
+    }
+    const entry: TerminalReleaseRetry = { snapshot, attempt, shutdownAttempted: true };
+    this.pendingTerminalReleaseRetries.set(snapshot.sessionId, entry);
+    logger.warn(
+      `[SessionManager] Terminal release of session ${snapshot.sessionId} is not persisted; ` +
+        `retrying the write before shutdown (attempt ${attempt})`,
+    );
+    this.trackReleaseDrainWrite(this.retryTerminalReleaseWrite(entry));
+  }
+
+  /** Track a release write the shutdown drain must await before the database closes. */
+  private trackReleaseDrainWrite(write: Promise<void>): void {
+    this.lateReleaseWrites.add(write);
+    void write.then(() => this.lateReleaseWrites.delete(write));
+  }
+
   /** The retry still matters: the UUID is still fenced by this snapshot and not being re-created. */
   private isTerminalReleaseRetryCurrent(snapshot: SessionReleaseSnapshot): boolean {
     const fence = this.terminalReleaseSnapshots.get(snapshot.sessionId);
@@ -4581,10 +4635,7 @@ export class SessionManager {
     );
   }
 
-  private async retryTerminalReleaseWrite(entry: {
-    snapshot: SessionReleaseSnapshot;
-    attempt: number;
-  }): Promise<void> {
+  private async retryTerminalReleaseWrite(entry: TerminalReleaseRetry): Promise<void> {
     const { snapshot } = entry;
     if (this.pendingTerminalReleaseRetries.get(snapshot.sessionId) !== entry) {
       return;
@@ -4636,6 +4687,7 @@ export class SessionManager {
         this.timer.clearTimeout(entry.handle);
         entry.handle = undefined;
       }
+      entry.shutdownAttempted = true;
       return this.retryTerminalReleaseWrite(entry);
     });
   }

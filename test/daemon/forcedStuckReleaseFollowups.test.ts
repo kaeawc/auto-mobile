@@ -251,3 +251,36 @@ describe("the force threshold and its fence (#11058 item 2)", () => {
     }
   });
 });
+
+describe("shutdown awaits a terminal write that fails during the drain (#11058 item 3)", () => {
+  test("the late failure is retried at once and the drain waits for it", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      await h.pool.bindOrReuseDeviceSession("a", first.deviceId, "android");
+      const wedged = Promise.withResolvers<void>();
+      h.persistence.parkRelease = wedged.promise;
+      const release = h.manager.releaseSession("a", "heartbeat-timeout");
+      await flush();
+      // The terminal write outlives its deadline: the device is freed and the write goes late.
+      await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      expect(await release).toBe(first.deviceId);
+      h.persistence.parkRelease = undefined;
+
+      let drained: boolean | undefined;
+      void h.manager.drainReleasePromises(5_000).then((result) => {
+        drained = result;
+      });
+      await flush();
+      expect(drained).toBeUndefined();
+
+      // The late write fails while shutdown is draining: no backoff timer, the retry runs now.
+      wedged.reject(new Error("SQLITE_IOERR"));
+      await flush();
+      expect(drained).toBe(true);
+      expect((await h.persistence.getSession!("a"))?.status).toBe("expired");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});

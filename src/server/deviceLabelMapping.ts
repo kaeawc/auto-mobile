@@ -82,6 +82,17 @@ export const failedPlanSessionHoldable = (baseSessionUuid: string): boolean =>
   !labelMapHasDerivedSessions(getDeviceLabelMap(baseSessionUuid), baseSessionUuid);
 
 /**
+ * The base session the plan lifecycle releases for an executePlan: the registry hands handlers the
+ * resolved label session as `sessionUuid`, while the lifecycle decides from the caller's base
+ * (`baseSessionUuid ?? sessionUuid`). A derived label session maps back to its base so the
+ * reported `sessionHeld` comes from the same id as the release (#11111).
+ */
+export const planLifecycleSessionUuid = (sessionUuid: string): string =>
+  (DaemonState.getInstance().isInitialized()
+    ? DaemonState.getInstance().getSessionManager().getBaseSessionOfDerivedLabel(sessionUuid)
+    : undefined) ?? sessionUuid;
+
+/**
  * No general pool/boot parallel-start limit exists in devicePool.ts. Its
  * assignmentMutex serializes assignment, preventing two labels from receiving
  * the same device, before this readiness setup runs. This bound only caps

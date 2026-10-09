@@ -6975,6 +6975,19 @@ export class SessionManager {
   }
 
   /**
+   * The base session a derived `${base}:${label}` session was published under, or undefined when
+   * `sessionId` is not a known derived label session (#11111).
+   */
+  getBaseSessionOfDerivedLabel(sessionId: string): string | undefined {
+    for (const [base, derived] of this.derivedLabelSessionsByBase) {
+      if (derived.has(sessionId)) {
+        return base;
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * Remove and return every derived `${base}:${label}` session ever published for `baseSessionId`
    * (#11091). Unlike the base's `deviceLabels` cache slot, this index survives the base's removal,
    * so a release of the base can still cascade to its derived sessions. Entries may name sessions

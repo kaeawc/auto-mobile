@@ -271,6 +271,16 @@ describe("executePlan cleans every acquired device before release", () => {
       }
     });
 
+    test("sessionHeld is false when the handler holds a derived label session as sessionUuid (#11111)", async () => {
+      await acquire(devices.slice(0, 2));
+
+      // The registry resolves `device: B` to the derived session before the handler runs.
+      expect(
+        withReportedSessionHold(failedResult, { holdSessionOnFailure: true, sessionUuid: "base:B" })
+          .sessionHeld,
+      ).toBe(false);
+    });
+
     test("a failed single-label plan keeps its base session like an unlabeled plan (#11091)", async () => {
       await acquire([devices[0]]);
       expect(sessionManager.getDeviceLabels("base")).toEqual({ A: "base" });

@@ -814,6 +814,7 @@ data class PrototypeStatusEntry(
 @Serializable
 enum class PrototypeEventKind {
   @SerialName("emit") EMIT,
+  /** A pager settled on another page: `name` is the pager id, the payload the new page index. */
   @SerialName("page_changed") PAGE_CHANGED,
   @SerialName("dismissed") DISMISSED,
   /**

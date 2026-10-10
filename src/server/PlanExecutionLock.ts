@@ -3,13 +3,19 @@ import type { ExecutionTracker } from "./executionTracker";
 import { executionTracker } from "./executionTracker";
 import { serverConfig } from "../utils/ServerConfig";
 
-// Observation may inspect a running plan without driving its device.
+// Observation may inspect a running plan without driving its device. Every other read is exempted
+// by the caller's `readOnly` classification (#11351).
 const exemptTools: ReadonlySet<string> = new Set(["observe"]);
 
 export interface PlanExecutionLockRequest {
   toolName: string;
   sessionId?: string;
   sessionUuid?: string;
+  /**
+   * The call is a read by its tool's classification (`isDeviceReadOnlyCall`). A read never
+   * requires a session and never waits for a plan (#11351), so it is never blocked.
+   */
+  readOnly?: boolean;
 }
 
 export interface PlanExecutionLockDecision {
@@ -40,7 +46,7 @@ export class ExecutionTrackerPlanExecutionLock implements PlanExecutionLock {
 
   evaluate(request: PlanExecutionLockRequest): PlanExecutionLockDecision {
     const scope = this.scopeProvider.getScope();
-    if (exemptTools.has(request.toolName)) {
+    if (request.readOnly === true || exemptTools.has(request.toolName)) {
       return { blocked: false, scope };
     }
     const hasActivePlan = this.tracker.hasActiveToolExecution("executePlan", {

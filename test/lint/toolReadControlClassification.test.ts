@@ -1,7 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { registerMcpTools } from "../../src/server";
 import { registerDoctorTools } from "../../src/server/doctorTools";
-import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry";
+import {
+  ToolRegistry,
+  ToolRegistryClass,
+  type RegisteredTool,
+} from "../../src/server/toolRegistry";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { serverConfig } from "../../src/utils/ServerConfig";
 
@@ -211,13 +215,9 @@ function perArgsViolations(
   ];
 }
 
-/** Every tool the server registers, including hidden aliases and gated tools. */
-function registeredTools(): RegisteredTool[] {
-  const listed = ToolRegistry.getAllTools({ includeUnavailable: true });
-  const hidden = ["startDevice"]
-    .map((name) => ToolRegistry.getTool(name))
-    .filter((tool): tool is RegisteredTool => tool !== undefined);
-  return [...listed, ...hidden];
+/** Every tool the registry holds: hidden and availability-gated ones included (#11353). */
+function registeredTools(registry: ToolRegistryClass = ToolRegistry): RegisteredTool[] {
+  return registry.getEveryRegisteredTool();
 }
 
 /** The device-aware tools the server registers, including hidden aliases and gated tools. */
@@ -291,6 +291,18 @@ describe("device-aware tool read/control classification (#10965)", () => {
           table,
         ),
       ).toEqual(["brandNewTool: unclassified; add it to read, perArgs or control"]);
+    });
+
+    test("an unclassified hidden device tool in a scratch registry fails (#11353)", () => {
+      const scratch = new ToolRegistryClass();
+      scratch.registerDeviceAware("hiddenNewTool", "x", {}, async () => ({ content: [] }), {
+        hidden: true,
+      });
+      const tools = registeredTools(scratch).filter((tool) => tool.requiresDevice);
+      expect(tools.map((tool) => tool.name)).toEqual(["hiddenNewTool"]);
+      expect(classificationViolations(tools, { read: [], perArgs: {}, control: [] })).toEqual([
+        "hiddenNewTool: unclassified; add it to read, perArgs or control",
+      ]);
     });
 
     test("a registration that disagrees with the table fails", () => {

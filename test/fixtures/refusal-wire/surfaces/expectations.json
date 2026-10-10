@@ -231,6 +231,42 @@
           "externalDevices": ["emulator-5560"]
         }
       }
+    },
+    "socket-frame.daemon_session_suspect": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_session_suspect",
+        "retryable": true,
+        "acquireNewSession": false,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "remainingMs": 8000
+        }
+      }
+    },
+    "socket-frame.session_ownership_lost.admission_heartbeat_timeout": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "heartbeat-timeout"
+        }
+      }
+    },
+    "socket-frame.session_ownership_lost.admission_cli_idle_timeout": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "cli-idle-timeout"
+        }
+      }
     }
   }
 }

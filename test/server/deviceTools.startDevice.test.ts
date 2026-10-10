@@ -2741,6 +2741,42 @@ describe("startDevice handler", () => {
     );
   });
 
+  // #11148: a one-shot `--cli` call is anonymous even though its socket forwards a per-connection
+  // MCP id, so with autolock on a second call must reuse the anonymous session, not be refused.
+  it("lets successive one-shot CLI startDevice calls share one session under autolock", async () => {
+    autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
+    );
+    const pooledDevice = { ...androidDevice };
+    fakeDeviceUtils.setBootedDevices("android", [pooledDevice]);
+    await pool.initializeWithDevices([pooledDevice]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(pooledDevice);
+    fakeMatcher.setImageResult(androidImage);
+
+    const first = await callStartDevice({
+      platform: "android",
+      __mcpSessionId: "cli-connection-1",
+      __oneShotCli: true,
+    });
+    const second = await callStartDevice({
+      platform: "android",
+      __mcpSessionId: "cli-connection-2",
+      __oneShotCli: true,
+    });
+
+    expect(second.runtime.session.sessionUuid).toBe(first.runtime.session.sessionUuid);
+    expect(pool.getDevice(pooledDevice.deviceId)?.autolockSessionId).toBeUndefined();
+  });
+
   it("does not kill a shared cold boot when autolock rejects the later caller", async () => {
     autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();

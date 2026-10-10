@@ -701,6 +701,29 @@ describe("IOSCtrlProxyManager", function () {
       expect(IOSCtrlProxyManager.getExistingInstance(physical.deviceId)).toBe(physicalManager);
     });
 
+    test("removal eviction skips a manager re-armed for a reappeared simulator (#11141)", async function () {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
+      const stop = deferred();
+      const stopEntered = deferred();
+      const stopSpy = spyOn(manager, "stop").mockImplementation(() => {
+        stopEntered.resolve();
+        return stop.promise;
+      });
+      const port = PortManager.getPort(testDevice.deviceId);
+      expect(port).toBeDefined();
+
+      const eviction = IOSCtrlProxyManager.evictAfterDeviceRemoval(testDevice.deviceId, fakeTimer);
+      await stopEntered.promise;
+      // The simulator reappears under the same UDID and a new acquisition starts its runner.
+      IOSCtrlProxyManager.resumeDevice(testDevice.deviceId);
+      stop.resolve();
+      await eviction;
+
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+      expect(IOSCtrlProxyManager.getExistingInstance(testDevice.deviceId)).toBe(manager);
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(port);
+    });
+
     test("explicit device start consumes the removal before a routine ready signal", async function () {
       const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
       const budget = manager.getForcedRestartBudget();

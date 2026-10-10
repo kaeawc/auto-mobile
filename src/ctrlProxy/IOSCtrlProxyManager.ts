@@ -585,6 +585,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
+  private supersededSinceRemoval(removalGeneration: number): boolean {
+    return (
+      this.removalGeneration !== removalGeneration ||
+      this.rearmedRemovalGeneration >= removalGeneration ||
+      this.sharedStart !== null
+    );
+  }
+
   /** Rearms after removal cleanup only once per removal generation, when suspended or exhausted. */
   public async rearmAfterDeviceReappearance(): Promise<void> {
     const state = this.forcedRestartBudget.snapshot().state;
@@ -705,10 +713,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (!manager) {
       return;
     }
-    await manager.suspendForDeviceRemoval();
+    const removal = manager.suspendForDeviceRemoval();
+    // suspendForDeviceRemoval bumps the generation synchronously, so this is ours.
+    const removalGeneration = manager.removalGeneration;
+    await removal;
+    // A simulator that came back (same UDID after erase or shutdown to boot) re-arms
+    // this manager, and a newer removal owns its own eviction; evicting here would
+    // force-stop the live runner and release its port (#11141).
     if (
       resolveIosDeviceKind({ deviceId }) === "simulator" &&
-      IOSCtrlProxyManager.instances.get(deviceId) === manager
+      IOSCtrlProxyManager.instances.get(deviceId) === manager &&
+      !manager.supersededSinceRemoval(removalGeneration)
     ) {
       await IOSCtrlProxyManager.evict(deviceId, timer);
     }

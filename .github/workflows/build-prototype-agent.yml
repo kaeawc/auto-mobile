@@ -1,0 +1,70 @@
+name: "Build Prototype Agent"
+
+# Builds the universal (arm64 + x86_64) iOS simulator prototype-agent dylib and
+# ad-hoc signs it. No Developer ID, notarization or provisioning profile: the
+# dylib is only ever loaded into simulator processes, so it needs no secrets.
+on:
+  workflow_call:
+    inputs:
+      checkout-ref:
+        description: "Commit or tag to build; defaults to the caller SHA"
+        required: false
+        type: string
+        default: ""
+      upload-artifact:
+        description: "Whether to upload the built dylib as a workflow artifact"
+        required: false
+        type: boolean
+        default: true
+      artifact-retention-days:
+        description: "How long to retain the uploaded prototype-agent artifact"
+        required: false
+        type: number
+        default: 7
+    outputs:
+      sha256:
+        description: "SHA256 checksum of the universal prototype-agent dylib"
+        value: ${{ jobs.build.outputs.sha256 }}
+
+jobs:
+  build:
+    name: "Build universal prototype agent"
+    runs-on: macos-26
+    timeout-minutes: 20
+    outputs:
+      sha256: ${{ steps.checksum.outputs.sha256 }}
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          ref: ${{ inputs.checkout-ref || github.sha }}
+          persist-credentials: false
+
+      - name: "Select Xcode 26.5"
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.5"
+
+      - name: "Build and ad-hoc sign prototype agent"
+        run: ./scripts/ios/build-prototype-agent.sh /tmp/AutoMobilePrototypeAgent.dylib
+
+      - name: "Verify prototype agent slices, minimum OS and signature"
+        run: ./scripts/ci/verify-prototype-agent.sh /tmp/AutoMobilePrototypeAgent.dylib
+
+      - name: "Calculate prototype agent SHA256"
+        id: checksum
+        run: |
+          # pipefail so a failing shasum is not masked by a succeeding cut (#4684).
+          set -euo pipefail
+          SHA256=$(shasum -a 256 /tmp/AutoMobilePrototypeAgent.dylib | cut -d' ' -f1)
+          echo "sha256=${SHA256}" >> "${GITHUB_OUTPUT}"
+          echo "prototype-agent SHA256: ${SHA256}"
+
+      - name: "Upload prototype agent"
+        if: ${{ inputs.upload-artifact }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: prototype-agent
+          path: /tmp/AutoMobilePrototypeAgent.dylib
+          retention-days: ${{ inputs.artifact-retention-days }}

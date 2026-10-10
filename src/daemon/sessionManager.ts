@@ -819,6 +819,11 @@ export type ExpiryReleaseExecutionCanceller = (
   sessionId: string,
   cancellation: SessionReleasedDuringCallError,
   query: ActiveSessionExecutionQuery,
+  /**
+   * The device the released session holds. A derived label session's release cuts its base
+   * session's calls only where they drive this device.
+   */
+  releasedDeviceId?: string,
 ) => void;
 
 /**
@@ -8812,9 +8817,11 @@ export class SessionManager {
    * Abort every call still running under a session that is about to be released for a reason of
    * its own, with the typed release, so each cut caller gets the terminal refusal. The one routine
    * for every such release: idle sweep, lazy expiry, the lapsed-lease admission, and the daemon's
-   * heartbeat reap and owner-disconnect release (#11400). It covers the scope the release vetoes
-   * count as in flight, implicit (autolock) calls included, so a veto can never count a call the
-   * release then leaves running on a freed device. Returns whether anything was in flight.
+   * heartbeat reap and owner-disconnect release (#11400). It covers the released session's
+   * implicit (autolock) calls too, and a base session's calls that drive a derived label session's
+   * device, so a veto can never count a call the release then leaves running on a freed device.
+   * A base session's call on any other device is counted by the veto but not cut: its session and
+   * its device are both still held. Returns whether anything was in flight.
    */
   cancelExecutionsCutByRelease(
     sessionId: string,
@@ -8830,6 +8837,7 @@ export class SessionManager {
       sessionId,
       new SessionReleasedDuringCallError(sessionId, releaseReason),
       query,
+      (this.sessions.get(sessionId) ?? this.getReleasingSession(sessionId))?.assignedDevice,
     );
     return true;
   }

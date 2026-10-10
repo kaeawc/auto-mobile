@@ -1155,6 +1155,53 @@ describe("ManagedSlotReconciler", () => {
     });
   });
 
+  describe("a duplicate acquisition behind an in-flight reconcile (#11342)", () => {
+    // The first reconcile parks inside provisioning until `release()`.
+    function parkFirst() {
+      let release!: () => void;
+      const parked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      provisioner.beforeCreate = () => parked;
+      return release;
+    }
+
+    async function untilPending(count: number) {
+      for (let turn = 0; turn < 50 && timer.getPendingTimeoutCount() < count; turn += 1) {
+        await Promise.resolve();
+      }
+    }
+
+    test("reports timeout at its own deadline while the first is still running", async () => {
+      const release = parkFirst();
+      const first = reconciler.reconcile(request());
+      await Promise.resolve();
+      const second = reconciler.reconcile(request(SPEC_18, { deadlineMs: timer.now() + 5_000 }));
+      await untilPending(1);
+      timer.advanceTime(5_000);
+
+      expect(expectFailed(await second).failure.code).toBe("timeout");
+      release();
+      expect(expectReady(await first).disposition).toBe("created");
+      expect(provisioner.created()).toHaveLength(1);
+    });
+
+    test("reports cancelled when its signal aborts while the first is still running", async () => {
+      const release = parkFirst();
+      const first = reconciler.reconcile(request());
+      await Promise.resolve();
+      const controller = new AbortController();
+      const second = reconciler.reconcile(request(SPEC_18, { signal: controller.signal }));
+      await untilPending(1);
+      controller.abort();
+
+      expect(expectFailed(await second).failure.code).toBe("cancelled");
+      release();
+      expect(expectReady(await first).disposition).toBe("created");
+      expect(provisioner.created()).toHaveLength(1);
+    });
+  });
+
   describe("any model (omitted deviceType)", () => {
     beforeEach(() => {
       reconciler = new ManagedSlotReconciler({

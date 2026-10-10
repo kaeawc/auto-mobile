@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
   evaluateIosPairCompatibility,
   iosDeviceSpecificationMismatch,
@@ -279,7 +280,7 @@ export interface ManagedSlotReconcilerDependencies {
   capacity?: ManagedSlotBootCapacity;
   /** Whether a recorded execution owner is alive; default: PID plus process generation. */
   isExecOwnerLive?: SlotExecOwnerLiveness;
-  timer: Pick<Timer, "now">;
+  timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
   /** Execution-reservation ids (default: random UUIDs). */
   idGenerator?: IdGenerator;
   /** Reservations in flight, which the registry's owner liveness reads (default: process-wide). */
@@ -992,18 +993,65 @@ export class ManagedSlotReconciler {
 
   async reconcile(request: ManagedSlotReconcileRequest): Promise<ManagedSlotReconcileResult> {
     const id = slotId(request.key);
-    const previous = this.inFlight.get(id) ?? Promise.resolve();
-    const run = previous.then(
-      () => this.reconcileSerialized(request),
-      () => this.reconcileSerialized(request),
-    );
+    const previous = this.inFlight.get(id);
+    // A caller that stopped waiting (deadline or abort) must not run its reconcile afterwards.
+    let abandoned = false;
+    const run: Promise<ManagedSlotReconcileResult | undefined> = (previous ?? Promise.resolve())
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .then(() => (abandoned ? undefined : this.reconcileSerialized(request)));
     this.inFlight.set(id, run);
     try {
-      return await run;
+      if (previous) {
+        const waitFailure = await this.waitForQueue(previous, request);
+        if (waitFailure) {
+          abandoned = true;
+          return {
+            outcome: "failed",
+            failure: waitFailure,
+            assignment: await this.deps.registry.getAssignment(request.key),
+            evidence: { initial: null, inventoryComplete: null },
+          };
+        }
+      }
+      return (await run) as ManagedSlotReconcileResult;
     } finally {
       if (this.inFlight.get(id) === run) {
         this.inFlight.delete(id);
       }
+    }
+  }
+
+  /**
+   * Wait behind the slot's in-flight reconcile for at most the request's own deadline and abort
+   * signal (#11342): a duplicate acquisition reports `timeout` or `cancelled` on time instead of
+   * after the first one finishes. Undefined when the queue cleared in time.
+   */
+  private async waitForQueue(
+    previous: Promise<unknown>,
+    request: ManagedSlotReconcileRequest,
+  ): Promise<ManagedSlotReconcileFailure | undefined> {
+    try {
+      await raceWithDeadline(
+        previous.then(
+          () => undefined,
+          () => undefined,
+        ),
+        {
+          timer: this.deps.timer,
+          timeoutMs: Math.max(0, request.deadlineMs - this.deps.timer.now()),
+          ...(request.signal ? { signal: request.signal } : {}),
+          label: "Waiting for the slot's in-flight reconcile",
+        },
+      );
+      return undefined;
+    } catch (error) {
+      logger.debug(`[ManagedSlots] queued reconcile stopped waiting: ${errorMessage(error)}`);
+      return request.signal?.aborted
+        ? failure("cancelled", "Slot preparation was cancelled.")
+        : failure("timeout", "Slot preparation deadline passed.");
     }
   }
 

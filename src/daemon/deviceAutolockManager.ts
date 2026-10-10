@@ -365,11 +365,25 @@ export class DeviceAutolockManager {
         lastUsedAtMs: session.lastUsedAt,
         expiresAtMs: session.expiresAt,
       });
-      await raceWithDeadline(persistence, {
-        timer: defaultTimer,
-        signal,
-        label: "Autolock persistence",
-      });
+      try {
+        await raceWithDeadline(persistence, {
+          timer: defaultTimer,
+          signal,
+          label: "Autolock persistence",
+        });
+      } catch (error) {
+        if (signal?.aborted) {
+          throw error;
+        }
+        // A transient write failure (e.g. SQLITE_BUSY past the retry) leaves the live session
+        // usable in memory, exactly like the attach path's attached-not-persisted (#11164):
+        // only abort/deadline cancels the acquisition.
+        logger.warn(
+          `Autolock session ${session.sessionId} acquired on ${device.id} but not persisted; ` +
+            `a daemon restart will not restore it: ${errorMessage(error)}`,
+          error,
+        );
+      }
       signal?.throwIfAborted();
     } catch (error) {
       // Session release fences automation admission synchronously, then may
@@ -656,17 +670,32 @@ export class DeviceAutolockManager {
       // second attachment runs, letting restoration clobber a `setActiveDevice`
       // that landed in between (#6807).
       // A persistence failure is logged and reported by the attach; keep restoring the rest.
-      await this.attachAutolockSessionToMcpSession(id, mcpSessionId, "if-absent");
+      await this.attachAutolockSessionToMcpSession(id, mcpSessionId, "if-absent", true);
     }
   }
 
   /**
+   * A successful tool call that named `sessionId` explicitly (#11164): adopt it for routing only
+   * when no other connected client owns it, and never flip an existing default — naming a UUID
+   * is not proof of ownership, and only setActiveDevice or a restore chooses the default.
+   */
+  attachExplicitSessionUuidCall(
+    sessionId: string,
+    mcpSessionId: string | undefined,
+  ): Promise<AutolockAttachOutcome> {
+    return this.attachAutolockSessionToMcpSession(sessionId, mcpSessionId, "if-absent", true);
+  }
+
+  /**
    * Associate a live autolock session with a reconnected MCP client session.
+   * `refuseForeignOwned` (reconnect restore, explicit-UUID calls) refuses a session another
+   * connected client owns.
    */
   async attachAutolockSessionToMcpSession(
     sessionId: string,
     mcpSessionId: string | undefined,
     makeDefault: boolean | "if-absent" = true,
+    refuseForeignOwned = false,
   ): Promise<AutolockAttachOutcome> {
     if (!mcpSessionId) {
       return "not-attached";
@@ -682,37 +711,69 @@ export class DeviceAutolockManager {
       ) {
         return "not-attached";
       }
-      this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);
-      let outcome: AutolockAttachOutcome = "attached";
-      try {
-        await this.deviceSessionRepository.markAutolockSession(sessionId, {
-          mcpSessionId,
-          daemonSessionId: this.pool.getDaemonSessionId(),
-          lastUsedAtMs: session.lastUsedAt,
-          expiresAtMs: session.expiresAt,
-        });
-      } catch (error) {
-        // The live session is attached in memory either way; only a daemon restart loses the
-        // mapping, so the caller's request still succeeds and learns the row is stale (#11129).
+      if (refuseForeignOwned && this.hasMcpSessionOwner(sessionId, mcpSessionId)) {
+        // The client merely named these ids: naming another connected client's autolock is
+        // not proof of ownership, so never move its persisted owner or default route here
+        // (#11164). setActiveDevice is the deliberate share.
         logger.warn(
-          `Autolock session ${sessionId} attached to MCP session ${mcpSessionId} but not ` +
-            `persisted; a daemon restart will not restore it: ${errorMessage(error)}`,
-          error,
+          `Not attaching autolock session ${sessionId} to MCP session ${mcpSessionId}: ` +
+            `another connection owns it`,
         );
-        outcome = "attached-not-persisted";
+        return "not-attached";
       }
-      if (
-        makeDefault === true ||
-        (makeDefault === "if-absent" &&
-          this.resolveAutolockSessionForMcpSession(mcpSessionId) === undefined)
-      ) {
-        this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
-      }
-      const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
-      acquired.add(sessionId);
-      this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
+      this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);
+      const outcome = await this.persistAttachment(session, mcpSessionId);
+      this.recordAttachment(sessionId, mcpSessionId, makeDefault, refuseForeignOwned);
       return outcome;
     });
+  }
+
+  private async persistAttachment(
+    session: Session,
+    mcpSessionId: string,
+  ): Promise<AutolockAttachOutcome> {
+    try {
+      await this.deviceSessionRepository.markAutolockSession(session.sessionId, {
+        mcpSessionId,
+        daemonSessionId: this.pool.getDaemonSessionId(),
+        lastUsedAtMs: session.lastUsedAt,
+        expiresAtMs: session.expiresAt,
+      });
+      return "attached";
+    } catch (error) {
+      // The live session is attached in memory either way; only a daemon restart loses the
+      // mapping, so the caller's request still succeeds and learns the row is stale (#11129).
+      logger.warn(
+        `Autolock session ${session.sessionId} attached to MCP session ${mcpSessionId} but not ` +
+          `persisted; a daemon restart will not restore it: ${errorMessage(error)}`,
+        error,
+      );
+      return "attached-not-persisted";
+    }
+  }
+
+  private recordAttachment(
+    sessionId: string,
+    mcpSessionId: string,
+    makeDefault: boolean | "if-absent",
+    takesOwnership: boolean,
+  ): void {
+    if (
+      makeDefault === true ||
+      (makeDefault === "if-absent" &&
+        this.resolveAutolockSessionForMcpSession(mcpSessionId) === undefined)
+    ) {
+      this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
+    }
+    const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
+    acquired.add(sessionId);
+    this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
+    if (takesOwnership) {
+      // No other connection owns it, so this client becomes the owner: keep the pool's
+      // ownership map in step, so its disconnect schedules the owner-disconnect release
+      // like an acquisition does. (A setActiveDevice share must not move ownership.)
+      this.pool.recordMcpSessionOwnership(mcpSessionId, sessionId);
+    }
   }
 
   clearExpiredAutolockStateWhenIdle(

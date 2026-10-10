@@ -364,6 +364,18 @@ describe("executePlan cleans every acquired device before release", () => {
         ]);
         expect(sessionManager.hasDeviceCleanupInProgress("device-A")).toBe(false);
       });
+      test("skips a device the held session left and another session now owns (#11164)", async () => {
+        await acquire([devices[0]], false);
+        await lifecycle.afterExecution(holdWithCleanup());
+        await sessionManager.rebindSession("base", "device-B", "android");
+        await sessionManager.createSession("other", "device-A", "android");
+
+        await sessionManager.releaseSession("base", "client-release");
+        await flush();
+
+        expect(cleanup.calls).toEqual([]);
+        expect(sessionManager.getSessionForDevice("device-A")).toBe("other");
+      });
     });
 
     test("sessionHeld is reported only on a failed run that asked to hold", () => {

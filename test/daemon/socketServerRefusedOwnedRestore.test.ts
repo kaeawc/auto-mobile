@@ -59,6 +59,14 @@ describe("refused owned-session restore", () => {
     expect(restores).toHaveLength(3);
   });
 
+  test("excludes the refused session from the autolock restore (#11164)", async () => {
+    const restores: string[][] = [];
+
+    await restore(serverRefusing(restores), { deviceId: "emulator-5554" });
+
+    expect(restores).toEqual([[MINE]]);
+  });
+
   test("fails a call that names the refused session", async () => {
     await expect(restore(serverRefusing([]), { sessionUuid: OTHER_SESSION })).rejects.toMatchObject(
       { code: "device_owned_by_other_session" },

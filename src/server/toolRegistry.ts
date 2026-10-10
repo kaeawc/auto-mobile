@@ -1866,6 +1866,30 @@ export interface PlanCleanupOutcome {
 // the ToolRegistry constructor; tests instantiate it directly to exercise
 // executePlan cleanup and the auto-release guard without a live daemon session.
 export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
+  /** The plan's base session and every device-label session derived from it. */
+  private planSessionFamily(baseSessionUuid: string): ReadonlySet<string> {
+    return new Set([baseSessionUuid, ...Object.values(getDeviceLabelMap(baseSessionUuid) ?? {})]);
+  }
+
+  /** Drop captured devices that a session outside `planSessions` now owns. */
+  private devicesNotOwnedByOtherSessions(
+    devices: BootedDevice[],
+    planSessions: ReadonlySet<string>,
+  ): BootedDevice[] {
+    const sessionManager = DaemonState.getInstance().getSessionManager();
+    return devices.filter((device) => {
+      const owner = sessionManager.getSessionForDevice(device.deviceId);
+      if (owner !== null && !planSessions.has(owner)) {
+        logger.info(
+          `[PlanLifecycle] Skipping deferred cleanup on ${device.deviceId}: now owned by ` +
+            `session ${owner}`,
+        );
+        return false;
+      }
+      return true;
+    });
+  }
+
   private getCleanupDevices(
     primaryDevice: BootedDevice,
     baseSessionUuid: string | undefined,
@@ -1888,10 +1912,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
 
     const sessionManager = state.getSessionManager();
     const devicePool = state.getDevicePool();
-    const sessions = new Set([
-      baseSessionUuid,
-      ...Object.values(getDeviceLabelMap(baseSessionUuid) ?? {}),
-    ]);
+    const sessions = this.planSessionFamily(baseSessionUuid);
     const devices = [...sessions].flatMap((sessionUuid): BootedDevice[] => {
       const session = sessionManager.getSession(sessionUuid);
       const pooledDevice = session ? devicePool.getDevice(session.assignedDevice) : null;
@@ -2120,10 +2141,10 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       // those plans still clean every device they own (#10022).
       const devices = this.getCleanupDevices(device, lifecycleSessionUuid);
       const cleanupConfig = { appId: args.cleanupAppId, clearAppData: args.cleanupClearAppData };
-      const runCleanup = async (): Promise<void> => {
-        const outcome = await this.cleanupDevicesShielded(devices, cleanupService, cleanupConfig);
+      const runCleanup = async (targets: BootedDevice[]): Promise<void> => {
+        const outcome = await this.cleanupDevicesShielded(targets, cleanupService, cleanupConfig);
         this.reportIncompleteCleanup(outcome, cleanupConfig.appId, lifecycleSessionUuid);
-        this.markIncompleteCleanupDevices(outcome, devices, cleanupService, cleanupConfig);
+        this.markIncompleteCleanupDevices(outcome, targets, cleanupService, cleanupConfig);
       };
       if (heldForRecovery) {
         // The caller's recovery and resumed plan need the app as the failure left it (#11139):
@@ -2132,14 +2153,17 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
           `[PlanLifecycle] Deferring app cleanup for ${cleanupConfig.appId} until held session ` +
             `${lifecycleSessionUuid} is released`,
         );
+        // The held session may be rebound before its release and its old device acquired by
+        // another session (#11164): skip, at run time, any device now owned outside this plan.
+        const planSessions = this.planSessionFamily(lifecycleSessionUuid);
         deferHeldPlanAppCleanup(
           DaemonState.getInstance().getSessionManager(),
           lifecycleSessionUuid,
-          runCleanup,
+          () => runCleanup(this.devicesNotOwnedByOtherSessions(devices, planSessions)),
           PLAN_APP_CLEANUP_CAP_MS,
         );
       } else {
-        await runCleanup();
+        await runCleanup(devices);
       }
     } else if (deferredCleanup) {
       await deferredCleanup();

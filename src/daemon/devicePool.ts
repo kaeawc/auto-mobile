@@ -8028,6 +8028,12 @@ export class DevicePool {
     return this.autolockManager.restoreAutolockSessionsForMcpSession(...args);
   }
 
+  attachExplicitSessionUuidCall(
+    ...args: Parameters<DeviceAutolockManager["attachExplicitSessionUuidCall"]>
+  ): ReturnType<DeviceAutolockManager["attachExplicitSessionUuidCall"]> {
+    return this.autolockManager.attachExplicitSessionUuidCall(...args);
+  }
+
   attachAutolockSessionToMcpSession(
     ...args: Parameters<DeviceAutolockManager["attachAutolockSessionToMcpSession"]>
   ): ReturnType<DeviceAutolockManager["attachAutolockSessionToMcpSession"]> {

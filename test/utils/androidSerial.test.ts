@@ -224,6 +224,29 @@ describe("Android physical transport evidence", () => {
     ]);
   });
 
+  test("canonicalFor never maps a reused endpoint kept by an additive fold to the old phone (#11164)", async () => {
+    const usb = executor("PHONE-A", "boot-a");
+    const wifi = executor("PHONE-A", "boot-a");
+    const aliases = new AndroidTransportAliases({
+      create: (target) => (target?.deviceId === "PHONE-A" ? usb : wifi),
+    });
+    const initial = [
+      withAndroidTransportId(device("PHONE-A"), "1"),
+      withAndroidTransportId(device("host-a:5555"), "2"),
+    ];
+    const pooled = new Set(["PHONE-A"]);
+    aliases.fold(initial, await aliases.prepare(initial), pooled);
+    expect(aliases.canonicalFor("host-a:5555")).toBe("PHONE-A");
+
+    wifi.setCommandResponse("ro.serialno", createExecResult("PHONE-B", ""));
+    wifi.setCommandResponse("boot_id", createExecResult("boot-b", ""));
+    const reused = [withAndroidTransportId(device("host-a:5555"), "3")];
+    aliases.fold(reused, await aliases.prepare(reused), pooled, false);
+
+    expect(aliases.canonicalFor("host-a:5555")).toBe("host-a:5555");
+    expect(aliases.canonicalFor("PHONE-A")).toBe("PHONE-A");
+  });
+
   test.each([true, false])(
     "a DHCP-reused endpoint is reidentified and never routes the old phone to its replacement (observed absence=%s)",
     async (observedAbsence) => {

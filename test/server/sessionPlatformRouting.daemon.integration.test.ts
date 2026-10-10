@@ -300,11 +300,17 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     await proxy.callTool("routingProbe", { platform: "android", keepScreenAwake: false });
     await proxy.callTool("routingProbe", { platform: "ios", keepScreenAwake: false });
     const android = pool.resolveAutolockSessionForMcpSession(socketSessionId, "android");
+    const defaultBeforeExplicitCall = pool.captureAutolockSessionForMcpSession(socketSessionId);
     await proxy.callTool("routingProbe", {
       sessionUuid: android,
       platform: "ios",
       keepScreenAwake: false,
     });
+    // Naming a session UUID never flips the connection's default; setActiveDevice does (#11164).
+    expect(pool.captureAutolockSessionForMcpSession(socketSessionId)).toBe(
+      defaultBeforeExplicitCall,
+    );
+    await proxy.callTool("setActiveDevice", { deviceId: devices[0].deviceId, platform: "android" });
     expect(pool.resolveAutolockSessionForMcpSession(socketSessionId)).toBe(android);
     const appleBeforeSwitch = pool.resolveAutolockSessionForMcpSession(socketSessionId, "ios");
     await proxy.callTool("setActiveDevice", { deviceId: devices[2].deviceId, platform: "android" });

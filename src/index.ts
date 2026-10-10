@@ -49,6 +49,7 @@ import {
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "./processLifecycle";
+import { assertManagedSlotsSupported } from "./models/managedSlotConfig";
 import { runShutdownCleanupStages } from "./shutdownCleanup";
 import { startStartupMaintenance } from "./utils/startupMaintenance";
 
@@ -237,6 +238,7 @@ async function main() {
       daemonHost,
       initialSessionUuid,
       livenessOwnerToken,
+      managedSlotConfig,
       debugPerf,
       debug,
       strictPort,
@@ -282,6 +284,8 @@ async function main() {
       process.exit(1);
       return;
     }
+    // Refuse before any daemon or device work rather than run unmanaged (#11208).
+    assertManagedSlotsSupported(managedSlotConfig);
     if (daemonRequested && daemonCommand === undefined) {
       const { printUnknownDaemonCommand } = await import("./daemon/cli/runDaemonCommand");
       printUnknownDaemonCommand(undefined);

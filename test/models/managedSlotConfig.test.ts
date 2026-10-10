@@ -3,6 +3,7 @@ import {
   MANAGED_SLOTS_V1_CAPABILITY,
   ManagedSlotConfigError,
   assertManagedSlotContractSupported,
+  assertManagedSlotsSupported,
   daemonSupportsManagedSlots,
   parseManagedSlotConfig,
   parseManagedSlotConfigSource,
@@ -150,6 +151,18 @@ describe("contract negotiation", () => {
       daemonSupportsManagedSlots(["daemon/registerSession", MANAGED_SLOTS_V1_CAPABILITY]),
     ).toBe(true);
     expect(daemonSupportsManagedSlots(["daemon/registerSession"])).toBe(false);
+  });
+});
+
+describe("assertManagedSlotsSupported", () => {
+  test("is not wired yet, so a supplied config is refused with a typed error", () => {
+    expect(codeOf(() => assertManagedSlotsSupported(parseManagedSlotConfig(validConfig)))).toBe(
+      "managed_slots_unsupported",
+    );
+    expect(() => assertManagedSlotsSupported(undefined)).not.toThrow();
+    expect(() =>
+      assertManagedSlotsSupported(parseManagedSlotConfig(validConfig), true),
+    ).not.toThrow();
   });
 });
 

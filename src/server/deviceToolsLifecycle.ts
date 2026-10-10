@@ -213,6 +213,42 @@ async function assertKillDeviceCaller(args: KillDeviceArgs): Promise<void> {
   });
 }
 
+/**
+ * deleteDevice's ownership refusal before the teardown lease is reserved: reserving it aborts the
+ * current lease holder, which a refused delete must never do. Resolution is read-only without a
+ * lease; a target that does not resolve here is left to the workflow's own resolution.
+ */
+async function preLeaseHolderRefusal(
+  args: TeardownDeviceArgs,
+  deps: DeviceToolsDependencies,
+  deadlineMs: number,
+  timeoutMs: number,
+  requestAbortSignal: AbortSignal | undefined,
+  requester: LifecycleRequester | undefined,
+  lifecycleLease: VirtualDeviceLifecycleLease | undefined,
+): Promise<TeardownToolResponse | undefined> {
+  // An already-aborted caller is left to the teardown service's own cancellation path.
+  if (!requester || lifecycleLease || requestAbortSignal?.aborted) {
+    return undefined;
+  }
+  const resolution = await resolveTeardownTarget({
+    args,
+    dependencies: deps,
+    deviceManager: deps.deviceManagerFactory(),
+    requestAbortSignal,
+    deadlineDevice: teardownDeadlineDevice(args),
+    deadlineMs,
+    timeoutMs,
+    cancelOnRequestAbort: args.cancellationPolicy === "cancel-on-request-abort",
+    mode: args.force === true ? "serial-only" : "named",
+    initialScan: { serials: new Set(), pooledEntries: [] },
+  });
+  if ("response" in resolution) {
+    return undefined;
+  }
+  return await teardownOwnershipRefusal(args, resolution.target, requester);
+}
+
 function createDeleteDeviceWorkflow(
   args: TeardownDeviceArgs,
   deps: DeviceToolsDependencies,
@@ -481,6 +517,24 @@ export function createLifecycleHandlers() {
       if (slotRefusal) {
         lifecycleLease?.release();
         return slotRefusal.response;
+      }
+      // Likewise the session-holder refusal: it needs the resolved target, so resolve read-only
+      // first. The workflow re-checks under the lease (#11274).
+      const holderRefusal = await preLeaseHolderRefusal(
+        args,
+        deps,
+        deadlineMs,
+        timeoutMs,
+        callerSignal,
+        requester,
+        lifecycleLease,
+      ).catch((error: unknown) => {
+        lifecycleLease?.release();
+        throw error;
+      });
+      if (holderRefusal) {
+        lifecycleLease?.release();
+        return holderRefusal;
       }
       return await teardownService.teardown<
         TeardownState,

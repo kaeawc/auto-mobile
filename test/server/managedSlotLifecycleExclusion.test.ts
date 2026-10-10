@@ -210,6 +210,38 @@ describe("managed-slot lifecycle and input exclusion", () => {
     expect(settled).toBe(true);
   });
 
+  test("a deleteDevice refused for a device another session holds does not preempt the lease holder (#11274)", async () => {
+    // freeDevice is held by "other-session"; a sessionless caller is refused, and must be
+    // refused before it reserves the teardown lease (reserving aborts the current lease holder).
+    const inFlight = await lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "ios", stableId: freeDevice.deviceId },
+      { operation: "start", deadlineMs: 60_000 },
+    );
+
+    const pending = tool("deleteDevice")({
+      ...deleteArgs(),
+      target: { platform: "ios", isVirtual: true, stableId: freeDevice.deviceId },
+    }) as Promise<{ content: Array<{ text: string }> }>;
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    for (let i = 0; i < 20 && !settled; i++) {
+      await Promise.resolve();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    expect(inFlight.signal.aborted).toBe(false);
+    inFlight.release();
+    const body = JSON.parse((await pending).content[0].text) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      success: false,
+      failure: { code: "device_owned_by_other_session", phase: "precondition" },
+    });
+    expect(settled).toBe(true);
+    expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
+  });
+
   test("getApple of a stopped slot simulator is refused before any boot or bind", async () => {
     await assignManagedSlotDevice(registry, "ios", "IOS-STOPPED", "runner-b");
     manager.setDeviceImages("ios", [

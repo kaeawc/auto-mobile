@@ -3410,7 +3410,13 @@ describe("provisionDevice handler", () => {
         await Promise.resolve();
       }
       expect(teardownSettled).toBe(false);
-      expect(deviceManager.getExecutedOperations()).toEqual([]);
+      // Target resolution is read-only discovery (it runs before the lease so a refused delete
+      // never preempts, #11274); nothing mutating may run until the lease is granted.
+      expect(
+        deviceManager
+          .getExecutedOperations()
+          .filter((operation) => !operation.startsWith("getBootedDevices:")),
+      ).toEqual([]);
 
       releaseReadiness();
       const provisionResult = await provision;

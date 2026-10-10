@@ -9,7 +9,9 @@ struct PrototypeRGBA: Equatable {
 
     /// The spec's Android-style hex: `#RRGGBB` or `#AARRGGBB`. Anything else is nil.
     init?(hex: String?) {
+        // `UInt64(_:radix:)` alone would take a sign, so "#+12345" must not pass as a colour.
         guard let hex, hex.hasPrefix("#"), hex.count == 7 || hex.count == 9,
+              hex.dropFirst().allSatisfy(\.isHexDigit),
               let value = UInt64(hex.dropFirst(), radix: 16) else { return nil }
         alpha = hex.count == 9 ? Double((value >> 24) & 0xFF) / 255 : 1
         red = Double((value >> 16) & 0xFF) / 255
@@ -85,36 +87,58 @@ struct PrototypeRGBA: Equatable {
     }
 }
 
-/// The spec's `theme.colors`: a seed, the device-colour source, and per-role hex overrides.
+/// The spec's `theme.colors`: a seed, the device-colour source, per-role hex overrides, and
+/// `light` / `dark` role maps for one resolved mode (#11218).
 struct PrototypeThemeColors: Decodable, Equatable {
     let seed: String?
     let source: String?
     /// Only the Material 3 role names (`PrototypePalette.roleNames`), hex values as authored.
     let roles: [String: String]
-    /// `light` and `dark`: role overrides for one resolved mode, applied after `roles` (#11218).
-    /// Decoded only; the palette applies them in #11220.
+    /// Role overrides for one resolved mode, applied after `roles` by `PrototypePalette.make`.
     let light: [String: String]
     let dark: [String: String]
+    /// Top-level keys that are neither a field nor a role name, sorted. They are not applied; the
+    /// agent logs them when the spec is shown.
+    let unknownKeys: [String]
+
+    private static let fieldNames: Set<String> = ["seed", "source", "light", "dark"]
 
     init(from decoder: Decoder) throws {
         let all = try decoder.singleValueContainer().decode([String: JSONValue].self)
         seed = Self.text(all["seed"])
         source = Self.text(all["source"])
-        roles = Self.roleOverrides(all)
-        light = Self.modeOverrides(all["light"])
-        dark = Self.modeOverrides(all["dark"])
+        roles = all.compactMapValues { Self.text($0) }.filter { PrototypePalette.roleNames.contains($0.key) }
+        light = try Self.modeOverrides(all["light"], mode: "light")
+        dark = try Self.modeOverrides(all["dark"], mode: "dark")
+        unknownKeys = all.keys
+            .filter { !Self.fieldNames.contains($0) && !PrototypePalette.roleNames.contains($0) }
+            .sorted()
     }
 
     private static func text(_ value: JSONValue?) -> String? {
         if case let .string(text)? = value { text } else { nil }
     }
 
-    private static func roleOverrides(_ fields: [String: JSONValue]) -> [String: String] {
-        fields.compactMapValues { text($0) }.filter { PrototypePalette.roleNames.contains($0.key) }
-    }
-
-    private static func modeOverrides(_ value: JSONValue?) -> [String: String] {
-        if case let .object(fields)? = value { roleOverrides(fields) } else { [:] }
+    /// A mode map is new with `prototype_theme_modes_v1` and has no host-independent fallback that
+    /// is safe to draw, so anything but a non-empty `{role: hex}` object fails the decode: a seed,
+    /// an unknown role and a role name used as a value are all refused.
+    private static func modeOverrides(_ value: JSONValue?, mode: String) throws -> [String: String] {
+        guard let value else { return [:] }
+        let path = "theme.colors.\(mode)"
+        guard case let .object(fields) = value, !fields.isEmpty else {
+            throw PrototypeThemeModes.violation(path, "Expected a non-empty {role: hex} map")
+        }
+        var overrides: [String: String] = [:]
+        for (role, entry) in fields.sorted(by: { $0.key < $1.key }) {
+            guard PrototypePalette.roleNames.contains(role) else {
+                throw PrototypeThemeModes.violation("\(path).\(role)", "Unknown colour role")
+            }
+            guard let hex = text(entry), PrototypeRGBA(hex: hex) != nil else {
+                throw PrototypeThemeModes.violation("\(path).\(role)", "Expected #RRGGBB or #AARRGGBB")
+            }
+            overrides[role] = hex
+        }
+        return overrides
     }
 }
 
@@ -281,7 +305,7 @@ struct PrototypeShapes: Equatable {
 
 /// The Material 3 colour roles a spec can name, resolved for one light or dark scheme. Mirrors
 /// Android's `PrototypeTheme.kt`: baseline Material palette, optionally replaced by a seed-derived
-/// scheme, then explicit role overrides painted last.
+/// scheme, then the flat role overrides, then the `light` or `dark` role map for the resolved mode.
 struct PrototypePalette: Equatable {
     let dark: Bool
     /// True when the spec carried a `theme`, so unstyled content follows the palette.
@@ -298,9 +322,22 @@ struct PrototypePalette: Equatable {
         return spec.hasPrefix("#") ? PrototypeRGBA(hex: spec) : colors[spec]
     }
 
-    /// A spec colour slot, through the `PrototypeModeValue.rendered` seam.
+    /// A spec colour slot in this palette's mode: a `{light, dark}` pair gives its side for
+    /// `dark`, and that value is then a hex literal or a role like any single value.
     func resolve(_ spec: PrototypeModeValue?) -> PrototypeRGBA? {
-        resolve(spec?.rendered)
+        resolve(spec?.value(dark: dark))
+    }
+
+    /// A scrim slot (`window.placement.scrim`, a bottomSheet `scrim`), the one place both scrims
+    /// resolve. A role is used unchanged, as on Android, so `"scrim": "scrim"` is opaque black; if
+    /// role scrims are given a default alpha (open with the owner, #11215), it is applied here.
+    func scrim(_ spec: PrototypeModeValue?) -> PrototypeRGBA? {
+        resolve(spec)
+    }
+
+    /// The asset id an image slot names in this palette's mode.
+    func asset(_ slot: PrototypeModeValue?) -> String? {
+        slot?.value(dark: dark)
     }
 
     /// `systemDark` decides when the theme has no `mode` (or `system`) and no surface override.
@@ -323,8 +360,14 @@ struct PrototypePalette: Equatable {
         if let seed = PrototypeRGBA(hex: theme?.colors?.seed) {
             colors.merge(seedScheme(seed: seed, dark: dark)) { _, derived in derived }
         }
-        for (role, hex) in roles {
-            if let color = PrototypeRGBA(hex: hex) { colors[role] = color }
+        // Flat overrides hold in both modes; the resolved mode's map is painted over them. Only the
+        // flat `background` / `surface` take part in the inference above: a mode map is chosen by
+        // the mode, so it cannot also decide it.
+        let modeRoles = (dark ? theme?.colors?.dark : theme?.colors?.light) ?? [:]
+        for overrides in [roles, modeRoles] {
+            for (role, hex) in overrides {
+                if let color = PrototypeRGBA(hex: hex) { colors[role] = color }
+            }
         }
         return PrototypePalette(dark: dark, themed: theme != nil, colors: colors)
     }

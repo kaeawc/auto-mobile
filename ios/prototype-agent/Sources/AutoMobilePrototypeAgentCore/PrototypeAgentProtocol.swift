@@ -25,6 +25,7 @@ enum PrototypeAgentProtocol {
         restoreAfterCaptureRequest,
         screenshotHideCapability,
         inspectCapability,
+        themeModesCapability,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -48,6 +49,11 @@ enum PrototypeAgentProtocol {
     /// state, which is what the host's `inspect` adopts. An older agent answers status without
     /// them, so the host refuses `inspect` unless this is advertised.
     static let inspectCapability = "prototype_inspect_v1"
+    /// Draws the per-mode spec forms (#11220): `{light, dark}` colour and image pairs, role names in
+    /// gradient stops and scrims, and `theme.colors.light` / `theme.colors.dark`. The host refuses a
+    /// spec that uses one on an agent that does not advertise it. Same name as the CtrlProxy
+    /// capability.
+    static let themeModesCapability = "prototype_theme_modes_v1"
     static let portEnvironmentKey = "AUTOMOBILE_PROTOTYPE_PORT"
     static let tokenEnvironmentKey = "AUTOMOBILE_PROTOTYPE_TOKEN"
     /// Shortest token the agent accepts, so a stray or empty value cannot open the server.

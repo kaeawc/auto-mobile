@@ -70,9 +70,43 @@ extension PrototypePalette {
         resolve(spec).map { Color($0) }
     }
 
-    /// A spec colour slot, through the `PrototypeModeValue.rendered` seam.
+    /// A spec colour slot, resolved for this palette's light or dark mode.
     func color(_ spec: PrototypeModeValue?) -> Color? {
-        color(spec?.rendered)
+        resolve(spec).map { Color($0) }
+    }
+}
+
+/// `style.gradient`, sized to the node: the line and radius depend on the measured box, as on
+/// Android (`PrototypeGradient.linearLine`, `radialRadius`).
+struct PrototypeGradientFill: View {
+    let gradient: PrototypeGradient
+    let palette: PrototypePalette
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = Double(proxy.size.width)
+            let height = Double(proxy.size.height)
+            let stops = gradient.colorStops(palette: palette).map {
+                Gradient.Stop(color: Color($0.color), location: CGFloat($0.location))
+            }
+            switch gradient {
+            case let .linear(angle, _):
+                let line = PrototypeGradient.linearLine(angle: angle, width: width, height: height)
+                Rectangle().fill(LinearGradient(
+                    stops: stops,
+                    startPoint: UnitPoint(x: line.start.x, y: line.start.y),
+                    endPoint: UnitPoint(x: line.end.x, y: line.end.y)
+                ))
+            case .radial:
+                Rectangle().fill(RadialGradient(
+                    stops: stops,
+                    center: .center,
+                    startRadius: 0,
+                    endRadius: CGFloat(PrototypeGradient.radialRadius(width: width, height: height))
+                ))
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -393,7 +427,7 @@ struct NodeView: View {
     }
 
     @ViewBuilder private var imageView: some View {
-        if let id = node.asset?.rendered, let image = model.assets[id] {
+        if let id = palette.asset(node.asset), let image = model.assets[id] {
             let resizable = Image(uiImage: image).resizable()
             switch node.contentScale {
             case "crop": resizable.aspectRatio(contentMode: .fill).clipped()
@@ -505,9 +539,7 @@ struct NodeView: View {
                     model.select(index: index, pager: node.pager, key: node.stateKey, then: node.onTap ?? [])
                 } label: {
                     VStack(spacing: 2) {
-                        if let icon = item.icon {
-                            PrototypeGlyph(symbol: sfSymbols[icon] ?? "circle")
-                        }
+                        navVisual(item)
                         Text(item.label).font(.caption)
                     }
                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -523,6 +555,28 @@ struct NodeView: View {
         }
     }
 
+    /// The item's image for the resolved mode when it is uploaded, then its icon, then a
+    /// placeholder square (24 pt, as Android's nav icons).
+    @ViewBuilder
+    private func navVisual(_ item: NavItem) -> some View {
+        switch item.visual(dark: palette.dark, available: Set(model.assets.keys)) {
+        case let .image(id):
+            if let image = model.assets[id] {
+                Image(uiImage: image).resizable().aspectRatio(contentMode: .fit)
+                    .frame(width: 24, height: 24)
+                    .accessibilityHidden(true)
+            }
+        case let .icon(name):
+            PrototypeGlyph(symbol: sfSymbols[name] ?? "circle")
+        case .placeholder:
+            Rectangle().fill(palette.placeholderFill.map { Color($0) } ?? Color.gray.opacity(0.3))
+                .frame(width: 24, height: 24)
+                .accessibilityHidden(true)
+        case .none:
+            EmptyView()
+        }
+    }
+
     /// A nav item's colour: the palette's role pair when themed, else the system accent and secondary.
     private func navForeground(selected: Bool) -> Color {
         if selected { return palette.navSelected.map { Color($0) } ?? .accentColor }
@@ -530,11 +584,19 @@ struct NodeView: View {
     }
 
     /// Opens at its first detent. Dragging between detents and swipe-to-dismiss are not
-    /// prototyped on iOS yet.
+    /// prototyped on iOS yet. An authored `scrim` fills the sheet node's own frame behind the
+    /// surface, takes the touches there, and closes the sheet on tap, as on Android; without one
+    /// nothing is drawn behind the surface.
     @ViewBuilder private var sheet: some View {
         let open = node.openWhen.map(model.holds) ?? false
         if open, let child = node.child {
             GeometryReader { proxy in
+                if let scrim = palette.scrim(node.scrim).map({ Color($0) }) {
+                    scrim
+                        .contentShape(Rectangle())
+                        .onTapGesture { model.closeModal(node) }
+                        .accessibilityHidden(true)
+                }
                 VStack(spacing: 8) {
                     if node.dragHandle ?? true {
                         Capsule().fill(palette.sheetHandle.map { Color($0) } ?? Color.secondary.opacity(0.5)).frame(
@@ -591,6 +653,12 @@ struct NodeView: View {
                 alignment: contentAlignment,
                 fillsByDefault: node.type == "spacer"
             ))
+            // The gradient is painted over the background colour, as on Android.
+            .background {
+                if let gradient = style?.gradient {
+                    PrototypeGradientFill(gradient: gradient, palette: palette)
+                }
+            }
             .background(palette.color(style?.background) ?? .clear)
             .clipShape(shape)
             .overlay(

@@ -124,6 +124,72 @@ every limit counts the expanded tree.
   \`root.children[2] (use postCard) → components.postCard.root.children[1].label\`.
 `;
 
+export const GUIDE_APPEARANCE = `## Light and dark mode
+
+A shown prototype has exactly one resolved mode, light or dark. Roles, per-mode values and the
+scheme all read that one mode, on Android and on iOS.
+
+Authoring, in order of preference:
+
+- **Roles.** Use a colour role name instead of a hex value wherever a colour goes. A role already
+  has a light and a dark value, so nothing else is needed.
+- **\`{light, dark}\` pairs.** For a brand literal that needs a hand-picked dark value, a colour
+  field, gradient stop or scrim takes \`{"light": "#FFFFFF", "dark": "surfaceContainer"}\`: both
+  sides required, each a hex value or a role. An image takes \`{"light": assetId, "dark": assetId}\`;
+  upload both assets.
+- **Theme maps.** \`theme.colors.<role>\` overrides a role in both modes. \`theme.colors.light\` and
+  \`theme.colors.dark\` are \`{<role>: hex}\` maps applied after the flat overrides, for the resolved
+  mode only.
+- **Scrims.** In a scrim slot (\`window.placement.scrim\`, a bottomSheet \`scrim\`) only the \`scrim\`
+  role is drawn translucent, at 0.4 alpha. Any other role is drawn unchanged, so it covers what is
+  behind it.
+
+Pairs, theme maps and role names in gradient stops and scrims need a device advertising
+\`prototype_theme_modes_v1\`; a show that uses them on an older device is refused.
+
+How the mode is resolved. The first step that applies decides, and is reported as \`source\`:
+
+1. \`theme.mode\` \`light\` or \`dark\` (\`explicit\`).
+2. The luminance of the flat \`theme.colors.background\` override, else \`theme.colors.surface\`
+   (\`roleLuminance\`). The per-mode maps never take part.
+3. The first opaque hex background on the root's leading chain (\`authoredBackground\`). A role or
+   a pair depends on the mode, so it cannot decide it.
+4. The system setting: the show's \`appearance\` when it is \`light\` or \`dark\` (\`override\`), else
+   the device's own setting (\`system\`).
+
+\`theme.mode: "system"\` asks for the system setting outright and skips steps 2 and 3.
+
+Checking both modes without touching the device: \`show\` takes \`appearance: "device" | "light" |
+"dark"\` (default \`device\`).
+
+\`\`\`json
+{ "action": "show", "appearance": "dark", "spec": { "id": "demo", "window": { "placement": { "type": "fullscreen" } }, "root": { "type": "text", "text": "Hello" } } }
+\`\`\`
+
+- The override replaces the system setting only (step 4). It does not beat an explicit
+  \`theme.mode\`, a flat \`background\`/\`surface\` override or an opaque authored background; the
+  reported \`source\` says which step won.
+- It belongs to that show: a later show of the same id without \`appearance\` follows the device
+  again. The device and the app behind the prototype are not changed.
+- \`light\` and \`dark\` need a device advertising \`prototype_appearance_v1\` and are refused, with
+  nothing shown, on one that does not. \`device\` works everywhere.
+
+To test a spec: show it with \`appearance: "dark"\`, \`observe\`, then show it again with
+\`appearance: "light"\` and \`observe\`. To put the app behind the prototype into the same mode as
+well, set the device with \`displayConfig\` and restore the \`previous\` value it returns when done.
+
+What the device reports (\`prototype_appearance_v1\`; absent on a device without it):
+
+- A successful show returns \`lastResult.appearance: {mode, source, deviceDark}\`; \`status\` and
+  \`inspect\` carry the same object on each prototype. \`deviceDark\` is the device's own setting
+  whatever decided \`mode\`.
+- While a prototype is shown it follows the device live. Any change of the resolved mode (the
+  device flipping, or prototype state changing a background the mode is inferred from) sends one
+  \`appearance_changed\` event with a null \`name\` and the payload \`{mode, source}\`, and refreshes
+  \`status\`. Wait for it with \`awaitEvent\` and \`kind: "appearance_changed"\`. Nothing is sent when
+  the mode stays the same, nor for the show itself, whose result already carries the mode.
+`;
+
 export const GUIDE_ERRORS = `## Common validation errors
 
 | Message | Fix |

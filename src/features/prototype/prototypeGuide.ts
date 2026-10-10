@@ -1,6 +1,12 @@
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_THEME_MODES_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
-import { GUIDE_COMPONENTS, GUIDE_ERRORS, GUIDE_INTRO, GUIDE_REPEAT } from "./prototypeGuideProse";
+import {
+  GUIDE_APPEARANCE,
+  GUIDE_COMPONENTS,
+  GUIDE_ERRORS,
+  GUIDE_INTRO,
+  GUIDE_REPEAT,
+} from "./prototypeGuideProse";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
 
 /** Resource URIs served by the prototype authoring guide. */
@@ -193,6 +199,7 @@ export function renderPrototypeGuide(): string {
     GUIDE_REPEAT,
     GUIDE_COMPONENTS,
     renderTheme(),
+    GUIDE_APPEARANCE,
     renderIcons(),
     GUIDE_ERRORS,
   ].join("\n\n");

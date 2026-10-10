@@ -421,6 +421,22 @@ validation. Pager context is the nearest enclosing pager; outside a pager those
 two reserved placeholders remain literal. State keys `page` and `pageCount` are
 permitted but the pager placeholders take precedence within a pager.
 
+A number renders the same in a `{key}` placeholder and in a `repeat` binding (#11408),
+and as the TypeScript host renders it (`renderScalar`):
+
+- An integral number prints every digit with no decimal point and no exponent at any
+  magnitude (`12345678`, `1000000000000000000000`), and negative zero prints `0`.
+- Any other number prints as JavaScript's `String(number)`: the shortest decimal digits
+  that read back as the same double, in plain notation down to `0.000001`
+  (`0.30000000000000004`, `0.00001`) and as `<digits>e-<exponent>` below that (`1e-7`,
+  `2.5e-7`). Android computes the digits itself, so the result does not depend on the
+  device's `Double.toString`.
+
+Known divergence: the iOS agent formats a non-integral number with Swift's own
+description, which switches to an exponent earlier and pads it (`0.00001` shows as
+`1e-05`). Integral numbers agree on all three. Prefer integral state for numbers a
+prototype shows, or keep display text in a string key.
+
 ## Style
 
 All properties are optional. Sizes, padding, offsets, radii, and spacing use dp.

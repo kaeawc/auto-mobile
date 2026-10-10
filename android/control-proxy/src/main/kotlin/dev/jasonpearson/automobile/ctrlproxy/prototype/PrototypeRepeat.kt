@@ -50,7 +50,6 @@ import dev.jasonpearson.automobile.protocol.PrototypeTextNode
 import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
-import java.math.BigDecimal
 
 /** A child to render and the path it is rendered under (also its stable Compose identity). */
 internal data class PrototypeChildEntry(val node: PrototypeNode, val path: String)
@@ -371,19 +370,6 @@ private fun RepeatInstance.interpolate(text: String): String =
       is PrototypeRepeatSegment.Literal -> segment.text
       is PrototypeRepeatSegment.Index -> index.toString()
       is PrototypeRepeatSegment.Field ->
-        item[segment.name]?.rendered() ?: "{$alias.${segment.name}}"
+        item[segment.name]?.renderedText() ?: "{$alias.${segment.name}}"
     }
-  }
-
-private fun PrototypeScalar.rendered(): String =
-  when (this) {
-    is PrototypeScalar.Text -> value
-    is PrototypeScalar.BooleanValue -> value.toString()
-    is PrototypeScalar.Numeric ->
-      // Integral values render without a decimal point or exponent at any magnitude.
-      if (value.isFinite() && value == Math.floor(value)) {
-        BigDecimal(value).toPlainString()
-      } else {
-        value.toString()
-      }
   }

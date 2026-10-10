@@ -74,6 +74,24 @@ describe("BootAdmissionLedger", () => {
     timer.advanceTime(1_000);
     expect(ledger.inFlightCount(new Set())).toBe(0);
   });
+
+  // #11537: a window used to keep only the boots in flight when it opened.
+  test("an open sample window keeps every boot that ends inside it, whenever it was admitted", () => {
+    const ledger = new BootAdmissionLedger(new FakeTimer());
+    const window = ledger.beginSample();
+    ledger.admit("SIM-A").release();
+    ledger.admit().handOff("emulator-5554", 1_000);
+    // Another listing shows the handed-off emulator: it leaves the ledger, not the window.
+    expect(ledger.inFlightCount(new Set(["emulator-5554"]))).toBe(0);
+    window.close();
+    ledger.admit("SIM-C").release(); // ended after the sample returned: not this window's
+
+    expect(ledger.inFlightCount(new Set(), undefined, window)).toBe(2);
+    // A boot the sample's own listing shows, or the boot's own target, takes no second slot.
+    expect(ledger.inFlightCount(new Set(["SIM-A"]), undefined, window)).toBe(1);
+    expect(ledger.inFlightCount(new Set(), "SIM-A", window)).toBe(1);
+    expect(ledger.inFlightCount(new Set())).toBe(0);
+  });
 });
 
 describe("CommandAndroidCapacitySource", () => {

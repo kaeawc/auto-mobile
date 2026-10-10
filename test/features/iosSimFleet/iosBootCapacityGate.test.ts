@@ -83,6 +83,26 @@ describe("iOS boot capacity gate", () => {
     expect((await second).decision.outcome).toBe("refuse");
   });
 
+  // #11537: boot A is admitted AND released while B's listing is open. B's window opened with an
+  // empty ledger, and its listing predates A's boot, so only the window can hold A's slot.
+  test("a boot admitted and released inside another admission's listing still holds its slot", async () => {
+    const source = new ScriptedSource();
+    const { gate } = build(source);
+    const first = gate.admitBoot(undefined, { bootUdid: A });
+    await tick();
+    const second = gate.admitBoot(undefined, { bootUdid: B });
+    await tick();
+    expect(source.pending.length).toBe(2);
+
+    source.pending[0]([sim(A, "Shutdown"), sim(B, "Shutdown")]);
+    const admitted = await first;
+    expect(admitted.decision.outcome).toBe("allow");
+    admitted.releaseAdmission?.(); // A finished booting: it now holds its slot only in simctl
+    source.pending[1]([sim(A, "Shutdown"), sim(B, "Shutdown")]);
+
+    expect((await second).decision.outcome).toBe("refuse");
+  });
+
   // The boot's own target never needs a second slot (decide() excludes it from the listing
   // count), yet a ledger entry for the SAME udid is counted as another in-flight boot.
   test("a second admission for a udid already in flight does not count its own target twice", async () => {

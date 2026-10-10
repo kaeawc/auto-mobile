@@ -124,8 +124,9 @@ export async function admitBootNow<S, D extends { outcome: string }>(
   options: BootAdmissionOptions<S, D>,
 ): Promise<BootAdmissionResult<D>> {
   options.signal?.throwIfAborted();
-  // A boot in flight when the sample starts must still hold its slot in this decision even if it
-  // ends before the sample returns: the (possibly slow) listing may predate it (#11465).
+  // A boot that ends before the sample returns must still hold its slot in this decision, whether
+  // it was admitted before or after the sample started: the (possibly slow) listing may predate
+  // it (#11465, #11537).
   const window = options.ledger.beginSample();
   let sample: S;
   try {
@@ -216,20 +217,18 @@ export interface LedgerAdmission {
 }
 
 /**
- * Boots in flight when a capacity sample started. Entries released while it runs stay in
- * `released`, because the sample may have been taken before the device showed up in the listing.
+ * One capacity sample in progress. Every entry that leaves the ledger while the window is open
+ * stays in `ended`, whenever it was admitted: the listing may have been taken before that boot
+ * showed up in it, so the boot still holds its slot for this sample's decision (#11465, #11537).
  */
 export interface LedgerSampleWindow {
   close(): void;
 }
 
 class SampleWindow implements LedgerSampleWindow {
-  readonly released: LedgerEntry[] = [];
+  readonly ended: LedgerEntry[] = [];
 
-  constructor(
-    readonly inFlightAtStart: ReadonlySet<symbol>,
-    private readonly onClose: (window: SampleWindow) => void,
-  ) {}
+  constructor(private readonly onClose: (window: SampleWindow) => void) {}
 
   close(): void {
     this.onClose(this);
@@ -251,18 +250,7 @@ export class BootAdmissionLedger {
     const token = Symbol("boot-admission");
     this.entries.set(token, { deviceId });
     return {
-      release: () => {
-        const entry = this.entries.get(token);
-        if (!entry) {
-          return;
-        }
-        this.entries.delete(token);
-        for (const window of this.openWindows) {
-          if (window.inFlightAtStart.has(token)) {
-            window.released.push(entry);
-          }
-        }
-      },
+      release: () => this.end(token),
       handOff: (handedOffDeviceId, untilMs) => {
         const entry = this.entries.get(token);
         if (entry) {
@@ -275,11 +263,29 @@ export class BootAdmissionLedger {
     };
   }
 
-  /** Start tracking the boots in flight now; `close` it once the sample returns. */
+  /**
+   * The only way an entry leaves the ledger. Every open sample window keeps it: a window that
+   * kept only the boots in flight when it opened lost a boot admitted and ended inside it, and
+   * a listing older than that boot then admitted past the limit (#11537).
+   */
+  private end(token: symbol): void {
+    const entry = this.entries.get(token);
+    if (!entry) {
+      return;
+    }
+    this.entries.delete(token);
+    for (const window of this.openWindows) {
+      window.ended.push(entry);
+    }
+  }
+
+  /**
+   * Start tracking the boots that end from now on; `close` it once the sample returns. The
+   * sample's listing must start no earlier than this call, or a boot that ended in between is
+   * in neither the window nor the listing.
+   */
   beginSample(): LedgerSampleWindow {
-    const window = new SampleWindow(new Set(this.entries.keys()), (closed) =>
-      this.openWindows.delete(closed),
-    );
+    const window = new SampleWindow((closed) => this.openWindows.delete(closed));
     this.openWindows.add(window);
     return window;
   }
@@ -295,11 +301,12 @@ export class BootAdmissionLedger {
     sampleWindow?: LedgerSampleWindow,
   ): number {
     const now = this.timer.now();
-    let count = this.releasedDuringSample(sampleWindow, visibleDeviceIds, excludeDeviceId, now);
-    for (const [token, entry] of this.entries) {
+    let count = this.endedDuringSample(sampleWindow, visibleDeviceIds, excludeDeviceId, now);
+    for (const [token, entry] of [...this.entries]) {
       const visible = entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId);
       if (entry.handedOffUntilMs !== undefined && (visible || now >= entry.handedOffUntilMs)) {
-        this.entries.delete(token);
+        // Visible in this listing, but a sample still open may hold an older one without it.
+        this.end(token);
       } else if (
         !visible &&
         (excludeDeviceId === undefined || entry.deviceId !== excludeDeviceId)
@@ -310,8 +317,8 @@ export class BootAdmissionLedger {
     return count;
   }
 
-  /** Boots that ended after the sample started and that the sample does not show either. */
-  private releasedDuringSample(
+  /** Boots that ended while the sample was open and that the sample does not show either. */
+  private endedDuringSample(
     window: LedgerSampleWindow | undefined,
     visibleDeviceIds: ReadonlySet<string>,
     excludeDeviceId: string | undefined,
@@ -320,7 +327,7 @@ export class BootAdmissionLedger {
     if (!(window instanceof SampleWindow)) {
       return 0;
     }
-    return window.released.filter(
+    return window.ended.filter(
       (entry) =>
         !(entry.handedOffUntilMs !== undefined && now >= entry.handedOffUntilMs) &&
         !(entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId)) &&

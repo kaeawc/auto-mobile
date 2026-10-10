@@ -93,6 +93,7 @@ test/daemon/devicePoolCreate.test.ts
 test/daemon/devicePoolPhysicalIosRename.test.ts
 test/daemon/devicePoolRecoveryPolicy.test.ts
 test/daemon/devicePoolRefresh.test.ts
+test/daemon/devicePoolStateChangeSites.test.ts
 test/daemon/deviceRecoveryPolicy.test.ts
 test/daemon/deviceRuntimeIdentity.test.ts
 test/daemon/deviceSessionResolver.test.ts

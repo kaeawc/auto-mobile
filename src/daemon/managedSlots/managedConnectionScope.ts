@@ -40,6 +40,22 @@ export class ManagedConnectionScopes {
     return mcpSessionId === undefined ? undefined : this.bindings.get(mcpSessionId);
   }
 
+  /**
+   * The binding that was granted `sessionUuid` as one of its slot sessions. Internal calls (plan
+   * steps, nested tools) carry no socket session id, only the session they run on (#11397).
+   */
+  forSlotSession(sessionUuid: string | undefined): ManagedConnectionBinding | undefined {
+    if (sessionUuid === undefined) {
+      return undefined;
+    }
+    for (const binding of this.bindings.values()) {
+      if (binding.sessionUuids.has(sessionUuid)) {
+        return binding;
+      }
+    }
+    return undefined;
+  }
+
   clear(): void {
     this.bindings.clear();
   }
@@ -94,6 +110,31 @@ export function managedConnectionControlRefusal(input: {
     }
   }
   return new DeviceOutsideManagedSlotsError(action, "device", binding.scopeKey, { deviceId });
+}
+
+/**
+ * The refusal for a plan's device labels on a bound managed connection (#11397), or undefined when
+ * every label is served by one of the connection's own slot sessions. A label mapped to any other
+ * session (a derived `${base}:${label}` session) would be handed a device by the generic pool, so
+ * it is refused before anything is allocated or booted. `labelSessions` is label -> session.
+ */
+export function managedConnectionPlanLabelRefusal(input: {
+  binding: ManagedConnectionBinding | undefined;
+  action: string;
+  labelSessions: Readonly<Record<string, string>>;
+}): DeviceOutsideManagedSlotsError | undefined {
+  const { binding } = input;
+  if (!binding) {
+    return undefined;
+  }
+  const outside = Object.entries(input.labelSessions).find(
+    ([, sessionUuid]) => !binding.sessionUuids.has(sessionUuid),
+  );
+  return outside
+    ? new DeviceOutsideManagedSlotsError(input.action, "tool", binding.scopeKey, {
+        deviceLabel: outside[0],
+      })
+    : undefined;
 }
 
 /**

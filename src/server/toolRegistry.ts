@@ -49,7 +49,10 @@ import {
   type SessionManager,
 } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
-import { managedConnectionControlRefusal } from "../daemon/managedSlots/managedConnectionScope";
+import {
+  managedConnectionControlRefusal,
+  managedConnectionPlainToolRefusal,
+} from "../daemon/managedSlots/managedConnectionScope";
 import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
 import { MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS } from "../daemon/inputDeviceOwnership";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
@@ -2405,8 +2408,13 @@ async function assertManagedSlotControlAccess(input: {
   const requesterSessionUuid = input.sessionUuid
     ? (resolveToolSelectionBaseSessionUuid(input.sessionUuid, sessionManager) ?? input.sessionUuid)
     : undefined;
+  // An internal call (plan step, nested tool) carries no socket session id: its connection is
+  // recognized by the slot session it runs on (#11397).
+  const connectionScopes = daemonState.getManagedConnectionScopes();
   const connectionRefusal = managedConnectionControlRefusal({
-    binding: daemonState.getManagedConnectionScopes().get(input.mcpSessionId),
+    binding:
+      connectionScopes.get(input.mcpSessionId) ??
+      connectionScopes.forSlotSession(requesterSessionUuid),
     action: input.toolName,
     deviceId: input.deviceId,
     requesterSessionUuid,
@@ -2432,6 +2440,38 @@ async function assertManagedSlotControlAccess(input: {
       requesterSessionUuid,
       maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
     });
+  }
+}
+
+/**
+ * The managed-connection gate for internal calls (#11397). The MCP ingress refuses a managed
+ * connection's lifecycle tools and off-slot `setActiveDevice`, but a plan step or nested tool call
+ * never passes the ingress and carries no socket session id. It is recognized by the slot session
+ * it runs on, so a plan on a slot session cannot acquire, boot, stop or delete a device either.
+ * Slot acquisition's own provisioning runs on no slot session and is unaffected.
+ */
+function assertInternalCallWithinManagedSlots(
+  toolName: string,
+  invocation: { args: Record<string, unknown>; routingSessionUuid?: string },
+): void {
+  const daemonState = DaemonState.getInstance();
+  if (!invocation.routingSessionUuid || !daemonState.isInitialized()) {
+    return;
+  }
+  const sessionManager = daemonState.getSessionManager();
+  const requesterSessionUuid =
+    resolveToolSelectionBaseSessionUuid(invocation.routingSessionUuid, sessionManager) ??
+    invocation.routingSessionUuid;
+  const refusal = managedConnectionPlainToolRefusal({
+    binding: daemonState.getManagedConnectionScopes().forSlotSession(requesterSessionUuid),
+    toolName,
+    args: invocation.args,
+    requesterSessionUuid,
+    slotDeviceOf: (slotSessionUuid) =>
+      sessionManager.getSession(slotSessionUuid)?.assignedDevice ?? undefined,
+  });
+  if (refusal) {
+    throw refusal;
   }
 }
 
@@ -2989,6 +3029,7 @@ export class ToolRegistryClass {
       throw new ActionableError(`Tool not found: ${tool}`);
     }
     const invocation = this.createInternalToolInvocationContext(args, options);
+    assertInternalCallWithinManagedSlots(resolved.name, invocation);
 
     return runWithToolSelectionContext(invocation, () =>
       runWithPostActionCaptureScope(

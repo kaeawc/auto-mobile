@@ -275,8 +275,13 @@ export class PoolManagedSlotDeviceClaims implements ManagedSlotDeviceClaims {
     if (held) {
       return { kind: "held", reason: `session ${held.sessionId} holds ${held.id}` };
     }
-    if (device.isRunning && device.isRunningStateKnown === false && runtimes.length === 0) {
-      return { kind: "unknown", reason: "its running runtime could not be identified" };
+    // The listing reports an unknown running state as isRunning:false, so the flag alone is not
+    // evidence the device is stopped.
+    if (device.isRunningStateKnown === false && runtimes.length === 0) {
+      return { kind: "unknown", reason: "its running state could not be determined" };
+    }
+    if (device.platform === "android" && this.hasUnresolvedSessionRuntime()) {
+      return { kind: "unknown", reason: "a session holds an emulator whose AVD is unresolved" };
     }
     for (const runtime of runtimes) {
       try {
@@ -292,6 +297,19 @@ export class PoolManagedSlotDeviceClaims implements ManagedSlotDeviceClaims {
     return this.runtimesOf(device).flatMap((pooled) =>
       pooled.sessionId ? [pooled.sessionId] : [],
     );
+  }
+
+  /** A session-held emulator whose AVD name has not resolved may be any configured AVD. */
+  private hasUnresolvedSessionRuntime(): boolean {
+    return this.pool
+      .getAllDevices()
+      .some(
+        (pooled) =>
+          pooled.platform === "android" &&
+          pooled.sessionId !== null &&
+          !pooled.avdName &&
+          pooled.name.startsWith("Unknown ("),
+      );
   }
 
   /** The pooled runtimes of a configured device (AVD name or simulator UDID). */

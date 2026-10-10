@@ -64,6 +64,13 @@ struct PrototypeSession {
     /// dismissal or another prototype never rewinds it, because hosts discard lower-or-equal
     /// sequences as duplicates.
     private var sequences: [String: Int] = [:]
+    /// The shown prototype's `appearance` from its show request.
+    private(set) var appearanceOverride = PrototypeAppearanceOverride.device
+    /// The device's own appearance, as last reported through `setDeviceDark`; it outlives a show.
+    private(set) var deviceDark = false
+    /// The mode the host was last told for the shown prototype, by its show result or by an
+    /// `appearance_changed` event; nil while nothing is shown.
+    private var reportedDark: Bool?
 
     var isShown: Bool {
         spec != nil
@@ -79,7 +86,13 @@ struct PrototypeSession {
     /// authoritative and each pager that survives keeps its page, matched by id and clamped to the
     /// new page count. Any other show, or one with `reset`, starts fresh: the spec's own state and
     /// every pager on its first page. Event sequences are per id and never rewound either way.
-    mutating func show(_ spec: PrototypeSpec, reset: Bool = false) {
+    /// `appearance` is the request's own: a show that carries none follows the device again.
+    mutating func show(
+        _ spec: PrototypeSpec,
+        reset: Bool = false,
+        appearance: PrototypeAppearanceOverride = .device
+    ) {
+        appearanceOverride = appearance
         let previous = !reset && self.spec?.id == spec.id ? pages : [:]
         pageCounts = spec.root.pagerCounts()
         pages = pageCounts.reduce(into: [:]) { result, entry in
@@ -87,10 +100,58 @@ struct PrototypeSession {
         }
         state = spec.state ?? [:]
         self.spec = spec
+        // The show result reports this mode, so the show itself is not a change.
+        reportedDark = self.appearance?.dark
     }
 
     func holds(_ condition: Condition) -> Bool {
         condition.holds(state)
+    }
+
+    // MARK: Appearance
+
+    /// The mode the shown prototype draws in and why; nil while nothing is shown. It is derived
+    /// from the spec, the current state and pages, the show's override and the device, so the
+    /// palette, the host chrome, the UIKit trait and the reports all read this one value.
+    var appearance: PrototypeAppearance? {
+        guard let spec else { return nil }
+        return .resolve(
+            theme: spec.theme,
+            root: spec.root,
+            state: state,
+            pages: pages,
+            override: appearanceOverride,
+            deviceDark: deviceDark
+        )
+    }
+
+    /// The device's appearance changed (or was read for the first time). The shown prototype is
+    /// re-resolved, keeping its state and pages; see `appearanceChange` for the event.
+    mutating func setDeviceDark(_ dark: Bool) -> [PrototypeEvent] {
+        deviceDark = dark
+        return appearanceChange()
+    }
+
+    /// Runs one transition and appends the `appearance_changed` it caused, if any: a state or page
+    /// change can move the leading authored background (a `styleWhen`, a `visibleWhen`, a pager
+    /// page) and with it the inferred mode. The event follows the `change` or `page_changed` that
+    /// caused it. Every transition of a shown prototype goes through here.
+    mutating func transition(_ body: (inout PrototypeSession) -> [PrototypeEvent]) -> [PrototypeEvent] {
+        let events = body(&self)
+        return events + appearanceChange()
+    }
+
+    /// Exactly one `appearance_changed` when the shown prototype's mode differs from the one last
+    /// reported, whatever changed it, and none otherwise: a repeated report, an explicit or pinned
+    /// mode, a change that leaves the mode as it was, nothing shown.
+    private mutating func appearanceChange() -> [PrototypeEvent] {
+        guard let appearance else {
+            reportedDark = nil
+            return []
+        }
+        guard appearance.dark != reportedDark else { return [] }
+        reportedDark = appearance.dark
+        return emit(kind: "appearance_changed", name: nil, payload: appearance.eventPayload)
     }
 
     // MARK: Interactions

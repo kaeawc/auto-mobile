@@ -114,6 +114,7 @@ test/daemon/livenessKeeperSuspectInteractions.test.ts
 test/daemon/livenessOwnerLease.test.ts
 test/daemon/managedExecutionLiveness.test.ts
 test/daemon/managedSlots/abandonedScopeReclaimer.test.ts
+test/daemon/managedSlots/capacityExternalDevices.test.ts
 test/daemon/managedSlots/managedExecutionDaemonRestart.test.ts
 test/daemon/managedSlots/managedSlotAcquisition.test.ts
 test/daemon/managedSlots/managedSlotExclusion.test.ts
@@ -124,6 +125,7 @@ test/daemon/managedSlots/slotJournal.test.ts
 test/daemon/managedSlots/slotOwnerLiveness.test.ts
 test/daemon/managedSlots/slotRegistryMigrations.test.ts
 test/daemon/managedSlots/slotScopeReset.test.ts
+test/daemon/managedSlots/slotsRegistryAbsentThenUnreadable.test.ts
 test/daemon/managedSlots/sqliteSlotRegistry.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
 test/daemon/observationRequestBatch.test.ts
@@ -150,6 +152,7 @@ test/daemon/recycledProcessGeneration.test.ts
 test/daemon/refusalWireContract.test.ts
 test/daemon/registerSessionManagedConnection.test.ts
 test/daemon/rehydratedLegacyLivenessDefaults.test.ts
+test/daemon/rehydrationIdleOrigin.test.ts
 test/daemon/releaseReasons.test.ts
 test/daemon/releasingSessionRequests.test.ts
 test/daemon/sessionCacheNoEscapeHatch.test.ts
@@ -528,6 +531,8 @@ test/features/observe/output/diffObserveRealDevice.test.ts
 test/features/observe/output/diffObserveResult.test.ts
 test/features/observe/output/stableIdentityScrollDiff.test.ts
 test/features/observe/ownWindowFocus.test.ts
+test/features/observe/prototypeLayerHighlightGesture.test.ts
+test/features/observe/prototypeWindowAppearance.test.ts
 test/features/observe/rasterGeometry.test.ts
 test/features/observe/screenshot/ScreenshotFileWriter.test.ts
 test/features/observe/screenshot/observationScreenshotEvidence.test.ts
@@ -559,6 +564,7 @@ test/features/prototype/ios/iosPrototypeTransport.test.ts
 test/features/prototype/ios/prototypeAgentClient.test.ts
 test/features/prototype/ios/prototypeAgentInjection.test.ts
 test/features/prototype/prototypeAnchors.test.ts
+test/features/prototype/prototypeAppearance.test.ts
 test/features/prototype/prototypeAssetUploader.test.ts
 test/features/prototype/prototypeAssets.test.ts
 test/features/prototype/prototypeComponents.test.ts
@@ -893,6 +899,7 @@ test/server/prototypeDisplayAssets.test.ts
 test/server/prototypeInspect.test.ts
 test/server/prototypeResources.test.ts
 test/server/prototypeToolAnchors.test.ts
+test/server/prototypeToolAppearance.test.ts
 test/server/prototypeToolAssets.test.ts
 test/server/prototypeToolSpecPath.test.ts
 test/server/prototypeToolThemeModes.test.ts
@@ -903,6 +910,7 @@ test/server/provisionDevice.property.test.ts
 test/server/provisionDeviceRecoveryEvidence.test.ts
 test/server/queryParamValidation.property.test.ts
 test/server/queryParamValidation.test.ts
+test/server/resourceNotifySlowSibling.test.ts
 test/server/resourceUriLoneSurrogate.test.ts
 test/server/resources/hostToolchainResources.test.ts
 test/server/resources/list.test.ts

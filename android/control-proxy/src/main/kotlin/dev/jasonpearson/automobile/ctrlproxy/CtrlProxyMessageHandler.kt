@@ -490,7 +490,13 @@ class CtrlProxyMessageHandler(
             error = error,
           )
         }
-        actions.showPrototype(request.requestId, request.spec, request.displayId, request.reset)
+        actions.showPrototype(
+          request.requestId,
+          request.spec,
+          request.displayId,
+          request.reset,
+          request.appearance,
+        )
       }
       is DismissPrototype -> {
         if ((request.id == null) == (request.all == null) || request.all == false) {

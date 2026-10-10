@@ -95,10 +95,24 @@ final class PrototypeModel: ObservableObject {
         session.pages
     }
 
-    func show(_ spec: PrototypeSpec, reset: Bool = false) {
+    /// Whether the prototype draws dark: the one value the palette, the host chrome and the window's
+    /// UIKit trait all take (`PrototypeSession.appearance`).
+    var dark: Bool {
+        session.appearance?.dark ?? session.deviceDark
+    }
+
+    /// Reports the device's appearance. A changed value re-themes a prototype that follows the
+    /// device, keeping its state and pages, and pushes `appearance_changed` when its mode changed;
+    /// it is not activity.
+    func setDeviceDark(_ dark: Bool) {
+        guard session.deviceDark != dark else { return }
+        apply(activity: false) { $0.setDeviceDark(dark) }
+    }
+
+    func show(_ spec: PrototypeSpec, reset: Bool = false, appearance: PrototypeAppearanceOverride = .device) {
         // Keep the touchable rects: SwiftUI re-reports a frame only when it changes, so clearing
         // them on a same-geometry re-show would leave the prototype passing every touch through.
-        session.show(spec, reset: reset)
+        session.show(spec, reset: reset, appearance: appearance)
         syncSnackbarTimeouts()
         // An accepted show, including a same-id replace, is activity.
         idleTimer.arm()
@@ -206,7 +220,8 @@ final class PrototypeModel: ObservableObject {
     /// TTL while the prototype stays up.
     private func apply(activity: Bool = true, _ transition: (inout PrototypeSession) -> [PrototypeEvent]) {
         let wasShown = session.isShown
-        let events = transition(&session)
+        // `transition` adds the `appearance_changed` a state or page change caused.
+        let events = session.transition(transition)
         if session.isShown {
             if activity { idleTimer.arm() }
         } else {
@@ -224,7 +239,7 @@ final class PrototypeModel: ObservableObject {
     }
 
     func status() -> [String: Any] {
-        [
+        var status: [String: Any] = [
             "shown": session.isShown,
             "id": spec?.id as Any? ?? NSNull(),
             "pages": pages,
@@ -232,6 +247,9 @@ final class PrototypeModel: ObservableObject {
             "assets": assets.keys.sorted(),
             "lastSequence": session.lastSequence,
         ]
+        // Only a shown prototype has a resolved mode.
+        if let appearance = session.appearance { status["appearance"] = appearance.wireObject }
+        return status
     }
 
     /// Typing goes through `change`, so every edit both updates state and emits `change`.

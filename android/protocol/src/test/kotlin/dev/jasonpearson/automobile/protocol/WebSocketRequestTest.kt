@@ -4,6 +4,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -743,6 +744,28 @@ class WebSocketRequestTest {
     val request = assertIs<ShowPrototype>(json.decodeFromString<WebSocketRequest>(explicit))
     assertEquals(2, request.displayId)
     assertEquals(explicit, json.encodeToString<WebSocketRequest>(request))
+  }
+
+  @Test
+  fun `show_prototype appearance is optional on the wire and round trips`() {
+    val spec =
+      """{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}"""
+    val absent = """{"type":"show_prototype","requestId":"r1","spec":$spec}"""
+    assertNull(assertIs<ShowPrototype>(json.decodeFromString<WebSocketRequest>(absent)).appearance)
+    for (value in PrototypeAppearanceOverride.entries) {
+      val wire = value.name.lowercase()
+      val literal =
+        """{"type":"show_prototype","requestId":"r1","spec":$spec,"appearance":"$wire"}"""
+      val request = assertIs<ShowPrototype>(json.decodeFromString<WebSocketRequest>(literal))
+      assertEquals(value, request.appearance)
+      assertEquals(literal, json.encodeToString<WebSocketRequest>(request))
+    }
+    // An unknown value fails the show instead of silently following the device.
+    assertFailsWith<SerializationException> {
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"show_prototype","requestId":"r1","spec":$spec,"appearance":"sepia"}""",
+      )
+    }
   }
 
   @Test

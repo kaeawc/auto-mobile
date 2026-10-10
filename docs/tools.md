@@ -665,6 +665,52 @@ every change instant. Android also accepts element anchors, which place a node o
 an app element resolved at `show` time; the result lists the resolved `anchors`.
 See the [prototype vocabulary](design-docs/plat/android/prototype-ux.md).
 
+#### Light and dark mode
+
+A shown prototype has one resolved mode, light or dark. The first of these that applies
+decides it, on Android and on iOS:
+
+1. `theme.mode` `light` or `dark`.
+2. The luminance of the flat `theme.colors.background` override, else `theme.colors.surface`.
+3. The first opaque authored background on the root's leading chain.
+4. The system setting: the show's `appearance` when it is `light` or `dark`, else the device's
+   own setting.
+
+`theme.mode: "system"` asks for the system setting outright and skips steps 2 and 3.
+
+`show` accepts `appearance`: `device` (the default), `light` or `dark`. `light` and `dark` pin
+what the system setting means for that one prototype, so a spec with `theme.mode: "system"` or no
+mode can be checked in both modes. The device itself and the app behind are not changed; use
+`displayConfig` (and restore the `previous` value it returns) to put the app into the same mode.
+The override replaces the system setting only (step 4), so it never beats what the spec itself
+says. It belongs to the show: a later show of the same id without it follows the device again.
+`light` and `dark` need a device advertising `prototype_appearance_v1`; without the flag the
+call is refused before anything is sent, with an update hint on Android and a relaunch hint on
+iOS. `device` sends nothing and works on every device.
+
+A device advertising `prototype_appearance_v1` reports
+`appearance: { mode, source, deviceDark }`. `mode` is `light` or `dark`. `source` names the step
+that decided it: `explicit`, `roleLuminance`, `authoredBackground`, `override` or `system`.
+`deviceDark` is the device's own setting whatever decided the mode. A successful `show` returns
+it in `lastResult`, and `status` and `inspect` return it on each prototype. The field is absent
+when the device lacks the flag, on `dismiss` and on a failed show; a failed same-id show keeps
+the value of the prototype still on screen.
+
+While a prototype is shown it follows the device live. On any change of the resolved mode (the
+device flipping, or prototype state changing a background the mode is inferred from) the device
+sends one `prototype_event` with `kind: "appearance_changed"`, `name: null` and
+`payload: { mode, source }`. Nothing is sent when the mode stays the same, nor for the show
+itself. Wait for it with `awaitEvent` and `kind: "appearance_changed"` (its `name` is null, so
+`eventName` does not match it). The event also refreshes the `appearance` that `status` reports:
+a `system` source sets `deviceDark` from the new mode, and any other source keeps the last
+reported `deviceDark`, which `inspect` refreshes.
+
+In a scrim slot (`window.placement.scrim`, a bottomSheet `scrim`) only the `scrim` role is drawn
+translucent, at 0.4 alpha; any other role is drawn unchanged. The per-mode forms
+(`{light, dark}` colour and image pairs, role names in gradient stops and scrims,
+`theme.colors.light` / `theme.colors.dark`) need a device advertising
+`prototype_theme_modes_v1`.
+
 #### iOS simulators
 
 On iOS simulators `prototype` is backed by a prototype agent injected into the app at launch
@@ -751,9 +797,10 @@ status. Raw transport disconnects are not observed; session release, device remo
 and device unbinding clear the corresponding buffers and host status.
 
 `awaitEvent` requires `id`; it waits for one event in the current session/device/id
-scope. Optional `eventName` (matching `name`), `kind` (`emit`, `page_changed`, or
-`dismissed`), and `afterSequence` (a nonnegative integer, strictly exclusive cursor)
-are valid only for `awaitEvent`. Its `timeoutMs` defaults to 30000 ms and cannot
+scope. Optional `eventName` (matching `name`), `kind` (`emit`, `page_changed`,
+`dismissed`, or `appearance_changed`), and `afterSequence` (a nonnegative integer, strictly exclusive cursor)
+are valid only for `awaitEvent`. An event of a kind this host does not know (a newer device) is
+logged and skipped: it is never returned, but its sequence still counts toward `lastSequence`. Its `timeoutMs` defaults to 30000 ms and cannot
 exceed 60000 ms; the MCP request deadline for an `awaitEvent` call is that wait plus 30 s of
 headroom, so a quiet wait ends with `timedOut: true` rather than a transport timeout. Request cancellation preserves the abort reason and removes the
 waiter's timer and abort listener. When the client supplies an MCP progress callback,

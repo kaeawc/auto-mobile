@@ -1,5 +1,8 @@
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
-import { SessionTerminalReleaseInProgressError } from "../../src/daemon/sessionManager";
+import {
+  SessionRecoveryIdentityLossError,
+  SessionTerminalReleaseInProgressError,
+} from "../../src/daemon/sessionManager";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import {
@@ -4430,6 +4433,47 @@ describe("DaemonMcpProxy", () => {
         expect(
           client.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
         ).toEqual([]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("an unbound connection does not adopt a session lost to recovery identity loss (#11391)", async () => {
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const lost = shapeToolCallError(
+        new SessionRecoveryIdentityLossError(
+          "dead-session",
+          { platform: "android", stableDeviceId: "stable-1", deviceId: "emulator-5554" },
+          "target-absent",
+        ),
+        { toolName: "tapOn", source: "MCP" },
+      );
+      const callTool = client.callTool.bind(client);
+      client.callTool = async (toolName, params) => {
+        await callTool(toolName, params);
+        return toolName === "tapOn" ? lost : { content: [{ type: "text", text: "ok" }] };
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await expect(
+          proxy.callTool("tapOn", { sessionUuid: "dead-session" }),
+        ).resolves.toMatchObject({ isError: true, content: lost.content });
+        await proxy.callTool("observe", {});
+
+        // The dead UUID is not replayed on the next sessionless call.
+        expect(client.callToolCalls).toEqual([
+          { toolName: "tapOn", params: { sessionUuid: "dead-session" } },
+          { toolName: "observe", params: {} },
+        ]);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

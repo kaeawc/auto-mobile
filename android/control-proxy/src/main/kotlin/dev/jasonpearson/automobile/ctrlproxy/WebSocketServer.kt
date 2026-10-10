@@ -347,6 +347,13 @@ class WebSocketServer(
     // it expects a string and fails the whole show, and draws a role-named stop transparent, so
     // hosts refuse such a spec for a device lacking this flag.
     add("prototype_theme_modes_v1")
+    // show_prototype honours appearance (device, light or dark as the system setting); a shown
+    // prototype re-themes when the device setting or palette changes and says so with an
+    // appearance_changed prototype_event; the show result and each inspect entry carry the resolved
+    // appearance, as does the prototype's hierarchy window entry (prototypeAppearance). An older
+    // APK ignores the request field and follows the device silently, so a
+    // host sends it, and expects the report, only when this flag is present.
+    add("prototype_appearance_v1")
     // A device-persistent prototype buffers its events while no host is connected and replays them,
     // and inspect_prototypes reports what it is showing. Older hosts never send inspect_prototypes.
     add("prototype_persistence_replay_v1")

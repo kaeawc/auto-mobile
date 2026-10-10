@@ -20,6 +20,9 @@ describe("MCP Tools Registry", () => {
     ToolRegistry.clearTools();
     restoreHermeticServer = installHermeticServerFixture();
     servers.push(createMcpServer());
+    // The first getToolDefinitions() builds the schema listing; pay it in setup so
+    // the first test is not charged (it sampled 73 ms on a loaded runner).
+    ToolRegistry.getToolDefinitions();
   });
 
   test("should expose all required MCP tools through the registry", () => {

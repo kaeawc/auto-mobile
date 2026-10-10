@@ -542,8 +542,86 @@ describe("CtrlProxy prototypes", () => {
     }
   });
 
+  test.each([["light"], ["dark"], [undefined]] as const)(
+    "show_prototype carries a top-level appearance %p only when one is given",
+    async (appearance) => {
+      const { client, socket } = await harness();
+      const sent: Record<string, unknown>[] = [];
+      const send = spyOn(socket, "send").mockImplementation((data) => {
+        sent.push(JSON.parse(String(data)));
+      });
+      try {
+        void client
+          .requestShowPrototype(spec, 5000, undefined, undefined, undefined, appearance)
+          .catch(() => undefined);
+        for (let turn = 0; turn < 10; turn++) {
+          await Promise.resolve();
+        }
+        expect(sent[0]?.type).toBe("show_prototype");
+        expect(sent[0]?.spec).toEqual(spec);
+        expect(sent[0]?.appearance).toBe(appearance);
+        expect(Object.hasOwn(sent[0] ?? {}, "appearance")).toBe(appearance !== undefined);
+      } finally {
+        send.mockRestore();
+      }
+    },
+  );
+
+  test("an appearance_changed event decodes with a null name and its {mode, source} payload", async () => {
+    const { client, receive } = await harness();
+    const received: PrototypeEvent[] = [];
+    client.onPrototypeEvent((value) => received.push(value));
+    // The literal android/protocol WebSocketResponseTest round-trips.
+    const frame = {
+      type: "prototype_event",
+      timestamp: 42,
+      id: "panel",
+      sequence: 4,
+      kind: "appearance_changed",
+      name: null,
+      payload: { mode: "light", source: "system" },
+      state: {},
+      pages: {},
+    };
+    await receive(frame);
+    expect(received).toEqual([frame as PrototypeEvent]);
+  });
+
+  test("an event of a kind this host does not know is warned about and passed on as a sequence marker", async () => {
+    const { client, receive } = await harness();
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const received: PrototypeEvent[] = [];
+    try {
+      client.onPrototypeEvent((value) => received.push(value));
+      // A future kind may carry fields of any shape; only the envelope is read.
+      await receive({ ...event, sequence: 7, kind: "pose_changed", name: 3, state: [1], extra: 1 });
+      expect(received).toEqual([
+        {
+          type: "prototype_event",
+          timestamp: 42,
+          id: "panel",
+          sequence: 7,
+          kind: "unknown",
+          name: null,
+          payload: null,
+          state: {},
+          pages: {},
+        },
+      ]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('unknown kind "pose_changed"');
+      // The frame did not fail the connection: the next known event still arrives.
+      await receive({ ...event, sequence: 8 });
+      expect(received.map((value) => value.sequence)).toEqual([7, 8]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test.each([
-    { ...event, kind: "unknown" },
+    { ...event, kind: "" },
+    { ...event, kind: 4 },
+    { ...event, kind: "pose_changed", sequence: -1 },
     { ...event, sequence: -1 },
     { ...event, sequence: 1.5 },
     { ...event, state: { bad: null } },

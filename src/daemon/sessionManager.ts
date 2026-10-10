@@ -8301,6 +8301,10 @@ export class SessionManager {
     for (const session of this.sessions.values()) {
       if (session.ownership === "awaiting-owner" && session.awaitingOwnerSince !== undefined) {
         session.awaitingOwnerSince = Math.max(session.awaitingOwnerSince, now);
+        // The idle window starts when the session is usable, like the owner window (#11388).
+        // Rehydration stamped both at its own time, which startup may have outlasted.
+        session.lastUsedAt = Math.max(session.lastUsedAt, now);
+        session.expiresAt = Math.max(session.expiresAt, now + session.sessionTimeoutMs);
         restarted++;
       }
     }

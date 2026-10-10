@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NodeSelector
+import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 
 /**
@@ -354,7 +355,13 @@ interface CtrlProxyActions {
   fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?)
 
   /** [reset] starts a same-id show fresh instead of replacing the prototype in place. */
-  fun showPrototype(requestId: String?, spec: PrototypeSpec, displayId: Int?, reset: Boolean)
+  fun showPrototype(
+    requestId: String?,
+    spec: PrototypeSpec,
+    displayId: Int?,
+    reset: Boolean,
+    appearance: PrototypeAppearanceOverride?,
+  )
 
   fun dismissPrototype(requestId: String?, id: String?, all: Boolean?)
 

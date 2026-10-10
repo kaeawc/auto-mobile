@@ -90,6 +90,7 @@ describe("cliDeviceOwnershipHint (#10743, #10783, #10785)", () => {
       sessionUuid: "session-1",
       deviceId: "emulator-5554",
       retryable: false,
+      nextAction: "acquire_new_session",
     });
     expect(payload.retryAfterMs).toBeUndefined();
     // The proxy's wait-and-retry loop must not pick it up as a shutting-down device.
@@ -131,6 +132,8 @@ describe("cliDeviceOwnershipHint (#10743, #10783, #10785)", () => {
       retryable: false,
     });
     expect(payload.retryAfterMs).toBeUndefined();
+    // The caller re-checks the holder; a fresh session would not help a refused kill (#11231).
+    expect(payload.nextAction).toBeUndefined();
     expect(cliDeviceOwnershipHint(payload, "killDevice")).toContain("--daemon active-sessions");
   });
 

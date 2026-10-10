@@ -1,15 +1,23 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
-import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
-import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
+import {
+  SessionManager,
+  TerminalSessionError,
+  type SessionDeviceAssigner,
+} from "../../src/daemon/sessionManager";
+import {
+  DeviceSessionRepository,
+  type DeviceSessionRecord,
+  type UpsertActiveSessionOptions,
+} from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // A recoverable row's claim (#11200) after #11243: a recovery that fails without terminalizing
-// the row hands the claim back, and a startup listing older than this daemon's own claim does
-// not refuse the row.
+// the row hands the claim back, a startup listing older than this daemon's own claim does not
+// refuse the row, and the recovering upsert cannot revive a row terminalized after the claim.
 
 const SESSION = "s1";
 const DEVICE = "emulator-5554";
@@ -148,6 +156,41 @@ describe("recoverable-row claim lifecycle (#11243)", () => {
     expect(await repo.getSession(SESSION)).toMatchObject({
       status: "active",
       daemon_session_id: "daemon-a",
+    });
+  });
+
+  test("a terminal write landing after the claim is not revived by the recovering upsert", async () => {
+    await seedRecoverableRow();
+    const live = () => new Set(["daemon-a", "daemon-b"]);
+    // The peer's terminal write (releasePersistedRestartRecovery, explicit release) lands after
+    // the winner's terminal-row check and before its upsert.
+    class RacingRepository extends DeviceSessionRepository {
+      override async upsertActiveSession(
+        record: DeviceSessionRecord,
+        nowMs?: number,
+        options?: UpsertActiveSessionOptions,
+      ) {
+        if (record.sessionUuid === SESSION) {
+          const row = (await repo.getSession(SESSION))!;
+          await repo.markReleased(SESSION, "released", 2_000, "explicit-release", {
+            expectedRowGeneration: row.stable_identity_generation ?? 0,
+          });
+        }
+        return await super.upsertActiveSession(record, nowMs, options);
+      }
+    }
+    const a = daemon("daemon-a", live, new RacingRepository(db, timer));
+
+    const outcome = await a.getOrCreateSession(SESSION, poolFor(a), "android").then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(outcome).toBeInstanceOf(TerminalSessionError);
+    expect(a.getSession(SESSION)).toBeNull();
+    expect(await repo.getSession(SESSION)).toMatchObject({
+      status: "released",
+      release_reason: "explicit-release",
     });
   });
 

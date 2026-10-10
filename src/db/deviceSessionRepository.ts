@@ -63,6 +63,32 @@ export class DeviceSessionNotActiveError extends ActionableError {
   }
 }
 
+/**
+ * A recovery's upsert of a claimed recoverable row (#11243) found the row no longer the incarnation
+ * it claimed: a terminal release, a peer, or the claim's own hand-back changed it first. Nothing
+ * was written.
+ */
+export class DeviceSessionRowChangedError extends ActionableError {
+  constructor(readonly sessionUuid: string) {
+    super(
+      `Device session ${sessionUuid} changed while it was being recovered; the recovery did not ` +
+        "persist it.",
+    );
+    this.name = "DeviceSessionRowChangedError";
+  }
+}
+
+/** Options for {@link DeviceSessionPersistence.upsertActiveSession}. */
+export interface UpsertActiveSessionOptions {
+  /**
+   * The recoverable row incarnation a recovery claimed (#11243): the write replaces the row only
+   * while it is still that incarnation (same generation and owner, still released for a
+   * recoverable reason), so a terminal release landing after the claim is not revived. A mismatch
+   * rejects with {@link DeviceSessionRowChangedError}.
+   */
+  claimedRow?: RecoverableRowIncarnation;
+}
+
 export interface DeviceSessionRecord {
   sessionUuid: string;
   deviceId: string;
@@ -122,7 +148,11 @@ export interface DeviceSessionPersistence {
    * {@link MarkReleasedOptions.expectedRowGeneration}. `nowMs` is the session clock the row's
    * stamps are written with (#11129), used for the retention prune; it defaults to the timer.
    */
-  upsertActiveSession(record: DeviceSessionRecord, nowMs?: number): Promise<number | void>;
+  upsertActiveSession(
+    record: DeviceSessionRecord,
+    nowMs?: number,
+    options?: UpsertActiveSessionOptions,
+  ): Promise<number | void>;
   getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
   /** `nowMs` is the session clock the persisted stamps were written with (#11129). */
   listRecoverableSessions?(nowMs?: number): Promise<DeviceSession[]>;
@@ -302,13 +332,16 @@ export class DeviceSessionRepository {
   async upsertActiveSession(
     record: DeviceSessionRecord,
     nowMs: number = this.timer.now(),
+    options: UpsertActiveSessionOptions = {},
   ): Promise<number> {
+    const { claimedRow } = options;
     // A cheap, unconditional, indexed range
     // delete run before the write rather than gated behind amortization —
     // session starts are far less frequent than the amortized-per-insert
     // tables (#6464). Self-contained: a prune failure must never block a new
     // session from being persisted, so it swallows its own errors.
     await this.pruneExpiredSessions(nowMs);
+    let written: { stable_identity_generation?: number } | undefined;
     try {
       const db = await this.getDb();
       const now = this.nowIso();
@@ -335,11 +368,11 @@ export class DeviceSessionRepository {
         updated_at: now,
       };
 
-      const written = await db
+      written = await db
         .insertInto("device_sessions")
         .values(row)
-        .onConflict((oc) =>
-          oc.column("session_uuid").doUpdateSet({
+        .onConflict((oc) => {
+          const update = oc.column("session_uuid").doUpdateSet({
             device_id: row.device_id,
             stable_device_id: row.stable_device_id,
             // Distinguishes this writer from a forward-compatible older binary
@@ -361,17 +394,46 @@ export class DeviceSessionRepository {
             ...livenessColumnsFromRow(row),
             liveness_contract_generation: sql`liveness_contract_generation + 1`,
             updated_at: now,
-          }),
-        )
+          });
+          if (!claimedRow) {
+            return update;
+          }
+          return update
+            .where("device_sessions.status", "!=", "active")
+            .where("device_sessions.stable_identity_generation", "=", claimedRow.rowGeneration)
+            .where((eb) =>
+              claimedRow.daemonSessionId === null
+                ? eb("device_sessions.daemon_session_id", "is", null)
+                : eb("device_sessions.daemon_session_id", "=", claimedRow.daemonSessionId),
+            )
+            .where((eb) =>
+              eb.or([
+                eb(
+                  "device_sessions.release_reason",
+                  "in",
+                  Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS),
+                ),
+                eb(
+                  "device_sessions.release_reason",
+                  "like",
+                  `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`,
+                ),
+              ]),
+            );
+        })
         .returning("stable_identity_generation")
-        .executeTakeFirstOrThrow();
-      return written.stable_identity_generation ?? 0;
+        .executeTakeFirst();
     } catch (error) {
       logger.warn(
         `[DeviceSessionRepository] Failed to upsert device session ${record.sessionUuid}: ${error}`,
       );
       throw error;
     }
+    if (!written) {
+      // The claimed row's precondition failed: an expected race outcome, not a storage failure.
+      throw new DeviceSessionRowChangedError(record.sessionUuid);
+    }
+    return written.stable_identity_generation ?? 0;
   }
 
   async recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void> {

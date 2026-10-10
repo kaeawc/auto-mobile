@@ -37,11 +37,14 @@ import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScree
 import {
   DeviceSessionNotActiveError,
   DeviceSessionRepository,
+  DeviceSessionRowChangedError,
   isDeviceRestartReleaseReason,
   isRecoverableDeviceSession,
   type DeviceSessionActivityUpdate,
   type DeviceSessionPersistence,
   type MarkReleasedOptions,
+  type RecoverableRowIncarnation,
+  type UpsertActiveSessionOptions,
 } from "../db/deviceSessionRepository";
 import type { DeviceSession } from "../db/types";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
@@ -1455,6 +1458,8 @@ export class SessionManager {
   private readonly sharedSessionAssignments = new Map<string, SharedSessionAssignment>();
   /** Persisted recovery state consumed by createSession before it publishes an assigned session. */
   private readonly pendingPersistedRecoveries: Map<string, DeviceSession> = new Map();
+  /** Rows this daemon claimed for recovery (#11200); their upsert is conditioned on the claim. */
+  private readonly claimedRecoverableRows = new WeakSet<DeviceSession>();
   /**
    * Last tool-call activity (a call starting, joining, or ending) against a session that is
    * waiting out a device restart. The released row's `expires_at_ms` froze at the device loss,
@@ -2408,7 +2413,11 @@ export class SessionManager {
     };
 
     const creation: PendingSessionCreation = { promise: Promise.resolve(session) };
-    creation.promise = this.persistAndPublishSession(session, creation);
+    creation.promise = this.persistAndPublishSession(
+      session,
+      creation,
+      this.claimedIncarnation(persistedRecovery),
+    );
     this.pendingSessionCreations.set(sessionId, creation);
     try {
       const created = await this.withinCreateDeadline(
@@ -2471,9 +2480,57 @@ export class SessionManager {
     });
   }
 
+  /** The claimed incarnation a recovery's upsert is conditioned on, when `row` is a claim. */
+  private claimedIncarnation(
+    row: DeviceSession | undefined,
+  ): RecoverableRowIncarnation | undefined {
+    if (!row || !this.claimedRecoverableRows.has(row)) {
+      return undefined;
+    }
+    return {
+      rowGeneration: row.stable_identity_generation ?? 0,
+      daemonSessionId: row.daemon_session_id ?? null,
+    };
+  }
+
+  /**
+   * Persist a new session; a recovery of a claimed row writes only while the row is still its claim
+   * (#11243). The terminal-row check before this write cannot fence a peer's terminal release that
+   * lands between them; the conditioned upsert does, and that release ends this recovery as terminal.
+   */
+  private async persistCreatedSession(
+    session: Session,
+    claimedRow: RecoverableRowIncarnation | undefined,
+  ): Promise<void> {
+    try {
+      await this.persistSession(session, session, claimedRow && { claimedRow });
+    } catch (error) {
+      if (!(error instanceof DeviceSessionRowChangedError)) {
+        throw error;
+      }
+      const current = await this.readPersistedSession(session.sessionId);
+      const terminalRelease =
+        current && this.terminalReleaseFromPersisted(session.sessionId, current);
+      if (terminalRelease) {
+        this.terminalReleaseSnapshots.set(session.sessionId, terminalRelease);
+        throw new TerminalSessionError(session.sessionId, terminalRelease);
+      }
+      const owner = current?.daemon_session_id ?? null;
+      if (owner !== null && owner !== this.daemonSessionId) {
+        logger.info(
+          `[SessionManager] Not recovering session ${session.sessionId}: another AutoMobile ` +
+            `daemon (${owner}) took its row during the recovery`,
+        );
+        throw new DeviceOwnedByOtherDaemonError(session.assignedDevice, undefined);
+      }
+      throw error;
+    }
+  }
+
   private async persistAndPublishSession(
     session: Session,
     creation?: PendingSessionCreation,
+    claimedRow?: RecoverableRowIncarnation,
   ): Promise<Session> {
     const persistedTerminalRelease = await this.getPersistedTerminalRelease(session.sessionId);
     if (persistedTerminalRelease) {
@@ -2482,7 +2539,7 @@ export class SessionManager {
     }
     this.assertCreationNotAbandoned(session, creation);
     await this.rejectCreationAfterShutdownFence(session);
-    await this.persistSession(session, session);
+    await this.persistCreatedSession(session, claimedRow);
     await this.retireCreationIfAbandoned(session, creation);
     await this.rejectCreationAfterShutdownFence(session);
     this.assertTerminalReleaseAdmission(session.sessionId, session);
@@ -3417,8 +3474,14 @@ export class SessionManager {
     if (generation === undefined) {
       return undefined;
     }
+    const claimed = {
+      ...row,
+      stable_identity_generation: generation,
+      daemon_session_id: daemonSessionId,
+    };
+    this.claimedRecoverableRows.add(claimed);
     return {
-      row: { ...row, stable_identity_generation: generation, daemon_session_id: daemonSessionId },
+      row: claimed,
       // This daemon's own stale claim is handed back unowned, so a peer can take it.
       previousOwner: owner === daemonSessionId ? null : owner,
     };
@@ -8560,7 +8623,11 @@ export class SessionManager {
   // (issue #2885) only drains fire-and-forget writers at graceful shutdown; an
   // awaited write is already sequenced by its caller and must not be wrapped in
   // `track()`. Do not "fix" this by adding a barrier — that would be a non-bug fix.
-  private async persistSession(session: Session, incarnation: Session): Promise<void> {
+  private async persistSession(
+    session: Session,
+    incarnation: Session,
+    upsertOptions?: UpsertActiveSessionOptions,
+  ): Promise<void> {
     const rowGeneration = await this.deviceSessionRepository.upsertActiveSession(
       {
         sessionUuid: session.sessionId,
@@ -8585,6 +8652,7 @@ export class SessionManager {
       },
       // The retention prune compares release stamps (#11129); converted to wall ms with them.
       this.sessionNow(),
+      upsertOptions,
     );
     // Recorded before the ownership write, which can fail after the row already advanced.
     this.recordPersistedRowGeneration(incarnation, rowGeneration);

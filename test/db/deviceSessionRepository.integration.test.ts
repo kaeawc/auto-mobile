@@ -6,6 +6,7 @@ import {
   deviceRestartReleaseReason,
   DeviceSessionNotActiveError,
   DeviceSessionRepository,
+  DeviceSessionRowChangedError,
   isRecoverableDaemonReleaseReason,
   RECOVERABLE_DAEMON_RELEASE_REASONS,
   type DeviceSessionRecord,
@@ -695,6 +696,57 @@ describe("DeviceSessionRepository", () => {
       expect(await repo.getSession("s4")).toMatchObject({
         release_reason: "explicit-release",
         daemon_session_id: "daemon-b",
+      });
+    });
+
+    test("a recovery's upsert writes only while the row is still its claim (#11243)", async () => {
+      const listed = await releaseRecoverable("s5", "dead-daemon");
+      const claimed = await repo.claimRecoverableSession(
+        "s5",
+        { rowGeneration: listed.stable_identity_generation!, daemonSessionId: "dead-daemon" },
+        "daemon-a",
+      );
+      const record: DeviceSessionRecord = {
+        sessionUuid: "s5",
+        deviceId: "emulator-5554",
+        platform: "android",
+        daemonSessionId: "daemon-a",
+        createdAtMs: 1000,
+        lastUsedAtMs: 3000,
+        expiresAtMs: 10_000_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+        hasReceivedHeartbeat: true,
+      };
+      const claimedRow = { rowGeneration: claimed!, daemonSessionId: "daemon-a" };
+      await repo.markReleased("s5", "released", 2500, "explicit-release", {
+        expectedRowGeneration: claimed!,
+      });
+
+      await expect(repo.upsertActiveSession(record, 3000, { claimedRow })).rejects.toBeInstanceOf(
+        DeviceSessionRowChangedError,
+      );
+      expect(await repo.getSession("s5")).toMatchObject({
+        status: "released",
+        release_reason: "explicit-release",
+        stable_identity_generation: claimed,
+      });
+
+      const other = await releaseRecoverable("s6", "dead-daemon");
+      const mine = await repo.claimRecoverableSession(
+        "s6",
+        { rowGeneration: other.stable_identity_generation!, daemonSessionId: "dead-daemon" },
+        "daemon-a",
+      );
+      expect(
+        await repo.upsertActiveSession({ ...record, sessionUuid: "s6" }, 3000, {
+          claimedRow: { rowGeneration: mine!, daemonSessionId: "daemon-a" },
+        }),
+      ).toBe(mine! + 1);
+      expect(await repo.getSession("s6")).toMatchObject({
+        status: "active",
+        release_reason: null,
+        daemon_session_id: "daemon-a",
       });
     });
 

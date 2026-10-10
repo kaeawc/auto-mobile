@@ -32,6 +32,7 @@ import type {
   DeviceSessionPersistence,
   DeviceSessionRecord,
   MarkReleasedOptions,
+  UpsertActiveSessionOptions,
 } from "../db/deviceSessionRepository";
 
 /** Converts instants between this daemon's session clock and the shared wall clock. */
@@ -99,10 +100,16 @@ class SessionClockPersistence implements DeviceSessionPersistence {
     private readonly frame: SessionClockFrame,
   ) {}
 
-  upsertActiveSession(record: DeviceSessionRecord, nowMs?: number): Promise<number | void> {
+  upsertActiveSession(
+    record: DeviceSessionRecord,
+    nowMs?: number,
+    options?: UpsertActiveSessionOptions,
+  ): Promise<number | void> {
+    // The claimed incarnation is a generation and a daemon id: frame-free.
     return this.inner.upsertActiveSession(
       recordOnWallClock(record, this.frame),
       toWallIfGiven(this.frame, nowMs),
+      options,
     );
   }
 

@@ -78,16 +78,12 @@ describe("pool ownership races found by the seeded concurrency harness", () => {
   // Harness: any seed of the default profile, e.g. AUTOMOBILE_POOL_OWNERSHIP_SEED_BASE=4, shrinks
   // to two steps: `acquireMcp c3 d2` then `closeConnection c3` before the bind returns.
   //
-  // Root cause: DevicePool.bindOrReuseDeviceSession records the caller's MCP connection as the
-  // session's owner (recordMcpSessionOwnership, src/daemon/devicePool.ts, right after
-  // `await this.createSessionOrRestore(...)` in the bind operation) without checking that the
-  // connection is still open. When the socket closes while the bind is in flight,
-  // releaseMcpSessionBindings(connection) has already run and found nothing to release; the bind
-  // then adds the session to mcpSessionAcquiredDeviceSessions under the dead connection id, and
-  // nothing ever removes it. The socket server guards the analogous restore path
-  // (SocketServer.releaseBindingsIfSocketDisconnected after restoreOwnedDeviceSessionsForMcpSession,
-  // src/daemon/socketServer.ts) but not the acquisition path.
-  test.todo("a connection that closed while its bind was in flight owns nothing", async () => {
+  // Root cause (fixed, #11146): DevicePool.bindOrReuseDeviceSession recorded the caller's MCP
+  // connection as the session's owner right after `await this.createSessionOrRestore(...)` without
+  // checking the connection was still open. A close in that window had already run
+  // releaseMcpSessionBindings(connection), so the dead connection stayed an owner forever. The pool
+  // now tracks binds in flight per connection and skips the ownership record for one that closed.
+  test("a connection that closed while its bind was in flight owns nothing", async () => {
     const { pool } = await createPoolWorld();
 
     const bind = bindForConnection(pool, "owner-session", "closing-connection");
@@ -103,7 +99,7 @@ describe("pool ownership races found by the seeded concurrency harness", () => {
   // hasConnectedMcpSessionOwner() true for the session forever, so when the owner's proxy later
   // reconnects, restores the session and disconnects again, the owner-disconnect release (#10503)
   // is never armed and the device stays held until some other path (heartbeat lapse) frees it.
-  test.todo("an owner whose first connection closed mid-bind still gets the owner-disconnect release", async () => {
+  test("an owner whose first connection closed mid-bind still gets the owner-disconnect release", async () => {
     const { pool, timer, manager, releases } = await createPoolWorld();
 
     const bind = bindForConnection(pool, "owner-session", "first-connection");

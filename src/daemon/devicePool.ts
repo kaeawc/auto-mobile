@@ -189,6 +189,19 @@ import {
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 export type { DeviceRecoveryPolicy } from "./poolConfig";
 
+/** The optional inputs of {@link DevicePool.bindOrReuseDeviceSession}, by name. */
+interface ExplicitBindOptions {
+  sourceImage?: DeviceInfo;
+  childProcess?: ChildProcess | null;
+  expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
+  allowSessionRebind: boolean;
+  readinessReservationOwners?: ReadonlySet<symbol>;
+  verifiedAndroidAvdIdentity?: DeviceInfo;
+  expectedExistingSessionDeviceId?: string;
+  mcpSessionId?: string;
+  oneShotCli: boolean;
+}
+
 interface McpSessionRecoveryLease {
   readonly device: PooledDevice;
   readonly token: symbol;
@@ -975,6 +988,13 @@ export class DevicePool {
   /** Releases a session after its owning connection closes and no owner remains (#10503). */
   private readonly ownerDisconnectRelease: OwnerDisconnectRelease;
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
+  /**
+   * MCP connections with a bind in flight, and whether each closed while it was (#11146). A bind
+   * records its caller as the session's owner after awaiting session creation; a connection that
+   * closed meanwhile already had its bindings released, so recording it then would leave a dead
+   * owner that suppresses the owner-disconnect release forever.
+   */
+  private readonly mcpBindsInFlight = new Map<string, { pending: number; closed: boolean }>();
   private readonly refreshMissingDeviceMisses: Map<string, number>;
   private readonly androidTransportAliases: AndroidTransportAliases;
   private androidAliasObservation = 0;
@@ -7192,6 +7212,41 @@ export class DevicePool {
     mcpSessionId?: string,
     oneShotCli = false,
   ): Promise<string> {
+    // Registered before the first await so a close racing the whole bind is seen (#11146).
+    const endBind = this.beginMcpBind(mcpSessionId);
+    try {
+      return await this.bindOrReuseDeviceSessionUnderBindClaim(sessionId, deviceId, platform, {
+        sourceImage,
+        childProcess,
+        expectedIdentity,
+        allowSessionRebind,
+        readinessReservationOwners,
+        verifiedAndroidAvdIdentity,
+        expectedExistingSessionDeviceId,
+        mcpSessionId,
+        oneShotCli,
+      });
+    } finally {
+      endBind();
+    }
+  }
+
+  private async bindOrReuseDeviceSessionUnderBindClaim(
+    sessionId: string,
+    deviceId: string,
+    platform: Platform,
+    options: ExplicitBindOptions,
+  ): Promise<string> {
+    const {
+      sourceImage,
+      childProcess,
+      expectedIdentity,
+      readinessReservationOwners,
+      verifiedAndroidAvdIdentity,
+      expectedExistingSessionDeviceId,
+      mcpSessionId,
+      oneShotCli,
+    } = options;
     const caller: AutolockClient = { mcpSessionId, oneShotCli };
     await this.assertNotClaimedByForeignDaemon(deviceId, platform);
     const heldBefore = this.devices.get(deviceId)?.sessionId ?? null;
@@ -7289,41 +7344,7 @@ export class DevicePool {
           device.status = "idle";
         }
 
-        const assignmentSnapshot = this.snapshotSessionAssignment(device);
-        const previousSession = this.sessionManager.getSession(sessionId);
-        this.assertExpectedRecoverySession(
-          previousSession,
-          sessionId,
-          deviceId,
-          platform,
-          expectedExistingSessionDeviceId,
-        );
-        device.sessionId = sessionId;
-        device.status = "busy";
-        device.lastUsedAt = this.nextLastUsedAt();
-        device.assignmentCount++;
-        device.errorCount = 0;
-
-        await this.createSessionOrRestore(
-          device,
-          assignmentSnapshot,
-          this.createSessionForBinding(
-            previousSession,
-            sessionId,
-            deviceId,
-            platform,
-            allowSessionRebind,
-            {
-              stableDeviceId: this.stableDeviceIdFor(device),
-              persistenceSource: creatorPersistenceSource(
-                caller,
-                allowSessionRebind,
-                expectedExistingSessionDeviceId,
-              ),
-            },
-          ),
-        );
-        this.recordMcpSessionOwnership(mcpSessionId, sessionId);
+        await this.assignDeviceToBoundSession(device, sessionId, platform, caller, options);
         logger.info(`Bound device ${deviceId} to session ${sessionId}`);
         return sessionId;
       },
@@ -7332,6 +7353,53 @@ export class DevicePool {
       await this.claimExplicitlyBoundDevice(boundSessionId, deviceId, heldBefore);
     }
     return boundSessionId;
+  }
+
+  /** Assign `device` to `sessionId`, create (or restore) the session and record its owner. */
+  private async assignDeviceToBoundSession(
+    device: PooledDevice,
+    sessionId: string,
+    platform: Platform,
+    caller: AutolockClient,
+    options: ExplicitBindOptions,
+  ): Promise<void> {
+    const deviceId = device.id;
+    const { allowSessionRebind, expectedExistingSessionDeviceId } = options;
+    const assignmentSnapshot = this.snapshotSessionAssignment(device);
+    const previousSession = this.sessionManager.getSession(sessionId);
+    this.assertExpectedRecoverySession(
+      previousSession,
+      sessionId,
+      deviceId,
+      platform,
+      expectedExistingSessionDeviceId,
+    );
+    device.sessionId = sessionId;
+    device.status = "busy";
+    device.lastUsedAt = this.nextLastUsedAt();
+    device.assignmentCount++;
+    device.errorCount = 0;
+
+    await this.createSessionOrRestore(
+      device,
+      assignmentSnapshot,
+      this.createSessionForBinding(
+        previousSession,
+        sessionId,
+        deviceId,
+        platform,
+        allowSessionRebind,
+        {
+          stableDeviceId: this.stableDeviceIdFor(device),
+          persistenceSource: creatorPersistenceSource(
+            caller,
+            allowSessionRebind,
+            expectedExistingSessionDeviceId,
+          ),
+        },
+      ),
+    );
+    this.recordBindOwnership(caller.mcpSessionId, sessionId);
   }
 
   /**
@@ -7707,6 +7775,41 @@ export class DevicePool {
     return true;
   }
 
+  /** Track a bind for `mcpSessionId` until the returned callback runs (#11146). */
+  private beginMcpBind(mcpSessionId: string | undefined): () => void {
+    if (!mcpSessionId) {
+      return () => {};
+    }
+    const bind = this.mcpBindsInFlight.get(mcpSessionId) ?? { pending: 0, closed: false };
+    bind.pending++;
+    this.mcpBindsInFlight.set(mcpSessionId, bind);
+    return () => {
+      bind.pending--;
+      if (bind.pending === 0 && this.mcpBindsInFlight.get(mcpSessionId) === bind) {
+        this.mcpBindsInFlight.delete(mcpSessionId);
+      }
+    };
+  }
+
+  /**
+   * Record a bind's caller as the session's owner, unless that connection closed while the bind
+   * was in flight (#11146): its bindings were already released, so it would stay a dead owner and
+   * suppress the owner-disconnect release (#10503). Then the session is ownerless, so arm that
+   * release instead, exactly as the close would have for an owner recorded in time.
+   */
+  private recordBindOwnership(mcpSessionId: string | undefined, sessionId: string): void {
+    if (!mcpSessionId || !this.mcpBindsInFlight.get(mcpSessionId)?.closed) {
+      this.recordMcpSessionOwnership(mcpSessionId, sessionId);
+      return;
+    }
+    logger.info(
+      `[DevicePool] MCP connection ${mcpSessionId} closed while binding session ${sessionId}; not recording it as owner`,
+    );
+    if (!this.hasConnectedMcpSessionOwner(sessionId)) {
+      this.ownerDisconnectRelease.ownerDisconnected(sessionId, mcpSessionId);
+    }
+  }
+
   private recordMcpSessionOwnership(mcpSessionId: string | undefined, sessionId: string): void {
     if (!mcpSessionId) {
       return;
@@ -7997,6 +8100,10 @@ export class DevicePool {
 
   /** Drop every socket-scoped route and ownership marker for a disconnected MCP client. */
   releaseMcpSessionBindings(mcpSessionId: string): void {
+    const bindInFlight = this.mcpBindsInFlight.get(mcpSessionId);
+    if (bindInFlight) {
+      bindInFlight.closed = true;
+    }
     const acquired = this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId);
     this.mcpSessionAcquiredDeviceSessions.delete(mcpSessionId);
     this.autolockManager.releaseMcpSessionBindings(mcpSessionId);

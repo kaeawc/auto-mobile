@@ -17,13 +17,10 @@ import {
 // (first seed), for example:
 //   AUTOMOBILE_POOL_OWNERSHIP_SEEDS=2000 bun test test/daemon/poolOwnershipConcurrency.property.test.ts
 //
-// Two violation kinds are tolerated because they are known, open bugs with minimized regressions
-// in poolOwnershipConcurrency.regressions.test.ts (test.todo). The fix for each removes its kind
-// from KNOWN_VIOLATIONS so the property is enforced again.
+// A violation kind listed here is tolerated: a known, open bug with a minimized `test.todo`
+// regression in poolOwnershipConcurrency.regressions.test.ts. Its fix removes the kind so the
+// property is enforced again. closed-connection-owns was fixed in #11146.
 const KNOWN_VIOLATIONS: ReadonlySet<ViolationKind> = new Set<ViolationKind>([
-  // An MCP connection that closes while its bind is in flight is recorded as the session's owner
-  // after its bindings were already dropped (bindOrReuseDeviceSession / recordMcpSessionOwnership).
-  "closed-connection-owns",
   // A terminal release racing a non-terminal release's persistence re-notifies a full release
   // without `upgradeOnly` (SessionManager.releaseSessionInternal).
   "double-release",

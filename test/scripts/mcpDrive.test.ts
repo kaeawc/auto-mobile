@@ -3,7 +3,10 @@ import {
   applySession,
   buildMismatchHint,
   isSessionMintingTool,
+  DEFAULT_DRIVE_TIMEOUT_MS,
   parseDriveArgs,
+  privateEnvError,
+  resolveTimeoutMs,
   runDrive,
   type DriveClient,
   type DriveStep,
@@ -243,5 +246,61 @@ describe("runDrive", () => {
     expect(result.results).toHaveLength(1); // stopped before observe
     expect(result.results[0].mismatchHint).toContain("Restart the daemon");
     expect(client.calls).toHaveLength(1);
+  });
+});
+
+describe("timeout and --private", () => {
+  test("flag beats env beats default", () => {
+    expect(resolveTimeoutMs(5, { AUTOMOBILE_DRIVE_TIMEOUT_MS: "9" })).toBe(5);
+    expect(resolveTimeoutMs(undefined, { AUTOMOBILE_DRIVE_TIMEOUT_MS: "9" })).toBe(9);
+    expect(resolveTimeoutMs(undefined, {})).toBe(DEFAULT_DRIVE_TIMEOUT_MS);
+    expect(DEFAULT_DRIVE_TIMEOUT_MS).toBeGreaterThan(60_000);
+  });
+
+  test("parses --timeout-ms and --private, rejecting bad values", () => {
+    const options = parseDriveArgs(["--timeout-ms", "120000", "--private", "observe"], () => "");
+    expect(options.timeoutMs).toBe(120000);
+    expect(options.private).toBe(true);
+    expect(() => parseDriveArgs(["observe", "--timeout-ms", "abc"], () => "")).toThrow();
+    expect(() => parseDriveArgs(["observe", "--timeout-ms"], () => "")).toThrow();
+  });
+
+  test("privateEnvError requires an absolute aux socket dir", () => {
+    expect(privateEnvError({})).toBeDefined();
+    expect(privateEnvError({ AUTOMOBILE_AUX_SOCKET_DIR: "rel" })).toBeDefined();
+    expect(privateEnvError({ AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/lane" })).toBeUndefined();
+  });
+
+  test("runDrive refuses --private without env and never connects", async () => {
+    let connected = false;
+    const deps = {
+      env: {},
+      createClient: () => {
+        connected = true;
+        return Promise.resolve(new FakeClient({}));
+      },
+      defaultServerPath: () => "/x",
+      log: () => {},
+    };
+    await expect(
+      runDrive({ json: false, quiet: false, private: true, steps: [] }, deps),
+    ).rejects.toThrow(/AUTOMOBILE_AUX_SOCKET_DIR/);
+    expect(connected).toBe(false);
+  });
+
+  test("runDrive passes the resolved timeout to createClient", async () => {
+    let seen = 0;
+    await runDrive(
+      { json: false, quiet: false, timeoutMs: 777, steps: [] },
+      {
+        createClient: (_p, timeoutMs) => {
+          seen = timeoutMs;
+          return Promise.resolve(new FakeClient({}));
+        },
+        defaultServerPath: () => "/x",
+        log: () => {},
+      },
+    );
+    expect(seen).toBe(777);
   });
 });

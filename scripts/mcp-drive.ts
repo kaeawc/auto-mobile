@@ -24,6 +24,12 @@
  *   --enable a,b,c     enableTools[] merged into the first session-minting call
  *   --json             print the full tool envelope as JSON (default: compact payload)
  *   --quiet            print only tool messages / errors
+ *   --timeout-ms <n>   per-request timeout (default: env AUTOMOBILE_DRIVE_TIMEOUT_MS, else 15 min).
+ *                      The SDK default is 60 s, which kills a cold boot / provisioning call
+ *                      client-side and the disconnect then tears the emulator down mid-boot.
+ *   --private          harness mode: refuse to start unless AUTOMOBILE_AUX_SOCKET_DIR is set to an
+ *                      absolute path (so the driver can never reach the resident daemon, which
+ *                      its build guard may restart). Without the flag behaviour is unchanged.
  *
  * A session minted by getAndroid/getApple/provisionDevice is captured and
  * injected as `sessionUuid` into every later call automatically. The process
@@ -35,6 +41,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../src/utils/deviceTimeouts";
 import { isCliToolFailure } from "../src/cli/index";
 import { coerceCliValue, getDeclaredParamTypes } from "../src/cli/cliValueCoercion";
 import { getDeviceSessionIdFromResult } from "../src/server/deviceSessionResult";
@@ -51,7 +58,56 @@ export interface DriveOptions {
   enable?: string[];
   json: boolean;
   quiet: boolean;
+  /** Per-request timeout in ms; defaults to DEFAULT_DRIVE_TIMEOUT_MS. */
+  timeoutMs?: number;
+  /** Harness mode: require the private-daemon env before connecting. */
+  private?: boolean;
   steps: DriveStep[];
+}
+
+/**
+ * Default per-request timeout: the daemon RPC socket's idle timeout (15 min), which already
+ * bounds the longest startDevice/provisionDevice request (MAX_PROVISION_DEVICE_TIMEOUT_MS plus
+ * MCP overhead), so the client never gives up before the daemon does.
+ */
+export const DEFAULT_DRIVE_TIMEOUT_MS = DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS;
+
+/** Resolve the request timeout from the flag, then env, then the default. */
+export function resolveTimeoutMs(
+  flag: number | undefined,
+  env: Record<string, string | undefined>,
+): number {
+  if (flag !== undefined) {
+    return flag;
+  }
+  const raw = env.AUTOMOBILE_DRIVE_TIMEOUT_MS?.trim();
+  if (raw) {
+    return parseTimeoutMs(raw, "AUTOMOBILE_DRIVE_TIMEOUT_MS");
+  }
+  return DEFAULT_DRIVE_TIMEOUT_MS;
+}
+
+export function parseTimeoutMs(raw: string | undefined, label: string): number {
+  const value = Number(raw);
+  if (!raw || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`${label} must be a positive integer number of milliseconds (got "${raw}").`);
+  }
+  return value;
+}
+
+/**
+ * Harness-mode guard: returns an error message when the private-daemon env is missing, else
+ * undefined. A driver run without it connects to the RESIDENT daemon (INCIDENT 2026-10-09).
+ */
+export function privateEnvError(env: Record<string, string | undefined>): string | undefined {
+  const aux = env.AUTOMOBILE_AUX_SOCKET_DIR?.trim();
+  if (!aux || !aux.startsWith("/")) {
+    return (
+      "--private requires AUTOMOBILE_AUX_SOCKET_DIR set to an absolute private directory " +
+      "(source your private daemon env first); refusing to risk the resident daemon."
+    );
+  }
+  return undefined;
 }
 
 /** Tools that mint their own device session; sessionUuid must NOT be injected. */
@@ -115,7 +171,9 @@ export interface DriveClient {
 }
 
 export interface DriveDeps {
-  createClient(serverPath: string): Promise<DriveClient>;
+  createClient(serverPath: string, timeoutMs: number): Promise<DriveClient>;
+  /** Environment used for the --private guard and timeout default. */
+  env?: Record<string, string | undefined>;
   log(message: string): void;
   /** Default entry script when --server is omitted. */
   defaultServerPath(): string;
@@ -163,8 +221,15 @@ function readEnvelope(envelope: unknown): {
  * exit semantics, and mismatch handling without spawning a process.
  */
 export async function runDrive(options: DriveOptions, deps: DriveDeps): Promise<DriveResult> {
+  if (options.private) {
+    const problem = privateEnvError(deps.env ?? {});
+    if (problem) {
+      throw new Error(problem);
+    }
+  }
   const serverPath = options.serverPath ?? deps.defaultServerPath();
-  const client = await deps.createClient(serverPath);
+  const timeoutMs = resolveTimeoutMs(options.timeoutMs, deps.env ?? {});
+  const client = await deps.createClient(serverPath, timeoutMs);
   const results: DriveStepResult[] = [];
   let session = options.session;
   let firstMint = true;
@@ -254,6 +319,12 @@ export function parseDriveArgs(argv: string[], readPlan: (path: string) => strin
     } else if (token === "--quiet") {
       options.quiet = true;
       i += 1;
+    } else if (token === "--private") {
+      options.private = true;
+      i += 1;
+    } else if (token === "--timeout-ms") {
+      options.timeoutMs = parseTimeoutMs(argv[++i], "--timeout-ms");
+      i += 1;
     } else if (token === "--plan") {
       planPath = argv[++i];
       i += 1;
@@ -318,7 +389,7 @@ export function parseDriveArgs(argv: string[], readPlan: (path: string) => strin
   return options;
 }
 
-async function createSdkClient(serverPath: string): Promise<DriveClient> {
+async function createSdkClient(serverPath: string, timeoutMs: number): Promise<DriveClient> {
   const client = new Client({ name: "mcp-drive", version: "1.0.0" });
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -328,7 +399,11 @@ async function createSdkClient(serverPath: string): Promise<DriveClient> {
   });
   await client.connect(transport);
   return {
-    callTool: (name, args) => client.callTool({ name, arguments: args }),
+    callTool: (name, args) =>
+      client.callTool({ name, arguments: args }, undefined, {
+        timeout: timeoutMs,
+        resetTimeoutOnProgress: true,
+      }),
     close: () => client.close(),
   };
 }
@@ -346,15 +421,22 @@ async function main(): Promise<void> {
     console.error(`mcp-drive: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(2);
   }
-  const result = await runDrive(options, {
-    createClient: createSdkClient,
-    defaultServerPath,
-    log: (message) => {
-      if (!options.quiet || message.includes("ERROR") || message.includes("mismatch")) {
-        console.log(message);
-      }
-    },
-  });
+  let result: DriveResult;
+  try {
+    result = await runDrive(options, {
+      env: process.env,
+      createClient: createSdkClient,
+      defaultServerPath,
+      log: (message) => {
+        if (!options.quiet || message.includes("ERROR") || message.includes("mismatch")) {
+          console.log(message);
+        }
+      },
+    });
+  } catch (error) {
+    console.error(`mcp-drive: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(2);
+  }
   if (result.session) {
     console.log(`session: ${result.session}`);
   }

@@ -440,6 +440,7 @@ describe("DeviceDisconnectHandler", () => {
           getRecoveryPolicy: h.port.getRecoveryPolicy,
           getSessionForDevice: () => session.sessionId,
           getSession: () => (capturingSession || sessionPresent ? session : null),
+          sessionClockToWall: (ms) => sessions.sessionClockToWall(ms),
           getProcessOutputTail: () => undefined,
         },
         store,

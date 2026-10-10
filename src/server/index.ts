@@ -68,7 +68,10 @@ import {
   type DeviceLossOutcome,
 } from "./deviceLossOutcome";
 
-import { refuseControlOnForeignOwnedSession } from "./foreignOwnedSessionRefusal";
+import {
+  isControlCallOnNamedSession,
+  refuseControlOnForeignOwnedSession,
+} from "./foreignOwnedSessionRefusal";
 
 // Import the tool registry
 import { ToolRegistry, toolHasOutputSchema } from "./toolRegistry";
@@ -1304,12 +1307,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // #11344: a control call never runs on a session another connected client owns. Refused
     // before the execution starts, so naming the session neither extends nor binds it. A plain
     // control tool (killDevice, recordSteps) is admitted on the session it names, so it is judged
-    // like a device call (#11542). `setActiveDevice` refuses in its own handler, and editing
-    // another session's tool profile is intended (docs/using/device-ownership.md).
-    const controlCallOnNamedSession = tool.requiresDevice
-      ? tool.isDeviceReadOnlyCall?.(parsedParams) !== true
-      : !plainReadCall && name !== "setActiveDevice" && name !== SET_TOOL_ENABLED_TOOL_NAME;
-    if (daemonMode && !isDeviceSessionAcquisitionTool(name) && controlCallOnNamedSession) {
+    // like a device call (#11542); nested internal calls are judged by the same predicate (#11555).
+    if (daemonMode && isControlCallOnNamedSession(tool, parsedParams)) {
       refuseControlOnForeignOwnedSession(name, providedSessionUuid, requestMcpSessionId);
       // The session a `device` label resolves to is the one the call runs on (#11542).
       if (derivedLabelSessionUuid !== providedSessionUuid) {

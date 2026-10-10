@@ -5,6 +5,7 @@ import {
   type DeviceExecutionBinding,
 } from "../server/deviceExecutionBinding";
 import { errorMessage } from "../utils/describeUnknownError";
+import { isIosSimulatorAlreadyStoppedError } from "../utils/ios-cmdline-tools/simulatorStateErrors";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import {
   ActionableError,
@@ -376,6 +377,10 @@ export function isScanAuthoritativeFor(scan: ConnectedPlatformScan, device: Boot
 }
 
 export type DeviceReadinessLevel = "booted" | "automationReady";
+
+/** Same cadence as the deleteDevice absence verification (DEVICE_SHUTDOWN_POLL_INTERVAL_MS). */
+const CREATED_IOS_ABSENCE_POLL_MS = 1_000;
+const CREATED_IOS_ABSENCE_TIMEOUT_MS = 10_000;
 
 /**
  * Ordering of {@link DeviceReadinessLevel} by how much setup each represents
@@ -1909,14 +1914,96 @@ export class DeviceSessionManager implements DeviceSessionManager {
     );
     // Cancellation cleanup must not inherit an already-aborted request signal.
     const cleanupSignal = new AbortController().signal;
-    await this.simctl!.deleteSimulator(created.deviceId, { signal: cleanupSignal }).catch(
-      (deleteError) => {
-        logger.warn(
-          `[DeviceSessionManager] Failed to roll back created iOS simulator ` +
-            `'${created.name}' (${created.deviceId}): ${errorMessage(deleteError)}`,
-        );
-      },
-    );
+    const device: BootedDevice = {
+      name: created.name,
+      platform: "ios",
+      deviceId: created.deviceId,
+    };
+    let step = "retire runner";
+    try {
+      // Same order as the deleteDevice teardown: runner, shutdown, delete, verify absence.
+      await this.retireCreatedIosRunner(device);
+      step = "shut down";
+      await this.shutDownCreatedIosSimulator(device, cleanupSignal);
+      step = "delete";
+      await this.simctl!.deleteSimulator(created.deviceId, { signal: cleanupSignal });
+      step = "verify absence of";
+      await this.verifyCreatedIosSimulatorAbsent(created.deviceId, cleanupSignal);
+    } catch (cleanupError) {
+      // The caller's failure is what explains the request; a rollback error never replaces it.
+      const state = await this.readCreatedIosSimulatorState(created.deviceId, cleanupSignal);
+      logger.warn(
+        `[DeviceSessionManager] Failed to ${step} created iOS simulator ` +
+          `'${created.name}' (${created.deviceId}, state: ${state}); it may be left behind: ` +
+          errorMessage(cleanupError),
+        cleanupError,
+      );
+    }
+  }
+
+  /** Mirrors the teardown's pre-shutdown runner stop; a failure is logged, not fatal. */
+  private async retireCreatedIosRunner(device: BootedDevice): Promise<void> {
+    try {
+      // Fence the observer first so the runner's socket close cannot reconnect and reboot the simulator.
+      await IOSCtrlProxyClient.retireInstance(device.deviceId);
+      await this.provider.getIOSCtrlProxyManager(device).stop();
+    } catch (error) {
+      logger.warn(
+        `[DeviceSessionManager] Failed to stop CtrlProxy iOS for created simulator ` +
+          `${device.deviceId} before rollback: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  private async shutDownCreatedIosSimulator(
+    device: BootedDevice,
+    signal: AbortSignal,
+  ): Promise<void> {
+    try {
+      await this.simctl!.killSimulator(device, { signal });
+    } catch (error) {
+      if (!isIosSimulatorAlreadyStoppedError(error)) {
+        throw error;
+      }
+      // simctl reports the simulator is already Shutdown: the state the delete needs.
+      logger.debug(
+        `[DeviceSessionManager] ${device.deviceId} was already shut down: ${errorMessage(error)}`,
+      );
+    }
+  }
+
+  private async verifyCreatedIosSimulatorAbsent(udid: string, signal: AbortSignal): Promise<void> {
+    const deadlineMs = this.runnerReadinessTimer.now() + CREATED_IOS_ABSENCE_TIMEOUT_MS;
+    for (;;) {
+      const images = await this.simctl!.listSimulatorImages(undefined, {
+        bypassCache: true,
+        signal,
+      });
+      if (!images.some((image) => image.deviceId === udid)) {
+        return;
+      }
+      if (this.runnerReadinessTimer.now() >= deadlineMs) {
+        throw new ActionableError(`iOS simulator ${udid} is still listed after delete.`);
+      }
+      await this.runnerReadinessTimer.sleep(CREATED_IOS_ABSENCE_POLL_MS);
+    }
+  }
+
+  private async readCreatedIosSimulatorState(udid: string, signal: AbortSignal): Promise<string> {
+    try {
+      const images = await this.simctl!.listSimulatorImages(undefined, {
+        bypassCache: true,
+        signal,
+      });
+      const image = images.find((candidate) => candidate.deviceId === udid);
+      return image ? (image.state ?? "unknown") : "absent";
+    } catch (error) {
+      logger.debug(
+        `[DeviceSessionManager] Could not read state of ${udid}: ${errorMessage(error)}`,
+      );
+      return "unknown";
+    }
   }
 
   /**

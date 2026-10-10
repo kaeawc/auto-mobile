@@ -22,8 +22,12 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // | gone with a recoverable reason, told by a not-found | runs         | exactly once | forwarded         |
 // |   heartbeat, within the recovery window of the      |              | a tick       |                   |
 // |   first such answer (#11461)                        |              |              |                   |
-// | gone with no reason, or a recoverable one past its  | for others   | none needed  | forwarded, and    |
-// |   window, told by a not-found heartbeat             |              |              | success re-arms   |
+// | gone with no reason, told by the first heartbeat    | runs         | exactly once | forwarded         |
+// |   answered on a connection that was just made (a    |              | a tick       |                   |
+// |   restarted daemon that has not rehydrated it yet), |              |              |                   |
+// |   within the same window (#11529)                   |              |              |                   |
+// | gone with no reason otherwise, or past the window,  | for others   | none needed  | forwarded, and    |
+// |   told by a not-found heartbeat                     |              |              | success re-arms   |
 // | gone with any reason that is not recoverable        | for others   | never again  | refused locally   |
 // |   (terminal, `plan-auto-release`, unknown to this   |              |              | while it is the   |
 // |   build), proxy told (release notification or       |              |              | fenced binding    |
@@ -44,6 +48,8 @@ const TERMINAL_REASON = "device-killed";
  */
 const ENDING_REASONS = [TERMINAL_REASON, "plan-auto-release", "reason-from-a-newer-daemon"];
 const RECOVERABLE_REASON = "device-restart:emulator-5554";
+/** Stands in for the proxy's latest binding when the history leaves it in doubt. */
+const UNCERTAIN = "a session the model cannot name";
 
 /** `terminal`: released for any reason that is not recoverable, which ends the binding. */
 type Gone = "terminal" | "recoverable" | "unknown";
@@ -136,6 +142,16 @@ interface SessionModel {
    * call restores the session: the proxy keeps heartbeating it for the recovery window (#11461).
    */
   recoverableSince?: number;
+  /**
+   * The daemon answered with no reason on a connection the proxy had just made to re-establish
+   * ownership of this session: its later answers with no reason keep that window open (#11529).
+   */
+  rehydrating?: boolean;
+  /**
+   * The same answer, when the history leaves the proxy's latest binding in doubt: the proxy may or
+   * may not be heartbeating it for the window that started then.
+   */
+  maybeRehydratingSince?: number;
 }
 
 /** A daemon the proxy talks to, with the model of what the proxy must do about each session. */
@@ -149,6 +165,20 @@ class World {
   latest: string | undefined;
   /** The latest binding the proxy was told is terminally gone: its calls are refused locally. */
   fenced: string | undefined;
+  /** False once a rejected call left it open which session the proxy's latest binding is. */
+  private latestCertain = true;
+  /**
+   * The session whose next heartbeat answer is the first on a connection the proxy just made to
+   * re-establish ownership of it: its latest binding, when it still heartbeats it.
+   */
+  private reestablishing: string | undefined;
+  /** Sessions the daemon answered a heartbeat for on the current connection. */
+  private readonly answeredOnConnection = new Set<string>();
+  /**
+   * The daemon was unreachable for longer than a heartbeat request. The first answer on the next
+   * connection goes to the heartbeat that gave up waiting, and liveness recovery classifies its own.
+   */
+  private afterUnreachableGap = false;
   rejectNextCall = false;
   private nextBirth: Birth = "lives";
   private reachable = true;
@@ -178,7 +208,7 @@ class World {
   }
 
   private newClient(): FakeDaemonClient {
-    return new FakeDaemonClient({
+    const created = new FakeDaemonClient({
       onCallDaemonMethod: (method, params) => {
         if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
           this.answerHeartbeat(params.sessionId);
@@ -191,6 +221,30 @@ class World {
       },
       toolResultFor: (name) => (name === "getAndroid" ? this.mintSession() : undefined),
     });
+    const connect = created.connect.bind(created);
+    created.connect = async () => {
+      await connect();
+      this.connectionEstablished();
+    };
+    return created;
+  }
+
+  /** The proxy connected: the keeper's next heartbeat for its latest binding re-establishes ownership. */
+  private connectionEstablished(): void {
+    this.answeredOnConnection.clear();
+    this.reestablishing = undefined;
+    if (this.afterUnreachableGap) {
+      this.afterUnreachableGap = false;
+      return;
+    }
+    if (!this.latestCertain) {
+      this.reestablishing = UNCERTAIN;
+      return;
+    }
+    const latest = this.latest === undefined ? undefined : this.sessions.get(this.latest);
+    if (latest !== undefined && !latest.told && latest.daemon !== "terminal") {
+      this.reestablishing = this.latest;
+    }
   }
 
   private mintSession(): { content: Array<{ type: string; text: string }> } {
@@ -205,6 +259,7 @@ class World {
     });
     // The proxy binds what an acquisition mints, before the session's first heartbeat.
     this.latest = sessionUuid;
+    this.latestCertain = true;
     this.fenced = undefined;
     return {
       content: [{ type: "text", text: JSON.stringify({ runtime: { session: { sessionUuid } } }) }],
@@ -218,6 +273,12 @@ class World {
       return;
     }
     session.heartbeats += 1;
+    const first = !this.answeredOnConnection.has(sessionUuid);
+    this.answeredOnConnection.add(sessionUuid);
+    const reestablishes = this.reestablishing === sessionUuid;
+    if (reestablishes) {
+      this.reestablishing = undefined;
+    }
     if (session.heartbeats === 1 && this.nextBirth === "released" && this.latest === sessionUuid) {
       // The heartbeat itself is acknowledged; the release reaches the proxy during it.
       this.release(sessionUuid, "terminal", true);
@@ -232,9 +293,18 @@ class World {
       }
       this.learnDead(sessionUuid);
     }
+    if (session.daemon === "unknown" && reestablishes) {
+      session.rehydrating = true;
+    } else if (session.daemon === "unknown" && first && this.reestablishing === UNCERTAIN) {
+      session.maybeRehydratingSince ??= this.timer.now();
+    }
     // A recoverable handoff is not "told gone" until its recovery window has passed: its owner
     // keeps heartbeating so a daemon still recovering the session finds it reclaimed (#11461).
-    session.told = session.daemon !== "recoverable" || this.recoveryWindowPassed(session);
+    // Nor is a session a just-connected daemon answered for with no reason (#11529).
+    const awaited =
+      session.daemon === "recoverable" ||
+      (session.daemon === "unknown" && session.rehydrating === true);
+    session.told = !awaited || this.recoveryWindowPassed(session);
     throw Object.assign(new Error(`Session not found: ${sessionUuid}`), {
       code: DAEMON_SESSION_NOT_FOUND_CODE,
       ...(session.daemon === "terminal" ? { releaseReason: session.endedAs } : {}),
@@ -259,6 +329,8 @@ class World {
     session.daemon = "live";
     session.told = false;
     session.recoverableSince = undefined;
+    session.rehydrating = undefined;
+    session.maybeRehydratingSince = undefined;
     if (this.rejectNextCall) {
       this.rejectNextCall = false;
       throw new Error("Element not found: text 'Continue'");
@@ -280,6 +352,7 @@ class World {
   /** The proxy binds `sessionUuid` as its latest binding and heartbeats it from now on. */
   private bound(sessionUuid: string): void {
     this.latest = sessionUuid;
+    this.latestCertain = true;
     this.fenced = undefined;
     this.mustBeat.add(sessionUuid);
     this.reholdPreviousBinding();
@@ -354,6 +427,7 @@ class World {
     } else if (outcome.startsWith("Element not found")) {
       // Admitted and rejected: the session is live again, and whether the proxy re-bound it
       // depends on what it held, so the latest binding is no longer certain.
+      this.latestCertain &&= this.latest === sessionUuid;
       this.latest = this.latest === sessionUuid ? sessionUuid : undefined;
     } else {
       this.violations.push(`a call naming usable session ${sessionUuid} was refused: ${outcome}`);
@@ -371,6 +445,7 @@ class World {
     const previous = this.client;
     this.client = this.newClient();
     this.reachable = gapMs === 0;
+    this.afterUnreachableGap = gapMs > 0;
     previous.emitConnectionClosed();
     if (gapMs > 0) {
       await this.timer.advanceTimeAsync(gapMs);
@@ -412,11 +487,13 @@ class World {
 
   async tick(): Promise<void> {
     const before = new Map([...this.mustBeat].map((id) => [id, this.sessions.get(id)!.heartbeats]));
-    // Sessions the proxy already knows are recoverable-not-found and still waits for.
+    // Sessions the proxy already knows are recoverable-not-found, or not rehydrated yet, and
+    // still waits for.
     const awaited = [...this.sessions]
       .filter(
         ([, session]) =>
-          session.daemon === "recoverable" &&
+          (session.daemon === "recoverable" ||
+            (session.daemon === "unknown" && session.rehydrating === true)) &&
           session.recoverableSince !== undefined &&
           !session.told,
       )
@@ -424,9 +501,9 @@ class World {
     await this.timer.advanceTimeAsync(INTERVAL_MS);
     for (const { id, session, heartbeats } of awaited) {
       const sent = session.heartbeats - heartbeats;
-      if (session.daemon === "recoverable" && sent !== 1) {
+      if ((session.daemon === "recoverable" || session.daemon === "unknown") && sent !== 1) {
         this.violations.push(
-          `recoverable not-found session ${id} got ${sent} heartbeats on a keeper tick, not 1`,
+          `awaited not-found session ${id} got ${sent} heartbeats on a keeper tick, not 1`,
         );
       }
     }
@@ -436,11 +513,18 @@ class World {
       }
     }
     const untold = [...this.sessions.values()].some((session) => !session.told);
+    // In doubt whether the proxy waits for a session: the keeper may run until that window ends.
+    const maybeAwaited = [...this.sessions.values()].some(
+      (session) =>
+        session.maybeRehydratingSince !== undefined &&
+        this.timer.now() - session.maybeRehydratingSince <=
+          RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS + INTERVAL_MS,
+    );
     const keeperScheduled = this.timer.getPendingIntervalCount() > 0;
     if (this.mustBeat.size > 0 && !keeperScheduled) {
       this.violations.push("the keeper is stopped although a session must be heartbeated");
     }
-    if (!untold && keeperScheduled) {
+    if (!untold && keeperScheduled && !maybeAwaited) {
       this.violations.push("the keeper still runs although every session is known to be gone");
     }
   }
@@ -559,6 +643,18 @@ const REGRESSIONS: ReadonlyArray<readonly [string, readonly Command[]]> = [
     [
       ACQUIRE,
       { kind: "release", target: 0, gone: "recoverable", notify: false },
+      ...Array.from(
+        { length: RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS + 3 },
+        () => TICK,
+      ),
+    ],
+  ],
+  [
+    "#11529 a restarted daemon that has not rehydrated the session is heartbeated once a tick until the window passes",
+    [
+      ACQUIRE,
+      TICK,
+      { kind: "daemon-restart", gapMs: 0 },
       ...Array.from(
         { length: RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS / INTERVAL_MS + 3 },
         () => TICK,

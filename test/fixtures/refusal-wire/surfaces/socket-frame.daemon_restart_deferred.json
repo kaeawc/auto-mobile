@@ -1,0 +1,13 @@
+{
+  "surface": "socket-frame",
+  "name": "daemon_restart_deferred",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "AutoMobile daemon restart deferred (a device operation is active). Retry after 1000ms; use an explicit daemon restart only after confirming that no device operation is active.",
+    "code": "daemon_restart_deferred",
+    "retryable": true,
+    "retryAfterMs": 1000
+  }
+}

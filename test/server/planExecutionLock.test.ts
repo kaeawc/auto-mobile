@@ -261,12 +261,13 @@ describe("Plan execution lock through session routing", () => {
     const execution = tracker.startExecution("executePlan", undefined, "provided-session");
     try {
       const call = (name: string) =>
-        explicitFixture
-          .getContext()
-          .client.request(
-            { method: "tools/call", params: { name, arguments: { sessionUuid: "provided-session" } } },
-            z.any(),
-          );
+        explicitFixture.getContext().client.request(
+          {
+            method: "tools/call",
+            params: { name, arguments: { sessionUuid: "provided-session" } },
+          },
+          z.any(),
+        );
       expect(await call(readToolName)).toMatchObject({
         content: [{ type: "text", text: "probe executed" }],
       });

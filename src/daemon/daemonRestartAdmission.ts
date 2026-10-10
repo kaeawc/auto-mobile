@@ -116,3 +116,22 @@ export class DaemonRestartPendingError extends DaemonUnavailableError {
     this.name = "DaemonRestartPendingError";
   }
 }
+
+/**
+ * The tool result a call gets when it starts during an accepted daemon restart: the typed,
+ * retryable `daemon_restart_pending` envelope, in both text and structured content.
+ */
+export function daemonRestartPendingToolResult(error: DaemonRestartPendingError): {
+  content: { type: "text"; text: string }[];
+  structuredContent: Record<string, unknown>;
+  isError: true;
+} {
+  const pending = {
+    error: { code: error.code, message: error.message, retryable: error.retryable },
+  };
+  return {
+    content: [{ type: "text", text: JSON.stringify(pending) }],
+    structuredContent: pending,
+    isError: true,
+  };
+}

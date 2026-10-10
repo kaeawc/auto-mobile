@@ -110,6 +110,7 @@ import {
   releasedRowStatus,
   type SessionReleaseReason,
 } from "./releaseReasons";
+import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import {
   NoopTerminalReleaseJournal,
@@ -804,11 +805,13 @@ export type SessionExecutionDeadlineLookup = (sessionId: string) => number | und
 
 /**
  * Aborts a session's in-flight executions before an idle-expiry release overrides them (#10820).
- * Must signal the aborts synchronously: the expiry release starts in the same turn.
+ * Must signal the aborts synchronously: the expiry release starts in the same turn. `cancellation`
+ * is what the calls are aborted with: the typed release, so their callers get the terminal
+ * `session_ownership_lost` refusal rather than a generic abort (#11381).
  */
 export type ExpiryReleaseExecutionCanceller = (
   sessionId: string,
-  reason: string,
+  cancellation: SessionReleasedDuringCallError,
   query: ActiveSessionExecutionQuery,
 ) => void;
 
@@ -8703,7 +8706,7 @@ export class SessionManager {
    */
   private cancelExecutionsOverriddenByExpiry(
     session: Session,
-    releaseReason: string,
+    releaseReason: SessionReleaseReason,
     excludeExecutionId?: string,
   ): boolean {
     const query: ActiveSessionExecutionQuery =
@@ -8711,7 +8714,11 @@ export class SessionManager {
     if (!this.activeSessionExecutionChecker(session.sessionId, query)) {
       return false;
     }
-    this.expiryReleaseExecutionCanceller(session.sessionId, releaseReason, query);
+    this.expiryReleaseExecutionCanceller(
+      session.sessionId,
+      new SessionReleasedDuringCallError(session.sessionId, releaseReason),
+      query,
+    );
     return true;
   }
 

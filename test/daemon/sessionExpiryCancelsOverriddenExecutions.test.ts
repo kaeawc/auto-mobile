@@ -5,6 +5,7 @@ import {
   UNSETTLED_EXECUTION_DEADLINE_GRACE_MS,
   UNSETTLED_EXECUTION_VETO_CEILING_MS,
 } from "../../src/daemon/unsettledExecutionVeto";
+import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
 import { ExecutionTracker, type ActiveExecution } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -41,9 +42,9 @@ describe("idle-expiry release cancels the executions it overrides (#10820)", () 
     manager.setSessionExecutionDeadlineLookup((sessionId) =>
       tracker.getLatestSessionExecutionDeadlineMs(sessionId),
     );
-    manager.setExpiryReleaseExecutionCanceller((sessionId, reason, query) => {
-      cancelCalls.push({ sessionId, reason });
-      void tracker.cancelDeviceSessionExecutions(sessionId, reason, {
+    manager.setExpiryReleaseExecutionCanceller((sessionId, cancellation, query) => {
+      cancelCalls.push({ sessionId, reason: cancellation.releaseReason });
+      void tracker.cancelDeviceSessionExecutions(sessionId, cancellation, {
         excludeExecutionId: query.excludeExecutionId,
       });
     });
@@ -122,6 +123,31 @@ describe("idle-expiry release cancels the executions it overrides (#10820)", () 
     expect(cancelCalls).toEqual([{ sessionId: SESSION, reason: "lazy-expiry" }]);
     expect(releases).toEqual([{ reason: "lazy-expiry", abortedAtRelease: true }]);
   });
+
+  // #11381: the call an idle release cuts is told the session is gone, in the same terminal
+  // refusal a call arriving after the release gets, not a generic abort.
+  for (const [path, reason, expire] of [
+    ["sweep", "cleanup-expired", () => manager.cleanupExpiredSessions()],
+    ["lazy lookup", "lazy-expiry", () => manager.getSession(SESSION)],
+  ] as const) {
+    it(`${path}: the call it cuts is aborted with the typed terminal release`, async () => {
+      const idleDeadline = startHungCall();
+      timer.setCurrentTime(idleDeadline + UNSETTLED_EXECUTION_VETO_CEILING_MS);
+      expire();
+      await settle();
+
+      expect(hung!.abortController.signal.reason).toBe(hung!.cancelReason);
+      expect(sessionReleasedDuringCallPayload(hung!.cancelReason)).toMatchObject({
+        error: {
+          code: "session_ownership_lost",
+          sessionUuid: SESSION,
+          reason,
+          retryable: false,
+          nextAction: "acquire_new_session",
+        },
+      });
+    });
+  }
 
   it("an ordinary idle release with nothing in flight cancels nothing", async () => {
     const idleDeadline = manager.getAllSessions()[0]!.expiresAt;

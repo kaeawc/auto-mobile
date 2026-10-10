@@ -1055,7 +1055,11 @@ export class Daemon {
           if (deferral) {
             return deferral;
           }
-          await this.cancelAndReleaseSession(session.sessionId, reason, false, session);
+          // A call the release cuts (one still running past the veto's bound) is told the session
+          // is gone, as a call arriving after the release is (#11381).
+          await this.cancelAndReleaseSession(session.sessionId, reason, false, session, undefined, {
+            cancellation: new SessionReleasedDuringCallError(session.sessionId, reason),
+          });
         },
       },
       onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
@@ -1150,8 +1154,8 @@ export class Daemon {
     executionTracker.setSessionClockOffsetProvider(
       () => this.sessionManager.sessionNow() - this.timer.now(),
     );
-    this.sessionManager.setExpiryReleaseExecutionCanceller((sessionId, reason, query) =>
-      this.cancelExecutionsForExpiryRelease(sessionId, reason, query),
+    this.sessionManager.setExpiryReleaseExecutionCanceller((sessionId, cancellation, query) =>
+      this.cancelExecutionsForExpiryRelease(sessionId, cancellation, query),
     );
     // A sessionless call admitted while the device was free must not keep driving it for the new
     // holder (#10829). The call performing the acquisition is spared.
@@ -3194,7 +3198,13 @@ export class Daemon {
    * session clock, so the deadlines are converted onto it (#11162).
    */
   private sessionExecutionProbe(options: { excludeReads?: boolean } = {}): SessionExecutionProbe {
-    return sessionExecutionProbe(executionTracker, this.sessionManager, this.devicePool, options);
+    // The pool is read when the probe is asked, not when it is built: the owner-disconnect veto
+    // is built while the pool itself is being constructed, so `this.devicePool` is not set yet.
+    const pool = {
+      isSessionRecoveryInFlight: (sessionId: string) =>
+        this.devicePool.isSessionRecoveryInFlight(sessionId),
+    };
+    return sessionExecutionProbe(executionTracker, this.sessionManager, pool, options);
   }
 
   /** Mirrors {@link hasActiveSessionExecution}; a recovery in flight carries no deadline. */
@@ -3214,18 +3224,21 @@ export class Daemon {
   /**
    * Abort what an idle-expiry release overrides (#10820), over the same session scope
    * {@link hasActiveSessionExecution} counts as in flight. The tracker signals each abort before
-   * its first await, so the aborts land before the release that follows starts.
+   * its first await, so the aborts land before the release that follows starts. They are aborted
+   * with the typed release, so each cut caller gets the terminal refusal (#11381).
    */
   private cancelExecutionsForExpiryRelease(
     sessionId: string,
-    reason: string,
+    cancellation: SessionReleasedDuringCallError,
     query: ActiveSessionExecutionQuery,
   ): void {
     const executionSessionId =
       resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
     for (const id of new Set([sessionId, executionSessionId])) {
       executionTracker
-        .cancelDeviceSessionExecutions(id, reason, { excludeExecutionId: query.excludeExecutionId })
+        .cancelDeviceSessionExecutions(id, cancellation, {
+          excludeExecutionId: query.excludeExecutionId,
+        })
         .catch((error: unknown) => {
           logger.warn(
             `[Daemon] Failed to cancel executions of expired session ${id}: ${errorMessage(error)}`,

@@ -5,7 +5,10 @@ import {
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
 import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
-import { SessionReleasedDuringCallError } from "../daemon/sessionReleasedDuringCall";
+import {
+  SESSION_OWNERSHIP_LOST_CODE,
+  sessionReleaseThatCancelledCall,
+} from "../daemon/sessionReleasedDuringCall";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
 import { SUSPECT_GRACE_MS } from "../daemon/sessionLivenessWindows";
 import {
@@ -87,7 +90,7 @@ export function sessionOwnershipLostPayload({
 }) {
   return {
     error: {
-      code: "session_ownership_lost",
+      code: SESSION_OWNERSHIP_LOST_CODE,
       message: appendHeartbeatExpiryMessage(message, release),
       sessionUuid,
       reason,
@@ -101,17 +104,20 @@ export function sessionOwnershipLostPayload({
  * The ownership-loss envelope for a call cancelled because its session was released under it
  * (#11322), or undefined when `cancelReason` (the tracker's record of why the call was aborted)
  * is anything else. The session is terminal, exactly as a call arriving after the release is told.
+ * The control socket answers the same refusal from the error's own fields (#11381); both go
+ * through {@link sessionReleaseThatCancelledCall}.
  */
 export function sessionReleasedDuringCallPayload(
   cancelReason: unknown,
 ): ReturnType<typeof sessionOwnershipLostPayload> | undefined {
-  if (!(cancelReason instanceof SessionReleasedDuringCallError)) {
+  const released = sessionReleaseThatCancelledCall(cancelReason);
+  if (!released) {
     return undefined;
   }
   return sessionOwnershipLostPayload({
-    message: cancelReason.message,
-    sessionUuid: cancelReason.sessionUuid,
-    reason: cancelReason.releaseReason,
+    message: released.message,
+    sessionUuid: released.sessionUuid,
+    reason: released.releaseReason,
   });
 }
 

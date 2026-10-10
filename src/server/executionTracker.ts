@@ -583,9 +583,6 @@ export class ExecutionTracker {
   }
 
   private notifySessionExecutionEnded(execution: ActiveExecution): void {
-    if (execution.readOnlySessionAccess) {
-      return;
-    }
     const sessionUuids = [
       ...new Set(
         [
@@ -598,9 +595,12 @@ export class ExecutionTracker {
     if (sessionUuids.length === 0) {
       return;
     }
+    // An inventory read's end is reported like any other call's, because a release it deferred
+    // must be retried when it ends (#11381); it is reported as not admitted, because it is not use.
+    const admitted = execution.sessionAdmitted === true && !execution.readOnlySessionAccess;
     for (const listener of this.sessionExecutionEndListeners) {
       try {
-        listener(sessionUuids, { admitted: execution.sessionAdmitted === true });
+        listener(sessionUuids, { admitted });
       } catch (error) {
         // A listener's failure must not stop the remaining listeners or the execution's teardown.
         logger.warn(
@@ -795,7 +795,7 @@ export class ExecutionTracker {
    */
   async cancelDeviceSessionExecutions(
     sessionUuid: string,
-    reason: string = "unspecified",
+    reason: ExecutionCancellationReason = "unspecified",
     options: ExecutionCancellationOptions = {},
   ): Promise<number> {
     const executionIds = new Set<string>([

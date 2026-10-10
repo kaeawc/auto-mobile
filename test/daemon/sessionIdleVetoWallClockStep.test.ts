@@ -42,8 +42,8 @@ describe("idle-release veto under a wall-clock step (#11105)", () => {
     manager.setSessionExecutionDeadlineLookup((sessionId) =>
       tracker.getLatestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true }),
     );
-    manager.setExpiryReleaseExecutionCanceller((sessionId, reason, query) => {
-      void tracker.cancelDeviceSessionExecutions(sessionId, reason, {
+    manager.setExpiryReleaseExecutionCanceller((sessionId, cancellation, query) => {
+      void tracker.cancelDeviceSessionExecutions(sessionId, cancellation, {
         excludeExecutionId: query.excludeExecutionId,
       });
     });

@@ -10,6 +10,7 @@ import {
 import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettledExecutionVeto";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
 import type { BootedDevice } from "../../src/models";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
@@ -144,6 +145,30 @@ describe("owner-disconnect release re-arm (#10663)", () => {
     // Released as soon as the call ends, without waiting for the heartbeat monitor (which runs
     // on the real daemon only, and only after the lease lapses).
     tracker.endExecution(call.id);
+    await settle(0);
+
+    expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
+    expect(devicePool.getDevice(DEVICE.deviceId)?.sessionId).toBeNull();
+  });
+
+  // #11381: an inventory read under the session vetoes the release like any call, but its end was
+  // never reported, so the release it deferred waited for the veto's bound instead.
+  test("a release deferred by an inventory read fires soon after the read ends", async () => {
+    // The daemon's own subscription (daemon.ts subscribeToolCallEndActivity), not a copy of it.
+    unsubscribeExecutionEnded();
+    unsubscribeExecutionEnded = subscribeToolCallEndActivity(tracker, sessionManager, devicePool);
+    const read = tracker.startExecution("listDevices", undefined, OWNER_SESSION);
+    tracker.markReadOnlySessionAccess(read.id);
+    tracker.markSessionAdmitted(read.id);
+    devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
+
+    await settle(OWNER_DISCONNECT_GRACE_MS + 10_000);
+    expect(releaseReasons).toEqual([]);
+    const idleDeadline = ownerSession().expiresAt;
+
+    tracker.endExecution(read.id);
+    // The read's end is not use: it re-arms the release without restarting the idle window.
+    expect(ownerSession().expiresAt).toBe(idleDeadline);
     await settle(0);
 
     expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);

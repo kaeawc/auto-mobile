@@ -149,6 +149,7 @@ test/daemon/recycledProcessGeneration.test.ts
 test/daemon/refusalWireContract.test.ts
 test/daemon/registerSessionManagedConnection.test.ts
 test/daemon/rehydratedLegacyLivenessDefaults.test.ts
+test/daemon/rehydrationIdleOrigin.test.ts
 test/daemon/releaseReasons.test.ts
 test/daemon/releasingSessionRequests.test.ts
 test/daemon/sessionCacheNoEscapeHatch.test.ts

@@ -5,6 +5,7 @@ import { logger } from "../../utils/logger";
 import { InMemoryBootDurationHistory } from "../../features/iosSimFleet/BootDurationHistory";
 import {
   IosSimFleetCostCollector,
+  occupyingUdids,
   type FleetCostSource,
 } from "../../features/iosSimFleet/FleetCostCollector";
 import { CommandFleetHostSource } from "../../features/iosSimFleet/FleetHostSource";
@@ -67,7 +68,7 @@ export async function checkIosSimulatorFleetCost(
       report.host,
       estimatePerSimulatorBytes(report),
     );
-    const booted = report.totals.bootedCount;
+    const booted = occupyingUdids(report).length;
     const atCapacity = booted >= limits.maxBooted;
     const pressured = isPressured(report.host);
     const degraded = report.errors.length > 0 || atCapacity || pressured;

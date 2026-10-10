@@ -24,6 +24,13 @@ export const SLOT_OCCUPYING_STATES: ReadonlySet<string> = new Set([
   "Shutting Down",
 ]);
 
+/** UDIDs of simulators holding a capacity slot, optionally leaving out the boot's own target. */
+export function occupyingUdids(report: FleetCostReport, excludeUdid?: string): string[] {
+  return report.simulators
+    .filter((sim) => SLOT_OCCUPYING_STATES.has(sim.state) && sim.udid !== excludeUdid)
+    .map((sim) => sim.udid);
+}
+
 /** Narrow consumer-facing seam: anything that can produce a fleet cost report. */
 export interface FleetCostSource {
   collect(options?: FleetReadOptions): Promise<FleetCostReport>;

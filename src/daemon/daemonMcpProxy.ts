@@ -83,6 +83,7 @@ import {
   isDeviceSessionAcquisitionTool,
   isDeviceBindingTool,
   readDeviceCleanupInProgressRefusal,
+  readTerminalSessionRefusal,
 } from "../server/deviceSessionResult";
 import {
   foreignOwnedSessionUuidFromResult,
@@ -377,6 +378,17 @@ function sessionScopedObservationUriSessionUuid(uri: string): string | undefined
     /^automobile:(?:observation\/session\/([^/]+)\/latest(?:\/screenshot)?|device-session\/([^/]+)\/screenshot)$/,
   );
   return match?.[1] ?? match?.[2];
+}
+
+/**
+ * Whether a resource URI names a device session at all: every `automobile:device-session/<id>/...`
+ * and `automobile:observation/session/<id>/...` form, whatever follows the session segment. These
+ * two prefixes are where the server registers its session-scoped templates
+ * (test/daemon/proxySessionNamingResourceFence.test.ts checks every registered template against
+ * this), so a new session-scoped resource is covered without listing it here.
+ */
+export function resourceUriNamesSession(uri: string): boolean {
+  return /^automobile:(?:device-session|observation\/session)\/[^/?#]+/.test(uri);
 }
 
 function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
@@ -4085,6 +4097,8 @@ export class DaemonMcpProxy {
           allowSuspectRetry,
         );
         this.bindForwardedSessionOnErrorResult(name, forwardedArgs, result, callReleaseEpoch);
+        // The daemon's own terminal refusal (a cut call's answer included) told this caller.
+        this.noteReleaseSurfacedBy(result);
         return { result, retryableSuspectRefusal };
       }
       this.rememberToolSelectionProfile(name, callerArgs, result);
@@ -4105,6 +4119,8 @@ export class DaemonMcpProxy {
       return { result };
     } catch (error) {
       signal?.throwIfAborted();
+      // A fence raised while this call was in flight names the session it lost: the caller is told.
+      this.noteReleaseSurfacedBy(error);
       // The success-only rememberSessionUuid above never runs when the handler
       // rejects, but an admitted-then-rejected call still reached
       // getOrCreateSession() and refreshed the LIVE daemon session. Without
@@ -4294,6 +4310,22 @@ export class DaemonMcpProxy {
       !this.stallHandovers.has(terminal.sessionUuid) &&
       this.isDeviceReadOnlyTool(name)
     );
+  }
+
+  /**
+   * Record that a tool call's answer named the fenced binding as released (#11483), as the entry
+   * gate does: `answer` is a terminal refusal the daemon answered and this proxy relayed, or the
+   * fence error raised while the call was in flight. Any other answer, and a session that is not
+   * the fenced binding, records nothing.
+   */
+  private noteReleaseSurfacedBy(answer: unknown): void {
+    const sessionUuid =
+      answer instanceof DaemonBoundSessionExpiredError
+        ? answer.sessionUuid
+        : readTerminalSessionRefusal(answer)?.sessionUuid;
+    if (sessionUuid !== undefined && sessionUuid === this.terminalBoundSession?.sessionUuid) {
+      this.releaseSurfacedFor = sessionUuid;
+    }
   }
 
   private isDeviceReadOnlyTool(name: string): boolean {
@@ -5843,7 +5875,10 @@ export class DaemonMcpProxy {
     const loss = sessionUuid ? this.pendingSessionLosses.get(sessionUuid) : undefined;
     if (sessionUuid && loss) {
       this.pendingSessionLosses.delete(sessionUuid);
-      throw new DaemonSessionStalledError(sessionUuid, loss);
+      const answer = new DaemonSessionStalledError(sessionUuid, loss);
+      // The stall-loss answer tells the caller its session is gone, like any terminal refusal.
+      this.noteReleaseSurfacedBy(answer);
+      throw answer;
     }
   }
 
@@ -6794,17 +6829,36 @@ export class DaemonMcpProxy {
     return typeof properties === "object" && properties !== null && "sessionUuid" in properties;
   }
 
+  /**
+   * Whether `sessionUuid` was minted by an acquisition RESULT on this proxy, as opposed to
+   * declared at startup (`--initial-session-uuid`, a managed slot) or only named by a caller.
+   * Provenance belongs to the session, not to how the binding last reached it (#11483): a
+   * connection that minted the session recovers in-band however the agent addressed it since.
+   * A session resumed under this proxy's stable owner token (#10990) counts: the same owner
+   * acquired it before a restart. A startup binding is never displaced by one, so the declared
+   * fence is not loosened.
+   */
+  private wasMintedThroughThisProxy(sessionUuid: string): boolean {
+    return (
+      this.claimableSessions.has(sessionUuid) &&
+      sessionUuid !== this.config.initialSessionUuid?.trim() &&
+      !this.managedExecutionSessions.has(sessionUuid)
+    );
+  }
+
   // Bind `sessionUuid`, refreshing the replay lease. A change to a different UUID
-  // marks the binding client-declared: the new UUID came from a call's args, not
-  // a device-acquisition result. A sessionless refresh re-binds the same
-  // result-minted UUID and preserves its provenance (issue #5689).
+  // takes that session's provenance: client-declared when the UUID is known only
+  // from a call's args, result-minted when this proxy minted it earlier and the
+  // binding is returning to it (setActiveDevice, or naming it once the latest
+  // binding is gone). A sessionless refresh re-binds the same UUID and preserves
+  // its provenance (issue #5689).
   private updateBoundSessionUuid(sessionUuid: string): void {
     // A held session that becomes the binding again keeps its idle clock: the call that named it
     // may be a read, and the daemon's echo already credited it when it was use (#11348).
     const heldLastUsedAt = this.otherHeldSessions.get(sessionUuid)?.lastUsedAt;
     if (sessionUuid !== this.boundSessionUuid) {
       this.holdPreviousBinding(sessionUuid);
-      this.boundSessionFromResultMint = false;
+      this.boundSessionFromResultMint = this.wasMintedThroughThisProxy(sessionUuid);
       this.livenessOwnershipClaimSent = false;
     }
     // Re-binding the session that is already bound is not use: a read naming it must not restart
@@ -7173,6 +7227,30 @@ export class DaemonMcpProxy {
   }
 
   /**
+   * Whether a resource read is forwarded with no session. A tool-output artifact always is. The
+   * rest is the resource form of {@link isSessionlessReadAfterRelease} (#11483): once the binding is
+   * released and one call has been told so, a read of a resource that names no session (the
+   * booted-device inventory, anything `resources/list` still lists while unbound) is forwarded
+   * without one, as `listDevices` and `observe {deviceId}` are. A URI that names a session, in
+   * any session-scoped resource family, is never read without one: it keeps its own routing and,
+   * for the released session, the typed terminal answer (its data is gone with it, apart from the
+   * fresh screenshot). A liveness handover is reported until the harness acts on it.
+   */
+  private isSessionlessResourceRead(uri: string): boolean {
+    if (isToolOutputResourceUri(uri)) {
+      // Session-independent at any time, fenced or not (#5917).
+      return true;
+    }
+    const terminal = this.terminalBoundSession;
+    return (
+      terminal !== undefined &&
+      this.releaseSurfacedFor === terminal.sessionUuid &&
+      !this.stallHandovers.has(terminal.sessionUuid) &&
+      !resourceUriNamesSession(uri)
+    );
+  }
+
+  /**
    * Read a resource from the daemon
    */
   async readResource(uri: string, { signal }: { signal?: AbortSignal } = {}): Promise<any> {
@@ -7191,9 +7269,10 @@ export class DaemonMcpProxy {
     const ownerForwardedParams = isToolOutput
       ? undefined
       : this.freshScreenshotOwnerForwardParams(uri);
+    const isSessionless = this.isSessionlessResourceRead(uri);
     const allowReleasedSession =
-      isToolOutput || isReleasedSessionScreenshot || ownerForwardedParams !== undefined;
-    const forwardedParams = isToolOutput
+      isSessionless || isReleasedSessionScreenshot || ownerForwardedParams !== undefined;
+    const forwardedParams = isSessionless
       ? {}
       : isReleasedSessionScreenshot
         ? {

@@ -46,7 +46,11 @@ import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSel
 import { ToolRegistry } from "./toolRegistry";
 import { installToolCallDispatcher } from "./toolCallDispatch";
 import { shapeToolCallError } from "./shapeToolCallError";
-import { livenessHandoverPayload, type LivenessHandover } from "../daemon/proxyLivenessRecovery";
+import {
+  livenessHandoverPayload,
+  PROXY_STALLED_CODE,
+  type LivenessHandover,
+} from "../daemon/proxyLivenessRecovery";
 import { MANAGED_SLOTS_EXPERIMENTAL_CAPABILITY } from "../models/managedSlotConfig";
 import {
   MANAGED_SLOTS_RESOURCE_URI,
@@ -124,6 +128,41 @@ function managedEndedRelayedResult<T>(
     : result;
 }
 
+/**
+ * A `proxy_stalled` handover is a definitive loss: the daemon answered that the session is gone.
+ * On a managed connection its "reacquire with getAndroid or getApple" advice cannot work, so a
+ * slot session lost that way is answered `managed_execution_ended` like every other terminal
+ * release (#11483). `daemon_stalled` is not a loss and keeps its own handover.
+ */
+function managedStallLossPayload(
+  managedSlots: ManagedSlotsResult | undefined,
+  sessionUuid: string,
+  handover: LivenessHandover,
+) {
+  return handover.code === PROXY_STALLED_CODE
+    ? managedEndedPayload(managedSlots, sessionUuid, handover.code)
+    : undefined;
+}
+
+/**
+ * The logging notifications for one liveness handover. A managed connection reports each slot
+ * session a `proxy_stalled` handover lost as `managed_execution_ended`; whatever is left keeps
+ * the handover payload, as does every handover on a generic connection.
+ */
+export function livenessHandoverNotificationPayloads(
+  handover: LivenessHandover,
+  managedSlots?: ManagedSlotsResult,
+): unknown[] {
+  const ended = handover.sessions.map((session) =>
+    managedStallLossPayload(managedSlots, session.sessionUuid, handover),
+  );
+  const rest = handover.sessions.filter((_, index) => !ended[index]);
+  return [
+    ...ended.filter((payload) => payload !== undefined),
+    ...(rest.length > 0 ? [livenessHandoverPayload({ ...handover, sessions: rest })] : []),
+  ];
+}
+
 function boundSessionOwnershipLostPayload(
   error: DaemonBoundSessionExpiredError,
   managedSlots?: ManagedSlotsResult,
@@ -131,7 +170,9 @@ function boundSessionOwnershipLostPayload(
   if (error instanceof DaemonSessionStalledError) {
     // `daemon_stalled` / `proxy_stalled` (#10053): the harness is told which sessions and devices
     // are affected and what to do, rather than the generic "acquire a replacement session".
-    return error.toPayload();
+    return (
+      managedStallLossPayload(managedSlots, error.sessionUuid, error.handover) ?? error.toPayload()
+    );
   }
   const ended = managedEndedPayload(managedSlots, error.sessionUuid, error.reason);
   if (ended) {
@@ -366,16 +407,19 @@ export function deviceControlTransportFailureResult(
 async function forwardLivenessHandover(
   server: McpServer,
   handover: LivenessHandover,
+  managedSlots?: ManagedSlotsResult,
 ): Promise<void> {
   try {
     // sendLoggingMessage honours a level the client set with logging/setLevel; a client that
     // asked for fewer messages than `error` is not sent the notification and still learns from
     // the structured error on its next tool call.
-    await server.server.sendLoggingMessage({
-      level: "error",
-      logger: "auto-mobile.liveness",
-      data: livenessHandoverPayload(handover),
-    });
+    for (const data of livenessHandoverNotificationPayloads(handover, managedSlots)) {
+      await server.server.sendLoggingMessage({
+        level: "error",
+        logger: "auto-mobile.liveness",
+        data,
+      });
+    }
   } catch (error) {
     // Best-effort: the next tool call for an affected session returns the same error.
     logger.warn("[ProxyServer] Failed to forward liveness handover notification", error);
@@ -663,7 +707,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     void forwardResourceUpdate(server, uri);
   });
   const stopLivenessHandovers = proxy.onLivenessHandover((handover) => {
-    void forwardLivenessHandover(server, handover);
+    void forwardLivenessHandover(server, handover, options.managedSlots);
   });
   const previousOnClose = server.server.onclose;
   server.server.onclose = () => {

@@ -128,6 +128,7 @@ function planDisconnectMonitorHarness(deviceId = "emulator-5554") {
         actions.push("reconcile");
       },
       mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
+      getAndroidTransportAliases: (): string[] => [],
       getAllDevices: () => (pooled ? devices : []),
       getDevice: (id: string) => (pooled && id === device.id ? device : null),
       isDeviceLeasedForAndroidStartup: () => false,

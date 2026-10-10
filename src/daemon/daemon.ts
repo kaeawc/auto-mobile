@@ -281,6 +281,7 @@ import {
   setProcessShutdownHandler,
 } from "../processLifecycle";
 import type { BootedDevice, Platform } from "../models";
+import { isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   safeProcessCwd,
@@ -2922,13 +2923,49 @@ export class Daemon {
     const discovery = await deviceManager.getBootedDevicesDetailed(platform, {
       bypassAndroidDeviceListCache,
     });
-    discovery.devices = this.devicePool.mapAndroidDiscovery(discovery.devices);
+    discovery.devices = await this.mapMonitorAndroidDiscovery(discovery.devices);
     // Reconciliation can quarantine identity and cancel in-flight work. During
     // allocation, discovery supplies only presence evidence for miss counting.
     if (!planActive) {
       await this.devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor");
     }
     return discovery;
+  }
+
+  /**
+   * Monitor ticks only map known transports. A wireless adb port change shows
+   * up as an unknown `host:port` row while the pooled transport goes missing;
+   * probe-and-fold it (ro.serialno + boot_id) before that counts as a miss, or
+   * the held session is released after three ticks (#11133).
+   */
+  private async mapMonitorAndroidDiscovery(devices: BootedDevice[]): Promise<BootedDevice[]> {
+    const mapped = this.devicePool.mapAndroidDiscovery(devices);
+    const present = new Set(mapped.map((device) => device.deviceId));
+    const pooled = this.devicePool
+      .getAllDevices()
+      .filter((device) => device.platform === "android");
+    const pooledIds = new Set(pooled.map((device) => device.id));
+    const unmappedTransport = mapped.some(
+      (device) =>
+        device.platform === "android" &&
+        !pooledIds.has(device.deviceId) &&
+        isAndroidTransportAddressSerial(device.deviceId),
+    );
+    if (!unmappedTransport) {
+      return mapped;
+    }
+    const missingTransportCandidate = pooled.some(
+      (device) =>
+        !present.has(device.id) &&
+        [device.id, ...this.devicePool.getAndroidTransportAliases(device.id)].some(
+          isAndroidTransportAddressSerial,
+        ),
+    );
+    if (!missingTransportCandidate) {
+      return mapped;
+    }
+    // Additive fold: a monitor tick must not prune alias groups or connection evidence.
+    return await this.devicePool.normalizeAndroidDiscovery(devices, false, () => true, false);
   }
 
   private startDeviceDisconnectMonitor(
@@ -3113,7 +3150,7 @@ export class Daemon {
       isStartupLeased: (id) => this.devicePool.isDeviceLeasedForAndroidStartup(id),
       isShutdownReserved: (id) => this.devicePool.isShutdownReservationHeld(id),
       discover,
-      getOfflineDeviceIds: (ids) => deviceManager.getAndroidOfflineDeviceIds(ids),
+      getOfflineDeviceIds: (ids) => this.getAndroidOfflineCanonicalIds(deviceManager, ids),
       isAdbReset: (ids, discovery) =>
         isProcessWideAdbServerReset(
           ids,
@@ -3179,15 +3216,22 @@ export class Daemon {
       bootedDeviceIds,
       candidatePlatforms,
     );
+    const aliasOwners = this.androidAliasOwners(missingAndroidCandidateIds);
     try {
       const listedStates =
         missingAndroidCandidateIds.size > 0
-          ? await deviceManager.getAndroidListedDeviceStates(missingAndroidCandidateIds)
+          ? await deviceManager.getAndroidListedDeviceStates(
+              new Set([...missingAndroidCandidateIds, ...aliasOwners.keys()]),
+            )
           : new Map<string, string>();
+      const candidateStates = [...listedStates].map(([id, state]): [string, string] => [
+        aliasOwners.get(id) ?? id,
+        state,
+      ]);
       return {
-        listedNonDeviceIds: new Set(listedStates.keys()),
+        listedNonDeviceIds: new Set(candidateStates.map(([id]) => id)),
         offlineDeviceIds: new Set(
-          [...listedStates].filter(([, state]) => state === "offline").map(([id]) => id),
+          candidateStates.filter(([, state]) => state === "offline").map(([id]) => id),
         ),
       };
     } catch (error) {
@@ -3200,6 +3244,34 @@ export class Daemon {
       );
       return {};
     }
+  }
+
+  /**
+   * A held USB+Wi-Fi phone is keyed by its USB serial; after an unplug its
+   * still-attached Wi-Fi alias may be listed offline/authorizing. Map each
+   * known alias serial to the canonical id it speaks for (#11133).
+   */
+  private androidAliasOwners(deviceIds: Iterable<string>): Map<string, string> {
+    return new Map(
+      [...deviceIds].flatMap((deviceId) =>
+        this.devicePool
+          .getAndroidTransportAliases(deviceId)
+          .map((alias): [string, string] => [alias, deviceId]),
+      ),
+    );
+  }
+
+  /** Offline canonical ids, counting an offline alias serial as its canonical (#11133). */
+  private async getAndroidOfflineCanonicalIds(
+    deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidOfflineDeviceIds">,
+    deviceIds: Iterable<string>,
+  ): Promise<Set<string>> {
+    const ids = [...deviceIds];
+    const aliasOwners = this.androidAliasOwners(ids);
+    const offline = await deviceManager.getAndroidOfflineDeviceIds(
+      new Set([...ids, ...aliasOwners.keys()]),
+    );
+    return new Set([...offline].map((id) => aliasOwners.get(id) ?? id));
   }
 
   private findMissingAndroidCandidates(

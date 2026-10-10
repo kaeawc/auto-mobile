@@ -610,10 +610,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
       perf.startOperation("androidDeviceScan");
       // A missing adb binary (or its cooldown) must not read as a complete,
       // empty scan: that would let reconciliation clear a pinned Android device.
-      const androidDevices = await this.adb.getBootedAndroidDevices({
-        signal,
-        throwOnMissingAdb: true,
-      });
+      const androidDevices = this.mapAndroidReadinessRows(
+        await this.adb.getBootedAndroidDevices({
+          signal,
+          throwOnMissingAdb: true,
+        }),
+      );
       perf.endOperation("androidDeviceScan");
       devices.push(...androidDevices);
       scannedSources.android = true;
@@ -718,11 +720,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     logger.info(
       `[DeviceSessionManager] ensureDeviceReady called with platform=${platform}, providedDeviceId=${providedDeviceId}`,
     );
-    if (providedDeviceId) {
-      await throwIfProvisionedDeviceTransportRetired(providedDeviceId, {
-        currentIdentity: () => this.resolveCurrentAndroidIdentity(providedDeviceId),
-      });
-    }
+    providedDeviceId = await this.resolveProvidedReadinessId(providedDeviceId);
 
     // Detect all connected devices
     const result = await this.getReadinessScan(platform, options);
@@ -1112,11 +1110,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
     resolvedIdentity?: ResolvedDeviceIdentity,
   ): Promise<void> {
     options?.signal?.throwIfAborted();
+    deviceId = this.canonicalAndroidId(deviceId);
     // Gate before discovery or a cached Window can use its pre-quarantine executor.
     // Identity reconciliation/lifting uses discovery directly, never readiness.
     this.admissionGate.assertDeviceActionable(deviceId, "to verify Android device readiness");
     this.executionBinding.bindDeviceExecution(deviceId);
-    const allDevices = await this.adb.getBootedAndroidDevices();
+    const allDevices = this.mapAndroidReadinessRows(await this.adb.getBootedAndroidDevices());
     const device = allDevices.find((device) => device.deviceId === deviceId);
 
     if (!device) {
@@ -1501,6 +1500,35 @@ export class DeviceSessionManager implements DeviceSessionManager {
       this.currentDevice &&
       (this.currentPlatform === platform || this.currentPlatform === resolvedPlatform)
     );
+  }
+
+  /**
+   * Raw adb rows name transports, while pooled sessions hold a canonical id. A
+   * USB+Wi-Fi phone keeps its USB serial after the cable is pulled, so map
+   * through the pool's alias groups before matching readiness ids (#11133).
+   */
+  /**
+   * Readiness rows are keyed by the pooled canonical id, so a caller naming a
+   * known transport alias (e.g. the Wi-Fi `ip:port`) must resolve to it (#11133).
+   */
+  private async resolveProvidedReadinessId(
+    providedDeviceId: string | undefined,
+  ): Promise<string | undefined> {
+    if (!providedDeviceId) {
+      return undefined;
+    }
+    await throwIfProvisionedDeviceTransportRetired(providedDeviceId, {
+      currentIdentity: () => this.resolveCurrentAndroidIdentity(providedDeviceId),
+    });
+    return this.canonicalAndroidId(providedDeviceId);
+  }
+
+  private canonicalAndroidId(deviceId: string): string {
+    return this.admissionGate.resolveAndroidCanonicalId?.(deviceId) ?? deviceId;
+  }
+
+  private mapAndroidReadinessRows(devices: BootedDevice[]): BootedDevice[] {
+    return this.admissionGate.mapAndroidReadinessDiscovery?.(devices) ?? devices;
   }
 
   private normalizeReadinessScan(

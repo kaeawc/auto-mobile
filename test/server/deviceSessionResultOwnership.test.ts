@@ -1,3 +1,4 @@
+import { SUSPECT_GRACE_MS } from "../../src/daemon/sessionLivenessWindows";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { describe, expect, test } from "bun:test";
@@ -47,7 +48,7 @@ describe("sessionOwnershipLostPayload", () => {
           code: "session_ownership_lost",
           message:
             error.message +
-            " No heartbeat for 21001 ms (limit 20000 ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).",
+            ` No heartbeat for 21001 ms (limit ${releaseReason === "heartbeat-timeout" ? 20_000 + SUSPECT_GRACE_MS : 20_000} ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).`,
           sessionUuid: "session-123",
           reason: releaseReason,
           retryable: false,

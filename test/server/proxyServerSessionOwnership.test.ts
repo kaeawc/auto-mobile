@@ -9,6 +9,7 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { appendHeartbeatExpiryMessage } from "../../src/server/deviceSessionResult";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/sessionLivenessWindows";
 import { SessionManager, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -28,14 +29,14 @@ describe("appendHeartbeatExpiryMessage", () => {
     },
   };
 
-  test.each(["heartbeat-timeout", "missing-first-heartbeat"])(
-    "formats the recorded leash and age for %s",
-    (releaseReason) => {
-      expect(appendHeartbeatExpiryMessage("Ownership lost.", { ...release, releaseReason })).toBe(
-        "Ownership lost. No heartbeat for 21001 ms (limit 20000 ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).",
-      );
-    },
-  );
+  test.each([
+    ["heartbeat-timeout", 20_000 + SUSPECT_GRACE_MS],
+    ["missing-first-heartbeat", 20_000],
+  ])("formats the release threshold and age for %s", (releaseReason, limitMs) => {
+    expect(appendHeartbeatExpiryMessage("Ownership lost.", { ...release, releaseReason })).toBe(
+      `Ownership lost. No heartbeat for 21001 ms (limit ${limitMs} ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).`,
+    );
+  });
 
   test("preserves the message without a release snapshot", () => {
     expect(appendHeartbeatExpiryMessage("Ownership lost.")).toBe("Ownership lost.");
@@ -208,7 +209,7 @@ describe("proxy server session ownership errors", () => {
                   message:
                     `Session ownership lost for session-123: ${releaseReason}. ` +
                     "Call getAndroid or getApple to acquire a new device session. " +
-                    "No heartbeat for 11000 ms (limit 10000 ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).",
+                    `No heartbeat for 11000 ms (limit ${releaseReason === "heartbeat-timeout" ? 10_000 + SUSPECT_GRACE_MS : 10_000} ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).`,
                   sessionUuid: "session-123",
                   reason: releaseReason,
                   retryable: false,

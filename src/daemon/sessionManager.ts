@@ -3027,6 +3027,24 @@ export class SessionManager {
    * A call's start on the clock `expiresAt` is stamped with (#11290): its wall-clock `startTime`
    * is not comparable with a session stamp once the wall clock has stepped.
    */
+  /**
+   * The live session a read may be answered from, releasing nothing. A read is never refused
+   * (#11322, #11361): one that arrives after the idle deadline while earlier work still holds the
+   * session is told there is no session to route to, like any read of an expired session, and
+   * runs sessionless rather than getting the refusal a late control call gets.
+   */
+  private observeSessionForRead(
+    sessionId: string,
+    execution: SessionExecutionMetadata | undefined,
+  ): Session | null {
+    const session = this.sessions.get(sessionId);
+    const started = execution && this.executionOnSessionClock(execution);
+    if (session && this.isLateExecutionWhileEarlierWorkIsActive(session, started)) {
+      return null;
+    }
+    return this.getSessionInternal(sessionId, true, execution, false);
+  }
+
   private executionOnSessionClock(execution: SessionExecutionMetadata): SessionClockExecution {
     return {
       ...execution,
@@ -3422,7 +3440,7 @@ export class SessionManager {
         // startup-rehydrated session is not proof that its owner returned. In
         // particular, do not enter reclaimAndRefreshExistingSession(), whose
         // acquisition semantics promote awaiting-owner to owned.
-        const observed = this.getSessionInternal(sessionId, true, execution, false);
+        const observed = this.observeSessionForRead(sessionId, execution);
         if (observed) {
           // Answered in every lease phase (#11322): a read is never refused, and never restores
           // or extends the lease it is watching.

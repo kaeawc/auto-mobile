@@ -728,17 +728,28 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("a stale heartbeat retry cannot fence a newer explicit binding", async () => {
+    test("a stale heartbeat retry cannot fence a newer selected binding", async () => {
       const timer = new FakeTimer();
       const heartbeatStarted = Promise.withResolvers<void>();
       const releaseFirstHeartbeat = Promise.withResolvers<void>();
       const retryHeartbeatCalled = Promise.withResolvers<void>();
       let staleHeartbeats = 0;
+      const selectsSessionB = (toolName: string) =>
+        toolName === "setActiveDevice"
+          ? {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ deviceId: "emulator-5556", sessionUuid: "session-b" }),
+                },
+              ],
+            }
+          : undefined;
       const staleClient = new FakeDaemonClient({
         toolResultFor: (toolName) =>
           toolName === "getAndroid"
             ? { content: [{ type: "text", text: JSON.stringify({ sessionId: "session-a" }) }] }
-            : undefined,
+            : selectsSessionB(toolName),
         onCallDaemonMethod: async (method) => {
           // The establishment claim succeeds; the keeper tick after it is the stale one.
           if (method === "daemon/heartbeat" && ++staleHeartbeats > 1) {
@@ -749,6 +760,7 @@ describe("DaemonMcpProxy", () => {
         },
       });
       const freshClient = new FakeDaemonClient({
+        toolResultFor: selectsSessionB,
         onCallDaemonMethod: (method) => {
           if (method === "daemon/heartbeat") {
             retryHeartbeatCalled.resolve();
@@ -766,14 +778,13 @@ describe("DaemonMcpProxy", () => {
       });
 
       try {
-        // Minted by this proxy, so it is heartbeated; session-b is only named (#10664).
+        // Minted by this proxy, so it is heartbeated; session-b is only selected (#10664).
         await proxy.callTool("getAndroid", {});
         timer.advanceTime(2_000);
         await heartbeatStarted.promise;
 
-        await proxy.callTool("observe", {
-          sessionUuid: "session-b",
-        });
+        // Only setActiveDevice or an acquisition moves the binding (#11347).
+        await proxy.callTool("setActiveDevice", { deviceId: "emulator-5556" });
         releaseFirstHeartbeat.resolve();
         await retryHeartbeatCalled.promise;
         await Promise.resolve();
@@ -3752,8 +3763,11 @@ describe("DaemonMcpProxy", () => {
           sessionUuid: "ios-session-b",
           reason: "session-not-found",
         });
+        // The caller's own marker is dropped; the proxy carries its binding beside the session
+        // the call named, so the daemon socket keeps this connection's route (#11347).
         expect(failedRequestParams).toEqual({
           sessionUuid: "ios-session-b",
+          __autoMobileBoundSessionUuid: "ios-session-a",
         });
 
         await proxy.callTool("observe", {});
@@ -4085,8 +4099,15 @@ describe("DaemonMcpProxy", () => {
             await expect(proxy.callTool("observe", {})).rejects.toBeInstanceOf(
               DaemonBoundSessionExpiredError,
             );
+            // Naming the owned session carries the owner proof beside it (#11344).
             expect(client.callToolCalls).toEqual([
-              { toolName: "executePlan", params: { sessionUuid: "session-a" } },
+              {
+                toolName: "executePlan",
+                params: expect.objectContaining({
+                  sessionUuid: "session-a",
+                  __autoMobileOwnedSessionUuids: ["session-a"],
+                }),
+              },
             ]);
           } else {
             await expect(proxy.callTool("observe", {})).resolves.toEqual({
@@ -4205,7 +4226,7 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("allows a learned binding to retarget to a later explicit session", async () => {
+    test("keeps a learned binding when a later call names another session (#11347)", async () => {
       const client = new FakeDaemonClient();
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
       const proxy = new DaemonMcpProxy({
@@ -4222,7 +4243,7 @@ describe("DaemonMcpProxy", () => {
         expect(client.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a" } },
           { toolName: "observe", params: { sessionUuid: "session-b" } },
-          { toolName: "observe", params: { sessionUuid: "session-b" } },
+          { toolName: "observe", params: { sessionUuid: "session-a" } },
         ]);
       } finally {
         isAvailableSpy.mockRestore();

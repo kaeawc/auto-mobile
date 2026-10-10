@@ -33,6 +33,8 @@ type AndroidEmulatorRecoveryDevice = PooledDevice & {
 };
 
 export interface SessionPreservingRecoveryPoolPort {
+  /** Tell resource subscribers a status or holder write committed (#11413). */
+  noteDeviceStateChanged?(device: Pick<PooledDevice, "id" | "platform">): void;
   getRecoveringSessionLoss(sessionId: string): AndroidRecoveryRecord | undefined;
   startAndroidRecoveryRecord: AndroidRecoveryRecordLedger["startAndroidRecoveryRecord"];
   isAndroidEmulatorActiveRelaunchEligible(
@@ -264,6 +266,7 @@ export class SessionPreservingRecoveryRunner {
     if (this.canRemoveReleasedDevice(device, sessionId, assignmentCount)) {
       device.sessionId = null;
       device.status = "idle";
+      this.pool.noteDeviceStateChanged?.(device);
       this.pool.suppressAutoStartForDevice(device);
       await this.pool.removeDevice(device.id, true, device);
     }

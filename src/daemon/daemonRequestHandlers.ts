@@ -85,7 +85,7 @@ import {
   SESSION_OWNERSHIP_LOST_CODE,
   SessionReleasedDuringCallError,
 } from "./sessionReleasedDuringCall";
-import { isExpiryReleaseReason } from "./releaseReasons";
+import { isExpiryReleaseReason, isTerminalReleaseReason } from "./releaseReasons";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import type { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
 import {
@@ -192,6 +192,8 @@ export interface DaemonStateAccess {
       livenessOwnerToken?: string,
     ): Promise<readonly RefusedOwnedSessionRestore[] | void>;
     releaseMcpSessionBindings?(mcpSessionId: string): void;
+    /** Give up the restart-recovery reservation made for a session, if any (#11294). */
+    releaseRehydrationReservation?(sessionId: string): void;
     refreshDevices(): Promise<number>;
     refreshDevicesWithOutcome?(): Promise<import("./devicePoolRefresh").DevicePoolRefreshResult>;
     getStats(): DevicePoolStats;
@@ -393,13 +395,18 @@ async function releaseDrainRefusal(
  * observer would let a client heartbeat and re-authenticate streams under a dead session. The
  * answer is the standard `session_ownership_lost` (not retryable, `acquire_new_session`) with the
  * release reason and, for an idle-window release, `idle: true`. A never-issued UUID has no
- * snapshot and still registers as an observer.
+ * snapshot and no row, and still registers as an observer.
+ *
+ * The in-memory snapshot is empty after a daemon restart, so a UUID without one is judged by its
+ * persisted `release_reason` under the same predicate. The read changes nothing: a recoverable
+ * handoff or a re-issuable `plan-auto-release` row keeps registering and stays as it was.
  */
-function terminalSessionRegistrationRefusal(
+async function terminalSessionRegistrationRefusal(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
-): DaemonMethodResult | undefined {
-  const release = manager.getTerminalReleaseSnapshot?.(sessionId);
+): Promise<DaemonMethodResult | undefined> {
+  const snapshot = manager.getTerminalReleaseSnapshot?.(sessionId);
+  const release = snapshot ?? (await persistedTerminalRelease(manager, sessionId));
   if (!release?.terminal || !isExpiryReleaseReason(release.releaseReason)) {
     return undefined;
   }
@@ -421,12 +428,45 @@ function terminalSessionRegistrationRefusal(
   };
 }
 
+/** The persisted release of a UUID this daemon holds no snapshot for (best-effort read). */
+async function persistedTerminalRelease(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): Promise<Pick<SessionReleaseSnapshot, "releaseReason" | "terminal" | "ownerPid"> | undefined> {
+  const releaseReason = await lookupReleasedSessionReason(manager, sessionId);
+  return releaseReason === undefined
+    ? undefined
+    : { releaseReason, terminal: isTerminalReleaseReason(releaseReason) };
+}
+
 /** A session-clock instant as wall-clock epoch ms, for a report another process reads (#11105). */
 function reportedWallClock(
   manager: { sessionClockToWall?(sessionClockMs: number): number },
   sessionClockMs: number,
 ): number {
   return manager.sessionClockToWall?.(sessionClockMs) ?? sessionClockMs;
+}
+
+/** The accepted registration of a UUID that is a live device session, or undefined. */
+function liveSessionRegistration(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+  clientName: string,
+): DaemonMethodResult | undefined {
+  const session = manager.getSession(sessionId);
+  if (!session) {
+    return undefined;
+  }
+  manager.recordSessionClientName?.(sessionId, clientName);
+  return {
+    success: true,
+    result: {
+      accepted: true,
+      heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+      // Reported to another process: wall-clock epoch ms, not the session clock (#11243).
+      expiresAtMs: reportedWallClock(manager, session.lastHeartbeat + session.heartbeatTimeoutMs),
+    },
+  };
 }
 
 async function handleRegisterSession(
@@ -459,22 +499,18 @@ async function handleRegisterSession(
   if (draining) {
     return draining;
   }
-  const session = manager.getSession(sessionId);
-  if (session) {
-    manager.recordSessionClientName?.(sessionId, clientName);
-    return {
-      success: true,
-      result: {
-        accepted: true,
-        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
-        // Reported to another process: wall-clock epoch ms, not the session clock (#11243).
-        expiresAtMs: reportedWallClock(manager, session.lastHeartbeat + session.heartbeatTimeoutMs),
-      },
-    };
+  const live = liveSessionRegistration(manager, sessionId, clientName);
+  if (live) {
+    return live;
   }
-  const terminal = terminalSessionRegistrationRefusal(manager, sessionId);
+  const terminal = await terminalSessionRegistrationRefusal(manager, sessionId);
   if (terminal) {
     return terminal;
+  }
+  // The persisted read yielded: a session issued meanwhile answers as itself, never an observer.
+  const issued = liveSessionRegistration(manager, sessionId, clientName);
+  if (issued) {
+    return issued;
   }
   const registry = state.getObserverSessionRegistry?.();
   if (!registry) {
@@ -1268,7 +1304,13 @@ async function handleReleaseSession(
         },
       };
     }
-    return await releaseUnknownSession(manager, sessionId, params?.requireKnown === true);
+    return await releaseUnknownSession(
+      state,
+      manager,
+      sessionId,
+      params?.requireKnown === true,
+      executions,
+    );
   }
   return releaseBoundSession(state, manager, sessionId, session, executions);
 }
@@ -1426,10 +1468,40 @@ function bindManagedConnection(
  * (#11148). A session this daemon issued and already released stays idempotent either way.
  */
 async function releaseUnknownSession(
+  state: DaemonStateAccess,
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
   requireKnown: boolean,
+  executions?: ReleaseCutExecutions,
 ): Promise<DaemonMethodResult> {
+  // Not in the session map is not the same as released (#11461): a restart handoff this daemon has
+  // not recovered yet, or a session still being created, would come back after an "already
+  // released" answer. The manager's release path ends those terminally; it resolves null when
+  // there was nothing to release. A UUID already fenced terminal needs no second release.
+  if (!manager.getTerminalReleaseSnapshot?.(sessionId)) {
+    const deviceId = await manager.releaseSession(sessionId);
+    // A recovery that won the race published the session meanwhile: release it like any held one.
+    const published = manager.getSession(sessionId) ?? manager.getReleasingSession?.(sessionId);
+    if (published || manager.hasSession(sessionId)) {
+      return releaseBoundSession(state, manager, sessionId, published, executions);
+    }
+    if (deviceId !== null && deviceId !== undefined) {
+      const pool = state.getDevicePool();
+      // The row no longer recovers, so its device is no longer held for it (#11294).
+      pool.releaseRehydrationReservation?.(sessionId);
+      // A session released while it was being created may already hold its device in the pool;
+      // this frees it only if this session is the holder.
+      await pool.releaseDevice(deviceId, sessionId);
+      return {
+        success: true,
+        result: {
+          message: `Session ${sessionId} released`,
+          device: deviceId,
+          alreadyReleased: false,
+        },
+      };
+    }
+  }
   if (requireKnown && (await lookupReleasedSessionReason(manager, sessionId)) === undefined) {
     return {
       success: false,

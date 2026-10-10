@@ -83,6 +83,7 @@ test/daemon/devicePool.recoveryStopOfflineConfirmation.test.ts
 test/daemon/devicePool.removeDeviceLeaks.test.ts
 test/daemon/devicePool.selectionPresenceSweep.test.ts
 test/daemon/devicePool.staleIdentityRefresh.test.ts
+test/daemon/devicePool.statsBuckets.test.ts
 test/daemon/devicePoolCreate.test.ts
 test/daemon/devicePoolPhysicalIosRename.test.ts
 test/daemon/devicePoolRecoveryPolicy.test.ts
@@ -113,6 +114,7 @@ test/daemon/livenessKeeperSuspectInteractions.test.ts
 test/daemon/livenessOwnerLease.test.ts
 test/daemon/managedExecutionLiveness.test.ts
 test/daemon/managedSlots/abandonedScopeReclaimer.test.ts
+test/daemon/managedSlots/capacityExternalDevices.test.ts
 test/daemon/managedSlots/managedExecutionDaemonRestart.test.ts
 test/daemon/managedSlots/managedSlotAcquisition.test.ts
 test/daemon/managedSlots/managedSlotExclusion.test.ts
@@ -149,6 +151,7 @@ test/daemon/recycledProcessGeneration.test.ts
 test/daemon/refusalWireContract.test.ts
 test/daemon/registerSessionManagedConnection.test.ts
 test/daemon/rehydratedLegacyLivenessDefaults.test.ts
+test/daemon/rehydrationIdleOrigin.test.ts
 test/daemon/releaseReasons.test.ts
 test/daemon/releasingSessionRequests.test.ts
 test/daemon/sessionCacheNoEscapeHatch.test.ts
@@ -527,6 +530,7 @@ test/features/observe/output/diffObserveRealDevice.test.ts
 test/features/observe/output/diffObserveResult.test.ts
 test/features/observe/output/stableIdentityScrollDiff.test.ts
 test/features/observe/ownWindowFocus.test.ts
+test/features/observe/prototypeLayerHighlightGesture.test.ts
 test/features/observe/rasterGeometry.test.ts
 test/features/observe/screenshot/ScreenshotFileWriter.test.ts
 test/features/observe/screenshot/observationScreenshotEvidence.test.ts

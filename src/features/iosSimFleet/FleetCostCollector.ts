@@ -96,7 +96,11 @@ export class IosSimFleetCostCollector implements FleetCostSource {
     reportFailure: boolean,
   ): Promise<{ value?: HostSnapshot; error?: string }> {
     try {
-      return { value: await this.source.readHostSnapshot(options) };
+      const value = await this.source.readHostSnapshot(options);
+      // A failed `ps` keeps the host totals but leaves per-process cost unmeasured.
+      return reportFailure && value.processesError
+        ? { value, error: value.processesError }
+        : { value };
     } catch (error) {
       logger.warn(`host snapshot failed: ${errorMessage(error)}`, error);
       // With nothing booted there is nothing to attribute, so a failed read is not an error.
@@ -121,8 +125,12 @@ export class IosSimFleetCostCollector implements FleetCostSource {
     if (entry.state !== BOOTED_STATE) {
       return { ...base, quality: "not-running" };
     }
-    if (!snapshot.value) {
-      return { ...base, quality: "unavailable", error: snapshot.error ?? "no host snapshot" };
+    if (!snapshot.value || snapshot.value.processesError) {
+      return {
+        ...base,
+        quality: "unavailable",
+        error: snapshot.error ?? snapshot.value?.processesError ?? "no host snapshot",
+      };
     }
     const process = attribution.get(entry.udid);
     return process

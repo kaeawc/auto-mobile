@@ -3688,11 +3688,30 @@ export class SessionManager {
     }
   }
 
+  private lateRehydrationListener?: (rehydrated: readonly string[]) => Promise<void>;
+
+  /**
+   * Notified with a session that finished rehydrating after the startup deadline (late row or
+   * follow-up), so the daemon re-owns its managed slot like the startup batch (#11288).
+   */
+  setLateRehydrationListener(listener: (rehydrated: readonly string[]) => Promise<void>): void {
+    this.lateRehydrationListener = listener;
+  }
+
   private logLateRehydrationOutcome(sessionId: string, outcome: RehydrationRowOutcome): void {
     logger.info(
       `[SessionManager] Rehydration of ${sessionId} finished after the startup deadline: ` +
         `${outcome.kind}${outcome.kind === "rehydrated" ? "" : ` (${outcome.reason})`}`,
     );
+    if (outcome.kind !== "rehydrated" || !this.lateRehydrationListener) {
+      return;
+    }
+    this.lateRehydrationListener([sessionId]).catch((error: unknown) => {
+      logger.warn(
+        `[SessionManager] Late rehydration hook failed for ${sessionId}: ${errorMessage(error)}`,
+        error,
+      );
+    });
   }
 
   /**

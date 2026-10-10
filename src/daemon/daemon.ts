@@ -1130,6 +1130,9 @@ export class Daemon {
         this.deviceDataStreamServer?.invalidateInitialDeviceFrames(deviceId);
       }
     });
+    this.sessionManager.setLateRehydrationListener((rehydrated) =>
+      this.reownRehydratedManagedExecutions(rehydrated),
+    );
     this.sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       this.hasActiveSessionExecution(sessionId, query),
     );

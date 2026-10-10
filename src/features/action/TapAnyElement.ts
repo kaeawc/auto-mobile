@@ -121,7 +121,7 @@ import {
   assertAppGestureNotUnderPrototype,
   scopeHierarchyForSelector,
 } from "../observe/hierarchyLayer";
-import { ownWindowSafeGesturePoint } from "../observe/ApplicationWindowCover";
+import { ownPrototypeSafeGesturePoint } from "../observe/ApplicationWindowCover";
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import {
   DefaultTalkBackNavigationDriverFactory,
@@ -1029,7 +1029,7 @@ export class TapAnyElement extends BaseVisualChange {
     }
     // Default-layer selectors also resolve app rows kept under AutoMobile's own prototype (#10691),
     // so avoid the prototype as tapOn does; layer "app" refuses later with its own error.
-    const safe = ownWindowSafeGesturePoint(
+    const safe = ownPrototypeSafeGesturePoint(
       target.capture.hierarchy,
       target.element,
       bounds,

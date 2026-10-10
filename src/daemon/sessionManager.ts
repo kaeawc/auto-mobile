@@ -8564,6 +8564,15 @@ export class SessionManager {
         // Shift, never reset (#10662), and never past the resume point.
         const idleStart = effectiveLastToolActivity(session);
         session.idleStallForgivenAt = Math.max(idleStart, Math.min(resumedAt, idleStart + lostMs));
+        // A rehydrated one is judged on its owner-reconnect window alone, so that window moves
+        // with the idle anchor (#11481): by the daemon's stall, never by host sleep, which counts
+        // toward a CLI session's idle window.
+        if (session.awaitingOwnerSince !== undefined) {
+          session.awaitingOwnerSince = Math.max(
+            session.awaitingOwnerSince,
+            Math.min(session.awaitingOwnerSince + lostMs, resumedAt),
+          );
+        }
         forgiven++;
         continue;
       }

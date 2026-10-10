@@ -26,6 +26,8 @@ export const TOOL_CALL_REMEDY =
  */
 export class InputDeviceOwnedError extends ActionableError {
   readonly code = DEVICE_OWNED_BY_OTHER_SESSION_CODE;
+  /** The holder keeps the device until it releases it; the same call cannot succeed as-is. */
+  readonly retryable = false;
 
   constructor(
     action: string,
@@ -44,6 +46,11 @@ export class InputDeviceOwnedError extends ActionableError {
           remedy,
     );
     this.name = "InputDeviceOwnedError";
+  }
+
+  /** The wire evidence: the held device, never the holder's session. */
+  toPayload(): Record<string, unknown> {
+    return { code: this.code, deviceId: this.deviceId, retryable: this.retryable };
   }
 }
 

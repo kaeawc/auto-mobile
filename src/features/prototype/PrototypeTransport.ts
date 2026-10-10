@@ -8,6 +8,7 @@
  */
 import type { PrototypeAssetRequestOptions } from "../observe/android/CtrlProxyPrototypes";
 import type {
+  PrototypeAppearanceOverride,
   PrototypeAssetResult,
   PrototypeDismiss,
   PrototypeEvent,
@@ -24,6 +25,11 @@ export interface PrototypeShowOptions {
   displayId?: number;
   /** Start a same-id show fresh instead of replacing the prototype in place. */
   reset?: boolean;
+  /**
+   * Pins what the system setting means for this show. The caller sets it only for a device
+   * advertising `prototype_appearance_v1`; absent follows the device and sends nothing.
+   */
+  appearance?: PrototypeAppearanceOverride;
 }
 
 /** A device's own view of its prototype, where the platform can answer one. */

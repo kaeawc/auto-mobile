@@ -111,13 +111,27 @@ function entryKey(platform: SlotPlatform, stableId: string): string {
 }
 
 interface LoadedSnapshot {
+  kind: "loaded";
   byDevice: Map<string, ManagedDeviceEntry>;
   byPlatform: Map<SlotPlatform, Set<string>>;
   loadedAtMs: number;
 }
 
+/** No host registry exists: nothing is managed. Not a read of the registry, so never a "last good" snapshot. */
+interface AbsentSnapshot {
+  kind: "absent";
+  loadedAtMs: number;
+}
+
+/** The registry exists (or was opened) but has not been read successfully yet: unknown, never free. */
+interface UnreadableSnapshot {
+  kind: "unreadable";
+}
+
+type RegistryState = LoadedSnapshot | AbsentSnapshot | UnreadableSnapshot;
+
 export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
-  private snapshot: LoadedSnapshot | undefined;
+  private snapshot: RegistryState | undefined;
   private inFlight: Promise<void> | undefined;
   private registry: Promise<SlotRegistry> | undefined;
 
@@ -136,6 +150,7 @@ export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
     if (
       maxAgeMs > 0 &&
       this.snapshot !== undefined &&
+      this.snapshot.kind !== "unreadable" &&
       this.timer.now() - this.snapshot.loadedAtMs < maxAgeMs
     ) {
       return;
@@ -147,10 +162,10 @@ export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
   }
 
   holderOf(device: ManagedDeviceRef): ManagedDeviceEntry | undefined {
-    const byDevice = this.snapshot?.byDevice;
-    if (!byDevice) {
+    if (this.snapshot?.kind !== "loaded") {
       return undefined;
     }
+    const byDevice = this.snapshot.byDevice;
     for (const stableId of device.stableIds) {
       const entry = stableId ? byDevice.get(entryKey(device.platform, stableId)) : undefined;
       if (entry) {
@@ -161,26 +176,31 @@ export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
   }
 
   stableIdsFor(platform: SlotPlatform): ReadonlySet<string> {
-    return this.snapshot?.byPlatform.get(platform) ?? new Set();
+    return this.snapshot?.kind === "loaded"
+      ? (this.snapshot.byPlatform.get(platform) ?? new Set())
+      : new Set();
   }
 
   private async load(): Promise<void> {
     let entries: ManagedDeviceEntry[];
+    if (this.registry === undefined && !this.registryExists()) {
+      // A host that never served a managed slot has no registry: nothing is managed, and reading
+      // must not create the file. This is "absent", not a successful read of the registry.
+      this.snapshot = { kind: "absent", loadedAtMs: this.timer.now() };
+      return;
+    }
     try {
-      // A host that never served a managed slot has no registry: an empty snapshot, not a refusal,
-      // and no file created by reading. Once opened, an unreadable registry fails closed below.
-      entries =
-        this.registry === undefined && !this.registryExists()
-          ? []
-          : await (await this.openRegistryOnce()).snapshotManagedDevices();
+      entries = await (await this.openRegistryOnce()).snapshotManagedDevices();
     } catch (error) {
-      if (this.snapshot) {
+      if (this.snapshot?.kind === "loaded") {
         logger.warn(
           `[ManagedSlots] Registry unreadable; keeping the last snapshot: ${errorMessage(error)}`,
           error,
         );
         return;
       }
+      // Never read successfully: unknown is never free, even if an earlier refresh saw it absent.
+      this.snapshot = { kind: "unreadable" };
       throw new ManagedSlotDiscoveryIncompleteError(errorMessage(error));
     }
     const byDevice = new Map<string, ManagedDeviceEntry>();
@@ -191,7 +211,7 @@ export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
       ids.add(entry.stableDeviceId);
       byPlatform.set(entry.platform, ids);
     }
-    this.snapshot = { byDevice, byPlatform, loadedAtMs: this.timer.now() };
+    this.snapshot = { kind: "loaded", byDevice, byPlatform, loadedAtMs: this.timer.now() };
   }
 
   private openRegistryOnce(): Promise<SlotRegistry> {

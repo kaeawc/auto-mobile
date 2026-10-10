@@ -121,6 +121,87 @@ export function sessionReleasedDuringCallPayload(
   });
 }
 
+/** What a failed persisted-session recovery says about the session it ended. */
+export interface RecoveryIdentityLoss {
+  message: string;
+  sessionUuid: string;
+  /** The terminal release reason the session is persisted with (`identity-recovery-<reason>`). */
+  reason: string;
+  /** Why recovery failed: target-absent, target-busy, identity-continuity-lost, owned-by-other-daemon. */
+  recoveryReason: string;
+  /** The device recovery was looking for (or, held by another daemon, the device that daemon holds). */
+  deviceId?: string;
+  ownerPid?: number;
+}
+
+/**
+ * The terminal session loss a `SessionRecoveryIdentityLossError` reports (#11391), or undefined for
+ * anything else. Recovery of a persisted session could not keep its device identity, so the session
+ * manager terminalizes the UUID: the caller is told what any later call naming it is told. Matched
+ * on the error's name and fields so the wire layer does not import the daemon's session manager.
+ */
+export function recoveryIdentityLoss(error: unknown): RecoveryIdentityLoss | undefined {
+  if (!(error instanceof Error) || error.name !== "SessionRecoveryIdentityLossError") {
+    return undefined;
+  }
+  const field = (key: string): unknown => Reflect.get(error, key);
+  const sessionUuid = field("sessionUuid");
+  const reason = field("terminalReleaseReason");
+  const recoveryReason = field("reason");
+  if (
+    typeof sessionUuid !== "string" ||
+    typeof reason !== "string" ||
+    typeof recoveryReason !== "string"
+  ) {
+    return undefined;
+  }
+  const target = field("target");
+  const targetDeviceId =
+    target !== null && typeof target === "object" ? Reflect.get(target, "deviceId") : undefined;
+  const deviceId = field("deviceId") ?? targetDeviceId;
+  const ownerPid = field("ownerPid");
+  return {
+    message: error.message,
+    sessionUuid,
+    reason,
+    recoveryReason,
+    ...(typeof deviceId === "string" ? { deviceId } : {}),
+    ...(typeof ownerPid === "number" ? { ownerPid } : {}),
+  };
+}
+
+/** The evidence of a recovery identity loss, beside the terminal-session fields (#11391). */
+export function recoveryIdentityLossDetails(loss: RecoveryIdentityLoss): Record<string, unknown> {
+  return {
+    sessionUuid: loss.sessionUuid,
+    reason: loss.reason,
+    recoveryReason: loss.recoveryReason,
+    ...(loss.deviceId === undefined ? {} : { deviceId: loss.deviceId }),
+    ...(loss.ownerPid === undefined ? {} : { ownerPid: loss.ownerPid }),
+  };
+}
+
+/**
+ * The ownership-loss envelope for a recovery identity loss (#11391): the standard terminal refusal
+ * (`session_ownership_lost`, not retryable, `acquire_new_session`) with the recovery reason and
+ * device as evidence. Never the wait-class `device_owned_by_other_daemon` code, whose meaning is
+ * "wait for the other daemon": this session UUID does not come back.
+ */
+export function recoveryIdentityLossPayload(loss: RecoveryIdentityLoss) {
+  const { error } = sessionOwnershipLostPayload({
+    message: loss.message,
+    sessionUuid: loss.sessionUuid,
+    reason: loss.reason,
+  });
+  return {
+    error: {
+      ...error,
+      ...terminalSessionRefusalFields(loss.ownerPid),
+      ...recoveryIdentityLossDetails(loss),
+    },
+  };
+}
+
 /** Whether `name` is a device-session acquisition tool (see above). */
 export function isDeviceSessionAcquisitionTool(name: string): boolean {
   return (DEVICE_SESSION_ACQUISITION_TOOLS as readonly string[]).includes(name);

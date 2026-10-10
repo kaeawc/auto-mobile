@@ -9,6 +9,8 @@ import type { DeviceObservationAccess } from "../../src/server/deviceObservation
 import { executionTracker } from "../../src/server/executionTracker";
 import { withAdmittedSessionEcho } from "../../src/server/routedSessionEcho";
 import { registerInteractionTools } from "../../src/server/interactionTools";
+import { serverConfig } from "../../src/utils/ServerConfig";
+import { registerDatabaseTools } from "../../src/server/databaseTools";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
@@ -45,6 +47,8 @@ export class RealToolCallPath {
   readonly deviceSessionManager = new FakeDeviceSessionManager();
   /** Tool bodies that reached the device boundary, in order. */
   readonly runs: DeviceToolRun[] = [];
+  /** Writes a socket `ide/*` frame sent to the device through CtrlProxy (the device boundary). */
+  readonly ctrlProxyWrites: string[] = [];
   /** Devices the read-only (watcher) path resolved from the booted list (#10830). */
   watcherResolutions = 0;
   /** Devices whose observer capture the read-only path ran (the handler's `executeDeviceRead`). */
@@ -102,10 +106,19 @@ export class RealToolCallPath {
           bindSession: () => undefined,
           getScreenScaleMetadata: () => null,
           requestTapCoordinates: async () => ({ success: true }),
+          setPreference: async () => {
+            this.ctrlProxyWrites.push("setPreference");
+            return { success: true };
+          },
         }) as unknown as AndroidCtrlProxyClient,
     );
     this.restorers.push(() => ctrlProxy.mockRestore());
     registerInteractionTools();
+    // sqlQuery is an embedded-SDK tool: it is only reachable when that mode is on.
+    const embeddedSdk = serverConfig.isEmbeddedSdkEnabled();
+    serverConfig.setEmbeddedSdkEnabled(true);
+    this.restorers.push(() => serverConfig.setEmbeddedSdkEnabled(embeddedSdk));
+    registerDatabaseTools();
     // The read-only path's capture is the one device-boundary call the handler makes itself (the
     // audit runner does not wrap it): a fake screen stands in for the observer's hierarchy service.
     registerObserveTools({

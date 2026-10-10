@@ -53,6 +53,11 @@ jobs:
     # No continue-on-error (#11368): a failed scenario fails this job and the run. The evidence
     # artifact is uploaded either way.
     needs: build-control-proxy-apk
+    # Job-level so only this job can write issues (the alert step below); other jobs keep the
+    # workflow's read-only default.
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -91,3 +96,13 @@ jobs:
           name: live-idle-release-evidence
           path: scratch/live-idle-release-check/
           if-no-files-found: warn
+
+      # Advisory job, loud failure (#11368): open or update ONE tracking issue.
+      - name: "Alert on Failure"
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALERT_JOB_STATUS: ${{ job.status }}
+          ALERT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERT_EVIDENCE_DIR: scratch/live-idle-release-check/ci
+        run: bash scripts/ci/open-live-idle-release-alert.sh

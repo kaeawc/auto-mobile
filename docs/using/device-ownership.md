@@ -34,6 +34,91 @@ never use, not even the holder's own (#10964): it does not extend the session's
 idle window. Only control calls do, including a holder's calls that name only
 `deviceId`, which run as the holder's session.
 
+## When a session is released
+
+A session is released by an explicit release, a lost owner heartbeat, or the idle
+window. Values below are the defaults; the constants live in
+`src/daemon/sessionLivenessWindows.ts` and are tuned with the variables in
+[Environment variables](environment-variables.md#session-heartbeat-timeout).
+
+- **Lost heartbeat.** The owning connection's heartbeat renews a lease of
+  `DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS` (4 s), followed by a suspect grace of
+  `SUSPECT_GRACE_MS` (4 s). With the 2 s expiry sweep, a session is released about
+  10 s after its owner's last heartbeat. The lease is judged on the owner's own
+  heartbeats only: tool calls from other callers do not keep a dead owner alive.
+- **Idle.** `DEFAULT_SESSION_IDLE_TIMEOUT_MS` (2 min) after the last control tool
+  call ends. The grace does not stretch it: a heartbeating session is released at
+  the idle deadline. Heartbeats and reads (`observe`, `listDevices`, `doctor`,
+  `recordSteps` status and the other reads listed above) never extend it. A call
+  still in flight holds the release, up to a bounded ceiling.
+- **`idleReleaseAt`** is the idle deadline as wall-clock epoch milliseconds. The
+  daemon computes it (session-clock instants are converted to wall time at the
+  daemon boundary), reports it in the session hold diagnostics and the heartbeat
+  acknowledgement, and clients should treat it as authoritative rather than
+  computing their own deadline.
+- **One owning connection per session.** Restoring a session on a connection
+  requires that session's owner token (the proxy sends it with the sessions it
+  owns), or that no other connected client owns it; otherwise the call is refused
+  with `device_owned_by_other_session`. A successful restore moves ownership, so
+  the previous connection no longer owns the session.
+
+## One-shot CLI sessions
+
+Each `--cli` call is its own connection, so the daemon treats one-shot CLI
+acquisitions as anonymous (#11096):
+
+- A one-shot CLI `getAndroid`, `getApple` or `startDevice` creates an anonymous
+  session and may reuse only an anonymous session. A second `--cli getAndroid` for
+  the same device reuses it (also by `--avd-name`, #11138). The CLI does not reuse a session an MCP connection holds.
+- Acquisition tools drop `--session-uuid` on the CLI. Skip re-acquiring and pass
+  `--session-uuid` on the follow-up calls, or free the device with
+  `--daemon release-session`.
+- A CLI session's idle window runs from tool calls. `--daemon heartbeat` on a
+  one-shot CLI session is a successful no-op, so keeper processes are unnecessary.
+
+## Refusals that name the next step
+
+- A call naming a session that is gone for good (`session_ownership_lost`,
+  `no_active_device_session`) is refused with `retryable: false` and
+  `nextAction: "acquire_new_session"` (`ACQUIRE_NEW_SESSION_NEXT_ACTION` in
+  `src/models/deviceSessionRecovery.ts`, #11098). Acquire a new session with
+  `getAndroid` or `getApple`; retrying the same UUID cannot succeed.
+- Booted-device discovery that did not complete (adb or simctl failed, or a
+  running emulator's AVD identity has not resolved) is refused with the retryable
+  code `discovery_incomplete` instead of booting or adopting a device blind. Retry
+  the acquisition.
+
+## A device that drops off
+
+For Android, the disconnect monitor holds a session on a device adb still lists
+but reports `offline` for up to `OFFLINE_DEVICE_DISCONNECT_BUDGET_MS` (60 s,
+`src/daemon/disconnectMonitor.ts`, #11090) before treating it as lost. A held
+device in that state still appears in `listDevices` with its session and
+connection state (#11118). A physical USB device that vanishes from `adb devices`
+in every state is released on the first miss; one still listed in a transitional
+state (`offline`, `authorizing`, `connecting`, `unauthorized`, `recovery`,
+`bootloader`, `sideload`, no permissions) keeps the normal multi-sweep debounce.
+When one handset is reachable over both USB and Wi-Fi, the pool treats the
+endpoints as aliases of one device only when `ro.serialno` and boot identity prove
+it, and two emulators that merely share an AVD name are never merged.
+
+## Daemon restart
+
+The restarted daemon stamps itself as owner of every session it rehydrates (#11114),
+so a later peer daemon does not mistake them for a dead predecessor's. Each
+rehydrated session gets a fresh idle window; a session already past its deadline
+at restart is not rehydrated. A release whose database write had not landed is
+recorded first in a crash-safe sidecar (`terminal-release-intents.jsonl` in the
+daemon data directory, `src/daemon/terminalReleaseJournal.ts`), and the restarted
+daemon finishes it before rehydrating, so a released UUID is never revived.
+
+## Planned: device state between owners
+
+Display and system settings a session changed are not yet reset when a different
+session next acquires the device. Resetting them at that acquisition is planned
+and tracked in #11145; until it lands, restore settings explicitly before
+releasing.
+
 ## Passing the session
 
 - **CLI:** `auto-mobile --cli --session-uuid <uuid> tapOn --selector '{"text":"Submit"}'`.

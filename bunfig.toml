@@ -5,6 +5,7 @@ preload = [
   "./test/setup/testPreload.ts",
   "./test/setup/portAvailabilityPreload.ts",
   "./test/setup/realDeviceToolSpawnGuardPreload.ts",
+  "./test/setup/fixedCtrlProxyPortFetchGuardPreload.ts",
 ]
 coverageReporter = ["text", "lcov"]
 coverageDir = "./coverage"

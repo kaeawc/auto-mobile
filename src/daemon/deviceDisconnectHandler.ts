@@ -5,7 +5,7 @@ import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResou
 import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
 import type { BootedDevice, DeviceInfo } from "../models";
 import type { DeviceRecoveryPolicy } from "./poolConfig";
-import type { PooledDevice } from "./devicePool";
+import type { PooledDevice, RemoveDeviceOptions } from "./devicePool";
 import type { EmulatorLossDetectionPath } from "./emulatorLossIncident";
 import { classifyMissingDeviceObservation } from "./missingDeviceLiveness";
 import { didSourceSucceedForDevice } from "../utils/discoverySource";
@@ -245,6 +245,7 @@ export interface DeviceDisconnectPoolPort {
     deviceId: string,
     awaitCacheCleanup: boolean,
     expectedDevice?: PooledDevice,
+    options?: RemoveDeviceOptions,
   ): Promise<void>;
   finishEmulatorLossIncident(
     incidentId: string | undefined,
@@ -445,7 +446,8 @@ export class DeviceDisconnectHandler {
         return;
       }
       this.pool.suppressAutoStartForDevice(device);
-      await this.pool.removeDevice(device.id, true, device);
+      // Liveness miss: adb dropped the serial, the emulator child may be alive.
+      await this.pool.removeDevice(device.id, true, device, { keepTrackedProcess: true });
       await this.completeRecoveryIfNotAttempted(incidentId, recoveryWasAttempted);
     } catch (error) {
       // Plain reboot has no deferred incident owner; preserve any coordinator outcome.

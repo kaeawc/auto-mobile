@@ -157,6 +157,24 @@ describe("suspect grace window and daemon stall (#10051)", () => {
     });
   });
 
+  describe("a non-owner's tool calls (#11107)", () => {
+    test("do not hide a dead owner: the session still turns suspect after the lease", async () => {
+      // A second connection names the session every second, as an active agent would, while the
+      // owner's heartbeats have stopped. Tool calls stamp `lastHeartbeat` but not the owner lease.
+      for (let elapsed = 0; elapsed < LEASE_MS + 1_000; elapsed += 1_000) {
+        timer.advanceTime(1_000);
+        if (elapsed + 1_000 <= LEASE_MS) {
+          await sessionManager.getOrCreateSession(SESSION);
+        }
+      }
+
+      expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("suspect");
+      await expect(sessionManager.getOrCreateSession(SESSION)).rejects.toBeInstanceOf(
+        SessionSuspectError,
+      );
+    });
+  });
+
   describe("while suspect", () => {
     beforeEach(() => {
       timer.advanceTime(LEASE_MS + 1);
@@ -402,9 +420,10 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
     test("host sleep shorter than the idle window still counts toward it, never granting a fresh window (#10699)", async () => {
       // The issue's probe: 60s window, last tool call at 1s, the host sleeps from 40s. Every sleep
-      // length releases at the first judgement past the window plus grace from the last tool call
-      // (at wake, when wake is already past it), so a shorter sleep never holds the device longer.
-      const releaseAfterToolMs = 60_000 + SUSPECT_GRACE_MS;
+      // length releases at the first judgement past the window from the last tool call (at wake,
+      // when wake is already past it), so a shorter sleep never holds the device longer. The
+      // suspect grace extends only the heartbeat lease, never idleness (#11107).
+      const releaseAfterToolMs = 60_000;
       for (const sleepMs of [15_000, 50_000, 65_000, 75_000, 79_000, 81_000, 200_000]) {
         timer = new FakeTimer();
         sessionManager.stopCleanupTimer();
@@ -436,7 +455,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
         }
 
         const due = 1_000 + releaseAfterToolMs;
-        // Kept until the window plus grace, released at the first judgement past it.
+        // Kept until the window, released at the first judgement past it.
         expect({ sleepMs, releasedAt }).toEqual({
           sleepMs,
           releasedAt:
@@ -731,18 +750,25 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       // keeps working: every call names the session and refreshes its activity.
       for (let elapsed = 0; elapsed < LEASE_MS + SUSPECT_GRACE_MS; elapsed += SCAN_MS) {
         timer.advanceTime(SCAN_MS);
-        await sessionManager.getOrCreateSession(SESSION);
+        // Past the lease the dead owner's session is suspect (#11107), so the restarted proxy's
+        // calls are refused until its claim can win; before it they still refresh activity.
+        const call = sessionManager.getOrCreateSession(SESSION);
+        if (sessionManager.getSessionLeaseState(SESSION)?.phase === "suspect") {
+          await expect(call).rejects.toBeInstanceOf(SessionSuspectError);
+        } else {
+          await call;
+        }
         await monitor.tick();
         expect((await heartbeat(FOREIGN, true)).code).toBe("liveness_owner_conflict");
       }
       expect(reaped).toEqual([]);
 
       timer.advanceTime(1);
-      await sessionManager.getOrCreateSession(SESSION);
       const claim = await heartbeat(FOREIGN, true);
 
       expect(claim.success).toBe(true);
       expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBe(FOREIGN);
+      await expect(sessionManager.getOrCreateSession(SESSION)).resolves.toBeDefined();
     });
 
     test("cache updates by a non-owner do not extend the owner's lease either (F1a)", async () => {

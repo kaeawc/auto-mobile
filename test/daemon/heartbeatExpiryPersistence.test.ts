@@ -6,11 +6,7 @@ import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadc
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-test.each([
-  [60_000, "monitor"],
-  [1_000, "monitor"],
-  [1_000, "lookup"],
-] as const)(
+test.each([[60_000, "monitor"]] as const)(
   "heartbeat expiry persists and broadcasts after grace with a %i ms idle timeout via %s",
   async (idleTimeoutMs, expiryPath) => {
     const timer = new FakeTimer();
@@ -96,6 +92,52 @@ test("idle expiry before the heartbeat lease lapses keeps its idle diagnostic", 
     expect(await persistence.getSession?.("idle-expired")).toMatchObject({
       status: "expired",
       release_reason: "lazy-expiry",
+    });
+  } finally {
+    manager.stopCleanupTimer();
+  }
+});
+
+test("an idle window as short as the lease releases at the idle deadline, without the suspect grace (#11107)", async () => {
+  const timer = new FakeTimer();
+  const persistence = new FakeDeviceSessionPersistence();
+  const manager = new SessionManager(timer, persistence);
+  try {
+    await manager.createSession("idle-at-deadline", "emulator-5554", "android", 1_000, 1_000);
+    manager.recordHeartbeat("idle-at-deadline");
+    timer.advanceTime(1_000);
+    expect(manager.getSession("idle-at-deadline")).not.toBeNull();
+
+    // The lease is now suspect, but the suspect grace never extends the idle deadline.
+    timer.advanceTime(1);
+    expect(manager.getSessionLeaseState("idle-at-deadline")?.phase).toBe("suspect");
+    expect(manager.getSession("idle-at-deadline")).toBeNull();
+    await manager.waitForSessionRelease("idle-at-deadline");
+
+    expect(await persistence.getSession?.("idle-at-deadline")).toMatchObject({
+      status: "expired",
+      release_reason: "lazy-expiry",
+    });
+  } finally {
+    manager.stopCleanupTimer();
+  }
+});
+
+test("a lookup that finds both the idle deadline and the lease lapsed keeps the heartbeat diagnostic", async () => {
+  const timer = new FakeTimer();
+  const persistence = new FakeDeviceSessionPersistence();
+  const manager = new SessionManager(timer, persistence);
+  try {
+    await manager.createSession("lease-lapsed", "emulator-5554", "android", 1_000, 1_000);
+    manager.recordHeartbeat("lease-lapsed");
+    timer.advanceTime(1_000 + SUSPECT_GRACE_MS + 1);
+
+    expect(manager.getSession("lease-lapsed")).toBeNull();
+    await manager.waitForSessionRelease("lease-lapsed");
+
+    expect(await persistence.getSession?.("lease-lapsed")).toMatchObject({
+      status: "expired",
+      release_reason: "heartbeat-timeout",
     });
   } finally {
     manager.stopCleanupTimer();

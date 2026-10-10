@@ -317,6 +317,11 @@ export class EmulatorProcessLifecycle {
   ): Promise<void> {
     const device = this.pool.getDevices().get(deviceId);
     if (!device) {
+      // A liveness-miss removal keeps the child tracked; its exit ends tracking.
+      if (childProcess && this.pool.getStartedDeviceProcesses().get(deviceId) === childProcess) {
+        this.pool.getStartedDeviceProcesses().delete(deviceId);
+        this.pool.getStartedDeviceProcessOutput().delete(deviceId);
+      }
       return;
     }
     if (this.pool.isReservedForShutdown(device)) {

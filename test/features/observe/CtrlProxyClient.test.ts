@@ -2457,6 +2457,38 @@ describe("AndroidCtrlProxyClient", function () {
       expect(table.rows()).toEqual([foreignRow]);
     });
 
+    test("a recorded forward with a connected client re-probes and reports a retryable conflict (#11106)", async function () {
+      await accessibilityServiceClient.close();
+      AndroidCtrlProxyClient.resetInstances();
+      fakeAdb.clearHistory();
+      const dir = newCoordinationDir();
+      // Recorded by a daemon that was SIGKILLed; a stray host process dials the
+      // fixed port the dead daemon's adb forward still holds open.
+      daemonLease(dir, process.ppid).recordOwnedForward(52001);
+      const foreignRow = `${testDevice.deviceId} tcp:52001 tcp:8765`;
+      const table = installSharedForwardTable([foreignRow]);
+      const probe = new FakeForwardClientProbe(() => [OTHER_DAEMON_PID]);
+
+      const client = withProbe(daemonClient(daemonLease(dir)), probe);
+      registerTestSingleton(client);
+      try {
+        const failure = await client.sweepOrphanedCtrlProxyPortForwards().then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+        expect(failure).toBeInstanceOf(CtrlProxyForwardingLeaseConflictError);
+        expect((failure as CtrlProxyForwardingLeaseConflictError).transient).toBe(true);
+        expect(probe.probedPorts).toEqual([52001, 52001]);
+        expect(fakeTimer.getSleepHistory()).toContain(1_000);
+        // Safety: a possibly-live daemon's forward is never removed.
+        expect(table.rows()).toEqual([foreignRow]);
+        expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:52001");
+      } finally {
+        await client.close();
+        AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
+      }
+    });
+
     test("still reclaims a forward recorded by an earlier daemon in the same coordination directory", async function () {
       await accessibilityServiceClient.close();
       AndroidCtrlProxyClient.resetInstances();

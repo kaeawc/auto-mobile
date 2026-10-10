@@ -50,8 +50,24 @@ internal class BackgroundHeartbeatManager(
   }
 
   fun removeSession(sessionId: String) {
-    sessions.remove(sessionId)
+    // Under startLock so an in-flight heartbeat's bookkeeping (taken under the same lock) cannot
+    // interleave with the prune and re-create state for the removed id.
+    synchronized(startLock) {
+      sessions.remove(sessionId)
+      // Prune per-id bookkeeping so a long-lived JVM does not grow with every plan UUID. `losses`
+      // stays: it is the terminal marker that keeps a released id from being heartbeated again.
+      clearProgress(sessionId)
+    }
   }
+
+  private fun clearProgress(sessionId: String) {
+    confirmed.remove(sessionId)
+    unconfirmedMisses.remove(sessionId)
+  }
+
+  /** Ids with acknowledged/miss bookkeeping still held; for tests asserting pruning. */
+  internal fun hasProgressState(sessionId: String): Boolean =
+    confirmed.contains(sessionId) || unconfirmedMisses.containsKey(sessionId)
 
   /** Why the daemon released [sessionId] while it was heartbeated, or null if it has not. */
   fun sessionLoss(sessionId: String): DaemonSessionLoss? = losses[sessionId]
@@ -84,7 +100,21 @@ internal class BackgroundHeartbeatManager(
    * (registration precedes executePlan), so keep heartbeating it, bounded. A 404 after a successful
    * heartbeat, or carrying a `releaseReason`, means the daemon released it (#11072).
    */
-  private fun recordRelease(sessionId: String, released: DaemonSessionReleasedException) {
+  private fun recordRelease(
+    sessionId: String,
+    released: DaemonSessionReleasedException,
+    loopRunning: AtomicBoolean,
+  ) {
+    // A stopped loop can still be mid-iteration when a new holder starts a second loop; only the
+    // live loop may count misses, or both would charge the same id and give up early.
+    synchronized(startLock) {
+      if (loopRunning.get()) recordReleaseLocked(sessionId, released)
+    }
+  }
+
+  private fun recordReleaseLocked(sessionId: String, released: DaemonSessionReleasedException) {
+    // removeSession ran while this heartbeat was in flight; do not resurrect its pruned state.
+    if (!sessions.contains(sessionId)) return
     val sure = released.releaseReason != null || confirmed.contains(sessionId)
     if (!sure) {
       val misses = unconfirmedMisses.merge(sessionId, 1, Int::plus) ?: 1
@@ -99,7 +129,17 @@ internal class BackgroundHeartbeatManager(
       )
     losses[sessionId] = loss
     sessions.remove(sessionId)
+    clearProgress(sessionId)
     println("Warning: ${loss.describe()}; no longer heartbeating it")
+  }
+
+  private fun recordAcknowledged(sessionId: String, loopRunning: AtomicBoolean) {
+    synchronized(startLock) {
+      if (loopRunning.get() && sessions.contains(sessionId)) {
+        confirmed.add(sessionId)
+        unconfirmedMisses.remove(sessionId)
+      }
+    }
   }
 
   private fun runLoop(loopRunning: AtomicBoolean) {
@@ -108,10 +148,9 @@ internal class BackgroundHeartbeatManager(
       snapshot.forEach { sessionId ->
         try {
           sendHeartbeat(sessionId)
-          confirmed.add(sessionId)
-          unconfirmedMisses.remove(sessionId)
+          recordAcknowledged(sessionId, loopRunning)
         } catch (released: DaemonSessionReleasedException) {
-          recordRelease(sessionId, released)
+          recordRelease(sessionId, released, loopRunning)
         } catch (_: Exception) {
           // A missed heartbeat is transient (daemon restarting, socket busy); the next tick
           // retries.

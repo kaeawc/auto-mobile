@@ -11,6 +11,8 @@ import {
 } from "../../src/devices/deviceCreationGate";
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 interface SimctlRecorder {
   createCalls: { name: string; deviceType: string; runtime: string }[];
@@ -32,6 +34,7 @@ function makeSimctl(recorder: SimctlRecorder, simulatorImages: DeviceInfo[] = []
   return {
     listSimulatorImages: async () => simulatorImages,
     getBootedSimulators: async () => [],
+    getBootedSimulatorsChecked: async () => [],
     getDeviceTypes: async () => [
       {
         name: "iPhone 17",
@@ -153,6 +156,39 @@ describe("findOrStartIosDevice creation gate", () => {
 
     await expect(manager.findOrStartIosDevice()).rejects.toThrow("boot failed");
     expect(recorder.deleteCalls).toEqual(["CREATED-UDID"]);
+  });
+
+  test("rolls back a created simulator when binding its lifecycle identity fails (#11100)", async () => {
+    setDeviceCreationGate(new FakeDeviceCreationGate(true));
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    // Another operation owns the new UDID, so binding it must wait; the request
+    // is cancelled while it waits, after simctl already created the simulator.
+    const holder = await lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "ios", stableId: "CREATED-UDID" },
+      { operation: "start", deadlineMs: 60_000 },
+    );
+    const request = new AbortController();
+    const simctl = makeSimctl(recorder);
+    const createSimulator = simctl.createSimulator.bind(simctl);
+    simctl.createSimulator = async (...args) => {
+      const udid = await createSimulator(...args);
+      queueMicrotask(() => request.abort(new Error("request cancelled")));
+      return udid;
+    };
+    manager = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils(), simctl),
+      undefined,
+      { lifecycleCoordinator },
+    );
+
+    await expect(manager.findOrStartIosDevice({ signal: request.signal })).rejects.toThrow();
+
+    expect(recorder.createCalls).toHaveLength(1);
+    expect(recorder.bootCalls).toEqual([]);
+    expect(recorder.deleteCalls).toEqual(["CREATED-UDID"]);
+    expect(recorder.deleteSignalAborted).toEqual([false]);
+    holder.release();
   });
 
   test("uses a live signal when rolling back after request cancellation", async () => {

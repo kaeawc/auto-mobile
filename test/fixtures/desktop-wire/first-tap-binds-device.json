@@ -144,7 +144,7 @@
               "platform": "android",
               "lastToolActivityAt": 6000,
               "lastOwnerHeartbeatAt": 16000,
-              "idleReleaseAt": 130000,
+              "idleReleaseAt": 126000,
               "holderKind": "desktop",
               "activeExecutions": 0
             }

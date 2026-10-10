@@ -685,6 +685,45 @@ describe("IOSCtrlProxyManager", function () {
   });
 
   describe("evict", function () {
+    test("device removal evicts a simulator manager and frees its port, but keeps a physical one (#11122)", async function () {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
+      spyOn(manager, "stop").mockResolvedValue();
+      const physical = { ...testDevice, deviceId: "00008120-001C2D3E1234567A" };
+      const physicalManager = IOSCtrlProxyManager.getInstance(physical, fakeTimer);
+      spyOn(physicalManager, "stop").mockResolvedValue();
+      expect(PortManager.getPort(testDevice.deviceId)).toBeDefined();
+
+      await IOSCtrlProxyManager.evictAfterDeviceRemoval(testDevice.deviceId, fakeTimer);
+      await IOSCtrlProxyManager.evictAfterDeviceRemoval(physical.deviceId, fakeTimer);
+
+      expect(IOSCtrlProxyManager.getExistingInstance(testDevice.deviceId)).toBeUndefined();
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+      expect(IOSCtrlProxyManager.getExistingInstance(physical.deviceId)).toBe(physicalManager);
+    });
+
+    test("removal eviction skips a manager re-armed for a reappeared simulator (#11141)", async function () {
+      const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
+      const stop = deferred();
+      const stopEntered = deferred();
+      const stopSpy = spyOn(manager, "stop").mockImplementation(() => {
+        stopEntered.resolve();
+        return stop.promise;
+      });
+      const port = PortManager.getPort(testDevice.deviceId);
+      expect(port).toBeDefined();
+
+      const eviction = IOSCtrlProxyManager.evictAfterDeviceRemoval(testDevice.deviceId, fakeTimer);
+      await stopEntered.promise;
+      // The simulator reappears under the same UDID and a new acquisition starts its runner.
+      IOSCtrlProxyManager.resumeDevice(testDevice.deviceId);
+      stop.resolve();
+      await eviction;
+
+      expect(stopSpy).toHaveBeenCalledTimes(1);
+      expect(IOSCtrlProxyManager.getExistingInstance(testDevice.deviceId)).toBe(manager);
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(port);
+    });
+
     test("explicit device start consumes the removal before a routine ready signal", async function () {
       const manager = IOSCtrlProxyManager.getInstance(testDevice, fakeTimer);
       const budget = manager.getForcedRestartBudget();

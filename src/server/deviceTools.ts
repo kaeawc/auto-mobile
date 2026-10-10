@@ -39,7 +39,7 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { enableToolsSchemaField } from "./toolSelectionTools";
 import { deviceResourceConfigurationSchema } from "./deviceResourceSchemas";
 import { registerDeviceResourceTools } from "./deviceResourceTools";
-import { createProvisionDeviceHandler } from "./deviceToolsProvisioning";
+import { createProvisionDeviceHandlers } from "./deviceToolsProvisioning";
 import { createAcquisitionHandlers } from "./deviceToolsAcquisition";
 import { createStartDeviceHandlers } from "./deviceToolsStartDevice";
 import { createLifecycleHandlers } from "./deviceToolsLifecycle";
@@ -108,7 +108,6 @@ import {
   platformSchema,
   addSessionUuidToSchema,
   withCanonicalDiscriminatedUnionJsonSchema,
-  withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher";
 import {
@@ -135,7 +134,7 @@ import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import {
   AndroidAvdIdentityConflictError,
-  AndroidBootedDeviceDiscoveryIncompleteError,
+  BootedDeviceDiscoveryIncompleteError,
   DeviceBootService,
   findUniqueBootedAndroidDeviceByName,
   type DeviceBootResult,
@@ -179,11 +178,6 @@ import { MIN_AVD_RAM_MB } from "../utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import type { ProvisionDeviceLifecycleOutcome } from "../devices/provisionDeviceLifecycle";
 import {
-  DeviceTeardownOperationRepository,
-  type DeviceTeardownOperationStore,
-} from "../db/deviceTeardownOperationRepository";
-import { stableStringify } from "../utils/stableStringify";
-import {
   getVirtualDeviceLifecycleCoordinator,
   InMemoryVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
@@ -203,7 +197,7 @@ export function knownProvisionDeviceError(error: unknown): ProvisionDeviceError 
   if (error instanceof AndroidAvdIdentityConflictError) {
     return new ProvisionDeviceError("identity_conflict", error.message);
   }
-  if (error instanceof AndroidBootedDeviceDiscoveryIncompleteError) {
+  if (error instanceof BootedDeviceDiscoveryIncompleteError) {
     return new ProvisionDeviceError("discovery_incomplete", error.message, true);
   }
   return undefined;
@@ -736,19 +730,9 @@ export const killDeviceSchema = z
   })
   .strict();
 
-const TEARDOWN_OPERATION_ID_JSON_SCHEMA_PATTERN =
-  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$";
-
 export const teardownDeviceSchema = addSessionUuidToSchema(
   z
     .object({
-      operationId: withJsonSchemaOverride(
-        z.string().uuid().describe("Caller-generated idempotency and diagnostic correlation ID"),
-        (jsonSchema) => {
-          // Zod's UUID JSON Schema pattern differs between platforms.
-          jsonSchema.pattern = TEARDOWN_OPERATION_ID_JSON_SCHEMA_PATTERN;
-        },
-      ),
       target: z
         .object({
           platform: platformSchema.describe("Platform reported by automobile:devices/booted"),
@@ -796,7 +780,6 @@ export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
 // accepted. Keep the public killDevice result coupled to the observable device
 // lifecycle, while bounding the wait so a wedged platform command is actionable.
 export const DEVICE_SHUTDOWN_TIMEOUT_MS = 30_000;
-export const TEARDOWN_OPERATION_RESULT_TTL_MS = 5 * 60 * 1_000;
 export const PROVISION_DEVICE_SETTLEMENT_WAIT_MS = 5_000;
 
 export async function waitForProvisionDeviceSettlement(
@@ -862,6 +845,8 @@ export interface StartDeviceArgs {
   runnerReadinessTimeoutMs?: number;
   createIfMissing?: boolean;
   __mcpSessionId?: string;
+  /** Daemon-forwarded: the caller is a one-shot `--cli` connection, so it acquires anonymously (#11096). */
+  __oneShotCli?: boolean;
   /** Acceptance-only, non-mutating discovery presentation control. */
   presentationOrder?: "forward" | "reverse";
   /** Internal exact runtime identity used by getAndroid. */
@@ -895,6 +880,8 @@ export interface ProvisionDeviceArgs {
   resources?: DeviceResourceConfiguration;
   timeoutMs?: number;
   __mcpSessionId?: string;
+  /** Daemon-forwarded one-shot `--cli` marker (#11096). */
+  __oneShotCli?: boolean;
   /** Daemon-provided remaining transport budget. */
   __mcpRequestTimeoutMs?: number;
   /** Daemon-provided absolute transport deadline. */
@@ -916,7 +903,6 @@ export interface KillDeviceArgs {
 }
 
 export interface TeardownDeviceArgs {
-  operationId: string;
   target: {
     platform: Platform;
     isVirtual: true;
@@ -1314,7 +1300,6 @@ export interface DeviceToolsDependencies {
     deviceManager: PlatformDeviceManager,
     deviceCreationGate: DeviceCreationGate,
   ) => ExactDeviceProvisioner;
-  teardownDeviceOperationStoreFactory: () => DeviceTeardownOperationStore;
   clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
   stopPerformanceMonitoring: (deviceId: string) => void;
   stopAndroidObservers: (device: BootedDevice) => Promise<void>;
@@ -2075,7 +2060,6 @@ function createTeardownResponse(
   timing?: unknown,
 ) {
   return createStructuredToolResponse({
-    operationId: args.operationId,
     mode: args.mode,
     state,
     target: {
@@ -2105,7 +2089,6 @@ export function createTeardownFailureResponse(
         text: JSON.stringify({
           success: false,
           error: message,
-          operationId: args.operationId,
           mode: args.mode,
           state: "failed",
           target: {
@@ -2312,33 +2295,6 @@ export class ProvisionDeviceRollbackError extends ProvisionDeviceError {
   }
 }
 
-// Exported for direct testing: a reused `operationId` is an idempotent replay
-// only when this string matches EXACTLY
-// (`DeviceTeardownOperationRepository.resolveExisting` compares the persisted
-// text), so the fingerprint's stability across daemon versions is a contract in
-// its own right.
-export function teardownOperationFingerprint(args: TeardownDeviceArgs): string {
-  return stableStringify({
-    target: args.target,
-    mode: args.mode,
-    verifyAbsence: args.verifyAbsence,
-    timeoutMs: args.timeoutMs,
-    cancellationPolicy: args.cancellationPolicy,
-    // A forced teardown is a materially different request from a verified one,
-    // so reusing an operationId across the two is a fingerprint mismatch rather
-    // than an idempotent replay of the other (#6864).
-    //
-    // Present ONLY when true. `stableStringify` is `JSON.stringify`, which drops
-    // `undefined` fields, so an unforced request still serializes to the exact
-    // bytes a pre-`force` daemon wrote. Spelling it `force: false` instead would
-    // make every teardown row persisted before the upgrade -- and still inside
-    // its five-minute result TTL when the daemon restarts -- fail to match the
-    // identical unforced retry, turning a replay into `operation_id_conflict`
-    // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
-    ...(args.force ? { force: true } : {}),
-  });
-}
-
 export function isTeardownFailure(response: TeardownToolResponse): boolean {
   return "isError" in response && response.isError === true;
 }
@@ -2350,9 +2306,7 @@ export function getDeviceTeardownService(
 ): DeviceTeardownService {
   deviceTeardownService ??= new DeviceTeardownService({
     lifecycleCoordinator: dependencies.lifecycleCoordinator,
-    operationStore: dependencies.teardownDeviceOperationStoreFactory(),
     timer: dependencies.timer,
-    resultTtlMs: TEARDOWN_OPERATION_RESULT_TTL_MS,
   });
   return deviceTeardownService;
 }
@@ -3052,7 +3006,6 @@ export async function destroyTeardownTarget(
   context: TeardownContext,
   target: TeardownResolvedTarget,
   retainStableLifecycleUntil: (operation: Promise<unknown>) => void,
-  markDestructionStarted: () => void,
   onLateSuccess: () => void,
 ): Promise<void> {
   const deadlineTarget: BootedDevice = {
@@ -3070,7 +3023,6 @@ export async function destroyTeardownTarget(
       {
         requestAbortSignal: context.requestAbortSignal,
         operation: async (signal, timeoutMs) => {
-          markDestructionStarted();
           destroy = context.deviceManager.destroyDevice(target.device, {
             signal,
             timeoutMs,
@@ -3497,7 +3449,6 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       deviceProvisionerFactory: () => createDefaultDeviceProvisioner(),
       exactDeviceProvisionerFactory: (deviceManager, deviceCreationGate) =>
         createDefaultExactDeviceProvisioner(deviceManager, deviceCreationGate),
-      teardownDeviceOperationStoreFactory: () => new DeviceTeardownOperationRepository(),
       clearInstalledAppsForDevice: defaultClearInstalledAppsForDevice,
       stopPerformanceMonitoring: (deviceId) => getPerformanceMonitor().stopMonitoring(deviceId),
       stopAndroidObservers: defaultStopAndroidObservers,
@@ -3575,8 +3526,6 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
       deps.deviceCreationGateFactory ?? currentDeps.deviceCreationGateFactory,
     deviceProvisionerFactory: deps.deviceProvisionerFactory ?? currentDeps.deviceProvisionerFactory,
     ...provisionDeviceDependencyOverrides(deps, currentDeps),
-    teardownDeviceOperationStoreFactory:
-      deps.teardownDeviceOperationStoreFactory ?? currentDeps.teardownDeviceOperationStoreFactory,
     clearInstalledAppsForDevice:
       deps.clearInstalledAppsForDevice ?? currentDeps.clearInstalledAppsForDevice,
     stopPerformanceMonitoring:
@@ -3591,7 +3540,6 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
 }
 
 export function resetDeviceToolsDependencies(): void {
-  deviceTeardownService?.dispose();
   deviceTeardownService = undefined;
   moduleDependencies = null;
   activeProvisionDeviceRequests.clear();
@@ -3618,6 +3566,7 @@ export function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
 
 export function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceArgs {
   const __mcpSessionId = input.__mcpSessionId;
+  const __oneShotCli = input.__oneShotCli === true;
   const __mcpRequestDeadlineMs = input.__mcpRequestDeadlineMs;
   const __mcpLiveDeadlineKey =
     typeof input.__mcpLiveDeadlineKey === "string" ? input.__mcpLiveDeadlineKey : undefined;
@@ -3634,6 +3583,7 @@ export function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionD
     boot: parsed.boot ?? true,
     readiness: parsed.readiness ?? "automation",
     __mcpSessionId,
+    ...(__oneShotCli ? { __oneShotCli } : {}),
     __mcpRequestDeadlineMs,
     ...(__mcpLiveDeadlineKey ? { __mcpLiveDeadlineKey } : {}),
   };
@@ -4208,6 +4158,7 @@ export async function reserveInitialDeviceForReadiness(
   boot: DeviceBootResult,
   releaseReadinessReservations: DeviceReadinessReservation[],
   mcpSessionId: string | undefined,
+  oneShotCli = false,
 ): Promise<void> {
   const devicePool = getStartDevicePool(daemonState);
   if (!devicePool) {
@@ -4219,7 +4170,7 @@ export async function reserveInitialDeviceForReadiness(
       boot.device,
       boot.sourceImage?.name ?? boot.device.name,
       undefined,
-      mcpSessionId ? { mcpSessionId } : undefined,
+      oneShotCli ? { oneShotCli } : mcpSessionId ? { mcpSessionId } : undefined,
       true,
     ),
   );
@@ -4607,20 +4558,25 @@ export function registerDeviceTools() {
   const acquisitionHandlers = createAcquisitionHandlers({
     getBootAndPrepareDevice: () => startDeviceHandlers!.bootAndPrepareDevice,
   });
+  let provisionHandlers: ReturnType<typeof createProvisionDeviceHandlers> | undefined = undefined;
   startDeviceHandlers = createStartDeviceHandlers({
     prepareDevice: acquisitionHandlers.prepareDevice,
     stripInternalAcquisitionParams: acquisitionHandlers.stripInternalAcquisitionParams,
+    // createIfMissing rolls back through provisionDevice's cleanup (#11100).
+    rollbackCreatedDevice: (device, failure, options) =>
+      provisionHandlers!.rollbackCreatedDevice(device, failure, options),
   });
   const { startDeviceHandler, bindBootedDeviceSession, ensureCtrlProxyReady } = startDeviceHandlers;
   const { getAndroidHandler, getAppleHandler } = acquisitionHandlers;
 
   const { killDeviceHandler, executeDeleteDevice, deleteDeviceHandler } = createLifecycleHandlers();
 
-  const provisionDeviceHandler = createProvisionDeviceHandler({
+  provisionHandlers = createProvisionDeviceHandlers({
     bindBootedDeviceSession,
     ensureCtrlProxyReady,
     executeDeleteDevice,
   });
+  const { provisionDeviceHandler } = provisionHandlers;
 
   // Register with the tool registry
   registerDeviceResourceTools(getDeviceToolsDependencies);
@@ -4629,7 +4585,7 @@ export function registerDeviceTools() {
     "List device images",
     listDeviceImagesSchema,
     listDeviceImagesHandler,
-    { defaultEnabled: true, outputSchema: listDeviceImagesOutputSchema },
+    { defaultEnabled: true, outputSchema: listDeviceImagesOutputSchema, readOnly: true },
   );
 
   ToolRegistry.register(
@@ -4637,7 +4593,7 @@ export function registerDeviceTools() {
     "List booted devices; pending configured-image enrichment includes retry hints and failed provenance includes a non-retryable reason; resource pointers for images and detail in the note",
     listDevicesSchema,
     listDevicesHandler,
-    { defaultEnabled: true, outputSchema: listDevicesOutputSchema },
+    { defaultEnabled: true, outputSchema: listDevicesOutputSchema, readOnly: true },
   );
 
   ToolRegistry.register(

@@ -271,6 +271,16 @@ describe("executePlan cleans every acquired device before release", () => {
       }
     });
 
+    test("sessionHeld is false when the handler holds a derived label session as sessionUuid (#11111)", async () => {
+      await acquire(devices.slice(0, 2));
+
+      // The registry resolves `device: B` to the derived session before the handler runs.
+      expect(
+        withReportedSessionHold(failedResult, { holdSessionOnFailure: true, sessionUuid: "base:B" })
+          .sessionHeld,
+      ).toBe(false);
+    });
+
     test("a failed single-label plan keeps its base session like an unlabeled plan (#11091)", async () => {
       await acquire([devices[0]]);
       expect(sessionManager.getDeviceLabels("base")).toEqual({ A: "base" });
@@ -286,6 +296,74 @@ describe("executePlan cleans every acquired device before release", () => {
         withReportedSessionHold(failedResult, { holdSessionOnFailure: true, sessionUuid: "base" })
           .sessionHeld,
       ).toBe(true);
+    });
+
+    describe("app cleanup waits for the held session's release (#11139)", () => {
+      const holdWithCleanup = (overrides: Partial<PlanLifecycleInput> = {}): PlanLifecycleInput =>
+        input({
+          args: {
+            cleanupAppId: "com.example.chat",
+            cleanupClearAppData: true,
+            holdSessionOnFailure: true,
+          },
+          succeeded: false,
+          ...overrides,
+        });
+      const flush = async (): Promise<void> => {
+        for (let i = 0; i < 20; i++) {
+          await Promise.resolve();
+        }
+      };
+
+      test("a held failed plan keeps its app untouched for recovery", async () => {
+        await acquire([devices[0]], false);
+
+        await lifecycle.afterExecution(holdWithCleanup());
+
+        expect(cleanup.calls).toEqual([]);
+        expect(sessionManager.getSession("base")).not.toBeNull();
+        expect(events).toEqual([]);
+      });
+
+      test("the resumed plan's lifecycle cleans once, before it releases the session", async () => {
+        await acquire([devices[0]], false);
+        await lifecycle.afterExecution(holdWithCleanup());
+
+        await lifecycle.afterExecution(
+          input({ args: { cleanupAppId: "com.example.chat", cleanupClearAppData: true } }),
+        );
+        await flush();
+
+        expectCleanupBeforeRelease([devices[0]]);
+      });
+
+      test("a resumed plan without cleanupAppId still runs the deferred cleanup", async () => {
+        await acquire([devices[0]], false);
+        await lifecycle.afterExecution(holdWithCleanup());
+
+        await lifecycle.afterExecution(input({ args: {} }));
+        await flush();
+
+        expectCleanupBeforeRelease([devices[0]]);
+      });
+
+      test("releasing the held session after a failed recovery runs the cleanup", async () => {
+        await acquire([devices[0]], false);
+        await lifecycle.afterExecution(holdWithCleanup());
+
+        await sessionManager.releaseSession("base", "client-release");
+        await flush();
+
+        expect(cleanup.calls).toEqual([
+          { device: devices[0], config: { appId: "com.example.chat", clearAppData: true } },
+        ]);
+        expect(events).toEqual([
+          "session-release:base",
+          "cleanup-start:device-A",
+          "cleanup-end:device-A",
+        ]);
+        expect(sessionManager.hasDeviceCleanupInProgress("device-A")).toBe(false);
+      });
     });
 
     test("sessionHeld is reported only on a failed run that asked to hold", () => {

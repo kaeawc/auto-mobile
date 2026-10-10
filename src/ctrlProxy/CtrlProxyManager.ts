@@ -89,6 +89,36 @@ const CTRL_PROXY_INSTALL_TIMEOUT_MS = 120_000;
 const CTRL_PROXY_PULL_TIMEOUT_MS = 120_000;
 class CtrlProxyApkStageError extends ActionableError {}
 
+/** `adb install` failed in a way that an uninstall+reinstall cannot fix (e.g. USER_RESTRICTED). */
+export class CtrlProxyApkInstallError extends ActionableError {
+  constructor(
+    message: string,
+    readonly failureCode: string | undefined,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+  }
+}
+
+// Install failures that an in-place `install -r -d` cannot fix but a fresh uninstall + reinstall can.
+// VERSION_DOWNGRADE: `-d` only permits downgrades of debuggable apps/builds, so a user-build device
+// with a newer non-debuggable CtrlProxy than the pinned APK needs the uninstall. INSTALL_FAILED_DEXOPT
+// and INSTALL_FAILED_INVALID_APK are deliberately excluded: an invalid APK fails identically on a
+// fresh install, and dexopt failures are storage/runtime faults a wipe rarely clears while it does
+// discard the user's accessibility enablement; both stay installed and surface the failure.
+const SIGNATURE_MISMATCH_FAILURE_CODES = new Set([
+  "INSTALL_FAILED_UPDATE_INCOMPATIBLE",
+  "INSTALL_FAILED_VERSION_DOWNGRADE",
+  "INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES",
+  "INSTALL_FAILED_SHARED_USER_INCOMPATIBLE",
+]);
+
+/** Extracts the `INSTALL_*` failure token from `adb install` output, if present. */
+function extractInstallFailureCode(message: string): string | undefined {
+  const anchored = /Failure \[(INSTALL_[A-Z_]+)/.exec(message)?.[1];
+  return anchored ?? /INSTALL_[A-Z_]+/.exec(message)?.[0];
+}
+
 /**
  * Android-specific accessibility-service lifecycle, extending the
  * platform-agnostic {@link ProxyManager}.
@@ -1902,6 +1932,87 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
   }
 
+  /**
+   * Uninstalling cannot fix a non-signature failure (USER_RESTRICTED, Play Protect,
+   * INSUFFICIENT_STORAGE, transport drop) and would strand the device without CtrlProxy.
+   */
+  private keepInstalledAfterUpgradeFailure(
+    result: AccessibilityVersionCheckResult,
+    failureCode: string | undefined,
+    upgradeError: unknown,
+  ): AccessibilityVersionCheckResult {
+    const upgradeMessage = errorMessage(upgradeError);
+    logger.warn(
+      `[CTRL_PROXY] Upgrade failed (${failureCode ?? "unknown failure"}); keeping installed CtrlProxy`,
+      { error: upgradeMessage },
+    );
+    this.clearAvailabilityCache();
+    const typed = new CtrlProxyApkInstallError(
+      `CtrlProxy APK upgrade failed with ${failureCode ?? "an unrecognized adb failure"}; ` +
+        `the installed CtrlProxy was left in place (no uninstall attempted): ${upgradeMessage}`,
+      failureCode,
+      { cause: upgradeError },
+    );
+    return { ...result, status: "failed", error: typed.message, cause: typed };
+  }
+
+  /**
+   * Tries `install -r -d`. Returns the outcome, or undefined when a signature mismatch means the
+   * caller should fall back to uninstall + reinstall.
+   */
+  private async tryInPlaceUpgrade(
+    apkPath: string,
+    result: AccessibilityVersionCheckResult,
+    perf: PerformanceTracker,
+  ): Promise<AccessibilityVersionCheckResult | undefined> {
+    try {
+      result.attemptedInstall = true;
+      perf.startOperation("installApk");
+      await this.executeApkStage(`install -r -d "${apkPath}"`, "CtrlProxy APK upgrade");
+      perf.endOperation("installApk");
+      logger.info("[CTRL_PROXY] APK upgraded successfully");
+      this.clearAvailabilityCache();
+      return {
+        ...result,
+        status: "upgraded",
+      };
+    } catch (upgradeError) {
+      perf.endOperation("installApk");
+      if (upgradeError instanceof CtrlProxyApkStageError) {
+        this.clearAvailabilityCache();
+        throw upgradeError;
+      }
+      const deviceError = this.statusInspectionDeviceError(upgradeError);
+      if (deviceError) {
+        throw deviceError;
+      }
+      const upgradeMessage = errorMessage(upgradeError);
+      const failureCode = extractInstallFailureCode(upgradeMessage);
+      result.upgradeError = upgradeMessage;
+      if (!failureCode || !SIGNATURE_MISMATCH_FAILURE_CODES.has(failureCode)) {
+        return this.keepInstalledAfterUpgradeFailure(result, failureCode, upgradeError);
+      }
+      logger.warn(`[CTRL_PROXY] Upgrade failed with ${failureCode}, attempting reinstall`, {
+        error: upgradeMessage,
+      });
+    }
+    return undefined;
+  }
+
+  /** Appends whether CtrlProxy survived a failed uninstall+reinstall. */
+  private async describeReinstallFailure(reinstallMessage: string): Promise<string> {
+    let stillInstalled = false;
+    try {
+      stillInstalled = await this.isInstalled();
+    } catch (verifyError) {
+      logger.warn(
+        `[CTRL_PROXY] Could not verify CtrlProxy after failed reinstall: ${errorMessage(verifyError)}`,
+        verifyError,
+      );
+    }
+    return `${reinstallMessage} (CtrlProxy is ${stillInstalled ? "still installed" : "no longer installed"} after the failed reinstall)`;
+  }
+
   private async installDownloadedApk(
     apkPath: string,
     result: AccessibilityVersionCheckResult,
@@ -1910,30 +2021,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     perf: PerformanceTracker,
   ): Promise<AccessibilityVersionCheckResult> {
     if (isInstalled && !needsReinstallDueToUnknownSha) {
-      try {
-        result.attemptedInstall = true;
-        perf.startOperation("installApk");
-        await this.executeApkStage(`install -r -d "${apkPath}"`, "CtrlProxy APK upgrade");
-        perf.endOperation("installApk");
-        logger.info("[CTRL_PROXY] APK upgraded successfully");
-        this.clearAvailabilityCache();
-        return {
-          ...result,
-          status: "upgraded",
-        };
-      } catch (upgradeError) {
-        perf.endOperation("installApk");
-        if (upgradeError instanceof CtrlProxyApkStageError) {
-          this.clearAvailabilityCache();
-          throw upgradeError;
-        }
-        const deviceError = this.statusInspectionDeviceError(upgradeError);
-        if (deviceError) {
-          throw deviceError;
-        }
-        const upgradeMessage = errorMessage(upgradeError);
-        logger.warn("[CTRL_PROXY] Upgrade failed, attempting reinstall", { error: upgradeMessage });
-        result.upgradeError = upgradeMessage;
+      const upgraded = await this.tryInPlaceUpgrade(apkPath, result, perf);
+      if (upgraded) {
+        return upgraded;
       }
     }
 
@@ -1968,7 +2058,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return {
         ...result,
         status: "failed",
-        reinstallError: reinstallMessage,
+        reinstallError: isInstalled
+          ? await this.describeReinstallFailure(reinstallMessage)
+          : reinstallMessage,
         cause: reinstallError,
       };
     }

@@ -5430,7 +5430,12 @@ describe("DevicePool", () => {
       );
     });
 
-    const bindAs = (sessionId: string, mcpSessionId?: string, allowSessionRebind = false) =>
+    const bindAs = (
+      sessionId: string,
+      mcpSessionId?: string,
+      allowSessionRebind = false,
+      oneShotCli = false,
+    ) =>
       devicePool.bindOrReuseDeviceSession(
         sessionId,
         "sim-1",
@@ -5443,6 +5448,7 @@ describe("DevicePool", () => {
         undefined,
         undefined,
         mcpSessionId,
+        oneShotCli,
       );
     const refusalOf = (promise: Promise<unknown>) =>
       promise.then(
@@ -5499,6 +5505,105 @@ describe("DevicePool", () => {
 
       expect(refusal).toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
       expect((refusal as Error).message).toContain("already assigned to another session");
+      expect(devicePool.getDevice("sim-1")?.sessionId).toBe("session-1");
+    });
+
+    // #11096: every socket call carries a per-connection MCP id, so one-shot `--cli` connections
+    // are anonymous by their explicit marker, not by a missing id.
+    test("reuses a one-shot CLI connection's session for the next one-shot CLI connection", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
+      await bindAs("session-1", "cli-connection-1", false, true);
+
+      const sessionId = await bindAs("session-2", "cli-connection-2", false, true);
+
+      expect(sessionId).toBe("session-1");
+      expect(sessionManager.getSession("session-2")).toBeNull();
+      expect(sessionManager.getSession("session-1")?.persistenceMetadata?.source).toBe(
+        ANONYMOUS_ACQUISITION_SESSION_SOURCE,
+      );
+    });
+
+    // #11138: an acquisition that resolved a source image fell into the freshly-started guard.
+    test("reuses an anonymous session for a one-shot CLI bind that resolved a source image", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
+      await bindAs("session-1", "cli-connection-1", false, true);
+
+      const sessionId = await devicePool.bindOrReuseDeviceSession(
+        "session-2",
+        "sim-1",
+        "ios",
+        { name: "iPhone 15", platform: "ios", deviceId: "sim-1", isRunning: true, source: "local" },
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        "cli-connection-2",
+        true,
+      );
+
+      expect(sessionId).toBe("session-1");
+      expect(sessionManager.getSession("session-2")).toBeNull();
+    });
+
+    // #11153: one-shot A cold-boots the emulator while one-shot B's anonymous bind of the same
+    // serial lands first; A must be refused rather than silently sharing B's session.
+    test("refuses a one-shot CLI bind that cold-booted the device when another anonymous session took it", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
+      await bindAs("session-1", "cli-connection-1", false, true);
+
+      const refusal = await refusalOf(
+        devicePool.bindOrReuseDeviceSession(
+          "session-2",
+          "sim-1",
+          "ios",
+          {
+            name: "iPhone 15",
+            platform: "ios",
+            deviceId: "sim-1",
+            isRunning: true,
+            source: "local",
+          },
+          new FakeChildProcess() as unknown as ChildProcess,
+          undefined,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          "cli-connection-2",
+          true,
+        ),
+      );
+
+      expect(refusal).toBeInstanceOf(Error);
+      expect((refusal as Error).message).toContain("Freshly started device 'sim-1'");
+      expect(devicePool.getDevice("sim-1")?.sessionId).toBe("session-1");
+    });
+
+    test("refuses a one-shot CLI bind of a device an MCP connection acquired, typed", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
+      await bindAs("session-1", "connection-1");
+
+      const refusal = await refusalOf(bindAs("session-2", "cli-connection-2", false, true));
+
+      expect(refusal).toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
+      expect(devicePool.getDevice("sim-1")?.sessionId).toBe("session-1");
+      expect(sessionManager.getSession("session-1")?.persistenceMetadata?.source).toBeUndefined();
+    });
+
+    test("refuses an MCP connection's bind of a device a one-shot CLI connection acquired", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-1", "ios", "iPhone 15")];
+      await bindAs("session-1", "cli-connection-1", false, true);
+
+      const refusal = await refusalOf(bindAs("session-2", "connection-2"));
+
+      expect(refusal).toMatchObject({ code: DEVICE_OWNED_BY_OTHER_SESSION_CODE });
       expect(devicePool.getDevice("sim-1")?.sessionId).toBe("session-1");
     });
 

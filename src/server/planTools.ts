@@ -15,7 +15,7 @@ import {
 import { startMcpRecording, stopMcpRecording, getMcpRecordingStatus } from "./mcpRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";
-import { failedPlanSessionHoldable } from "./deviceLabelMapping";
+import { failedPlanSessionHoldable, planLifecycleSessionUuid } from "./deviceLabelMapping";
 import type { ExecutePlanResult } from "../models/ExecutePlanResult";
 import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import {
@@ -214,7 +214,10 @@ export const withReportedSessionHold = (
   params: { holdSessionOnFailure?: boolean; sessionUuid?: string },
 ): ExecutePlanResult =>
   params.holdSessionOnFailure === true && !result.success && params.sessionUuid
-    ? { ...result, sessionHeld: failedPlanSessionHoldable(params.sessionUuid) }
+    ? {
+        ...result,
+        sessionHeld: failedPlanSessionHoldable(planLifecycleSessionUuid(params.sessionUuid)),
+      }
     : result;
 
 const executePlanTool = async (
@@ -535,6 +538,11 @@ export const registerPlanTools = () => {
     "Record MCP tool calls to YAML. begin/end require mcp-recording; status always works.",
     recordStepsSchema,
     recordStepsTool,
-    { defaultEnabled: false, outputSchema: recordStepsResultSchema },
+    {
+      defaultEnabled: false,
+      outputSchema: recordStepsResultSchema,
+      // `status` only reports the recording; begin/end change it (#11107).
+      readOnly: (args: { action?: unknown }) => args?.action === "status",
+    },
   );
 };

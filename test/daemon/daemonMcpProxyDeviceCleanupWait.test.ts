@@ -2,7 +2,10 @@ import { describe, expect, test, spyOn } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
-import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
+import {
+  DeviceCleanupInProgressError,
+  DeviceShuttingDownError,
+} from "../../src/daemon/deviceAcquisitionRefusals";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -14,13 +17,28 @@ const refusal = (retryAfterMs: number) =>
     toolName: "startDevice",
     source: "MCP",
   });
+const shuttingDownRefusal = () =>
+  shapeToolCallError(new DeviceShuttingDownError("emulator-5554"), {
+    toolName: "startDevice",
+    source: "MCP",
+  });
 const success = { content: [{ type: "text", text: "ok" }] };
 
-async function setup(options: { refusals: number; retryAfterMs: number; budgetMs?: number }) {
+async function setup(options: {
+  refusals: number;
+  retryAfterMs: number;
+  budgetMs?: number;
+  shuttingDown?: boolean;
+}) {
   const timer = new FakeTimer();
   let remaining = options.refusals;
   const client = new FakeDaemonClient({
-    toolResultFor: () => (remaining-- > 0 ? refusal(options.retryAfterMs) : success),
+    toolResultFor: () =>
+      remaining-- > 0
+        ? options.shuttingDown
+          ? shuttingDownRefusal()
+          : refusal(options.retryAfterMs)
+        : success,
   });
   const manager = new FakeDaemonManager();
   manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
@@ -65,6 +83,24 @@ describe("DaemonMcpProxy waits out device_cleanup_in_progress (#10960)", () => {
         "startDevice",
         "startDevice",
       ]);
+    } finally {
+      await done();
+    }
+  });
+
+  test("retries a device_shutting_down refusal after its retryAfterMs (#11111)", async () => {
+    const { timer, client, proxy, done } = await setup({
+      refusals: 1,
+      retryAfterMs: 0,
+      shuttingDown: true,
+    });
+    try {
+      const call = proxy.callTool("startDevice", {});
+      await drainUntil(() => timer.getPendingSleepCount() === 1, { description: "first wait" });
+      expect(timer.getPendingSleeps()[0]).toBeGreaterThanOrEqual(2_000);
+      timer.advanceTime(timer.getPendingSleeps()[0]);
+      await expect(call).resolves.toEqual(success);
+      expect(client.callToolCalls).toHaveLength(2);
     } finally {
       await done();
     }

@@ -55,4 +55,23 @@ describe("runCliCommand daemon-option threading (issue #4247)", () => {
     expect(constructedWith[0]?.embeddedSdk).toBe(true);
     expect(constructedWith[0]?.networkMockable).toBe(true);
   });
+
+  // #11096: the daemon treats this connection's acquisitions as anonymous only when marked.
+  test("constructs the proxy as a one-shot CLI connection", async () => {
+    const oneShot: Array<boolean | undefined> = [];
+    setDaemonProxyFactoryForTesting((config): any => {
+      oneShot.push(config.oneShotCli);
+      return {
+        callTool: async (): Promise<any> => ({ success: true }),
+        adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
+        close: async (): Promise<void> => {
+          // no-op fake
+        },
+      };
+    });
+
+    await runCliCommand(["listApps", "--platform", "android"]);
+
+    expect(oneShot).toEqual([true]);
+  });
 });

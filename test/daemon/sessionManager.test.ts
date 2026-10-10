@@ -5,7 +5,7 @@ import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/sessionLivenes
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 import {
   SessionManager,
   getDefaultSessionHeartbeatTimeoutMs,
@@ -3216,14 +3216,14 @@ describe("SessionManager", () => {
   });
 
   describe("recordHeartbeat", () => {
-    test("holds a heartbeating session only through the suspect grace past its custom timeout", async () => {
+    test("releases a heartbeating session exactly at its idle deadline, with no suspect grace (#11107)", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android", 5000);
       fakeTimer.advanceTime(4000);
 
-      // A heartbeat does not extend the idle deadline (#10656), but a heartbeating session
-      // past its deadline is held for the suspect grace window (#10051) before release.
+      // A heartbeat does not extend the idle deadline (#10656), and the suspect grace (#10051)
+      // belongs to the heartbeat lease only: idleness releases exactly at the deadline.
       sessionManager.recordHeartbeat("session-1");
-      fakeTimer.advanceTime(1000 + SUSPECT_GRACE_MS);
+      fakeTimer.advanceTime(1000);
       expect(sessionManager.getSession("session-1")).not.toBeNull();
 
       fakeTimer.advanceTime(1);
@@ -6181,9 +6181,11 @@ describe("SessionManager", () => {
     }
   });
 
-  test("bounds a hung rehydration and skips the remaining rows", async () => {
-    const persistence = new FakeDeviceSessionPersistence();
-    const seed = async (sessionUuid: string, lastUsedAtMs: number): Promise<void> => {
+  async function seedRestartReleasedRows(
+    persistence: FakeDeviceSessionPersistence,
+    rows: Array<[sessionUuid: string, lastUsedAtMs: number]>,
+  ): Promise<void> {
+    for (const [sessionUuid, lastUsedAtMs] of rows) {
       await persistence.upsertActiveSession({
         sessionUuid,
         deviceId: "emulator-5554",
@@ -6197,20 +6199,48 @@ describe("SessionManager", () => {
         hasReceivedHeartbeat: true,
       });
       await persistence.markReleased(sessionUuid, "released", 30, "daemon-restart");
-    };
-    await seed("hung-rehydration", 20);
-    await seed("queued-rehydration", 10);
-    const restarted = new SessionManager(fakeTimer, persistence);
-    let assignments = 0;
+    }
+  }
+
+  /** Hangs the named rows' recovery; every other row recovers at once. */
+  function poolHanging(restarted: SessionManager, hung: ReadonlySet<string>) {
+    const assigned: string[] = [];
     const devicePool: SessionDeviceAssigner = {
-      async assignDeviceToSession(): Promise<string> {
-        assignments += 1;
-        return new Promise(() => {});
+      async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
+        assigned.push(sessionId);
+        if (hung.has(sessionId)) {
+          return await new Promise<string>(() => {});
+        }
+        const session = await restarted.createSession(
+          sessionId,
+          "emulator-5556",
+          "android",
+          target?.liveness?.sessionTimeoutMs,
+          target?.liveness?.heartbeatTimeoutMs,
+          target?.stableDeviceId,
+          target?.liveness,
+          target?.initialOwnership,
+        );
+        return session.assignedDevice;
       },
     };
+    return { assigned, devicePool };
+  }
+
+  test("bounds hung rehydrations; every row starts before the deadline (#11114)", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    await seedRestartReleasedRows(persistence, [
+      ["hung-rehydration", 20],
+      ["queued-rehydration", 10],
+    ]);
+    const restarted = new SessionManager(fakeTimer, persistence);
+    const { assigned, devicePool } = poolHanging(
+      restarted,
+      new Set(["hung-rehydration", "queued-rehydration"]),
+    );
     try {
       const rehydration = restarted.rehydratePersistedSessions(devicePool, { deadlineMs: 1_000 });
-      for (let turn = 0; turn < 12 && assignments === 0; turn++) {
+      for (let turn = 0; turn < 12 && assigned.length < 2; turn++) {
         await Promise.resolve();
       }
       await fakeTimer.advanceTimeAsync(1_000);
@@ -6223,7 +6253,64 @@ describe("SessionManager", () => {
         ],
         timedOut: true,
       });
-      expect(assignments).toBe(1);
+      expect(assigned).toEqual(["hung-rehydration", "queued-rehydration"]);
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("one slow row does not abandon the rows after it (#11114)", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    await seedRestartReleasedRows(persistence, [
+      ["slow-row", 20],
+      ["later-row", 10],
+    ]);
+    const restarted = new SessionManager(fakeTimer, persistence);
+    const { devicePool } = poolHanging(restarted, new Set(["slow-row"]));
+    try {
+      const rehydration = restarted.rehydratePersistedSessions(devicePool, { deadlineMs: 1_000 });
+      await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+      await fakeTimer.advanceTimeAsync(1_000);
+      await expect(rehydration).resolves.toEqual({
+        rehydrated: ["later-row"],
+        terminalized: [],
+        skipped: [{ sessionUuid: "slow-row", reason: "startup-deadline" }],
+        timedOut: true,
+      });
+      expect(restarted.getSession("later-row")).toMatchObject({ ownership: "awaiting-owner" });
+    } finally {
+      restarted.stopCleanupTimer();
+    }
+  });
+
+  test("a follow-up sweep recovers rows the deadline kept from starting (#11114)", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    await seedRestartReleasedRows(persistence, [
+      ["slow-row", 20],
+      ["deferred-row", 10],
+    ]);
+    const restarted = new SessionManager(fakeTimer, persistence);
+    const { assigned, devicePool } = poolHanging(restarted, new Set(["slow-row"]));
+    try {
+      const rehydration = restarted.rehydratePersistedSessions(devicePool, {
+        deadlineMs: 1_000,
+        concurrency: 1,
+      });
+      await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+      await fakeTimer.advanceTimeAsync(1_000);
+      await expect(rehydration).resolves.toMatchObject({
+        skipped: [
+          { sessionUuid: "slow-row", reason: "startup-deadline" },
+          { sessionUuid: "deferred-row", reason: "startup-deadline" },
+        ],
+        timedOut: true,
+      });
+
+      await fakeTimer.advanceTimeAsync(0);
+      await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+
+      expect(assigned).toEqual(["slow-row", "deferred-row"]);
+      expect(restarted.getSession("deferred-row")).toMatchObject({ ownership: "awaiting-owner" });
     } finally {
       restarted.stopCleanupTimer();
     }

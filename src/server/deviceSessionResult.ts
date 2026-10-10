@@ -1,9 +1,15 @@
-import { DEVICE_SESSION_RECOVERY_TOOLS } from "../models/deviceSessionRecovery";
+import {
+  ACQUIRE_NEW_SESSION_NEXT_ACTION,
+  DEVICE_SESSION_RECOVERY_TOOLS,
+} from "../models/deviceSessionRecovery";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
 import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
-import { DEVICE_CLEANUP_IN_PROGRESS_CODE } from "../daemon/deviceAcquisitionRefusals";
+import {
+  DEVICE_CLEANUP_IN_PROGRESS_CODE,
+  DEVICE_SHUTTING_DOWN_CODE,
+} from "../daemon/deviceAcquisitionRefusals";
 
 /**
  * The tools that acquire a device and mint a device session, returning its
@@ -44,6 +50,22 @@ export function appendHeartbeatExpiryMessage(
   return `${message} No heartbeat for ${ageMs} ms (limit ${timeoutMs} ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).`;
 }
 
+/**
+ * The fields every terminal-session refusal shares (#11098). The session UUID cannot be retried, so
+ * `retryable` is false and `nextAction` says what to do instead.
+ */
+export function terminalSessionRefusalFields(ownerPid?: number) {
+  return {
+    retryable: false as const,
+    nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
+    ...(ownerPid === undefined ? {} : { ownerPid }),
+    recovery: {
+      action: "acquire_replacement_session" as const,
+      tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
+    },
+  };
+}
+
 /** Build the ownership-loss envelope shared by the direct MCP server and daemon proxy. */
 export function sessionOwnershipLostPayload({
   message,
@@ -62,11 +84,7 @@ export function sessionOwnershipLostPayload({
       message: appendHeartbeatExpiryMessage(message, release),
       sessionUuid,
       reason,
-      retryable: true,
-      recovery: {
-        action: "acquire_replacement_session",
-        tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
-      },
+      ...terminalSessionRefusalFields(release?.ownerPid),
       ...(release ? { release } : {}),
     },
   };
@@ -163,7 +181,11 @@ export function isDeviceBindingTool(name: string): boolean {
   return name === "setActiveDevice" || isDeviceSessionAcquisitionTool(name);
 }
 
-/** The retry hint of a typed `device_cleanup_in_progress` refusal result, when it is one. */
+/**
+ * The retry hint of a typed `device_cleanup_in_progress` or `device_shutting_down` refusal result,
+ * when it is one. Both are bind refusals that never reached a device and clear on their own
+ * (#10960, #11111).
+ */
 export function readDeviceCleanupInProgressRefusal(
   result: unknown,
 ): { retryAfterMs?: number } | undefined {
@@ -171,7 +193,10 @@ export function readDeviceCleanupInProgressRefusal(
     return undefined;
   }
   const payload = readToolEnvelopePayload(result)?.payload;
-  if (!payload || payload.code !== DEVICE_CLEANUP_IN_PROGRESS_CODE) {
+  if (
+    !payload ||
+    (payload.code !== DEVICE_CLEANUP_IN_PROGRESS_CODE && payload.code !== DEVICE_SHUTTING_DOWN_CODE)
+  ) {
     return undefined;
   }
   const { retryAfterMs } = payload;

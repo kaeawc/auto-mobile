@@ -34,6 +34,10 @@ import {
 } from "./androidSegmentedPlanVideoSession";
 import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
+import { DaemonState } from "../daemon/daemonState";
+import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
+import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { type StoppedSegment, writeSegmentManifest } from "./segmentManifest";
 
 const DEFAULT_MAX_DURATION_SECONDS = 30;
@@ -503,11 +507,114 @@ function segmentedStopResponse(stopped: StoppedSegmentedSession) {
   });
 }
 
-async function tryStopSegmentedSession(recordingId: string) {
+/**
+ * How a stop-by-id requester is matched to a recording's owner (#11140). The recorded owner is
+ * the registry-resolved session (a derived `${base}:${label}` session, or the session holding
+ * the device), while the caller may present the plan's base session or a proxy-bound one.
+ */
+export interface RecordingRequesterResolver {
+  baseSessionUuid(sessionUuid: string): string;
+  /** Whether the MCP connection acquired the session that holds `deviceId`. */
+  connectionOwnsDeviceSession(
+    mcpSessionId: string,
+    deviceId: string,
+    ownerBaseSessionUuid: string,
+  ): boolean;
+}
+
+const daemonRecordingRequesterResolver: RecordingRequesterResolver = {
+  baseSessionUuid(sessionUuid) {
+    if (!DaemonState.getInstance().isInitialized()) {
+      return sessionUuid;
+    }
+    const sessionManager = DaemonState.getInstance().getSessionManager();
+    return resolveToolSelectionBaseSessionUuid(sessionUuid, sessionManager) ?? sessionUuid;
+  },
+  connectionOwnsDeviceSession(mcpSessionId, deviceId, ownerBaseSessionUuid) {
+    if (!DaemonState.getInstance().isInitialized()) {
+      return false;
+    }
+    const held = DaemonState.getInstance()
+      .getDevicePool()
+      .resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId);
+    return held !== undefined && this.baseSessionUuid(held) === ownerBaseSessionUuid;
+  },
+};
+
+let recordingRequesterResolver: RecordingRequesterResolver = daemonRecordingRequesterResolver;
+
+export function setRecordingRequesterResolverForTesting(
+  resolver: RecordingRequesterResolver | undefined,
+): void {
+  recordingRequesterResolver = resolver ?? daemonRecordingRequesterResolver;
+}
+
+function mcpSessionIdOf(args: VideoRecordingArgs): string | undefined {
+  const value: unknown = Reflect.get(args, INTERNAL_MCP_SESSION_PARAM);
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * An active recording another session started is not the caller's to stop (#11130): a stop by id
+ * needs no device, so without this any live session holding a recordingId could end a capture on a
+ * device it does not hold. Ownerless recordings and unscoped (sessionless) callers stay open, the
+ * same visibility rule the finalized lookups use.
+ */
+function assertActiveRecordingOwner(input: {
+  recordingId: string;
+  deviceId: string;
+  recordingOwner: string | undefined;
+  requesterSessionUuid: string | undefined;
+  requesterMcpSessionId?: string;
+}): void {
+  const { recordingId, deviceId, recordingOwner, requesterSessionUuid, requesterMcpSessionId } =
+    input;
+  if (!recordingOwner || requesterSessionUuid === undefined) {
+    return;
+  }
+  if (recordingOwner === requesterSessionUuid) {
+    return;
+  }
+  const ownerBase = recordingRequesterResolver.baseSessionUuid(recordingOwner);
+  if (recordingRequesterResolver.baseSessionUuid(requesterSessionUuid) === ownerBase) {
+    return;
+  }
+  if (
+    requesterMcpSessionId &&
+    recordingRequesterResolver.connectionOwnsDeviceSession(
+      requesterMcpSessionId,
+      deviceId,
+      ownerBase,
+    )
+  ) {
+    return;
+  }
+  throw new InputDeviceOwnedError(
+    "videoRecording stop",
+    deviceId,
+    requesterSessionUuid,
+    undefined,
+    `videoRecording stop refused: recording ${recordingId} on device '${deviceId}' belongs to ` +
+      "another session. Only the session that started an active recording can stop it.",
+  );
+}
+
+async function tryStopSegmentedSession(
+  recordingId: string,
+  ownerSessionUuid?: string,
+  requesterMcpSessionId?: string,
+) {
   const session = segmentedSessions.get(recordingId);
   if (!session) {
     return null;
   }
+  assertActiveRecordingOwner({
+    recordingId,
+    deviceId: session.deviceId,
+    recordingOwner: session.ownerSession,
+    requesterSessionUuid: ownerSessionUuid,
+    requesterMcpSessionId,
+  });
 
   try {
     return segmentedStopResponse(await segmentedSessions.stopAndRemove(recordingId, session));
@@ -560,8 +667,16 @@ async function finalizedStopResponse(recordingId: string, ownerSessionUuid?: str
   });
 }
 
-async function stopRecordingById(recordingId: string, ownerSessionUuid?: string) {
-  const segmented = await tryStopSegmentedSession(recordingId);
+async function stopRecordingById(
+  recordingId: string,
+  ownerSessionUuid?: string,
+  requesterMcpSessionId?: string,
+) {
+  const segmented = await tryStopSegmentedSession(
+    recordingId,
+    ownerSessionUuid,
+    requesterMcpSessionId,
+  );
   if (segmented) {
     return segmented;
   }
@@ -575,6 +690,14 @@ async function stopRecordingById(recordingId: string, ownerSessionUuid?: string)
     if (finalized) {
       return finalized;
     }
+  } else {
+    assertActiveRecordingOwner({
+      recordingId,
+      deviceId: matching.deviceId,
+      recordingOwner: matching.ownerSessionUuid,
+      requesterSessionUuid: ownerSessionUuid,
+      requesterMcpSessionId,
+    });
   }
 
   try {
@@ -803,7 +926,7 @@ function createVideoStopResponse(output: {
 
 async function stopDeviceRecordings(device: BootedDevice, args: VideoRecordingArgs) {
   if (args.recordingId) {
-    return stopRecordingById(args.recordingId, args.sessionUuid);
+    return stopRecordingById(args.recordingId, args.sessionUuid, mcpSessionIdOf(args));
   }
 
   const results: Array<Record<string, unknown>> = [];
@@ -931,7 +1054,7 @@ export function registerVideoRecordingTools(): void {
   ) => {
     signal?.throwIfAborted();
     if (args.action === "stop" && args.recordingId) {
-      return stopRecordingById(args.recordingId, args.sessionUuid);
+      return stopRecordingById(args.recordingId, args.sessionUuid, mcpSessionIdOf(args));
     }
 
     throw new ActionableError(

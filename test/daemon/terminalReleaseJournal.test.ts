@@ -4,14 +4,26 @@ import os from "node:os";
 import path from "node:path";
 import {
   FileTerminalReleaseJournal,
-  renameWithRetry,
+  nodeTerminalReleaseJournalFileSystem,
   createDaemonTerminalReleaseJournal,
   TERMINAL_RELEASE_JOURNAL_FILE_NAME,
+  terminalReleaseJournalPath,
 } from "../../src/daemon/terminalReleaseJournal";
 import { logger } from "../../src/utils/logger";
 import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalReleaseJournalFileSystem";
 
 const FILE = "/data/terminal-release-intents.jsonl";
+
+/** A read-only view of the shared fake that ignores its read failure (a later daemon). */
+class FakeReadable extends FakeTerminalReleaseJournalFileSystem {
+  constructor(private readonly backing: FakeTerminalReleaseJournalFileSystem) {
+    super();
+  }
+
+  override readText(filePath: string): string | undefined {
+    return this.backing.files.get(filePath);
+  }
+}
 
 function line(sessionId: string, reason: string, at: number): string {
   return `${JSON.stringify({ sessionId, reason, at })}\n`;
@@ -65,27 +77,36 @@ describe("FileTerminalReleaseJournal (#10959)", () => {
     ]);
   });
 
-  test("renameWithRetry retries transient EPERM/EACCES and rethrows other errors (#11077)", () => {
-    const sleeps: number[] = [];
-    let calls = 0;
-    const flaky = () => {
-      calls++;
-      if (calls < 3) {
-        throw Object.assign(new Error("busy"), { code: calls === 1 ? "EPERM" : "EACCES" });
-      }
-    };
-    renameWithRetry(flaky, (ms) => sleeps.push(ms), "a", "b");
-    expect(calls).toBe(3);
-    expect(sleeps.length).toBe(2);
+  test("a failed compaction rename is not retried or slept on; the lifted marker is appended at once (#11102)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trj-"));
+    const file = path.join(dir, TERMINAL_RELEASE_JOURNAL_FILE_NAME);
+    const rename = spyOn(fs, "renameSync").mockImplementation(() => {
+      throw Object.assign(new Error("held by AV"), { code: "EPERM" });
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const wait = spyOn(Atomics, "wait");
+    try {
+      const journal = new FileTerminalReleaseJournal(file, nodeTerminalReleaseJournalFileSystem);
+      journal.record({ sessionId: "live", reason: "heartbeat-timeout", at: 1 });
+      journal.record({ sessionId: "other", reason: "explicit-release", at: 2 });
 
-    const missing = () => {
-      throw Object.assign(new Error("gone"), { code: "ENOENT" });
-    };
-    expect(() => renameWithRetry(missing, () => {}, "a", "b")).toThrow("gone");
-    const stuck = () => {
-      throw Object.assign(new Error("stuck"), { code: "EPERM" });
-    };
-    expect(() => renameWithRetry(stuck, () => {}, "a", "b")).toThrow("stuck");
+      journal.resolve("live");
+
+      expect(rename).toHaveBeenCalledTimes(1);
+      expect(wait).not.toHaveBeenCalled();
+      expect(fs.readdirSync(dir)).toEqual([TERMINAL_RELEASE_JOURNAL_FILE_NAME]);
+      rename.mockRestore();
+      expect(
+        new FileTerminalReleaseJournal(file, nodeTerminalReleaseJournalFileSystem)
+          .loadUnconfirmed()
+          .map(({ sessionId }) => sessionId),
+      ).toEqual(["other"]);
+    } finally {
+      wait.mockRestore();
+      warn.mockRestore();
+      rename.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("a confirmation for another reason keeps a later upgraded intent", () => {
@@ -128,6 +149,33 @@ describe("FileTerminalReleaseJournal (#10959)", () => {
     }
   });
 
+  test("an unreadable journal is never compacted; it appends and retries the read (#11114)", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    fs.files.set(FILE, line("predecessor", "heartbeat-timeout", 1));
+    fs.failReads = Object.assign(new Error("EIO"), { code: "EIO" });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const journal = new FileTerminalReleaseJournal(FILE, fs);
+      expect(journal.loadUnconfirmed()).toEqual([]);
+      journal.record({ sessionId: "mine", reason: "explicit-release", at: 2 });
+      journal.resolve("mine", "explicit-release");
+
+      // Nothing was rewritten or removed from the empty cache: the predecessor intent survives.
+      expect(fs.replaces).toBe(0);
+      expect(new FileTerminalReleaseJournal(FILE, new FakeReadable(fs)).loadUnconfirmed()).toEqual([
+        { sessionId: "predecessor", reason: "heartbeat-timeout", at: 1 },
+      ]);
+
+      // Once the file reads again, the same journal recovers the predecessor intent.
+      fs.failReads = undefined;
+      expect(journal.loadUnconfirmed()).toEqual([
+        { sessionId: "predecessor", reason: "heartbeat-timeout", at: 1 },
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("a failed append is logged and still tracked in memory", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
@@ -147,14 +195,20 @@ describe("FileTerminalReleaseJournal (#10959)", () => {
   test("the daemon journal round-trips through a real data directory", () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "terminal-release-journal-"));
     try {
-      const filePath = path.join(dataDir, "nested", TERMINAL_RELEASE_JOURNAL_FILE_NAME);
-      const journal = createDaemonTerminalReleaseJournal(path.dirname(filePath));
+      const filePath = terminalReleaseJournalPath(path.join(dataDir, "nested"), "daemon-a");
+      const open = () =>
+        createDaemonTerminalReleaseJournal({
+          dataDir: path.join(dataDir, "nested"),
+          daemonSessionId: "daemon-a",
+          liveDaemonSessionIds: new Set(["daemon-a"]),
+        });
+      const journal = open();
       journal.record({ sessionId: "a", reason: "explicit-release", at: 1 });
       journal.record({ sessionId: "b", reason: "heartbeat-timeout", at: 2 });
       journal.resolve("a");
 
       expect(fs.readFileSync(filePath, "utf-8")).toBe(line("b", "heartbeat-timeout", 2));
-      expect(createDaemonTerminalReleaseJournal(path.dirname(filePath)).loadUnconfirmed()).toEqual([
+      expect(open().loadUnconfirmed()).toEqual([
         { sessionId: "b", reason: "heartbeat-timeout", at: 2 },
       ]);
 
@@ -163,6 +217,85 @@ describe("FileTerminalReleaseJournal (#10959)", () => {
       expect(fs.readdirSync(path.dirname(filePath))).toEqual([]);
     } finally {
       fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("per-daemon terminal release journals (#11158)", () => {
+  const DATA = "/data";
+  const legacy = path.join(DATA, TERMINAL_RELEASE_JOURNAL_FILE_NAME);
+  const own = terminalReleaseJournalPath(DATA, "self");
+  const peer = terminalReleaseJournalPath(DATA, "live-peer");
+  const dead = terminalReleaseJournalPath(DATA, "dead-daemon");
+
+  function open(fs: FakeTerminalReleaseJournalFileSystem, live: string[] = ["self", "live-peer"]) {
+    return createDaemonTerminalReleaseJournal({
+      dataDir: DATA,
+      daemonSessionId: "self",
+      liveDaemonSessionIds: new Set(live),
+      fileSystem: fs,
+    });
+  }
+
+  test("adopts a dead daemon's intents and never reads or touches a live peer's", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    fs.files.set(peer, line("peer-session", "heartbeat-timeout", 1));
+    fs.files.set(dead, line("dead-session", "explicit-release", 2) + '{"torn');
+
+    const journal = open(fs);
+
+    expect(journal.loadUnconfirmed()).toEqual([
+      { sessionId: "dead-session", reason: "explicit-release", at: 2 },
+    ]);
+    expect(fs.files.get(own)).toBe(line("dead-session", "explicit-release", 2));
+    expect(fs.files.has(dead)).toBe(false);
+    expect(fs.files.get(peer)).toBe(line("peer-session", "heartbeat-timeout", 1));
+  });
+
+  test("compaction rewrites only this daemon's file", () => {
+    const fs = new FakeTerminalReleaseJournalFileSystem();
+    const peerText = line("peer-a", "heartbeat-timeout", 1) + line("peer-b", "device-killed", 2);
+    fs.files.set(peer, peerText);
+    const journal = open(fs);
+    journal.record({ sessionId: "mine", reason: "explicit-release", at: 3 });
+    journal.record({ sessionId: "mine-2", reason: "explicit-release", at: 4 });
+
+    journal.resolve("mine");
+    journal.resolve("mine-2");
+
+    expect(fs.files.has(own)).toBe(false);
+    expect(fs.files.get(peer)).toBe(peerText);
+  });
+
+  test("the legacy shared file is adopted only when no peer daemon is live", () => {
+    const withPeer = new FakeTerminalReleaseJournalFileSystem();
+    withPeer.files.set(legacy, line("legacy-session", "explicit-release", 1));
+    expect(open(withPeer).loadUnconfirmed()).toEqual([]);
+    expect(withPeer.files.has(legacy)).toBe(true);
+
+    const alone = new FakeTerminalReleaseJournalFileSystem();
+    alone.files.set(legacy, line("legacy-session", "explicit-release", 1));
+    expect(open(alone, ["self"]).loadUnconfirmed()).toEqual([
+      { sessionId: "legacy-session", reason: "explicit-release", at: 1 },
+    ]);
+    expect(alone.files.has(legacy)).toBe(false);
+  });
+
+  test("a dead daemon's file is kept when its intents cannot be adopted durably", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const fs = new FakeTerminalReleaseJournalFileSystem();
+      fs.files.set(dead, line("dead-session", "explicit-release", 2));
+      fs.failNextAppend = new Error("ENOSPC");
+
+      expect(open(fs).loadUnconfirmed()).toEqual([]);
+      expect(fs.files.get(dead)).toBe(line("dead-session", "explicit-release", 2));
+      // The next startup adopts it.
+      expect(open(fs).loadUnconfirmed()).toEqual([
+        { sessionId: "dead-session", reason: "explicit-release", at: 2 },
+      ]);
+    } finally {
+      warn.mockRestore();
     }
   });
 });

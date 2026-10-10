@@ -95,8 +95,8 @@ export interface NetworkStateConfig {
  * replaced). State installed without a session has no owner, so no session
  * release ever removes it, even on a device where a session also installed
  * state. It stays until it is cleared explicitly (`clearMockNetwork`, a cancelled
- * or expired simulation) or the device is retired; this host keeps no other
- * lifetime for it.
+ * or expired simulation), a session acquires the device (#11130), or the device
+ * is retired.
  */
 interface DeviceNetworkScope {
   mocks: Map<string, MockRule>;
@@ -218,6 +218,30 @@ export class NetworkState {
       this.stopSimulationTimer(scope);
       scope.simulation = null;
       scope.simulationOwner = null;
+      removed = true;
+    }
+    this.pruneIfEmpty(deviceId);
+    return removed;
+  }
+
+  /**
+   * Remove the rules and the simulation installed without a session on a device, when a session
+   * acquires it (#11130): sessionless state has no release of its own, so without this it would
+   * keep shaping the new holder's traffic. Returns true when state was removed.
+   */
+  clearSessionlessDeviceState(deviceId: string): boolean {
+    const scope = this._devices.get(deviceId);
+    if (!scope) {
+      return false;
+    }
+    const sessionless = [...scope.mocks.keys()].filter((mockId) => !scope.mockOwners.has(mockId));
+    for (const mockId of sessionless) {
+      scope.mocks.delete(mockId);
+    }
+    let removed = sessionless.length > 0;
+    if (scope.simulation && scope.simulationOwner === null) {
+      this.stopSimulationTimer(scope);
+      scope.simulation = null;
       removed = true;
     }
     this.pruneIfEmpty(deviceId);

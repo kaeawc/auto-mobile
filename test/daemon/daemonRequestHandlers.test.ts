@@ -64,6 +64,10 @@ class FakeDevicePool {
     return this.devices;
   }
 
+  getDevice(deviceId: string): PooledDevice | null {
+    return this.devices.find((device) => device.id === deviceId) ?? null;
+  }
+
   isPooledIdentityUnresolved(deviceId: string): boolean {
     return this.devices.find((device) => device.id === deviceId)?.identityUnresolved === true;
   }
@@ -760,7 +764,7 @@ describe("handleDaemonRequest", () => {
       expect(snapshotOf()).toEqual(before);
     });
 
-    test("keeps a one-shot CLI session on the keeper's claim and ticks as before", async () => {
+    test("moves a heartbeat-contract session onto the CLI policy on the keeper's first claim", async () => {
       const state = await stateWithSession();
 
       expect(await handleDaemonRequest(keeperRequest("keeper", true), state)).toMatchObject({
@@ -771,18 +775,42 @@ describe("handleDaemonRequest", () => {
         livenessPolicy: "cli-idle",
         livenessOwnerToken: "keeper",
       });
+    });
 
-      fakeTimer.advanceTime(30_000);
-      expect(await handleDaemonRequest(keeperRequest("keeper", false), state)).toMatchObject({
+    // Owner decision 2026-10-09 (#11096): keepers are dropped for CLI sessions. Every one-shot
+    // `--cli` call re-claims a cli-idle session's liveness, so a keeper that claimed it was
+    // displaced by the next call and its next tick failed liveness_owner_superseded.
+    test("a keeper on a one-shot CLI session no-ops instead of being superseded by the next call", async () => {
+      const state = await stateWithSession();
+      expect((await handleDaemonRequest(proxyClaim("cli-call-1", "cli"), state)).success).toBe(
+        true,
+      );
+      const noop = {
         success: true,
-      });
-      expect(snapshotOf()).toMatchObject({ lastHeartbeat: fakeTimer.now() });
+        result: { sessionId, livenessPolicy: "cli-idle", livenessUnchanged: true },
+      };
 
-      // A later one-shot keeper with a new token claims the cli-idle session.
-      expect(await handleDaemonRequest(keeperRequest("keeper-2", true), state)).toMatchObject({
-        success: true,
-      });
-      expect(snapshotOf()).toMatchObject({ livenessOwnerToken: "keeper-2" });
+      fakeTimer.advanceTime(1_000);
+      let before = snapshotOf();
+      expect(await handleDaemonRequest(keeperRequest("keeper", true), state)).toEqual(noop);
+      // The keeper claims nothing and touches nothing.
+      expect(snapshotOf()).toEqual(before);
+
+      fakeTimer.advanceTime(1_000);
+      expect((await handleDaemonRequest(proxyClaim("cli-call-2", "cli"), state)).success).toBe(
+        true,
+      );
+      fakeTimer.advanceTime(1_000);
+      before = snapshotOf();
+      expect(before.livenessOwnerToken).toBe("cli-call-2");
+      for (const request of [
+        keeperRequest("keeper", false),
+        keeperRequest("keeper", true),
+        keeperRequest(undefined, false),
+      ]) {
+        expect(await handleDaemonRequest(request, state)).toEqual(noop);
+        expect(snapshotOf()).toEqual(before);
+      }
     });
 
     test("does not refuse a one-shot --cli proxy's own declaration without the keeper marker", async () => {
@@ -1062,7 +1090,7 @@ describe("handleDaemonRequest", () => {
     },
   );
 
-  test("unknown session release stays idempotent without cancelling or waiting", async () => {
+  test("a never-issued session release is refused without cancelling or waiting (#11148)", async () => {
     const timer = new FakeTimer();
     const tracker = new ExecutionTracker(timer, new FakeIdGenerator());
     const cancel = spyOn(tracker, "cancelSessionUuidExecutions");
@@ -1070,16 +1098,14 @@ describe("handleDaemonRequest", () => {
     try {
       expect(
         await handleDaemonRequest(
-          buildRequest("daemon/releaseSession", { sessionId: "missing" }),
+          buildRequest("daemon/releaseSession", { sessionId: "missing", requireKnown: true }),
           new FakeDaemonState(sessionManager, pool),
           tracker,
         ),
-      ).toEqual({
-        success: true,
-        result: {
-          message: "Session missing already released or never existed",
-          alreadyReleased: true,
-        },
+      ).toMatchObject({
+        success: false,
+        code: "daemon_session_not_found",
+        error: expect.stringContaining("Session missing is not a known session"),
       });
       expect(cancel).not.toHaveBeenCalled();
       expect(pool.releasedDevices).toEqual([]);
@@ -1088,6 +1114,34 @@ describe("handleDaemonRequest", () => {
     } finally {
       cancel.mockRestore();
     }
+  });
+
+  test("an unknown session release stays idempotent without requireKnown (desktop wire)", async () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator());
+    const pool = new FakeDevicePool({ total: 0, idle: 0, assigned: 0, error: 0 });
+
+    expect(
+      await handleDaemonRequest(
+        buildRequest("daemon/releaseSession", { sessionId: "missing" }),
+        new FakeDaemonState(sessionManager, pool),
+        tracker,
+      ),
+    ).toMatchObject({ success: true, result: { alreadyReleased: true } });
+  });
+
+  test("releasing an already released session stays idempotent (#11148)", async () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator());
+    const pool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+    await sessionManager.createSession("released-once", "emulator-5556", "android");
+    const release = () =>
+      handleDaemonRequest(
+        buildRequest("daemon/releaseSession", { sessionId: "released-once", requireKnown: true }),
+        new FakeDaemonState(sessionManager, pool),
+        tracker,
+      );
+    await release();
+
+    expect(await release()).toMatchObject({ success: true, result: { alreadyReleased: true } });
   });
 
   test("releases session and device without a cancellation await when idle", async () => {
@@ -1319,6 +1373,38 @@ describe("handleDaemonRequest", () => {
     expect(
       (await handleDaemonRequest(buildRequest("daemon/deviceLeaseStatus", {}), state)).success,
     ).toBe(false);
+  });
+
+  test("reports a pool-assigned device as in use before its session is published (#11158)", async () => {
+    const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+    devicePool.devices.push({
+      id: "emulator-5600",
+      name: "emulator-5600",
+      platform: "android",
+      sessionId: "session-unpublished",
+      status: "assigned",
+      lastUsedAt: 0,
+      assignmentCount: 1,
+      errorCount: 0,
+      incarnation: 1,
+    });
+    const state = new FakeDaemonState(sessionManager, devicePool);
+    spyOn(sessionManager, "getSessionForDevice").mockReturnValue(null);
+
+    const status = await handleDaemonRequest(
+      buildRequest("daemon/deviceLeaseStatus", { deviceId: "emulator-5600" }),
+      state,
+    );
+    const relinquish = await handleDaemonRequest(
+      buildRequest("daemon/relinquishDeviceLease", { deviceId: "emulator-5600" }),
+      state,
+    );
+
+    expect(status.result).toMatchObject({ sessionId: "session-unpublished" });
+    expect(relinquish.result).toMatchObject({
+      sessionId: "session-unpublished",
+      released: false,
+    });
   });
 
   test("reports CtrlProxy requests and idleness that no tool call is bound to (#10497 review)", async () => {

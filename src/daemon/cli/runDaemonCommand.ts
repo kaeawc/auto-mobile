@@ -268,7 +268,17 @@ function requireDaemonSession(
   return session;
 }
 
-function recordLocalDaemonHeartbeat(daemonState: DaemonStateLike, sessionId: string): void {
+/**
+ * Owner decision 2026-10-09 (#11096): a one-shot CLI session needs no keeper. Its idle window runs
+ * from tool calls, and each `--cli` call re-claims its liveness, so a heartbeat on it is a
+ * successful no-op that claims nothing.
+ */
+function cliIdleNoopMessage(sessionId: string): string {
+  return `Session ${sessionId} is a one-shot CLI session: its idle window runs from tool calls, so this heartbeat changed nothing (no keeper is needed).`;
+}
+
+/** Record a keeper heartbeat in-process; false when the session is a no-op cli-idle session. */
+function recordLocalDaemonHeartbeat(daemonState: DaemonStateLike, sessionId: string): boolean {
   const sessionManager = daemonState.getSessionManager();
   const session =
     sessionManager.getSession(sessionId) ?? sessionManager.getReleasingSession(sessionId);
@@ -284,7 +294,11 @@ function recordLocalDaemonHeartbeat(daemonState: DaemonStateLike, sessionId: str
       ),
     );
   }
+  if (session.livenessPolicy === "cli-idle") {
+    return false;
+  }
   sessionManager.recordHeartbeat(sessionId);
+  return true;
 }
 
 async function runDaemonLifecycleCommand(
@@ -548,7 +562,7 @@ async function releaseDaemonSession(args: string[], manager: DaemonManager): Pro
       try {
         await client.connect();
         await client
-          .callDaemonMethod("daemon/releaseSession", { sessionId })
+          .callDaemonMethod("daemon/releaseSession", { sessionId, requireKnown: true })
           .then(async (result: unknown) => {
             await client.close();
             if (!isReleaseResult(result)) {
@@ -602,22 +616,31 @@ async function recordDaemonHeartbeat(args: string[], manager: DaemonManager): Pr
       parseDaemonHeartbeatCommandArgs(args);
     const daemonState = manager.getDaemonState();
     if (daemonState.isInitialized()) {
-      recordLocalDaemonHeartbeat(daemonState, sessionId);
-      console.log(`Session ${sessionId} heartbeat recorded`);
+      const recorded = recordLocalDaemonHeartbeat(daemonState, sessionId);
+      console.log(
+        recorded ? `Session ${sessionId} heartbeat recorded` : cliIdleNoopMessage(sessionId),
+      );
       return;
     }
     {
       const client = manager.createClient();
       try {
         await client.connect();
-        await client.callDaemonMethod("daemon/heartbeat", {
-          sessionId,
-          livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
-          livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
-          idleTimeoutMs: getCliSessionIdleTimeoutMs(),
-          ...(livenessOwnerToken ? { livenessOwnerToken } : {}),
-          ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
-        });
+        const result: { livenessUnchanged?: unknown } | undefined = await client.callDaemonMethod(
+          "daemon/heartbeat",
+          {
+            sessionId,
+            livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+            livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
+            idleTimeoutMs: getCliSessionIdleTimeoutMs(),
+            ...(livenessOwnerToken ? { livenessOwnerToken } : {}),
+            ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
+          },
+        );
+        if (result?.livenessUnchanged === true) {
+          console.log(cliIdleNoopMessage(sessionId));
+          return;
+        }
       } catch (error) {
         throw new ActionableError(heartbeatFailureMessage(sessionId, error));
       } finally {
@@ -745,7 +768,9 @@ function printDaemonUsageError(message: string): void {
     console.log(
       "  release-liveness-ownership <id> --liveness-owner-token <token>  Hand off liveness; keep the device",
     );
-    console.log("  heartbeat <id>        Heartbeat a one-shot CLI session (proxy-owned: refused)");
+    console.log(
+      "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
+    );
     process.exit(1);
   } catch (error) {
     if (error instanceof ActionableError) {

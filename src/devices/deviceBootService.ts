@@ -30,7 +30,11 @@ import {
   matchesDeviceCriteria,
   type DeviceMatcher,
 } from "../utils/deviceMatcher";
-import type { DeviceProvisioner, DeviceProvisioningIdentityHooks } from "./deviceProvisioning";
+import type {
+  DeviceProvisioner,
+  DeviceProvisioningIdentityHooks,
+  ProvisionedDevice,
+} from "./deviceProvisioning";
 import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -42,10 +46,10 @@ import type { StableVirtualDeviceIdentity } from "./virtualDeviceLifecycleCoordi
 import {
   getVirtualDeviceLifecycleCoordinator,
   InMemoryVirtualDeviceLifecycleCoordinator,
+  selectorLifecycleIdentity,
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleLease,
 } from "./virtualDeviceLifecycleCoordinator";
-import { stableStringify } from "../utils/stableStringify";
 import {
   defaultDisplayInventoryProvider,
   hydrateRequiredDisplayInventories,
@@ -73,22 +77,33 @@ export class DeviceBootTimeoutError extends ActionableError {
 }
 
 /**
- * Android booted-device discovery did not complete this sweep (ADB
+ * Booted-device discovery did not complete this sweep (adb/simctl
  * unavailable/failed). A transient failure must never be treated as an
  * authoritative empty result — that would let boot or adoption proceed
  * without having proven identity uniqueness (issue #7179). The failure is
  * retryable: callers should re-attempt discovery rather than fall back to
  * an unqualified boot/adopt decision.
  */
-export class AndroidBootedDeviceDiscoveryIncompleteError extends ActionableError {
+export class BootedDeviceDiscoveryIncompleteError extends ActionableError {
   readonly code = "discovery_incomplete";
   readonly retryable = true;
 
-  constructor(readonly discoveryError: DeviceDiscoveryError | undefined) {
+  constructor(
+    readonly platform: Platform,
+    readonly discoveryError: DeviceDiscoveryError | undefined,
+  ) {
     super(
-      "discovery_incomplete: Android booted-device discovery was incomplete and is retryable" +
+      `discovery_incomplete: ${platform === "android" ? "Android" : "iOS"} booted-device ` +
+        "discovery was incomplete and is retryable" +
         (discoveryError ? `: ${discoveryError.message}` : "."),
     );
+  }
+}
+
+/** Android flavour of {@link BootedDeviceDiscoveryIncompleteError}. */
+export class AndroidBootedDeviceDiscoveryIncompleteError extends BootedDeviceDiscoveryIncompleteError {
+  constructor(discoveryError: DeviceDiscoveryError | undefined) {
+    super("android", discoveryError);
   }
 }
 
@@ -405,6 +420,12 @@ export interface DeviceBootServiceDependencies {
   isProcessRunning?: (pid: number) => boolean;
   /** Opts an injected daemon lease into post-bind re-checks; deviceTools' reservation races tolerate shared cold boots. */
   allowExternalLeaseAdoptionRecheck?: boolean;
+  /**
+   * Removes a device this boot created (createIfMissing) when binding or booting
+   * it then fails, so it is not orphaned (#11100). The original failure is still
+   * thrown; a rollback failure is the callee's to report.
+   */
+  rollbackCreatedDevice?: (device: DeviceInfo, failure: unknown) => Promise<void>;
 }
 
 interface BootDeadlineContext {
@@ -429,6 +450,35 @@ interface BootDeadlineContext {
   unheldLaunchTermination?: Promise<OwnedTermination>;
   /** A fresh provision's cold boot opts Android readiness into offline recovery (#7054). */
   freshProvision?: boolean;
+}
+
+function noMatchingDeviceError(
+  request: DeviceBootRequest,
+  criteria: DeviceMatchCriteria,
+  images: DeviceInfo[],
+  describedCandidates: Parameters<typeof describeDisplayRequirements>[1],
+): ActionableError {
+  return new ActionableError(
+    `No ${request.platform} device matching criteria found. ` +
+      `${request.minOsVersion ? `minOsVersion>=${request.minOsVersion} ` : ""}` +
+      `${request.maxOsVersion ? `maxOsVersion<=${request.maxOsVersion} ` : ""}` +
+      `${request.name ? `name=${request.name} ` : ""}` +
+      `${describeDisplayRequirements(criteria, describedCandidates)} ` +
+      `Available images: ${images.map((device) => `${device.name}${device.osVersion ? ` (v${device.osVersion})` : ""}`).join(", ") || "none"}.`,
+  );
+}
+
+function createdImageFor(provisioned: ProvisionedDevice, request: DeviceBootRequest): DeviceInfo {
+  return {
+    name: provisioned.name,
+    platform: provisioned.platform,
+    deviceId: provisioned.deviceId,
+    isRunning: false,
+    formFactor: request.formFactor,
+    runtimeId: provisioned.runtimeId,
+    runtime: provisioned.runtime,
+    deviceType: provisioned.deviceType,
+  } as DeviceInfo;
 }
 
 /**
@@ -473,19 +523,7 @@ export class DeviceBootService {
     };
     if (!context.lifecycleLease && !this.dependencies.onIdentityResolved) {
       context.lifecycleLease = await this.lifecycleCoordinator.reserve(
-        {
-          kind: "selector",
-          platform: request.platform,
-          selector: stableStringify({
-            deviceId: request.deviceId,
-            name: request.name,
-            minOsVersion: request.minOsVersion,
-            maxOsVersion: request.maxOsVersion,
-            formFactor: request.formFactor,
-            requires: request.requires,
-            screenSize: request.screenSize,
-          }),
-        },
+        selectorLifecycleIdentity(request.platform, request),
         {
           operation: "start",
           deadlineMs: context.deadlineMs,
@@ -999,19 +1037,35 @@ export class DeviceBootService {
       booted: "isRunning" in candidate ? candidate.isRunning : true,
     }));
     if (!this.dependencies.deviceCreationGate.isCreationAllowed(request.createIfMissing)) {
-      throw new ActionableError(
-        `No ${request.platform} device matching criteria found. ` +
-          `${request.minOsVersion ? `minOsVersion>=${request.minOsVersion} ` : ""}` +
-          `${request.maxOsVersion ? `maxOsVersion<=${request.maxOsVersion} ` : ""}` +
-          `${request.name ? `name=${request.name} ` : ""}` +
-          `${describeDisplayRequirements(criteria, describedCandidates)} ` +
-          `Available images: ${images.map((device) => `${device.name}${device.osVersion ? ` (v${device.osVersion})` : ""}`).join(", ") || "none"}.`,
-      );
+      throw noMatchingDeviceError(request, criteria, images, describedCandidates);
     }
     if (criteria.requires?.panels !== undefined || criteria.requires?.posture !== undefined) {
       throw new ActionableError(describeDisplayRequirements(criteria, describedCandidates));
     }
-    const identityHooks: DeviceProvisioningIdentityHooks = {
+    let created: ProvisionedDevice | undefined;
+    const identityHooks = this.provisioningIdentityHooks(context, (device) => {
+      created = device;
+    });
+    try {
+      const provisioned = await this.runPhase(context, "provisioning a device", (signal) =>
+        this.dependencies.deviceProvisioner.provision(criteria, signal, identityHooks),
+      );
+      created = provisioned;
+      return await this.bootImage(createdImageFor(provisioned, request), context, progress, true);
+    } catch (error) {
+      if (created) {
+        await this.dependencies.rollbackCreatedDevice?.(createdImageFor(created, request), error);
+      }
+      throw error;
+    }
+  }
+
+  /** Binds a created device's lifecycle identity, reporting it as created first. */
+  private provisioningIdentityHooks(
+    context: BootDeadlineContext,
+    onCreated: (device: ProvisionedDevice) => void,
+  ): DeviceProvisioningIdentityHooks {
+    return {
       reserveBeforeCreate: async (identity) => {
         if (identity.platform === "android") {
           await this.bindLifecycleIdentity(context, {
@@ -1022,6 +1076,7 @@ export class DeviceBootService {
         return context.signal;
       },
       bindAfterCreate: async (device) => {
+        onCreated(device);
         if (device.platform === "ios") {
           if (!device.deviceId) {
             throw new ActionableError(
@@ -1035,20 +1090,6 @@ export class DeviceBootService {
         }
       },
     };
-    const provisioned = await this.runPhase(context, "provisioning a device", (signal) =>
-      this.dependencies.deviceProvisioner.provision(criteria, signal, identityHooks),
-    );
-    const createdImage: DeviceInfo = {
-      name: provisioned.name,
-      platform: provisioned.platform,
-      deviceId: provisioned.deviceId,
-      isRunning: false,
-      formFactor: request.formFactor,
-      runtimeId: provisioned.runtimeId,
-      runtime: provisioned.runtime,
-      deviceType: provisioned.deviceType,
-    } as DeviceInfo;
-    return this.bootImage(createdImage, context, progress, true);
   }
 
   private async waitForRunningDevice(

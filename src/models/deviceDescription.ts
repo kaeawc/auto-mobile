@@ -77,6 +77,12 @@ export interface DeviceDescription {
     serviceStatus: DeviceServiceStatusLike | null;
     locked: boolean | null;
     orientation: "portrait" | "landscape" | null;
+    /**
+     * Present only while the daemon still holds a session on an Android device that `adb devices`
+     * lists in a non-`device` state (offline, unauthorized, ...), inside the disconnect monitor's
+     * offline budget (#11118). Absent for a device adb reports online.
+     */
+    connection?: { state: "offline"; adbState: string };
   };
 }
 

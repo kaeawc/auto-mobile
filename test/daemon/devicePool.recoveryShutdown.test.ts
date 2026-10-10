@@ -1853,6 +1853,26 @@ test("restart assignment without an incident exposes same-session retry details"
   );
 });
 
+test("the restart recovery window is judged on the session clock across a wall-clock step (#11105)", async () => {
+  const { timer, sessions, pool } = await setupSettledRestart();
+  timer.advanceTime(2_500);
+  // A backward NTP step: the deadline derives from session stamps, which the step does not move.
+  timer.stepWallClock(-3_600_000);
+  const buildError = Reflect.get(pool, "recoveryAssignmentError").bind(pool) as (
+    sessionId: string,
+    target: { platform: "android"; stableDeviceId: string; restartRecoveryDeadlineMs?: number },
+  ) => ActionableError;
+
+  const error = buildError("session", {
+    platform: "android",
+    stableDeviceId: original.name,
+    restartRecoveryDeadlineMs: 180_000,
+  });
+
+  expect(error).toMatchObject({ details: { recoveryWindowRemainingMs: 177_500 } });
+  sessions.stopCleanupTimer();
+});
+
 test.each([undefined, 60_000, 59_999])(
   "recovery assignment outside the window preserves its text with deadline %s",
   async (deadline) => {

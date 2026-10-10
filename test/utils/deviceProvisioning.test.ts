@@ -399,6 +399,24 @@ describe("DefaultDeviceProvisioner", () => {
     ]);
   });
 
+  it("names the created iOS simulator after a requested name that is not a device type (#11148)", async () => {
+    const simctl = new FakeIosSimulatorCreator(
+      [deviceType("iPhone 17")],
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+      "NEW-UDID",
+    );
+    const provisioner = new DefaultDeviceProvisioner({
+      iosCreator: () => simctl,
+      androidCreator: () => new FakeAndroidAvdCreator(),
+      idGenerator: new CountingIdGenerator("uuid"),
+    });
+
+    const created = await provisioner.provision({ platform: "ios", name: "My Test Sim" });
+
+    expect(created.name).toBe("AutoMobile-My-Test-Sim-uuid1");
+    expect(simctl.createCalls[0].name).toBe("AutoMobile-My-Test-Sim-uuid1");
+  });
+
   it("uses both iOS version bounds when selecting the runtime", async () => {
     const signal = new AbortController().signal;
     const simctl = new FakeIosSimulatorCreator(

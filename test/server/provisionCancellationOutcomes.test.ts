@@ -31,4 +31,25 @@ describe("ProvisionCancellationOutcomes", () => {
     timer.advanceTime(100);
     expect(await waiting).toBeUndefined();
   });
+
+  // #11111: a quiet daemon must not retain unclaimed outcomes until some later publish.
+  test("isAwaiting and await prune expired unclaimed outcomes without a publish", async () => {
+    const timer = new FakeTimer();
+    const outcomes = new ProvisionCancellationOutcomes(timer);
+
+    outcomes.publish("a", 1);
+    outcomes.publish("b", 2);
+    timer.advanceTime(EARLY_OUTCOME_RETENTION_MS + 1);
+    expect(outcomes.retainedEarlyCount).toBe(2);
+
+    expect(outcomes.isAwaiting("c")).toBe(false);
+    expect(outcomes.retainedEarlyCount).toBe(0);
+
+    outcomes.publish("d", 3);
+    timer.advanceTime(EARLY_OUTCOME_RETENTION_MS + 1);
+    const waiting = outcomes.await("e", 100, timer);
+    expect(outcomes.retainedEarlyCount).toBe(0);
+    timer.advanceTime(100);
+    expect(await waiting).toBeUndefined();
+  });
 });

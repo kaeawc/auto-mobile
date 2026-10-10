@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import type { Database as BunDatabase } from "bun:sqlite";
 import { CompiledQuery } from "kysely";
-import { BunSqliteConnectionState } from "../../src/db/bunSqliteDialect";
+import {
+  BunSqliteConnectionState,
+  DEFAULT_RETRY_TOTAL_WAIT_MS,
+} from "../../src/db/bunSqliteDialect";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { Random } from "../../src/utils/Random";
@@ -204,9 +207,26 @@ describe("BunSqliteConnectionState BEGIN IMMEDIATE busy retry", () => {
 
       await expect(state.executeQuery(UPDATE, Symbol("write"))).rejects.toThrow();
 
-      // One busy_timeout, not attempts x busy_timeout.
+      // One attempt: the budget is spent, so no retry starts (not attempts x busy_timeout).
       expect(executed).toHaveLength(1);
       expect(timer.getSleepHistory()).toHaveLength(0);
+    });
+
+    it("checks the budget only before a retry, so one started just inside it may wait again (#11102)", async () => {
+      // The documented bound is budget + busy_timeout (~2x), not a hard single busy_timeout: an
+      // attempt in flight cannot be shortened, so a 4.9 s first wait still starts a second attempt.
+      const timer = new FakeTimer();
+      const { db, executed } = scriptedDatabase([
+        slowBusy(timer, 4_900),
+        slowBusy(timer, 5_000),
+        null,
+      ]);
+      const { state } = connection(db, 3, timer);
+
+      await expect(state.executeQuery(UPDATE, Symbol("write"))).rejects.toThrow();
+
+      expect(executed).toHaveLength(2);
+      expect(timer.now()).toBeLessThan(DEFAULT_RETRY_TOTAL_WAIT_MS + 5_000);
     });
 
     it("still retries fast BUSY failures within the budget", async () => {

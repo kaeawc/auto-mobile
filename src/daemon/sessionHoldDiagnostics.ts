@@ -10,7 +10,6 @@
  * the same answer.
  */
 
-import { suspectGraceMsFor } from "./livenessOwnerLease";
 import { effectiveLastToolActivity } from "./sessionClocks";
 import type { Session } from "./sessionManager";
 import { unsettledExecutionVetoExpiresAt } from "./unsettledExecutionVeto";
@@ -87,14 +86,14 @@ export function classifySessionHolderKind(
 /**
  * The idle deadline the daemon releases on. A `cli-idle` session is judged by
  * the heartbeat monitor on wall-clock idleness from its last tool activity; a
- * `heartbeat` session expires at `expiresAt`, plus the suspect grace when its
- * owner has heartbeated (`SessionManager.isSessionExpired`).
+ * `heartbeat` session expires exactly at `expiresAt` (`SessionManager.isSessionExpired`): the
+ * suspect grace extends only the heartbeat lease, never the idle deadline (#11107).
  */
 export function idleReleaseAt(session: SessionHoldSnapshot): number {
   if (session.livenessPolicy === "cli-idle") {
     return effectiveLastToolActivity(session) + session.heartbeatTimeoutMs;
   }
-  return session.expiresAt + suspectGraceMsFor(session);
+  return session.expiresAt;
 }
 
 /** What bounds an in-flight execution's veto (`SessionManager.getIdleReleaseExecutionVeto`). */
@@ -127,15 +126,25 @@ export function vetoedIdleReleaseAt(
   );
 }
 
+/** Converts an instant on the session clock to wall-clock epoch ms (#11105). */
+export type SessionClockToWall = (sessionClockMs: number) => number;
+
+/**
+ * The reported instants are epoch ms, but a session stamps them on the steady session clock; a
+ * wall-clock step makes the two differ. `toWall` converts at this boundary (wall now + (instant -
+ * session now)) so the daemon stays authoritative for the value and clients read it as epoch ms.
+ */
 export function sessionHoldDiagnostics(
   session: SessionHoldSnapshot,
   activeExecutions: number,
   veto?: IdleReleaseExecutionVeto,
+  toWall: SessionClockToWall = (ms) => ms,
 ): SessionHoldDiagnostics {
   return {
-    lastToolActivityAt: session.lastUsedAt,
-    lastOwnerHeartbeatAt: session.lastOwnerHeartbeat ?? null,
-    idleReleaseAt: vetoedIdleReleaseAt(session, veto),
+    lastToolActivityAt: toWall(session.lastUsedAt),
+    lastOwnerHeartbeatAt:
+      session.lastOwnerHeartbeat === undefined ? null : toWall(session.lastOwnerHeartbeat),
+    idleReleaseAt: toWall(vetoedIdleReleaseAt(session, veto)),
     holderKind: classifySessionHolderKind(session),
     activeExecutions,
   };

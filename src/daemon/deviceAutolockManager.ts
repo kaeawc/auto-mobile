@@ -5,6 +5,7 @@ import {
 } from "./inputDeviceOwnership";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -14,6 +15,12 @@ import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import { getDevicePoolTimeoutMs, type Environment } from "./poolConfig";
 import type { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import type { Session, SessionExecutionMetadata, SessionManager } from "./sessionManager";
+
+/**
+ * Result of attaching an autolock session to an MCP session (#11129). `attached-not-persisted`
+ * routes in this daemon but its row write failed (already logged), so a restart will not restore it.
+ */
+export type AutolockAttachOutcome = "attached" | "attached-not-persisted" | "not-attached";
 import type {
   DeviceAutolockChildProcess,
   PooledDevice,
@@ -23,7 +30,12 @@ import type {
   TargetDeviceValidationOptions,
 } from "./devicePool";
 
-export type AutolockClient = { mcpSessionId?: string; expectedSessionId?: string };
+export type AutolockClient = {
+  mcpSessionId?: string;
+  expectedSessionId?: string;
+  /** A one-shot `--cli` caller: anonymous, so it may act only on anonymous sessions (#11096). */
+  oneShotCli?: boolean;
+};
 
 export class McpSessionRecoveryInProgressError extends ActionableError {
   constructor(mcpSessionId: string) {
@@ -643,6 +655,7 @@ export class DeviceAutolockManager {
       // assignment mutex. A pre-loop snapshot would be stale by the time the
       // second attachment runs, letting restoration clobber a `setActiveDevice`
       // that landed in between (#6807).
+      // A persistence failure is logged and reported by the attach; keep restoring the rest.
       await this.attachAutolockSessionToMcpSession(id, mcpSessionId, "if-absent");
     }
   }
@@ -654,11 +667,11 @@ export class DeviceAutolockManager {
     sessionId: string,
     mcpSessionId: string | undefined,
     makeDefault: boolean | "if-absent" = true,
-  ): Promise<void> {
+  ): Promise<AutolockAttachOutcome> {
     if (!mcpSessionId) {
-      return;
+      return "not-attached";
     }
-    await this.pool.withAssignmentLock(async () => {
+    return await this.pool.withAssignmentLock(async (): Promise<AutolockAttachOutcome> => {
       const session = this.pool.getSessionManager().getSession(sessionId);
       const device = session ? this.pool.getDevice(session.assignedDevice) : undefined;
       if (
@@ -667,15 +680,27 @@ export class DeviceAutolockManager {
         device.sessionId !== sessionId ||
         device.autolockSessionId !== sessionId
       ) {
-        return;
+        return "not-attached";
       }
       this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);
-      await this.deviceSessionRepository.markAutolockSession(sessionId, {
-        mcpSessionId,
-        daemonSessionId: this.pool.getDaemonSessionId(),
-        lastUsedAtMs: session.lastUsedAt,
-        expiresAtMs: session.expiresAt,
-      });
+      let outcome: AutolockAttachOutcome = "attached";
+      try {
+        await this.deviceSessionRepository.markAutolockSession(sessionId, {
+          mcpSessionId,
+          daemonSessionId: this.pool.getDaemonSessionId(),
+          lastUsedAtMs: session.lastUsedAt,
+          expiresAtMs: session.expiresAt,
+        });
+      } catch (error) {
+        // The live session is attached in memory either way; only a daemon restart loses the
+        // mapping, so the caller's request still succeeds and learns the row is stale (#11129).
+        logger.warn(
+          `Autolock session ${sessionId} attached to MCP session ${mcpSessionId} but not ` +
+            `persisted; a daemon restart will not restore it: ${errorMessage(error)}`,
+          error,
+        );
+        outcome = "attached-not-persisted";
+      }
       if (
         makeDefault === true ||
         (makeDefault === "if-absent" &&
@@ -686,6 +711,7 @@ export class DeviceAutolockManager {
       const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
       acquired.add(sessionId);
       this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
+      return outcome;
     });
   }
 
@@ -784,18 +810,32 @@ export class DeviceAutolockManager {
   }
 
   /** Whether any connected MCP client still acquired or routes to the autolock session. */
-  hasMcpSessionOwner(sessionId: string): boolean {
-    for (const acquired of this.mcpSessionAcquiredAutolocks.values()) {
-      if (acquired.has(sessionId)) {
+  hasMcpSessionOwner(sessionId: string, exceptMcpSessionId?: string): boolean {
+    for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredAutolocks) {
+      if (mcpSessionId !== exceptMcpSessionId && acquired.has(sessionId)) {
         return true;
       }
     }
-    for (const mappedSessionId of this.mcpSessionAutolockMap.values()) {
-      if (mappedSessionId === sessionId) {
+    for (const [mcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
+      if (mcpSessionId !== exceptMcpSessionId && mappedSessionId === sessionId) {
         return true;
       }
     }
     return false;
+  }
+
+  /** Drop every other MCP client's hold on `sessionId`: ownership moves to `mcpSessionId` (#11107). */
+  releaseMcpSessionOwnershipExcept(sessionId: string, mcpSessionId: string): void {
+    for (const [otherMcpSessionId, acquired] of this.mcpSessionAcquiredAutolocks) {
+      if (otherMcpSessionId !== mcpSessionId && acquired.delete(sessionId) && acquired.size === 0) {
+        this.mcpSessionAcquiredAutolocks.delete(otherMcpSessionId);
+      }
+    }
+    for (const [otherMcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
+      if (otherMcpSessionId !== mcpSessionId && mappedSessionId === sessionId) {
+        this.mcpSessionAutolockMap.delete(otherMcpSessionId);
+      }
+    }
   }
 
   releaseMcpSessionBindings(mcpSessionId: string): void {

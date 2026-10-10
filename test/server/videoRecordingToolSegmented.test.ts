@@ -25,6 +25,7 @@ import {
 } from "../../src/features/video";
 import {
   registerVideoRecordingTools,
+  setRecordingRequesterResolverForTesting,
   resetSegmentedSessions,
   setSegmentedSessionRecordingDependencies,
   setSegmentedSessionTimer,
@@ -174,6 +175,7 @@ describe("videoRecording tool segmentation branch", () => {
   let writeFileSpy: ReturnType<typeof spyOn<typeof fsPromises, "writeFile">> | undefined;
 
   afterEach(() => {
+    setRecordingRequesterResolverForTesting(undefined);
     writeFileSpy?.mockRestore();
     writeFileSpy = undefined;
     displayTransitions.reset("tool-foldable");
@@ -373,6 +375,154 @@ describe("videoRecording tool segmentation branch", () => {
       await expect(
         handler()(androidDevice, { action: "stop", recordingId: handle, sessionUuid: "session-b" }),
       ).rejects.toThrow("Failed to stop video recording");
+    });
+  });
+
+  describe("stop by id requires the active recording's owner (#11130)", () => {
+    test("a foreign session cannot stop another session's active single recording", async () => {
+      const active = await startVideoRecording({
+        device: androidDevice,
+        ownerSessionUuid: "session-a",
+      });
+      const stopsBefore = fakeBackend.stopCalls.length;
+
+      const refusal = handler()(androidDevice, {
+        action: "stop",
+        recordingId: active.recordingId,
+        sessionUuid: "session-b",
+      });
+
+      await expect(refusal).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+      expect(fakeBackend.stopCalls.length).toBe(stopsBefore);
+      await fsPromises.writeFile(active.outputPath, "video-bytes");
+      const response = parse(
+        await handler()(androidDevice, {
+          action: "stop",
+          recordingId: active.recordingId,
+          sessionUuid: "session-a",
+        }),
+      );
+      expect((response.recordings as Array<{ recordingId: string }>)[0].recordingId).toBe(
+        active.recordingId,
+      );
+    });
+
+    describe("base-session and connection-owner matching (#11140)", () => {
+      const stopArgs = (recordingId: string, extra: Record<string, unknown>) => ({
+        action: "stop" as const,
+        recordingId,
+        ...extra,
+      });
+
+      test("the base session may stop a recording owned by its derived label session", async () => {
+        setRecordingRequesterResolverForTesting({
+          baseSessionUuid: (uuid) => uuid.split(":")[0],
+          connectionOwnsDeviceSession: () => false,
+        });
+        const active = await startVideoRecording({
+          device: androidDevice,
+          ownerSessionUuid: "plan-base:pixel",
+        });
+        await fsPromises.writeFile(active.outputPath, "video-bytes");
+
+        const response = parse(
+          await handler()(
+            androidDevice,
+            stopArgs(active.recordingId, { sessionUuid: "plan-base" }),
+          ),
+        );
+
+        expect(response.count).toBe(1);
+      });
+
+      test("a proxy bound to a different session may stop when its connection owns the holder session", async () => {
+        const seen: Array<[string, string, string]> = [];
+        setRecordingRequesterResolverForTesting({
+          baseSessionUuid: (uuid) => uuid,
+          connectionOwnsDeviceSession: (mcp, deviceId, ownerBase) => {
+            seen.push([mcp, deviceId, ownerBase]);
+            return mcp === "mcp-owner";
+          },
+        });
+        const active = await startVideoRecording({
+          device: androidDevice,
+          ownerSessionUuid: "holder-session",
+        });
+        await fsPromises.writeFile(active.outputPath, "video-bytes");
+
+        const response = parse(
+          await handler()(
+            androidDevice,
+            stopArgs(active.recordingId, {
+              sessionUuid: "proxy-bound-session",
+              __mcpSessionId: "mcp-owner",
+            }),
+          ),
+        );
+
+        expect(response.count).toBe(1);
+        expect(seen).toEqual([["mcp-owner", androidDevice.deviceId, "holder-session"]]);
+      });
+
+      test("a different owner is still refused", async () => {
+        setRecordingRequesterResolverForTesting({
+          baseSessionUuid: (uuid) => uuid.split(":")[0],
+          connectionOwnsDeviceSession: () => false,
+        });
+        const active = await startVideoRecording({
+          device: androidDevice,
+          ownerSessionUuid: "plan-base:pixel",
+        });
+        const stopsBefore = fakeBackend.stopCalls.length;
+
+        await expect(
+          handler()(
+            androidDevice,
+            stopArgs(active.recordingId, { sessionUuid: "other-base", __mcpSessionId: "mcp-x" }),
+          ),
+        ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+        expect(fakeBackend.stopCalls.length).toBe(stopsBefore);
+      });
+    });
+
+    test("an ownerless active recording stays stoppable by any session", async () => {
+      const active = await startVideoRecording({ device: androidDevice });
+      await fsPromises.writeFile(active.outputPath, "video-bytes");
+
+      const response = parse(
+        await handler()(androidDevice, {
+          action: "stop",
+          recordingId: active.recordingId,
+          sessionUuid: "session-b",
+        }),
+      );
+
+      expect(response.count).toBe(1);
+    });
+
+    test("a foreign session cannot stop another session's active segmented recording", async () => {
+      const start = parse(
+        await handler()(androidDevice, {
+          action: "start",
+          platform: "android",
+          maxDuration: 181,
+          sessionUuid: "session-a",
+        }),
+      );
+      const handle = (start.recordings as Array<{ recordingId: string }>)[0].recordingId;
+
+      await expect(
+        handler()(androidDevice, { action: "stop", recordingId: handle, sessionUuid: "session-b" }),
+      ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+
+      const response = parse(
+        await handler()(androidDevice, {
+          action: "stop",
+          recordingId: handle,
+          sessionUuid: "session-a",
+        }),
+      );
+      expect(response.segmented).toBe(true);
     });
   });
 

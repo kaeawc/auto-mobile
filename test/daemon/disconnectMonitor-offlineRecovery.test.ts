@@ -190,6 +190,7 @@ function monitorHarness(
       retryDueDeferredSessionRecoveries: async () => {},
       reconcileDiscoveryObservation: async () => {},
       mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
+      getAndroidTransportAliases: (): string[] => [],
       getAllDevices: () => [device],
       isDeviceLeasedForAndroidStartup: () => false,
       releaseAdbServerResetCohortReservations: async () => {},

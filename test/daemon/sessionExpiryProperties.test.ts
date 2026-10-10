@@ -250,11 +250,13 @@ const exitedOwnerReleased: PropertyCheck = async (schedule) => {
     : `owner exited at t=${exitAt}; ${describeRelease(result)}, expected a heartbeat, idle or rehydration timeout`;
 };
 
-/** First instant at which the last accepted tool call is more than window + grace in the past. */
+/**
+ * First instant at which the last accepted tool call is more than the idle window in the past. The
+ * suspect grace extends only the heartbeat lease, never idleness (#11107).
+ */
 function firstEvaluationPastIdle(schedule: Schedule, result: RunResult): number | undefined {
   return schedule.instants.find(
-    (instant) =>
-      instant.at > lastActivityAt(result, instant.at - 1) + schedule.idleWindowMs + GRACE_MS,
+    (instant) => instant.at > lastActivityAt(result, instant.at - 1) + schedule.idleWindowMs,
   )?.at;
 }
 
@@ -262,7 +264,6 @@ function firstEvaluationPastIdle(schedule: Schedule, result: RunResult): number 
 const idleReleasedDespiteHeartbeats: PropertyCheck = async (schedule) => {
   const result = await runSchedule(schedule, ORDER_SEED_A);
   if (result.release?.reason === "expired-before-restart") {
-    // A restart past the idle deadline ends the session without waiting out the suspect grace.
     const last = lastActivityAt(result, result.release.at);
     return result.release.at >= last + schedule.idleWindowMs
       ? undefined
@@ -350,8 +351,7 @@ const stallNeverReleasesActiveSession: PropertyCheck = async (schedule) => {
     return undefined;
   }
   const last = lastActivityAt(result, result.release.at);
-  const allowed =
-    schedule.idleWindowMs + stalledBetween(schedule, last, result.release.at) + GRACE_MS;
+  const allowed = schedule.idleWindowMs + stalledBetween(schedule, last, result.release.at);
   return result.release.at - last > allowed
     ? undefined
     : `${describeRelease(result)}, ${result.release.at - last}ms after the last tool call at ` +
@@ -483,7 +483,7 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
   );
 
   propertyTests(
-    "#10699: a sleep shorter than the window counts toward idle, so wake past the window plus grace releases at the first judgement",
+    "#10699: a sleep shorter than the window counts toward idle, so wake past the window releases at the first judgement",
     9_100,
     SHORT_SLEEPS,
     idleReleasedDespiteHeartbeats,

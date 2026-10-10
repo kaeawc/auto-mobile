@@ -71,6 +71,7 @@ import {
   getDeviceLabelMap,
   releaseDeviceLabelSessions,
 } from "./deviceLabelMapping";
+import { deferHeldPlanAppCleanup, takeHeldPlanAppCleanup } from "./heldPlanAppCleanup";
 import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import type { Environment } from "../daemon/poolConfig";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
@@ -378,6 +379,17 @@ interface ToolRegistrationOptions {
   appUiResourceUri?: string;
 }
 
+/** Options for a plain (non-device) tool. */
+interface PlainToolOptions extends ToolRegistrationOptions {
+  /**
+   * The plain tool's read/control classification (#11107): true for a read, a per-args classifier
+   * for a mixed tool, absent for control. A read naming a session is admitted read-only: it never
+   * counts as session activity (owner decision 2026-10-09). Enumerated by
+   * `test/lint/toolReadControlClassification.test.ts`.
+   */
+  readOnly?: boolean | ((args: any) => boolean);
+}
+
 /** Resolves a device for a read without acquiring, readying or changing a device session. */
 interface SessionlessDeviceRead {
   resolve(deviceId: string, signal?: AbortSignal): Promise<BootedDevice>;
@@ -444,8 +456,8 @@ export interface RegisteredTool {
   outputSchema?: any;
   appUiResourceUri?: string;
   /**
-   * A device-aware tool's read/control classification (#10965): true for a read, a per-args
-   * classifier for a mixed tool, absent for control. Enumerated by
+   * The tool's read/control classification (#10965; plain tools' `readOnly`, #11107): true for a
+   * read, a per-args classifier for a mixed tool, absent for control. Enumerated by
    * `test/lint/toolReadControlClassification.test.ts`. Only `true` (a read for every call) is
    * advertised as `_meta["automobile/deviceReadOnly"]`, so a proxy can forward such reads without
    * a session (#10971); a per-args tool (sqlQuery, keyboard, clipboard, ...) is not marked.
@@ -722,9 +734,14 @@ async function resolveSessionlessDeviceRead(
 }
 
 function isDeviceReadOnlyCall(options: DeviceAwareToolOptions, args: unknown): boolean {
-  return typeof options.deviceReadOnly === "function"
-    ? options.deviceReadOnly(args)
-    : options.deviceReadOnly === true;
+  return isReadOnlyCall(options.deviceReadOnly, args);
+}
+
+function isReadOnlyCall(
+  classification: boolean | ((args: any) => boolean) | undefined,
+  args: unknown,
+): boolean {
+  return typeof classification === "function" ? classification(args) : classification === true;
 }
 
 /** Reads never require a session (#10970): an ambiguous read is asked for its deviceId. */
@@ -2078,27 +2095,60 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       sessionBindingReleaseHandler,
       sessionToolSelectionService,
     } = input;
+    const lifecycleSessionUuid = baseSessionUuid ?? sessionUuid;
+    const ownsPoolSession =
+      shouldResolveDevice &&
+      sessionUuid !== undefined &&
+      lifecycleSessionUuid !== undefined &&
+      name === "executePlan" &&
+      DaemonState.getInstance().isInitialized();
+    const heldForRecovery =
+      ownsPoolSession && this.holdsFailedPlanSessionForRecovery(input, lifecycleSessionUuid);
+    // A cleanup deferred by an earlier failed run on this session (#11139) is superseded once
+    // this run's own lifecycle cleans and releases it.
+    const deferredCleanup =
+      ownsPoolSession && !heldForRecovery
+        ? takeHeldPlanAppCleanup(
+            DaemonState.getInstance().getSessionManager(),
+            lifecycleSessionUuid,
+          )
+        : undefined;
+
     if (device && name === "executePlan" && args?.cleanupAppId) {
       // Resolved under the request signal: a device-loss abort names the lost device
       // to skip. A deadline or client cancel aborts it too but names no device, so
       // those plans still clean every device they own (#10022).
-      const devices = this.getCleanupDevices(device, baseSessionUuid ?? sessionUuid);
+      const devices = this.getCleanupDevices(device, lifecycleSessionUuid);
       const cleanupConfig = { appId: args.cleanupAppId, clearAppData: args.cleanupClearAppData };
-      const outcome = await this.cleanupDevicesShielded(devices, cleanupService, cleanupConfig);
-      this.reportIncompleteCleanup(outcome, args.cleanupAppId, baseSessionUuid ?? sessionUuid);
-      this.markIncompleteCleanupDevices(outcome, devices, cleanupService, cleanupConfig);
+      const runCleanup = async (): Promise<void> => {
+        const outcome = await this.cleanupDevicesShielded(devices, cleanupService, cleanupConfig);
+        this.reportIncompleteCleanup(outcome, cleanupConfig.appId, lifecycleSessionUuid);
+        this.markIncompleteCleanupDevices(outcome, devices, cleanupService, cleanupConfig);
+      };
+      if (heldForRecovery) {
+        // The caller's recovery and resumed plan need the app as the failure left it (#11139):
+        // clean up only once the held session is finally released.
+        logger.info(
+          `[PlanLifecycle] Deferring app cleanup for ${cleanupConfig.appId} until held session ` +
+            `${lifecycleSessionUuid} is released`,
+        );
+        deferHeldPlanAppCleanup(
+          DaemonState.getInstance().getSessionManager(),
+          lifecycleSessionUuid,
+          runCleanup,
+          PLAN_APP_CLEANUP_CAP_MS,
+        );
+      } else {
+        await runCleanup();
+      }
+    } else if (deferredCleanup) {
+      await deferredCleanup();
     }
 
-    if (
-      shouldResolveDevice &&
-      sessionUuid &&
-      name === "executePlan" &&
-      DaemonState.getInstance().isInitialized() &&
-      !this.holdsFailedPlanSessionForRecovery(input, baseSessionUuid ?? sessionUuid)
-    ) {
+    if (ownsPoolSession && !heldForRecovery) {
       const sessionManager = DaemonState.getInstance().getSessionManager();
       const devicePool = DaemonState.getInstance().getDevicePool();
-      const releaseSessionUuid = baseSessionUuid ?? sessionUuid;
+      const releaseSessionUuid = lifecycleSessionUuid;
       // Track exactly which sessions this release actually frees so the
       // server-side transport binding is torn down for each (issue #4611 Gap
       // D) — coupled to the REAL release, never cleared optimistically. Each
@@ -2503,7 +2553,7 @@ export class ToolRegistryClass {
     description: string,
     schema: any,
     handler: ToolHandler,
-    options: ToolRegistrationOptions = {},
+    options: PlainToolOptions = {},
   ): void {
     this.invalidateToolDefinitionSchemaCache();
     if (this === ToolRegistry) {
@@ -2519,6 +2569,8 @@ export class ToolRegistryClass {
       supportsProgress: options.supportsProgress ?? false,
       transportRecovery: options.transportRecovery,
       requiresDevice: false,
+      isDeviceReadOnlyCall: (args) => isReadOnlyCall(options.readOnly, args),
+      deviceReadOnly: options.readOnly,
       debugOnly: options.debugOnly ?? false,
       hidden: options.hidden ?? false,
       embeddedSdkOnly: false,

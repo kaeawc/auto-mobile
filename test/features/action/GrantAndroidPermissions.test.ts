@@ -269,7 +269,7 @@ describe("GrantAndroidPermissions", () => {
     expect(result.success).toBe(true);
     expect(result.results).toEqual([
       {
-        operationId: "pm_reset_permissions",
+        stepId: "pm_reset_permissions",
         success: true,
         countsTowardSuccess: true,
       },
@@ -302,7 +302,7 @@ describe("GrantAndroidPermissions", () => {
     expect(result.success).toBe(false);
     expect(result.results).toEqual([
       {
-        operationId: "pm_reset_permissions",
+        stepId: "pm_reset_permissions",
         success: false,
         countsTowardSuccess: true,
         error:
@@ -327,7 +327,7 @@ describe("GrantAndroidPermissions", () => {
     expect(result.userId).toBe(0);
     expect(result.results).toEqual([
       {
-        operationId: "pm_reset_permissions",
+        stepId: "pm_reset_permissions",
         success: false,
         countsTowardSuccess: true,
         error: "Android reset is device-wide and does not support userId",
@@ -354,7 +354,7 @@ describe("GrantAndroidPermissions", () => {
     expect(result.success).toBe(false);
     expect(result.results).toEqual([
       {
-        operationId: "pm_reset_permissions",
+        stepId: "pm_reset_permissions",
         success: false,
         countsTowardSuccess: true,
         error: "java.lang.SecurityException: Permission reset denied",
@@ -405,7 +405,7 @@ describe("GrantAndroidPermissions", () => {
 
     // The blank name never reaches adb but is recorded as a required failure.
     expect(result.results).toHaveLength(2);
-    expect(result.results[0].operationId).toBe("pm_grant:(empty)");
+    expect(result.results[0].stepId).toBe("pm_grant:(empty)");
     expect(result.results[0].success).toBe(false);
     expect(result.results[0].countsTowardSuccess).toBe(true);
     expect(result.results[0].error).toBe("empty permission name");
@@ -420,7 +420,7 @@ describe("GrantAndroidPermissions", () => {
     ["grant", "android.permission.READ_EXTERNAL_STORAGE"],
     ["revoke", "android.permission.READ_EXTERNAL_STORAGE"],
   ] as const)(
-    "reports the failed %s operation ID when setting a permission fails",
+    "reports the failed %s step ID when setting a permission fails",
     async (actionType, permission) => {
       const factory = new FakeAdbClientFactory();
       const client = factory.getFakeClient();

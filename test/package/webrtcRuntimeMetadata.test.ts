@@ -11,14 +11,25 @@ describe("packaged WebRTC runtime metadata", () => {
     expect(declaredVersion).toBeString();
   });
 
+  // `./daemon/processEntry` must precede everything to capture the launcher pid
+  // (#11041); it imports nothing, so runtime metadata is still initialized
+  // before any module that could depend on it.
   test("the packaged entrypoint initializes runtime metadata first", async () => {
     const entrypoint = await Bun.file("src/index.ts").text();
     const executableBody = entrypoint.replace(/^#!.*\r?\n/, "");
-    const firstImportLine = executableBody
-      .split(/\r?\n/)
-      .find((line) => line.startsWith("import "));
+    const importLines = executableBody.split(/\r?\n/).filter((line) => line.startsWith("import "));
 
-    expect(firstImportLine).toBe('import "./runtime/reflectMetadata";');
+    expect(importLines.slice(0, 2)).toEqual([
+      'import "./daemon/processEntry";',
+      'import "./runtime/reflectMetadata";',
+    ]);
+  });
+
+  test("the process entry module imports nothing", async () => {
+    const processEntry = await Bun.file("src/daemon/processEntry.ts").text();
+    expect(processEntry).not.toMatch(
+      /^\s*(import|export\s+\*\s+from|export\s+\{[^}]*\}\s+from)\b/m,
+    );
   });
 
   test("runtime metadata initialization loads reflect-metadata", async () => {

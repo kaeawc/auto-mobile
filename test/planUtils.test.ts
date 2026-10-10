@@ -82,7 +82,7 @@ describe("Plan Utils", () => {
         {
           timestamp: "2023-01-01T10:00:00.500Z",
           tool: "deleteDevice",
-          params: { operationId: "35e6f783-b794-47b8-b8a1-8619677820f0" },
+          params: { mode: "destroy" },
           result: { success: true },
         },
         {

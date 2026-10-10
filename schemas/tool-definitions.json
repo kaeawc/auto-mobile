@@ -1062,12 +1062,6 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "operationId": {
-          "description": "Caller-generated idempotency and diagnostic correlation ID",
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000)$"
-        },
         "target": {
           "type": "object",
           "properties": {
@@ -1129,7 +1123,7 @@
           "type": "boolean"
         }
       },
-      "required": ["operationId", "target", "mode", "verifyAbsence"],
+      "required": ["target", "mode", "verifyAbsence"],
       "additionalProperties": false
     }
   },
@@ -3111,6 +3105,9 @@
       },
       "required": ["deviceType", "runtime"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -7707,6 +7704,20 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "connection": {
+                    "type": "object",
+                    "properties": {
+                      "state": {
+                        "type": "string",
+                        "const": "offline"
+                      },
+                      "adbState": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["state", "adbState"],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -7984,6 +7995,9 @@
       },
       "required": ["message", "images", "count", "platform", "configuredInventory"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -8380,6 +8394,20 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "connection": {
+                    "type": "object",
+                    "properties": {
+                      "state": {
+                        "type": "string",
+                        "const": "offline"
+                      },
+                      "adbState": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["state", "adbState"],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -8687,6 +8715,9 @@
       },
       "required": ["message", "devices", "count", "discovery", "note"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnly": true
     }
   },
   {
@@ -22770,6 +22801,20 @@
                       "type": "null"
                     }
                   ]
+                },
+                "connection": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "const": "offline"
+                    },
+                    "adbState": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["state", "adbState"],
+                  "additionalProperties": false
                 }
               },
               "required": [

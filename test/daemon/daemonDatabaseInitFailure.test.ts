@@ -156,6 +156,27 @@ describe("Daemon.initializeDatabase fatality", () => {
     expect(tracker.resetCalls).toBe(0);
   });
 
+  test("startup installed-apps clear keeps a live peer's rows (#11158)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const installedAppsRepository = new FakeInstalledAppsRepository();
+    await installedAppsRepository.seedInstalledApp("peer-device", 0, "com.peer", false, 1);
+    await installedAppsRepository.setSessionTracking("live-peer-daemon", "peer-device", 1);
+    await installedAppsRepository.seedInstalledApp("dead-device", 0, "com.dead", false, 1);
+    await installedAppsRepository.setSessionTracking("dead-daemon", "dead-device", 1);
+    const { daemon } = buildDaemon({
+      initializer: new FakeDatabaseInitializer(),
+      tracker: new FakeStartupFailureTracker(),
+      timer,
+      installedAppsRepository,
+    });
+
+    await (daemon as unknown as DaemonInternals).initializeDatabase();
+
+    expect(await installedAppsRepository.listInstalledApps("peer-device")).toHaveLength(1);
+    expect(await installedAppsRepository.listInstalledApps("dead-device")).toHaveLength(0);
+  });
+
   test("unions a captured live same-namespace incumbent into stale-session protection", async () => {
     const incumbentRecord = {
       pid: 9001,

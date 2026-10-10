@@ -11,11 +11,14 @@ export interface RetiredProvisionedDeviceTransport {
 export interface ProvisionedDeviceTransportTombstoneStore {
   retire(input: RetiredProvisionedDeviceTransport, retiredAtMs: number): Promise<void>;
   get(deviceId: string): Promise<RetiredProvisionedDeviceTransport | undefined>;
+  clear(deviceId: string): Promise<void>;
 }
 
 export interface ProvisionedDeviceTransportFence {
   retire(input: RetiredProvisionedDeviceTransport): Promise<void>;
   get(deviceId: string): Promise<RetiredProvisionedDeviceTransport | undefined>;
+  /** Drops the tombstone once a different incarnation (or a deliberate boot) owns the serial. */
+  clear(deviceId: string): Promise<void>;
 }
 
 export class InMemoryProvisionedDeviceTransportFence implements ProvisionedDeviceTransportFence {
@@ -28,6 +31,10 @@ export class InMemoryProvisionedDeviceTransportFence implements ProvisionedDevic
   async get(deviceId: string): Promise<RetiredProvisionedDeviceTransport | undefined> {
     const retired = this.retired.get(deviceId);
     return retired ? { ...retired } : undefined;
+  }
+
+  async clear(deviceId: string): Promise<void> {
+    this.retired.delete(deviceId);
   }
 }
 
@@ -54,6 +61,11 @@ export class DurableProvisionedDeviceTransportFence implements ProvisionedDevice
   async get(deviceId: string): Promise<RetiredProvisionedDeviceTransport | undefined> {
     return (await this.memory.get(deviceId)) ?? (await this.store.get(deviceId));
   }
+
+  async clear(deviceId: string): Promise<void> {
+    await this.store.clear(deviceId);
+    await this.memory.clear(deviceId);
+  }
 }
 
 let defaultFence: ProvisionedDeviceTransportFence | undefined =
@@ -75,9 +87,26 @@ export function getProvisionedDeviceTransportFence(): ProvisionedDeviceTransport
   return defaultFence;
 }
 
-export async function throwIfProvisionedDeviceTransportRetired(deviceId: string): Promise<void> {
-  const retired = await getProvisionedDeviceTransportFence().get(deviceId);
+export interface RetiredTransportCheckOptions {
+  /**
+   * Resolves the stable id (AVD name) of whatever is attached to the serial now, or undefined when
+   * it cannot be determined. A different identity than the tombstone's proves a new incarnation.
+   */
+  currentIdentity?: () => Promise<string | undefined>;
+}
+
+export async function throwIfProvisionedDeviceTransportRetired(
+  deviceId: string,
+  options: RetiredTransportCheckOptions = {},
+): Promise<void> {
+  const fence = getProvisionedDeviceTransportFence();
+  const retired = await fence.get(deviceId);
   if (!retired) {
+    return;
+  }
+  const current = await options.currentIdentity?.();
+  if (current && current !== retired.stableId) {
+    await fence.clear(deviceId);
     return;
   }
   throw new DeviceLostError(

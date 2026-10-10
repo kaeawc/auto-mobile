@@ -113,6 +113,7 @@ export type LeaseSession = Pick<
   | "livenessPolicy"
   | "hasReceivedHeartbeat"
   | "ownership"
+  | "livenessOwnerToken"
 >;
 
 /**
@@ -205,4 +206,22 @@ export function sessionOwnerLeaseSnapshot(
   now: number,
 ): LivenessOwnerLeaseSnapshot {
   return { ...sessionLeaseSnapshot(session, now), lastHeartbeat: ownerLeaseHeartbeat(session) };
+}
+
+/**
+ * The lease snapshot that decides whether a session is live, suspect or lapsed (#11107).
+ *
+ * An owned session that has heartbeated is judged on its owner's own heartbeats, exactly as
+ * `SessionHeartbeatMonitor` judges release: `lastHeartbeat` is also stamped by tool calls from any
+ * connection, so judging suspect on it would let a non-owner's calls hide a dead owner and the
+ * session would never enter its suspect window. A session no proxy owns keeps the
+ * activity-refreshed fallback.
+ */
+export function sessionJudgedLeaseSnapshot(
+  session: LeaseSession,
+  now: number,
+): LivenessOwnerLeaseSnapshot {
+  return session.livenessOwnerToken !== undefined && session.hasReceivedHeartbeat
+    ? sessionOwnerLeaseSnapshot(session, now)
+    : sessionLeaseSnapshot(session, now);
 }

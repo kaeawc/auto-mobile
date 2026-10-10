@@ -60,7 +60,7 @@ describe("daemon command characterization with fake I/O", () => {
           ],
           [
             "stdout",
-            "  heartbeat <id>        Heartbeat a one-shot CLI session (proxy-owned: refused)",
+            "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
           ],
           ["exit", 1],
           ["stderr", "Unexpected error: fake exit"],
@@ -660,6 +660,58 @@ describe("heartbeat command against a proxy-owned session (#10054)", () => {
         `Error: Session ${sessionId} is owned by an MCP proxy. [liveness_owner_is_proxy] Stop this keeper; heartbeat only works for one-shot CLI sessions.`,
       ],
       ["exit", 1],
+    ]);
+  });
+});
+
+// Owner decision 2026-10-09 (#11096): keepers are dropped for one-shot CLI sessions.
+describe("heartbeat command against a one-shot CLI session (#11096)", () => {
+  test("reports the daemon's no-op and exits zero", async () => {
+    const sessionId = "cli-idle-session";
+    const events: unknown[] = [];
+    class Client extends FakeDaemonClient {
+      override async connect() {}
+      override async callDaemonMethod() {
+        return { sessionId, livenessPolicy: "cli-idle", livenessUnchanged: true };
+      }
+      override async close() {
+        events.push("close");
+      }
+    }
+    const client = new Client();
+    class Manager extends SafeDaemonManager {
+      override getDaemonState() {
+        return remoteState;
+      }
+      override createClient() {
+        return client;
+      }
+    }
+    const log = spyOn(console, "log").mockImplementation((text) => {
+      events.push(["stdout", text]);
+    });
+    const exit = spyOn(process, "exit").mockImplementation((code) => {
+      events.push(["exit", code]);
+      return undefined as never;
+    });
+    try {
+      await runDaemonCommand(
+        "heartbeat",
+        [sessionId, "--liveness-owner-token", "keeper", "--claim-liveness-ownership"],
+        {},
+        Manager,
+      );
+    } finally {
+      log.mockRestore();
+      exit.mockRestore();
+    }
+
+    expect(events).toEqual([
+      [
+        "stdout",
+        `Session ${sessionId} is a one-shot CLI session: its idle window runs from tool calls, so this heartbeat changed nothing (no keeper is needed).`,
+      ],
+      "close",
     ]);
   });
 });

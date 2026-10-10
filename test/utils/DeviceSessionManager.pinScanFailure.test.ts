@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { AdbUnavailableError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -63,6 +64,33 @@ describe("DeviceSessionManager platform scan status", () => {
       expect(manager.getExplicitDevicePin()).toBeUndefined();
     },
   );
+
+  test("does not treat a missing adb binary as a complete, empty Android scan", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([android]);
+    const manager = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), new FakeSimctl() as never),
+    );
+    manager.setExplicitDevicePin(android);
+    // Mirror AdbClient: a missing binary yields [] unless the caller opts into the throw.
+    const scanSpy = spyOn(adb, "getBootedAndroidDevices").mockImplementation(async (options) => {
+      if (options?.throwOnMissingAdb) {
+        throw new AdbUnavailableError("ADB executable is unavailable");
+      }
+      return [];
+    });
+    try {
+      const scan = await manager.detectConnectedPlatformsWithStatus();
+      expect(scan.scanned.android).toBe(false);
+      expect(scan.scannedSources.android).toBe(false);
+      await expect(manager.ensureDeviceReady("android", "absent-device")).rejects.toThrow(
+        "not found",
+      );
+      expect(manager.getExplicitDevicePin()).toEqual(android);
+    } finally {
+      scanSpy.mockRestore();
+    }
+  });
 
   test("does not treat absent simctl as a successful iOS scan", async () => {
     const manager = DeviceSessionManager.createInstance(

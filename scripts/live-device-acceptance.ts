@@ -3305,7 +3305,6 @@ export async function runAcceptanceMatrix(
     clients.push(client);
     await enableDestructiveTool(client, "deleteDevice", "persisted-target-absent-delete");
     const request = {
-      operationId: randomUUID(),
       target: {
         platform: args.platform,
         isVirtual: true,

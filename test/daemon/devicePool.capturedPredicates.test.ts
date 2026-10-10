@@ -46,6 +46,9 @@ const rows: PredicateRow[] = [
     name: "suspect/grace",
     prepare: ({ manager, timer, session }) => {
       manager.recordHeartbeat(session.sessionId);
+      // The suspect grace holds only the heartbeat lease, not idleness (#11107): keep the idle
+      // window open so the lease, not the idle deadline, decides this row.
+      session.expiresAt = timer.now() + 120_000;
       timer.setCurrentTime(timer.now() + 1_001);
       expect(manager.getSessionLeaseState(session.sessionId)?.phase).toBe("suspect");
     },

@@ -172,6 +172,50 @@ describe("MultiPlatformDeviceManager", () => {
       );
     }
 
+    test("a wedged devicectl costs only its budget, with simulators listed in parallel (#11122)", async () => {
+      await withProcessPlatform("darwin", async () => {
+        const timer = new FakeTimer();
+        let simctlStartedBeforePhysicalSettled = false;
+        let physicalSettled = false;
+        const fakeSimctl = {
+          isAvailable: async () => true,
+          getBootedSimulatorsChecked: async () => {
+            simctlStartedBeforePhysicalSettled = !physicalSettled;
+            return [simulator];
+          },
+        } as unknown as SimCtlClient;
+        const hangingLister: IosPhysicalDeviceLister = {
+          listConnectedDevices: () =>
+            new Promise(() => {
+              // devicectl never answers
+            }),
+        };
+        const manager = new MultiPlatformDeviceManager(
+          new FakeAdbClient() as unknown as AdbClient,
+          fakeSimctl,
+          createFakeAndroidEmulator({ getBootedDevices: async () => [] }),
+          undefined,
+          undefined,
+          hangingLister,
+        ).withPhysicalIosScanBudget(3_000, timer);
+
+        const pending = manager.getBootedDevicesDetailed("ios").finally(() => {
+          physicalSettled = true;
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+        await timer.advanceTimeAsync(2_999);
+        expect(physicalSettled).toBe(false);
+        await timer.advanceTimeAsync(1);
+        const discovery = await pending;
+
+        expect(simctlStartedBeforePhysicalSettled).toBe(true);
+        expect(discovery.devices).toEqual([simulator]);
+        expect(discovery.succeededSources?.has("ios-simulator")).toBe(true);
+        expect(discovery.succeededSources?.has("ios-physical")).toBe(false);
+        expect(discovery.sourceErrors?.["ios-physical"]?.code).toBe("timeout");
+      });
+    });
+
     test("a simulator-only host still lists only its simulators", async () => {
       await withProcessPlatform("darwin", async () => {
         const manager = makeManager({ simulators: [simulator], physical: [] });
@@ -564,7 +608,8 @@ describe("MultiPlatformDeviceManager", () => {
       controller.abort(cancellation);
 
       await expect(discoveryPromise).rejects.toBe(cancellation);
-      expect(simctlCalled).toBe(false);
+      // simctl runs beside devicectl (#11122); the abort still wins the sweep.
+      expect(simctlCalled).toBe(true);
       resolvePhysical({ devices: [], complete: true });
     });
   });

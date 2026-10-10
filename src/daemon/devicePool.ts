@@ -63,6 +63,7 @@ import {
   type BootedDeviceDiscovery,
   waitForDeviceReadyOrCancel,
 } from "../devices/deviceUtils";
+import { BootedDeviceDiscoveryIncompleteError } from "../devices/deviceBootService";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { SingleFlight } from "../utils/cache/SingleFlight";
@@ -356,6 +357,13 @@ function describeMultiDeviceAllocationAttempts(
 /**
  * Pooled Device Status
  */
+/** A live session whose ownership a reconnecting client was refused (#11107). */
+export interface RefusedOwnedSessionRestore {
+  sessionId: string;
+  deviceId: string;
+  reason: "owned-by-other-connection";
+}
+
 export type DeviceStatus = "idle" | "busy" | "error";
 type MutableMetadataSource = "refresh" | "snapshot";
 export type SessionPreservingRecoveryResult =
@@ -382,6 +390,11 @@ export type DeviceRecoveryEligibility =
  *
  * Represents a device in the pool with assignment info
  */
+export interface RemoveDeviceOptions {
+  /** Keep the tracked emulator child (liveness-miss removal, not retirement). */
+  keepTrackedProcess?: boolean;
+}
+
 export interface PooledDevice {
   id: string; // Device ID (e.g., "emulator-5554")
   name: string; // Device name (e.g., "Pixel 7")
@@ -914,20 +927,26 @@ interface StopDiscoveredEmulatorOptions {
 
 /**
  * The persisted creator kind of a session a pool bind creates (#11071): an acquisition (not a
- * caller-chosen session rebind or a recovery) with no MCP connection id is anonymous, and only
+ * caller-chosen session rebind or a recovery) by an anonymous caller is anonymous, and only
  * another anonymous acquisition may reuse it, keeping repeated `--cli` startDevice idempotent
- * (#2421).
+ * (#2421). A one-shot `--cli` connection is anonymous by its explicit marker even though the
+ * socket forwards a per-connection MCP id (#11096); a caller with no MCP id at all cannot prove
+ * any ownership and is anonymous too. Every other MCP connection is identified.
  */
 function creatorPersistenceSource(
-  mcpSessionId: string | undefined,
+  caller: AutolockClient,
   allowSessionRebind: boolean,
   expectedExistingSessionDeviceId: string | undefined,
 ): string | undefined {
-  return mcpSessionId === undefined &&
+  return isAnonymousCaller(caller) &&
     !allowSessionRebind &&
     expectedExistingSessionDeviceId === undefined
     ? ANONYMOUS_ACQUISITION_SESSION_SOURCE
     : undefined;
+}
+
+function isAnonymousCaller(caller: AutolockClient | undefined): boolean {
+  return caller?.oneShotCli === true || caller?.mcpSessionId === undefined;
 }
 
 export class DevicePool {
@@ -1284,6 +1303,7 @@ export class DevicePool {
       },
       this.timer,
       options.graceMs ?? OWNER_DISCONNECT_GRACE_MS,
+      () => this.sessionManager.sessionNow(),
     );
   }
 
@@ -1339,8 +1359,8 @@ export class DevicePool {
         this.intentionalShutdowns.delete(deviceId);
       },
       isReservedForShutdown: (device) => this.isReservedForShutdown(device),
-      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
-        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice),
+      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice, options) =>
+        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice, options),
       finishEmulatorLossIncident: (incidentId, outcome) =>
         this.finishEmulatorLossIncident(incidentId, outcome),
       recordEmulatorLossIncident: (deviceId, path, processExit, lastAdbState) =>
@@ -1477,8 +1497,8 @@ export class DevicePool {
       completeEmulatorLossRecovery: (incidentId, outcome) =>
         this.completeEmulatorLossRecovery(incidentId, outcome),
       settleEmulatorLossIncident: (incidentId) => this.settleEmulatorLossIncident(incidentId),
-      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
-        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice),
+      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice, options) =>
+        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice, options),
       isReservedForShutdown: (device) => this.isReservedForShutdown(device),
       recordEmulatorLossIncident: (deviceId, path, exit, state) =>
         this.recordEmulatorLossIncident(deviceId, path, exit, state),
@@ -2150,12 +2170,30 @@ export class DevicePool {
   }
 
   /**
+   * Retirement forgets the tracked emulator process. A liveness-miss removal
+   * (adb dropped the serial but the child may be alive) keeps it so its exit is
+   * still watched and killDevice can stop it (#11123).
+   */
+  private dropTrackedProcessOnRemoval(deviceId: string, options?: RemoveDeviceOptions): void {
+    const tracked = this.startedDeviceProcesses.get(deviceId);
+    if (options?.keepTrackedProcess && tracked) {
+      return;
+    }
+    if (tracked && !this.emulatorProcessLifecycle.getCompletedProcessExit(tracked)) {
+      logger.warn(`[DevicePool] Dropping tracking of live emulator process for ${deviceId}`);
+    }
+    this.startedDeviceProcesses.delete(deviceId);
+    this.startedDeviceProcessOutput.delete(deviceId);
+  }
+
+  /**
    * Remove device from pool
    */
   async removeDevice(
     deviceId: string,
     awaitCacheCleanup: boolean = true,
     expectedDevice?: PooledDevice,
+    options?: RemoveDeviceOptions,
   ): Promise<void> {
     const device = this.devices.get(deviceId);
     if (!device) {
@@ -2190,8 +2228,12 @@ export class DevicePool {
     this.notifyDeviceRemoved(deviceId, device.platform);
     this.deviceSessionStarts.delete(deviceId);
     this.refreshMissingDeviceMisses.delete(deviceId);
-    this.startedDeviceProcesses.delete(deviceId);
-    this.startedDeviceProcessOutput.delete(deviceId);
+    this.dropTrackedProcessOnRemoval(deviceId, options);
+    for (const [capturedSessionId, capture] of this.releasedDeviceCaptures) {
+      if (capture.deviceId === deviceId) {
+        this.releasedDeviceCaptures.delete(capturedSessionId);
+      }
+    }
     if (this.lastReleasedDeviceId === deviceId) {
       this.lastReleasedDeviceId = null;
     }
@@ -3471,11 +3513,13 @@ export class DevicePool {
             platform: device.platform,
             stableId: device.platform === "android" ? device.name : device.deviceId!,
           };
-    const lifecycleLease = await this.lifecycleCoordinator.reserve(identity, {
-      operation,
-      deadlineMs,
-      signal: controller.signal,
-    });
+    const lifecycleLease = await this.lifecycleCoordinator
+      .reserve(identity, { operation, deadlineMs, signal: controller.signal })
+      .catch((error: unknown) => {
+        // The finally below only owns the timer once the lease is held (#11123).
+        this.timer.clearTimeout(timeoutHandle);
+        throw error;
+      });
     const signal = AbortSignal.any([controller.signal, lifecycleLease.signal]);
     let retainedLeaseSettlement: Promise<unknown> | undefined;
     const retainLeaseUntil = (settlement: Promise<unknown>): void => {
@@ -3578,9 +3622,16 @@ export class DevicePool {
     device: DeviceInfo,
     outcome: DeviceStartResult["outcome"],
   ): Promise<boolean> {
-    const visible = (await this.deviceManager.getBootedDevices("android")).find(
-      (booted) => booted.name === device.name,
-    );
+    const discovery = await this.deviceManager.getBootedDevicesDetailed("android");
+    if (!discovery.succeededPlatforms.has("android")) {
+      // An incomplete adb listing cannot prove the emulator is ours to adopt (or
+      // free of a foreign lease); refuse rather than wait on it (#11103).
+      logger.warn(
+        `[DevicePool] Android discovery was incomplete; not adopting AVD '${device.name}' for allocation`,
+      );
+      return false;
+    }
+    const visible = discovery.devices.find((booted) => booted.name === device.name);
     if (visible) {
       return !(await this.refusesForeignOwnedEmulator(device, visible.deviceId));
     }
@@ -3741,6 +3792,22 @@ export class DevicePool {
     }
   }
 
+  /**
+   * Booted devices for a start decision. A failed listing is not "nothing is
+   * booted": starting from it could boot a duplicate beside an attached device,
+   * so an incomplete scan refuses with a retryable error (#11103).
+   */
+  private async listBootedDevicesForStart(platform: Platform): Promise<BootedDevice[]> {
+    const discovery = await this.deviceManager.getBootedDevicesDetailed(platform);
+    if (!discovery.succeededPlatforms.has(platform)) {
+      throw new BootedDeviceDiscoveryIncompleteError(
+        platform,
+        discovery.discoveryErrors?.[platform],
+      );
+    }
+    return discovery.devices;
+  }
+
   private async getStartableDeviceImageCandidates(
     platform: Platform,
     criteria?: DeviceAllocationCriteria,
@@ -3751,7 +3818,7 @@ export class DevicePool {
       return [];
     }
 
-    const bootedDevices = await this.deviceManager.getBootedDevices(platform);
+    const bootedDevices = await this.listBootedDevicesForStart(platform);
     const bootedIds = new Set(bootedDevices.map((device) => device.deviceId));
     const bootedNames = new Set(bootedDevices.map((device) => device.name));
     const candidates: DeviceInfo[] = [];
@@ -3966,8 +4033,16 @@ export class DevicePool {
       await this.finishEmulatorLossIncident(incidentId, "not-attempted");
       return false;
     }
+    this.discardReleasedCapture(sessionId, device.id);
     device.sessionId = null;
     return true;
+  }
+
+  /** Device-loss releases never reach releaseDevice, the only capture consumer (#11123). */
+  private discardReleasedCapture(sessionId: string, deviceId: string): void {
+    if (this.releasedDeviceCaptures.get(sessionId)?.deviceId === deviceId) {
+      this.releasedDeviceCaptures.delete(sessionId);
+    }
   }
 
   private async tryPreserveSessionForMissingDevice(
@@ -4997,7 +5072,7 @@ export class DevicePool {
     const timeoutMs =
       recoveryDeadline === undefined
         ? this.DEVICE_WAIT_TIMEOUT_MS
-        : Math.max(0, recoveryDeadline - this.timer.now());
+        : Math.max(0, recoveryDeadline - this.recoveryNow());
     // Include the deadline attempt: attempt one runs immediately, before any sleep.
     const maxAttempts = Math.max(
       1,
@@ -5092,7 +5167,7 @@ export class DevicePool {
             this.DEVICE_WAIT_INTERVAL_MS,
             recoveryDeadline === undefined
               ? this.DEVICE_WAIT_INTERVAL_MS
-              : Math.max(0, recoveryDeadline - this.timer.now()),
+              : Math.max(0, recoveryDeadline - this.recoveryNow()),
           ),
         shouldRetry: (error) =>
           error instanceof DevicePoolError &&
@@ -5183,7 +5258,7 @@ export class DevicePool {
     if (
       incident &&
       target.restartRecoveryDeadlineMs !== undefined &&
-      this.timer.now() < target.restartRecoveryDeadlineMs &&
+      this.recoveryNow() < target.restartRecoveryDeadlineMs &&
       this.getDevicesMatchingRecoveryTarget(target).length === 0
     ) {
       throw this.recoveryAssignmentError(sessionId, target, incident);
@@ -5194,12 +5269,20 @@ export class DevicePool {
     return incident;
   }
 
+  /**
+   * "Now" for comparing against a recovery target's restart deadline, which derives from session
+   * stamps (`released_at_ms`, `expires_at_ms`) on the session clock (#11105).
+   */
+  private recoveryNow(): number {
+    return this.sessionManager.sessionNow();
+  }
+
   private recoveryAssignmentError(
     sessionId: string,
     target: SessionRecoveryTarget,
     incident?: EmulatorLossIncident,
   ): ActionableError {
-    const now = this.timer.now();
+    const now = this.recoveryNow();
     if (target.restartRecoveryDeadlineMs !== undefined && now < target.restartRecoveryDeadlineMs) {
       return new SessionRecoveryAssignmentError({
         sessionUuid: sessionId,
@@ -5242,7 +5325,7 @@ export class DevicePool {
     if (
       target.platform !== "android" ||
       target.restartRecoveryDeadlineMs === undefined ||
-      this.timer.now() >= target.restartRecoveryDeadlineMs
+      this.recoveryNow() >= target.restartRecoveryDeadlineMs
     ) {
       return undefined;
     }
@@ -5769,7 +5852,7 @@ export class DevicePool {
   ): Promise<DevicePoolRefreshResult> {
     if (
       target.restartRecoveryDeadlineMs === undefined ||
-      this.timer.now() >= target.restartRecoveryDeadlineMs
+      this.recoveryNow() >= target.restartRecoveryDeadlineMs
     ) {
       return this.refreshDevicesInternal(false);
     }
@@ -6910,7 +6993,7 @@ export class DevicePool {
       this.autolockManager.getOwnedAutolockSession(device, client);
       return;
     }
-    this.assertMcpSessionOwnsDeviceSession(client?.mcpSessionId, session, device);
+    this.assertCallerOwnsDeviceSession(client, session, device);
   }
 
   private assertAndroidRecoveryExclusionForReadinessReservation(
@@ -7107,7 +7190,9 @@ export class DevicePool {
     verifiedAndroidAvdIdentity?: DeviceInfo,
     expectedExistingSessionDeviceId?: string,
     mcpSessionId?: string,
+    oneShotCli = false,
   ): Promise<string> {
+    const caller: AutolockClient = { mcpSessionId, oneShotCli };
     await this.assertNotClaimedByForeignDaemon(deviceId, platform);
     const heldBefore = this.devices.get(deviceId)?.sessionId ?? null;
     const boundSessionId = await this.withTargetDeviceDiscovery({
@@ -7179,10 +7264,11 @@ export class DevicePool {
               deviceId,
               expectedExistingSessionDeviceId,
             );
-            const confirmedSameOwner = this.assertMcpSessionOwnsDeviceSession(
-              mcpSessionId,
+            const confirmedSameOwner = this.assertCallerOwnsDeviceSession(
+              caller,
               existingSession,
               device,
+              Boolean(childProcess),
             );
             return this.reuseExistingDeviceSession(
               deviceId,
@@ -7230,7 +7316,7 @@ export class DevicePool {
             {
               stableDeviceId: this.stableDeviceIdFor(device),
               persistenceSource: creatorPersistenceSource(
-                mcpSessionId,
+                caller,
                 allowSessionRebind,
                 expectedExistingSessionDeviceId,
               ),
@@ -7583,12 +7669,31 @@ export class DevicePool {
     return refreshedSession.sessionId;
   }
 
-  /** Assert any supplied MCP identity and return whether same-owner reuse was proven. */
-  private assertMcpSessionOwnsDeviceSession(
-    mcpSessionId: string | undefined,
+  /**
+   * Assert the caller may act on `session` and return whether same-owner reuse was proven. An
+   * identified MCP connection must have acquired it; a one-shot `--cli` caller may act only on a
+   * session another anonymous acquisition created, and is then its owner unless this acquisition
+   * spawned the device (#11096, #11138, #11153); a
+   * caller with no identity is left to the anonymous reuse check.
+   */
+  private assertCallerOwnsDeviceSession(
+    caller: AutolockClient | undefined,
     session: Session,
     device: PooledDevice,
+    spawnedDevice = false,
   ): boolean {
+    if (caller?.oneShotCli === true) {
+      if (!isAnonymousAcquisitionSession(session)) {
+        throw deviceAlreadyAssignedToAnotherSessionError(device.id);
+      }
+      // Anonymous acquisitions share one owner, so a one-shot CLI caller reusing one is its
+      // confirmed owner. Returning false sent an acquisition that resolved a source image (an AVD
+      // name, or a booted AVD's serial) into the freshly-started-device guard (#11138).
+      // An acquisition that spawned the emulator itself is not: a different one-shot's anonymous
+      // bind of the same serial mid-boot must be refused, not silently shared (#11153).
+      return !spawnedDevice;
+    }
+    const mcpSessionId = caller?.mcpSessionId;
     if (mcpSessionId === undefined) {
       return false;
     }
@@ -7607,6 +7712,18 @@ export class DevicePool {
       return;
     }
     this.ownerDisconnectRelease.cancel(sessionId);
+    // One owning connection per session (#11107): recording ownership moves it off any other
+    // connection, so the previous owner's disconnect can no longer be suppressed by a duplicate.
+    for (const [otherMcpSessionId, otherAcquired] of this.mcpSessionAcquiredDeviceSessions) {
+      if (
+        otherMcpSessionId !== mcpSessionId &&
+        otherAcquired.delete(sessionId) &&
+        otherAcquired.size === 0
+      ) {
+        this.mcpSessionAcquiredDeviceSessions.delete(otherMcpSessionId);
+      }
+    }
+    this.autolockManager.releaseMcpSessionOwnershipExcept(sessionId, mcpSessionId);
     const acquired = this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId) ?? new Set<string>();
     acquired.add(sessionId);
     this.mcpSessionAcquiredDeviceSessions.set(mcpSessionId, acquired);
@@ -7678,6 +7795,15 @@ export class DevicePool {
 
   mapAndroidDiscovery(devices: readonly BootedDevice[]): BootedDevice[] {
     return this.androidTransportAliases.mapDiscovery(devices);
+  }
+
+  /** Readiness sees live rows, so a surviving alias also takes over dispatch (#11133). */
+  mapAndroidReadinessDiscovery(devices: readonly BootedDevice[]): BootedDevice[] {
+    return this.androidTransportAliases.mapDiscovery(devices, true);
+  }
+
+  resolveAndroidCanonicalId(deviceId: string): string {
+    return this.androidTransportAliases.canonicalFor(deviceId);
   }
 
   private isPooledAndroidEmulator(deviceId: string): boolean {
@@ -7801,7 +7927,7 @@ export class DevicePool {
 
   attachAutolockSessionToMcpSession(
     ...args: Parameters<DeviceAutolockManager["attachAutolockSessionToMcpSession"]>
-  ): Promise<void> {
+  ): ReturnType<DeviceAutolockManager["attachAutolockSessionToMcpSession"]> {
     return this.autolockManager.attachAutolockSessionToMcpSession(...args);
   }
 
@@ -7811,14 +7937,18 @@ export class DevicePool {
 
   /**
    * Restore ownership of live result-minted sessions after a daemon socket
-   * reconnect. Unlike autolock restoration, this intentionally does not select
-   * an implicit routing default or mutate persisted autolock metadata.
+   * reconnect. Sessions another connection still owns are not restored and are returned as
+   * refusals instead of failing the whole restore. Unlike autolock restoration, this
+   * intentionally does not select an implicit routing default or mutate persisted autolock
+   * metadata.
    */
   async restoreOwnedDeviceSessionsForMcpSession(
     sessionIds: readonly string[],
     mcpSessionId: string,
-  ): Promise<void> {
-    await this.assignmentMutex.runExclusive(() => {
+    livenessOwnerToken?: string,
+  ): Promise<readonly RefusedOwnedSessionRestore[]> {
+    return await this.assignmentMutex.runExclusive(() => {
+      const refused: RefusedOwnedSessionRestore[] = [];
       for (const sessionId of sessionIds) {
         const session = this.sessionManager.getSession(sessionId);
         const device = session ? this.devices.get(session.assignedDevice) : undefined;
@@ -7828,10 +7958,33 @@ export class DevicePool {
           this.isSessionAssignmentCurrent(device, session) &&
           this.sessionManager.isAdmittedForAutomation(session)
         ) {
+          if (!this.mayRestoreMcpSessionOwnership(session, mcpSessionId, livenessOwnerToken)) {
+            // One refused session must not stop the rest from restoring: the caller decides
+            // whether the refusal matters to the call it is routing.
+            refused.push({ sessionId, deviceId: device.id, reason: "owned-by-other-connection" });
+            continue;
+          }
           this.recordMcpSessionOwnership(mcpSessionId, sessionId);
         }
       }
+      return refused;
     });
+  }
+
+  /**
+   * Whether a reconnecting client may restore ownership of a live session (#11107): it proves the
+   * session's liveness owner token, or no other connected MCP client owns the session. Naming a
+   * session UUID is not proof of ownership.
+   */
+  private mayRestoreMcpSessionOwnership(
+    session: Session,
+    mcpSessionId: string,
+    livenessOwnerToken: string | undefined,
+  ): boolean {
+    if (livenessOwnerToken !== undefined && session.livenessOwnerToken === livenessOwnerToken) {
+      return true;
+    }
+    return !this.hasConnectedMcpSessionOwner(session.sessionId, mcpSessionId);
   }
 
   /**
@@ -7855,14 +8008,17 @@ export class DevicePool {
     }
   }
 
-  /** Whether a still-connected MCP client owns the session or routes to it by autolock. */
-  private hasConnectedMcpSessionOwner(sessionId: string): boolean {
-    for (const acquired of this.mcpSessionAcquiredDeviceSessions.values()) {
-      if (acquired.has(sessionId)) {
+  /**
+   * Whether a still-connected MCP client (other than `exceptMcpSessionId`) owns the session or
+   * routes to it by autolock.
+   */
+  private hasConnectedMcpSessionOwner(sessionId: string, exceptMcpSessionId?: string): boolean {
+    for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredDeviceSessions) {
+      if (mcpSessionId !== exceptMcpSessionId && acquired.has(sessionId)) {
         return true;
       }
     }
-    return this.autolockManager.hasMcpSessionOwner(sessionId);
+    return this.autolockManager.hasMcpSessionOwner(sessionId, exceptMcpSessionId);
   }
 
   /**
@@ -8209,7 +8365,7 @@ export class DevicePool {
       if (transportIdentityUnresolved) {
         if (
           target.restartRecoveryDeadlineMs === undefined ||
-          this.timer.now() < target.restartRecoveryDeadlineMs
+          this.recoveryNow() < target.restartRecoveryDeadlineMs
         ) {
           return new DevicePoolError("Recovery target identity is unresolved", true);
         }
@@ -8219,7 +8375,7 @@ export class DevicePool {
       }
       if (
         target.restartRecoveryDeadlineMs !== undefined &&
-        this.timer.now() < target.restartRecoveryDeadlineMs
+        this.recoveryNow() < target.restartRecoveryDeadlineMs
       ) {
         return new DevicePoolError("Recovery target is restarting", true);
       }

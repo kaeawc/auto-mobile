@@ -37,7 +37,6 @@ import {
 } from "../../src/devices/exactDeviceProvisioning";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
-import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceResourceController } from "../fakes/FakeDeviceResourceController";
@@ -327,7 +326,6 @@ describe("provisionDevice handler", () => {
   let deviceManager: FakeDeviceUtils;
   let resourceObserver: FakeDeviceResourceObserver;
   let exactProvisioner: FakeExactDeviceProvisioner;
-  let teardownOperationStore: FakeDeviceTeardownOperationStore;
   let restorePipelineOverrides: (() => void) | undefined;
 
   const setup = async () => {
@@ -355,14 +353,12 @@ describe("provisionDevice handler", () => {
     };
     deviceManager = new FakeDeviceUtils();
     exactProvisioner = new FakeExactDeviceProvisioner();
-    teardownOperationStore = new FakeDeviceTeardownOperationStore();
     setDeviceToolsDependencies({
       env: autolockEnv,
       deviceResourceObserverFactory: () => resourceObserver,
       deviceManagerFactory: () => deviceManager,
       avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
       exactDeviceProvisionerFactory: () => exactProvisioner,
-      teardownDeviceOperationStoreFactory: () => teardownOperationStore,
       notifyResourcesChanged: async () => {},
       clearInstalledAppsForDevice: async () => {},
     });
@@ -1902,6 +1898,59 @@ describe("provisionDevice handler", () => {
     expect(await deviceManager.listDeviceImages("android")).toEqual([]);
   });
 
+  test("does not delete an AVD whose creation avdmanager rejected (#11100)", async () => {
+    const timer = new FakeTimer();
+    const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+    configureProvisionBootAndTeardown(deviceManager, "android");
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator,
+      exactDeviceProvisionerFactory: (manager, creationGate) =>
+        new DefaultExactDeviceProvisioner({
+          listDeviceImages: async (platform) => await manager.listDeviceImages(platform),
+          isCreationAllowed: (createIfMissing) => creationGate.isCreationAllowed(createIfMissing),
+          avdManager: {
+            createAvd: async ({ name }) => {
+              // A racing external create landed after the provisioner's listing.
+              deviceManager.setDeviceImages("android", [
+                { name, platform: "android", isRunning: false },
+              ]);
+              return { success: false, message: `An AVD with the name '${name}' already exists.` };
+            },
+          },
+          androidConfigReader: {
+            readConfig: async () => undefined,
+          },
+          androidConfigWriter: {
+            setMemoryMb: async () => {
+              throw new Error("unexpected AVD config write");
+            },
+          },
+          iosSimulator: {
+            createSimulator: async () => {
+              throw new Error("unexpected iOS simulator creation");
+            },
+          },
+          lifecycleCoordinator,
+          timer,
+        }),
+      idGenerator: new FakeIdGenerator(["cleanup-rejected-create"]),
+    });
+    registerDeviceTools();
+    const args = { ...provisionTestArgs("android"), boot: false, readiness: "none" as const };
+
+    const response = JSON.parse(await provisionResponseText(args));
+
+    expect(response).toMatchObject({
+      success: false,
+      error: { code: "platform_command_failed" },
+    });
+    expect(response.cleanup).toBeUndefined();
+    expect(await deviceManager.listDeviceImages("android")).toEqual([
+      { name: args.device.name, platform: "android", isRunning: false },
+    ]);
+  });
+
   test("cancelled exact configuration cannot overwrite a replacement AVD after rollback", async () => {
     const timer = new FakeTimer();
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
@@ -3216,7 +3265,6 @@ describe("provisionDevice handler", () => {
       deviceManager.clearHistory();
 
       const teardown = teardownTool.handler({
-        operationId: "35e6f783-b794-47b8-b8a1-8619677820f0",
         target: {
           platform: "ios",
           isVirtual: true,
@@ -3752,6 +3800,60 @@ describe("provisionDevice handler", () => {
     expect(retried.error?.code).not.toBe("request_cancelled");
     expect(retried.error).toBeUndefined();
     expect(retried).toMatchObject({ created: true });
+    expect(provisionCalls).toBe(2);
+  });
+
+  // #11111: the daemon frees its admission barrier on cancel while rollback keeps running, so the
+  // lifecycle lease alone must fence a following provision of the same device.
+  test("a provision right after a cancel waits for the cancelled attempt's rollback", async () => {
+    const timer = new FakeTimer();
+    let provisionCalls = 0;
+    const provisionEntered = deferred();
+    const firstAttemptGate = Promise.withResolvers<void>();
+    setDeviceToolsDependencies({
+      timer,
+      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+      exactDeviceProvisionerFactory: () => ({
+        provision: async (request) => {
+          provisionCalls += 1;
+          request.onBeforeCreate?.();
+          provisionEntered.resolve();
+          if (provisionCalls > 1) {
+            return provisionedTestDevice("android", true);
+          }
+          await new Promise<void>((resolve) => {
+            request.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          await firstAttemptGate.promise;
+          throw request.signal?.reason ?? new Error("aborted");
+        },
+      }),
+    });
+    registerDeviceTools();
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = { ...provisionTestArgs("android"), boot: false, readiness: "none" as const };
+
+    const caller = new AbortController();
+    const first = tool.handler(args, undefined, caller.signal);
+    await provisionEntered.promise;
+    caller.abort(new Error("client went away"));
+    await flushMicrotasks();
+    timer.advanceTime(5_000);
+    const cancelled = JSON.parse(
+      ((await first) as { content: { text: string }[] }).content[0].text,
+    );
+    expect(cancelled).toMatchObject({ error: { code: "request_cancelled" } });
+
+    const second = tool.handler(args);
+    await flushMicrotasks();
+    expect(provisionCalls).toBe(1);
+
+    firstAttemptGate.resolve();
+    const retried = JSON.parse(((await second) as { content: { text: string }[] }).content[0].text);
+    expect(retried.error).toBeUndefined();
     expect(provisionCalls).toBe(2);
   });
 

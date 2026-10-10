@@ -35,7 +35,15 @@ export interface InstalledAppsStore {
   markProfileStale(deviceId: string, userId: number): Promise<void>;
   touchDevice(deviceId: string, timestampMs: number): Promise<void>;
   clearDeviceSession(deviceId: string): Promise<void>;
-  clearOldDaemonSessions(currentDaemonSessionId: string): Promise<void>;
+  /**
+   * Drop cache rows tagged by a previous daemon. Rows owned by the current
+   * daemon or by any id in `liveDaemonSessionIds` (a live peer sharing this
+   * data dir) are kept (issue #11158).
+   */
+  clearOldDaemonSessions(
+    currentDaemonSessionId: string,
+    liveDaemonSessionIds?: ReadonlySet<string>,
+  ): Promise<void>;
   setSessionTracking(
     daemonSessionId: string,
     deviceId: string,

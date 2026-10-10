@@ -62,6 +62,30 @@ struct PrototypeSizeRules: Equatable {
 enum PrototypeSizing {
     typealias Size = (width: Double, height: Double)
 
+    /// Where content sits inside the box the rules sized, as a unit anchor. An axis with no
+    /// authored size (unset or `wrap`) is Android's `wrapContentWidth()`/`wrapContentHeight()`, which
+    /// centre the content in whatever a min bound grew the box to; every other axis (`fill`, `{dp}`,
+    /// a weight's share, an aspect ratio) keeps the node's own `alignment`.
+    static func contentAnchor(
+        _ rules: PrototypeSizeRules,
+        alignment: (x: Double, y: Double)
+    )
+        -> (x: Double, y: Double)
+    {
+        let wrapsWidth = wraps(rules.width, weighted: rules.weightedAxis == .horizontal, rules: rules)
+        let wrapsHeight = wraps(rules.height, weighted: rules.weightedAxis == .vertical, rules: rules)
+        return (wrapsWidth ? 0.5 : alignment.x, wrapsHeight ? 0.5 : alignment.y)
+    }
+
+    private static func wraps(_ dimension: Dimension?, weighted: Bool, rules: PrototypeSizeRules) -> Bool {
+        guard !weighted, rules.aspectRatio == nil else { return false }
+        switch dimension {
+        case .wrap?: return true
+        case nil: return !rules.fillsByDefault
+        default: return false
+        }
+    }
+
     /// The size the node takes. `proposed` is the room the parent offers per axis (nil: unbounded),
     /// `content` measures the node's content given the largest size it may take per axis.
     static func resolve(

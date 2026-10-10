@@ -28,7 +28,9 @@ struct PrototypeSizedLayout: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
-        let anchor = PrototypeLayeredLayout.anchor(alignment)
+        let aligned = PrototypeLayeredLayout.anchor(alignment)
+        let centred = PrototypeSizing.contentAnchor(rules, alignment: (Double(aligned.x), Double(aligned.y)))
+        let anchor = UnitPoint(x: centred.x, y: centred.y)
         for child in subviews {
             child.place(
                 at: CGPoint(x: bounds.minX + bounds.width * anchor.x, y: bounds.minY + bounds.height * anchor.y),
@@ -46,6 +48,9 @@ struct PrototypeWeightKey: LayoutValueKey {
 
 /// A `row` or `column` with at least one weighted child, laid out by `PrototypeWeightedStack`.
 /// Children are centred across a row and leading-aligned down a column, as in the plain stacks.
+/// SwiftUI mirrors a custom `Layout`'s placements under right-to-left on its own (proved by
+/// `PrototypeSizingLayoutTests`), so a row reverses and a column's leading edge flips with no
+/// layout-direction handling here.
 /// A weighted stack has no free space left for `space*` arrangements, so it adds no spacers.
 struct PrototypeWeightedStackLayout: Layout {
     let axis: PrototypeAxis

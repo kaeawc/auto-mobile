@@ -224,3 +224,22 @@ final class PrototypeSizingTests: XCTestCase {
         XCTAssertEqual(decoded.state?["b"], .number(2.5))
     }
 }
+
+extension PrototypeSizingTests {
+    func testContentCentresOnlyOnWrappedAxes() throws {
+        func anchor(_ json: String, weighted: PrototypeAxis? = nil) throws -> [Double] {
+            let style = try JSONDecoder().decode(Style.self, from: Data(json.utf8))
+            let a = PrototypeSizing.contentAnchor(
+                PrototypeSizeRules(style: style, weightedAxis: weighted),
+                alignment: (0, 1)
+            )
+            return [a.x, a.y]
+        }
+        XCTAssertEqual(try anchor(#"{"minWidth": 200}"#), [0.5, 0.5])
+        XCTAssertEqual(try anchor(#"{"width": "wrap"}"#), [0.5, 0.5])
+        XCTAssertEqual(try anchor(#"{"width": {"dp": 9}}"#), [0, 0.5])
+        XCTAssertEqual(try anchor(#"{"width": "fill", "height": {"dp": 9}}"#), [0, 1])
+        XCTAssertEqual(try anchor(#"{"weight": 1}"#, weighted: .horizontal), [0, 0.5])
+        XCTAssertEqual(try anchor(#"{"aspectRatio": 2}"#), [0, 1])
+    }
+}

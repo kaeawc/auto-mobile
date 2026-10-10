@@ -15,8 +15,11 @@ enforcement across tools, scope reset and abandoned-scope reclaim. The
 
 Live acceptance on Android (private daemon, real STDIO proxies, API 36 arm64
 image) passed the epic's six-step scenario below. Evidence: the
-managed-slot rerun report for #11172 / #11180. **No iOS acceptance evidence is
-published yet**; the iOS paths are covered by unit and integration tests only.
+managed-slot rerun report for #11172 / #11180. Live acceptance on iOS
+simulators (iOS 26.5 and 27.0 runtimes) also passed the six-step scenario,
+including an omitted `deviceType` resolving to an installed iPhone model and a
+cross-platform replace from Android to iOS in the same slot. Follow-ups from
+that run are tracked in #11271.
 Nothing here is in a released package until the next release is cut.
 
 Known gaps at the time of writing:

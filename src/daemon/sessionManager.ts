@@ -2650,7 +2650,7 @@ export class SessionManager {
   }
 
   /**
-   * A tool call started, joined or ended against a session waiting out a device restart.
+   * A control call started, joined or ended against a session waiting out a device restart.
    *
    * The in-memory mark applies at once (see {@link readPersistedSession}); the durable write
    * (#10713) lets the extended expiry survive a daemon restart during the device restart, which
@@ -3021,7 +3021,8 @@ export class SessionManager {
   ): Promise<Session> {
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
     if (pendingAssignment) {
-      if (this.restartRecoveryActivityAt.has(sessionId)) {
+      // Only a control call joining the recovery is use; a read joins without extending (#11281).
+      if (access === "acquire" && this.restartRecoveryActivityAt.has(sessionId)) {
         this.recordRestartRecoveryActivity(sessionId);
       }
       const shared = this.sharedSessionAssignments.get(sessionId);
@@ -7763,16 +7764,20 @@ export class SessionManager {
    * the session's activity heartbeat, exactly as the start did (`reclaimAndRefreshExistingSession`).
    */
   recordToolCallEnded(sessionId: string, end: { admitted: boolean } = { admitted: true }): void {
+    // A call refused at admission (suspect, expired, not the holder) never used the session, so
+    // its end must not restore a suspect lease or push an expired deadline out (#10824). A read
+    // ends unadmitted too, and never extends the idle window, restart recovery included (#11281).
+    if (!end.admitted) {
+      return;
+    }
     const session = this.sessions.get(sessionId);
     if (!session && this.restartRecoveryActivityAt.has(sessionId)) {
-      // A call that waited on, or failed because of, a device restart is still the client using
-      // the session: restart its idle window so recovery is only lost after real quiet.
+      // A control call that waited on, or failed because of, a device restart is still the client
+      // using the session: restart its idle window so recovery is only lost after real quiet.
       this.recordRestartRecoveryActivity(sessionId);
       return;
     }
-    // A call refused at admission (suspect, expired, not the holder) never used the session, so
-    // its end must not restore a suspect lease or push an expired deadline out (#10824).
-    if (!end.admitted || !session || this.releasingSessions.has(session)) {
+    if (!session || this.releasingSessions.has(session)) {
       return;
     }
     const now = this.sessionNow();

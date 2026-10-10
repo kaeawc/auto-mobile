@@ -7160,6 +7160,99 @@ describe("released-session restart recovery window read-only probe", () => {
   });
 });
 
+describe("restart recovery idle window counts control calls only (#11281)", () => {
+  const SESSION = "restarting";
+  const stillRebooting = {
+    assignDeviceToSession: async (): Promise<string> => {
+      throw new Error("device still rebooting");
+    },
+  };
+  const neverAssigns = { assignDeviceToSession: () => new Promise<string>(() => {}) };
+
+  function restartingManager(): {
+    timer: FakeTimer;
+    persistence: FakeDeviceSessionPersistence;
+    manager: SessionManager;
+  } {
+    const timer = new FakeTimer();
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.seed(
+      persistedRecoverySession({
+        session_uuid: SESSION,
+        stable_device_id: "Pixel",
+        status: "released",
+        release_reason: "device-restart:Pixel",
+        expires_at_ms: 60_000,
+      }),
+    );
+    const manager = new SessionManager(timer, persistence);
+    manager.stopCleanupTimer();
+    return { timer, persistence, manager };
+  }
+
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+  }
+
+  /** A control call at t=0 waits on the restart and fails: the last control activity. */
+  async function failedControlCallAtZero(manager: SessionManager): Promise<void> {
+    await expect(
+      manager.getOrCreateSession(SESSION, stillRebooting, "android", undefined, true),
+    ).rejects.toThrow();
+    manager.recordToolCallEnded(SESSION, { admitted: true });
+  }
+
+  test.each([
+    { name: "a read ending", end: { admitted: false }, recoverableAt70s: false },
+    { name: "an admitted control call ending", end: { admitted: true }, recoverableAt70s: true },
+  ])(
+    "$name at 50 s => recoverable at 70 s: $recoverableAt70s",
+    async ({ end, recoverableAt70s }) => {
+      const { timer, persistence, manager } = restartingManager();
+      await failedControlCallAtZero(manager);
+      await settle();
+      const expiryAfterControlCall = (await persistence.getSession?.(SESSION))?.expires_at_ms;
+
+      timer.advanceTime(50_000);
+      expect(await manager.isReleasedSessionInRestartRecoveryWindow(SESSION)).toBe(true);
+      manager.recordToolCallEnded(SESSION, end);
+      await settle();
+
+      const persistedExpiry = (await persistence.getSession?.(SESSION))?.expires_at_ms;
+      expect(persistedExpiry === expiryAfterControlCall).toBe(!recoverableAt70s);
+      timer.advanceTime(20_000);
+      expect(await manager.isReleasedSessionInRestartRecoveryWindow(SESSION)).toBe(
+        recoverableAt70s,
+      );
+    },
+  );
+
+  test.each([
+    { access: "read-only" as const, recoverableAt70s: false },
+    { access: "acquire" as const, recoverableAt70s: true },
+  ])(
+    "a $access admission joining the pending recovery at 50 s => recoverable at 70 s: $recoverableAt70s",
+    async ({ access, recoverableAt70s }) => {
+      const { timer, manager } = restartingManager();
+      void manager
+        .getOrCreateSession(SESSION, neverAssigns, "android", undefined, true)
+        .catch(() => {});
+      await settle();
+
+      timer.advanceTime(50_000);
+      void manager.admitIssuedSessionForAutomation(SESSION, undefined, { access }).catch(() => {});
+      await settle();
+
+      timer.advanceTime(20_000);
+      expect(await manager.isReleasedSessionInRestartRecoveryWindow(SESSION)).toBe(
+        recoverableAt70s,
+      );
+    },
+  );
+});
+
 describe("terminal release of persisted restart recovery", () => {
   test.each([
     "explicit-release",

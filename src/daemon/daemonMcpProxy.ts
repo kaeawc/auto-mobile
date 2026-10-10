@@ -6574,6 +6574,16 @@ export class DaemonMcpProxy {
       return;
     }
     const admittedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
+    if (
+      this.terminalBoundSession !== undefined ||
+      (admittedSessionUuid !== undefined && this.otherHeldSessions.has(admittedSessionUuid))
+    ) {
+      // A rejection never switches the binding, as on the error-result path
+      // (bindForwardedSessionOnErrorResult): under a terminal fence the rebound session would
+      // not be heartbeated, and a held session is heartbeated where it is (#11411). The call's
+      // use is credited when it ends (endSessionCall).
+      return;
+    }
     if (admittedSessionUuid) {
       this.updateBoundSessionUuid(admittedSessionUuid);
       this.startBoundSessionHeartbeat();

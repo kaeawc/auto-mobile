@@ -41,6 +41,11 @@ import { registerNavigationTools } from "../src/server/navigationTools";
 import { registerPlanTools } from "../src/server/planTools";
 import { registerDoctorTools } from "../src/server/doctorTools";
 
+import {
+  installDeviceToolFixture,
+  type DeviceToolFixtureName,
+  type ToolFixture,
+} from "./benchmark-device-tools-fixture";
 import { installListDevicesFixture } from "./benchmark-listdevices-fixture";
 
 import fs from "node:fs";
@@ -57,12 +62,12 @@ const TOOL_CATEGORIES: ToolCategory[] = [
   {
     name: "Fast Operations",
     expectedLatency: "<100ms",
-    tools: ["listDevices", "getForegroundApp", "pressButton"],
+    tools: ["listDevices", "pressButton"],
   },
   {
     name: "Medium Operations",
     expectedLatency: "100ms-1s",
-    tools: ["observe", "tapOn", "inputText", "swipe"],
+    tools: ["observe", "tapOn"],
   },
   {
     name: "Slow Operations",
@@ -73,13 +78,21 @@ const TOOL_CATEGORIES: ToolCategory[] = [
 
 /**
  * Tools whose real dependencies spawn host processes (adb, simctl, ps) get a fixture that injects
- * fakes for the duration of their run, so the gate measures the handler and not the host (#11332).
- * `listDevices` is gated on the daemon-shaped scenario: the `DevicePool` ownership refresh is the
- * work that grows with the handler's contract. Tools without an entry still run against real
- * tooling; see the NOTES of #11332 for which ones.
+ * fakes for the duration of their run, so the gate measures the handler and not the host (#11332,
+ * #11375). `listDevices` is gated on the daemon-shaped scenario: the `DevicePool` ownership refresh
+ * is the work that grows with the handler's contract.
+ *
+ * Every benchmarked tool MUST have an entry: a tool without one would drive real adb/simctl, so
+ * `benchmarkTool` refuses to run it. `getForegroundApp`, `inputText` and `swipe` were dropped from
+ * the categories because no tool is registered under those names.
  */
-const TOOL_FIXTURES: Record<string, () => Promise<{ dispose(): void }>> = {
-  listDevices: () => installListDevicesFixture("daemon"),
+const TOOL_FIXTURES: Record<string, () => Promise<ToolFixture>> = {
+  listDevices: async () => installListDevicesFixture("daemon"),
+  ...Object.fromEntries(
+    (["observe", "pressButton", "tapOn", "launchApp", "installApp"] as DeviceToolFixtureName[]).map(
+      (name) => [name, () => installDeviceToolFixture(name)],
+    ),
+  ),
 };
 
 // Benchmark configuration
@@ -197,88 +210,57 @@ function createMockDevice(): BootedDevice {
   };
 }
 
+type RegisteredTool = NonNullable<ReturnType<typeof ToolRegistry.getTool>>;
+
+async function callHandler(
+  tool: RegisteredTool,
+  mockDevice: BootedDevice,
+  args: Record<string, unknown>,
+): Promise<void> {
+  const response = tool.deviceAwareHandler
+    ? await tool.deviceAwareHandler(mockDevice, args)
+    : await tool.handler(args);
+  // A faked tool must succeed; an error envelope means the fixture is broken.
+  if ((response as { isError?: boolean } | undefined)?.isError) {
+    throw new Error(`${tool.name} returned an error response under its fixture`);
+  }
+}
+
 /**
- * Benchmark a single tool with mocked execution
+ * Benchmark a single tool against its fake-backed fixture. A throw anywhere means the fixture is
+ * broken, so it fails the run rather than counting as a sample.
  */
 async function benchmarkTool(
   toolName: string,
   sampleSize: number,
   mockDevice: BootedDevice,
 ): Promise<ToolMetrics> {
-  const tool = ToolRegistry.getTool(toolName);
-
-  if (!tool) {
-    throw new Error(`Tool not found: ${toolName}`);
+  const installFixture = TOOL_FIXTURES[toolName];
+  if (!installFixture) {
+    throw new Error(`No fake-backed fixture for ${toolName}; refusing to run real host tooling`);
   }
-
-  const measurements: number[] = [];
-  let successes = 0;
-
-  // Prepare mock arguments based on tool type
-  const getMockArgs = () => {
-    const baseArgs = { platform: "android" as const };
-
-    // Add tool-specific arguments to avoid validation errors
-    if (toolName === "tapOn" || toolName === "swipe") {
-      return { ...baseArgs, selector: "mock-selector" };
-    }
-    if (toolName === "inputText") {
-      return { ...baseArgs, text: "mock-text" };
-    }
-    if (toolName === "launchApp" || toolName === "installApp") {
-      return { ...baseArgs, appId: "com.mock.app" };
-    }
-    return baseArgs;
-  };
-
-  const fixture = await TOOL_FIXTURES[toolName]?.();
+  const fixture = await installFixture();
   try {
-    // Warm-up run (not counted)
-    try {
-      const args = getMockArgs();
-      if (tool.deviceAwareHandler) {
-        await tool.deviceAwareHandler(mockDevice, args);
-      } else {
-        await tool.handler(args);
-      }
-    } catch (error) {
-      // Ignore warm-up errors - device operations will fail, but we measure up to that point
-      if (fixture) {
-        throw error;
-      }
+    // Looked up after the fixture: observe's fixture re-registers the tool with fakes.
+    const tool = ToolRegistry.getTool(toolName);
+    if (!tool) {
+      throw new Error(`Tool not found: ${toolName}`);
     }
+    const args = fixture.args ?? { platform: "android" as const };
+    const measurements: number[] = [];
 
-    // Actual benchmark runs - measure real tool handlers including MCP overhead
+    // Warm-up run (not counted)
+    await callHandler(tool, mockDevice, args);
+
     for (let i = 0; i < sampleSize; i++) {
       const startTime = performance.now();
-
-      try {
-        const args = getMockArgs();
-        // Call the actual tool handler to measure real MCP plumbing overhead
-        if (tool.deviceAwareHandler) {
-          await tool.deviceAwareHandler(mockDevice, args);
-        } else {
-          await tool.handler(args);
-        }
-        successes++;
-      } catch (error) {
-        // Expected: device operations will fail without real device
-        // But we've measured the MCP overhead (registry, validation, wrapper logic)
-        // Still count as success for throughput measurement
-        if (fixture) {
-          throw error;
-        } // A faked tool must succeed; a throw means the fixture is broken.
-        successes++;
-      }
-
-      const endTime = performance.now();
-      measurements.push(endTime - startTime);
+      await callHandler(tool, mockDevice, args);
+      measurements.push(performance.now() - startTime);
     }
+    return calculateMetrics(toolName, measurements, measurements.length);
   } finally {
-    fixture?.dispose();
+    await fixture.dispose();
   }
-
-  return calculateMetrics(toolName, measurements, successes);
 }
 
 /**

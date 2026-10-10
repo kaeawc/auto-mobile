@@ -96,9 +96,20 @@ export function provisionErrorFromPayload(
   const limit = numberField(error.limit);
   const booted = numberField(error.booted);
   const retryAfterMs = numberField(error.retryAfterMs);
+  const externalDevices = Array.isArray(error.externalDevices)
+    ? error.externalDevices.filter((udid): udid is string => typeof udid === "string")
+    : [];
   return new ProvisionDeviceError(code, message, retryable, {
     ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
-    ...(limit !== undefined && booted !== undefined ? { capacity: { limit, booted } } : {}),
+    ...(limit !== undefined && booted !== undefined
+      ? {
+          capacity: {
+            limit,
+            booted,
+            ...(externalDevices.length > 0 ? { externalDevices } : {}),
+          },
+        }
+      : {}),
   });
 }
 

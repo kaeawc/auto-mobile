@@ -77,3 +77,4 @@ research/
 # Python bytecode cache (mkdocs doc-build hooks under scripts/github/)
 __pycache__/
 .pack-trim-backup/
+*.orig

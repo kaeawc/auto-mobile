@@ -12,6 +12,7 @@ import { runAsManagedSlotReconciler } from "./managedSlotExclusion";
 import { WorkflowManagedSlotDeviceDeleter } from "../../server/managedSlotDeviceDeleter";
 import {
   ManagedSlotAcquisition,
+  type ManagedSlotAcquisitionDependencies,
   type ManagedSlotAcquisitionSessions,
 } from "./managedSlotAcquisition";
 import {
@@ -46,6 +47,8 @@ export interface DaemonManagedSlotAcquisitionOptions {
   journal: { owner: SlotJournalOwner; inFlight: SlotJournalInFlight };
   /** Defaults to the in-process tool registry (the same handlers MCP callers run). */
   invokeTool?: ManagedSlotToolInvoker;
+  /** The settle-waiting implicit reset of a superseded incarnation (#11174). */
+  resetSupersededScope?: ManagedSlotAcquisitionDependencies["resetSupersededScope"];
 }
 
 /** Resolved lazily: the tool registry pulls in every tool module. */
@@ -112,6 +115,7 @@ export function createDaemonManagedSlotAcquisition(
     sessions: options.sessions,
     owner: options.owner,
     timer: options.timer,
+    ...(options.resetSupersededScope ? { resetSupersededScope: options.resetSupersededScope } : {}),
   });
   return {
     acquisition,

@@ -1,8 +1,8 @@
 import { z } from "zod/v4";
 import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../daemon/sessionLivenessWindows";
 import {
-  androidProvisionDeviceSpecSchema,
-  iosProvisionDeviceSpecSchema,
+  androidManagedSlotSpecSchema,
+  iosManagedSlotSpecSchema,
 } from "../server/provisionDeviceSpecSchemas";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -76,14 +76,14 @@ export const managedSlotRequestSchema = z.discriminatedUnion("platform", [
     .object({
       ...slotRequestBase,
       platform: z.literal("android"),
-      requestedSpec: androidProvisionDeviceSpecSchema,
+      requestedSpec: androidManagedSlotSpecSchema,
     })
     .strict(),
   z
     .object({
       ...slotRequestBase,
       platform: z.literal("ios"),
-      requestedSpec: iosProvisionDeviceSpecSchema,
+      requestedSpec: iosManagedSlotSpecSchema,
     })
     .strict(),
 ]);

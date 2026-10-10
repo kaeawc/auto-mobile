@@ -443,6 +443,88 @@ describe("ManagedSlotReconciler", () => {
     });
   });
 
+  describe("fresh session per execution", () => {
+    /**
+     * The production bind is bind-or-reuse: provisioning a device the pool still holds a session
+     * on hands that session back. Model it, with releases removing the session from the pool.
+     */
+    function bindOrReuse(options: { releaseFails?: boolean; releaseIgnored?: boolean } = {}) {
+      const provision = provisioner.provision.bind(provisioner);
+      provisioner.provision = async (provisionRequest) => {
+        const provisioned = await provision(provisionRequest);
+        const held = claims.sessions.get(provisioned.device.stableId)?.[0];
+        return held ? { ...provisioned, sessionUuid: held } : provisioned;
+      };
+      provisioner.releaseSession = async (sessionUuid) => {
+        provisioner.released.push(sessionUuid);
+        if (options.releaseFails) {
+          throw new Error("release failed");
+        }
+        if (!options.releaseIgnored) {
+          for (const [stableId, sessions] of claims.sessions) {
+            claims.sessions.set(
+              stableId,
+              sessions.filter((session) => session !== sessionUuid),
+            );
+          }
+        }
+      };
+    }
+
+    test("a leaked session on the slot's device is released first; the execution gets a fresh one", async () => {
+      const stableId = await seedAssigned();
+      claims.sessions.set(stableId, ["leaked-session"]);
+      bindOrReuse();
+
+      const result = expectReady(await reconciler.reconcile(request()));
+
+      expect(result.disposition).toBe("reused");
+      expect(result.sessionUuid).not.toBe("leaked-session");
+      expect(provisioner.released).toEqual(["leaked-session"]);
+      expect(result.evidence.releasedStaleSessions).toEqual(["leaked-session"]);
+    });
+
+    test("a provision that still hands back the leaked session is refused, never reported ready", async () => {
+      const stableId = await seedAssigned();
+      claims.sessions.set(stableId, ["leaked-session"]);
+      bindOrReuse({ releaseIgnored: true });
+
+      const failed = expectFailed(await reconciler.reconcile(request()));
+
+      expect(failed.failure).toMatchObject({ code: "stale_session", retryable: true });
+      expect((await registry.getAssignment(key))?.execOwner ?? null).toBeNull();
+    });
+
+    test("a leaked session that cannot be released refuses before provisioning", async () => {
+      const stableId = await seedAssigned();
+      claims.sessions.set(stableId, ["leaked-session"]);
+      bindOrReuse({ releaseFails: true });
+
+      const failed = expectFailed(await reconciler.reconcile(request()));
+
+      expect(failed.failure).toMatchObject({ code: "stale_session", retryable: true });
+      expect(provisioner.calls).toEqual([]);
+    });
+
+    test("an orphan leftover someone holds a session on is never adopted", async () => {
+      inventory.devices.push({
+        name: managedSlotDeviceName(key, 1, "earlier"),
+        platform: "ios",
+        deviceId: "UDID-LEFTOVER",
+        isRunning: true,
+        runtime: IOS_18,
+        deviceType: IPHONE_16,
+      });
+      claims.sessions.set("UDID-LEFTOVER", ["generic-session"]);
+
+      const result = expectReady(await reconciler.reconcile(request()));
+
+      expect(result.disposition).toBe("created");
+      expect(result.device.stableId).not.toBe("UDID-LEFTOVER");
+      expect(provisioner.released).toEqual([]);
+    });
+  });
+
   describe("assigned and not matching", () => {
     test("replaces: deletes and verifies the old device, creates a new one, commits into the same slot", async () => {
       const oldId = await seedAssigned(SPEC_17);

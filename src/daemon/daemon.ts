@@ -917,6 +917,10 @@ export class Daemon {
         owner: this.managedSlotJournalOwner(),
         inFlight: this.managedSlotJournalInFlight,
       },
+      // A new incarnation retires the old one through the same settle-waiting reset as the
+      // operator command (#11174), published by installManagedExecutionRelease.
+      resetSupersededScope: (scope, waitMs) =>
+        DaemonState.getInstance().getSlotScopeReset()?.resetSupersededScope(scope, waitMs),
     });
     this.managedSlotAcquisition = acquisition;
     DaemonState.getInstance().setManagedSlotAcquisition(acquisition.acquisition);

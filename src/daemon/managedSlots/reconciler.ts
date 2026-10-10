@@ -227,6 +227,12 @@ export type ManagedSlotDeviceClaim =
 /** Live sessions and foreign-daemon claims on a device, checked before destructive work. */
 export interface ManagedSlotDeviceClaims {
   describe(device: DeviceInfo): Promise<ManagedSlotDeviceClaim>;
+  /**
+   * The sessions this daemon holds on the device. Before a slot device is provisioned for a new
+   * execution, any of these is a leftover of an earlier one: the provision path's bind would hand
+   * it out again (bind-or-reuse), so it is released first and never reused.
+   */
+  sessionsOn?(device: DeviceInfo): string[];
 }
 
 export type ManagedSlotCapacityCheck =
@@ -314,6 +320,7 @@ export type ManagedSlotReconcileFailureCode =
   | "capacity_exhausted"
   | "concurrent_modification"
   | "readiness_incomplete"
+  | "stale_session"
   | "provision_failed"
   | "timeout"
   | "cancelled";
@@ -331,6 +338,7 @@ const FAILURE_RETRYABILITY: Readonly<Record<ManagedSlotReconcileFailureCode, boo
   capacity_exhausted: true,
   concurrent_modification: true,
   readiness_incomplete: true,
+  stale_session: true,
   provision_failed: false,
   timeout: true,
   cancelled: true,
@@ -349,6 +357,7 @@ const FAILURE_NEXT_ACTION: Readonly<Record<ManagedSlotReconcileFailureCode, stri
   capacity_exhausted: "Shut down a device or raise the boot limit, then retry.",
   concurrent_modification: "The slot changed concurrently; retry to converge on its new state.",
   readiness_incomplete: "Retry; the device did not reach automation readiness.",
+  stale_session: "Retry; an earlier execution's session on the slot device could not be released.",
   provision_failed: "Inspect the provision failure code; retry if it is retryable.",
   timeout: "Retry with a longer preparation timeout.",
   cancelled: "The preparation was cancelled; retry when needed.",
@@ -381,6 +390,8 @@ export interface ManagedSlotReconcileEvidence {
   redriven?: SlotJournalRedriveRecord[];
   /** The journal entry this attempt opened, and the phase it reached. */
   journal?: { entryId: number; kind: SlotJournalEntry["kind"]; phase: SlotJournalEntry["phase"] };
+  /** Leftover sessions of earlier executions released before provisioning, so none is reused. */
+  releasedStaleSessions?: string[];
 }
 
 export type ManagedSlotReconcileResult =
@@ -1114,7 +1125,9 @@ export class ManagedSlotReconciler {
     device: DeviceInfo,
     reservation: string | undefined,
   ): Promise<ReadyResult> {
-    const provisioned = await this.provisionExisting(context, device);
+    // The slot's own device is excluded from every other caller and the slot has no live
+    // execution, so any session on it is an earlier execution's leftover.
+    const provisioned = await this.provisionExisting(context, device, { releaseStale: true });
     const expected = expectationOf(assignment);
     const fingerprint = encodeManagedSpecFingerprint(context.fingerprint);
     const unchanged =
@@ -1231,9 +1244,10 @@ export class ManagedSlotReconciler {
         continue;
       }
       if (source === "orphan") {
-        // A leftover of this slot's interrupted create is adoptable only if nobody holds it.
+        // A leftover of this slot's interrupted create is adoptable only if nobody holds it: no
+        // slot, and no session (an orphan is not excluded from generic clients).
         const holder = await this.deps.registry.findDeviceHolder(request.platform, stableId);
-        if (holder) {
+        if (holder || this.sessionsOn(device).length > 0) {
           continue;
         }
       }
@@ -1271,7 +1285,11 @@ export class ManagedSlotReconciler {
       throw new ReconcileAbort(casFailure(reserved, "adoption"));
     }
     context.evidence.adoptedFrom = source;
-    const provisioned = await this.provisionExisting(context, device);
+    // A free-pool device is excluded from generic clients, so a session on it is a leftover
+    // managed execution; an orphan's is not ours to end.
+    const provisioned = await this.provisionExisting(context, device, {
+      releaseStale: source === "free_pool",
+    });
     const ready = await this.deps.registry.updateSlotState(
       request.key,
       expectationOf(reserved.assignment),
@@ -1643,11 +1661,60 @@ export class ManagedSlotReconciler {
 
   // --- shared steps ----------------------------------------------------------------------------
 
+  /** Sessions this daemon holds on `device` (none when the claims port cannot tell). */
+  private sessionsOn(device: DeviceInfo): string[] {
+    return this.deps.claims.sessionsOn?.(device) ?? [];
+  }
+
+  /**
+   * Every execution gets a fresh session: end the sessions earlier executions left on the device
+   * (or refuse, when they are not ours to end) before provisioning binds it, and refuse a provision
+   * that still hands one of them back.
+   */
+  private async releaseStaleSessions(
+    context: ReconcileContext,
+    device: DeviceInfo,
+    releaseStale: boolean,
+  ): Promise<ReadonlySet<string>> {
+    const stale = this.sessionsOn(device);
+    if (stale.length === 0) {
+      return new Set();
+    }
+    if (!releaseStale) {
+      throw new ReconcileAbort(
+        failure(
+          "device_busy",
+          `Device '${device.name}' is held by session(s) ${stale.join(", ")}.`,
+        ),
+      );
+    }
+    try {
+      await Promise.all(
+        stale.map((sessionUuid) => this.deps.provisioner.releaseSession(sessionUuid)),
+      );
+    } catch (error) {
+      logger.warn(
+        `[ManagedSlots] releasing stale session(s) on '${device.name}' failed: ${errorMessage(error)}`,
+        error,
+      );
+      throw new ReconcileAbort(
+        failure(
+          "stale_session",
+          `An earlier execution's session on '${device.name}' could not be released: ${errorMessage(error)}`,
+        ),
+      );
+    }
+    context.evidence.releasedStaleSessions = stale;
+    return new Set(stale);
+  }
+
   private async provisionExisting(
     context: ReconcileContext,
     device: DeviceInfo,
+    options: { releaseStale: boolean },
   ): Promise<ManagedSlotProvisionedDevice> {
     const { request } = context;
+    const stale = await this.releaseStaleSessions(context, device, options.releaseStale);
     let provisioned: ManagedSlotProvisionedDevice;
     try {
       provisioned = await this.deps.provisioner.provision({
@@ -1661,6 +1728,16 @@ export class ManagedSlotReconciler {
       });
     } catch (error) {
       throw new ReconcileAbort(provisionFailure(error));
+    }
+    if (stale.has(provisioned.sessionUuid)) {
+      // Never hand an earlier execution's session to this one.
+      await this.releaseSession(provisioned.sessionUuid);
+      throw new ReconcileAbort(
+        failure(
+          "stale_session",
+          `Provisioning '${device.name}' returned earlier session ${provisioned.sessionUuid}.`,
+        ),
+      );
     }
     if (!this.isAutomationReady(provisioned)) {
       await this.releaseSession(provisioned.sessionUuid);

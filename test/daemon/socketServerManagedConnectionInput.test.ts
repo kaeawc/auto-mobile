@@ -168,3 +168,80 @@ describe("input/* from a managed connection (#11178)", () => {
     expect(unbound).toHaveLength(1);
   });
 });
+
+describe("daemon/acquireManagedSlots binds the requesting socket (#11178)", () => {
+  test("a ready acquisition binds the socket session that asked, until that socket closes", async () => {
+    const bound: Array<[string, { scopeKey: string; sessionUuids: string[] }]> = [];
+    const state = {
+      ...createFakeDaemonState(),
+      getManagedSlotAcquisition: () => ({
+        acquire: async () => ({
+          contractVersion: 1 as const,
+          scope: {
+            managedHostScope: "host-a",
+            runnerNamespace: "ns",
+            runnerIncarnation: "inc-1",
+            scopeKey: "scope-a",
+          },
+          outcome: "ready" as const,
+          slots: [{ sessionUuid: SLOT_SESSION }],
+        }),
+      }),
+      getManagedConnectionScopes: () => ({
+        bind: (
+          mcpSessionId: string,
+          granted: { scopeKey: string; sessionUuids: Iterable<string> },
+        ) => {
+          bound.push([
+            mcpSessionId,
+            { scopeKey: granted.scopeKey, sessionUuids: [...granted.sessionUuids] },
+          ]);
+        },
+        get: () => undefined,
+        unbind: (mcpSessionId: string) => {
+          unbound.push(mcpSessionId);
+        },
+      }),
+    };
+    const server = new UnixSocketServer("unused", "http://localhost:0/mcp", state, new FakeTimer());
+    internals = server as unknown as Internals;
+    internals.acceptingRequests = true;
+    const socket = connect();
+
+    socket.send({
+      id: "acquire",
+      type: "mcp_request",
+      method: "daemon/acquireManagedSlots",
+      params: {
+        config: {
+          contractVersion: 1,
+          managedHostScope: "host-a",
+          runnerNamespace: "ns",
+          runnerIncarnation: "inc-1",
+          localSlotCapacity: 1,
+          requests: [
+            {
+              slotIndex: 0,
+              role: "app",
+              platform: "android",
+              requestedSpec: {
+                runtime: "system-images;android-35;google_apis;arm64-v8a",
+                deviceType: "pixel_8",
+              },
+            },
+          ],
+        },
+        livenessOwnerToken: "proxy-token",
+      },
+    });
+    await drain();
+
+    expect(socket.responses.find((frame) => frame.id === "acquire")).toMatchObject({
+      success: true,
+    });
+    expect(bound).toHaveLength(1);
+    expect(bound[0]![1]).toEqual({ scopeKey: "scope-a", sessionUuids: [SLOT_SESSION] });
+    socket.destroy();
+    expect(unbound).toEqual([bound[0]![0]]);
+  });
+});

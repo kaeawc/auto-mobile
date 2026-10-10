@@ -399,6 +399,31 @@ describe("managed slot journal redrive", () => {
       await expectSettledSlot();
     });
 
+    test("crash after the create of a spec without deviceType: the device is adopted, not deleted", async () => {
+      // Owner decision Q4: an omitted deviceType is unconstrained. The journal must read the
+      // recorded requested spec as a managed spec, or the adoptable device is deleted and recreated.
+      const anyModel: ManagedSlotReconcileRequest = {
+        key,
+        role: "app",
+        platform: "android",
+        requestedSpec: { runtime: "system-images;android-35;google_apis;arm64-v8a" },
+        deadlineMs: timer.now() + 60_000,
+      };
+      const crash = crashPoint();
+      provisioner.beforeReturn = crash.hang;
+      void daemon("daemon-1").reconcile(anyModel);
+      await crash.reached;
+      provisioner.beforeReturn = undefined;
+      const createdByDaemon1 = inventory.devices[0]!;
+
+      const result = expectReady(await restart().reconcile(anyModel));
+
+      expect(result.device.stableId).toBe(createdByDaemon1.name);
+      expect(provisioner.created()).toHaveLength(1);
+      expect(deleter.stableIds()).toEqual([]);
+      await expectSettledSlot();
+    });
+
     test("an in-process provision failure with proven absence closes the entry at once", async () => {
       provisioner.failWith = () => new Error("simctl create failed");
       expectFailed(await daemon("daemon-1").reconcile(request()));

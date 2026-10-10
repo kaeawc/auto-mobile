@@ -7,7 +7,14 @@ import {
   DefaultManagedSpecResolver,
   ManagedSlotReconciler,
 } from "../../../src/daemon/managedSlots/reconciler";
-import { computeSlotScopeKey } from "../../../src/daemon/managedSlots/slotRegistry";
+import {
+  computeSlotScopeKey,
+  type SlotScopeRecord,
+} from "../../../src/daemon/managedSlots/slotRegistry";
+import {
+  SLOT_SCOPE_RESET_DEFAULT_WAIT_MS,
+  SlotScopeReset,
+} from "../../../src/daemon/managedSlots/slotScopeReset";
 import {
   parseManagedSlotConfig,
   type ManagedSlotConfig,
@@ -78,6 +85,7 @@ describe("ManagedSlotAcquisition", () => {
   let deleter: FakeDeleter;
   let sessions: FakeSessions;
   let livePids: Set<number>;
+  let reconciler: ManagedSlotReconciler;
   let acquisition: ManagedSlotAcquisition;
 
   beforeEach(() => {
@@ -90,7 +98,7 @@ describe("ManagedSlotAcquisition", () => {
     provisioner = new FakeProvisioner(inventory);
     deleter = new FakeDeleter(inventory);
     sessions = new FakeSessions();
-    const reconciler = new ManagedSlotReconciler({
+    reconciler = new ManagedSlotReconciler({
       registry,
       inventory,
       matcher: new FakeMatcher(),
@@ -259,6 +267,81 @@ describe("ManagedSlotAcquisition", () => {
       expect(next.outcome).toBe("failed");
       expect(next.failure).toMatchObject({ code: "scope_transition_pending", retryable: true });
       expect(next.slots).toEqual([]);
+    });
+
+    function acquisitionWithReset(
+      resetSupersededScope: (
+        scope: SlotScopeRecord,
+        waitMs: number,
+      ) => ReturnType<SlotScopeReset["resetSupersededScope"]> | undefined,
+    ): ManagedSlotAcquisition {
+      return new ManagedSlotAcquisition({
+        registry: async () => registry,
+        reconcile: (_registry, request) => reconciler.reconcile(request),
+        sessions,
+        owner: () => ({ daemonId: "daemon-1", pid: DAEMON_PID }),
+        timer,
+        resetSupersededScope,
+      });
+    }
+
+    test("a new incarnation waits, through the implicit reset, for the old execution to settle", async () => {
+      const old = configFor();
+      const first = await acquisition.acquire(old, { livenessOwnerToken: TOKEN });
+      const reset = new SlotScopeReset({ registry: async () => registry, timer });
+      const waits: number[] = [];
+      const withReset = acquisitionWithReset((scope, waitMs) => {
+        waits.push(waitMs);
+        return reset.resetSupersededScope(scope, waitMs);
+      });
+      // The old execution ends while the reset is waiting on it.
+      const sleep = timer.sleep.bind(timer);
+      timer.sleep = async (ms: number) => {
+        await endExecution(old, first.slots[0]!.sessionUuid!);
+        timer.advanceTime(ms);
+      };
+      try {
+        const next = await withReset.acquire(configFor({ runnerIncarnation: "inc-2" }), {
+          livenessOwnerToken: TOKEN,
+        });
+
+        expect(next.outcome).toBe("ready");
+        expect(next.slots[0]).toMatchObject({ disposition: "adopted" });
+        expect(waits).toEqual([SLOT_SCOPE_RESET_DEFAULT_WAIT_MS]);
+        expect((await registry.getScope(computeSlotScopeKey(old)))?.state).toBe("invalidated");
+      } finally {
+        timer.sleep = sleep;
+      }
+    });
+
+    test("an implicit reset still pending reports scope_transition_pending within the deadline", async () => {
+      await acquisition.acquire(configFor(), { livenessOwnerToken: TOKEN });
+      const waits: number[] = [];
+      const withReset = acquisitionWithReset(async (scope, waitMs) => {
+        waits.push(waitMs);
+        return {
+          ...scope,
+          outcome: "pending",
+          freedDevices: [],
+          pending: {
+            liveOwners: [{ slotIndex: 0, sessionUuid: "session-1", pid: DAEMON_PID }],
+            settling: [],
+            cleanupPending: [],
+            openJournal: [],
+          },
+        };
+      });
+      const next = configFor({ runnerIncarnation: "inc-2" });
+
+      const result = await withReset.acquire(
+        { ...next, preparationTimeoutMs: 3_000 },
+        { livenessOwnerToken: TOKEN },
+      );
+
+      expect(result.failure).toMatchObject({ code: "scope_transition_pending", retryable: true });
+      expect(result.failure?.message).toContain("1 live execution(s)");
+      // The settle wait never outlives the acquisition's preparation budget.
+      expect(waits).toEqual([3_000]);
     });
 
     test("an abandoned scope whose incarnation returns is revived and reuses its device", async () => {

@@ -1,68 +1,114 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { registerMcpTools } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../../src/utils/debug";
 
-describe("Daemon-only MCP tools", () => {
-  beforeEach(() => {
+/**
+ * Registration is the expensive step (12-30 ms), so each configuration is
+ * registered once in beforeAll and captured as an immutable snapshot of plain
+ * data. Tests assert on snapshots only, so they share no mutable state and are
+ * order-independent.
+ */
+interface RegistrationSnapshot {
+  discoverable: string[];
+  direct: Record<string, boolean>;
+  plan: Record<string, boolean>;
+}
+
+const PROBED_TOOLS = [
+  "criticalSection",
+  "barrier",
+  "accessibilityFocus",
+  "setUIState",
+  "sqlQuery",
+  "setKeyValue",
+  "removeKeyValue",
+  "clearKeyValueFile",
+  "network",
+  "mockNetwork",
+  "clearMockNetwork",
+  "getNetworkGraph",
+];
+
+function registerAndSnapshot(
+  daemonMode: boolean,
+  options: { debug?: boolean; embeddedSdk?: boolean } = {},
+): RegistrationSnapshot {
+  (ToolRegistry as any).tools.clear();
+  setDebugModeEnabled(options.debug === true);
+  serverConfig.setEmbeddedSdkEnabled(options.embeddedSdk === true);
+  try {
+    registerMcpTools(daemonMode);
+    const direct: Record<string, boolean> = {};
+    const plan: Record<string, boolean> = {};
+    for (const name of PROBED_TOOLS) {
+      direct[name] = ToolRegistry.getTool(name) !== undefined;
+      plan[name] = ToolRegistry.getToolForPlan(name) !== undefined;
+    }
+    return {
+      discoverable: ToolRegistry.getToolDefinitions().map((tool) => tool.name),
+      direct,
+      plan,
+    };
+  } finally {
+    setDebugModeEnabled(false);
+    serverConfig.setEmbeddedSdkEnabled(false);
     (ToolRegistry as any).tools.clear();
+  }
+}
+
+describe("Daemon-only MCP tools", () => {
+  let standalone: RegistrationSnapshot;
+  let daemon: RegistrationSnapshot;
+  let debug: RegistrationSnapshot;
+  let embedded: RegistrationSnapshot;
+
+  beforeAll(() => {
+    standalone = registerAndSnapshot(false);
+    daemon = registerAndSnapshot(true);
+    debug = registerAndSnapshot(false, { debug: true });
+    embedded = registerAndSnapshot(false, { embeddedSdk: true });
   });
 
-  afterEach(() => {
+  afterAll(() => {
     setDebugModeEnabled(false);
     serverConfig.setEmbeddedSdkEnabled(false);
     (ToolRegistry as any).tools.clear();
   });
 
   test("registers plan tools in both modes, criticalSection only in daemon mode", () => {
-    registerMcpTools(false);
-
-    const toolNames = ToolRegistry.getToolDefinitions().map((tool) => tool.name);
-    expect(toolNames).toContain("executePlan");
-    expect(toolNames).not.toContain("criticalSection");
+    expect(standalone.discoverable).toContain("executePlan");
+    expect(standalone.discoverable).not.toContain("criticalSection");
   });
 
   test("registers criticalSection/barrier plan-only in daemon mode (hidden from discovery, usable in plans)", () => {
-    registerMcpTools(true);
-
-    const toolNames = ToolRegistry.getToolDefinitions().map((tool) => tool.name);
-    expect(toolNames).toContain("executePlan");
+    expect(daemon.discoverable).toContain("executePlan");
     // Plan-only coordination primitives are registered in daemon mode but hidden
-    // from normal discovery — a single direct call would just block.
-    expect(toolNames).not.toContain("criticalSection");
-    expect(toolNames).not.toContain("barrier");
-    expect(ToolRegistry.getTool("criticalSection")).toBeUndefined();
-    expect(ToolRegistry.getTool("barrier")).toBeUndefined();
+    // from normal discovery - a single direct call would just block.
+    expect(daemon.discoverable).not.toContain("criticalSection");
+    expect(daemon.discoverable).not.toContain("barrier");
+    expect(daemon.direct.criticalSection).toBe(false);
+    expect(daemon.direct.barrier).toBe(false);
     // ...but resolvable for plan execution.
-    expect(ToolRegistry.getToolForPlan("criticalSection")).toBeDefined();
-    expect(ToolRegistry.getToolForPlan("barrier")).toBeDefined();
+    expect(daemon.plan.criticalSection).toBe(true);
+    expect(daemon.plan.barrier).toBe(true);
   });
 
   test("hides debug-only tools unless debug mode is enabled", () => {
-    registerMcpTools(false);
+    expect(standalone.direct.accessibilityFocus).toBe(false);
+    expect(standalone.direct.setUIState).toBe(false);
+    expect(standalone.plan.accessibilityFocus).toBe(false);
+    expect(standalone.plan.setUIState).toBe(true);
+    expect(standalone.discoverable).not.toContain("accessibilityFocus");
+    expect(standalone.discoverable).not.toContain("setUIState");
 
-    expect(ToolRegistry.getTool("accessibilityFocus")).toBeUndefined();
-    expect(ToolRegistry.getTool("setUIState")).toBeUndefined();
-    expect(ToolRegistry.getToolForPlan("accessibilityFocus")).toBeUndefined();
-    expect(ToolRegistry.getToolForPlan("setUIState")).toBeDefined();
-    expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).not.toContain(
-      "accessibilityFocus",
-    );
-    expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).not.toContain("setUIState");
-
-    (ToolRegistry as any).tools.clear();
-    setDebugModeEnabled(true);
-    registerMcpTools(false);
-
-    expect(ToolRegistry.getTool("accessibilityFocus")).toBeDefined();
-    expect(ToolRegistry.getTool("setUIState")).toBeDefined();
-    expect(ToolRegistry.getToolForPlan("accessibilityFocus")).toBeDefined();
-    expect(ToolRegistry.getToolForPlan("setUIState")).toBeDefined();
-    expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).toContain(
-      "accessibilityFocus",
-    );
-    expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).toContain("setUIState");
+    expect(debug.direct.accessibilityFocus).toBe(true);
+    expect(debug.direct.setUIState).toBe(true);
+    expect(debug.plan.accessibilityFocus).toBe(true);
+    expect(debug.plan.setUIState).toBe(true);
+    expect(debug.discoverable).toContain("accessibilityFocus");
+    expect(debug.discoverable).toContain("setUIState");
   });
 
   test("hides embedded-SDK tools unless embedded SDK mode is enabled", () => {
@@ -77,22 +123,14 @@ describe("Daemon-only MCP tools", () => {
       "getNetworkGraph",
     ];
 
-    registerMcpTools(false);
-
-    const defaultNames = ToolRegistry.getToolDefinitions().map((tool) => tool.name);
     for (const toolName of embeddedSdkTools) {
-      expect(ToolRegistry.getTool(toolName)).toBeUndefined();
-      expect(defaultNames).not.toContain(toolName);
+      expect(standalone.direct[toolName]).toBe(false);
+      expect(standalone.discoverable).not.toContain(toolName);
     }
 
-    (ToolRegistry as any).tools.clear();
-    serverConfig.setEmbeddedSdkEnabled(true);
-    registerMcpTools(false);
-
-    const embeddedSdkNames = ToolRegistry.getToolDefinitions().map((tool) => tool.name);
     for (const toolName of embeddedSdkTools) {
-      expect(ToolRegistry.getTool(toolName)).toBeDefined();
-      expect(embeddedSdkNames).toContain(toolName);
+      expect(embedded.direct[toolName]).toBe(true);
+      expect(embedded.discoverable).toContain(toolName);
     }
   });
 });

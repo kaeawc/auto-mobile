@@ -7572,6 +7572,10 @@
                       }
                     ]
                   },
+                  "heldBy": {
+                    "type": "string",
+                    "enum": ["managed_slot", "other_daemon"]
+                  },
                   "session": {
                     "anyOf": [
                       {
@@ -8267,6 +8271,10 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "heldBy": {
+                    "type": "string",
+                    "enum": ["managed_slot", "other_daemon"]
                   },
                   "session": {
                     "anyOf": [
@@ -22743,6 +22751,10 @@
                       "type": "null"
                     }
                   ]
+                },
+                "heldBy": {
+                  "type": "string",
+                  "enum": ["managed_slot", "other_daemon"]
                 },
                 "session": {
                   "anyOf": [

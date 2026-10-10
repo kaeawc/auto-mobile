@@ -8,12 +8,14 @@ import {
 import type {
   DeviceDescription,
   DeviceReadinessState,
+  DeviceHeldBy,
   DevicePoolStatus,
   DeviceSessionOwnership,
   DeviceServiceStatusLike,
 } from "../models/deviceDescription";
 export type {
   DeviceReadinessState,
+  DeviceHeldBy,
   DevicePoolStatus,
   DeviceSessionOwnership,
   DeviceDescription,
@@ -58,6 +60,8 @@ export type DeviceDescriptionInput =
       orientation?: "portrait" | "landscape";
       /** adb lists the device in this non-`device` state (#11118). */
       adbOfflineState?: string;
+      /** The pool refuses generic allocation of this device: a managed slot or another daemon holds it. */
+      heldBy?: DeviceHeldBy;
     }
   | {
       kind: "provisioned";
@@ -113,6 +117,7 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
     orientation: input.orientation,
     configured: input.kind === "booted" ? input.configured : undefined,
     adbOfflineState: input.kind === "booted" ? input.adbOfflineState : undefined,
+    heldBy: input.kind === "booted" ? input.heldBy : undefined,
   });
   return input.unhealthy ? { ...description, unhealthy: input.unhealthy } : description;
 }
@@ -166,6 +171,7 @@ interface BootedDescriptionOptions {
   orientation?: "portrait" | "landscape";
   configured?: StableConfiguredDeviceImage;
   adbOfflineState?: string;
+  heldBy?: DeviceHeldBy;
 }
 
 // oxlint-disable-next-line complexity -- one exhaustive canonical booted projection preserves precedence.
@@ -181,6 +187,7 @@ function describeBooted({
   orientation,
   configured,
   adbOfflineState,
+  heldBy,
 }: BootedDescriptionOptions): DeviceDescription {
   const merged = mergeRuntimeFacts(device, admittedImage, admittedImageAuthoritative);
   // A cold-boot adapter can report a temporary non-emulator transport id even
@@ -217,7 +224,8 @@ function describeBooted({
       readiness: {
         state: adbOfflineState ? "not_ready" : readinessFromServiceStatus(serviceStatus),
       },
-      poolStatus: poolStatus(pooled),
+      poolStatus: poolStatus(pooled, heldBy),
+      ...(heldBy ? { heldBy } : {}),
       session: session
         ? {
             sessionUuid: session.sessionId,
@@ -287,11 +295,14 @@ function readinessFromServiceStatus(
   return status.running ? "ready" : "unknown";
 }
 
-function poolStatus(pooled: PooledDevice | undefined): DevicePoolStatus | null {
+function poolStatus(
+  pooled: PooledDevice | undefined,
+  heldBy: DeviceHeldBy | undefined,
+): DevicePoolStatus | null {
   if (!pooled) {
     return null;
   }
-  if (pooled.status === "busy") {
+  if (pooled.status === "busy" || (heldBy && pooled.status === "idle")) {
     return "assigned";
   }
   return pooled.status === "idle" || pooled.status === "error" ? pooled.status : null;
@@ -435,6 +446,7 @@ export const deviceDescriptionSchema = z
         lifecycle: lifecycleSchema,
         readiness: readinessSchema,
         poolStatus: z.enum(["idle", "assigned", "error"]).nullable(),
+        heldBy: z.enum(["managed_slot", "other_daemon"]).optional(),
         session: z
           .object({
             sessionUuid: nullableString,

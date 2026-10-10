@@ -20,7 +20,7 @@ Canonical fields after phase 3:
   (`deviceId`, `connectionId`, and `deviceSessionUuid`) live under `runtime`.
 - `osVersion`, `apiLevel`, `runtimeId`, `deviceType`, `model`, `architecture`,
   and `formFactor` are top-level static facts.
-- `runtime.lifecycle`, `runtime.readiness`, `runtime.poolStatus`, and
+- `runtime.lifecycle`, `runtime.readiness`, `runtime.poolStatus` (`assigned` also covers a device held by a managed slot or another daemon, with `runtime.heldBy` of `managed_slot`/`other_daemon`), and
   `runtime.session` describe observed state and ownership.
 - Image provenance is `image.{path,target,basedOn}`; availability failures use
   top-level `availabilityError`.

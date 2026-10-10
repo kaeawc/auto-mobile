@@ -135,6 +135,7 @@ import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSe
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   admitInputOnHolderSession,
+  assertControlNotOnForeignDaemonDevice,
   assertInputNotOnForeignManagedSlotDevice,
   assertInputRequesterHoldsDevice,
   deviceAlreadyAssignedToAnotherSessionError,
@@ -800,6 +801,7 @@ interface SocketDaemonStateAccess extends DaemonStateAccess {
       deviceId: string,
     ): string | undefined;
     isAutolockSessionOwnedByOtherConnection?(sessionId: string, mcpSessionId?: string): boolean;
+    assertNotClaimedByForeignDaemon?(deviceId: string, platform: "android" | "ios"): Promise<void>;
   };
 }
 
@@ -5473,6 +5475,12 @@ export class UnixSocketServer {
       sessionManager,
       gate: this.daemonState.getDevicePool(),
     });
+    // Another daemon's device is refused, `force` or not: `force` overrides a local holder only.
+    await assertControlNotOnForeignDaemonDevice({
+      deviceId,
+      platform: device.platform,
+      gate: this.daemonState.getDevicePool(),
+    });
     if (force) {
       return;
     }
@@ -7295,6 +7303,12 @@ export class UnixSocketServer {
       platform: targetDevice.platform,
       requesterSessionUuid: requester?.(),
       sessionManager: this.daemonState.getSessionManager(),
+      gate: this.daemonState.getDevicePool(),
+    });
+    // A device no local session holds takes no input while another daemon claims it (#11349).
+    await assertControlNotOnForeignDaemonDevice({
+      deviceId: targetDevice.deviceId,
+      platform: targetDevice.platform,
       gate: this.daemonState.getDevicePool(),
     });
   }

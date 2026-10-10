@@ -1,8 +1,9 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerPlanTools } from "../../src/server/planTools";
+import * as videoRecordingManager from "../../src/server/videoRecordingManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -15,6 +16,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakePlanVideoRecorder } from "../fakes/FakePlanVideoRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
 
@@ -50,8 +52,29 @@ describe("managed connection executePlan device labels (#11397)", () => {
   let pool: DevicePool;
   let keyA: SlotKey;
   let allocatorCalls: string[][];
+  let restoreVideoRecorder: () => void;
+
+  // The executePlan tool builds its orchestrator without an injection seam, so the video
+  // manager that the orchestrator's default recorder delegates to is replaced instead. The
+  // orchestrator reads those bindings when it is constructed, after this runs.
+  const fakeVideoRecorder = (): (() => void) => {
+    const fake = new FakePlanVideoRecorder();
+    const spies = [
+      spyOn(videoRecordingManager, "startVideoRecording").mockImplementation(
+        fake.startVideoRecording,
+      ),
+      spyOn(videoRecordingManager, "stopVideoRecording").mockImplementation(
+        fake.stopVideoRecording,
+      ),
+      spyOn(videoRecordingManager, "rollbackVideoRecordingStart").mockResolvedValue(undefined),
+      spyOn(videoRecordingManager, "getVideoRecordingStatus").mockResolvedValue(null),
+      spyOn(videoRecordingManager, "getVideoRecordingMetadata").mockResolvedValue(null),
+    ];
+    return () => spies.forEach((spy) => spy.mockRestore());
+  };
 
   const setUp = async (): Promise<void> => {
+    restoreVideoRecorder = fakeVideoRecorder();
     ToolRegistry.clearTools();
     restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
@@ -111,6 +134,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
   };
 
   const tearDown = (): void => {
+    restoreVideoRecorder();
     restorePipeline();
     Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
     Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);

@@ -44,6 +44,7 @@ import {
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   SessionManager,
   SessionRecoveryIdentityLossError,
+  type RehydrationDeviceReservation,
   type Session,
   type SessionRecoveryTarget,
 } from "./sessionManager";
@@ -1183,6 +1184,11 @@ export class DevicePool {
   private readonly foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
   private readonly iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
   private readonly managedSlotExclusion: ManagedSlotExclusion | undefined;
+  /** Devices held for the persisted rows restart recovery is working through (#11294). */
+  private readonly rehydrationReservations = new Map<
+    string,
+    RehydrationDeviceReservation["target"]
+  >();
   /** Last foreign owner PID logged per device, so a waiting allocation logs each owner once. */
   private readonly loggedForeignDeviceOwners = new Map<string, number>();
   /** Devices whose allocation claim this daemon published and has not withdrawn, by claim store. */
@@ -5876,7 +5882,7 @@ export class DevicePool {
       const result = await this.assignmentMutex.runExclusive(async () => {
         throwIfRequestAborted();
         let candidates = selectCandidates();
-        let selection = await this.selectAssignableIdleDevice(candidates, snapshots);
+        let selection = await this.selectAssignableIdleDevice(candidates, snapshots, sessionId);
         let device = selection.device;
         let snapshotStale = selection.snapshotStale;
         livenessUnknown ||= selection.livenessUnknown;
@@ -5884,10 +5890,10 @@ export class DevicePool {
 
         // Selection can await local persistence, and release does not take this
         // mutex. Revalidate after that await; skip invalid entries without I/O.
-        while (device && !this.isCurrentIdleDeviceAssignable(device)) {
+        while (device && !this.isCurrentIdleDeviceAssignable(device, sessionId)) {
           snapshotStale = true;
           candidates = candidates.filter((candidate) => candidate !== device);
-          selection = await this.selectAssignableIdleDevice(candidates, snapshots);
+          selection = await this.selectAssignableIdleDevice(candidates, snapshots, sessionId);
           device = selection.device;
           livenessUnknown ||= selection.livenessUnknown;
         }
@@ -6035,11 +6041,11 @@ export class DevicePool {
   }
 
   // selectAssignableIdleDevice additionally requires eligibility and resolved identity.
-  private isCurrentIdleDeviceAssignable(device: PooledDevice): boolean {
+  private isCurrentIdleDeviceAssignable(device: PooledDevice, forSessionId?: string): boolean {
     return (
       this.isPooledEntryCurrent(device) &&
       device.sessionId === null &&
-      this.selectIdleDevice([device]) === device &&
+      this.selectIdleDevice([device], forSessionId) === device &&
       this.runtimeIdentity.isPooledDeviceIdentityAssignable(device)
     );
   }
@@ -6047,15 +6053,16 @@ export class DevicePool {
   private async selectAssignableIdleDevice(
     candidates: PooledDevice[],
     { capturedEntries, iosLiveness, androidPresence }: AllocationDiscoverySnapshots,
+    forSessionId?: string,
   ): Promise<AssignableIdleDeviceSelection> {
-    let device = this.selectIdleDevice(candidates);
+    let device = this.selectIdleDevice(candidates, forSessionId);
     let livenessUnknown = false;
     let snapshotStale = [...capturedEntries].some(
       (entry) =>
         !this.isPooledEntryCurrent(entry) ||
         entry.status !== "idle" ||
         entry.sessionId !== null ||
-        this.isReservedForAssignment(entry),
+        this.isReservedForAssignment(entry, forSessionId),
     );
     // One fresh Android sweep per pass (#6546), now taken outside the mutex.
     // Entry identity fences older snapshots from newer pool incarnations (#8130).
@@ -6065,7 +6072,7 @@ export class DevicePool {
         snapshotStale = true;
       } else if (!this.runtimeIdentity.isPooledDeviceIdentityAssignable(device)) {
         // Quarantined serial identity is not assignable, even if it is present.
-      } else if (!this.isCurrentIdleDeviceAssignable(device)) {
+      } else if (!this.isCurrentIdleDeviceAssignable(device, forSessionId)) {
         snapshotStale = true;
       } else if (this.shouldValidatePooledDevicePresence(device)) {
         if (!androidPresence) {
@@ -6101,7 +6108,7 @@ export class DevicePool {
         }
       }
       candidates = candidates.filter((candidate) => candidate.id !== skippedDeviceId);
-      device = this.selectIdleDevice(candidates);
+      device = this.selectIdleDevice(candidates, forSessionId);
     }
     return { livenessUnknown, snapshotStale };
   }
@@ -6147,17 +6154,22 @@ export class DevicePool {
     return existingSession === session ? { deviceId: device.id } : { deviceId: device.id, session };
   }
 
-  private isIdleDeviceEligible(device: PooledDevice): boolean {
+  private isIdleDeviceEligible(device: PooledDevice, forSessionId?: string): boolean {
     return (
       device.status === "idle" &&
       this.isPotentialAllocationSupply(device) &&
-      !this.isReservedForAssignment(device)
+      !this.isReservedForAssignment(device, forSessionId)
     );
   }
 
-  private selectIdleDevice(candidates: PooledDevice[]): PooledDevice | undefined {
+  private selectIdleDevice(
+    candidates: PooledDevice[],
+    forSessionId?: string,
+  ): PooledDevice | undefined {
     // Find idle devices and prefer most recently released for reuse
-    const idleDevices = candidates.filter((device) => this.isIdleDeviceEligible(device));
+    const idleDevices = candidates.filter((device) =>
+      this.isIdleDeviceEligible(device, forSessionId),
+    );
     if (idleDevices.length === 0) {
       return undefined;
     }
@@ -7374,14 +7386,97 @@ export class DevicePool {
     return !blocked.some(Boolean);
   }
 
-  private isReservedForAssignment(device: PooledDevice): boolean {
+  /**
+   * `forSessionId` is the session the question is asked for: a restart-recovery reservation
+   * (#11294) holds the device against everyone but the row it was made for.
+   */
+  private isReservedForAssignment(device: PooledDevice, forSessionId?: string): boolean {
     return (
       this.isReservedForReadiness(device.id) ||
       this.hasReadinessNameReservation(device) ||
       this.recoveryCoordinator.isAndroidRecoveryHandoffReserved(device.id) ||
       this.isReservedForShutdown(device) ||
-      this.shutdownReservationCoordinator.isDeviceUnderShutdown(device.id)
+      this.shutdownReservationCoordinator.isDeviceUnderShutdown(device.id) ||
+      this.isReservedForOtherRehydration(device, forSessionId)
     );
+  }
+
+  /**
+   * Hold each persisted row's device for that row while daemon restart recovery works through
+   * the rows (#11294), so an allocation arriving meanwhile cannot take a device a row is about
+   * to recover onto. The reservation is by identity, so it also covers a device discovery has
+   * not listed yet. A device a managed slot holds is not reserved: the slot wins, and the row
+   * recovers or fails through the normal path. When two rows name one device the first keeps it.
+   */
+  async reserveDevicesForRehydration(rows: readonly RehydrationDeviceReservation[]): Promise<void> {
+    if (rows.length === 0) {
+      return;
+    }
+    if (this.managedSlotExclusion) {
+      try {
+        await this.managedSlotExclusion.refresh();
+      } catch (error) {
+        // Which devices managed slots hold is unknown, and they win: reserve nothing.
+        logger.warn(
+          `[DevicePool] Not reserving devices for restart recovery: ${errorMessage(error)}`,
+          error,
+        );
+        return;
+      }
+    }
+    for (const { sessionId, target } of rows) {
+      const managed = this.managedSlotExclusion?.holderOf({
+        platform: target.platform,
+        stableIds: [target.stableDeviceId, target.deviceId],
+      });
+      const alreadyReserved = [...this.rehydrationReservations.values()].some(
+        (reserved) =>
+          reserved.platform === target.platform &&
+          reserved.stableDeviceId === target.stableDeviceId,
+      );
+      if (!managed && !alreadyReserved) {
+        this.rehydrationReservations.set(sessionId, target);
+      }
+    }
+  }
+
+  /** Give up the restart-recovery reservation made for `sessionId`, if any (#11294). */
+  releaseRehydrationReservation(sessionId: string): void {
+    if (this.rehydrationReservations.delete(sessionId)) {
+      logger.info(`[DevicePool] Released the restart-recovery reservation for ${sessionId}`);
+    }
+  }
+
+  /** The session whose restart recovery `device` is reserved for, if any (#11294). */
+  private rehydrationReservationHolder(device: PooledDevice): string | undefined {
+    if (this.rehydrationReservations.size === 0) {
+      return undefined;
+    }
+    const stableId = this.stableDeviceIdFor(device);
+    for (const [sessionId, target] of this.rehydrationReservations) {
+      if (
+        target.platform === device.platform &&
+        target.stableDeviceId === stableId &&
+        (target.androidEmulator === undefined ||
+          this.isPooledAndroidEmulator(device.id) === target.androidEmulator)
+      ) {
+        return sessionId;
+      }
+    }
+    return undefined;
+  }
+
+  private isReservedForOtherRehydration(device: PooledDevice, forSessionId?: string): boolean {
+    const holder = this.rehydrationReservationHolder(device);
+    return holder !== undefined && holder !== forSessionId;
+  }
+
+  /** Restart recovery is about to put another session back on `device` (#11294). */
+  private assertNotReservedForOtherRehydration(device: PooledDevice, sessionId: string): void {
+    const holder = this.rehydrationReservationHolder(device);
+    if (holder !== undefined && holder !== sessionId) {
+      throw deviceAssignedToOtherSessionError(device.id, holder, sessionId);
+    }
   }
 
   private assertNotReservedForShutdown(device: PooledDevice, detail: string): void {
@@ -7473,6 +7568,7 @@ export class DevicePool {
         }
         this.runtimeIdentity.assertRuntimeIdentity(device, expectedIdentity);
         this.assertNotReservedForShutdown(device, "and cannot be assigned");
+        this.assertNotReservedForOtherRehydration(device, sessionId);
         if (alreadyPooled) {
           this.recordSourceAndroidAvd(deviceId, androidAvdIdentity);
           this.notifyTargetDeviceReady({ device, snapshot });
@@ -8869,7 +8965,8 @@ export class DevicePool {
       return new SessionRecoveryIdentityLossError(sessionId, target, "target-absent");
     }
     const exact = exactMatches[0];
-    if (exact.status === "busy" || this.isReservedForAssignment(exact)) {
+    // A restart-recovery reservation made for this very row is not "busy" (#11294).
+    if (exact.status === "busy" || this.isReservedForAssignment(exact, sessionId)) {
       return new SessionRecoveryIdentityLossError(sessionId, target, "target-busy");
     }
     return undefined;

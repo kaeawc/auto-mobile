@@ -759,6 +759,7 @@ test/scripts/benchmarkListDevicesFixture.test.ts
 test/scripts/benchmarkSettledScreenshot.test.ts
 test/scripts/benchmarkSettledScreenshotIsolation.test.ts
 test/scripts/benchmarkSettledScreenshotReliability.test.ts
+test/scripts/benchmarkThresholds.test.ts
 test/scripts/buildReleaseNotes.test.ts
 test/scripts/checkUtilsImportDirection.test.ts
 test/scripts/ciLfsSkipSmudgePolicy.test.ts

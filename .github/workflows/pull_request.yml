@@ -1044,13 +1044,22 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      # The selector adds `docs-github-markdown` when docs/ changes, and that
+      # check exits 2 without uv ("uv is required"), failing every docs PR.
+      - name: "Install uv for docs Markdown validation"
+        uses: astral-sh/setup-uv@v7
+        background: true
+        id: install-uv
+        with:
+          enable-cache: true
+
       # Foreground: it appends node_modules/.bin to $GITHUB_PATH, and the
       # selector resolves TypeScript check dependencies with bun.
       - name: "Install Bun dependencies"
         shell: bash
         run: scripts/ci/install-bun-deps.sh
 
-      - wait: install-bats
+      - wait: [install-bats, install-uv]
 
       - name: "Run changed-file shell checks"
         shell: bash

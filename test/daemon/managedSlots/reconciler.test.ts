@@ -505,6 +505,22 @@ describe("ManagedSlotReconciler", () => {
       expect(result.disposition).toBe("reused");
     });
 
+    test("a slot settling under a live settler refuses slot_settling; a dead settler's slot is recovered and reused", async () => {
+      const stableId = await seedAssigned();
+      await registry.updateSlotState(key, { generation: 1, stableDeviceId: stableId }, "settling", {
+        settler: { daemonId: "d", pid: 300 },
+      });
+
+      const busy = expectFailed(await reconciler.reconcile(request()));
+      expect(busy.failure).toMatchObject({ code: "slot_settling", retryable: true });
+      expect(provisioner.calls).toHaveLength(0);
+
+      registry.setExecOwnerLiveness((owner) => owner.pid !== 300);
+      const result = expectReady(await reconciler.reconcile(request()));
+      expect(result.disposition).toBe("reused");
+      expect(result.assignment).toMatchObject({ generation: 2, state: "ready", settler: null });
+    });
+
     test("a live execution owner refuses with slot_in_use", async () => {
       const stableId = await seedAssigned();
       await registry.claimExecution(

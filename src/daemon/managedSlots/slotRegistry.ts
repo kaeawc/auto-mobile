@@ -50,19 +50,38 @@ export interface SlotKey {
   slotIndex: number;
 }
 
-export type SlotAssignmentState = "provisioning" | "ready" | "replacing" | "cleanup_pending";
+/**
+ * - `provisioning`: no device yet, or a bound device not yet confirmed ready.
+ * - `ready`: the bound device satisfies the spec and may be claimed.
+ * - `replacing`: the bound device is being deleted for a replacement (fenced).
+ * - `settling`: a released execution's work (an action, or the release's restoration) has not
+ *   ended yet; the device itself is fine. Its {@link SlotAssignmentRecord.settler} returns it to
+ *   `ready` once the work settles, and a dead settler means the work died with it, so the slot is
+ *   recoverable (`recoverSettledSlots`).
+ * - `cleanup_pending`: deleting the bound device failed, so it may half-exist. Only the journal
+ *   redrive (#11179) or an operator resolves it.
+ */
+export type SlotAssignmentState =
+  | "provisioning"
+  | "ready"
+  | "replacing"
+  | "settling"
+  | "cleanup_pending";
 
-/** The live execution currently holding a slot's device; cleared on session release. */
-export interface SlotExecOwner {
+/** A daemon process, as recorded for liveness checks. */
+export interface SlotProcessIdentity {
   daemonId: string;
   pid: number;
-  sessionUuid: string;
   /**
-   * The owner process's generation token (its start identity), so a reused PID is not mistaken
-   * for the owner. Absent or null when the platform cannot report one: liveness then falls back
-   * to the PID probe alone.
+   * The process's generation token (its start identity), so a reused PID is not mistaken for it.
+   * Absent or null when the platform cannot report one: liveness then falls back to the PID alone.
    */
   processGenerationToken?: string | null;
+}
+
+/** The live execution currently holding a slot's device; cleared on session release. */
+export interface SlotExecOwner extends SlotProcessIdentity {
+  sessionUuid: string;
 }
 
 export interface SlotAssignmentRecord extends SlotKey {
@@ -76,6 +95,8 @@ export interface SlotAssignmentRecord extends SlotKey {
   specFingerprint: string | null;
   state: SlotAssignmentState;
   execOwner: SlotExecOwner | null;
+  /** The daemon watching a `settling` slot's work; null in every other state. */
+  settler: SlotProcessIdentity | null;
   updatedAtMs: number;
 }
 
@@ -164,8 +185,14 @@ export type UpdateSlotStateResult =
  */
 export const FENCING_SLOT_STATES: ReadonlySet<SlotAssignmentState> = new Set([
   "replacing",
+  "settling",
   "cleanup_pending",
 ]);
+
+export interface UpdateSlotStateOptions {
+  /** Required when entering `settling`: the daemon whose watcher will settle the slot. */
+  settler?: SlotProcessIdentity;
+}
 
 /** Whether moving from `current` to `next` enters a fencing state (and so bumps the generation). */
 export function entersFencingState(
@@ -226,6 +253,8 @@ export type CompleteScopeInvalidationResult =
       kind: "pending";
       scope: SlotScopeRecord;
       liveOwners: SlotAssignmentRecord[];
+      /** Slots whose released work is still settling under a live settler. */
+      settling: SlotAssignmentRecord[];
       cleanupPending: SlotAssignmentRecord[];
     }
   | { kind: "not_invalidating"; scope: SlotScopeRecord }
@@ -252,10 +281,10 @@ export interface AbandonmentQuery {
 export const MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS = 60 * 60 * 1000;
 
 /**
- * Decides whether a recorded execution owner is still alive. The default
+ * Decides whether a recorded execution owner (or settler) is still alive. The default
  * (`defaultSlotExecOwnerLiveness`) requires its PID to run as the same process generation.
  */
-export type SlotExecOwnerLiveness = (owner: SlotExecOwner) => boolean;
+export type SlotExecOwnerLiveness = (owner: SlotProcessIdentity) => boolean;
 
 export interface SlotRegistry {
   /**
@@ -291,7 +320,14 @@ export interface SlotRegistry {
     key: SlotKey,
     expected: SlotBindingExpectation,
     state: SlotAssignmentState,
+    options?: UpdateSlotStateOptions,
   ): Promise<UpdateSlotStateResult>;
+  /**
+   * Return every `settling` slot (of `scopeKey`, or of any scope) whose settler is dead and which
+   * no live execution owns to `ready`: its released work died with the settler's process. The
+   * restart-time recovery for a drain whose watcher never finished. Returns the recovered slots.
+   */
+  recoverSettledSlots(scopeKey?: string): Promise<SlotAssignmentRecord[]>;
 
   /**
    * Record the live execution holding a ready slot; refused while another live owner holds it,
@@ -334,7 +370,8 @@ export interface SlotRegistry {
     reason: SlotScopeInvalidationReason,
   ): Promise<BeginScopeInvalidationResult>;
   /**
-   * invalidating → invalidated once no live owner and no `cleanup_pending` slot remains: bound
+   * invalidating → invalidated once no live owner, no `cleanup_pending` slot and no slot settling
+   * under a live settler remains (a dead settler's slot is settled and does not block): bound
    * devices move to the free pool and the scope's slots are removed. Idempotent.
    */
   completeScopeInvalidation(scopeKey: string): Promise<CompleteScopeInvalidationResult>;
@@ -401,6 +438,20 @@ export function isRevivableScope(scope: SlotScopeRecord): boolean {
 /** Whether a reason makes an invalidation permanent (anything but abandonment). */
 export function isPermanentInvalidationReason(reason: SlotScopeInvalidationReason): boolean {
   return reason !== "abandoned";
+}
+
+/** Whether entering `state` needs a settler, and whether one was given. */
+export function assertSettlerForState(
+  state: SlotAssignmentState,
+  options: UpdateSlotStateOptions | undefined,
+): SlotProcessIdentity | null {
+  if (state !== "settling") {
+    return null;
+  }
+  if (!options?.settler) {
+    throw new ActionableError("Marking a managed slot settling requires the settling daemon");
+  }
+  return options.settler;
 }
 
 export function bindingMatches(

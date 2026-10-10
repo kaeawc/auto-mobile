@@ -5,7 +5,7 @@ import {
   readDarwinProcessGenerationToken,
   readLinuxProcessGenerationToken,
 } from "../processGeneration";
-import type { SlotExecOwner, SlotExecOwnerLiveness } from "./slotRegistry";
+import type { SlotExecOwnerLiveness, SlotProcessIdentity } from "./slotRegistry";
 
 /**
  * Owner liveness for managed slots (#11242 item 5): a recorded execution owner is live while its
@@ -43,7 +43,7 @@ export function createSlotOwnerProcessProbe(
 export function createSlotExecOwnerLiveness(
   probe: SlotOwnerProcessProbe = createSlotOwnerProcessProbe(),
 ): SlotExecOwnerLiveness {
-  return (owner: SlotExecOwner): boolean => {
+  return (owner: SlotProcessIdentity): boolean => {
     if (!probe.isRunning(owner.pid)) {
       return false;
     }
@@ -69,6 +69,6 @@ export const defaultSlotExecOwnerLiveness: SlotExecOwnerLiveness = createSlotExe
 export function currentSlotOwnerProcess(
   readToken: () => string | undefined = currentDaemonProcessGenerationToken,
   pid: number = process.pid,
-): Pick<SlotExecOwner, "pid" | "processGenerationToken"> {
+): Pick<SlotProcessIdentity, "pid" | "processGenerationToken"> {
   return { pid, processGenerationToken: readToken() ?? null };
 }

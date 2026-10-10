@@ -20,14 +20,15 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 // #11177: ending a managed execution drains its work and releases its live control, but the slot
 // keeps its device: the assignment (binding, generation) survives and generic allocation stays
-// excluded. Unsettled work leaves the slot `cleanup_pending` until it settles.
+// excluded. Unsettled work leaves the slot `settling` (outcome `cleanup_pending`) until it settles.
 
+const SETTLER = { daemonId: "daemon-a", pid: 4242, processGenerationToken: "linux:boot:1" };
 const S1 = "session-1";
 const S2 = "session-2";
 const DEVICE = "emulator-5554";
 const AVD = "Pixel_8_API_35";
 const BINDING = { generation: 1, stableDeviceId: AVD };
-/** Entering cleanup_pending fences the slot: same device, next generation. */
+/** Entering settling fences the slot: same device, next generation. */
 const FENCED = { generation: 2, stableDeviceId: AVD };
 
 class FakeWork implements ManagedExecutionWork {
@@ -117,7 +118,13 @@ describe("managed execution release (daemon/releaseExecution)", () => {
     registry = new FakeSlotRegistry(timer);
     work = new FakeWork(timer);
     sessions = new FakeSessions();
-    drain = new ManagedExecutionRelease({ registry: async () => registry, work, sessions, timer });
+    drain = new ManagedExecutionRelease({
+      registry: async () => registry,
+      work,
+      sessions,
+      timer,
+      settler: SETTLER,
+    });
     warn = spyOn(logger, "warn").mockImplementation(() => {});
     const scope = await registry.ensureScope({
       managedHostScope: "host",
@@ -198,7 +205,7 @@ describe("managed execution release (daemon/releaseExecution)", () => {
     await claim(S2);
   });
 
-  test("unsettled work leaves the slot cleanup_pending, blocks the next claim, then settles", async () => {
+  test("unsettled work leaves the slot settling, blocks the next claim, then settles", async () => {
     timer.enableAutoAdvance();
     work.endOnCancel = false;
     work.active.set(S1, 1);
@@ -206,11 +213,12 @@ describe("managed execution release (daemon/releaseExecution)", () => {
     const result = await drain.releaseExecution(S1);
 
     expect(result).toMatchObject({ outcome: "cleanup_pending", settlement: "settling" });
-    expect(result.slots[0]).toMatchObject({ state: "cleanup_pending", execOwnerReleased: true });
+    expect(result.slots[0]).toMatchObject({ state: "settling", execOwnerReleased: true });
     expect(sessions.released).toEqual([S1]);
     expect(await registry.getAssignment(key)).toMatchObject({
       ...FENCED,
-      state: "cleanup_pending",
+      state: "settling",
+      settler: SETTLER,
       execOwner: null,
     });
     // The assignment is protected, not freed: the slot's next acquisition waits.
@@ -241,7 +249,8 @@ describe("managed execution release (daemon/releaseExecution)", () => {
     expect(sessions.forced).toEqual([S1]);
     expect(await registry.getAssignment(key)).toMatchObject({
       ...FENCED,
-      state: "cleanup_pending",
+      state: "settling",
+      settler: SETTLER,
       execOwner: null,
     });
 
@@ -250,13 +259,14 @@ describe("managed execution release (daemon/releaseExecution)", () => {
     expect(await registry.getAssignment(key)).toMatchObject({ ...FENCED, state: "ready" });
   });
 
-  test("work that never settles stays cleanup_pending past the watcher cap", async () => {
+  test("work that never settles stays settling past the watcher cap, until its settler is gone", async () => {
     drain = new ManagedExecutionRelease({
       registry: async () => registry,
       work,
       sessions,
       timer,
       settlementCapMs: 1_000,
+      settler: SETTLER,
     });
     timer.enableAutoAdvance();
     work.endOnCancel = false;
@@ -265,7 +275,16 @@ describe("managed execution release (daemon/releaseExecution)", () => {
     await drain.releaseExecution(S1);
     await drain.whenIdle();
 
-    expect(await registry.getAssignment(key)).toMatchObject({ state: "cleanup_pending" });
+    expect(await registry.getAssignment(key)).toMatchObject({ state: "settling", settler: SETTLER });
+    // A live settler keeps it; a restarted daemon recovers it once that settler is gone.
+    expect(await drain.recoverSettledSlots()).toEqual([]);
+    registry.setExecOwnerLiveness((owner) => owner.pid !== SETTLER.pid);
+    expect((await drain.recoverSettledSlots()).map((slot) => slot.slotIndex)).toEqual([0]);
+    expect(await registry.getAssignment(key)).toMatchObject({
+      ...FENCED,
+      state: "ready",
+      settler: null,
+    });
   });
 
   test("repeated and concurrent releases converge without releasing twice", async () => {
@@ -338,13 +357,17 @@ describe("managed execution release (daemon/releaseExecution)", () => {
       await Promise.resolve();
       await timer.sleep(10);
       expect(await registry.getAssignment(key)).toMatchObject({
-        state: "cleanup_pending",
+        state: "settling",
         execOwner: null,
       });
 
       work.active.delete(S1);
       await drain.whenIdle();
-      expect(await registry.getAssignment(key)).toMatchObject({ ...FENCED, state: "ready" });
+      expect(await registry.getAssignment(key)).toMatchObject({
+        ...FENCED,
+        state: "ready",
+        settler: null,
+      });
     });
 
     test("non-managed sessions and terminal upgrades are ignored", async () => {

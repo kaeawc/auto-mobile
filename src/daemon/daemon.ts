@@ -62,6 +62,7 @@ import {
   ManagedExecutionRelease,
   managedExecutionSessionsFrom,
 } from "./managedSlots/managedExecutionRelease";
+import { currentSlotOwnerProcess } from "./managedSlots/slotOwnerLiveness";
 import { openSqliteSlotRegistry } from "./managedSlots/sqliteSlotRegistry";
 import type { SlotRegistry } from "./managedSlots/slotRegistry";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
@@ -799,6 +800,10 @@ export class Daemon {
         releaseDevice: (deviceId, sessionId) => this.devicePool.releaseDevice(deviceId, sessionId),
       }),
       timer: this.timer,
+      settler: {
+        daemonId: this.daemonSessionId,
+        ...currentSlotOwnerProcess(() => this.processGenerationToken),
+      },
     });
     this.managedExecutionRelease = release;
     this.sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot, options) =>
@@ -808,7 +813,18 @@ export class Daemon {
   }
 
   private openManagedSlotRegistry(): Promise<SlotRegistry> {
-    const opening = (this.managedSlotRegistry ??= openSqliteSlotRegistry({ timer: this.timer }));
+    if (this.managedSlotRegistry) {
+      return this.managedSlotRegistry;
+    }
+    const opening = openSqliteSlotRegistry({ timer: this.timer });
+    this.managedSlotRegistry = opening;
+    // Restart-time recovery (#11242): slots a previous daemon left settling are settled once that
+    // daemon is gone. Runs once per open, after the open succeeds.
+    opening.then(
+      () => void this.managedExecutionRelease?.recoverSettledSlots(),
+      // The open failure is logged (and the open forgotten) by the handler below.
+      () => undefined,
+    );
     opening.catch((error: unknown) => {
       // The release that asked reports this failure; forgetting the failed open lets the next
       // release retry instead of failing forever.

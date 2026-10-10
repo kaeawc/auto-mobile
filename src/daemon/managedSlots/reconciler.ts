@@ -242,6 +242,7 @@ export type ManagedSlotReconcileFailureCode =
   | "slot_platform_conflict"
   | "discovery_incomplete"
   | "slot_in_use"
+  | "slot_settling"
   | "device_busy"
   | "reconcile_in_progress"
   | "cleanup_pending"
@@ -259,6 +260,7 @@ const FAILURE_RETRYABILITY: Readonly<Record<ManagedSlotReconcileFailureCode, boo
   slot_platform_conflict: false,
   discovery_incomplete: true,
   slot_in_use: true,
+  slot_settling: true,
   device_busy: true,
   reconcile_in_progress: true,
   cleanup_pending: true,
@@ -277,6 +279,7 @@ const FAILURE_NEXT_ACTION: Readonly<Record<ManagedSlotReconcileFailureCode, stri
   slot_platform_conflict: "Use a different slot index for a different platform.",
   discovery_incomplete: "Retry once device discovery completes; nothing destructive was done.",
   slot_in_use: "Wait for the slot's live execution to end, then retry.",
+  slot_settling: "Wait for the previous execution's released work to settle, then retry.",
   device_busy: "Wait for the device's live session or foreign claim to end, then retry.",
   reconcile_in_progress: "Another reconciliation of this slot is in progress; retry later.",
   cleanup_pending: "The previous device could not be removed; retry after cleanup succeeds.",
@@ -674,7 +677,7 @@ export class ManagedSlotReconciler {
     if (init.kind === "scope_not_valid") {
       throw new ReconcileAbort(failure("scope_not_valid", "Slot scope is not valid."));
     }
-    const assignment = init.assignment;
+    const assignment = await this.recoverIfSettled(request, init.assignment);
     evidence.initial = {
       generation: assignment.generation,
       stableDeviceId: assignment.stableDeviceId,
@@ -721,6 +724,31 @@ export class ManagedSlotReconciler {
       return await this.reuseAssigned(context, assignment, assigned);
     }
     return await this.replaceAssigned(context, assignment, assigned, inventory.complete);
+  }
+
+  /**
+   * A `settling` slot whose settler is gone is settled (its work died with that process): recover
+   * it to `ready` and continue. One whose settler still runs refuses retryable `slot_settling`.
+   */
+  private async recoverIfSettled(
+    request: ManagedSlotReconcileRequest,
+    assignment: SlotAssignmentRecord,
+  ): Promise<SlotAssignmentRecord> {
+    if (assignment.state !== "settling") {
+      return assignment;
+    }
+    const recovered = (await this.deps.registry.recoverSettledSlots(request.key.scopeKey)).find(
+      (slot) => slot.slotIndex === request.key.slotIndex,
+    );
+    if (recovered) {
+      return recovered;
+    }
+    throw new ReconcileAbort(
+      failure(
+        "slot_settling",
+        `Slot ${request.key.slotIndex} is settling the released work of its previous execution.`,
+      ),
+    );
   }
 
   private assertSlotAcceptsWork(

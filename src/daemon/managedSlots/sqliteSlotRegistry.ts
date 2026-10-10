@@ -9,6 +9,7 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
 import { migrateSlotRegistry } from "./slotRegistryMigrations";
 import {
+  assertSettlerForState,
   assertValidSlotKey,
   bindingMatches,
   computeSlotScopeKey,
@@ -39,11 +40,13 @@ import {
   type SlotInit,
   type SlotKey,
   type SlotPlatform,
+  type SlotProcessIdentity,
   type SlotRegistry,
   type SlotScopeIdentity,
   type SlotScopeInvalidationReason,
   type SlotScopeRecord,
   type SlotScopeState,
+  type UpdateSlotStateOptions,
   type UpdateSlotStateResult,
 } from "./slotRegistry";
 
@@ -100,6 +103,9 @@ interface SlotAssignmentsTable {
   exec_owner_pid: number | null;
   exec_owner_process_token: string | null;
   exec_session_uuid: string | null;
+  settler_daemon_id: string | null;
+  settler_pid: number | null;
+  settler_process_token: string | null;
   updated_at_ms: number;
 }
 
@@ -161,6 +167,25 @@ function toExecOwner(row: AssignmentRow): SlotExecOwner | null {
   };
 }
 
+function toSettler(row: AssignmentRow): SlotProcessIdentity | null {
+  if (row.settler_daemon_id === null || row.settler_pid === null) {
+    return null;
+  }
+  return {
+    daemonId: row.settler_daemon_id,
+    pid: row.settler_pid,
+    processGenerationToken: row.settler_process_token,
+  };
+}
+
+function settlerColumns(settler: SlotProcessIdentity | null) {
+  return {
+    settler_daemon_id: settler?.daemonId ?? null,
+    settler_pid: settler?.pid ?? null,
+    settler_process_token: settler?.processGenerationToken ?? null,
+  };
+}
+
 function toAssignment(row: AssignmentRow): SlotAssignmentRecord {
   return {
     scopeKey: row.scope_key,
@@ -175,6 +200,7 @@ function toAssignment(row: AssignmentRow): SlotAssignmentRecord {
     specFingerprint: row.spec_fingerprint,
     state: row.state,
     execOwner: toExecOwner(row),
+    settler: toSettler(row),
     updatedAtMs: row.updated_at_ms,
   };
 }
@@ -367,6 +393,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
         exec_owner_pid: null,
         exec_owner_process_token: null,
         exec_session_uuid: null,
+        ...settlerColumns(null),
         updated_at_ms: this.timer.now(),
       };
       await trx.insertInto("slot_assignments").values(row).execute();
@@ -423,6 +450,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
           resolved_spec_json: resolvedSpecJson,
           spec_fingerprint: next.specFingerprint,
           state: next.state,
+          ...settlerColumns(null),
           ...(requestedSpecJson === undefined ? {} : { requested_spec_json: requestedSpecJson }),
           // A different device cannot inherit the previous device's execution owner.
           ...(deviceChanged
@@ -447,8 +475,10 @@ export class SqliteSlotRegistry implements SlotRegistry {
     key: SlotKey,
     expected: SlotBindingExpectation,
     state: SlotAssignmentState,
+    options?: UpdateSlotStateOptions,
   ): Promise<UpdateSlotStateResult> {
     assertValidSlotKey(key);
+    const settler = assertSettlerForState(state, options);
     return this.db.transaction().execute(async (trx): Promise<UpdateSlotStateResult> => {
       const checked = await this.checkBinding(trx, key, expected);
       if ("kind" in checked) {
@@ -463,7 +493,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
         : checked.generation;
       const updated = await trx
         .updateTable("slot_assignments")
-        .set({ state, generation, updated_at_ms: this.timer.now() })
+        .set({ state, generation, ...settlerColumns(settler), updated_at_ms: this.timer.now() })
         .where("scope_key", "=", key.scopeKey)
         .where("slot_index", "=", key.slotIndex)
         .returningAll()
@@ -534,6 +564,32 @@ export class SqliteSlotRegistry implements SlotRegistry {
         return { released: true, assignment: toAssignment(updated) };
       }
       return { released: false, assignment: await this.readAssignment(trx, key) };
+    });
+  }
+
+  async recoverSettledSlots(scopeKey?: string): Promise<SlotAssignmentRecord[]> {
+    return this.db.transaction().execute(async (trx) => {
+      let query = trx.selectFrom("slot_assignments").selectAll().where("state", "=", "settling");
+      if (scopeKey !== undefined) {
+        query = query.where("scope_key", "=", scopeKey);
+      }
+      const settled = (await query.orderBy("scope_key").orderBy("slot_index").execute())
+        .map(toAssignment)
+        .filter((assignment) => this.isSettled(assignment));
+      const recovered: SlotAssignmentRecord[] = [];
+      for (const assignment of settled) {
+        const row = await trx
+          .updateTable("slot_assignments")
+          .set({ state: "ready", ...settlerColumns(null), updated_at_ms: this.timer.now() })
+          .where("scope_key", "=", assignment.scopeKey)
+          .where("slot_index", "=", assignment.slotIndex)
+          .where("generation", "=", assignment.generation)
+          .where("state", "=", "settling")
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        recovered.push(toAssignment(row));
+      }
+      return recovered;
     });
   }
 
@@ -697,11 +753,14 @@ export class SqliteSlotRegistry implements SlotRegistry {
       const liveOwners = assignments.filter(
         (assignment) => assignment.execOwner !== null && this.isExecOwnerLive(assignment.execOwner),
       );
+      const settling = assignments.filter(
+        (assignment) => assignment.state === "settling" && !this.isSettled(assignment),
+      );
       const cleanupPending = assignments.filter(
         (assignment) => assignment.state === "cleanup_pending",
       );
-      if (liveOwners.length > 0 || cleanupPending.length > 0) {
-        return { kind: "pending", scope, liveOwners, cleanupPending };
+      if (liveOwners.length > 0 || settling.length > 0 || cleanupPending.length > 0) {
+        return { kind: "pending", scope, liveOwners, settling, cleanupPending };
       }
       const nowMs = this.timer.now();
       const freedDevices = assignments.flatMap((assignment): FreeSlotDeviceRecord[] =>
@@ -847,12 +906,19 @@ export class SqliteSlotRegistry implements SlotRegistry {
       .selectFrom("slot_assignments")
       .selectAll()
       .where("scope_key", "=", scopeKey)
-      .where("exec_session_uuid", "is not", null)
+      .where((eb) => eb.or([eb("exec_session_uuid", "is not", null), eb("state", "=", "settling")]))
       .execute();
-    return rows.some((row) => {
-      const owner = toExecOwner(row);
-      return owner !== null && this.isExecOwnerLive(owner);
-    });
+    // A live settler still drives its released work, so it keeps the scope in use too.
+    return rows.some((row) => !this.isSettled(toAssignment(row)));
+  }
+
+  /** A settling slot is settled once its settler is dead and no live execution owns it. */
+  private isSettled(assignment: SlotAssignmentRecord): boolean {
+    const { settler, execOwner } = assignment;
+    return (
+      (settler === null || !this.isExecOwnerLive(settler)) &&
+      (execOwner === null || !this.isExecOwnerLive(execOwner))
+    );
   }
 
   /** An explicit reset of an abandoned scope replaces the revivable reason with the reset's. */

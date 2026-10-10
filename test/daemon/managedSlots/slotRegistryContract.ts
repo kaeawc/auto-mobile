@@ -275,6 +275,85 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect((await registry.updateSlotState(key, binding, "replacing")).kind).toBe("updated");
     });
 
+    test("settling records its settler, fences the slot, and clears the settler on leaving", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const binding = { generation: 1, stableDeviceId: "avd-1" };
+      await expect(registry.updateSlotState(key, binding, "settling")).rejects.toThrow(
+        "settling daemon",
+      );
+      const settler = { daemonId: "daemon-a", pid: 300, processGenerationToken: "linux:b:1" };
+      expect(await registry.updateSlotState(key, binding, "settling", { settler })).toMatchObject({
+        kind: "updated",
+        assignment: { generation: 2, state: "settling", settler },
+      });
+      expect(
+        await registry.updateSlotState(key, { generation: 2, stableDeviceId: "avd-1" }, "ready"),
+      ).toMatchObject({ kind: "updated", assignment: { generation: 2, settler: null } });
+    });
+
+    test("recoverSettledSlots returns only slots whose settler is gone to ready", async () => {
+      const scopeKey = await readyScope();
+      const other = await readyScope(SCOPE_B1);
+      const mine = { scopeKey, slotIndex: 0 };
+      const live = { scopeKey, slotIndex: 1 };
+      const elsewhere = { scopeKey: other, slotIndex: 0 };
+      await boundSlot(mine, "avd-1");
+      await boundSlot(live, "avd-2");
+      await boundSlot(elsewhere, "avd-3");
+      livePids.add(301);
+      for (const [key, id, pid] of [
+        [mine, "avd-1", 300],
+        [live, "avd-2", 301],
+        [elsewhere, "avd-3", 300],
+      ] as const) {
+        await registry.updateSlotState(key, { generation: 1, stableDeviceId: id }, "settling", {
+          settler: { daemonId: "d", pid },
+        });
+      }
+
+      const recovered = await registry.recoverSettledSlots(scopeKey);
+
+      expect(recovered.map((slot) => [slot.scopeKey, slot.slotIndex])).toEqual([[scopeKey, 0]]);
+      expect(await registry.getAssignment(mine)).toMatchObject({
+        generation: 2,
+        state: "ready",
+        settler: null,
+      });
+      expect((await registry.getAssignment(live))?.state).toBe("settling");
+      expect((await registry.getAssignment(elsewhere))?.state).toBe("settling");
+      expect((await registry.recoverSettledSlots()).map((slot) => slot.scopeKey)).toEqual([other]);
+    });
+
+    test("a slot settling under a dead settler does not block scope invalidation; a live one does", async () => {
+      const scopeKey = await readyScope();
+      const key = { scopeKey, slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      livePids.add(300);
+      await registry.updateSlotState(key, { generation: 1, stableDeviceId: "avd-1" }, "settling", {
+        settler: { daemonId: "d", pid: 300 },
+      });
+      timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS);
+      // A live settler still drives the released work, so the scope is not abandoned.
+      expect(await registry.markScopeAbandoned(scopeKey)).toMatchObject({
+        kind: "not_abandoned",
+        reason: "live_owner",
+      });
+      await registry.beginScopeInvalidation(scopeKey, "operator_reset");
+      const pending = await registry.completeScopeInvalidation(scopeKey);
+      expect(pending).toMatchObject({ kind: "pending", liveOwners: [], cleanupPending: [] });
+      if (pending.kind !== "pending") {
+        throw new Error("expected pending");
+      }
+      expect(pending.settling.map((slot) => slot.slotIndex)).toEqual([0]);
+
+      livePids.delete(300);
+      expect(await registry.completeScopeInvalidation(scopeKey)).toMatchObject({
+        kind: "invalidated",
+        freedDevices: [{ stableDeviceId: "avd-1" }],
+      });
+    });
+
     test("a claim may supersede only the reservation it names", async () => {
       const key = { scopeKey: await readyScope(), slotIndex: 0 };
       await boundSlot(key, "avd-1");

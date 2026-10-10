@@ -1,4 +1,5 @@
 import {
+  assertSettlerForState,
   assertValidSlotKey,
   bindingMatches,
   computeSlotScopeKey,
@@ -33,6 +34,7 @@ import {
   type SlotScopeIdentity,
   type SlotScopeInvalidationReason,
   type SlotScopeRecord,
+  type UpdateSlotStateOptions,
   type UpdateSlotStateResult,
 } from "../../src/daemon/managedSlots/slotRegistry";
 import type { Timer } from "../../src/utils/SystemTimer";
@@ -136,6 +138,7 @@ export class FakeSlotRegistry implements SlotRegistry {
       specFingerprint: null,
       state: "provisioning",
       execOwner: null,
+      settler: null,
       updatedAtMs: this.timer.now(),
     };
     this.assignments.set(slotId(key), assignment);
@@ -179,6 +182,7 @@ export class FakeSlotRegistry implements SlotRegistry {
         : roundTrip(next.resolvedSpec);
     checked.specFingerprint = next.specFingerprint;
     checked.state = next.state;
+    checked.settler = null;
     if (next.requestedSpec !== undefined) {
       checked.requestedSpec = roundTrip(next.requestedSpec);
     }
@@ -193,7 +197,9 @@ export class FakeSlotRegistry implements SlotRegistry {
     key: SlotKey,
     expected: SlotBindingExpectation,
     state: SlotAssignmentState,
+    options?: UpdateSlotStateOptions,
   ): Promise<UpdateSlotStateResult> {
+    const settler = assertSettlerForState(state, options);
     const checked = this.checkBinding(key, expected);
     if ("kind" in checked) {
       return checked;
@@ -206,6 +212,7 @@ export class FakeSlotRegistry implements SlotRegistry {
       checked.generation += 1;
     }
     checked.state = state;
+    checked.settler = settler ? { ...settler } : null;
     checked.updatedAtMs = this.timer.now();
     return { kind: "updated", assignment: copy(checked) };
   }
@@ -249,6 +256,25 @@ export class FakeSlotRegistry implements SlotRegistry {
     assignment.execOwner = null;
     assignment.updatedAtMs = this.timer.now();
     return { released: true, assignment: copy(assignment) };
+  }
+
+  async recoverSettledSlots(scopeKey?: string): Promise<SlotAssignmentRecord[]> {
+    const settled = [...this.assignments.values()]
+      .filter(
+        (assignment) =>
+          assignment.state === "settling" &&
+          (scopeKey === undefined || assignment.scopeKey === scopeKey) &&
+          this.isSettled(assignment),
+      )
+      .sort((a, b) =>
+        a.scopeKey === b.scopeKey ? a.slotIndex - b.slotIndex : a.scopeKey < b.scopeKey ? -1 : 1,
+      );
+    for (const assignment of settled) {
+      assignment.state = "ready";
+      assignment.settler = null;
+      assignment.updatedAtMs = this.timer.now();
+    }
+    return settled.map(copy);
   }
 
   async getAssignment(key: SlotKey): Promise<SlotAssignmentRecord | null> {
@@ -367,14 +393,18 @@ export class FakeSlotRegistry implements SlotRegistry {
     const liveOwners = assignments.filter(
       (assignment) => assignment.execOwner !== null && this.isExecOwnerLive(assignment.execOwner),
     );
+    const settling = assignments.filter(
+      (assignment) => assignment.state === "settling" && !this.isSettled(assignment),
+    );
     const cleanupPending = assignments.filter(
       (assignment) => assignment.state === "cleanup_pending",
     );
-    if (liveOwners.length > 0 || cleanupPending.length > 0) {
+    if (liveOwners.length > 0 || settling.length > 0 || cleanupPending.length > 0) {
       return {
         kind: "pending",
         scope: { ...scope },
         liveOwners: liveOwners.map(copy),
+        settling: settling.map(copy),
         cleanupPending: cleanupPending.map(copy),
       };
     }
@@ -477,11 +507,18 @@ export class FakeSlotRegistry implements SlotRegistry {
   }
 
   private hasLiveExecOwner(scopeKey: string): boolean {
+    // A live settler still drives its released work, so it keeps the scope in use too.
     return [...this.assignments.values()].some(
-      (assignment) =>
-        assignment.scopeKey === scopeKey &&
-        assignment.execOwner !== null &&
-        this.isExecOwnerLive(assignment.execOwner),
+      (assignment) => assignment.scopeKey === scopeKey && !this.isSettled(assignment),
+    );
+  }
+
+  /** No live execution owner, and (when settling) no live settler. */
+  private isSettled(assignment: SlotAssignmentRecord): boolean {
+    const { settler, execOwner } = assignment;
+    return (
+      (settler === null || !this.isExecOwnerLive(settler)) &&
+      (execOwner === null || !this.isExecOwnerLive(execOwner))
     );
   }
 
@@ -514,6 +551,12 @@ function copy(assignment: SlotAssignmentRecord): SlotAssignmentRecord {
       ? {
           ...assignment.execOwner,
           processGenerationToken: assignment.execOwner.processGenerationToken ?? null,
+        }
+      : null,
+    settler: assignment.settler
+      ? {
+          ...assignment.settler,
+          processGenerationToken: assignment.settler.processGenerationToken ?? null,
         }
       : null,
   };

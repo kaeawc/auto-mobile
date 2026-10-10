@@ -141,7 +141,12 @@ const EXPIRY_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
  * step moves away from them.
  */
 const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
-  "src/daemon/sessionManager.ts": ["SessionManager.isSessionExpired"],
+  "src/daemon/sessionManager.ts": [
+    "SessionManager.isSessionExpired",
+    // #11290: a new call's start is judged against `expiresAt` on the session clock.
+    "SessionManager.isSessionExpiredForNewExecution",
+    "SessionManager.isLateExecutionWhileEarlierWorkIsActive",
+  ],
   // #11162: the release's deferral is a session-clock instant from the execution veto.
   "src/daemon/ownerDisconnectRelease.ts": [
     "ownerDisconnectReleaseBlocker",

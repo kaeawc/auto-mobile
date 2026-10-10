@@ -769,8 +769,19 @@ export type SessionReleaseCallback = (
 export type SessionCreatedCallback = (session: Session) => void;
 export interface SessionExecutionMetadata {
   executionId: string;
+  /** When the call started, on the wall clock of the tracker that stamped it. */
   startTime: number;
+  /**
+   * {@link startTime} on the session clock, captured when the call started (#11290). Session
+   * stamps are judged against this; without it the start is converted with the offset in force
+   * when the session is looked up, which is the same instant unless the wall clock stepped in
+   * between.
+   */
+  sessionClockStartTime?: number;
 }
+
+/** A call whose start is known on the session clock, as every expiry judgement needs it. */
+type SessionClockExecution = SessionExecutionMetadata & { sessionClockStartTime: number };
 
 export interface ActiveSessionExecutionQuery {
   startedAtOrBefore?: number;
@@ -2808,15 +2819,16 @@ export class SessionManager {
     if (!session) {
       return null;
     }
+    const startedExecution = execution && this.executionOnSessionClock(execution);
     if (
       expireDespiteActiveExecution &&
-      this.isLateExecutionWhileEarlierWorkIsActive(session, execution)
+      this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution)
     ) {
       throw new Error(
         `Session ${sessionId} expired before this execution began while earlier work is still active.`,
       );
     }
-    if (this.shouldExpireSession(session, expireDespiteActiveExecution, execution)) {
+    if (this.shouldExpireSession(session, expireDespiteActiveExecution, startedExecution)) {
       if (!releaseExpired) {
         return null;
       }
@@ -2843,10 +2855,22 @@ export class SessionManager {
     return session;
   }
 
+  /**
+   * A call's start on the clock `expiresAt` is stamped with (#11290): its wall-clock `startTime`
+   * is not comparable with a session stamp once the wall clock has stepped.
+   */
+  private executionOnSessionClock(execution: SessionExecutionMetadata): SessionClockExecution {
+    return {
+      ...execution,
+      sessionClockStartTime:
+        execution.sessionClockStartTime ?? this.wallToSessionClock(execution.startTime),
+    };
+  }
+
   private shouldExpireSession(
     session: Session,
     expireDespiteActiveExecution: boolean,
-    execution?: SessionExecutionMetadata,
+    execution?: SessionClockExecution,
   ): boolean {
     return expireDespiteActiveExecution
       ? this.isSessionExpiredForNewExecution(session, execution)
@@ -8534,7 +8558,7 @@ export class SessionManager {
 
   private isSessionExpiredForNewExecution(
     session: Session,
-    execution?: SessionExecutionMetadata,
+    execution?: SessionClockExecution,
   ): boolean {
     // A lookup that carries no execution (routing resolution: autolock, setActiveDevice, the
     // lifecycle ownership check) is not a call that arrived after the deadline; it only asks who
@@ -8546,17 +8570,17 @@ export class SessionManager {
     if (this.sessionNow() <= session.expiresAt) {
       return false;
     }
-    return execution.startTime > session.expiresAt;
+    return execution.sessionClockStartTime > session.expiresAt;
   }
 
   private isLateExecutionWhileEarlierWorkIsActive(
     session: Session,
-    execution: SessionExecutionMetadata | undefined,
+    execution: SessionClockExecution | undefined,
   ): boolean {
     return (
       execution !== undefined &&
       this.sessionNow() > session.expiresAt &&
-      execution.startTime > session.expiresAt &&
+      execution.sessionClockStartTime > session.expiresAt &&
       this.activeSessionExecutionChecker(session.sessionId, {
         excludeExecutionId: execution.executionId,
       })

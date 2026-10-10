@@ -1516,6 +1516,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             {
               executionId: execution.id,
               startTime: execution.startTime,
+              sessionClockStartTime: execution.sessionClockStartTime,
             },
             plainReadCall ? { access: "read-only" } : undefined,
           );
@@ -1658,6 +1659,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           ? daemonSessionManager.getSessionForNewExecution(providedSessionUuid, {
               executionId: execution.id,
               startTime: execution.startTime,
+              sessionClockStartTime: execution.sessionClockStartTime,
             })
           : undefined;
       if (

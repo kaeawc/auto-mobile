@@ -3235,8 +3235,12 @@ export class Daemon {
     const executionSessionId =
       resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
     for (const id of new Set([sessionId, executionSessionId])) {
+      // Only a call running under the released session is told it is gone. The base session's call
+      // is cut because it drives the derived session's device (#5364), but the base is still live:
+      // it gets the plain cancellation, never a refusal naming a session that is not its own.
+      const reason = id === sessionId ? cancellation : cancellation.releaseReason;
       executionTracker
-        .cancelDeviceSessionExecutions(id, cancellation, {
+        .cancelDeviceSessionExecutions(id, reason, {
           excludeExecutionId: query.excludeExecutionId,
         })
         .catch((error: unknown) => {

@@ -177,4 +177,52 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
     expect(devicePool.getDevice(DEVICE.deviceId)?.sessionId).toBeNull();
     expectTerminalRefusal(hung, "owner-disconnected");
   });
+
+  // A call is told the session is gone only when the session IT runs under was released. A derived
+  // `${base}:${label}` session expiring cuts the base session's call too (#10820), but the base
+  // session is still live, so that call gets no refusal.
+  describe("a derived label session's idle expiry", () => {
+    const BASE = "typed-cancellation-base";
+    const DERIVED = `${BASE}:A`;
+    const LONG_TIMEOUT_MS = 60 * 60 * 1000;
+    const DERIVED_TIMEOUT_MS = 1_000;
+
+    async function baseWithDerivedLabel(): Promise<void> {
+      const sessionManager = daemon.getSessionManager();
+      await sessionManager.createSession(BASE, "emulator-5554", "android", LONG_TIMEOUT_MS);
+      await sessionManager.createSession(DERIVED, "emulator-5556", "android", DERIVED_TIMEOUT_MS);
+      sessionManager.setDeviceLabels(BASE, { A: DERIVED });
+    }
+
+    async function expireDerivedPastHungCall(execution: ActiveExecution): Promise<void> {
+      const deadlineMs = timer.now() + 2_000;
+      executionTracker.setExecutionDeadline(execution.id, () => deadlineMs);
+      await settle(deadlineMs + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS - timer.now() + 1);
+      // The lookup that observes the expiry releases the session.
+      expect(daemon.getSessionManager().getSession(DERIVED)).toBeNull();
+    }
+
+    test("cuts the base session's call without telling it the base session is gone", async () => {
+      await baseWithDerivedLabel();
+      const baseCall = track(executionTracker.startExecution("tapOn", undefined, BASE));
+
+      await expireDerivedPastHungCall(baseCall);
+
+      expect(baseCall.abortController.signal.aborted).toBe(true);
+      expect(sessionReleasedDuringCallPayload(baseCall.cancelReason)).toBeUndefined();
+      expect(daemon.getSessionManager().hasSession(BASE)).toBe(true);
+    });
+
+    test("answers the derived session's own call with the refusal naming the derived session", async () => {
+      await baseWithDerivedLabel();
+      const derivedCall = track(executionTracker.startExecution("tapOn", undefined, DERIVED));
+
+      await expireDerivedPastHungCall(derivedCall);
+
+      expect(derivedCall.abortController.signal.aborted).toBe(true);
+      expect(sessionReleasedDuringCallPayload(derivedCall.cancelReason)).toMatchObject({
+        error: { code: "session_ownership_lost", sessionUuid: DERIVED, reason: "lazy-expiry" },
+      });
+    });
+  });
 });

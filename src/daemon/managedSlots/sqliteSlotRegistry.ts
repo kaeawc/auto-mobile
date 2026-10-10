@@ -5,18 +5,22 @@ import { SQLITE_BUSY_TIMEOUT_MS } from "../../db/database";
 import { isInMemoryDatabasePath } from "../../db/migrationLock";
 import { ActionableError } from "../../models/ActionableError";
 import { ensureSecureDirectorySync, getAdbServerScopedAutoMobileDir } from "../../utils/tempDir";
-import { isProcessRunning } from "../../utils/processLiveness";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
 import { migrateSlotRegistry } from "./slotRegistryMigrations";
 import {
+  assertSettlerForState,
   assertValidSlotKey,
   bindingMatches,
   computeSlotScopeKey,
+  entersFencingState,
   isPermanentInvalidationReason,
   isRevivableScope,
+  lastScopeActivityMs,
   resolveAbandonmentThresholdMs,
   type AbandonmentQuery,
   type BeginScopeInvalidationResult,
+  type ClaimExecutionOptions,
   type ClaimExecutionResult,
   type CommitBindingResult,
   type CompleteScopeInvalidationResult,
@@ -37,11 +41,14 @@ import {
   type SlotInit,
   type SlotKey,
   type SlotPlatform,
+  type SlotProcessIdentity,
   type SlotRegistry,
   type SlotScopeIdentity,
   type SlotScopeInvalidationReason,
   type SlotScopeRecord,
   type SlotScopeState,
+  type UpdateSlotStateOptions,
+  type UpdateSlotStateResult,
 } from "./slotRegistry";
 
 /** Scope under the ADB-server coordination root: host-wide, independent of any one adb server. */
@@ -50,8 +57,15 @@ export const MANAGED_SLOTS_REGISTRY_SUBDIR = "registry";
 export const MANAGED_SLOTS_REGISTRY_FILE = "slots.sqlite";
 
 /**
- * The host-wide registry path (#11174). It is NOT under `AUTOMOBILE_DB_DIR` or the coordination
- * dir, which can differ per daemon; every daemon on the host resolves this same file.
+ * The host-wide registry path (#11174). It is NOT under `AUTOMOBILE_DATA_DIR`, `AUTOMOBILE_DB_DIR`
+ * or the coordination dir, which can differ per daemon (worktree daemons included); every daemon
+ * on the host resolves this same file under the user's home.
+ *
+ * `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` is the one override, and it creates a SEPARATE slot
+ * authority (#11242 item 8). That is sound for Android only when the daemons sharing it also share
+ * the AVD home; iOS simulators are host-global regardless, so two daemons with different overrides
+ * must never manage slots on the same simulator set. Daemons that should share slots must resolve
+ * the same override (or none).
  */
 export function defaultSlotRegistryPath(
   env: NodeJS.ProcessEnv = process.env,
@@ -77,6 +91,7 @@ interface SlotScopesTable {
   invalidation_reason: SlotScopeInvalidationReason | null;
   created_at_ms: number;
   last_acquired_at_ms: number;
+  last_released_at_ms: number | null;
   invalidating_at_ms: number | null;
   invalidated_at_ms: number | null;
 }
@@ -95,7 +110,11 @@ interface SlotAssignmentsTable {
   state: SlotAssignmentState;
   exec_owner_daemon_id: string | null;
   exec_owner_pid: number | null;
+  exec_owner_process_token: string | null;
   exec_session_uuid: string | null;
+  settler_daemon_id: string | null;
+  settler_pid: number | null;
+  settler_process_token: string | null;
   updated_at_ms: number;
 }
 
@@ -127,6 +146,7 @@ function toScope(row: ScopeRow): SlotScopeRecord {
     state: row.state,
     createdAtMs: row.created_at_ms,
     lastAcquiredAtMs: row.last_acquired_at_ms,
+    lastReleasedAtMs: row.last_released_at_ms,
     invalidationReason: row.invalidation_reason,
     invalidatingAtMs: row.invalidating_at_ms,
     invalidatedAtMs: row.invalidated_at_ms,
@@ -153,6 +173,26 @@ function toExecOwner(row: AssignmentRow): SlotExecOwner | null {
     daemonId: row.exec_owner_daemon_id,
     pid: row.exec_owner_pid,
     sessionUuid: row.exec_session_uuid,
+    processGenerationToken: row.exec_owner_process_token,
+  };
+}
+
+function toSettler(row: AssignmentRow): SlotProcessIdentity | null {
+  if (row.settler_daemon_id === null || row.settler_pid === null) {
+    return null;
+  }
+  return {
+    daemonId: row.settler_daemon_id,
+    pid: row.settler_pid,
+    processGenerationToken: row.settler_process_token,
+  };
+}
+
+function settlerColumns(settler: SlotProcessIdentity | null) {
+  return {
+    settler_daemon_id: settler?.daemonId ?? null,
+    settler_pid: settler?.pid ?? null,
+    settler_process_token: settler?.processGenerationToken ?? null,
   };
 }
 
@@ -170,6 +210,7 @@ function toAssignment(row: AssignmentRow): SlotAssignmentRecord {
     specFingerprint: row.spec_fingerprint,
     state: row.state,
     execOwner: toExecOwner(row),
+    settler: toSettler(row),
     updatedAtMs: row.updated_at_ms,
   };
 }
@@ -194,7 +235,7 @@ function serializeSpec(spec: unknown): string {
 
 export interface SqliteSlotRegistryOptions {
   timer?: Timer;
-  /** Decides whether a recorded execution owner is alive. Defaults to a PID liveness probe. */
+  /** Decides whether a recorded execution owner is alive. Defaults to PID + process generation. */
   isExecOwnerLive?: SlotExecOwnerLiveness;
 }
 
@@ -203,7 +244,14 @@ export interface OpenSqliteSlotRegistryOptions extends SqliteSlotRegistryOptions
   dbPath?: string;
 }
 
-const defaultExecOwnerLiveness: SlotExecOwnerLiveness = (owner) => isProcessRunning(owner.pid);
+/**
+ * bun:sqlite waits for a busy lock synchronously, blocking this daemon's event loop (heartbeat
+ * lease handling included) for up to the busy timeout per attempt of the dialect's bounded retry.
+ * Registry transactions are a few short statements, so the registry waits far less than the
+ * per-daemon DB's {@link SQLITE_BUSY_TIMEOUT_MS} and surfaces contention as a retryable busy error
+ * instead of stalling (#11242 item 9). Keep registry transactions short and off the heartbeat path.
+ */
+export const MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS = Math.min(1_000, SQLITE_BUSY_TIMEOUT_MS);
 
 /** The slice of a bun:sqlite handle this module touches before handing it to the dialect. */
 interface RegistrySqliteHandle {
@@ -216,7 +264,7 @@ function openRegistrySqlite(dbPath: string): RegistrySqliteHandle {
     Database: new (path: string) => RegistrySqliteHandle;
   };
   const sqliteDb = new Database(dbPath);
-  sqliteDb.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`);
+  sqliteDb.exec(`PRAGMA busy_timeout = ${MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS};`);
   sqliteDb.exec("PRAGMA journal_mode = WAL;");
   // Assignment authority must survive power loss; writes are rare, so pay for the fsync.
   sqliteDb.exec("PRAGMA synchronous = FULL;");
@@ -257,7 +305,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
     options: SqliteSlotRegistryOptions = {},
   ) {
     this.timer = options.timer ?? defaultTimer;
-    this.isExecOwnerLive = options.isExecOwnerLive ?? defaultExecOwnerLiveness;
+    this.isExecOwnerLive = options.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
   }
 
   async ensureScope(identity: SlotScopeIdentity): Promise<EnsureScopeResult> {
@@ -307,14 +355,19 @@ export class SqliteSlotRegistry implements SlotRegistry {
           .executeTakeFirstOrThrow();
         return { kind: "ready", scope: toScope(revived), created: false, revived: true };
       }
-      // A newer incarnation supersedes every abandoned one of this namespace for good.
-      await trx
+      // A newer incarnation supersedes every abandoned one of this namespace for good: their kept
+      // slots (all already invalidated, or the conflict above would have refused) are freed.
+      const superseded = await trx
         .updateTable("slot_scopes")
         .set({ invalidation_reason: "incarnation_reset" })
         .where("managed_host_scope", "=", identity.managedHostScope)
         .where("runner_namespace", "=", identity.runnerNamespace)
         .where("invalidation_reason", "=", "abandoned")
+        .returning("scope_key")
         .execute();
+      for (const { scope_key } of superseded) {
+        await this.releaseSlotsToFreePool(trx, scope_key);
+      }
       const row: ScopeRow = {
         scope_key: scopeKey,
         managed_host_scope: identity.managedHostScope,
@@ -324,6 +377,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
         invalidation_reason: null,
         created_at_ms: nowMs,
         last_acquired_at_ms: nowMs,
+        last_released_at_ms: null,
         invalidating_at_ms: null,
         invalidated_at_ms: null,
       };
@@ -362,7 +416,9 @@ export class SqliteSlotRegistry implements SlotRegistry {
         state: "provisioning",
         exec_owner_daemon_id: null,
         exec_owner_pid: null,
+        exec_owner_process_token: null,
         exec_session_uuid: null,
+        ...settlerColumns(null),
         updated_at_ms: this.timer.now(),
       };
       await trx.insertInto("slot_assignments").values(row).execute();
@@ -419,10 +475,16 @@ export class SqliteSlotRegistry implements SlotRegistry {
           resolved_spec_json: resolvedSpecJson,
           spec_fingerprint: next.specFingerprint,
           state: next.state,
+          ...settlerColumns(null),
           ...(requestedSpecJson === undefined ? {} : { requested_spec_json: requestedSpecJson }),
           // A different device cannot inherit the previous device's execution owner.
           ...(deviceChanged
-            ? { exec_owner_daemon_id: null, exec_owner_pid: null, exec_session_uuid: null }
+            ? {
+                exec_owner_daemon_id: null,
+                exec_owner_pid: null,
+                exec_owner_process_token: null,
+                exec_session_uuid: null,
+              }
             : {}),
           updated_at_ms: this.timer.now(),
         })
@@ -438,16 +500,25 @@ export class SqliteSlotRegistry implements SlotRegistry {
     key: SlotKey,
     expected: SlotBindingExpectation,
     state: SlotAssignmentState,
-  ) {
+    options?: UpdateSlotStateOptions,
+  ): Promise<UpdateSlotStateResult> {
     assertValidSlotKey(key);
-    return this.db.transaction().execute(async (trx) => {
+    const settler = assertSettlerForState(state, options);
+    return this.db.transaction().execute(async (trx): Promise<UpdateSlotStateResult> => {
       const checked = await this.checkBinding(trx, key, expected);
       if ("kind" in checked) {
         return checked;
       }
+      const owner = checked.execOwner;
+      if (state === "replacing" && owner && this.isExecOwnerLive(owner)) {
+        return { kind: "slot_in_use", owner, assignment: checked };
+      }
+      const generation = entersFencingState(checked.state, state)
+        ? checked.generation + 1
+        : checked.generation;
       const updated = await trx
         .updateTable("slot_assignments")
-        .set({ state, updated_at_ms: this.timer.now() })
+        .set({ state, generation, ...settlerColumns(settler), updated_at_ms: this.timer.now() })
         .where("scope_key", "=", key.scopeKey)
         .where("slot_index", "=", key.slotIndex)
         .returningAll()
@@ -460,6 +531,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
     key: SlotKey,
     expected: SlotBindingExpectation,
     owner: SlotExecOwner,
+    options: ClaimExecutionOptions = {},
   ): Promise<ClaimExecutionResult> {
     assertValidSlotKey(key);
     return this.db.transaction().execute(async (trx): Promise<ClaimExecutionResult> => {
@@ -471,7 +543,12 @@ export class SqliteSlotRegistry implements SlotRegistry {
         return { kind: "slot_not_ready", assignment: checked };
       }
       const current = checked.execOwner;
-      if (current && current.sessionUuid !== owner.sessionUuid && this.isExecOwnerLive(current)) {
+      if (
+        current &&
+        current.sessionUuid !== owner.sessionUuid &&
+        current.sessionUuid !== options.supersedesSessionUuid &&
+        this.isExecOwnerLive(current)
+      ) {
         return { kind: "slot_in_use", owner: current, assignment: checked };
       }
       const updated = await trx
@@ -479,6 +556,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
         .set({
           exec_owner_daemon_id: owner.daemonId,
           exec_owner_pid: owner.pid,
+          exec_owner_process_token: owner.processGenerationToken ?? null,
           exec_session_uuid: owner.sessionUuid,
           updated_at_ms: this.timer.now(),
         })
@@ -498,6 +576,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
         .set({
           exec_owner_daemon_id: null,
           exec_owner_pid: null,
+          exec_owner_process_token: null,
           exec_session_uuid: null,
           updated_at_ms: this.timer.now(),
         })
@@ -507,9 +586,41 @@ export class SqliteSlotRegistry implements SlotRegistry {
         .returningAll()
         .executeTakeFirst();
       if (updated) {
+        // An execution ending is scope activity: the abandonment clock restarts here.
+        await trx
+          .updateTable("slot_scopes")
+          .set({ last_released_at_ms: updated.updated_at_ms })
+          .where("scope_key", "=", key.scopeKey)
+          .execute();
         return { released: true, assignment: toAssignment(updated) };
       }
       return { released: false, assignment: await this.readAssignment(trx, key) };
+    });
+  }
+
+  async recoverSettledSlots(scopeKey?: string): Promise<SlotAssignmentRecord[]> {
+    return this.db.transaction().execute(async (trx) => {
+      let query = trx.selectFrom("slot_assignments").selectAll().where("state", "=", "settling");
+      if (scopeKey !== undefined) {
+        query = query.where("scope_key", "=", scopeKey);
+      }
+      const settled = (await query.orderBy("scope_key").orderBy("slot_index").execute())
+        .map(toAssignment)
+        .filter((assignment) => this.isSettled(assignment));
+      const recovered: SlotAssignmentRecord[] = [];
+      for (const assignment of settled) {
+        const row = await trx
+          .updateTable("slot_assignments")
+          .set({ state: "ready", ...settlerColumns(null), updated_at_ms: this.timer.now() })
+          .where("scope_key", "=", assignment.scopeKey)
+          .where("slot_index", "=", assignment.slotIndex)
+          .where("generation", "=", assignment.generation)
+          .where("state", "=", "settling")
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        recovered.push(toAssignment(row));
+      }
+      return recovered;
     });
   }
 
@@ -592,7 +703,13 @@ export class SqliteSlotRegistry implements SlotRegistry {
         "slot_scopes.state as scope_state",
       ])
       .where("slot_assignments.stable_device_id", "is not", null)
-      .where("slot_scopes.state", "<>", "invalidated")
+      // A revivable (abandoned) scope's kept slots stay reserved for its returning incarnation.
+      .where((eb) =>
+        eb.or([
+          eb("slot_scopes.state", "<>", "invalidated"),
+          eb("slot_scopes.invalidation_reason", "=", "abandoned"),
+        ]),
+      )
       .execute();
     const free = await this.db.selectFrom("slot_free_devices").selectAll().execute();
     return [
@@ -673,41 +790,21 @@ export class SqliteSlotRegistry implements SlotRegistry {
       const liveOwners = assignments.filter(
         (assignment) => assignment.execOwner !== null && this.isExecOwnerLive(assignment.execOwner),
       );
+      const settling = assignments.filter(
+        (assignment) => assignment.state === "settling" && !this.isSettled(assignment),
+      );
       const cleanupPending = assignments.filter(
         (assignment) => assignment.state === "cleanup_pending",
       );
-      if (liveOwners.length > 0 || cleanupPending.length > 0) {
-        return { kind: "pending", scope, liveOwners, cleanupPending };
+      if (liveOwners.length > 0 || settling.length > 0 || cleanupPending.length > 0) {
+        return { kind: "pending", scope, liveOwners, settling, cleanupPending };
       }
       const nowMs = this.timer.now();
-      const freedDevices = assignments.flatMap((assignment): FreeSlotDeviceRecord[] =>
-        assignment.stableDeviceId === null
+      // An abandoned scope stays revivable: keep its slots until the invalidation is permanent.
+      const freedDevices =
+        scope.invalidationReason === "abandoned"
           ? []
-          : [
-              {
-                platform: assignment.platform,
-                stableDeviceId: assignment.stableDeviceId,
-                specFingerprint: assignment.specFingerprint,
-                fromScopeKey: scopeKey,
-                freedAtMs: nowMs,
-              },
-            ],
-      );
-      await trx.deleteFrom("slot_assignments").where("scope_key", "=", scopeKey).execute();
-      if (freedDevices.length > 0) {
-        await trx
-          .insertInto("slot_free_devices")
-          .values(
-            freedDevices.map((device) => ({
-              platform: device.platform,
-              stable_device_id: device.stableDeviceId,
-              spec_fingerprint: device.specFingerprint,
-              from_scope_key: device.fromScopeKey,
-              freed_at_ms: device.freedAtMs,
-            })),
-          )
-          .execute();
-      }
+          : await this.releaseSlotsToFreePool(trx, scopeKey);
       const invalidated = await trx
         .updateTable("slot_scopes")
         .set({ state: "invalidated", invalidated_at_ms: nowMs })
@@ -726,9 +823,11 @@ export class SqliteSlotRegistry implements SlotRegistry {
         .selectAll()
         .where("state", "=", "valid")
         .where("last_acquired_at_ms", "<=", cutoffMs)
-        .orderBy("last_acquired_at_ms")
         .execute()
-    ).map(toScope);
+    )
+      .map(toScope)
+      .filter((scope) => lastScopeActivityMs(scope) <= cutoffMs)
+      .sort((a, b) => lastScopeActivityMs(a) - lastScopeActivityMs(b));
     const abandoned: SlotScopeRecord[] = [];
     for (const scope of candidates) {
       if (!(await this.hasLiveExecOwner(this.db, scope.scopeKey))) {
@@ -751,7 +850,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
       if (scope.state !== "valid") {
         return { kind: "not_abandoned", scope, reason: "not_valid" };
       }
-      if (scope.lastAcquiredAtMs > this.timer.now() - thresholdMs) {
+      if (lastScopeActivityMs(scope) > this.timer.now() - thresholdMs) {
         return { kind: "not_abandoned", scope, reason: "recent_acquisition" };
       }
       if (await this.hasLiveExecOwner(trx, scopeKey)) {
@@ -823,15 +922,73 @@ export class SqliteSlotRegistry implements SlotRegistry {
       .selectFrom("slot_assignments")
       .selectAll()
       .where("scope_key", "=", scopeKey)
-      .where("exec_session_uuid", "is not", null)
+      .where((eb) => eb.or([eb("exec_session_uuid", "is not", null), eb("state", "=", "settling")]))
       .execute();
-    return rows.some((row) => {
-      const owner = toExecOwner(row);
-      return owner !== null && this.isExecOwnerLive(owner);
-    });
+    // A live settler still drives its released work, so it keeps the scope in use too.
+    return rows.some((row) => !this.isSettled(toAssignment(row)));
   }
 
-  /** An explicit reset of an abandoned scope replaces the revivable reason with the reset's. */
+  /** A settling slot is settled once its settler is dead and no live execution owns it. */
+  private isSettled(assignment: SlotAssignmentRecord): boolean {
+    const { settler, execOwner } = assignment;
+    return (
+      (settler === null || !this.isExecOwnerLive(settler)) &&
+      (execOwner === null || !this.isExecOwnerLive(execOwner))
+    );
+  }
+
+  /**
+   * Move a scope's bound devices to the free pool and remove its slots. Used when an invalidation
+   * is (or becomes) permanent.
+   */
+  private async releaseSlotsToFreePool(
+    trx: Executor,
+    scopeKey: string,
+  ): Promise<FreeSlotDeviceRecord[]> {
+    const assignments = (
+      await trx
+        .selectFrom("slot_assignments")
+        .selectAll()
+        .where("scope_key", "=", scopeKey)
+        .orderBy("slot_index")
+        .execute()
+    ).map(toAssignment);
+    const nowMs = this.timer.now();
+    const freedDevices = assignments.flatMap((assignment): FreeSlotDeviceRecord[] =>
+      assignment.stableDeviceId === null
+        ? []
+        : [
+            {
+              platform: assignment.platform,
+              stableDeviceId: assignment.stableDeviceId,
+              specFingerprint: assignment.specFingerprint,
+              fromScopeKey: scopeKey,
+              freedAtMs: nowMs,
+            },
+          ],
+    );
+    await trx.deleteFrom("slot_assignments").where("scope_key", "=", scopeKey).execute();
+    if (freedDevices.length > 0) {
+      await trx
+        .insertInto("slot_free_devices")
+        .values(
+          freedDevices.map((device) => ({
+            platform: device.platform,
+            stable_device_id: device.stableDeviceId,
+            spec_fingerprint: device.specFingerprint,
+            from_scope_key: device.fromScopeKey,
+            freed_at_ms: device.freedAtMs,
+          })),
+        )
+        .execute();
+    }
+    return freedDevices;
+  }
+
+  /**
+   * An explicit reset of an abandoned scope replaces the revivable reason with the reset's; when
+   * the scope was already invalidated, its kept slots are freed now.
+   */
   private async makeResetPermanent(
     trx: Executor,
     scope: SlotScopeRecord,
@@ -839,6 +996,9 @@ export class SqliteSlotRegistry implements SlotRegistry {
   ): Promise<SlotScopeRecord> {
     if (!isRevivableScope(scope) || !isPermanentInvalidationReason(reason)) {
       return scope;
+    }
+    if (scope.state === "invalidated") {
+      await this.releaseSlotsToFreePool(trx, scope.scopeKey);
     }
     const row = await trx
       .updateTable("slot_scopes")

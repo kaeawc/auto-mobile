@@ -14,10 +14,17 @@ import {
   type ResolvedExactDeviceSpecification,
 } from "../../devices/exactDeviceProvisioning";
 import type { DeviceInfo } from "../../models";
+import { evaluateRuntimeCompatibility } from "../../utils/ios-cmdline-tools/runtimeCompatibility";
+import type {
+  AppleDeviceRuntime,
+  AppleDeviceType,
+} from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import type { AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
+import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
 import { logger } from "../../utils/logger";
 import { stableStringify } from "../../utils/stableStringify";
 import type { Timer } from "../../utils/SystemTimer";
@@ -26,6 +33,7 @@ import {
   type SlotAssignmentRecord,
   type SlotBindingExpectation,
   type SlotCasFailure,
+  type SlotExecOwner,
   type SlotExecOwnerLiveness,
   type SlotKey,
   type SlotPlatform,
@@ -71,6 +79,26 @@ export interface ManagedSlotSpecFingerprint {
 
 export type ManagedSlotDisposition = "reused" | "adopted" | "created" | "replaced";
 
+type WithOptionalDeviceType<T extends { deviceType: string }> = Omit<T, "deviceType"> & {
+  deviceType?: string;
+};
+
+/**
+ * A managed slot's requested spec: an exact spec whose `deviceType` (the model or hardware
+ * profile) may be omitted. Omitted means "any model" (owner decision Q4): any listed device of the
+ * requested runtime matches, and a device that must be created gets a model the resolver picks
+ * and records in the resolved spec.
+ */
+export type ManagedSlotRequestedSpec =
+  | WithOptionalDeviceType<AndroidDeviceSpecification>
+  | WithOptionalDeviceType<IosDeviceSpecification>;
+
+/**
+ * The Android hardware profile created for a spec that omits `deviceType` (a current Pixel with a
+ * known cutout class). Override per resolver.
+ */
+export const MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPE = "pixel_8";
+
 // ---------------------------------------------------------------------------------------------
 // Ports
 // ---------------------------------------------------------------------------------------------
@@ -93,7 +121,7 @@ export interface ManagedSlotInventory {
 export type ManagedSpecMatch = "match" | "mismatch" | "unknown";
 
 export interface ManagedSpecMatcher {
-  matches(device: DeviceInfo, spec: ExactDeviceSpecification): Promise<ManagedSpecMatch>;
+  matches(device: DeviceInfo, spec: ManagedSlotRequestedSpec): Promise<ManagedSpecMatch>;
 }
 
 export type ManagedSpecResolution =
@@ -102,13 +130,15 @@ export type ManagedSpecResolution =
       resolvedSpec: ResolvedExactDeviceSpecification;
       fingerprint: ManagedSlotSpecFingerprint;
     }
-  | { kind: "unsupported"; code: "spec_unsupported" | "runtime_incompatible"; message: string };
+  | { kind: "unsupported"; code: "spec_unsupported" | "runtime_incompatible"; message: string }
+  /** The spec could not be resolved yet (an unreadable catalog); retryable, nothing changed. */
+  | { kind: "unresolved"; message: string };
 
 /** Validates and resolves a spec before any destructive work. */
 export interface ManagedSpecResolver {
   resolve(
     platform: SlotPlatform,
-    spec: ExactDeviceSpecification,
+    spec: ManagedSlotRequestedSpec,
     options: { signal?: AbortSignal },
   ): Promise<ManagedSpecResolution>;
 }
@@ -119,7 +149,11 @@ export interface ManagedSlotProvisionRequest {
   name: string;
   /** iOS UDID of an existing simulator to adopt. */
   deviceId?: string;
-  spec: ExactDeviceSpecification;
+  /**
+   * `create` always carries a concrete `deviceType` (the resolved model). `adopt` carries the
+   * requested spec, whose omitted `deviceType` accepts the existing device's model.
+   */
+  spec: ManagedSlotRequestedSpec;
   /** `adopt` must never create; `create` provisions a new device under `name`. */
   mode: "adopt" | "create";
   deadlineMs: number;
@@ -202,9 +236,11 @@ export interface ManagedSlotReconcilerDependencies {
   deleter: ManagedSlotDeviceDeleter;
   claims: ManagedSlotDeviceClaims;
   capacity?: ManagedSlotBootCapacity;
-  /** Whether a recorded execution owner is alive; default treats every owner as live. */
+  /** Whether a recorded execution owner is alive; default: PID plus process generation. */
   isExecOwnerLive?: SlotExecOwnerLiveness;
   timer: Pick<Timer, "now">;
+  /** Execution-reservation ids (default: random UUIDs). */
+  idGenerator?: IdGenerator;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -215,12 +251,19 @@ export interface ManagedSlotReconcileRequest {
   key: SlotKey;
   role: string;
   platform: SlotPlatform;
-  requestedSpec: ExactDeviceSpecification;
+  requestedSpec: ManagedSlotRequestedSpec;
   /** Non-authoritative: preferred among adoption candidates, never trusted for deletion. */
   priorDeviceHint?: { stableId: string };
   /** Absolute deadline on the timer's clock for the whole preparation. */
   deadlineMs: number;
   signal?: AbortSignal;
+  /**
+   * The execution the prepared device is for. When set, the reconciler claims the slot for it
+   * atomically with the outcome: an assigned device is reserved BEFORE it is provisioned (so no
+   * concurrent replacement can mark it while a session is being bound), and the ready result
+   * names this owner with the provisioned session. Without it the caller claims afterwards.
+   */
+  owner?: Omit<SlotExecOwner, "sessionUuid">;
 }
 
 export type ManagedSlotReconcileFailureCode =
@@ -230,6 +273,7 @@ export type ManagedSlotReconcileFailureCode =
   | "slot_platform_conflict"
   | "discovery_incomplete"
   | "slot_in_use"
+  | "slot_settling"
   | "device_busy"
   | "reconcile_in_progress"
   | "cleanup_pending"
@@ -247,6 +291,7 @@ const FAILURE_RETRYABILITY: Readonly<Record<ManagedSlotReconcileFailureCode, boo
   slot_platform_conflict: false,
   discovery_incomplete: true,
   slot_in_use: true,
+  slot_settling: true,
   device_busy: true,
   reconcile_in_progress: true,
   cleanup_pending: true,
@@ -265,6 +310,7 @@ const FAILURE_NEXT_ACTION: Readonly<Record<ManagedSlotReconcileFailureCode, stri
   slot_platform_conflict: "Use a different slot index for a different platform.",
   discovery_incomplete: "Retry once device discovery completes; nothing destructive was done.",
   slot_in_use: "Wait for the slot's live execution to end, then retry.",
+  slot_settling: "Wait for the previous execution's released work to settle, then retry.",
   device_busy: "Wait for the device's live session or foreign claim to end, then retry.",
   reconcile_in_progress: "Another reconciliation of this slot is in progress; retry later.",
   cleanup_pending: "The previous device could not be removed; retry after cleanup succeeds.",
@@ -308,7 +354,7 @@ export type ManagedSlotReconcileResult =
       assignment: SlotAssignmentRecord;
       device: ManagedSlotDeviceIdentity;
       sessionUuid: string;
-      requestedSpec: ExactDeviceSpecification;
+      requestedSpec: ManagedSlotRequestedSpec;
       resolvedSpec: ResolvedExactDeviceSpecification;
       specFingerprint: ManagedSlotSpecFingerprint;
       readiness: { mode: string; status: string };
@@ -327,9 +373,21 @@ export type ManagedSlotReconcileResult =
 // Helpers
 // ---------------------------------------------------------------------------------------------
 
-/** `amslot-<8 hex of scope key>-<slot>-g<generation>`, valid as an AVD and simulator name. */
-export function managedSlotDeviceName(key: SlotKey, generation: number): string {
-  return `${managedSlotDeviceNamePrefix(key)}${generation}`;
+/**
+ * `amslot-<8 hex of scope key>-<slot>-g<generation>-<attempt nonce>`, valid as an AVD and
+ * simulator name. The per-attempt nonce keeps two concurrent attempts on the same slot (another
+ * daemon, or a retry while the first attempt still runs) from creating the same AVD name, whose
+ * name is its stable id, so one attempt's cleanup can never delete the other's device.
+ */
+export function managedSlotDeviceName(key: SlotKey, generation: number, nonce: string): string {
+  const safeNonce = nonce
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 8);
+  if (safeNonce.length === 0) {
+    throw new Error(`Managed slot device name nonce '${nonce}' has no usable characters`);
+  }
+  return `${managedSlotDeviceNamePrefix(key)}${generation}-${safeNonce}`;
 }
 
 function managedSlotDeviceNamePrefix(key: SlotKey): string {
@@ -362,7 +420,7 @@ export function deviceStableId(device: DeviceInfo): string | undefined {
 export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
   constructor(private readonly androidConfigReader: Pick<AvdConfigReader, "readConfig">) {}
 
-  async matches(device: DeviceInfo, spec: ExactDeviceSpecification): Promise<ManagedSpecMatch> {
+  async matches(device: DeviceInfo, spec: ManagedSlotRequestedSpec): Promise<ManagedSpecMatch> {
     if (device.platform === "android") {
       let config: Awaited<ReturnType<AvdConfigReader["readConfig"]>>;
       try {
@@ -377,33 +435,61 @@ export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
       if (!config) {
         return "unknown";
       }
-      return matchesAndroidDeviceSpecification(spec as AndroidDeviceSpecification, config)
-        ? "match"
-        : "mismatch";
+      // An omitted hardware profile is unconstrained: the AVD's own profile (even an unset one)
+      // satisfies it.
+      const constraints = {
+        ...(spec as WithOptionalDeviceType<AndroidDeviceSpecification>),
+        deviceType: (spec.deviceType ?? config.deviceName) as string,
+      };
+      return matchesAndroidDeviceSpecification(constraints, config) ? "match" : "mismatch";
     }
+    // An unavailable simulator (runtime unmounted, or listed under a different Xcode or
+    // DEVELOPER_DIR) proves nothing about its configuration, so it is never a mismatch to replace.
     if (
-      device.isAvailable !== false &&
-      (device.runtime === undefined || device.deviceType === undefined)
+      device.isAvailable === false ||
+      device.runtime === undefined ||
+      (spec.deviceType !== undefined && device.deviceType === undefined)
     ) {
       return "unknown";
     }
-    return iosDeviceSpecificationMismatch(spec as IosDeviceSpecification, device) === undefined
-      ? "match"
-      : "mismatch";
+    // An omitted model is unconstrained: the simulator's own model satisfies it.
+    const constraints = {
+      runtime: spec.runtime,
+      deviceType: spec.deviceType ?? device.deviceType!,
+    };
+    return iosDeviceSpecificationMismatch(constraints, device) === undefined ? "match" : "mismatch";
   }
+}
+
+export interface DefaultManagedSpecResolverOptions {
+  /** Profile created for an Android spec that omits `deviceType`. */
+  androidDefaultDeviceType?: string;
 }
 
 /**
  * Resolves a spec with the shared exact-provisioning checks: Android image identifier shape,
  * display cutout, and (with a catalog) a proven-incompatible iOS model/runtime pair. Unreadable
  * catalogs are unknown, not unsupported, matching the provisioner.
+ *
+ * An omitted `deviceType` ("any model") resolves to the model a creation would use: on iOS the
+ * newest iPhone the catalog lists as supporting the runtime (so a catalog is required), on Android
+ * {@link MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPE} unless overridden. Matching still accepts any
+ * model; only creation uses the resolved one. A cutout preference needs an explicit model.
  */
 export class DefaultManagedSpecResolver implements ManagedSpecResolver {
-  constructor(private readonly iosRuntimeCatalog?: ExactIosRuntimeCatalog) {}
+  private readonly androidDefaultDeviceType: string;
+
+  constructor(
+    private readonly iosRuntimeCatalog?: ExactIosRuntimeCatalog,
+    options: DefaultManagedSpecResolverOptions = {},
+  ) {
+    this.androidDefaultDeviceType =
+      options.androidDefaultDeviceType ?? MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPE;
+  }
 
   async resolve(
     platform: SlotPlatform,
-    spec: ExactDeviceSpecification,
+    spec: ManagedSlotRequestedSpec,
     options: { signal?: AbortSignal },
   ): Promise<ManagedSpecResolution> {
     if (platform === "android" && !parseAndroidSystemImageRuntime(spec.runtime)) {
@@ -413,18 +499,23 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
         message: `Android runtime '${spec.runtime}' is not a system-image identifier.`,
       };
     }
-    const cutout = resolveDisplayCutoutPreference(platform, spec);
+    const model = await this.resolveDeviceType(platform, spec, options.signal);
+    if (model.kind !== "resolved") {
+      return model.resolution;
+    }
+    const exact = { ...spec, deviceType: model.deviceType } as ExactDeviceSpecification;
+    const cutout = resolveDisplayCutoutPreference(platform, exact);
     if (cutout.kind !== "resolved") {
       return { kind: "unsupported", code: "spec_unsupported", message: cutout.message };
     }
-    if (platform === "ios" && this.iosRuntimeCatalog) {
-      const incompatible = await this.findIosIncompatibility(spec, options.signal);
+    if (platform === "ios" && this.iosRuntimeCatalog && spec.deviceType !== undefined) {
+      const incompatible = await this.findIosIncompatibility(exact, options.signal);
       if (incompatible) {
         return { kind: "unsupported", code: "runtime_incompatible", message: incompatible };
       }
     }
     const resolvedSpec = {
-      ...spec,
+      ...exact,
       displayCutout: cutout.displayCutout,
     } as ResolvedExactDeviceSpecification;
     return {
@@ -432,6 +523,61 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
       resolvedSpec,
       fingerprint: computeManagedSpecFingerprint(platform, resolvedSpec),
     };
+  }
+
+  private async resolveDeviceType(
+    platform: SlotPlatform,
+    spec: ManagedSlotRequestedSpec,
+    signal: AbortSignal | undefined,
+  ): Promise<
+    | { kind: "resolved"; deviceType: string }
+    | { kind: "refused"; resolution: ManagedSpecResolution }
+  > {
+    if (spec.deviceType !== undefined) {
+      return { kind: "resolved", deviceType: spec.deviceType };
+    }
+    if (spec.displayCutout !== undefined && spec.displayCutout !== "any") {
+      return refused(
+        "spec_unsupported",
+        `A display cutout preference ('${spec.displayCutout}') needs an explicit deviceType.`,
+      );
+    }
+    if (platform === "android") {
+      return { kind: "resolved", deviceType: this.androidDefaultDeviceType };
+    }
+    if (!this.iosRuntimeCatalog) {
+      return refused(
+        "spec_unsupported",
+        "An iOS spec without deviceType needs the simulator catalog to choose a model.",
+      );
+    }
+    let runtimes: AppleDeviceRuntime[];
+    let deviceTypes: AppleDeviceType[];
+    try {
+      [runtimes, deviceTypes] = await Promise.all([
+        this.iosRuntimeCatalog.getRuntimesChecked(undefined, signal),
+        this.iosRuntimeCatalog.getDeviceTypesChecked(signal),
+      ]);
+    } catch (error) {
+      logger.warn(
+        `[ManagedSlots] iOS catalog unreadable; cannot choose a model: ${errorMessage(error)}`,
+        error,
+      );
+      return {
+        kind: "refused",
+        resolution: {
+          kind: "unresolved",
+          message: `The simulator catalog could not be read to choose a model: ${errorMessage(error)}`,
+        },
+      };
+    }
+    const deviceType = chooseIosDeviceType(spec.runtime, runtimes, deviceTypes);
+    return deviceType
+      ? { kind: "resolved", deviceType }
+      : refused(
+          "runtime_incompatible",
+          `No installed iPhone model supports runtime '${spec.runtime}', or the runtime is not available.`,
+        );
   }
 
   private async findIosIncompatibility(
@@ -461,6 +607,35 @@ export class DefaultManagedSpecResolver implements ManagedSpecResolver {
       ? `Runtime '${spec.runtime}' is not available. Compatible installed runtimes: ${alternatives}.`
       : `Device type '${spec.deviceType}' does not support runtime '${spec.runtime}'. Compatible installed runtimes: ${alternatives}.`;
   }
+}
+
+function refused(
+  code: "spec_unsupported" | "runtime_incompatible",
+  message: string,
+): { kind: "refused"; resolution: ManagedSpecResolution } {
+  return { kind: "refused", resolution: { kind: "unsupported", code, message } };
+}
+
+/**
+ * The model "any model" creates for an iOS runtime: the last (newest, in simctl's catalog order)
+ * iPhone whose runtime range supports it, else the last iPhone with no range metadata (simctl
+ * stays the authority). Undefined when the runtime is missing or unavailable, or no iPhone fits.
+ */
+export function chooseIosDeviceType(
+  runtimeId: string,
+  runtimes: readonly AppleDeviceRuntime[],
+  deviceTypes: readonly AppleDeviceType[],
+): string | undefined {
+  const runtime = runtimes.find((entry) => entry.identifier === runtimeId);
+  if (!runtime?.isAvailable) {
+    return undefined;
+  }
+  const iphones = deviceTypes.filter((entry) => entry.productFamily === "iPhone");
+  const statusOf = (entry: AppleDeviceType) =>
+    evaluateRuntimeCompatibility(entry, runtime.version).status;
+  const supported = iphones.filter((entry) => statusOf(entry) === "supported");
+  const unknown = iphones.filter((entry) => statusOf(entry) === "unknown");
+  return (supported.at(-1) ?? unknown.at(-1))?.identifier;
 }
 
 class ReconcileAbort extends Error {
@@ -501,6 +676,27 @@ function casFailure(result: SlotCasFailure, step: string): ManagedSlotReconcileF
         "concurrent_modification",
         `Device is already assigned to slot ${result.holder.slotIndex} of another scope (${step}).`,
       );
+  }
+}
+
+/** A refused execution claim or fence, as a reconcile failure. */
+function claimFailure(
+  result:
+    | SlotCasFailure
+    | { kind: "slot_in_use"; owner: SlotExecOwner }
+    | { kind: "slot_not_ready" },
+  step: string,
+): ManagedSlotReconcileFailure {
+  switch (result.kind) {
+    case "slot_in_use":
+      return failure(
+        "slot_in_use",
+        `Slot is held by live session ${result.owner.sessionUuid} (${step}).`,
+      );
+    case "slot_not_ready":
+      return failure("concurrent_modification", `Slot stopped being ready during ${step}.`);
+    default:
+      return casFailure(result, step);
   }
 }
 
@@ -561,9 +757,11 @@ export class ManagedSlotReconciler {
   /** Serializes reconciliations of one slot inside this process. */
   private readonly inFlight = new Map<string, Promise<unknown>>();
   private readonly isExecOwnerLive: SlotExecOwnerLiveness;
+  private readonly idGenerator: IdGenerator;
 
   constructor(private readonly deps: ManagedSlotReconcilerDependencies) {
-    this.isExecOwnerLive = deps.isExecOwnerLive ?? (() => true);
+    this.isExecOwnerLive = deps.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
+    this.idGenerator = deps.idGenerator ?? defaultIdGenerator;
   }
 
   async reconcile(request: ManagedSlotReconcileRequest): Promise<ManagedSlotReconcileResult> {
@@ -615,6 +813,9 @@ export class ManagedSlotReconciler {
     if (resolution.kind === "unsupported") {
       throw new ReconcileAbort(failure(resolution.code, resolution.message));
     }
+    if (resolution.kind === "unresolved") {
+      throw new ReconcileAbort(failure("discovery_incomplete", resolution.message));
+    }
     const context: ReconcileContext = {
       request,
       resolvedSpec: resolution.resolvedSpec,
@@ -630,7 +831,7 @@ export class ManagedSlotReconciler {
     if (init.kind === "scope_not_valid") {
       throw new ReconcileAbort(failure("scope_not_valid", "Slot scope is not valid."));
     }
-    const assignment = init.assignment;
+    const assignment = await this.recoverIfSettled(request, init.assignment);
     evidence.initial = {
       generation: assignment.generation,
       stableDeviceId: assignment.stableDeviceId,
@@ -677,6 +878,31 @@ export class ManagedSlotReconciler {
       return await this.reuseAssigned(context, assignment, assigned);
     }
     return await this.replaceAssigned(context, assignment, assigned, inventory.complete);
+  }
+
+  /**
+   * A `settling` slot whose settler is gone is settled (its work died with that process): recover
+   * it to `ready` and continue. One whose settler still runs refuses retryable `slot_settling`.
+   */
+  private async recoverIfSettled(
+    request: ManagedSlotReconcileRequest,
+    assignment: SlotAssignmentRecord,
+  ): Promise<SlotAssignmentRecord> {
+    if (assignment.state !== "settling") {
+      return assignment;
+    }
+    const recovered = (await this.deps.registry.recoverSettledSlots(request.key.scopeKey)).find(
+      (slot) => slot.slotIndex === request.key.slotIndex,
+    );
+    if (recovered) {
+      return recovered;
+    }
+    throw new ReconcileAbort(
+      failure(
+        "slot_settling",
+        `Slot ${request.key.slotIndex} is settling the released work of its previous execution.`,
+      ),
+    );
   }
 
   private assertSlotAcceptsWork(
@@ -726,6 +952,25 @@ export class ManagedSlotReconciler {
     device: DeviceInfo,
   ): Promise<ReadyResult> {
     await this.assertBootCapacity(context.request, device);
+    // Reserve the slot before binding a session to its device, so a concurrent replacement can
+    // neither fence nor delete the device while this attempt provisions it.
+    const reservation = await this.reserveExecution(context, assignment);
+    try {
+      return await this.reuseReserved(context, assignment, device, reservation);
+    } catch (error) {
+      if (reservation) {
+        await this.releaseReservation(context.request.key, reservation);
+      }
+      throw error;
+    }
+  }
+
+  private async reuseReserved(
+    context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
+    device: DeviceInfo,
+    reservation: string | undefined,
+  ): Promise<ReadyResult> {
     const provisioned = await this.provisionExisting(context, device);
     const expected = expectationOf(assignment);
     const fingerprint = encodeManagedSpecFingerprint(context.fingerprint);
@@ -747,9 +992,48 @@ export class ManagedSlotReconciler {
         });
     if (committed.kind !== "updated" && committed.kind !== "committed") {
       await this.releaseSession(provisioned.sessionUuid);
-      throw new ReconcileAbort(casFailure(committed, "reuse"));
+      throw new ReconcileAbort(claimFailure(committed, "reuse"));
     }
-    return this.ready(context, "reused", committed.assignment, provisioned);
+    return await this.claimAndReady(
+      context,
+      "reused",
+      committed.assignment,
+      provisioned,
+      reservation,
+    );
+  }
+
+  /** Claim a ready, assigned slot for a placeholder session before provisioning, when owned. */
+  private async reserveExecution(
+    context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
+  ): Promise<string | undefined> {
+    const { owner, key } = context.request;
+    if (!owner || assignment.state !== "ready") {
+      return undefined;
+    }
+    const reservation = `reserve-${this.idGenerator.next()}`;
+    const claimed = await this.deps.registry.claimExecution(key, expectationOf(assignment), {
+      ...owner,
+      sessionUuid: reservation,
+    });
+    if (claimed.kind !== "claimed") {
+      throw new ReconcileAbort(claimFailure(claimed, "reservation"));
+    }
+    return reservation;
+  }
+
+  private async releaseReservation(key: SlotKey, reservation: string): Promise<void> {
+    try {
+      await this.deps.registry.releaseExecution(key, reservation);
+    } catch (error) {
+      // A leaked reservation names this daemon's PID, so it blocks the slot only until this
+      // process exits; log it so the stuck slot has a trace.
+      logger.warn(
+        `[ManagedSlots] releasing reservation ${reservation} failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   // --- empty slot: adopt or create -------------------------------------------------------------
@@ -852,9 +1136,9 @@ export class ManagedSlotReconciler {
     );
     if (ready.kind !== "updated") {
       await this.releaseSession(provisioned.sessionUuid);
-      throw new ReconcileAbort(casFailure(ready, "adoption"));
+      throw new ReconcileAbort(claimFailure(ready, "adoption"));
     }
-    return this.ready(context, "adopted", ready.assignment, provisioned);
+    return await this.claimAndReady(context, "adopted", ready.assignment, provisioned, undefined);
   }
 
   private async createAndCommit(
@@ -865,14 +1149,19 @@ export class ManagedSlotReconciler {
     const { request } = context;
     this.checkBudget(request);
     await this.assertBootCapacity(request, undefined);
-    const name = managedSlotDeviceName(request.key, assignment.generation + 1);
+    const name = managedSlotDeviceName(
+      request.key,
+      assignment.generation + 1,
+      this.idGenerator.next(),
+    );
     context.evidence.createdName = name;
     let provisioned: ManagedSlotProvisionedDevice;
     try {
       provisioned = await this.deps.provisioner.provision({
         platform: request.platform,
         name,
-        spec: request.requestedSpec,
+        // "Any model" creates the model the resolver chose (and recorded).
+        spec: { ...request.requestedSpec, deviceType: context.resolvedSpec.deviceType },
         mode: "create",
         deadlineMs: request.deadlineMs,
         signal: request.signal,
@@ -903,10 +1192,20 @@ export class ManagedSlotReconciler {
       await this.discardUncommitted(context, provisioned);
       throw new ReconcileAbort(casFailure(committed, "create commit"));
     }
-    return this.ready(context, disposition, committed.assignment, provisioned);
+    return await this.claimAndReady(
+      context,
+      disposition,
+      committed.assignment,
+      provisioned,
+      undefined,
+    );
   }
 
-  /** A device this attempt created but could not publish: release its session and delete it. */
+  /**
+   * A device this attempt created but could not publish: release its session and delete it, unless
+   * the registry says a slot (any scope) or the free pool now holds that stable id. Losing a
+   * compare-and-set never licenses deleting the device the winner committed.
+   */
   private async discardUncommitted(
     context: ReconcileContext,
     provisioned: ManagedSlotProvisionedDevice,
@@ -916,6 +1215,25 @@ export class ManagedSlotReconciler {
       return;
     }
     const { request } = context;
+    const holder = await this.deps.registry.findDeviceHolder(
+      request.platform,
+      provisioned.device.stableId,
+    );
+    if (holder) {
+      const heldBy =
+        holder.kind === "slot"
+          ? `slot ${holder.assignment.slotIndex} of scope ${holder.assignment.scopeKey}`
+          : "the managed free pool";
+      context.evidence.uncommittedCleanup = {
+        stableId: provisioned.device.stableId,
+        removed: false,
+        message: `kept: held by ${heldBy}`,
+      };
+      logger.warn(
+        `[ManagedSlots] not discarding '${provisioned.device.stableId}': it is held by ${heldBy}`,
+      );
+      return;
+    }
     const result = await this.deleteDevice({
       platform: request.platform,
       stableId: provisioned.device.stableId,
@@ -954,7 +1272,8 @@ export class ManagedSlotReconciler {
       "replacing",
     );
     if (marked.kind !== "updated") {
-      throw new ReconcileAbort(casFailure(marked, "replace"));
+      // A live execution (or another attempt's reservation) claimed the device after our checks.
+      throw new ReconcileAbort(claimFailure(marked, "replace"));
     }
     const deletion = await this.deleteDevice({
       platform: request.platform,
@@ -1140,6 +1459,34 @@ export class ManagedSlotReconciler {
     if (this.deps.timer.now() >= request.deadlineMs) {
       throw new ReconcileAbort(failure("timeout", "Slot preparation deadline passed."));
     }
+  }
+
+  /**
+   * Hand the slot to the request's execution (superseding its own reservation) under the binding
+   * just committed, then report ready. A lost claim releases the session it would have published.
+   */
+  private async claimAndReady(
+    context: ReconcileContext,
+    disposition: ManagedSlotDisposition,
+    assignment: SlotAssignmentRecord,
+    provisioned: ManagedSlotProvisionedDevice,
+    reservation: string | undefined,
+  ): Promise<ReadyResult> {
+    const { owner, key } = context.request;
+    if (!owner) {
+      return this.ready(context, disposition, assignment, provisioned);
+    }
+    const claimed = await this.deps.registry.claimExecution(
+      key,
+      expectationOf(assignment),
+      { ...owner, sessionUuid: provisioned.sessionUuid },
+      reservation ? { supersedesSessionUuid: reservation } : {},
+    );
+    if (claimed.kind !== "claimed") {
+      await this.releaseSession(provisioned.sessionUuid);
+      throw new ReconcileAbort(claimFailure(claimed, "execution claim"));
+    }
+    return this.ready(context, disposition, claimed.assignment, provisioned);
   }
 
   private ready(

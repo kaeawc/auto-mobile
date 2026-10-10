@@ -12,10 +12,14 @@
  *
  * - `reusable_for_this_slot`: every owned action and the release's restoration settled, so the
  *   slot's next acquisition may take the device at once.
- * - `cleanup_pending`: some work outlived the budget. The slot is marked `cleanup_pending` BEFORE
- *   its execution owner is cleared, so there is no instant at which it looks ready and unowned;
- *   `claimExecution` refuses a non-ready slot, so the next acquisition waits. A watcher returns the
- *   slot to `ready` once the work settles, or leaves it protected for later recovery past its cap.
+ * - `cleanup_pending`: some work outlived the budget. The slot is marked `settling` (fenced: the
+ *   generation advances) BEFORE its execution owner is cleared, so there is no instant at which it
+ *   looks ready and unowned; `claimExecution` refuses a non-ready slot, so the next acquisition
+ *   waits. This daemon is recorded as the slot's settler. Its watcher returns the slot to `ready`
+ *   once the work settles; past the watcher's cap, or after this daemon exits, the slot stays
+ *   `settling` until {@link SlotRegistry.recoverSettledSlots} finds its settler dead (the work died
+ *   with it) — a restarted daemon runs that recovery when it opens the registry. A failed device
+ *   deletion is a different state (`cleanup_pending`) that only the journal redrive resolves.
  *
  * The same slot bookkeeping runs for a managed session released any other way (heartbeat loss, idle
  * window, forced stuck release): the assignment is always kept.
@@ -31,11 +35,13 @@ import {
   releaseSessionAndDevice,
   type SessionReleasePool,
 } from "../releaseSessionAndDevice";
+import { currentSlotOwnerProcess } from "./slotOwnerLiveness";
 import type {
   SlotAssignmentRecord,
   SlotAssignmentState,
   SlotKey,
   SlotPlatform,
+  SlotProcessIdentity,
   SlotRegistry,
 } from "./slotRegistry";
 
@@ -87,7 +93,11 @@ export interface ManagedExecutionReleaseResult {
 /** The registry slice the drain needs. */
 export type ManagedExecutionSlotRegistry = Pick<
   SlotRegistry,
-  "findExecutionAssignments" | "releaseExecution" | "updateSlotState" | "getAssignment"
+  | "findExecutionAssignments"
+  | "releaseExecution"
+  | "updateSlotState"
+  | "getAssignment"
+  | "recoverSettledSlots"
 >;
 
 /** The execution-tracker slice the drain needs (cancel, bounded wait, and a settled probe). */
@@ -127,8 +137,9 @@ export const MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS = 700;
 /** How often the settlement watcher re-checks unsettled work. */
 export const MANAGED_EXECUTION_SETTLEMENT_POLL_MS = 250;
 /**
- * How long the watcher waits for unsettled work before leaving the slot `cleanup_pending` for later
- * recovery (journal redrive / operator reset). Generous: a stuck action blocks only its own slot.
+ * How long the watcher waits for unsettled work before leaving the slot `settling` for later
+ * recovery (once this daemon exits, its slots are recoverable). Generous: a stuck action blocks
+ * only its own slot.
  */
 export const MANAGED_EXECUTION_SETTLEMENT_CAP_MS = 5 * 60 * 1000;
 /** Released sessions remembered so a repeated release can still name its slots. */
@@ -145,6 +156,8 @@ export interface ManagedExecutionReleaseOptions {
   releaseBudgetMs?: number;
   settlementPollMs?: number;
   settlementCapMs?: number;
+  /** This daemon, recorded as the settler of slots it marks `settling`. Default: this process. */
+  settler?: SlotProcessIdentity;
 }
 
 interface MarkedSlot {
@@ -163,6 +176,7 @@ export class ManagedExecutionRelease {
   private readonly recentSlots = new Map<string, SlotKey[]>();
   private readonly background = new Set<Promise<void>>();
   private closed = false;
+  private settler: SlotProcessIdentity | undefined;
 
   constructor(private readonly options: ManagedExecutionReleaseOptions) {
     this.drainBudgetMs = options.drainBudgetMs ?? MANAGED_EXECUTION_DRAIN_BUDGET_MS;
@@ -214,7 +228,30 @@ export class ManagedExecutionRelease {
     }
   }
 
-  /** Stop the settlement watchers (daemon shutdown). Slots they guard stay `cleanup_pending`. */
+  /**
+   * Restart-time recovery: return every `settling` slot whose settler is dead to `ready`. Resolves
+   * to the recovered slots; a failure is logged and recovers nothing.
+   */
+  async recoverSettledSlots(): Promise<SlotAssignmentRecord[]> {
+    try {
+      const recovered = await (await this.options.registry()).recoverSettledSlots();
+      if (recovered.length > 0) {
+        logger.info(
+          `[ManagedExecutionRelease] Recovered ${recovered.length} settled slot(s) whose settling ` +
+            "daemon is gone",
+        );
+      }
+      return recovered;
+    } catch (error) {
+      logger.warn(
+        `[ManagedExecutionRelease] Recovering settled slots failed: ${errorMessage(error)}`,
+        error,
+      );
+      return [];
+    }
+  }
+
+  /** Stop the settlement watchers (daemon shutdown). Slots they guard stay `settling`. */
   close(): void {
     this.closed = true;
   }
@@ -235,7 +272,7 @@ export class ManagedExecutionRelease {
     const marked: MarkedSlot[] = [];
     if (!drained) {
       // Protect the slots before anything else lets go: unsettled work may still drive the device.
-      marked.push(...(await this.markCleanupPending(registry, held, slotFailures)));
+      marked.push(...(await this.markSettling(registry, held, slotFailures)));
     }
 
     const release = live
@@ -246,7 +283,7 @@ export class ManagedExecutionRelease {
     // A slot marked before the release stays reported pending; its watcher confirms settlement.
     const settled = drained && release.releaseSettled && this.isSettled(sessionId, releasedDevice);
     if (!settled && drained) {
-      marked.push(...(await this.markCleanupPending(registry, held, slotFailures)));
+      marked.push(...(await this.markSettling(registry, held, slotFailures)));
     }
     const slots = await this.releaseOwnership(registry, sessionId, held, slotFailures);
     if (marked.length > 0) {
@@ -292,7 +329,7 @@ export class ManagedExecutionRelease {
     );
     const stillSettling =
       this.options.work.hasActiveDeviceSessionExecutions(sessionId) ||
-      assignments.some((assignment) => assignment.state === "cleanup_pending");
+      assignments.some((assignment) => assignment.state === "settling");
     return {
       sessionId,
       outcome: stillSettling ? "cleanup_pending" : "reusable_for_this_slot",
@@ -366,7 +403,7 @@ export class ManagedExecutionRelease {
     const slotFailures: ManagedExecutionSlotFailure[] = [];
     const marked = this.isSettled(sessionId, deviceId)
       ? []
-      : await this.markCleanupPending(registry, held, slotFailures);
+      : await this.markSettling(registry, held, slotFailures);
     await this.releaseOwnership(registry, sessionId, held, slotFailures);
     for (const failure of slotFailures) {
       logger.warn(
@@ -379,8 +416,8 @@ export class ManagedExecutionRelease {
     }
   }
 
-  /** Mark each held slot `cleanup_pending` under its current binding. */
-  private async markCleanupPending(
+  /** Mark each held slot `settling` (with this daemon as settler) under its current binding. */
+  private async markSettling(
     registry: ManagedExecutionSlotRegistry,
     held: readonly SlotAssignmentRecord[],
     failures: ManagedExecutionSlotFailure[],
@@ -392,12 +429,19 @@ export class ManagedExecutionRelease {
           generation: assignment.generation,
           stableDeviceId: assignment.stableDeviceId,
         };
-        const updated = await registry.updateSlotState(key, binding, "cleanup_pending");
+        const updated = await registry.updateSlotState(key, binding, "settling", {
+          settler: this.settlerIdentity(),
+        });
         if (updated.kind !== "updated") {
-          failures.push({ ...key, error: `could not mark cleanup_pending: ${updated.kind}` });
+          failures.push({ ...key, error: `could not mark settling: ${updated.kind}` });
           return null;
         }
-        return { key, ...binding };
+        // Entering the fence bumped the generation; the watcher restores under the new one.
+        return {
+          key,
+          generation: updated.assignment.generation,
+          stableDeviceId: updated.assignment.stableDeviceId,
+        };
       }),
     );
     return results.flatMap((result, index) => {
@@ -431,7 +475,7 @@ export class ManagedExecutionRelease {
 
   /**
    * Return each marked slot to `ready` once the session's work and the device's teardown settle.
-   * Only a slot still at the marked binding, still `cleanup_pending` and unowned is touched, so a
+   * Only a slot still at the marked binding, still `settling` and unowned is touched, so a
    * newer binding or execution is never disturbed.
    */
   private async settleLater(
@@ -449,7 +493,8 @@ export class ManagedExecutionRelease {
       if (timer.now() >= deadline) {
         logger.warn(
           `[ManagedExecutionRelease] Work of released session ${sessionId} did not settle within ` +
-            `${this.settlementCapMs}ms; its slots stay cleanup_pending for recovery`,
+            `${this.settlementCapMs}ms; its slots stay settling until this daemon's exit makes ` +
+            "them recoverable",
         );
         return;
       }
@@ -466,7 +511,7 @@ export class ManagedExecutionRelease {
       const current = await registry.getAssignment(slot.key);
       if (
         !current ||
-        current.state !== "cleanup_pending" ||
+        current.state !== "settling" ||
         current.generation !== slot.generation ||
         current.stableDeviceId !== slot.stableDeviceId ||
         current.execOwner !== null
@@ -487,10 +532,18 @@ export class ManagedExecutionRelease {
     } catch (error) {
       logger.warn(
         `[ManagedExecutionRelease] Returning slot ${slot.key.scopeKey}/${slot.key.slotIndex} to ` +
-          `ready failed; it stays cleanup_pending: ${errorMessage(error)}`,
+          `ready failed; it stays settling: ${errorMessage(error)}`,
         error,
       );
     }
+  }
+
+  private settlerIdentity(): SlotProcessIdentity {
+    this.settler ??= this.options.settler ?? {
+      daemonId: `pid-${process.pid}`,
+      ...currentSlotOwnerProcess(),
+    };
+    return this.settler;
   }
 
   private rememberSlots(sessionId: string, held: readonly SlotAssignmentRecord[]): void {

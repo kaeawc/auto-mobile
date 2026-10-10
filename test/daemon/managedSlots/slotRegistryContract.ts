@@ -205,7 +205,7 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(result.kind).toBe("committed");
     });
 
-    test("updateSlotState CASes on the binding without changing the generation", async () => {
+    test("updateSlotState CASes on the binding; a non-fencing change keeps the generation", async () => {
       const key = { scopeKey: await readyScope(), slotIndex: 0 };
       await boundSlot(key, "avd-1");
       const stale = await registry.updateSlotState(
@@ -217,12 +217,160 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       const updated = await registry.updateSlotState(
         key,
         { generation: 1, stableDeviceId: "avd-1" },
-        "cleanup_pending",
+        "provisioning",
       );
       expect(updated).toMatchObject({
         kind: "updated",
-        assignment: { generation: 1, state: "cleanup_pending" },
+        assignment: { generation: 1, state: "provisioning" },
       });
+    });
+
+    test("entering replacing or cleanup_pending bumps the generation, fencing stale writers", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const before = { generation: 1, stableDeviceId: "avd-1" };
+      const fenced = await registry.updateSlotState(key, before, "replacing");
+      expect(fenced).toMatchObject({
+        kind: "updated",
+        assignment: { generation: 2, stableDeviceId: "avd-1", state: "replacing" },
+      });
+
+      // A reuse that read `ready` before the fence can no longer overwrite it, nor claim.
+      expect((await registry.updateSlotState(key, before, "ready")).kind).toBe("stale_binding");
+      expect((await registry.claimExecution(key, before, ownerFor(1, "s1"))).kind).toBe(
+        "stale_binding",
+      );
+      expect((await registry.getAssignment(key))?.state).toBe("replacing");
+
+      const pending = await registry.updateSlotState(
+        key,
+        { generation: 2, stableDeviceId: "avd-1" },
+        "cleanup_pending",
+      );
+      expect(pending).toMatchObject({ kind: "updated", assignment: { generation: 3 } });
+      // Re-entering the same fencing state is not a new fence.
+      expect(
+        await registry.updateSlotState(
+          key,
+          { generation: 3, stableDeviceId: "avd-1" },
+          "cleanup_pending",
+        ),
+      ).toMatchObject({ kind: "updated", assignment: { generation: 3 } });
+    });
+
+    test("entering replacing is refused while a live execution owns the slot", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const binding = { generation: 1, stableDeviceId: "avd-1" };
+      livePids.add(100);
+      await registry.claimExecution(key, binding, ownerFor(100, "s1"));
+
+      expect(await registry.updateSlotState(key, binding, "replacing")).toMatchObject({
+        kind: "slot_in_use",
+        owner: { sessionUuid: "s1" },
+      });
+      expect(await registry.getAssignment(key)).toMatchObject({ generation: 1, state: "ready" });
+
+      livePids.delete(100);
+      expect((await registry.updateSlotState(key, binding, "replacing")).kind).toBe("updated");
+    });
+
+    test("settling records its settler, fences the slot, and clears the settler on leaving", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const binding = { generation: 1, stableDeviceId: "avd-1" };
+      await expect(registry.updateSlotState(key, binding, "settling")).rejects.toThrow(
+        "settling daemon",
+      );
+      const settler = { daemonId: "daemon-a", pid: 300, processGenerationToken: "linux:b:1" };
+      expect(await registry.updateSlotState(key, binding, "settling", { settler })).toMatchObject({
+        kind: "updated",
+        assignment: { generation: 2, state: "settling", settler },
+      });
+      expect(
+        await registry.updateSlotState(key, { generation: 2, stableDeviceId: "avd-1" }, "ready"),
+      ).toMatchObject({ kind: "updated", assignment: { generation: 2, settler: null } });
+    });
+
+    test("recoverSettledSlots returns only slots whose settler is gone to ready", async () => {
+      const scopeKey = await readyScope();
+      const other = await readyScope(SCOPE_B1);
+      const mine = { scopeKey, slotIndex: 0 };
+      const live = { scopeKey, slotIndex: 1 };
+      const elsewhere = { scopeKey: other, slotIndex: 0 };
+      await boundSlot(mine, "avd-1");
+      await boundSlot(live, "avd-2");
+      await boundSlot(elsewhere, "avd-3");
+      livePids.add(301);
+      for (const [key, id, pid] of [
+        [mine, "avd-1", 300],
+        [live, "avd-2", 301],
+        [elsewhere, "avd-3", 300],
+      ] as const) {
+        await registry.updateSlotState(key, { generation: 1, stableDeviceId: id }, "settling", {
+          settler: { daemonId: "d", pid },
+        });
+      }
+
+      const recovered = await registry.recoverSettledSlots(scopeKey);
+
+      expect(recovered.map((slot) => [slot.scopeKey, slot.slotIndex])).toEqual([[scopeKey, 0]]);
+      expect(await registry.getAssignment(mine)).toMatchObject({
+        generation: 2,
+        state: "ready",
+        settler: null,
+      });
+      expect((await registry.getAssignment(live))?.state).toBe("settling");
+      expect((await registry.getAssignment(elsewhere))?.state).toBe("settling");
+      expect((await registry.recoverSettledSlots()).map((slot) => slot.scopeKey)).toEqual([other]);
+    });
+
+    test("a slot settling under a dead settler does not block scope invalidation; a live one does", async () => {
+      const scopeKey = await readyScope();
+      const key = { scopeKey, slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      livePids.add(300);
+      await registry.updateSlotState(key, { generation: 1, stableDeviceId: "avd-1" }, "settling", {
+        settler: { daemonId: "d", pid: 300 },
+      });
+      timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS);
+      // A live settler still drives the released work, so the scope is not abandoned.
+      expect(await registry.markScopeAbandoned(scopeKey)).toMatchObject({
+        kind: "not_abandoned",
+        reason: "live_owner",
+      });
+      await registry.beginScopeInvalidation(scopeKey, "operator_reset");
+      const pending = await registry.completeScopeInvalidation(scopeKey);
+      expect(pending).toMatchObject({ kind: "pending", liveOwners: [], cleanupPending: [] });
+      if (pending.kind !== "pending") {
+        throw new Error("expected pending");
+      }
+      expect(pending.settling.map((slot) => slot.slotIndex)).toEqual([0]);
+
+      livePids.delete(300);
+      expect(await registry.completeScopeInvalidation(scopeKey)).toMatchObject({
+        kind: "invalidated",
+        freedDevices: [{ stableDeviceId: "avd-1" }],
+      });
+    });
+
+    test("a claim may supersede only the reservation it names", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const binding = { generation: 1, stableDeviceId: "avd-1" };
+      livePids.add(100);
+      await registry.claimExecution(key, binding, ownerFor(100, "reserve-1"));
+
+      expect(
+        await registry.claimExecution(key, binding, ownerFor(100, "s1"), {
+          supersedesSessionUuid: "reserve-other",
+        }),
+      ).toMatchObject({ kind: "slot_in_use", owner: { sessionUuid: "reserve-1" } });
+      expect(
+        await registry.claimExecution(key, binding, ownerFor(100, "s1"), {
+          supersedesSessionUuid: "reserve-1",
+        }),
+      ).toMatchObject({ kind: "claimed", assignment: { execOwner: { sessionUuid: "s1" } } });
     });
 
     test("mutations on a missing slot or an invalidating scope are refused", async () => {
@@ -270,6 +418,26 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       });
       expect((await registry.releaseExecution(key, "s2")).released).toBe(false);
       expect(await registry.isDeviceAssignedToValidSlot("android", "avd-1")).toBe(true);
+    });
+
+    test("the owner's process-generation token round-trips and is cleared on release", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const binding = { generation: 1, stableDeviceId: "avd-1" };
+      const claimed = await registry.claimExecution(key, binding, {
+        ...ownerFor(100, "s1"),
+        processGenerationToken: "linux:boot:42",
+      });
+      expect(claimed).toMatchObject({
+        kind: "claimed",
+        assignment: { execOwner: { pid: 100, processGenerationToken: "linux:boot:42" } },
+      });
+      expect((await registry.getAssignment(key))?.execOwner?.processGenerationToken).toBe(
+        "linux:boot:42",
+      );
+      await registry.releaseExecution(key, "s1");
+      await registry.claimExecution(key, binding, ownerFor(100, "s2"));
+      expect((await registry.getAssignment(key))?.execOwner?.processGenerationToken).toBeNull();
     });
 
     test("findExecutionAssignments resolves the slots a session holds, and none once released", async () => {
@@ -536,31 +704,74 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(await registry.ensureScope(SCOPE_A1)).toMatchObject({ kind: "ready", revived: false });
     });
 
-    test("a scope abandoned through to invalidated still revives; its freed devices stay adoptable", async () => {
+    test("a scope abandoned through to invalidated keeps its slots, reserved for its revival", async () => {
       const key = { scopeKey: await readyScope(), slotIndex: 0 };
       await boundSlot(key, "avd-1");
       await abandon(key.scopeKey);
-      expect((await registry.completeScopeInvalidation(key.scopeKey)).kind).toBe("invalidated");
+      expect(await registry.completeScopeInvalidation(key.scopeKey)).toMatchObject({
+        kind: "invalidated",
+        freedDevices: [],
+      });
+
+      // Still excluded from generic allocation, not in the free pool, not adoptable elsewhere.
+      expect(await registry.listFreeDevices()).toEqual([]);
+      expect(await registry.snapshotManagedDevices()).toEqual([
+        expect.objectContaining({
+          stableDeviceId: "avd-1",
+          holder: "slot",
+          slotIndex: 0,
+          scopeState: "invalidated",
+        }),
+      ]);
+      const other = { scopeKey: await readyScope(SCOPE_B1), slotIndex: 0 };
+      await registry.initSlot(other, INIT);
+      expect(
+        await registry.commitBinding(
+          other,
+          { generation: 0, stableDeviceId: null },
+          readyBinding("avd-1", 1),
+        ),
+      ).toMatchObject({ kind: "device_assigned_elsewhere" });
 
       expect(await registry.ensureScope(SCOPE_A1)).toMatchObject({
         kind: "ready",
         revived: true,
         scope: { state: "valid", invalidatedAtMs: null },
       });
-      await registry.initSlot(key, INIT);
-      expect(
-        await registry.commitBinding(
-          key,
-          { generation: 0, stableDeviceId: null },
-          readyBinding("avd-1", 1),
-        ),
-      ).toMatchObject({
-        kind: "committed",
-        adoptedFreeDevice: { stableDeviceId: "avd-1", fromScopeKey: key.scopeKey },
+      // The same row, binding and generation: nothing is re-created or re-adopted.
+      expect(await registry.getAssignment(key)).toMatchObject({
+        generation: 1,
+        stableDeviceId: "avd-1",
+        state: "ready",
       });
+      expect(await registry.isDeviceAssignedToValidSlot("android", "avd-1")).toBe(true);
     });
 
-    test("an explicit reset of an abandoned scope is permanent", async () => {
+    test("the abandonment clock runs from the last execution release, not the acquisition", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const binding = { generation: 1, stableDeviceId: "avd-1" };
+      livePids.add(100);
+      await registry.claimExecution(key, binding, ownerFor(100, "s1"));
+      // A 50-minute execution ends.
+      timer.advanceTime(50 * 60 * 1000);
+      await registry.releaseExecution(key, "s1");
+      livePids.delete(100);
+      expect((await registry.getScope(key.scopeKey))?.lastReleasedAtMs).toBe(timer.now());
+
+      timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS - 1);
+      expect(await registry.findAbandonedScopes()).toEqual([]);
+      expect(await registry.markScopeAbandoned(key.scopeKey)).toMatchObject({
+        kind: "not_abandoned",
+        reason: "recent_acquisition",
+      });
+      timer.advanceTime(1);
+      expect((await registry.findAbandonedScopes()).map((scope) => scope.scopeKey)).toEqual([
+        key.scopeKey,
+      ]);
+    });
+
+    test("an explicit reset of an abandoned scope is permanent and frees its kept slots", async () => {
       const invalidating = await readyScope(SCOPE_A1);
       await abandon(invalidating);
       expect(await registry.beginScopeInvalidation(invalidating, "operator_reset")).toMatchObject({
@@ -570,13 +781,20 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect((await registry.ensureScope(SCOPE_A1)).kind).toBe("scope_invalidated");
 
       const invalidated = await readyScope(SCOPE_B1);
+      const kept = { scopeKey: invalidated, slotIndex: 0 };
+      await boundSlot(kept, "avd-b");
       await abandon(invalidated);
       await registry.completeScopeInvalidation(invalidated);
+      expect(await registry.listAssignments(invalidated)).toHaveLength(1);
       expect(await registry.beginScopeInvalidation(invalidated, "operator_reset")).toMatchObject({
         kind: "already_invalidated",
         scope: { invalidationReason: "operator_reset" },
       });
       expect((await registry.ensureScope(SCOPE_B1)).kind).toBe("scope_invalidated");
+      expect(await registry.listAssignments(invalidated)).toEqual([]);
+      expect((await registry.listFreeDevices()).map((device) => device.stableDeviceId)).toEqual([
+        "avd-b",
+      ]);
     });
 
     test("an abandonment-only re-mark keeps the scope revivable", async () => {
@@ -589,15 +807,22 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(await registry.ensureScope(SCOPE_A1)).toMatchObject({ kind: "ready", revived: true });
     });
 
-    test("a newer incarnation makes an abandoned one permanently invalid", async () => {
+    test("a newer incarnation makes an abandoned one permanently invalid and frees its slots", async () => {
       const oldKey = await readyScope(SCOPE_A1);
+      await boundSlot({ scopeKey: oldKey, slotIndex: 0 }, "avd-old");
       await abandon(oldKey);
       // Still invalidating: the old incarnation blocks the new one until it settles.
       expect((await registry.ensureScope(SCOPE_A2)).kind).toBe("incarnation_conflict");
       await registry.completeScopeInvalidation(oldKey);
+      expect(await registry.listFreeDevices()).toEqual([]);
 
       const newKey = await readyScope(SCOPE_A2);
       expect((await registry.getScope(oldKey))?.invalidationReason).toBe("incarnation_reset");
+      expect(await registry.listAssignments(oldKey)).toEqual([]);
+      expect(await registry.findDeviceHolder("android", "avd-old")).toMatchObject({
+        kind: "free",
+        device: { fromScopeKey: oldKey },
+      });
       expect((await registry.ensureScope(SCOPE_A1)).kind).toBe("scope_invalidated");
 
       await registry.beginScopeInvalidation(newKey, "operator_reset");

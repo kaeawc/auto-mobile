@@ -1,12 +1,16 @@
 import {
+  assertSettlerForState,
   assertValidSlotKey,
   bindingMatches,
   computeSlotScopeKey,
+  entersFencingState,
   isPermanentInvalidationReason,
   isRevivableScope,
+  lastScopeActivityMs,
   resolveAbandonmentThresholdMs,
   type AbandonmentQuery,
   type BeginScopeInvalidationResult,
+  type ClaimExecutionOptions,
   type ClaimExecutionResult,
   type CommitBindingResult,
   type CompleteScopeInvalidationResult,
@@ -31,6 +35,7 @@ import {
   type SlotScopeIdentity,
   type SlotScopeInvalidationReason,
   type SlotScopeRecord,
+  type UpdateSlotStateOptions,
   type UpdateSlotStateResult,
 } from "../../src/daemon/managedSlots/slotRegistry";
 import type { Timer } from "../../src/utils/SystemTimer";
@@ -90,6 +95,7 @@ export class FakeSlotRegistry implements SlotRegistry {
     for (const superseded of sameNamespace) {
       if (superseded.invalidationReason === "abandoned") {
         superseded.invalidationReason = "incarnation_reset";
+        this.releaseSlotsToFreePool(superseded.scopeKey);
       }
     }
     const scope: SlotScopeRecord = {
@@ -98,6 +104,7 @@ export class FakeSlotRegistry implements SlotRegistry {
       state: "valid",
       createdAtMs: nowMs,
       lastAcquiredAtMs: nowMs,
+      lastReleasedAtMs: null,
       invalidationReason: null,
       invalidatingAtMs: null,
       invalidatedAtMs: null,
@@ -134,6 +141,7 @@ export class FakeSlotRegistry implements SlotRegistry {
       specFingerprint: null,
       state: "provisioning",
       execOwner: null,
+      settler: null,
       updatedAtMs: this.timer.now(),
     };
     this.assignments.set(slotId(key), assignment);
@@ -177,6 +185,7 @@ export class FakeSlotRegistry implements SlotRegistry {
         : roundTrip(next.resolvedSpec);
     checked.specFingerprint = next.specFingerprint;
     checked.state = next.state;
+    checked.settler = null;
     if (next.requestedSpec !== undefined) {
       checked.requestedSpec = roundTrip(next.requestedSpec);
     }
@@ -191,12 +200,22 @@ export class FakeSlotRegistry implements SlotRegistry {
     key: SlotKey,
     expected: SlotBindingExpectation,
     state: SlotAssignmentState,
+    options?: UpdateSlotStateOptions,
   ): Promise<UpdateSlotStateResult> {
+    const settler = assertSettlerForState(state, options);
     const checked = this.checkBinding(key, expected);
     if ("kind" in checked) {
       return checked;
     }
+    const owner = checked.execOwner;
+    if (state === "replacing" && owner && this.isExecOwnerLive(owner)) {
+      return { kind: "slot_in_use", owner: { ...owner }, assignment: copy(checked) };
+    }
+    if (entersFencingState(checked.state, state)) {
+      checked.generation += 1;
+    }
     checked.state = state;
+    checked.settler = settler ? { ...settler } : null;
     checked.updatedAtMs = this.timer.now();
     return { kind: "updated", assignment: copy(checked) };
   }
@@ -205,6 +224,7 @@ export class FakeSlotRegistry implements SlotRegistry {
     key: SlotKey,
     expected: SlotBindingExpectation,
     owner: SlotExecOwner,
+    options: ClaimExecutionOptions = {},
   ): Promise<ClaimExecutionResult> {
     const checked = this.checkBinding(key, expected);
     if ("kind" in checked) {
@@ -214,7 +234,12 @@ export class FakeSlotRegistry implements SlotRegistry {
       return { kind: "slot_not_ready", assignment: copy(checked) };
     }
     const current = checked.execOwner;
-    if (current && current.sessionUuid !== owner.sessionUuid && this.isExecOwnerLive(current)) {
+    if (
+      current &&
+      current.sessionUuid !== owner.sessionUuid &&
+      current.sessionUuid !== options.supersedesSessionUuid &&
+      this.isExecOwnerLive(current)
+    ) {
       return { kind: "slot_in_use", owner: { ...current }, assignment: copy(checked) };
     }
     checked.execOwner = { ...owner };
@@ -233,7 +258,30 @@ export class FakeSlotRegistry implements SlotRegistry {
     }
     assignment.execOwner = null;
     assignment.updatedAtMs = this.timer.now();
+    const scope = this.scopes.get(assignment.scopeKey);
+    if (scope) {
+      scope.lastReleasedAtMs = assignment.updatedAtMs;
+    }
     return { released: true, assignment: copy(assignment) };
+  }
+
+  async recoverSettledSlots(scopeKey?: string): Promise<SlotAssignmentRecord[]> {
+    const settled = [...this.assignments.values()]
+      .filter(
+        (assignment) =>
+          assignment.state === "settling" &&
+          (scopeKey === undefined || assignment.scopeKey === scopeKey) &&
+          this.isSettled(assignment),
+      )
+      .sort((a, b) =>
+        a.scopeKey === b.scopeKey ? a.slotIndex - b.slotIndex : a.scopeKey < b.scopeKey ? -1 : 1,
+      );
+    for (const assignment of settled) {
+      assignment.state = "ready";
+      assignment.settler = null;
+      assignment.updatedAtMs = this.timer.now();
+    }
+    return settled.map(copy);
   }
 
   async getAssignment(key: SlotKey): Promise<SlotAssignmentRecord | null> {
@@ -282,7 +330,12 @@ export class FakeSlotRegistry implements SlotRegistry {
   async snapshotManagedDevices(): Promise<ManagedDeviceEntry[]> {
     const bound = [...this.assignments.values()].flatMap((assignment): ManagedDeviceEntry[] => {
       const scope = this.scopes.get(assignment.scopeKey);
-      if (assignment.stableDeviceId === null || !scope || scope.state === "invalidated") {
+      // A revivable (abandoned) scope's kept slots stay reserved for its returning incarnation.
+      if (
+        assignment.stableDeviceId === null ||
+        !scope ||
+        (scope.state === "invalidated" && scope.invalidationReason !== "abandoned")
+      ) {
         return [];
       }
       return [
@@ -329,6 +382,9 @@ export class FakeSlotRegistry implements SlotRegistry {
     }
     if (isRevivableScope(scope) && isPermanentInvalidationReason(reason)) {
       scope.invalidationReason = reason;
+      if (scope.state === "invalidated") {
+        this.releaseSlotsToFreePool(scopeKey);
+      }
     }
     return scope.state === "invalidating"
       ? { kind: "already_invalidating", scope: { ...scope } }
@@ -352,37 +408,25 @@ export class FakeSlotRegistry implements SlotRegistry {
     const liveOwners = assignments.filter(
       (assignment) => assignment.execOwner !== null && this.isExecOwnerLive(assignment.execOwner),
     );
+    const settling = assignments.filter(
+      (assignment) => assignment.state === "settling" && !this.isSettled(assignment),
+    );
     const cleanupPending = assignments.filter(
       (assignment) => assignment.state === "cleanup_pending",
     );
-    if (liveOwners.length > 0 || cleanupPending.length > 0) {
+    if (liveOwners.length > 0 || settling.length > 0 || cleanupPending.length > 0) {
       return {
         kind: "pending",
         scope: { ...scope },
         liveOwners: liveOwners.map(copy),
+        settling: settling.map(copy),
         cleanupPending: cleanupPending.map(copy),
       };
     }
     const nowMs = this.timer.now();
-    const freedDevices = assignments.flatMap((assignment): FreeSlotDeviceRecord[] =>
-      assignment.stableDeviceId === null
-        ? []
-        : [
-            {
-              platform: assignment.platform,
-              stableDeviceId: assignment.stableDeviceId,
-              specFingerprint: assignment.specFingerprint,
-              fromScopeKey: scopeKey,
-              freedAtMs: nowMs,
-            },
-          ],
-    );
-    for (const assignment of assignments) {
-      this.assignments.delete(slotId(assignment));
-    }
-    for (const device of freedDevices) {
-      this.free.set(deviceId(device.platform, device.stableDeviceId), { ...device });
-    }
+    // An abandoned scope stays revivable: keep its slots until the invalidation is permanent.
+    const freedDevices =
+      scope.invalidationReason === "abandoned" ? [] : this.releaseSlotsToFreePool(scopeKey);
     scope.state = "invalidated";
     scope.invalidatedAtMs = nowMs;
     return { kind: "invalidated", scope: { ...scope }, freedDevices };
@@ -394,10 +438,10 @@ export class FakeSlotRegistry implements SlotRegistry {
       .filter(
         (scope) =>
           scope.state === "valid" &&
-          scope.lastAcquiredAtMs <= cutoffMs &&
+          lastScopeActivityMs(scope) <= cutoffMs &&
           !this.hasLiveExecOwner(scope.scopeKey),
       )
-      .sort((a, b) => a.lastAcquiredAtMs - b.lastAcquiredAtMs)
+      .sort((a, b) => lastScopeActivityMs(a) - lastScopeActivityMs(b))
       .map((scope) => ({ ...scope }));
   }
 
@@ -413,7 +457,7 @@ export class FakeSlotRegistry implements SlotRegistry {
     if (scope.state !== "valid") {
       return { kind: "not_abandoned", scope: { ...scope }, reason: "not_valid" };
     }
-    if (scope.lastAcquiredAtMs > this.timer.now() - thresholdMs) {
+    if (lastScopeActivityMs(scope) > this.timer.now() - thresholdMs) {
       return { kind: "not_abandoned", scope: { ...scope }, reason: "recent_acquisition" };
     }
     if (this.hasLiveExecOwner(scopeKey)) {
@@ -451,6 +495,34 @@ export class FakeSlotRegistry implements SlotRegistry {
     return current;
   }
 
+  /** Free a scope's bound devices and remove its slots (a permanent invalidation). */
+  private releaseSlotsToFreePool(scopeKey: string): FreeSlotDeviceRecord[] {
+    const nowMs = this.timer.now();
+    const assignments = [...this.assignments.values()]
+      .filter((assignment) => assignment.scopeKey === scopeKey)
+      .sort((a, b) => a.slotIndex - b.slotIndex);
+    const freedDevices = assignments.flatMap((assignment): FreeSlotDeviceRecord[] =>
+      assignment.stableDeviceId === null
+        ? []
+        : [
+            {
+              platform: assignment.platform,
+              stableDeviceId: assignment.stableDeviceId,
+              specFingerprint: assignment.specFingerprint,
+              fromScopeKey: scopeKey,
+              freedAtMs: nowMs,
+            },
+          ],
+    );
+    for (const assignment of assignments) {
+      this.assignments.delete(slotId(assignment));
+    }
+    for (const device of freedDevices) {
+      this.free.set(deviceId(device.platform, device.stableDeviceId), { ...device });
+    }
+    return freedDevices;
+  }
+
   private findBound(
     platform: SlotPlatform,
     stableDeviceId: string,
@@ -462,11 +534,18 @@ export class FakeSlotRegistry implements SlotRegistry {
   }
 
   private hasLiveExecOwner(scopeKey: string): boolean {
+    // A live settler still drives its released work, so it keeps the scope in use too.
     return [...this.assignments.values()].some(
-      (assignment) =>
-        assignment.scopeKey === scopeKey &&
-        assignment.execOwner !== null &&
-        this.isExecOwnerLive(assignment.execOwner),
+      (assignment) => assignment.scopeKey === scopeKey && !this.isSettled(assignment),
+    );
+  }
+
+  /** No live execution owner, and (when settling) no live settler. */
+  private isSettled(assignment: SlotAssignmentRecord): boolean {
+    const { settler, execOwner } = assignment;
+    return (
+      (settler === null || !this.isExecOwnerLive(settler)) &&
+      (execOwner === null || !this.isExecOwnerLive(execOwner))
     );
   }
 
@@ -495,6 +574,17 @@ function copy(assignment: SlotAssignmentRecord): SlotAssignmentRecord {
     ...assignment,
     requestedSpec: roundTrip(assignment.requestedSpec),
     resolvedSpec: roundTrip(assignment.resolvedSpec),
-    execOwner: assignment.execOwner ? { ...assignment.execOwner } : null,
+    execOwner: assignment.execOwner
+      ? {
+          ...assignment.execOwner,
+          processGenerationToken: assignment.execOwner.processGenerationToken ?? null,
+        }
+      : null,
+    settler: assignment.settler
+      ? {
+          ...assignment.settler,
+          processGenerationToken: assignment.settler.processGenerationToken ?? null,
+        }
+      : null,
   };
 }

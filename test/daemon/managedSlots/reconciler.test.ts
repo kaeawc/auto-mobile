@@ -22,6 +22,8 @@ import {
   type ManagedSlotReconcileResult,
   type ManagedSpecMatch,
   type ManagedSpecMatcher,
+  type ManagedSlotRequestedSpec,
+  chooseIosDeviceType,
 } from "../../../src/daemon/managedSlots/reconciler";
 import type { SlotKey, SlotPlatform } from "../../../src/daemon/managedSlots/slotRegistry";
 import {
@@ -33,6 +35,7 @@ import type { DeviceInfo } from "../../../src/models";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import type { AvdConfig } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../../../src/utils/android-cmdline-tools/AndroidSystemImageRuntime";
+import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -41,6 +44,45 @@ const IOS_17 = "com.apple.CoreSimulator.SimRuntime.iOS-17-5";
 const IPHONE_16 = "com.apple.CoreSimulator.SimDeviceType.iPhone-16";
 const SPEC_18: ExactDeviceSpecification = { runtime: IOS_18, deviceType: IPHONE_16 };
 const SPEC_17: ExactDeviceSpecification = { runtime: IOS_17, deviceType: IPHONE_16 };
+const IPHONE_15 = "com.apple.CoreSimulator.SimDeviceType.iPhone-15";
+const IPAD = "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M4";
+const IPHONE_OLD = "com.apple.CoreSimulator.SimDeviceType.iPhone-8";
+
+function runtime(identifier: string, version: string, isAvailable = true) {
+  return {
+    identifier,
+    version,
+    isAvailable,
+    bundlePath: "",
+    buildversion: "",
+    runtimeRoot: "",
+    name: `iOS ${version}`,
+  };
+}
+
+function deviceType(identifier: string, productFamily: string, min: string, max: string) {
+  return {
+    identifier,
+    name: identifier.split(".").at(-1)!,
+    minRuntimeVersion: 0,
+    maxRuntimeVersion: 0,
+    minRuntimeVersionString: min,
+    maxRuntimeVersionString: max,
+    bundlePath: "",
+    productFamily,
+  };
+}
+
+/** simctl lists device types oldest first; the iPad and the old iPhone must never be chosen. */
+const ANY_MODEL_CATALOG: ExactIosRuntimeCatalog = {
+  getRuntimesChecked: async () => [runtime(IOS_17, "17.5"), runtime(IOS_18, "18.0")],
+  getDeviceTypesChecked: async () => [
+    deviceType(IPHONE_OLD, "iPhone", "11.0", "16.4"),
+    deviceType(IPHONE_15, "iPhone", "17.0", "65535.255.255"),
+    deviceType(IPHONE_16, "iPhone", "18.0", "65535.255.255"),
+    deviceType(IPAD, "iPad", "17.0", "65535.255.255"),
+  ],
+};
 
 class FakeInventory implements ManagedSlotInventory {
   complete = true;
@@ -62,12 +104,13 @@ class FakeInventory implements ManagedSlotInventory {
 /** iOS-style matching on listed runtime/device type; overrides force a verdict per stable id. */
 class FakeMatcher implements ManagedSpecMatcher {
   readonly overrides = new Map<string, ManagedSpecMatch>();
-  async matches(device: DeviceInfo, spec: ExactDeviceSpecification): Promise<ManagedSpecMatch> {
+  async matches(device: DeviceInfo, spec: ManagedSlotRequestedSpec): Promise<ManagedSpecMatch> {
     const override = this.overrides.get(deviceStableId(device) ?? "");
     if (override) {
       return override;
     }
-    return device.runtime === spec.runtime && device.deviceType === spec.deviceType
+    return device.runtime === spec.runtime &&
+      (spec.deviceType === undefined || device.deviceType === spec.deviceType)
       ? "match"
       : "mismatch";
   }
@@ -201,6 +244,8 @@ describe("ManagedSlotReconciler", () => {
       claims,
       capacity,
       timer,
+      idGenerator: new FakeIdGenerator(),
+      isExecOwnerLive: () => true,
     });
     const scope = await registry.ensureScope(SCOPE);
     if (scope.kind !== "ready") {
@@ -248,7 +293,7 @@ describe("ManagedSlotReconciler", () => {
       const result = expectReady(await reconciler.reconcile(request()));
 
       expect(result.disposition).toBe("created");
-      expect(result.device.name).toBe(managedSlotDeviceName(key, 1));
+      expect(result.device.name).toBe(managedSlotDeviceName(key, 1, "fake-1"));
       expect(result.assignment).toMatchObject({
         generation: 1,
         stableDeviceId: result.device.stableId,
@@ -308,7 +353,7 @@ describe("ManagedSlotReconciler", () => {
           deviceType: IPHONE_16,
         },
         {
-          name: managedSlotDeviceName(key, 1),
+          name: managedSlotDeviceName(key, 1, "earlier"),
           platform: "ios",
           deviceId: "UDID-LEFTOVER",
           isRunning: true,
@@ -331,7 +376,7 @@ describe("ManagedSlotReconciler", () => {
       }
       const otherKey = { scopeKey: other.scope.scopeKey, slotIndex: 0 };
       inventory.devices.push({
-        name: managedSlotDeviceName(key, 1),
+        name: managedSlotDeviceName(key, 1, "earlier"),
         platform: "ios",
         deviceId: "UDID-HELD",
         isRunning: false,
@@ -416,7 +461,9 @@ describe("ManagedSlotReconciler", () => {
 
       expect(result.failure.code).toBe("readiness_incomplete");
       expect(provisioner.released).toEqual(["session-1"]);
-      expect(deleter.calls.map((call) => call.name)).toEqual([managedSlotDeviceName(key, 1)]);
+      expect(deleter.calls.map((call) => call.name)).toEqual([
+        managedSlotDeviceName(key, 1, "fake-1"),
+      ]);
       expect(result.assignment).toMatchObject({ generation: 0, stableDeviceId: null });
     });
   });
@@ -458,7 +505,7 @@ describe("ManagedSlotReconciler", () => {
 
       expect(result.disposition).toBe("created");
       expect(result.evidence.assignedMissing).toBe(true);
-      expect(result.device.name).toBe(managedSlotDeviceName(key, 2));
+      expect(result.device.name).toStartWith(managedSlotDeviceName(key, 2, "x").slice(0, -1));
       expect(result.assignment.generation).toBe(2);
       expect(deleter.calls).toHaveLength(0);
     });
@@ -473,6 +520,47 @@ describe("ManagedSlotReconciler", () => {
       expect(result.failure.code).toBe("discovery_incomplete");
       expect(provisioner.calls).toHaveLength(0);
       expect(result.assignment).toMatchObject({ generation: 1, stableDeviceId: stableId });
+    });
+
+    test("by default an owner whose PID is not running does not hold the slot", async () => {
+      const stableId = await seedAssigned();
+      await registry.claimExecution(
+        key,
+        { generation: 1, stableDeviceId: stableId },
+        // A non-positive PID is never a running process.
+        { daemonId: "d", pid: -1, sessionUuid: "crashed" },
+      );
+      reconciler = new ManagedSlotReconciler({
+        registry,
+        inventory,
+        matcher,
+        resolver: new DefaultManagedSpecResolver(),
+        provisioner,
+        deleter,
+        claims,
+        capacity,
+        timer,
+      });
+
+      const result = expectReady(await reconciler.reconcile(request()));
+
+      expect(result.disposition).toBe("reused");
+    });
+
+    test("a slot settling under a live settler refuses slot_settling; a dead settler's slot is recovered and reused", async () => {
+      const stableId = await seedAssigned();
+      await registry.updateSlotState(key, { generation: 1, stableDeviceId: stableId }, "settling", {
+        settler: { daemonId: "d", pid: 300 },
+      });
+
+      const busy = expectFailed(await reconciler.reconcile(request()));
+      expect(busy.failure).toMatchObject({ code: "slot_settling", retryable: true });
+      expect(provisioner.calls).toHaveLength(0);
+
+      registry.setExecOwnerLiveness((owner) => owner.pid !== 300);
+      const result = expectReady(await reconciler.reconcile(request()));
+      expect(result.disposition).toBe("reused");
+      expect(result.assignment).toMatchObject({ generation: 2, state: "ready", settler: null });
     });
 
     test("a live execution owner refuses with slot_in_use", async () => {
@@ -501,9 +589,10 @@ describe("ManagedSlotReconciler", () => {
       expect(inventory.has(oldId)).toBe(false);
       expect(result.evidence.deletedStableId).toBe(oldId);
       expect(result.device.stableId).not.toBe(oldId);
-      expect(result.device.name).toBe(managedSlotDeviceName(key, 3));
+      // generation 2 fenced the old device (`replacing`), 3 recorded its verified absence.
+      expect(result.device.name).toStartWith(managedSlotDeviceName(key, 4, "x").slice(0, -1));
       expect(result.assignment).toMatchObject({
-        generation: 3,
+        generation: 4,
         stableDeviceId: result.device.stableId,
         state: "ready",
       });
@@ -517,7 +606,7 @@ describe("ManagedSlotReconciler", () => {
 
       expect(result.failure).toMatchObject({ code: "cleanup_pending", retryable: true });
       expect(result.assignment).toMatchObject({
-        generation: 1,
+        generation: 3,
         stableDeviceId: oldId,
         state: "cleanup_pending",
       });
@@ -556,7 +645,7 @@ describe("ManagedSlotReconciler", () => {
       });
       expect(failed.evidence.deletedStableId).toBe(oldId);
       expect(failed.assignment).toMatchObject({
-        generation: 2,
+        generation: 3,
         stableDeviceId: null,
         state: "provisioning",
       });
@@ -564,7 +653,7 @@ describe("ManagedSlotReconciler", () => {
       provisioner.failWith = undefined;
       const retry = expectReady(await reconciler.reconcile(request(SPEC_18)));
       expect(retry.disposition).toBe("created");
-      expect(retry.assignment.generation).toBe(3);
+      expect(retry.assignment.generation).toBe(4);
       expect(deleter.calls).toHaveLength(1);
     });
 
@@ -576,6 +665,28 @@ describe("ManagedSlotReconciler", () => {
 
       expect(result.failure.code).toBe("discovery_incomplete");
       expect(deleter.calls).toHaveLength(0);
+    });
+
+    test("an unavailable assigned simulator is discovery_incomplete: never deleted or replaced", async () => {
+      reconciler = new ManagedSlotReconciler({
+        registry,
+        inventory,
+        matcher: new DefaultManagedSpecMatcher({ readConfig: async () => null }),
+        resolver: new DefaultManagedSpecResolver(),
+        provisioner,
+        deleter,
+        claims,
+        capacity,
+        timer,
+      });
+      const oldId = await seedAssigned(SPEC_17);
+      inventory.devices.find((device) => device.deviceId === oldId)!.isAvailable = false;
+
+      const result = expectFailed(await reconciler.reconcile(request(SPEC_18)));
+
+      expect(result.failure).toMatchObject({ code: "discovery_incomplete", retryable: true });
+      expect(deleter.calls).toHaveLength(0);
+      expect(result.assignment).toMatchObject({ stableDeviceId: oldId, state: "ready" });
     });
 
     test("partial inventory blocks replacement even when the old device is listed", async () => {
@@ -706,6 +817,44 @@ describe("ManagedSlotReconciler", () => {
       expect(result.assignment).toMatchObject({ generation: 1, stableDeviceId: "UDID-WINNER" });
     });
 
+    test("a losing Android create never deletes the AVD the winner committed under the same id", async () => {
+      const androidSpec = {
+        runtime: "system-images;android-35;google_apis;arm64-v8a",
+        deviceType: "pixel_8",
+      };
+      provisioner.beforeReturn = async (call) => {
+        // The winner committed a device whose stable id (the AVD name) equals ours.
+        await registry.commitBinding(
+          key,
+          { generation: 0, stableDeviceId: null },
+          {
+            stableDeviceId: call.name,
+            deviceName: call.name,
+            resolvedSpec: null,
+            specFingerprint: null,
+            state: "ready",
+          },
+        );
+      };
+
+      const result = expectFailed(
+        await reconciler.reconcile(request(androidSpec, { platform: "android" })),
+      );
+
+      expect(result.failure.code).toBe("concurrent_modification");
+      expect(deleter.calls).toHaveLength(0);
+      expect(result.evidence.uncommittedCleanup).toMatchObject({ removed: false });
+      expect(inventory.has(result.assignment!.stableDeviceId!)).toBe(true);
+    });
+
+    test("two attempts on the same slot and generation never generate the same device name", async () => {
+      const first = managedSlotDeviceName(key, 1, "attempt-a");
+      const second = managedSlotDeviceName(key, 1, "attempt-b");
+      expect(first).not.toBe(second);
+      expect(first).toStartWith("amslot-");
+      expect(first).toMatch(/^[a-z0-9-]+$/);
+    });
+
     test("a binding change before the replace mark refuses deletion", async () => {
       const oldId = await seedAssigned(SPEC_17);
       claims.beforeDescribe = async () => {
@@ -752,6 +901,95 @@ describe("ManagedSlotReconciler", () => {
       expect(provisioner.released).toEqual(["session-2"]);
     });
 
+    test("a replacement that fences the slot while a reuse provisions wins: the reuse never reports ready", async () => {
+      const stableId = await seedAssigned();
+      provisioner.beforeReturn = async () => {
+        // Another daemon's replacer marks the slot after this reuse read it as ready.
+        const marked = await registry.updateSlotState(
+          key,
+          { generation: 1, stableDeviceId: stableId },
+          "replacing",
+        );
+        expect(marked.kind).toBe("updated");
+      };
+
+      const result = expectFailed(await reconciler.reconcile(request()));
+
+      expect(result.failure.code).toBe("concurrent_modification");
+      expect(provisioner.released).toEqual(["session-2"]);
+      expect(result.assignment).toMatchObject({ generation: 2, state: "replacing" });
+    });
+
+    test("an owned reuse reserves the slot before provisioning, so a replacer cannot fence it", async () => {
+      const stableId = await seedAssigned();
+      const owner = { daemonId: "daemon-a", pid: 4242 };
+      let fenceDuringProvision: string | undefined;
+      provisioner.beforeReturn = async () => {
+        const current = await registry.getAssignment(key);
+        expect(current?.execOwner).toMatchObject({ ...owner, sessionUuid: expect.any(String) });
+        fenceDuringProvision = (
+          await registry.updateSlotState(
+            key,
+            { generation: 1, stableDeviceId: stableId },
+            "replacing",
+          )
+        ).kind;
+      };
+
+      const result = expectReady(await reconciler.reconcile(request(SPEC_18, { owner })));
+
+      expect(fenceDuringProvision).toBe("slot_in_use");
+      expect(result.disposition).toBe("reused");
+      expect(result.assignment).toMatchObject({
+        generation: 1,
+        state: "ready",
+        execOwner: { ...owner, sessionUuid: "session-2" },
+      });
+    });
+
+    test("an owned create claims the slot for the provisioned session", async () => {
+      const owner = { daemonId: "daemon-a", pid: 4242 };
+
+      const result = expectReady(await reconciler.reconcile(request(SPEC_18, { owner })));
+
+      expect(result.assignment.execOwner).toMatchObject({
+        ...owner,
+        sessionUuid: result.sessionUuid,
+      });
+      const again = expectFailed(await reconciler.reconcile(request(SPEC_18, { owner })));
+      expect(again.failure.code).toBe("slot_in_use");
+    });
+
+    test("a lost reservation releases nothing it did not take and refuses slot_in_use", async () => {
+      const stableId = await seedAssigned();
+      await registry.claimExecution(
+        key,
+        { generation: 1, stableDeviceId: stableId },
+        { daemonId: "other", pid: 7, sessionUuid: "theirs" },
+      );
+      registry.setExecOwnerLiveness(() => true);
+      reconciler = new ManagedSlotReconciler({
+        registry,
+        inventory,
+        matcher,
+        resolver: new DefaultManagedSpecResolver(),
+        provisioner,
+        deleter,
+        claims,
+        capacity,
+        timer,
+        isExecOwnerLive: () => false,
+      });
+
+      const result = expectFailed(
+        await reconciler.reconcile(request(SPEC_18, { owner: { daemonId: "a", pid: 1 } })),
+      );
+
+      expect(result.failure.code).toBe("slot_in_use");
+      expect(provisioner.calls).toHaveLength(0);
+      expect(result.assignment?.execOwner?.sessionUuid).toBe("theirs");
+    });
+
     test("concurrent reconciliations of one slot in one process serialize onto one device", async () => {
       const [first, second] = await Promise.all([
         reconciler.reconcile(request()),
@@ -762,6 +1000,64 @@ describe("ManagedSlotReconciler", () => {
       expect(expectReady(second).disposition).toBe("reused");
       expect(expectReady(second).device.stableId).toBe(expectReady(first).device.stableId);
       expect(provisioner.created()).toHaveLength(1);
+    });
+  });
+
+  describe("any model (omitted deviceType)", () => {
+    beforeEach(() => {
+      reconciler = new ManagedSlotReconciler({
+        registry,
+        inventory,
+        matcher,
+        resolver: new DefaultManagedSpecResolver(ANY_MODEL_CATALOG),
+        provisioner,
+        deleter,
+        claims,
+        capacity,
+        timer,
+        idGenerator: new FakeIdGenerator(),
+        isExecOwnerLive: () => true,
+      });
+    });
+
+    test("an empty slot creates the newest iPhone that supports the runtime and records it", async () => {
+      const result = expectReady(await reconciler.reconcile(request({ runtime: IOS_17 })));
+
+      expect(result.disposition).toBe("created");
+      expect(provisioner.created()[0]?.spec).toMatchObject({
+        runtime: IOS_17,
+        deviceType: IPHONE_15,
+      });
+      expect(result.resolvedSpec).toMatchObject({ runtime: IOS_17, deviceType: IPHONE_15 });
+      expect(result.assignment.requestedSpec).toEqual({ runtime: IOS_17 });
+    });
+
+    test("an assigned simulator of any model on the runtime is reused, never replaced", async () => {
+      inventory.devices.push({
+        name: managedSlotDeviceName(key, 1, "earlier"),
+        platform: "ios",
+        deviceId: "UDID-OLD-MODEL",
+        isRunning: true,
+        runtime: IOS_18,
+        deviceType: IPHONE_15,
+      });
+      const first = expectReady(await reconciler.reconcile(request({ runtime: IOS_18 })));
+      expect(first.disposition).toBe("adopted");
+
+      const again = expectReady(await reconciler.reconcile(request({ runtime: IOS_18 })));
+
+      expect(again.disposition).toBe("reused");
+      expect(again.device.stableId).toBe("UDID-OLD-MODEL");
+      expect(deleter.calls).toHaveLength(0);
+    });
+
+    test("a different runtime still replaces an any-model slot", async () => {
+      await seedAssigned({ runtime: IOS_17 });
+
+      const result = expectReady(await reconciler.reconcile(request({ runtime: IOS_18 })));
+
+      expect(result.disposition).toBe("replaced");
+      expect(result.resolvedSpec.deviceType).toBe(IPHONE_16);
     });
   });
 
@@ -839,6 +1135,31 @@ describe("DefaultManagedSpecMatcher", () => {
     });
   }
 
+  test("an omitted Android profile or iOS model is unconstrained", async () => {
+    expect(await matcherFor(baseConfig).matches(avd, { runtime })).toBe("match");
+    expect(
+      await matcherFor({ ...baseConfig, deviceName: undefined }).matches(avd, { runtime }),
+    ).toBe("match");
+    expect(
+      await matcherFor(baseConfig).matches(avd, {
+        runtime: "system-images;android-34;google_apis;arm64-v8a",
+      }),
+    ).toBe("mismatch");
+    const sim: DeviceInfo = {
+      name: "s",
+      platform: "ios",
+      deviceId: "U",
+      isRunning: false,
+      runtime: IOS_18,
+      deviceType: IPHONE_15,
+    };
+    expect(await matcherFor(null).matches(sim, { runtime: IOS_18 })).toBe("match");
+    expect(
+      await matcherFor(null).matches({ ...sim, deviceType: undefined }, { runtime: IOS_18 }),
+    ).toBe("match");
+    expect(await matcherFor(null).matches(sim, { runtime: IOS_17 })).toBe("mismatch");
+  });
+
   test("omitted configuration is unconstrained", async () => {
     expect(await matcherFor(baseConfig).matches(avd, { runtime, deviceType: "pixel_8" })).toBe(
       "match",
@@ -870,9 +1191,78 @@ describe("DefaultManagedSpecMatcher", () => {
     expect(
       await matcherFor(null).matches({ ...sim, runtime: IOS_18, deviceType: IPHONE_16 }, SPEC_18),
     ).toBe("match");
-    expect(await matcherFor(null).matches({ ...sim, isAvailable: false }, SPEC_18)).toBe(
-      "mismatch",
-    );
+  });
+
+  test("an unavailable iOS simulator is unknown, never a mismatch, even with matching metadata", async () => {
+    const sim: DeviceInfo = {
+      name: "s",
+      platform: "ios",
+      deviceId: "U",
+      isRunning: false,
+      isAvailable: false,
+      runtime: IOS_17,
+      deviceType: IPHONE_16,
+    };
+    expect(await matcherFor(null).matches(sim, SPEC_18)).toBe("unknown");
+    expect(await matcherFor(null).matches({ ...sim, runtime: IOS_18 }, SPEC_18)).toBe("unknown");
+  });
+});
+
+describe("DefaultManagedSpecResolver any model", () => {
+  test("chooses the newest supporting iPhone, never an iPad or an out-of-range model", () => {
+    const runtimes = [runtime(IOS_17, "17.5"), runtime(IOS_18, "18.0", false)];
+    const types = [
+      deviceType(IPHONE_OLD, "iPhone", "11.0", "16.4"),
+      deviceType(IPHONE_15, "iPhone", "17.0", "65535.255.255"),
+      deviceType(IPAD, "iPad", "17.0", "65535.255.255"),
+    ];
+    expect(chooseIosDeviceType(IOS_17, runtimes, types)).toBe(IPHONE_15);
+    expect(chooseIosDeviceType(IOS_18, runtimes, types)).toBeUndefined();
+    expect(chooseIosDeviceType("missing", runtimes, types)).toBeUndefined();
+  });
+
+  test("iOS without a catalog, with an unreadable one, or with no fitting model refuses", async () => {
+    expect(
+      await new DefaultManagedSpecResolver().resolve("ios", { runtime: IOS_18 }, {}),
+    ).toMatchObject({ kind: "unsupported", code: "spec_unsupported" });
+    const unreadable: ExactIosRuntimeCatalog = {
+      getRuntimesChecked: async () => {
+        throw new Error("simctl timed out");
+      },
+      getDeviceTypesChecked: async () => [],
+    };
+    expect(
+      await new DefaultManagedSpecResolver(unreadable).resolve("ios", { runtime: IOS_18 }, {}),
+    ).toMatchObject({ kind: "unresolved" });
+    expect(
+      await new DefaultManagedSpecResolver(ANY_MODEL_CATALOG).resolve(
+        "ios",
+        { runtime: "com.apple.CoreSimulator.SimRuntime.iOS-9-0" },
+        {},
+      ),
+    ).toMatchObject({ kind: "unsupported", code: "runtime_incompatible" });
+  });
+
+  test("a cutout preference needs an explicit model; 'any' does not", async () => {
+    const resolver = new DefaultManagedSpecResolver(ANY_MODEL_CATALOG);
+    expect(
+      await resolver.resolve("ios", { runtime: IOS_18, displayCutout: "notch" }, {}),
+    ).toMatchObject({ kind: "unsupported", code: "spec_unsupported" });
+    expect(
+      await resolver.resolve("ios", { runtime: IOS_18, displayCutout: "any" }, {}),
+    ).toMatchObject({ kind: "resolved", resolvedSpec: { deviceType: IPHONE_16 } });
+  });
+
+  test("Android resolves the default profile, or the configured one", async () => {
+    const runtime35 = "system-images;android-35;google_apis;arm64-v8a";
+    expect(
+      await new DefaultManagedSpecResolver().resolve("android", { runtime: runtime35 }, {}),
+    ).toMatchObject({ kind: "resolved", resolvedSpec: { deviceType: "pixel_8" } });
+    expect(
+      await new DefaultManagedSpecResolver(undefined, {
+        androidDefaultDeviceType: "pixel_9",
+      }).resolve("android", { runtime: runtime35 }, {}),
+    ).toMatchObject({ kind: "resolved", resolvedSpec: { deviceType: "pixel_9" } });
   });
 });
 

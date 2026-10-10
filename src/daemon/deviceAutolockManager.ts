@@ -727,7 +727,7 @@ export class DeviceAutolockManager {
       if (refuseForeignOwned && this.hasMcpSessionOwner(sessionId, mcpSessionId)) {
         // The client merely named these ids: naming another connected client's autolock is
         // not proof of ownership, so never move its persisted owner or default route here
-        // (#11164). setActiveDevice is the deliberate share.
+        // (#11164). setActiveDevice refuses it too (device_owned_by_other_session, #11167).
         logger.warn(
           `Not attaching autolock session ${sessionId} to MCP session ${mcpSessionId}: ` +
             `another connection owns it`,

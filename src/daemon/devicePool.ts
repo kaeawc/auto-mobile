@@ -8165,10 +8165,9 @@ export class DevicePool {
   }
 
   /**
-   * Whether a still-connected MCP client (other than `exceptMcpSessionId`) owns the session or
-   * routes to it by autolock.
+   * Whether `sessionId` is a live autolock session that a still-connected MCP client other than
+   * `mcpSessionId` owns or routes to by autolock.
    */
-  /** Whether `sessionId` is a live autolock session another connected client owns or routes to. */
   isAutolockSessionOwnedByOtherConnection(sessionId: string, mcpSessionId?: string): boolean {
     if (!this.autolockManager.hasMcpSessionOwner(sessionId, mcpSessionId)) {
       return false;

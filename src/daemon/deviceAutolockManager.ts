@@ -13,6 +13,7 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator } from "../utils/IdGenerator";
 import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import { getDevicePoolTimeoutMs, type Environment } from "./poolConfig";
+import { freshStartAlreadyBoundError } from "./deviceAcquisitionRefusals";
 import type { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import type { Session, SessionExecutionMetadata, SessionManager } from "./sessionManager";
 
@@ -525,9 +526,10 @@ export class DeviceAutolockManager {
       if (this.isOwnedAutolockSession(device, existingSession, mcpSessionId)) {
         return;
       }
-      throw new ActionableError(
-        `Freshly started device '${device.id}' was assigned to session ` +
-          `${existingSession.sessionId} before its owning session could reserve it.`,
+      throw freshStartAlreadyBoundError(
+        device.id,
+        existingSession.sessionId,
+        existingSession.ownership === "awaiting-owner",
       );
     }
   }

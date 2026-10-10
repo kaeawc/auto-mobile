@@ -16,6 +16,12 @@ import {
 import { LIFECYCLE_TOOL_REMEDY } from "../../src/server/lifecycleDeviceOwnership";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { createTeardownFailureResponse } from "../../src/server/deviceTools";
+import {
+  SessionNoLongerOwnsDeviceError,
+  SessionRebindingError,
+  SessionTerminalReleaseInProgressError,
+} from "../../src/daemon/sessionManager";
+import { readDeviceCleanupInProgressRefusal } from "../../src/server/deviceSessionResult";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 describe("cliDeviceOwnershipHint (#10743, #10783, #10785)", () => {
@@ -66,6 +72,66 @@ describe("cliDeviceOwnershipHint (#10743, #10783, #10785)", () => {
       retryable: true,
       retryAfterMs: 2_000,
     });
+  });
+
+  test("a terminal-release refusal has its own non-retryable wire code (#11189)", () => {
+    const result = shapeToolCallError(
+      new SessionTerminalReleaseInProgressError(
+        "session-1",
+        "emulator-5554",
+        "is being terminally released from its device; use a new session UUID",
+      ),
+      { toolName: "tapOn", source: "MCP" },
+    );
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload).toMatchObject({
+      success: false,
+      code: "session_terminal_release_in_progress",
+      sessionUuid: "session-1",
+      deviceId: "emulator-5554",
+      retryable: false,
+    });
+    expect(payload.retryAfterMs).toBeUndefined();
+    // The proxy's wait-and-retry loop must not pick it up as a shutting-down device.
+    expect(readDeviceCleanupInProgressRefusal(result)).toBeUndefined();
+    const hint = cliDeviceOwnershipHint(payload, "tapOn");
+    expect(hint).toContain("new session");
+    expect(hint).not.toContain("retryAfterMs");
+  });
+
+  test("a kill racing the session's rebind is typed and retryable after retryAfterMs (#11166)", () => {
+    const result = shapeToolCallError(new SessionRebindingError("session-1"), {
+      toolName: "killDevice",
+      source: "MCP",
+    });
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload).toMatchObject({
+      success: false,
+      code: "session_rebinding",
+      sessionUuid: "session-1",
+      retryable: true,
+      retryAfterMs: 1_000,
+    });
+    // A refused kill is not an acquisition: the proxy's acquisition wait loop leaves it alone.
+    expect(readDeviceCleanupInProgressRefusal(result)).toBeUndefined();
+    expect(cliDeviceOwnershipHint(payload, "killDevice")).toContain("rebind has settled");
+  });
+
+  test("a kill naming a device the session left is typed and not retryable as-is (#11166)", () => {
+    const result = shapeToolCallError(
+      new SessionNoLongerOwnsDeviceError("session-1", "emulator-5554"),
+      { toolName: "killDevice", source: "MCP" },
+    );
+    const payload = JSON.parse(result.content[0].text);
+    expect(payload).toMatchObject({
+      success: false,
+      code: "session_no_longer_owns_device",
+      sessionUuid: "session-1",
+      deviceId: "emulator-5554",
+      retryable: false,
+    });
+    expect(payload.retryAfterMs).toBeUndefined();
+    expect(cliDeviceOwnershipHint(payload, "killDevice")).toContain("--daemon active-sessions");
   });
 
   test("tells the caller another daemon holds the device (#10980)", () => {

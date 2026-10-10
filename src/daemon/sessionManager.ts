@@ -87,7 +87,9 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
   DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
-  DEVICE_SHUTTING_DOWN_CODE,
+  SESSION_NO_LONGER_OWNS_DEVICE_CODE,
+  SESSION_REBINDING_CODE,
+  SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
   SessionCreationTimeoutError,
   SessionReleasedDuringCreationError,
 } from "./deviceAcquisitionRefusals";
@@ -574,11 +576,12 @@ export class SessionReleasePersistTimeoutError extends ActionableError {
 
 /**
  * A session under a kill's terminal release reservation cannot be bound, rebound or reserved again
- * (#11146). It carries the device-shutdown wire code but is not retryable: the session UUID ends
- * with that release, so only a new UUID (or nothing, for a second kill) can follow.
+ * (#11146). It has its own wire code, serialized with `retryable: false` (#11189): the session UUID
+ * ends with that release, so only a new UUID (or nothing, for a second kill) can follow.
  */
 export class SessionTerminalReleaseInProgressError extends ActionableError {
-  readonly code = DEVICE_SHUTTING_DOWN_CODE;
+  readonly code = SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE;
+  readonly retryable = false;
 
   constructor(
     readonly sessionUuid: string,
@@ -586,21 +589,24 @@ export class SessionTerminalReleaseInProgressError extends ActionableError {
     detail: string,
   ) {
     super(
-      `Session ${sessionUuid} ${detail} (code ${DEVICE_SHUTTING_DOWN_CODE}, device '${deviceId}').`,
+      `Session ${sessionUuid} ${detail} (code ${SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE}, device '${deviceId}').`,
     );
     this.name = "SessionTerminalReleaseInProgressError";
   }
 }
 
+export { SESSION_NO_LONGER_OWNS_DEVICE_CODE, SESSION_REBINDING_CODE };
+
 /**
  * A terminal-release reservation (killDevice) named a device the session no longer holds: the
  * session was rebound or released since the caller resolved it (#11166). Re-resolve the device's
- * current session and retry, rather than release a session that moved on.
+ * current session and retry, rather than release a session that moved on. Serialized with
+ * `retryable: false` (#11189): the device's holder changed, so a blind repeat of a destructive
+ * kill could stop a device another session now owns.
  */
-export const SESSION_NO_LONGER_OWNS_DEVICE_CODE = "session_no_longer_owns_device";
-
 export class SessionNoLongerOwnsDeviceError extends ActionableError {
   readonly code = SESSION_NO_LONGER_OWNS_DEVICE_CODE;
+  readonly retryable = false;
 
   constructor(
     readonly sessionUuid: string,
@@ -617,13 +623,13 @@ export class SessionNoLongerOwnsDeviceError extends ActionableError {
 
 /**
  * A terminal-release reservation (killDevice) raced the session's own rebind to another device
- * (#11166). The rebind settles on its own, so retrying the shutdown afterwards is safe.
+ * (#11166). The rebind settles on its own, so retrying the shutdown afterwards is safe; it is
+ * serialized `retryable: true` with a `retryAfterMs` hint (#11189).
  */
-export const SESSION_REBINDING_CODE = "session_rebinding";
-
 export class SessionRebindingError extends ActionableError {
   readonly code = SESSION_REBINDING_CODE;
   readonly retryable = true;
+  readonly retryAfterMs = DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
 
   constructor(readonly sessionUuid: string) {
     super(

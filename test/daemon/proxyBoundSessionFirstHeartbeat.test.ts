@@ -1087,6 +1087,75 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       }
     });
 
+    test("a stall after a clean daemon-shutdown release is not logged at error level (#11189)", async () => {
+      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+      const firstClient = heartbeatForwardingClient(sessionManager);
+      const makeRefusingClient = (): FakeDaemonClient => {
+        const client = heartbeatForwardingClient(sessionManager);
+        client.connect = async () => {
+          throw new DaemonUnavailableError("connection refused");
+        };
+        return client;
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const errors = spyOn(logger, "error").mockImplementation(() => {});
+      const warnings = spyOn(logger, "warn").mockImplementation(() => {});
+      const proxy = stdioProxy([firstClient], makeRefusingClient);
+      const stalledLogs = (spy: typeof errors) =>
+        spy.mock.calls.filter(([message]) => String(message).includes("daemon_stalled"));
+
+      try {
+        await proxy.ensureConnected();
+        firstClient.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          BOUND_SESSION,
+          "daemon-shutdown",
+        );
+        firstClient.emitConnectionClosed();
+        await timer.advanceTimeAsync(STDIO_BUDGET_MS * 2);
+
+        // The handover still happens; the daemon announced its shutdown, so it is not an error.
+        expect(stalledLogs(warnings).length).toBeGreaterThanOrEqual(1);
+        expect(String(stalledLogs(warnings)[0][0])).toContain("after a clean daemon shutdown");
+        expect(stalledLogs(errors)).toEqual([]);
+      } finally {
+        errors.mockRestore();
+        warnings.mockRestore();
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a stall with no daemon-shutdown release is still logged at error level", async () => {
+      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+      const firstClient = heartbeatForwardingClient(sessionManager);
+      const makeRefusingClient = (): FakeDaemonClient => {
+        const client = heartbeatForwardingClient(sessionManager);
+        client.connect = async () => {
+          throw new DaemonUnavailableError("connection refused");
+        };
+        return client;
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const errors = spyOn(logger, "error").mockImplementation(() => {});
+      const warnings = spyOn(logger, "warn").mockImplementation(() => {});
+      const proxy = stdioProxy([firstClient], makeRefusingClient);
+
+      try {
+        await proxy.ensureConnected();
+        firstClient.emitConnectionClosed();
+        await timer.advanceTimeAsync(STDIO_BUDGET_MS * 2);
+        expect(
+          errors.mock.calls.filter(([message]) => String(message).includes("daemon_stalled")),
+        ).toHaveLength(1);
+      } finally {
+        errors.mockRestore();
+        warnings.mockRestore();
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("a reconnect that fails fast is retried three times, spread over the budget, before the handover", async () => {
       await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
       const firstClient = heartbeatForwardingClient(sessionManager);

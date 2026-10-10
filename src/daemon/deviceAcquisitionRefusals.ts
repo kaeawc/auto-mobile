@@ -27,6 +27,28 @@ export const DEVICE_OWNED_BY_OTHER_DAEMON_CODE = "device_owned_by_other_daemon";
  */
 export const DEVICE_SHUTTING_DOWN_CODE = "device_shutting_down";
 
+/**
+ * The session UUID is under a kill's terminal release reservation (#11146), so it cannot be bound,
+ * rebound or reserved again. Unlike `device_shutting_down` it is NOT retryable: the UUID ends with
+ * that release, so only a new session UUID (or nothing, for a second kill) can follow (#11189).
+ */
+export const SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE = "session_terminal_release_in_progress";
+
+/**
+ * A kill's terminal-release reservation named a device the session no longer holds (#11166).
+ * Not retryable as-is: the device's holder changed, so the caller re-checks before killing.
+ */
+export const SESSION_NO_LONGER_OWNS_DEVICE_CODE = "session_no_longer_owns_device";
+
+/**
+ * A kill's terminal-release reservation raced the session's own rebind (#11166). Retryable with a
+ * `retryAfterMs` hint once the rebind settles, but deliberately NOT in
+ * {@link RETRYABLE_DEVICE_ACQUISITION_CODES}: it refuses a destructive shutdown, not an
+ * acquisition, and after the rebind the device may be unowned or held by another session, so the
+ * caller (not a client loop) decides whether to kill again (#11189).
+ */
+export const SESSION_REBINDING_CODE = "session_rebinding";
+
 /** Wire codes of acquisition refusals a client should wait out rather than fail on. */
 export const RETRYABLE_DEVICE_ACQUISITION_CODES: ReadonlySet<string> = new Set([
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
@@ -34,6 +56,30 @@ export const RETRYABLE_DEVICE_ACQUISITION_CODES: ReadonlySet<string> = new Set([
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DEVICE_SHUTTING_DOWN_CODE,
 ]);
+
+/**
+ * A freshly started device turned out to be held by another session before the caller could
+ * reserve it. When that holder is a session the daemon restored after a restart and is holding for
+ * its previous owner, say so: "freshly started" reads as a race and hides the remedy (#11189).
+ */
+export function freshStartAlreadyBoundError(
+  deviceId: string,
+  holderSessionId: string,
+  holderAwaitingOwner: boolean,
+): ActionableError {
+  if (holderAwaitingOwner) {
+    return new ActionableError(
+      `Device '${deviceId}' is reserved for session ${holderSessionId}, which the daemon restored ` +
+        "after a restart and is holding for its previous owner to reconnect. If that session is " +
+        `yours, pass sessionUuid ${holderSessionId} to reclaim it; otherwise wait for the ` +
+        "reservation to lapse or use another device.",
+    );
+  }
+  return new ActionableError(
+    `Freshly started device '${deviceId}' was assigned to session ` +
+      `${holderSessionId} before its owning session could reserve it.`,
+  );
+}
 
 /** Retry hint when nothing bounds the remaining wait more precisely. */
 export const DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS = 1_000;

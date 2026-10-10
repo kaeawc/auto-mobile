@@ -130,6 +130,7 @@ import {
   DeviceSettingDefaults,
   createDeviceSettingDefaultsAcquisitionReset,
   installDeviceSettingDefaults,
+  recordDeviceSettingDefaultsBeforeChange,
 } from "../features/utility/DeviceSettingDefaults";
 import { DeviceSettingDefaultsRepository } from "../db/deviceSettingDefaultsRepository";
 import { NetworkState } from "../server/NetworkState";
@@ -1353,6 +1354,8 @@ export class Daemon {
     startAppearanceSyncScheduler({
       getTargets: () => this.getAppearanceSyncTargets(),
       isEnabled: () => this.passiveWorkPolicy.isAppearanceSyncEnabled(),
+      // A sync-driven night-mode change is reset for the next owner like a tool's (#11145).
+      beforeApply: (device) => recordDeviceSettingDefaultsBeforeChange(device, ["nightMode"]),
     });
     startPerformanceMonitor();
     this.startAdbMissingDeviceListener();

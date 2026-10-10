@@ -250,7 +250,9 @@ export type ManagedSlotCapacityCheck =
       retryAfterMs: number;
       /** Counted devices AutoMobile did not start; present only when there are any (#11390). */
       externalDevices?: string[];
-    };
+    }
+  /** The booted count could not be established; never read as free capacity. */
+  | { kind: "unknown"; message: string };
 
 /** Immediate boot capacity probe (no waiting). Absent means boots are not gated. */
 export interface ManagedSlotBootCapacity {
@@ -1786,10 +1788,9 @@ export class ManagedSlotReconciler {
         ),
       );
     }
-    // Deleting a running device frees a boot slot; a stopped one does not, so fail before deleting.
-    if (!device.isRunning) {
-      await this.assertBootCapacity(request, undefined);
-    }
+    // Fail before deleting: only a running device of the platform being booted frees a boot slot.
+    const freedBootSlots = device.isRunning && assignment.platform === request.platform ? 1 : 0;
+    await this.assertBootCapacity(request, undefined, freedBootSlots);
     this.checkBudget(request);
     const holder = await this.deps.registry.findDeviceHolder(assignment.platform, oldId);
     if (
@@ -1925,16 +1926,23 @@ export class ManagedSlotReconciler {
     );
   }
 
-  /** Fail immediately at the boot limit when the device would need a boot. */
+  /**
+   * Fail immediately at the boot limit when the device would need a boot. `freedBootSlots` counts
+   * booted devices the caller is about to delete; an unknown count is never free capacity.
+   */
   private async assertBootCapacity(
     request: ManagedSlotReconcileRequest,
     device: DeviceInfo | undefined,
+    freedBootSlots = 0,
   ): Promise<void> {
     if (!this.deps.capacity || device?.isRunning) {
       return;
     }
     const check = await this.deps.capacity.check(request.platform, { signal: request.signal });
-    if (check.kind === "exhausted") {
+    if (check.kind === "unknown") {
+      throw new ReconcileAbort(failure("discovery_incomplete", check.message));
+    }
+    if (check.kind === "exhausted" && check.booted - freedBootSlots >= check.limit) {
       throw new ReconcileAbort(
         failure(
           "capacity_exhausted",

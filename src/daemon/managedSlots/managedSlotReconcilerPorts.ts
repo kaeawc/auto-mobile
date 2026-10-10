@@ -17,6 +17,8 @@ import {
   type ProvisionDeviceFailureCode,
 } from "../../devices/exactDeviceProvisioning";
 import type { PlatformDeviceManager } from "../../devices/deviceUtils";
+import { assertBootCapacityAvailable } from "../../features/bootAdmission/sharedBootAdmissionGates";
+import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedError";
 import type { AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -25,6 +27,8 @@ import type { Timer } from "../../utils/SystemTimer";
 import type { PooledDevice } from "../devicePool";
 import {
   deviceStableId,
+  type ManagedSlotBootCapacity,
+  type ManagedSlotCapacityCheck,
   type ManagedSlotDeviceClaim,
   type ManagedSlotDeviceClaims,
   type ManagedSlotDeviceProvisioner,
@@ -256,6 +260,51 @@ export class DeviceManagerSlotInventory implements ManagedSlotInventory {
         error,
       );
       return { complete: false, devices: [] };
+    }
+  }
+}
+
+/** Read-only "would one more cold boot of `platform` be refused now"; throws when it would. */
+export type ManagedSlotBootCapacityAssertion = (
+  platform: SlotPlatform,
+  signal: AbortSignal | undefined,
+) => Promise<void>;
+
+/**
+ * The process-wide boot admission gates as the reconciler's capacity probe: the same read-only
+ * check the provision path runs before creating a device, asked before a replacement deletes one.
+ */
+export class GateManagedSlotBootCapacity implements ManagedSlotBootCapacity {
+  constructor(
+    private readonly assertAvailable: ManagedSlotBootCapacityAssertion = (platform, signal) =>
+      assertBootCapacityAvailable(platform, { signal }),
+  ) {}
+
+  async check(
+    platform: SlotPlatform,
+    options: { signal?: AbortSignal },
+  ): Promise<ManagedSlotCapacityCheck> {
+    try {
+      await this.assertAvailable(platform, options.signal);
+      return { kind: "available" };
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      if (error instanceof BootCapacityExhaustedError) {
+        const { externalDevices } = error.details;
+        return {
+          kind: "exhausted",
+          limit: error.limit,
+          booted: error.booted,
+          retryAfterMs: error.retryAfterMs,
+          ...(externalDevices && externalDevices.length > 0 ? { externalDevices } : {}),
+        };
+      }
+      // A count that could not be read (or a sample that failed) is unknown, never free capacity.
+      logger.warn(
+        `[ManagedSlots] ${platform} boot capacity is unknown: ${errorMessage(error)}`,
+        error,
+      );
+      return { kind: "unknown", message: errorMessage(error) };
     }
   }
 }

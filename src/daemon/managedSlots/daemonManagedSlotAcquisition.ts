@@ -4,8 +4,11 @@
  * pool claims, and the session manager's liveness ownership and managed-execution policy.
  */
 
-import { MultiPlatformDeviceManager } from "../../devices/deviceUtils";
-import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
+import { MultiPlatformDeviceManager, type PlatformDeviceManager } from "../../devices/deviceUtils";
+import {
+  FileAvdConfigReader,
+  type AvdConfigReader,
+} from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { listInstalledSystemImages } from "../../utils/android-cmdline-tools/avdmanager";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { Timer } from "../../utils/SystemTimer";
@@ -18,8 +21,10 @@ import {
 } from "./managedSlotAcquisition";
 import {
   DeviceManagerSlotInventory,
+  GateManagedSlotBootCapacity,
   PoolManagedSlotDeviceClaims,
   ToolManagedSlotProvisioner,
+  type ManagedSlotBootCapacityAssertion,
   type ManagedSlotClaimPool,
   type ManagedSlotToolInvoker,
 } from "./managedSlotReconcilerPorts";
@@ -27,6 +32,7 @@ import {
   DefaultManagedSpecMatcher,
   DefaultManagedSpecResolver,
   ManagedSlotReconciler,
+  type ManagedAndroidImageCatalog,
 } from "./reconciler";
 import {
   SlotJournalRedriveLoop,
@@ -57,7 +63,25 @@ export interface DaemonManagedSlotAcquisitionOptions {
   invokeTool?: ManagedSlotToolInvoker;
   /** The settle-waiting implicit reset of a superseded incarnation (#11174). */
   resetSupersededScope?: ManagedSlotAcquisitionDependencies["resetSupersededScope"];
+  /** The host device tooling behind the reconciler's ports; tests inject fakes. */
+  tooling?: DaemonManagedSlotTooling;
 }
+
+/** Each part defaults to the host's real tooling. */
+export interface DaemonManagedSlotTooling {
+  deviceManager?: Pick<PlatformDeviceManager, "listDeviceImages">;
+  androidConfigReader?: Pick<AvdConfigReader, "readConfig">;
+  androidImageCatalog?: ManagedAndroidImageCatalog;
+  /** Defaults to the process-wide boot admission gates. */
+  checkBootCapacity?: ManagedSlotBootCapacityAssertion;
+}
+
+const sdkAndroidImageCatalog: ManagedAndroidImageCatalog = {
+  listInstalledPackages: async (signal) =>
+    (await listInstalledSystemImages(undefined, undefined, signal)).map(
+      (image) => image.packageName,
+    ),
+};
 
 /**
  * The in-process registry invoker the daemon uses by default: the same handlers MCP callers run,
@@ -89,8 +113,8 @@ export function createDaemonManagedSlotAcquisition(
     let reconciler = reconcilers.get(registry);
     if (!reconciler) {
       // Built on the first acquisition: daemons that never serve a managed slot never touch them.
-      const deviceManager = new MultiPlatformDeviceManager();
-      const androidConfigReader = new FileAvdConfigReader();
+      const deviceManager = options.tooling?.deviceManager ?? new MultiPlatformDeviceManager();
+      const androidConfigReader = options.tooling?.androidConfigReader ?? new FileAvdConfigReader();
       reconciler = new ManagedSlotReconciler({
         registry,
         inventory: new DeviceManagerSlotInventory(deviceManager),
@@ -98,14 +122,7 @@ export function createDaemonManagedSlotAcquisition(
         // The simulator catalog exists only where simctl does.
         resolver: new DefaultManagedSpecResolver(
           process.platform === "darwin" ? new SimCtlClient(null) : undefined,
-          {
-            androidImageCatalog: {
-              listInstalledPackages: async (signal) =>
-                (await listInstalledSystemImages(undefined, undefined, signal)).map(
-                  (image) => image.packageName,
-                ),
-            },
-          },
+          { androidImageCatalog: options.tooling?.androidImageCatalog ?? sdkAndroidImageCatalog },
         ),
         provisioner: new ToolManagedSlotProvisioner({
           invokeTool,
@@ -127,7 +144,9 @@ export function createDaemonManagedSlotAcquisition(
               ),
             }
           : {}),
-        // Boot capacity is enforced by the provision path itself (BootCapacityExhaustedError).
+        // The provision path refuses a boot at the limit, but only after a replacement deleted the
+        // old device: the reconciler asks the same gates first, so it fails before deleting.
+        capacity: new GateManagedSlotBootCapacity(options.tooling?.checkBootCapacity),
         timer: options.timer,
         journal: { owner: options.journal.owner, inFlight: options.journal.inFlight },
       });

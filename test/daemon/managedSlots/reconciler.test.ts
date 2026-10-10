@@ -778,6 +778,51 @@ describe("ManagedSlotReconciler", () => {
       expect(running.disposition).toBe("replaced");
     });
 
+    test("an unknown booted count never replaces: discovery_incomplete before deleting", async () => {
+      const oldId = await seedAssigned(SPEC_17);
+      inventory.devices.find((device) => device.deviceId === oldId)!.isRunning = true;
+      capacity.result = { kind: "unknown", message: "simulator count unknown" };
+
+      const result = expectFailed(await reconciler.reconcile(request(SPEC_18)));
+
+      expect(result.failure).toMatchObject({ code: "discovery_incomplete", retryable: true });
+      expect(deleter.calls).toHaveLength(0);
+      expect(result.assignment).toMatchObject({ stableDeviceId: oldId, state: "ready" });
+    });
+
+    test("over the boot limit a running old device is not deleted: one freed slot is not enough", async () => {
+      const oldId = await seedAssigned(SPEC_17);
+      inventory.devices.find((device) => device.deviceId === oldId)!.isRunning = true;
+      capacity.result = { kind: "exhausted", limit: 1, booted: 2, retryAfterMs: 5_000 };
+
+      const result = expectFailed(await reconciler.reconcile(request(SPEC_18)));
+
+      expect(result.failure).toMatchObject({
+        code: "capacity_exhausted",
+        capacity: { limit: 1, booted: 2 },
+      });
+      expect(deleter.calls).toHaveLength(0);
+    });
+
+    test("a running device of another platform frees no boot slot: not deleted at the limit", async () => {
+      const oldId = await seedAssigned();
+      inventory.devices.find((device) => device.deviceId === oldId)!.isRunning = true;
+      capacity.result = { kind: "exhausted", limit: 1, booted: 1, retryAfterMs: 5_000 };
+
+      const result = expectFailed(
+        await reconciler.reconcile(
+          request(
+            { runtime: "system-images;android-35;google_apis;arm64-v8a", deviceType: "pixel_8" },
+            { platform: "android" },
+          ),
+        ),
+      );
+
+      expect(result.failure.code).toBe("capacity_exhausted");
+      expect(deleter.calls).toHaveLength(0);
+      expect(result.assignment).toMatchObject({ platform: "ios", stableDeviceId: oldId });
+    });
+
     test("a slot left replacing without a journal entry is redriven: delete finished, slot refilled", async () => {
       const oldId = await seedAssigned(SPEC_17);
       await registry.updateSlotState(key, { generation: 1, stableDeviceId: oldId }, "replacing");

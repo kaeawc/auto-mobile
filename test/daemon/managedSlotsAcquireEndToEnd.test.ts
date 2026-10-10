@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { DaemonClient } from "../../src/daemon/client";
@@ -128,6 +128,26 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
   let isAvailableSpy: ReturnType<typeof spyOn>;
   let warnSpy: ReturnType<typeof spyOn>;
   const proxies: DaemonMcpProxy[] = [];
+
+  // beforeAll is outside the per-test budget: the first MCP server/client pair in the process pays
+  // one-off schema and protocol initialization, which would otherwise land on the first test.
+  beforeAll(async () => {
+    const warmTimer = new FakeTimer();
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => new FakeDaemonClient(),
+      daemonManager: new FakeDaemonManager(),
+      autoStartDaemon: false,
+      timer: warmTimer,
+    });
+    const { server } = createProxyMcpServer({ proxy });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "warmup", version: "0.0.1" });
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    await client.close();
+    await server.close();
+    await proxy.close();
+  });
 
   beforeEach(() => {
     timer = new FakeTimer();

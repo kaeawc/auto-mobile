@@ -2179,10 +2179,11 @@ export class SessionManager {
 
   /**
    * An instant on the session clock as wall-clock epoch ms, for reporting to other processes
-   * (#11105): wall now + (instant - session now). Differs from the stamp only after a wall step.
+   * (#11105): the instant plus a wall-minus-session offset anchored by the session clock, so a
+   * fixed instant reports one stable value (#11368). Differs from the stamp only after a wall step.
    */
   sessionClockToWall(sessionClockMs: number): number {
-    return this.timer.now() + (sessionClockMs - this.sessionNow());
+    return this.sessionClock.toWall(sessionClockMs);
   }
 
   /**

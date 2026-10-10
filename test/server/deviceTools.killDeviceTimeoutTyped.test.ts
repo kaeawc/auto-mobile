@@ -3,24 +3,24 @@ import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
-} from "../../../src/server/deviceTools";
-import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { DaemonState } from "../../../src/daemon/daemonState";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
+} from "../../src/server/deviceTools";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../../src/server/videoRecordingManager";
-import type { BootedDevice } from "../../../src/models";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeTimer } from "../../fakes/FakeTimer";
+} from "../../src/server/videoRecordingManager";
+import type { BootedDevice } from "../../src/models";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 /** The platform kill command "succeeds" but the emulator stays in ADB discovery. */
 class StubbornDeviceManager extends FakeDeviceUtils {
   override async killDevice(): Promise<void> {}
 }
 
-describe("hunt: killDevice post-kill timeout", () => {
+describe("killDevice post-kill timeout", () => {
   const timer = new FakeTimer();
   const device: BootedDevice = { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" };
 

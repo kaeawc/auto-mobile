@@ -15,11 +15,16 @@ import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceBootTimeoutError } from "../../src/devices/deviceBootService";
+import { shutdownTimeoutError } from "../../src/server/deviceToolsShutdown";
 
 // #11548: boot and shutdown timeouts are the retryable `timeout`, the same on the MCP result and
 // the socket frame as provisionDevice's.
 test("boot and shutdown timeouts agree on the socket frame and the MCP result", () => {
-  const errors = [new DeviceBootTimeoutError("startDevice", "starting the device", 5, 10, "Pixel 8")];
+  const device = { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" } as const;
+  const errors = [
+    new DeviceBootTimeoutError("startDevice", "starting the device", 5, 10, "Pixel 8"),
+    shutdownTimeoutError(device, "still listed"),
+  ];
   for (const error of errors) {
     expect(mcpRequestFailureDetails(error, undefined)).toEqual({
       code: "timeout",

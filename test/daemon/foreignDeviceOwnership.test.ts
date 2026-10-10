@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import {
   adbServerScope,
   DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS,
+  DEVICE_OWNER_UNANSWERED_LAPSE_MS,
   deviceAllocationClaimPath,
   ForwardLeaseForeignDeviceOwnership,
   type DeviceOwnershipFileSource,
@@ -146,6 +147,105 @@ describe("ForwardLeaseForeignDeviceOwnership", () => {
     files.files.set("/leases/d.lock", { pid: FOREIGN_PID, token: "t", metadata: metadata("/s") });
     probe.reports.set("/s", { kind: "no-response", detail: "timeout" });
     expect(await ownerOf("d")).toBe(FOREIGN_PID);
+  });
+
+  describe("a wedged-but-alive owner (#11349)", () => {
+    const SWEEP_MS = 30_000;
+    const noResponse: ForwardLeaseOwnerReport = { kind: "no-response", detail: "timeout" };
+
+    /** A peer holding the device's lease and claim whose socket accepts but never answers. */
+    function wedgedPeer() {
+      const h = harness();
+      const lock = { pid: FOREIGN_PID, token: "t", metadata: metadata("/s") };
+      h.files.files.set("/leases/d.lock", lock);
+      h.files.files.set("/claims/d.lock", lock);
+      h.probe.reports.set("/s", noResponse);
+      /** Sweep every {@link SWEEP_MS} until `ms` have passed; the owner seen by the last sweep. */
+      const sweepFor = async (ms: number) => {
+        let owner = await h.ownerOf("d");
+        for (let elapsed = 0; elapsed < ms; elapsed += SWEEP_MS) {
+          h.timer.advanceTime(SWEEP_MS);
+          owner = await h.ownerOf("d");
+        }
+        return owner;
+      };
+      return { ...h, sweepFor };
+    }
+
+    const lapseWarnings = (warn: { mock: { calls: unknown[][] } }) =>
+      warn.mock.calls.map((call) => String(call[0])).filter((line) => line.includes("lapsed"));
+
+    test("still holds after 4 minutes of no answers, and has lapsed at 5 minutes plus one sweep, with one warning", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const { sweepFor, ownerOf, timer } = wedgedPeer();
+
+        expect(await sweepFor(4 * 60_000)).toBe(FOREIGN_PID);
+        expect(lapseWarnings(warn)).toEqual([]);
+
+        // Up to just short of the lapse window, then one more sweep.
+        expect(await sweepFor(60_000 - SWEEP_MS)).toBe(FOREIGN_PID);
+        expect(DEVICE_OWNER_UNANSWERED_LAPSE_MS).toBe(5 * 60_000);
+        timer.advanceTime(SWEEP_MS);
+        expect(await ownerOf("d")).toBeUndefined();
+
+        // Later sweeps keep the device free without repeating the warning.
+        expect(await sweepFor(2 * SWEEP_MS)).toBeUndefined();
+        const warnings = lapseWarnings(warn);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain(`PID ${FOREIGN_PID}`);
+        expect(warnings[0]).toContain(" of d ");
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("its lapsed claim can be taken over", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const { sweepFor, ownership, files } = wedgedPeer();
+        expect(await ownership.claim("d")).toBe(false);
+
+        await sweepFor(DEVICE_OWNER_UNANSWERED_LAPSE_MS);
+
+        expect(await ownership.claim("d")).toBe(true);
+        expect(files.files.get("/claims/d.lock")?.pid).toBe(SELF_PID);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("any answer ends the run: a busy owner that answers in between keeps the device", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const { sweepFor, probe, ownerOf } = wedgedPeer();
+        expect(await sweepFor(4 * 60_000)).toBe(FOREIGN_PID);
+
+        probe.reports.set("/s", status(FOREIGN_PID, "session"));
+        expect(await ownerOf("d")).toBe(FOREIGN_PID);
+
+        probe.reports.set("/s", noResponse);
+        expect(await sweepFor(4 * 60_000)).toBe(FOREIGN_PID);
+        expect(lapseWarnings(warn)).toEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("time the host spent suspended is not unanswered time", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const { ownerOf, timer } = wedgedPeer();
+        expect(await ownerOf("d")).toBe(FOREIGN_PID);
+
+        timer.simulateHostSleep(2 * DEVICE_OWNER_UNANSWERED_LAPSE_MS);
+
+        expect(await ownerOf("d")).toBe(FOREIGN_PID);
+        expect(lapseWarnings(warn)).toEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 
   test("a reused PID whose recorded socket is unreachable does not own the device", async () => {

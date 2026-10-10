@@ -115,6 +115,14 @@ export interface DeviceOwnershipFileSource {
  */
 export const DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS = 60_000;
 
+/**
+ * How long a live owner may keep accepting connections on its control socket without answering
+ * before its claims and leases lapse (#11349, owner decision 2026-10-10). One unanswered request
+ * means a busy owner; an unbroken run of them this long means a wedged one, which would otherwise
+ * hold its devices for as long as its process lives.
+ */
+export const DEVICE_OWNER_UNANSWERED_LAPSE_MS = 5 * 60_000;
+
 /** Directory of device allocation claims, one lock per device, under each ADB server's scope. */
 export const DEVICE_ALLOCATION_CLAIM_SUBDIR = "device-allocations";
 
@@ -306,13 +314,16 @@ export const iosDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
  * detects an orphaned lease (#10497): an unreachable socket, or one now served by a different
  * PID, means the owner is gone. A claim also lapses once its owner reports no session and no
  * running tool call on the device. An owner that records no socket (an older build) keeps the
- * live-PID check.
+ * live-PID check. An owner whose socket accepts but never answers keeps its devices while that
+ * could be a busy moment, and loses them after {@link DEVICE_OWNER_UNANSWERED_LAPSE_MS} of it.
  */
 export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnership {
   private readonly owners = new Map<string, number>();
   private readonly unreadable = new Set<string>();
   /** Device -> control socket of an idle holder whose lease was its only foreign ownership. */
   private readonly idleLeaseHolders = new Map<string, string>();
+  /** Owner PID -> its current run of unanswered status requests, cleared by any answer. */
+  private readonly unanswered = new Map<number, { since: number; warnedDevices: Set<string> }>();
   private readonly ownerToken = defaultIdGenerator.next();
 
   constructor(
@@ -507,6 +518,9 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       return { pid };
     }
     const report = await this.probe.query(metadata.socketPath, deviceId);
+    if (this.wedgedOwnerLapsed(report, pid, deviceId, kind)) {
+      return undefined;
+    }
     const startingUp =
       kind === "claim" &&
       this.timer.now() - metadata.acquiredAt < DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS;
@@ -526,9 +540,44 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       return undefined;
     }
     if (!this.source.isProcessRunning(pid)) {
+      this.unanswered.delete(pid);
       return undefined;
     }
     return { pid, metadata: decodeForwardLeaseOwnerMetadata(content?.metadata) };
+  }
+
+  /**
+   * Whether owner `pid` has now gone unanswered for {@link DEVICE_OWNER_UNANSWERED_LAPSE_MS}: it
+   * is alive but wedged, and its hold on `deviceId` has lapsed (#11349). Any answer ends the run.
+   * Warns once per device until the owner answers again.
+   */
+  private wedgedOwnerLapsed(
+    report: ForwardLeaseOwnerReport,
+    pid: number,
+    deviceId: string,
+    kind: "lease" | "claim",
+  ): boolean {
+    if (report.kind !== "no-response") {
+      this.unanswered.delete(pid);
+      return false;
+    }
+    // Monotonic where available: a wall-clock step or a host suspend is not unanswered time.
+    const now = this.timer.monotonicNow?.() ?? this.timer.now();
+    const streak = this.unanswered.get(pid) ?? { since: now, warnedDevices: new Set<string>() };
+    this.unanswered.set(pid, streak);
+    const unansweredForMs = now - streak.since;
+    if (unansweredForMs < DEVICE_OWNER_UNANSWERED_LAPSE_MS) {
+      return false;
+    }
+    if (!streak.warnedDevices.has(deviceId)) {
+      streak.warnedDevices.add(deviceId);
+      logger.warn(
+        `[DevicePool] ${kind} owner PID ${pid} of ${deviceId} is alive but has not answered on its ` +
+          `control socket for ${Math.round(unansweredForMs / 1000)}s; treating its hold on the ` +
+          "device as lapsed",
+      );
+    }
+    return true;
   }
 }
 
@@ -571,7 +620,8 @@ function ownerStillHolds(
       return false;
     case "no-response":
     case "unsupported":
-      // A busy or older owner cannot report its use; keep treating the device as its own.
+      // A busy or older owner cannot report its use; keep treating the device as its own. An
+      // owner unanswered for DEVICE_OWNER_UNANSWERED_LAPSE_MS never reaches here.
       return true;
     case "status":
       if (report.status.pid !== pid) {

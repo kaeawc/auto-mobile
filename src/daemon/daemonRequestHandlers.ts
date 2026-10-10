@@ -150,6 +150,8 @@ export interface DaemonStateAccess {
     getStats(): DevicePoolStats;
     releaseDevice(deviceId: string, expectedSessionId: string): Promise<void>;
     getAllDevices?(): PooledDevice[];
+    /** The pooled device, whose `sessionId` is set as soon as a session is assigned it. */
+    getDevice?(deviceId: string): PooledDevice | null;
     isPooledIdentityUnresolved?(deviceId: string): boolean;
     getRecoveryPolicy?(): DeviceRecoveryPolicy;
     getDeviceHealthMarker?(deviceId: string): DeviceHealthMarker | undefined;
@@ -1056,6 +1058,24 @@ async function handleListDeviceSessions(
 }
 
 /**
+ * The session that holds a device here, for a lease-status or relinquish answer. A device the pool
+ * assigned (and claimed) is in use even before its session is published to the session manager,
+ * which happens only after the session row persists (#11158): answering "no session" in that
+ * window would let a peer take over the allocation claim and assign the same device.
+ */
+function deviceLeaseActivitySourcesFor(state: DaemonStateAccess): DeviceLeaseActivitySources {
+  const override = state.getDeviceLeaseActivitySources?.();
+  if (override) {
+    return override;
+  }
+  const manager = state.getSessionManager();
+  const pool = state.getDevicePool();
+  return daemonDeviceLeaseActivitySources(
+    (id) => manager.getSessionForDevice?.(id) ?? pool.getDevice?.(id)?.sessionId ?? null,
+  );
+}
+
+/**
  * Report whether this daemon still uses a device, so another AutoMobile process
  * can decide whether to take over its CtrlProxy forwarding lease (#10497).
  */
@@ -1071,10 +1091,7 @@ async function handleDeviceLeaseStatus(
     };
   }
   const { deviceId } = parsed.data;
-  const manager = state.getSessionManager();
-  const sources =
-    state.getDeviceLeaseActivitySources?.() ??
-    daemonDeviceLeaseActivitySources((id) => manager.getSessionForDevice?.(id) ?? null);
+  const sources = deviceLeaseActivitySourcesFor(state);
   return {
     success: true,
     result: {
@@ -1104,10 +1121,7 @@ async function handleRelinquishDeviceLease(
     };
   }
   const { deviceId } = parsed.data;
-  const manager = state.getSessionManager();
-  const sources =
-    state.getDeviceLeaseActivitySources?.() ??
-    daemonDeviceLeaseActivitySources((id) => manager.getSessionForDevice?.(id) ?? null);
+  const sources = deviceLeaseActivitySourcesFor(state);
   const port = state.getDeviceLeaseRelinquishPort?.() ?? daemonDeviceLeaseRelinquishPort();
   const status = { pid: process.pid, deviceId, ...readDeviceLeaseActivity(sources, deviceId) };
   const decision = decideOwnerRelinquish(status, port.idleMs);

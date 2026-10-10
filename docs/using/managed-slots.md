@@ -295,7 +295,10 @@ The registry tracks each scope as `valid`, `invalidating` or `invalidated`
   execution owner, nor a slot still inside the cap: those report `pending`, and
   the scope's `forceRefusals` says why and how long remains (`remainingMs`) before
   `--force` will apply. A `settling` slot with no open release entry is reported
-  the same way. The stuck work may keep running after an abandon.
+  the same way. The stuck work may keep running after an abandon. An owner record
+  whose session has ended (its clear failed against a busy registry) is not a live
+  owner: the daemon clears it when the slot settles, and `--force` does not yield
+  to it.
 
   `--runner-namespace` and `--incarnation` are required; `--managed-host-scope`
   narrows to one host scope; `--wait-ms` is the bounded settle wait (integer 0 to

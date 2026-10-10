@@ -37,11 +37,13 @@ import {
   releaseSessionAndDevice,
   type SessionReleasePool,
 } from "../releaseSessionAndDevice";
-import { currentSlotOwnerProcess } from "./slotOwnerLiveness";
+import { currentSlotOwnerProcess, defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
 import type { SlotJournalInFlight } from "./slotJournal";
 import type {
   SlotAssignmentRecord,
   SlotAssignmentState,
+  SlotExecOwner,
+  SlotExecOwnerLiveness,
   SlotKey,
   SlotPlatform,
   SlotProcessIdentity,
@@ -177,6 +179,12 @@ export interface ManagedExecutionReleaseOptions {
   /** This daemon, recorded as the settler of slots it marks `settling`. Default: this process. */
   settler?: SlotProcessIdentity;
   journal?: ManagedExecutionReleaseJournal;
+  /**
+   * Judges an owner record left on a slot this drain marked `settling` (#11545): pass the
+   * registry's own predicate, so the watcher and the registry agree. Default: PID plus process
+   * start identity, under which a record this daemon wrote always reads live and is never cleared.
+   */
+  isExecOwnerLive?: SlotExecOwnerLiveness;
 }
 
 interface MarkedSlot {
@@ -199,8 +207,10 @@ export class ManagedExecutionRelease {
   private readonly background = new Set<Promise<void>>();
   private closed = false;
   private settler: SlotProcessIdentity | undefined;
+  private readonly isExecOwnerLive: SlotExecOwnerLiveness;
 
   constructor(private readonly options: ManagedExecutionReleaseOptions) {
+    this.isExecOwnerLive = options.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
     this.drainBudgetMs = options.drainBudgetMs ?? MANAGED_EXECUTION_DRAIN_BUDGET_MS;
     this.releaseBudgetMs = options.releaseBudgetMs ?? MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS;
     this.settlementPollMs = options.settlementPollMs ?? MANAGED_EXECUTION_SETTLEMENT_POLL_MS;
@@ -556,8 +566,8 @@ export class ManagedExecutionRelease {
 
   /**
    * Return each marked slot to `ready` once the session's work and the device's teardown settle.
-   * Only a slot still at the marked binding, still `settling` and unowned is touched, so a
-   * newer binding or execution is never disturbed.
+   * Only a slot still at the marked binding, still `settling` and without a live owner is
+   * touched, so a newer binding or execution is never disturbed.
    */
   private async settleLater(
     registry: ManagedExecutionSlotRegistry,
@@ -598,7 +608,7 @@ export class ManagedExecutionRelease {
         current.state !== "settling" ||
         current.generation !== slot.generation ||
         current.stableDeviceId !== slot.stableDeviceId ||
-        current.execOwner !== null
+        !(await this.clearLeftoverOwner(registry, slot, current.execOwner))
       ) {
         await this.closeSupersededEntry(registry, slot, current);
         return;
@@ -617,6 +627,37 @@ export class ManagedExecutionRelease {
         error,
       );
     }
+  }
+
+  /**
+   * The owner record still on a settled slot at its marked binding (#11545). A `settling` slot
+   * accepts no claim, so the record predates the mark: it is the released session's own, left by
+   * an owner clear that failed (a busy registry). Dead by liveness, the clear is retried and the
+   * slot may return to `ready` either way, where a dead record pins nothing (#11339). A live owner
+   * is never cleared. Resolves to whether the slot may be restored.
+   */
+  private async clearLeftoverOwner(
+    registry: ManagedExecutionSlotRegistry,
+    slot: MarkedSlot,
+    owner: SlotExecOwner | null,
+  ): Promise<boolean> {
+    if (owner === null) {
+      return true;
+    }
+    if (this.isExecOwnerLive(owner)) {
+      return false;
+    }
+    try {
+      await registry.releaseExecution(slot.key, owner.sessionUuid);
+    } catch (error) {
+      logger.warn(
+        `[ManagedExecutionRelease] Retrying the owner clear of slot ${slot.key.scopeKey}/` +
+          `${slot.key.slotIndex} for ended session ${owner.sessionUuid} failed; the dead record ` +
+          `stays and the slot still returns to ready: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    return true;
   }
 
   /** Return a settled slot to `ready`, closing its release journal entry in the same transaction. */
@@ -640,8 +681,8 @@ export class ManagedExecutionRelease {
 
   /**
    * The slot moved on before settlement: close its release entry (rolled back when the binding
-   * changed, committed when something else already restored it). A slot that gained an execution
-   * owner meanwhile keeps its entry open for redrive.
+   * changed, committed when something else already restored it). A slot with a live execution
+   * owner keeps its entry open for redrive; a dead owner record holds nothing open (#11545).
    */
   private async closeSupersededEntry(
     registry: ManagedExecutionSlotRegistry,
@@ -649,7 +690,8 @@ export class ManagedExecutionRelease {
     current: SlotAssignmentRecord | null,
   ): Promise<void> {
     const journal = this.options.journal;
-    if (!journal || slot.journalEntryId === undefined || current?.execOwner) {
+    const owner = current?.execOwner ?? null;
+    if (!journal || slot.journalEntryId === undefined || (owner && this.isExecOwnerLive(owner))) {
       return;
     }
     const rebound =

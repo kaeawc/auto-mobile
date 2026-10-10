@@ -18,9 +18,11 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
 import { MANAGED_EXECUTION_SETTLEMENT_CAP_MS } from "./managedExecutionRelease";
+import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
 import type {
   CompleteScopeInvalidationResult,
   SlotAssignmentRecord,
+  SlotExecOwnerLiveness,
   SlotJournalEntry,
   SlotPlatform,
   SlotRegistry,
@@ -138,13 +140,20 @@ export interface SlotScopeResetOptions {
   pollMs?: number;
   /** Age of a release after which its settlement counts as stuck. Default: the watcher's cap. */
   settlementCapMs?: number;
+  /**
+   * Judges a `settling` slot's owner record for `--force` (#11545): pass the registry's own
+   * predicate, so the reset and the registry agree. Default: PID plus process start identity.
+   */
+  isExecOwnerLive?: SlotExecOwnerLiveness;
 }
 
 export class SlotScopeReset {
   private readonly pollMs: number;
   private readonly settlementCapMs: number;
+  private readonly isExecOwnerLive: SlotExecOwnerLiveness;
 
   constructor(private readonly options: SlotScopeResetOptions) {
+    this.isExecOwnerLive = options.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
     this.pollMs = options.pollMs ?? SLOT_SCOPE_RESET_POLL_MS;
     this.settlementCapMs = options.settlementCapMs ?? MANAGED_EXECUTION_SETTLEMENT_CAP_MS;
   }
@@ -246,10 +255,10 @@ export class SlotScopeReset {
   }
 
   /**
-   * Return each unowned `settling` slot of the scope that is provably stuck to `ready`, committing
+   * Return each `settling` slot of the scope with no live owner that is provably stuck to `ready`, committing
    * its release journal entry in the same transaction (the existing journal API, never by hand).
    * Stuck means the release outlived the settlement cap, the watcher's own "past cap" state
-   * (#11539). A slot with an execution owner is left for the normal wait; every other slot left
+   * (#11539). A slot with a live execution owner is left for the normal wait; every other slot left
    * alone is returned as a typed refusal saying why and what to do.
    */
   private async abandonSettlement(
@@ -257,7 +266,8 @@ export class SlotScopeReset {
     scope: SlotScopeRecord,
   ): Promise<SlotScopeResetForceRefusal[]> {
     const slots = (await registry.listAssignments(scope.scopeKey)).filter(
-      (slot) => slot.state === "settling" && slot.execOwner === null,
+      // An owner record dead by liveness (its clear failed) is not an execution in use (#11545).
+      (slot) => slot.state === "settling" && !this.hasLiveOwner(slot),
     );
     const refusals: SlotScopeResetForceRefusal[] = [];
     for (const slot of slots) {
@@ -330,6 +340,10 @@ export class SlotScopeReset {
       }
     }
     return refusals;
+  }
+
+  private hasLiveOwner(slot: SlotAssignmentRecord): boolean {
+    return slot.execOwner !== null && this.isExecOwnerLive(slot.execOwner);
   }
 }
 

@@ -1057,8 +1057,9 @@ async function resolveShowDisplay(
 }
 
 /**
- * Display resolution, then window-option support, then anchor resolution: any refusal ends the call
- * unsent. An in-place show stays on [show.shownDisplayId], so anchors are checked against that.
+ * Display resolution, then the theme-modes refusal, then window-option support and the app-layer
+ * grant (a device side effect, so refusals that need no grant come first), then anchor resolution:
+ * any refusal ends the call unsent. An in-place show stays on [show.shownDisplayId], so anchors are checked against that.
  */
 async function preflightMutation(
   show: { inPlace: boolean; shownDisplayId?: number },
@@ -1076,8 +1077,8 @@ async function preflightMutation(
     return resolved;
   }
   const failure =
-    (await prepareWindowOptions(target, device, args, dependencies, signal)) ??
-    (await themeModesRefusal(target, args, signal));
+    (await themeModesRefusal(target, args, signal)) ??
+    (await prepareWindowOptions(target, device, args, dependencies, signal));
   if (failure) {
     return { displayId: resolved.displayId, failure };
   }

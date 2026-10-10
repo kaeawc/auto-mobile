@@ -335,6 +335,22 @@ class PrototypeRuntime(
     )
   }
 
+  /**
+   * The resolved light or dark mode changed while shown. The controller decides when; this only
+   * allocates the next sequence and sends the event, like every other one.
+   */
+  internal suspend fun appearanceChanged(appearance: PrototypeAppearance) {
+    if (!current.active) return
+    emit(
+      PrototypeEventKind.APPEARANCE_CHANGED,
+      payload =
+        buildJsonObject {
+          put("mode", runtimeJson.encodeToJsonElement(appearance.mode))
+          put("source", runtimeJson.encodeToJsonElement(appearance.source))
+        },
+    )
+  }
+
   private suspend fun emit(
     kind: PrototypeEventKind,
     name: String? = null,

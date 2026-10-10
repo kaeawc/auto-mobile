@@ -2,6 +2,7 @@ import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
 import type { PrototypeScope, PrototypeStatusStore } from "./PrototypeStatusStore";
 import {
   PrototypeEventBuffer,
+  type DeliverablePrototypeEvent,
   type PrototypeEventCounts,
   type PrototypeEventFilter,
 } from "./PrototypeEventBuffer";
@@ -24,7 +25,7 @@ export interface PrototypeEventTelemetry {
   recordPrototypeEvent(scope: PrototypeScope, event: PrototypeEvent): void;
 }
 export interface PrototypeAwaitResult extends PrototypeEventCounts {
-  event?: Omit<PrototypeEvent, "type">;
+  event?: Omit<DeliverablePrototypeEvent, "type">;
   timedOut?: true;
   reason?: "dismissed";
 }
@@ -222,6 +223,8 @@ export class PrototypeEventCoordinator {
     const entry = Array.from(this.entries.values()).find(
       (known) => known.scope.deviceId === deviceId && known.id === event.id,
     );
+    // A duplicate is not buffered, and neither is a kind this host does not know: the buffer only
+    // advances its sequence for that one, so it is not recorded, counted or handed to a waiter.
     if (!entry || entry.terminal || !entry.buffer.push(event)) {
       return;
     }

@@ -55,6 +55,8 @@ final class PrototypeAgent {
     private var sceneObserver: NSObjectProtocol?
     private var keyboardObservers: [NSObjectProtocol] = []
     private var sessionObserver: AnyCancellable?
+    /// Keeps the scene's appearance observation alive; the window, once attached, is never removed.
+    private var appearanceObservation: (any UITraitChangeRegistration)?
     /// App windows' own `accessibilityElementsHidden` while the prototype covers them.
     private var hiddenBeforeCovering: [ObjectIdentifier: Bool] = [:]
     /// The flags last applied, so an unrelated state change posts no accessibility notification.
@@ -98,6 +100,7 @@ final class PrototypeAgent {
         // computed from the published value: a dialog opening or closing re-applies them.
         sessionObserver = model.$session.sink { [weak self] session in
             self?.updateAccessibility(session: session)
+            self?.applyInterfaceStyle(session: session)
         }
         observeKeyboard()
         server.start()
@@ -134,6 +137,25 @@ final class PrototypeAgent {
     private func activeScene() -> UIWindowScene? {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         return scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+    }
+
+    // MARK: Appearance
+
+    /// Reads the device's appearance into the model. It comes from the window scene: the prototype
+    /// window carries the resolved mode as its own override, so its traits no longer say what the
+    /// simulator is set to. Before any scene exists, the process-wide current traits stand in.
+    private func syncDeviceAppearance() {
+        let traits = (window?.windowScene ?? activeScene())?.traitCollection ?? UITraitCollection.current
+        model.setDeviceDark(traits.userInterfaceStyle == .dark)
+    }
+
+    /// Puts the resolved mode on the window's UIKit trait, so UIKit-backed pieces (a text field's
+    /// keyboard, dynamic `UIColor`s) match what SwiftUI draws. `session` is the published value,
+    /// which `model.session` does not hold yet while `$session` is publishing.
+    private func applyInterfaceStyle(session: PrototypeSession) {
+        guard let window, let appearance = session.appearance else { return }
+        let style: UIUserInterfaceStyle = appearance.dark ? .dark : .light
+        if window.overrideUserInterfaceStyle != style { window.overrideUserInterfaceStyle = style }
     }
 
     private func setVisible(_ visible: Bool) {
@@ -208,6 +230,17 @@ final class PrototypeAgent {
         model.safeInsets = window.safeAreaInsets
         model.windowOrigin = window.screenOrigin
         self.window = window
+        // A simulator appearance change re-resolves the shown prototype (#11222).
+        // The window is attached from the main queue, which is the isolation UIKit asks for here.
+        appearanceObservation = MainActor.assumeIsolated {
+            scene.registerForTraitChanges(
+                [UITraitUserInterfaceStyle.self]
+            ) { [weak self] (_: UIWindowScene, _: UITraitCollection) in
+                self?.syncDeviceAppearance()
+            }
+        }
+        syncDeviceAppearance()
+        applyInterfaceStyle(session: model.session)
     }
 
     // MARK: Protocol
@@ -252,13 +285,19 @@ final class PrototypeAgent {
                         "\(path): Element anchors must be resolved to bounds by the host; update the AutoMobile host"
                     )
                 }
-                model.show(spec, reset: message["reset"] as? Bool == true)
+                guard let appearance = PrototypeAppearanceOverride.parse(message["appearance"]) else {
+                    return result(false, "appearance: Expected device, light or dark")
+                }
+                // The show result reports the device's appearance, so read it before resolving.
+                syncDeviceAppearance()
+                model.show(spec, reset: message["reset"] as? Bool == true, appearance: appearance)
                 warnAboutFontAssets(for: spec)
                 warnAboutUnknownThemeColors(for: spec)
-                let missing = missingAssetsExtra()
+                var extra = missingAssetsExtra()
+                if let appearance = model.session.appearance { extra["appearance"] = appearance.wireObject }
                 // The host can leave before this queued show runs; nothing would remove it later.
                 if connectedClients == 0 { model.hostDisconnected() }
-                result(true, extra: missing)
+                result(true, extra: extra)
             // No update_prototype (#10550): a same-id show_prototype replaces the shown prototype.
             case "dismiss_prototype":
                 // Like Android's PrototypeController: an id that is not the shown prototype fails, and
@@ -463,11 +502,12 @@ private final class PrototypeLayersView: UIView {
 struct PrototypeRootView: View {
     @ObservedObject var model: PrototypeModel
     let layer: PrototypeHostLayer
-    @Environment(\.colorScheme) private var systemScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let palette = PrototypePalette.make(theme: model.spec?.theme, systemDark: systemScheme == .dark)
+        // The model's one resolved mode, not this window's `colorScheme`: the window carries that
+        // mode as its UIKit override, so its own scheme no longer says what the device is set to.
+        let palette = PrototypePalette.make(theme: model.spec?.theme, dark: model.dark)
         let chip = PrototypeHostChrome.closeChipColors(palette: palette)
         // An open dialog makes the page behind it inert for accessibility, as it is for touches
         // (#10899). VoiceOver honours this collapse; the XCUITest snapshot needs the UIKit flags

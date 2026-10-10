@@ -12,6 +12,7 @@ import {
   forceStuckSessionRelease,
   releaseSessionAndDevice,
 } from "./releaseSessionAndDevice";
+import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
 import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
@@ -44,7 +45,12 @@ import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "./sessionManager";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
-import { hasActiveSessionExecution, subscribeToolCallEndActivity } from "./toolCallActivity";
+import {
+  hasActiveSessionExecution,
+  latestSessionExecutionDeadlineMs,
+  sessionExecutionProbe,
+  subscribeToolCallEndActivity,
+} from "./toolCallActivity";
 import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
@@ -3082,9 +3088,15 @@ export class Daemon {
     this.sessionManager.startRehydratedOwnerWindows();
     this.heartbeatMonitor = new SessionHeartbeatMonitor(
       this.sessionManager,
-      this.sessionExecutionProbe(),
+      // Only control calls keep a stale session (#11322): a read admitted after the owner went
+      // quiet is answered, but it is not the owner's liveness and must not hold the device.
+      this.sessionExecutionProbe({ excludeReads: true }),
       async (sessionId, reason) => {
-        await this.cancelAndReleaseSession(sessionId, reason);
+        // A call still in flight (a read never keeps the session) learns why it was cancelled:
+        // the typed terminal refusal, not a generic abort (#11322).
+        await this.cancelAndReleaseSession(sessionId, reason, false, undefined, undefined, {
+          cancellation: new SessionReleasedDuringCallError(sessionId, reason),
+        });
       },
       this.timer,
       {
@@ -3181,12 +3193,8 @@ export class Daemon {
    * latest request deadline among them, which bounds the veto (#10712). The veto judges on the
    * session clock, so the deadlines are converted onto it (#11162).
    */
-  private sessionExecutionProbe(): SessionExecutionProbe {
-    return {
-      hasActiveExecutions: (sessionId) => this.hasActiveSessionExecution(sessionId),
-      latestExecutionDeadlineMs: (sessionId) =>
-        this.latestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true }),
-    };
+  private sessionExecutionProbe(options: { excludeReads?: boolean } = {}): SessionExecutionProbe {
+    return sessionExecutionProbe(executionTracker, this.sessionManager, this.devicePool, options);
   }
 
   /** Mirrors {@link hasActiveSessionExecution}; a recovery in flight carries no deadline. */
@@ -3194,15 +3202,13 @@ export class Daemon {
     sessionId: string,
     options: { onSessionClock?: boolean } = {},
   ): number | undefined {
-    if (this.devicePool.isSessionRecoveryInFlight(sessionId)) {
-      return Number.POSITIVE_INFINITY;
-    }
-    const executionSessionId =
-      resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
-    const deadlines = [...new Set([sessionId, executionSessionId])]
-      .map((id) => executionTracker.getLatestSessionExecutionDeadlineMs(id, options))
-      .filter((deadline): deadline is number => deadline !== undefined);
-    return deadlines.length === 0 ? undefined : Math.max(...deadlines);
+    return latestSessionExecutionDeadlineMs(
+      executionTracker,
+      this.sessionManager,
+      this.devicePool,
+      sessionId,
+      options,
+    );
   }
 
   /**
@@ -4252,9 +4258,10 @@ export class Daemon {
     allowExpired: boolean = false,
     expectedSession?: Session,
     shouldCommit?: () => boolean,
-    options?: { deferFailureFallback?: boolean },
+    options?: { deferFailureFallback?: boolean; cancellation?: Error },
   ): Promise<boolean> {
-    return cancelExecutionsAndReleaseSession(sessionId, releaseReason, async (cancelled) => {
+    const cancelWith = options?.cancellation ?? releaseReason;
+    return cancelExecutionsAndReleaseSession(sessionId, cancelWith, async (cancelled) => {
       // Early identity fence: discovery can replace a same-serial runtime while
       // execution cancellation is in flight. It is not the final one — the
       // session manager re-evaluates `shouldCommit` immediately before it
@@ -4277,7 +4284,7 @@ export class Daemon {
         sessionId,
         releaseReason,
         {
-          ...options,
+          deferFailureFallback: options?.deferFailureFallback,
           release: async () => {
             if (expectedSession) {
               deviceId = await this.sessionManager.releaseSessionIfOwned(

@@ -786,6 +786,8 @@ type SessionClockExecution = SessionExecutionMetadata & { sessionClockStartTime:
 export interface ActiveSessionExecutionQuery {
   startedAtOrBefore?: number;
   excludeExecutionId?: string;
+  /** Count control calls only: a read never counts as its session owner's liveness (#11322). */
+  excludeReads?: boolean;
 }
 
 export type ActiveSessionExecutionChecker = (
@@ -911,6 +913,23 @@ export interface SessionDeviceAssigner {
     platform?: Platform,
     recoveryTarget?: SessionRecoveryTarget,
   ): Promise<string>;
+  /**
+   * Hold each row's device for that row while restart recovery works through the rows (#11294).
+   * The assigner must exempt a row's own recovery from its reservation, and may decline a device
+   * (one a managed slot holds). Optional: an assigner without it recovers rows unreserved.
+   */
+  reserveDevicesForRehydration?(rows: readonly RehydrationDeviceReservation[]): Promise<void>;
+  /** Give up the reservation made for `sessionId`; a no-op when there is none. */
+  releaseRehydrationReservation?(sessionId: string): void;
+}
+
+/** The device a persisted row will be recovered onto, held for that row's session id (#11294). */
+export interface RehydrationDeviceReservation {
+  sessionId: string;
+  target: Pick<
+    SessionRecoveryTarget,
+    "platform" | "stableDeviceId" | "deviceId" | "androidEmulator"
+  >;
 }
 
 type SessionAccess = "acquire" | "read-only";
@@ -1213,6 +1232,24 @@ type RehydrationRowOutcome =
   | { kind: "skipped"; reason: string };
 
 export class UnissuedSessionError extends ActionableError {}
+
+/**
+ * The durable device identity a persisted row can be recovered onto, or undefined when the row
+ * recorded none. iOS device_id has always been the simulator's immutable UDID. Android's emulator
+ * device_id and TCP/mDNS transport addresses cannot prove continuity; a physical handset serial
+ * is its durable identity.
+ */
+function persistedStableDeviceId(persisted: DeviceSession): string | undefined {
+  const recorded =
+    persisted.stable_device_id ??
+    (persisted.platform === "ios" ||
+    (persisted.platform === "android" &&
+      !isAndroidEmulatorSerial(persisted.device_id) &&
+      !isAndroidTransportAddressSerial(persisted.device_id))
+      ? persisted.device_id
+      : undefined);
+  return recorded || undefined;
+}
 
 /**
  * Synchronous commit predicate for a conditional release. Returning `false`
@@ -2980,7 +3017,7 @@ export class SessionManager {
       logger.info(
         `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
       );
-      this.assertSessionNotSuspect(existing);
+      this.assertSessionNotSuspect(existing, access);
       await this.refuseControlCallOnLapsedOwnerLease(existing, access, execution);
       await this.refreshExistingSessionForAccess(existing, access);
       return existing;
@@ -3243,7 +3280,8 @@ export class SessionManager {
         // acquisition semantics promote awaiting-owner to owned.
         const observed = this.getSessionInternal(sessionId, true, execution, false);
         if (observed) {
-          this.assertSessionNotSuspect(observed);
+          // Answered in every lease phase (#11322): a read is never refused, and never restores
+          // or extends the lease it is watching.
           return observed;
         }
         if (this.sessions.has(sessionId)) {
@@ -3643,6 +3681,7 @@ export class SessionManager {
     const persistedSessions = (
       await this.listRecoverableSessionsBeforeDeadline(deadlineAt, summary)
     ).map((persisted) => this.withRecoveredTerminalRelease(persisted));
+    await this.reserveDevicesForRehydration(persistedSessions, devicePool, deadlineAt);
     // Rows recover concurrently, so one slow row (an unresolved emulator waiting out its restart
     // grace) no longer holds every later row past the deadline (#11114).
     const outcomes: Array<RehydrationRowOutcome | undefined> = [];
@@ -3652,6 +3691,9 @@ export class SessionManager {
       while (!deadlineReached && nextIndex < persistedSessions.length) {
         const index = nextIndex++;
         const outcome = await this.rehydratePersistedRow(persistedSessions[index], devicePool);
+        // However the row ended, its device is no longer held for it: a recovered session holds
+        // the device itself, and a failed row gives it back at once (#11294).
+        this.releaseRehydrationReservation(persistedSessions[index].session_uuid, devicePool);
         if (deadlineReached) {
           this.logLateRehydrationOutcome(persistedSessions[index].session_uuid, outcome);
         } else {
@@ -3682,6 +3724,10 @@ export class SessionManager {
     // Rows the deadline kept from starting are recovered by a follow-up sweep, not abandoned.
     const unstarted = persistedSessions.slice(nextIndex);
     nextIndex = persistedSessions.length;
+    // They no longer hold their devices: the deadline passed without them starting (#11294).
+    for (const persisted of unstarted) {
+      this.releaseRehydrationReservation(persisted.session_uuid, devicePool);
+    }
     for (const [index, persisted] of persistedSessions.entries()) {
       this.recordRehydrationOutcome(summary, persisted, outcomes[index]);
     }
@@ -3700,6 +3746,84 @@ export class SessionManager {
         `${summary.terminalized.length} terminalized, ${summary.skipped.length} skipped`,
     );
     return summary;
+  }
+
+  /**
+   * Reserve every row's device before any row starts recovering (#11294): rows recover a few at
+   * a time, and an allocation arriving meanwhile must not take a device a later row is about to
+   * recover onto. A row with no durable device identity reserves nothing; its recovery reports
+   * that. Bounded by the startup deadline, and never fatal: rows then recover unreserved.
+   */
+  private async reserveDevicesForRehydration(
+    persistedSessions: readonly DeviceSession[],
+    devicePool: SessionDeviceAssigner,
+    deadlineAt: number,
+  ): Promise<void> {
+    const reserve = devicePool.reserveDevicesForRehydration?.bind(devicePool);
+    const rows = persistedSessions.flatMap((persisted): RehydrationDeviceReservation[] => {
+      const stableDeviceId = persistedStableDeviceId(persisted);
+      if (
+        stableDeviceId === undefined ||
+        !this.isRecoverablePersistedSession(persisted) ||
+        this.rehydrationSkipReason(persisted.session_uuid) !== undefined
+      ) {
+        return [];
+      }
+      return [
+        {
+          sessionId: persisted.session_uuid,
+          target: {
+            platform: persisted.platform,
+            stableDeviceId,
+            deviceId: persisted.device_id,
+            ...(persisted.platform === "android"
+              ? { androidEmulator: isAndroidEmulatorSerial(persisted.device_id) }
+              : {}),
+          },
+        },
+      ];
+    });
+    if (!reserve || rows.length === 0 || this.sessionNow() >= deadlineAt) {
+      return;
+    }
+    const reservation = reserve(rows);
+    try {
+      await raceWithDeadline(reservation, {
+        timer: this.timer,
+        timeoutMs: Math.max(0, deadlineAt - this.sessionNow()),
+        label: "Session rehydration device reservation",
+      });
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Could not reserve devices for rehydration: ${errorMessage(error)}`,
+        error,
+      );
+      // A reservation that lands after the deadline must not outlive the rows it was made for.
+      const releaseAll = (): void => {
+        for (const row of rows) {
+          devicePool.releaseRehydrationReservation?.(row.sessionId);
+        }
+      };
+      releaseAll();
+      void reservation.then(releaseAll, () => undefined);
+    }
+  }
+
+  /**
+   * Give up a row's reservation (#11294). A row its owner is recovering on demand right now keeps
+   * the device until that recovery settles; it is the same row, so the reservation exempts it.
+   */
+  private releaseRehydrationReservation(
+    sessionId: string,
+    devicePool: SessionDeviceAssigner,
+  ): void {
+    const release = (): void => devicePool.releaseRehydrationReservation?.(sessionId);
+    const pending = this.pendingSessionAssignments.get(sessionId);
+    if (pending) {
+      void pending.then(release, release);
+    } else {
+      release();
+    }
   }
 
   private recordRehydrationOutcome(
@@ -8083,9 +8207,13 @@ export class SessionManager {
     );
   }
 
-  /** Reject a tool call against a suspect session; only its owner's heartbeat restores it. */
-  private assertSessionNotSuspect(session: Session): void {
-    if (this.isSessionSuspect(session)) {
+  /**
+   * Reject a control call against a suspect session; only its owner's heartbeat restores it.
+   * Reads are never refused (#11322): they are answered in every lease phase, restore nothing,
+   * and never count as the owner's liveness.
+   */
+  private assertSessionNotSuspect(session: Session, access: SessionAccess): void {
+    if (access !== "read-only" && this.isSessionSuspect(session)) {
       const { remainingMs } = livenessLeaseState(
         sessionJudgedLeaseSnapshot(session, this.sessionNow()),
       );
@@ -8123,8 +8251,12 @@ export class SessionManager {
     if (access === "read-only" || !this.isOwnerLeaseLapsed(session)) {
       return;
     }
-    const query: ActiveSessionExecutionQuery =
-      execution === undefined ? {} : { excludeExecutionId: execution.executionId };
+    // Only a control call in flight keeps the session (#5343). A read admitted since the owner
+    // went quiet is watching, not use: it must not turn this refusal retryable (#11322).
+    const query: ActiveSessionExecutionQuery = {
+      excludeReads: true,
+      ...(execution === undefined ? {} : { excludeExecutionId: execution.executionId }),
+    };
     if (this.activeSessionExecutionChecker(session.sessionId, query)) {
       throw new SessionSuspectError(session.sessionId, 0);
     }
@@ -8806,17 +8938,7 @@ export class SessionManager {
     if (!persisted || !this.isRecoverablePersistedSession(persisted)) {
       return undefined;
     }
-    // iOS device_id has always been the simulator's immutable UDID. Android's
-    // emulator device_id and TCP/mDNS transport addresses cannot prove
-    // continuity; a physical handset serial is its durable identity.
-    const stableDeviceId =
-      persisted.stable_device_id ??
-      (persisted.platform === "ios" ||
-      (persisted.platform === "android" &&
-        !isAndroidEmulatorSerial(persisted.device_id) &&
-        !isAndroidTransportAddressSerial(persisted.device_id))
-        ? persisted.device_id
-        : undefined);
+    const stableDeviceId = persistedStableDeviceId(persisted);
     if (!stableDeviceId) {
       await this.terminalizePersistedRecoveryFailure(sessionId, persisted, {
         terminalReleaseReason: "identity-recovery-identity-continuity-lost",

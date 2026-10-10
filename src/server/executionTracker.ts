@@ -66,6 +66,12 @@ interface ActiveExecution {
    */
   deviceReadCall?: boolean;
   /**
+   * A device-aware control step ran under this execution (#11322 review): its own tool, or a
+   * nested one. It is use of the session whatever else the execution did, so the execution is
+   * never a read again.
+   */
+  deviceControlCall?: boolean;
+  /**
    * Reads the request's current absolute deadline (live: progress may extend it), on the
    * tracker's clock. Undefined when the call was admitted without a deadline (#10712).
    */
@@ -146,6 +152,42 @@ export interface ActiveExecutionQuery {
   excludeExecutionId?: string;
   /** Same session filter as {@link ExecutionCancellationOptions.onlySessionUuid}. */
   onlySessionUuid?: string;
+  /**
+   * Count control calls only (#11322): a read (an inventory read or a device read) watches the
+   * session, it is not use of it and never counts as its owner's liveness.
+   */
+  excludeReads?: boolean;
+}
+
+/** A call that only watches: an inventory read or a device read (#10964, #11107). */
+function isReadExecution(execution: ActiveExecution): boolean {
+  return (
+    execution.deviceControlCall !== true &&
+    (execution.readOnlySessionAccess === true || execution.deviceReadCall === true)
+  );
+}
+
+/** Whether `query` leaves this execution out by id or as a read ({@link ActiveExecutionQuery}). */
+function isExcludedByQuery(
+  executionId: string,
+  execution: ActiveExecution | undefined,
+  query: ActiveExecutionQuery | undefined,
+): boolean {
+  if (executionId === query?.excludeExecutionId) {
+    return true;
+  }
+  return query?.excludeReads === true && execution !== undefined && isReadExecution(execution);
+}
+
+/** Whether `query` filters nothing, so any tracked execution answers it. */
+function isUnfilteredQuery(query: ActiveExecutionQuery | undefined): boolean {
+  return (
+    query?.startedAtOrBefore === undefined &&
+    query?.excludeExecutionId === undefined &&
+    query?.onlyToolName === undefined &&
+    query?.onlySessionUuid === undefined &&
+    !query?.excludeReads
+  );
 }
 
 export type DaemonRestartAdmission = "accepted" | "active_operations" | "restart_pending";
@@ -405,7 +447,7 @@ export class ExecutionTracker {
    */
   getLatestSessionExecutionDeadlineMs(
     sessionUuid: string,
-    options: { onSessionClock?: boolean } = {},
+    options: { onSessionClock?: boolean; excludeReads?: boolean } = {},
   ): number | undefined {
     const executionIds = new Set([
       ...(this.sessionUuidExecutions.get(sessionUuid) ?? []),
@@ -414,7 +456,7 @@ export class ExecutionTracker {
     ]);
     const deadlines = [...executionIds].flatMap((executionId) => {
       const execution = this.executions.get(executionId);
-      if (!execution) {
+      if (!execution || (options.excludeReads && isReadExecution(execution))) {
         return [];
       }
       const deadline = execution.readDeadlineMs?.() ?? Number.POSITIVE_INFINITY;
@@ -488,11 +530,30 @@ export class ExecutionTracker {
     return cancelled;
   }
 
-  /** Mark an execution as a device read (`deviceReadOnly`), which does not use its session. */
-  markDeviceReadCall(executionId: string): void {
+  /**
+   * Mark an execution as a device read (`deviceReadOnly`), which does not use its session.
+   *
+   * `toolName` is the read being run. Nested device-aware calls (a plan's `observe` step, a
+   * control tool's internal read) run under their outer call's execution, so only a read that IS
+   * the execution's top-level call marks it: a nested read never downgrades the control call it
+   * runs inside, which must keep vetoing its session's release (#5343, #11322 review).
+   */
+  markDeviceReadCall(executionId: string, toolName: string): void {
+    const execution = this.executions.get(executionId);
+    if (execution && execution.toolName === toolName && !execution.deviceControlCall) {
+      execution.deviceReadCall = true;
+    }
+  }
+
+  /**
+   * Record that a device-aware control step ran under this execution, top-level or nested. A read
+   * that goes on to perform one is a control call from then on.
+   */
+  markDeviceControlCall(executionId: string): void {
     const execution = this.executions.get(executionId);
     if (execution) {
-      execution.deviceReadCall = true;
+      execution.deviceControlCall = true;
+      execution.deviceReadCall = false;
     }
   }
 
@@ -618,7 +679,7 @@ export class ExecutionTracker {
 
   async cancelSessionUuidExecutions(
     sessionUuid: string,
-    reason: string = "unspecified",
+    reason: ExecutionCancellationReason = "unspecified",
     options: ExecutionCancellationOptions = {},
   ): Promise<number> {
     return this.cancelExecutionsForKey(
@@ -849,7 +910,7 @@ export class ExecutionTracker {
       this.unresolvedAutolockExecutionIds(sessionUuid).some((executionId) => {
         const execution = this.executions.get(executionId);
         return (
-          executionId !== query?.excludeExecutionId &&
+          !isExcludedByQuery(executionId, execution, query) &&
           (query?.onlyToolName === undefined || execution?.toolName === query.onlyToolName) &&
           (query?.startedAtOrBefore === undefined ||
             (execution !== undefined && execution.startTime <= query.startedAtOrBefore))
@@ -939,19 +1000,14 @@ export class ExecutionTracker {
     if (!executions || executions.size === 0) {
       return false;
     }
-    if (
-      query?.startedAtOrBefore === undefined &&
-      query?.excludeExecutionId === undefined &&
-      query?.onlyToolName === undefined &&
-      query?.onlySessionUuid === undefined
-    ) {
+    if (isUnfilteredQuery(query)) {
       return true;
     }
     return Array.from(executions).some((executionId) => {
       const execution = this.executions.get(executionId);
       return (
         execution !== undefined &&
-        executionId !== query?.excludeExecutionId &&
+        !isExcludedByQuery(executionId, execution, query) &&
         (query?.onlyToolName === undefined || execution.toolName === query.onlyToolName) &&
         this.belongsToSessionFilter(execution, query?.onlySessionUuid) &&
         (query?.startedAtOrBefore === undefined || execution.startTime <= query.startedAtOrBefore)

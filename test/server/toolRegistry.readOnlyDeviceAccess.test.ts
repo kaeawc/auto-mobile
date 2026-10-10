@@ -34,7 +34,11 @@ import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { isSessionlessDeviceRead } from "../../src/features/toolSelection/toolSelectionContext";
+import {
+  isSessionlessDeviceRead,
+  runWithToolSelectionContext,
+} from "../../src/features/toolSelection/toolSelectionContext";
+import { executionTracker } from "../../src/server/executionTracker";
 import type { AppsQueryResourceContent } from "../../src/server/appResources";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../src/utils/debug";
@@ -56,6 +60,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   let reads: Array<{ deviceId: string; readPath: boolean; sessionUuid: unknown }>;
   let listed: number;
   let authorized: boolean;
+  /** Whether the fake audit runner also runs the audited tool's handler. */
+  let runAuditedHandlers: boolean;
   let originalDeviceSessionManager: unknown;
   let originalToolCallRepository: unknown;
   let originalNavigationRecorder: unknown;
@@ -85,6 +91,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     reads = [];
     listed = 0;
     authorized = true;
+    runAuditedHandlers = false;
     ToolRegistry.clearTools();
     const deviceReadAccess: DeviceObservationAccess = {
       listBooted: async () => {
@@ -99,7 +106,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       auditRunner: {
         async run(input: AuditRunnerInput) {
           audited.push({ name: input.name, deviceId: input.device.deviceId });
-          return { success: true };
+          return runAuditedHandlers ? input.handler(input.device, input.args) : { success: true };
         },
       },
       afterToolCall: {
@@ -268,6 +275,106 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
     expect((error as Error).message).toContain("observer-session");
     expect(audited).toEqual([]);
+  });
+
+  // #11322 review: nested device-aware calls run under their outer call's execution. A nested read
+  // must never reclassify the control call it runs inside as a read, or that call stops vetoing
+  // its session's release (#5343).
+  describe("which execution counts as a read for the release veto (#11322)", () => {
+    const controlOnly = { excludeReads: true };
+    let started: string[];
+
+    beforeEach(() => {
+      started = [];
+      runAuditedHandlers = true;
+      ToolRegistry.registerDeviceAware(
+        "controlProbe",
+        "Control probe",
+        z.object({}).passthrough(),
+        async (_device: BootedDevice, args: Record<string, unknown>) => {
+          if (args.thenRead) {
+            // A control tool's own internal read, as a post-action observation makes one.
+            await ToolRegistry.callInternal("readProbe", { sessionUuid: agent });
+          }
+          return { success: true };
+        },
+      );
+    });
+
+    afterEach(() => {
+      for (const id of started) {
+        executionTracker.endExecution(id);
+      }
+    });
+
+    /** Start a top-level call's execution and run `body` under it, as MCP ingress does. */
+    async function underExecution(toolName: string, body: () => Promise<unknown>): Promise<void> {
+      const execution = executionTracker.startExecution(toolName, undefined, agent);
+      started.push(execution.id);
+      await runWithToolSelectionContext(
+        { execution: { executionId: execution.id, startTime: execution.startTime } },
+        body,
+      );
+    }
+
+    const countsAsControl = () =>
+      executionTracker.hasActiveSessionUuidExecutions(agent, controlOnly);
+
+    test("a plan with a read step stays a control call", async () => {
+      await underExecution("executePlan", () =>
+        ToolRegistry.callInternal("readProbe", { sessionUuid: agent }, undefined, undefined, {
+          forPlan: true,
+        }),
+      );
+
+      expect(reads).toHaveLength(1);
+      expect(countsAsControl()).toBe(true);
+    });
+
+    test("a plan's failure observe leaves it a control call", async () => {
+      await underExecution("executePlan", async () => {
+        await ToolRegistry.callInternal(
+          "controlProbe",
+          { sessionUuid: agent },
+          undefined,
+          undefined,
+          {
+            forPlan: true,
+          },
+        );
+        // PlanStepExecutor's failure observe: an internal read with no plan options.
+        await ToolRegistry.callInternal("readProbe", { sessionUuid: agent });
+      });
+
+      expect(reads).toHaveLength(1);
+      expect(countsAsControl()).toBe(true);
+    });
+
+    test("a control tool that reads internally stays a control call", async () => {
+      await underExecution("controlProbe", () =>
+        call("controlProbe", { sessionUuid: agent, thenRead: true }),
+      );
+
+      expect(reads).toHaveLength(1);
+      expect(countsAsControl()).toBe(true);
+    });
+
+    test("a top-level read is still left out of the veto", async () => {
+      await underExecution("readProbe", () => call("readProbe", { sessionUuid: agent }));
+
+      expect(reads).toHaveLength(1);
+      expect(executionTracker.hasActiveSessionUuidExecutions(agent)).toBe(true);
+      expect(countsAsControl()).toBe(false);
+    });
+
+    test("a top-level read that goes on to a control step counts as control", async () => {
+      await underExecution("readProbe", async () => {
+        await call("readProbe", { sessionUuid: agent });
+        await ToolRegistry.callInternal("controlProbe", { sessionUuid: agent });
+      });
+
+      expect(countsAsControl()).toBe(true);
+    });
   });
 
   describe("registered read tools", () => {

@@ -337,6 +337,7 @@ import {
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import {
   sessionOwnershipLostPayload,
+  sessionReleasedDuringCallPayload,
   getActiveDeviceSelectionFromResult,
   getDeviceSessionIdFromResult,
   isDeviceSessionAcquisitionTool,
@@ -1753,6 +1754,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(sessionOwnershipLost) }],
+          isError: true,
+        };
+      }
+      // The heartbeat monitor released this call's session under it and cancelled the call
+      // (#11322): the same terminal refusal a call arriving after the release gets.
+      const releasedDuringCall = sessionReleasedDuringCallPayload(execution.cancelReason);
+      if (releasedDuringCall) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(releasedDuringCall) }],
           isError: true,
         };
       }

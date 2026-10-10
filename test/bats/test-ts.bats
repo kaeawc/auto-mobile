@@ -1,5 +1,9 @@
 #!/usr/bin/env bats
-# bats file_tags=serial
+# bats file_tags=parallel-within-file
+# Hermetic: every test relocates the shard scratch tree into BATS_TEST_TMPDIR
+# (AUTOMOBILE_TEST_TS_SCRATCH_DIR) and stubs bun/find, so nothing is written to
+# the real tree and this slowest file leads the cross-file parallel pass instead
+# of occupying the serial pass alone.
 
 SCRIPT="scripts/test-ts.sh"
 TIMING_SCRIPT="scripts/validate-bun-test-timings.sh"
@@ -56,6 +60,9 @@ setup() {
   # scripts/test-ts.sh resolves ROOT with pwd -P; a checkout reached through a
   # symlink (macOS /tmp -> /private/tmp) makes $PWD differ from what it prints.
   ROOT_PHYS="$(pwd -P)"
+  SHARD_SCRATCH="$BATS_TEST_TMPDIR/scratch"
+  export AUTOMOBILE_TEST_TS_SCRATCH_DIR="$SHARD_SCRATCH"
+  export AUTOMOBILE_TEST_TS_COVERAGE_DIR="$BATS_TEST_TMPDIR/coverage"
   # The lane derives its per-test timeout and worker count from the runner's
   # OS, so a macOS CI runner (RUNNER_OS=macOS: --timeout 20000) must not leak
   # into stubbed invocations; tests that need an OS set RUNNER_OS themselves.
@@ -697,7 +704,7 @@ bun_test_invocations() {
   [[ "$output" == *"test-ts: unit shard 1/1 wall="*"s status=0 attempts=2"* ]]
   [[ "$output" == *"test-ts: unit shards total wall="*"s status=0 retried=1"* ]]
   [[ "$output" == *"==> TypeScript unit shard 1/1 (attempt 1 of 2, retried)"* ]]
-  [ -f scratch/test-ts-unit-shards/shard-0.attempt-1.log ]
+  [ -f "$SHARD_SCRATCH/test-ts-unit-shards/shard-0.attempt-1.log" ]
   [ -s "$report_dir/shard-0.xml" ]
 }
 
@@ -855,9 +862,9 @@ reset_completion_order_hook() {
   [[ "$output" == *"test-ts: unit shard 1/3 wall="*"s status=0"* ]]
   [[ "$output" == *"test-ts: unit shard 3/3 wall="*"s status=0 attempts=2"* ]]
   [[ "$output" == *"test-ts: unit shards total wall="*"s status=0 retried=1"* ]]
-  [ -f scratch/test-ts-unit-shards/shard-2.attempt-1.log ]
-  [ -s scratch/test-ts-unit-shards/shard-0.wall ]
-  [ -s scratch/test-ts-unit-shards/shard-2.wall ]
+  [ -f "$SHARD_SCRATCH/test-ts-unit-shards/shard-2.attempt-1.log" ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/shard-0.wall" ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/shard-2.wall" ]
 }
 
 @test "completion-order reaping judges the lane cap at each shard's own reap time (#10644)" {
@@ -951,7 +958,7 @@ unit shard 0 attempt 2 end|$report_dir/calibration-unit-shard-0.tsv" ]
   run_retry_lane STUB_PROBE_RECORD="$probes" AUTOMOBILE_RUNNER_CALIBRATION=0
   [ "$status" -eq 0 ]
   [ ! -e "$probes" ]
-  [ ! -e scratch/test-ts-unit-shards/calibration-unit-shard-0.tsv ]
+  [ ! -e "$SHARD_SCRATCH/test-ts-unit-shards/calibration-unit-shard-0.tsv" ]
 
   run_retry_lane STUB_PROBE_EXIT=3
   [ "$status" -eq 0 ]
@@ -979,8 +986,8 @@ EOF
     STUB_SLOW_SHARD_LABEL="unit shard 0" STUB_SLOW_SHARD_SECONDS=2 \
     bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
-  [ -s scratch/test-ts-unit-shards/shard-0.wall ]
-  [ -s scratch/test-ts-unit-shards/shard-1.wall ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/shard-0.wall" ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/shard-1.wall" ]
   slow="$(sed -nE 's/^test-ts: unit shard 1\/2 wall=([0-9]+)s status=0$/\1/p' <<< "$output")"
   fast="$(sed -nE 's/^test-ts: unit shard 2\/2 wall=([0-9]+)s status=0$/\1/p' <<< "$output")"
   [ "$slow" -ge 2 ]
@@ -1034,7 +1041,7 @@ EOF
   [ "$status" -eq 0 ]
   [ -s "$report_dir/changed-shard-1.xml" ]
   [ -s "$report_dir/changed-shard-2.xml" ]
-  [ -f scratch/test-ts-changed-shards/shard-0.log ]
+  [ -f "$SHARD_SCRATCH/test-ts-changed-shards/shard-0.log" ]
   grep -q -- '--changed=origin/main --shard=1/2' "$BUN_ARGS_FILE"
   [ "$(grep -c '^180$' "$wall_file")" -eq 2 ]
 }
@@ -1246,8 +1253,8 @@ EOF
 }
 
 @test "classifies a symlinked test file by its resolved target" {
-  link="test/.lane-classification-${BATS_TEST_NUMBER}.test.ts"
-  ln -s "stress/memory-leak.stress.test.ts" "$link"
+  link="$BATS_TEST_TMPDIR/lane-classification.test.ts"
+  ln -s "$ROOT_PHYS/test/stress/memory-leak.stress.test.ts" "$link"
   run_lane unit "$link"
   rm -f "$link"
   [ "$status" -eq 2 ]
@@ -1364,7 +1371,7 @@ EOF
     STUB_BUN_SLEEP_SECONDS=5 AUTOMOBILE_UNIT_SHARD_RETRIES=0 \
     AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
-  [ -s "scratch/test-ts-unit-shards/watchdog-shard-0.txt" ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt" ]
   [[ "$output" == *"TIMEOUT: unit shard 0 exceeded its wall-clock budget"* ]]
 }
 
@@ -2290,7 +2297,7 @@ EOF
     [ "$(sed -n "$((chunk + 1))p" "$BUN_ARGS_FILE")" = "$expected" ]
     [ -s "$reports/shard-0-chunk-$chunk.xml" ]
   done
-  timing="$ROOT_PHYS/scratch/test-ts-unit-shards/timing-shard-0.ndjson"
+  timing="$SHARD_SCRATCH/test-ts-unit-shards/timing-shard-0.ndjson"
   [ "$(grep -Fxc "true|$timing|$timing" "$record")" -eq 3 ]
   [ "$(wc -l < "$timing")" -eq 12 ]
   for ((i = 0; i < 12; i += 1)); do
@@ -2323,7 +2330,7 @@ EOF
   [ "$status" -eq 1 ]
   [ "$(wc -l < "$record")" -eq 3 ]
   [[ "$output" == *"FAIL: unit shard 0 exited with status 7"* ]]
-  [ "$(wc -l < scratch/test-ts-unit-shards/timing-shard-0.ndjson)" -eq 12 ]
+  [ "$(wc -l < "$SHARD_SCRATCH/test-ts-unit-shards/timing-shard-0.ndjson")" -eq 12 ]
 }
 
 @test "one watchdog bounds the complete chunk sequence rather than each fresh invocation" {
@@ -2345,7 +2352,7 @@ EOF
   started=0
   if [ -e "$record" ]; then started="$(wc -l < "$record" | tr -d ' ')"; fi
   [ "$started" -lt 3 ]
-  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt" ]
 }
 
 @test "a chunk deadline spent before the shard launches still leaves a non-empty watchdog snapshot (#11019)" {
@@ -2362,8 +2369,8 @@ EOF
     AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
-  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
-  grep -Fq "deadline" scratch/test-ts-unit-shards/watchdog-shard-0.txt
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt" ]
+  grep -Fq "deadline" "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt"
 }
 
 @test "a retried watchdog timeout keeps attempt 1's snapshot and writes a fresh non-empty one (#11019)" {
@@ -2372,9 +2379,9 @@ EOF
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
   [[ "$output" == *"RETRY: unit shard 0"* ]]
-  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.attempt-1.txt ]
-  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
-  [ -z "$(ls scratch/test-ts-unit-shards | grep -F '.tmp.' || true)" ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.attempt-1.txt" ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt" ]
+  [ -z "$(ls "$SHARD_SCRATCH/test-ts-unit-shards" | grep -F '.tmp.' || true)" ]
 }
 
 @test "chunk size rejects invalid values just like worker count before invoking Bun" {
@@ -2484,7 +2491,7 @@ fixture_list() {
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
   [ "$(grep -c -- '--isolate' "$BUN_ARGS_FILE")" -le 1 ]
-  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
+  [ -s "$SHARD_SCRATCH/test-ts-unit-shards/watchdog-shard-0.txt" ]
 }
 
 @test "isolated chunk size splits a shard's isolated group into sequential processes with distinct reports" {
@@ -2502,7 +2509,7 @@ fixture_list() {
   [ "$(sed -n 3p "$BUN_ARGS_FILE")" = "$flags-2.xml$(fixture_list 10 11)" ]
   [ ! -e "$reports/shard-0.xml" ]
   # All chunks share the shard's timing log and watchdog environment.
-  timing="$ROOT_PHYS/scratch/test-ts-unit-shards/timing-shard-0.ndjson"
+  timing="$SHARD_SCRATCH/test-ts-unit-shards/timing-shard-0.ndjson"
   [ "$(grep -Fxc "true|$timing|$timing" "$record")" -eq 3 ]
   # The timing gate globs *.xml, so every chunk report is read.
   run "$REAL_BUN" run scripts/lib/junit-testcase-timings.ts "$reports"/*.xml

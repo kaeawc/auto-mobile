@@ -111,6 +111,11 @@ export function parseCliArgs(args: string[]): {
     }
   }
 
+  // The trailing form (`observe --session-uuid ""`) names a session just as the leading one does.
+  if (typeof params.sessionUuid === "string" && params.sessionUuid.trim() === "") {
+    throw new ActionableError("--session-uuid requires a non-empty value");
+  }
+
   return { toolName, sessionUuid, params };
 }
 

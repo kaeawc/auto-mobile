@@ -78,6 +78,12 @@ describe("parseCliArgs --session-uuid", () => {
     );
   });
 
+  test("rejects a blank trailing --session-uuid too", () => {
+    expect(() => parseCliArgs(["observe", "--session-uuid", ""])).toThrow(
+      "--session-uuid requires a non-empty value",
+    );
+  });
+
   test("accepts a real value and an absent flag as before", () => {
     expect(parseCliArgs(["--session-uuid", "abc", "observe"]).sessionUuid).toBe("abc");
     expect(parseCliArgs(["observe"]).sessionUuid).toBeUndefined();

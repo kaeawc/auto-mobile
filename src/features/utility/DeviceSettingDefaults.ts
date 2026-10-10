@@ -75,6 +75,11 @@ function recordedKeys(values: DeviceSettingValues): DeviceSettingKey[] {
   return DEVICE_SETTING_KEYS.filter((key) => key in values);
 }
 
+interface ResetFence {
+  keys: Set<DeviceSettingKey>;
+  sessionId: string;
+}
+
 /** Upper bound on a settings change waiting for the device's pending acquisition reset (#11145). */
 export const PENDING_RESET_WAIT_MS = 15_000;
 
@@ -86,6 +91,8 @@ export class DeviceSettingDefaults {
   private readonly queues = new Map<string, Promise<void>>();
   /** Bumped when a different device takes over a serial: queued work of the old one is dropped. */
   private readonly identityEpochs = new Map<string, number>();
+  /** Per device: keys a new owner changed while an acquisition reset was still running (#11254). */
+  private readonly pendingResetFences = new Map<string, Set<ResetFence>>();
 
   constructor(
     private readonly persistence: DeviceSettingDefaultsPersistence,
@@ -109,13 +116,15 @@ export class DeviceSettingDefaults {
       sessionId === null || keys.length === 0
         ? this.settled(device.deviceId)
         : this.enqueueRecord(device, keys, sessionId, abandoned);
-    return this.awaitPendingReset(device.deviceId, work, abandoned);
+    return this.awaitPendingReset(device.deviceId, work, abandoned, sessionId, keys);
   }
 
   private async awaitPendingReset(
     deviceId: string,
     work: Promise<void>,
     abandoned: { value: boolean },
+    sessionId: string | null,
+    keys: readonly DeviceSettingKey[],
   ): Promise<void> {
     try {
       await raceWithDeadline(work, {
@@ -127,6 +136,15 @@ export class DeviceSettingDefaults {
       // The caller changes the setting now: a record queued behind the reset would observe that
       // change instead of the device default.
       abandoned.value = true;
+      // The reset is still running and would overwrite the change just made: fence these keys.
+      if (sessionId !== null) {
+        for (const fence of this.pendingResetFences.get(deviceId) ?? []) {
+          for (const key of keys) {
+            fence.keys.add(key);
+          }
+          fence.sessionId = sessionId;
+        }
+      }
       logger.warn(
         `Proceeding with a settings change on ${deviceId} before its pending reset finished: ${errorMessage(error)}`,
         error,
@@ -170,29 +188,52 @@ export class DeviceSettingDefaults {
    * recorded so the next acquisition tries again.
    */
   resetOnAcquisition(deviceId: string, sessionId: string): Promise<void> {
-    return this.enqueue(deviceId, async () => {
-      const record = await this.persistence.get(deviceId);
-      if (!record || record.sessionId === sessionId) {
-        return;
+    const fence: ResetFence = { keys: new Set(), sessionId };
+    const fences = this.pendingResetFences.get(deviceId) ?? new Set<ResetFence>();
+    fences.add(fence);
+    this.pendingResetFences.set(deviceId, fences);
+    const done = this.enqueue(deviceId, () => this.runReset(deviceId, sessionId, fence));
+    void done.then(() => {
+      fences.delete(fence);
+      if (fences.size === 0 && this.pendingResetFences.get(deviceId) === fences) {
+        this.pendingResetFences.delete(deviceId);
       }
-      const device: BootedDevice = { deviceId, name: record.name, platform: record.platform };
-      const keys = recordedKeys(record.values);
-      const current = await this.access.read(device, keys);
-      const differing = keys.filter(
-        (key) => !(key in current) || current[key] !== record.values[key],
-      );
-      const written =
-        differing.length > 0 ? await this.access.write(device, pick(record.values, differing)) : [];
-      const remaining = differing.filter((key) => !written.includes(key));
-      if (remaining.length === 0) {
-        await this.persistence.delete(deviceId);
-        return;
-      }
+    });
+    return done;
+  }
+
+  private async runReset(deviceId: string, sessionId: string, fence: ResetFence): Promise<void> {
+    const record = await this.persistence.get(deviceId);
+    if (!record || record.sessionId === sessionId) {
+      return;
+    }
+    const device: BootedDevice = { deviceId, name: record.name, platform: record.platform };
+    const keys = recordedKeys(record.values);
+    const current = await this.access.read(device, keys);
+    // Keys the new owner changed after the wait gave up are theirs now: leave them, but keep the
+    // original default recorded under the new owner so the next acquisition resets them.
+    const fenced = keys.filter((key) => fence.keys.has(key));
+    const differing = keys.filter(
+      (key) => !fence.keys.has(key) && (!(key in current) || current[key] !== record.values[key]),
+    );
+    const written =
+      differing.length > 0 ? await this.access.write(device, pick(record.values, differing)) : [];
+    const remaining = differing.filter((key) => !written.includes(key));
+    const kept = [...remaining, ...fenced];
+    if (kept.length === 0) {
+      await this.persistence.delete(deviceId);
+      return;
+    }
+    if (remaining.length > 0) {
       logger.warn(
         `Could not reset ${remaining.join(", ")} on ${deviceId} to the recorded device defaults; ` +
           "the next acquisition by another session retries",
       );
-      await this.persistence.put(deviceId, { ...record, values: pick(record.values, remaining) });
+    }
+    await this.persistence.put(deviceId, {
+      ...record,
+      ...(fenced.length > 0 ? { sessionId: fence.sessionId } : {}),
+      values: pick(record.values, kept),
     });
   }
 

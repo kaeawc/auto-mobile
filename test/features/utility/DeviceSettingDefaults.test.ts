@@ -4,6 +4,7 @@ import {
   DeviceSettingDefaults,
   createDeviceSettingDefaultsAcquisitionReset,
   createDeviceSettingDefaultsIdentityListener,
+  PENDING_RESET_WAIT_MS,
   type DeviceSettingKey,
   type DeviceSettingValues,
 } from "../../../src/features/utility/DeviceSettingDefaults";
@@ -198,6 +199,58 @@ describe("DeviceSettingDefaults (#11145)", () => {
       await h.defaults.settled(device.deviceId);
       const recorded = h.persistence.records.get(device.deviceId);
       expect(recorded?.values.nightMode).not.toBe("dark");
+    });
+  });
+
+  describe("reset still running after the wait timed out (#11254)", () => {
+    function slow() {
+      const persistence = new FakePersistence();
+      const settings = new GatedSettings({ fontScale: 1, nightMode: "light" });
+      const timer = new FakeTimer();
+      const defaults = new DeviceSettingDefaults(persistence, settings, () => "session-b", timer);
+      persistence.records.set(device.deviceId, {
+        platform: "android",
+        name: "Pixel",
+        sessionId: "session-a",
+        values: { fontScale: 1, nightMode: "light" },
+      });
+      // Session A had changed both; session B then changed fontScale only.
+      settings.current.fontScale = 1.5;
+      settings.current.nightMode = "dark";
+      return { persistence, settings, timer, defaults };
+    }
+
+    test("the late reset does not overwrite the new owner's change and keeps its default recorded", async () => {
+      const h = slow();
+      const reset = h.defaults.resetOnAcquisition(device.deviceId, "session-b");
+      const record = h.defaults.recordBeforeChange(device, ["fontScale"]);
+      h.timer.advanceTime(PENDING_RESET_WAIT_MS);
+      await record;
+      h.settings.current.fontScale = 2;
+      h.settings.open();
+      await reset;
+      expect(h.settings.current.fontScale).toBe(2);
+      expect(h.settings.current.nightMode).toBe("light");
+      expect(h.persistence.records.get(device.deviceId)).toEqual({
+        platform: "android",
+        name: "Pixel",
+        sessionId: "session-b",
+        values: { fontScale: 1 },
+      });
+    });
+
+    test("the next acquisition by another session then resets the kept key", async () => {
+      const h = slow();
+      const reset = h.defaults.resetOnAcquisition(device.deviceId, "session-b");
+      const record = h.defaults.recordBeforeChange(device, ["fontScale"]);
+      h.timer.advanceTime(PENDING_RESET_WAIT_MS);
+      await record;
+      h.settings.current.fontScale = 2;
+      h.settings.open();
+      await reset;
+      await h.defaults.resetOnAcquisition(device.deviceId, "session-c");
+      expect(h.settings.current.fontScale).toBe(1);
+      expect(h.persistence.records.has(device.deviceId)).toBe(false);
     });
   });
 

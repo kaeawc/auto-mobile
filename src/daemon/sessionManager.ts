@@ -143,6 +143,14 @@ interface ReleaseTeardownStage {
   abandon?: () => void;
 }
 
+/** Keep-awake restore resolved before any await, like the biometric target below. */
+interface KeepScreenAwakeRestoreTarget {
+  incarnation?: number;
+  sessionId: string;
+  deviceId: string;
+  state: KeepScreenAwakeState;
+}
+
 interface BiometricRestoreTarget {
   incarnation?: number;
   sessionId: string;
@@ -1036,6 +1044,12 @@ export interface RebindSessionOptions {
 }
 
 const KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS = 1_000;
+/**
+ * A failed keep-awake restore leaves a physical device that never sleeps, so — like the network
+ * restorer — it is retried inside the pending cleanup, then handed to health recovery (#11145).
+ */
+const KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS = 2;
+const KEEP_SCREEN_AWAKE_RESTORE_RETRY_DELAY_MS = 250;
 const BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS = 1_000;
 /**
  * A failed restore leaves the simulator holding session-modified enrollment, so
@@ -4618,6 +4632,7 @@ export class SessionManager {
   ): Promise<readonly ReleaseTeardownStage[]> {
     // Captured before any await: a rebind reassigns `session.assignedDevice`.
     const deviceId = session.assignedDevice;
+    const keepScreenAwakeTarget = this.keepScreenAwakeRestoreTarget(session);
     const biometricTarget = this.biometricRestoreTarget(session);
     const networkTarget = this.networkConditionRestoreTarget(session);
     const setups = Array.from(this.sessionSetupPromises, (setup) =>
@@ -4640,12 +4655,15 @@ export class SessionManager {
         return { pending: pendingSetups };
       },
       async () => ({
-        pending: (await this.restoreKeepScreenAwakeBestEffort(session)).pending,
+        pending: (await this.restoreKeepScreenAwakeBestEffort(session, forced)).pending,
+        // A forced release (#11058) may already have handed the device to its next owner.
         abandon: () =>
-          logger.warn(
-            `Gave up restoring keep-awake state on ${deviceId} after ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms; ` +
-              `the screen may stay awake until the next session changes it`,
-          ),
+          forced()
+            ? logger.warn(
+                `Gave up restoring keep-awake state on ${deviceId} after a forced release; ` +
+                  `the screen may stay awake`,
+              )
+            : this.abandonCappedRestore(keepScreenAwakeTarget, "keep-screen-awake"),
       }),
       async () => ({
         pending: session.cacheData.biometricEnrollment
@@ -4704,8 +4722,12 @@ export class SessionManager {
 
   /** The teardown budget ran out with this restore unfinished: record it like an exhausted retry. */
   private abandonCappedRestore(
-    target: BiometricRestoreTarget | NetworkConditionRestoreTarget | null,
-    reason: "biometric-enrollment" | "network-condition",
+    target:
+      | KeepScreenAwakeRestoreTarget
+      | BiometricRestoreTarget
+      | NetworkConditionRestoreTarget
+      | null,
+    reason: "keep-screen-awake" | "biometric-enrollment" | "network-condition",
   ): void {
     if (!target) {
       return;
@@ -4715,9 +4737,11 @@ export class SessionManager {
         `restore finished on ${target.deviceId}; the device may hold session-modified state`,
     );
     this.abandonRestore(target, reason, () =>
-      "enrollment" in target
-        ? this.restoreBiometricEnrollment(target)
-        : this.restoreNetworkCondition(target),
+      "state" in target
+        ? this.restoreKeepScreenAwakeTarget(target)
+        : "enrollment" in target
+          ? this.restoreBiometricEnrollment(target)
+          : this.restoreNetworkCondition(target),
     );
   }
 
@@ -5331,13 +5355,15 @@ export class SessionManager {
 
   private async restoreKeepScreenAwakeBestEffort(
     session: Session,
+    forced: () => boolean = () => false,
   ): Promise<{ pending: Promise<void> | null }> {
-    if (!session.cacheData.keepScreenAwake?.applied) {
+    const target = this.keepScreenAwakeRestoreTarget(session);
+    if (!target) {
       return { pending: null };
     }
-    const restoration = this.restoreKeepScreenAwake(session).then(
+    const restoration = this.restoreKeepScreenAwakeTarget(target).then(
       () => ({ outcome: "restored" as const }),
-      (error) => ({ outcome: "failed" as const, error }),
+      (error: unknown) => ({ outcome: "failed" as const, error }),
     );
     const timeout = new Error("Keep-awake restore timed out");
     const result = await raceWithDeadline(restoration, {
@@ -5355,13 +5381,88 @@ export class SessionManager {
       logger.warn(
         `Failed to restore keep-awake state for session ${session.sessionId}: ${result.error}`,
       );
-    } else if (result.outcome === "timed-out") {
+      // Quarantine the device until the retries settle, as the network restore does (#11145).
+      return { pending: this.retryKeepScreenAwakeRestore(target, result.error, forced) };
+    }
+    if (result.outcome === "timed-out") {
       logger.warn(
         `Timed out after ${KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS}ms restoring keep-awake state for session ${session.sessionId}`,
       );
-      return { pending: restoration.then(() => undefined) };
+      return {
+        pending: restoration.then((settled) =>
+          settled.outcome === "failed"
+            ? this.retryKeepScreenAwakeRestore(target, settled.error, forced)
+            : undefined,
+        ),
+      };
     }
     return { pending: null };
+  }
+
+  private keepScreenAwakeRestoreTarget(session: Session): KeepScreenAwakeRestoreTarget | null {
+    const state = session.cacheData.keepScreenAwake;
+    if (session.platform !== "android" || !state?.applied) {
+      return null;
+    }
+    return {
+      sessionId: session.sessionId,
+      deviceId: session.assignedDevice,
+      incarnation: this.deviceHealth?.incarnation(session.assignedDevice),
+      state,
+    };
+  }
+
+  private async restoreKeepScreenAwakeTarget(target: KeepScreenAwakeRestoreTarget): Promise<void> {
+    if (!this.restoreIncarnationIsCurrent(target)) {
+      return;
+    }
+    const device: BootedDevice = {
+      name: target.deviceId,
+      platform: "android",
+      deviceId: target.deviceId,
+    };
+    await this.keepScreenAwakeRestorerFactory(device).restore(target.state);
+    this.clearRestoreHealth(target, "keep-screen-awake");
+  }
+
+  /** Bounded retries after a failed keep-awake restore, then background health recovery. */
+  private async retryKeepScreenAwakeRestore(
+    target: KeepScreenAwakeRestoreTarget,
+    initialError: unknown,
+    forced: () => boolean,
+  ): Promise<void> {
+    let lastError = initialError;
+    for (let attempt = 1; attempt <= KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS; attempt++) {
+      if (forced()) {
+        // The device may belong to the next owner: never retry against it (#11058).
+        logger.warn(
+          `Not retrying the keep-awake restore for session ${target.sessionId} after a forced release: ${lastError}`,
+        );
+        return;
+      }
+      await this.timer.sleep(KEEP_SCREEN_AWAKE_RESTORE_RETRY_DELAY_MS);
+      if (forced() || !this.restoreIncarnationIsCurrent(target)) {
+        return;
+      }
+      try {
+        await this.restoreKeepScreenAwakeTarget(target);
+        return;
+      } catch (error) {
+        // Bounded: keep retrying, then hand the last failure to health recovery.
+        lastError = error;
+        logger.debug(
+          `Retry ${attempt} restoring keep-awake state for session ${target.sessionId} failed: ${error}`,
+        );
+      }
+    }
+    logger.warn(
+      `Gave up restoring keep-awake state for session ${target.sessionId} after ` +
+        `${KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS} retries; device ${target.deviceId} ` +
+        `may stay awake: ${lastError}`,
+    );
+    this.abandonRestore(target, "keep-screen-awake", () =>
+      this.restoreKeepScreenAwakeTarget(target),
+    );
   }
 
   /**
@@ -8115,24 +8216,6 @@ export class SessionManager {
       this.notifyDeviceOwnershipChange(session.assignedDevice);
     }
     return true;
-  }
-
-  private async restoreKeepScreenAwake(session: Session): Promise<void> {
-    if (session.platform !== "android") {
-      return;
-    }
-    const state = session.cacheData.keepScreenAwake;
-    if (!state || !state.applied) {
-      return;
-    }
-
-    const device: BootedDevice = {
-      name: session.assignedDevice,
-      platform: session.platform,
-      deviceId: session.assignedDevice,
-    };
-    const manager = this.keepScreenAwakeRestorerFactory(device);
-    await manager.restore(state);
   }
 
   /**

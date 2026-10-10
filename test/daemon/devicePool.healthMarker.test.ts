@@ -55,7 +55,7 @@ async function harness(count = 1) {
     timer,
     new FakeDeviceSessionPersistence(),
     () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => {} }),
+    () => ({ restore }),
     () => ({ restore }),
     { networkCondition: () => ({ restore }), clock: () => ({ restore }) },
   );
@@ -584,4 +584,30 @@ test("a timed-out background restore that later fails continues with a scaled de
     warn.mockRestore();
   }
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
+});
+
+test("a failed keep-awake restore quarantines the device until background recovery restores it (#11145)", async () => {
+  const h = await harness();
+  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  h.manager.setKeepScreenAwake("old", {
+    applied: true,
+    method: "svc",
+    svcWasEnabled: false,
+    originalStayOnWhilePluggedIn: "0",
+  });
+  await h.manager.releaseSession("old");
+  await h.pool.releaseDevice(device.deviceId, "old");
+  for (const delay of [250, 250]) {
+    await h.timer.advanceTimeAsync(delay);
+    await flush();
+  }
+  // The initial restore and both retries failed: the device must not go back to the pool awake.
+  expect(h.calls).toBe(3);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("keep-screen-awake");
+  expect(h.pool.getStats().idle).toBe(0);
+  h.succeed();
+  await h.timer.advanceTimeAsync(1000);
+  await flush();
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
+  expect(await h.pool.assignDeviceToSession("next", "android")).toBe(device.deviceId);
 });

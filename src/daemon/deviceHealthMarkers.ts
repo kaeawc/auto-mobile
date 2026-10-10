@@ -4,7 +4,8 @@ export type DeviceHealthReason =
   | "biometric-enrollment"
   | "network-condition"
   | "clock"
-  | "app-cleanup";
+  | "app-cleanup"
+  | "keep-screen-awake";
 export interface DeviceHealthMarker {
   readonly reason: DeviceHealthReason;
   /** Milliseconds from the injected Timer. */

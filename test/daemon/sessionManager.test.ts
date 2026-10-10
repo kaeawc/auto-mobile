@@ -2215,6 +2215,12 @@ describe("SessionManager", () => {
 
           if (outcome === "reject") {
             restoration.reject(new Error("late keep-awake restore failure"));
+            // A late failure is retried before the old device leaves quarantine (#11145).
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            await fakeTimer.advanceTimeAsync(250);
+            expect(manager.getPendingDeviceCleanup("device-1")).not.toBeNull();
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            await fakeTimer.advanceTimeAsync(250);
           } else {
             restoration.resolve();
           }
@@ -2257,7 +2263,7 @@ describe("SessionManager", () => {
       }
     });
 
-    test("warns and rebinds when keep-awake restoration rejects immediately", async () => {
+    test("warns, rebinds and retries when keep-awake restoration rejects immediately (#11145)", async () => {
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       const manager = new SessionManager(
         fakeTimer,
@@ -2280,7 +2286,19 @@ describe("SessionManager", () => {
         expect(warning).toHaveBeenCalledWith(
           expect.stringContaining("immediate keep-awake restore failure"),
         );
+        // The old device stays quarantined while the bounded retries run.
+        expect(manager.getPendingDeviceCleanup("device-1")).not.toBeNull();
+        for (const delay of [250, 250]) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          await fakeTimer.advanceTimeAsync(delay);
+        }
+        await manager.getPendingDeviceCleanup("device-1");
         expect(manager.getPendingDeviceCleanup("device-1")).toBeNull();
+        expect(warning).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Gave up restoring keep-awake state for session s1 after 2 retries",
+          ),
+        );
       } finally {
         manager.stopCleanupTimer();
         warning.mockRestore();

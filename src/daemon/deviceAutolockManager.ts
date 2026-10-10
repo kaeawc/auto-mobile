@@ -4,6 +4,7 @@ import {
   InputDeviceOwnedError,
 } from "./inputDeviceOwnership";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
@@ -466,7 +467,13 @@ export class DeviceAutolockManager {
     if (!session) {
       return undefined;
     }
-    const refreshed = await this.pool.getSessionManager().getOrCreateSession(session.sessionId);
+    // The call doing this is already tracked under the autolock session; naming it keeps its own
+    // admission from being judged as earlier work still in flight (#11400).
+    const refreshed = await this.pool
+      .getSessionManager()
+      .getOrCreateSession(session.sessionId, undefined, undefined, undefined, false, {
+        callerExecutionId: getToolSelectionContext()?.execution?.executionId,
+      });
     // Release can finish while activity persistence yields, even under the
     // assignment mutex. Do not report success for a retired ownership identity.
     if (

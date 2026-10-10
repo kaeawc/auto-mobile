@@ -8060,7 +8060,16 @@ export class DevicePool {
     ) {
       throw deviceAssignedToOtherSessionError(deviceId, existingSessionId, requestedSessionId);
     }
-    const refreshedSession = await this.sessionManager.getOrCreateSession(existingSessionId);
+    // The reusing call may already be tracked under the holder (autolock); naming it keeps its
+    // own admission from being judged as earlier work still in flight (#11400).
+    const refreshedSession = await this.sessionManager.getOrCreateSession(
+      existingSessionId,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      { callerExecutionId: this.ambientExecutionIdReader?.getExecutionId() },
+    );
     logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);
     return refreshedSession.sessionId;
   }

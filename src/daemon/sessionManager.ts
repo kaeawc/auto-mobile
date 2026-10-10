@@ -801,7 +801,11 @@ export type ActiveSessionExecutionChecker = (
  * clock; `Number.POSITIVE_INFINITY` or undefined when some execution carries no deadline. Same
  * contract as `SessionExecutionProbe.latestExecutionDeadlineMs` (#10712).
  */
-export type SessionExecutionDeadlineLookup = (sessionId: string) => number | undefined;
+export type SessionExecutionDeadlineLookup = (
+  sessionId: string,
+  /** With `excludeReads`, reads' deadlines are left out, as the reads themselves are (#11322). */
+  query?: Pick<ActiveSessionExecutionQuery, "excludeReads">,
+) => number | undefined;
 
 /**
  * Aborts a session's in-flight executions before an idle-expiry release overrides them (#10820).
@@ -941,6 +945,13 @@ interface SessionAcquisitionOptions {
   access?: SessionAccess;
   /** Request-local only; not part of Session or the persistence contract. */
   requestDeadlineMs?: number;
+  /**
+   * The tracked call making this lookup, when it passes no execution metadata of its own: an
+   * implicit (autolock) call refreshing its holder is already tracked under that session, and
+   * must not be mistaken for earlier work still in flight when its admission is judged (#11400).
+   * It only names the caller; expiry is still judged as for a lookup that carries no execution.
+   */
+  callerExecutionId?: string;
 }
 
 /** Persisted identity required before recovering a session after daemon restart. */
@@ -2304,9 +2315,10 @@ export class SessionManager {
   }
 
   /**
-   * How an idle-expiry release aborts the executions it overrides once their veto has run out, as
-   * the heartbeat reap and owner-disconnect paths already do (#9839, #10820). The daemon supplies
-   * the execution tracker.
+   * How a release aborts the executions it overrides once their veto has run out (#9839, #10820):
+   * the idle-expiry releases, and the heartbeat reap and owner-disconnect release that share
+   * {@link cancelExecutionsCutByRelease} with them (#11400). The daemon supplies the execution
+   * tracker.
    */
   setExpiryReleaseExecutionCanceller(canceller: ExpiryReleaseExecutionCanceller): void {
     this.expiryReleaseExecutionCanceller = canceller;
@@ -2989,7 +3001,8 @@ export class SessionManager {
     requireIssuedSession = false,
     accessOptions: SessionAccess | SessionAcquisitionOptions = "acquire",
   ): Promise<Session> {
-    const { access, requestDeadlineMs } = this.resolveSessionAcquisitionOptions(accessOptions);
+    const { access, requestDeadlineMs, callerExecutionId } =
+      this.resolveSessionAcquisitionOptions(accessOptions);
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     if (pendingRebind) {
       await pendingRebind.promise;
@@ -3021,7 +3034,12 @@ export class SessionManager {
         `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
       );
       this.assertSessionNotSuspect(existing, access);
-      await this.refuseControlCallOnLapsedOwnerLease(existing, access, execution);
+      await this.refuseControlCallOnLapsedOwnerLease(
+        existing,
+        access,
+        execution,
+        callerExecutionId,
+      );
       await this.refreshExistingSessionForAccess(existing, access);
       return existing;
     }
@@ -3080,10 +3098,15 @@ export class SessionManager {
   private resolveSessionAcquisitionOptions(options: SessionAccess | SessionAcquisitionOptions): {
     access: SessionAccess;
     requestDeadlineMs?: number;
+    callerExecutionId?: string;
   } {
     return typeof options === "string"
       ? { access: options }
-      : { access: options.access ?? "acquire", requestDeadlineMs: options.requestDeadlineMs };
+      : {
+          access: options.access ?? "acquire",
+          requestDeadlineMs: options.requestDeadlineMs,
+          callerExecutionId: options.callerExecutionId,
+        };
   }
 
   /**
@@ -8250,15 +8273,19 @@ export class SessionManager {
     session: Session,
     access: SessionAccess,
     execution: SessionExecutionMetadata | undefined,
+    unnamedCallerExecutionId: string | undefined,
   ): Promise<void> {
     if (access === "read-only" || !this.isOwnerLeaseLapsed(session)) {
       return;
     }
+    const callerExecutionId = execution?.executionId ?? unnamedCallerExecutionId;
     // Only a control call in flight keeps the session (#5343). A read admitted since the owner
-    // went quiet is watching, not use: it must not turn this refusal retryable (#11322).
+    // went quiet is watching, not use: it must not turn this refusal retryable (#11322). Nor must
+    // the refused call itself, which is tracked under the session when it arrived through
+    // autolock (#11400).
     const query: ActiveSessionExecutionQuery = {
       excludeReads: true,
-      ...(execution === undefined ? {} : { excludeExecutionId: execution.executionId }),
+      ...(callerExecutionId === undefined ? {} : { excludeExecutionId: callerExecutionId }),
     };
     if (this.activeSessionExecutionChecker(session.sessionId, query)) {
       throw new SessionSuspectError(session.sessionId, 0);
@@ -8266,6 +8293,9 @@ export class SessionManager {
     logger.info(
       `Session ${session.sessionId} lost its owner's heartbeat lease before this call; releasing`,
     );
+    // Cut what the scan's reap would cut, through the routine it uses: a read still in flight is
+    // answered with the typed release instead of being left running on a freed device (#11400).
+    this.cancelExecutionsCutByRelease(session.sessionId, "heartbeat-timeout", callerExecutionId);
     await this.releaseSession(session.sessionId, "heartbeat-timeout", true, undefined, {
       expiryOrigin: "lazy-expiry",
     });
@@ -8690,14 +8720,23 @@ export class SessionManager {
 
   /**
    * What bounds an in-flight execution's idle-release veto for `sessionId`, or undefined when
-   * nothing is in flight. Hold diagnostics derive `idleReleaseAt` from it with the same shared
+   * nothing that vetoes the release is in flight. Hold diagnostics derive `idleReleaseAt` from it with the same shared
    * policy the idle sweep applies (#10671, #10712, #10713).
    */
   getIdleReleaseExecutionVeto(sessionId: string): { latestDeadlineMs?: number } | undefined {
-    if (!this.sessions.has(sessionId) || !this.activeSessionExecutionChecker(sessionId)) {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
       return undefined;
     }
-    return { latestDeadlineMs: this.sessionExecutionDeadlineLookup(sessionId) };
+    // Report the deadline the releaser will apply (#11393). A `cli-idle` session's idle release
+    // is the heartbeat monitor's, whose veto never counts a read (#11322); every other session's
+    // is the idle sweep's, which judges with the unfiltered checker ({@link isSessionExpired}).
+    const query: Pick<ActiveSessionExecutionQuery, "excludeReads"> =
+      session.livenessPolicy === "cli-idle" ? { excludeReads: true } : {};
+    if (!this.activeSessionExecutionChecker(sessionId, query)) {
+      return undefined;
+    }
+    return { latestDeadlineMs: this.sessionExecutionDeadlineLookup(sessionId, query) };
   }
 
   /**
@@ -8713,14 +8752,30 @@ export class SessionManager {
     releaseReason: SessionReleaseReason,
     excludeExecutionId?: string,
   ): boolean {
+    return this.cancelExecutionsCutByRelease(session.sessionId, releaseReason, excludeExecutionId);
+  }
+
+  /**
+   * Abort every call still running under a session that is about to be released for a reason of
+   * its own, with the typed release, so each cut caller gets the terminal refusal. The one routine
+   * for every such release: idle sweep, lazy expiry, the lapsed-lease admission, and the daemon's
+   * heartbeat reap and owner-disconnect release (#11400). It covers the scope the release vetoes
+   * count as in flight, implicit (autolock) calls included, so a veto can never count a call the
+   * release then leaves running on a freed device. Returns whether anything was in flight.
+   */
+  cancelExecutionsCutByRelease(
+    sessionId: string,
+    releaseReason: SessionReleaseReason,
+    excludeExecutionId?: string,
+  ): boolean {
     const query: ActiveSessionExecutionQuery =
       excludeExecutionId === undefined ? {} : { excludeExecutionId };
-    if (!this.activeSessionExecutionChecker(session.sessionId, query)) {
+    if (!this.activeSessionExecutionChecker(sessionId, query)) {
       return false;
     }
     this.expiryReleaseExecutionCanceller(
-      session.sessionId,
-      new SessionReleasedDuringCallError(session.sessionId, releaseReason),
+      sessionId,
+      new SessionReleasedDuringCallError(sessionId, releaseReason),
       query,
     );
     return true;

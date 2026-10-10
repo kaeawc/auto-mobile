@@ -349,29 +349,22 @@ struct PrototypePalette: Equatable {
         slot?.value(dark: dark)
     }
 
-    /// `systemDark` decides when the theme has no `mode` (or `system`) and no surface override.
+    /// The palette for a theme alone, with no tree to infer from: `systemDark` decides when the
+    /// theme has no `mode` (or `system`) and no surface override. See `PrototypeAppearance.resolve`.
     static func make(theme: PrototypeTheme?, systemDark: Bool) -> PrototypePalette {
+        make(theme: theme, dark: PrototypeAppearance.resolve(theme: theme, root: nil, deviceDark: systemDark).dark)
+    }
+
+    /// The palette for an already resolved mode (`PrototypeAppearance.dark`).
+    static func make(theme: PrototypeTheme?, dark: Bool) -> PrototypePalette {
         let roles = theme?.colors?.roles ?? [:]
-        let dark: Bool
-        switch theme?.mode {
-        case "light": dark = false
-        case "dark": dark = true
-        case "system": dark = systemDark
-        default:
-            // No mode: an explicit background (else surface) override is the screen colour the
-            // author chose, so its luminance decides, as Android's prototypeRoleSurfaceDark does.
-            dark = (PrototypeRGBA(hex: roles["background"]) ?? PrototypeRGBA(hex: roles["surface"]))
-                .map { $0.luminance < darkLuminanceCeiling } ?? systemDark
-        }
         var colors = dark ? baselineDark : baselineLight
         // Device (dynamic) colour does not exist on iOS: `source: device` falls through to the seed
         // or the baseline, as Android does below API 31.
         if let seed = PrototypeRGBA(hex: theme?.colors?.seed) {
             colors.merge(seedScheme(seed: seed, dark: dark)) { _, derived in derived }
         }
-        // Flat overrides hold in both modes; the resolved mode's map is painted over them. Only the
-        // flat `background` / `surface` take part in the inference above: a mode map is chosen by
-        // the mode, so it cannot also decide it.
+        // Flat overrides hold in both modes; the resolved mode's map is painted over them.
         let modeRoles = (dark ? theme?.colors?.dark : theme?.colors?.light) ?? [:]
         for overrides in [roles, modeRoles] {
             for (role, hex) in overrides {
@@ -380,9 +373,6 @@ struct PrototypePalette: Equatable {
         }
         return PrototypePalette(dark: dark, themed: theme != nil, colors: colors)
     }
-
-    /// Below this, white content has more contrast than black, so the surface is a dark one.
-    private static let darkLuminanceCeiling = 0.179
 
     // MARK: Seed scheme
 

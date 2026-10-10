@@ -64,6 +64,10 @@ struct PrototypeSession {
     /// dismissal or another prototype never rewinds it, because hosts discard lower-or-equal
     /// sequences as duplicates.
     private var sequences: [String: Int] = [:]
+    /// The shown prototype's `appearance` from its show request.
+    private(set) var appearanceOverride = PrototypeAppearanceOverride.device
+    /// The device's own appearance, as last reported through `setDeviceDark`; it outlives a show.
+    private(set) var deviceDark = false
 
     var isShown: Bool {
         spec != nil
@@ -79,7 +83,13 @@ struct PrototypeSession {
     /// authoritative and each pager that survives keeps its page, matched by id and clamped to the
     /// new page count. Any other show, or one with `reset`, starts fresh: the spec's own state and
     /// every pager on its first page. Event sequences are per id and never rewound either way.
-    mutating func show(_ spec: PrototypeSpec, reset: Bool = false) {
+    /// `appearance` is the request's own: a show that carries none follows the device again.
+    mutating func show(
+        _ spec: PrototypeSpec,
+        reset: Bool = false,
+        appearance: PrototypeAppearanceOverride = .device
+    ) {
+        appearanceOverride = appearance
         let previous = !reset && self.spec?.id == spec.id ? pages : [:]
         pageCounts = spec.root.pagerCounts()
         pages = pageCounts.reduce(into: [:]) { result, entry in
@@ -91,6 +101,34 @@ struct PrototypeSession {
 
     func holds(_ condition: Condition) -> Bool {
         condition.holds(state)
+    }
+
+    // MARK: Appearance
+
+    /// The mode the shown prototype draws in and why; nil while nothing is shown. It is derived
+    /// from the spec, the current state and pages, the show's override and the device, so the
+    /// palette, the host chrome, the UIKit trait and the reports all read this one value.
+    var appearance: PrototypeAppearance? {
+        guard let spec else { return nil }
+        return .resolve(
+            theme: spec.theme,
+            root: spec.root,
+            state: state,
+            pages: pages,
+            override: appearanceOverride,
+            deviceDark: deviceDark
+        )
+    }
+
+    /// The device's appearance changed (or was read for the first time). The shown prototype is
+    /// re-resolved, keeping its state and pages; exactly one `appearance_changed` follows when its
+    /// mode changed, and none when it did not (an explicit or pinned mode, an inferred one, a
+    /// repeated report, nothing shown).
+    mutating func setDeviceDark(_ dark: Bool) -> [PrototypeEvent] {
+        let before = appearance
+        deviceDark = dark
+        guard let before, let after = appearance, after.dark != before.dark else { return [] }
+        return emit(kind: "appearance_changed", name: nil, payload: after.eventPayload)
     }
 
     // MARK: Interactions

@@ -120,9 +120,11 @@ describe("daemon/registerSession on managed connections", () => {
         code: "managed_slot_registration_refused",
       });
     }
-    expect(scopes.get("socket-2")).toBeUndefined();
-    expect(scopes.get("socket-3")).toBeUndefined();
-    expect(scopes.get("socket-4")).toBeUndefined();
+    // A refused re-bind binds fail-closed with zero sessions (#11399), never a generic socket.
+    for (const socket of ["socket-2", "socket-3", "socket-4"]) {
+      expect(scopes.get(socket)?.scopeKey).toBe(SCOPE);
+      expect(scopes.get(socket)?.sessionUuids.size).toBe(0);
+    }
     expect(reowned).toEqual([]);
   });
 

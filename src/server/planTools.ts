@@ -201,6 +201,22 @@ const executePlanResultSchema = z
       .describe(
         "Present only on a failed run with holdSessionOnFailure: true when the session and device were kept for recovery, false when they were released (plans with derived label sessions are always released).",
       ),
+    code: z
+      .string()
+      .optional()
+      .describe(
+        "Present only when a typed refusal failed the plan before it produced a result (e.g. capacity_exhausted from device allocation): its wire code.",
+      ),
+    retryable: z
+      .boolean()
+      .optional()
+      .describe("With code: whether retrying the same plan can succeed."),
+    retryAfterMs: z.number().optional().describe("With code: suggested wait before retrying."),
+    nextAction: z.string().optional().describe("With code: what to do instead of retrying."),
+    details: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .describe("With code: the refusal's structured details (e.g. limit, booted)."),
   })
   .passthrough();
 

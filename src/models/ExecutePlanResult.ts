@@ -168,4 +168,14 @@ export interface ExecutePlanResult {
    * derived label sessions is always released), so the caller must not recover on that device (#11091).
    */
   sessionHeld?: boolean;
+  /**
+   * Typed refusal fields of the error that failed the plan before it produced a result (e.g. a
+   * retryable `capacity_exhausted` boot refusal during device allocation, #11236). Present only
+   * when that error carried a wire `code` and `retryable` flag.
+   */
+  code?: string;
+  retryable?: boolean;
+  retryAfterMs?: number;
+  nextAction?: string;
+  details?: Record<string, unknown>;
 }

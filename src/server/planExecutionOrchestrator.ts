@@ -230,6 +230,39 @@ function planToolResultsTruncatedField(truncated: PlanToolResultsTruncation | un
   return truncated ? { toolResultsTruncated: truncated } : {};
 }
 
+/**
+ * The typed refusal fields of an error that failed the plan, so a typed retryable refusal (e.g.
+ * `capacity_exhausted` from device allocation) is not flattened into the `error` string (#11236).
+ * Only an error carrying both a wire `code` and a `retryable` flag is a typed refusal.
+ */
+export function planRefusalFields(
+  error: unknown,
+): Pick<ExecutePlanResult, "code" | "retryable" | "retryAfterMs" | "nextAction" | "details"> {
+  if (typeof error !== "object" || error === null) {
+    return {};
+  }
+  const field = (key: string): unknown => Reflect.get(error, key);
+  const [code, retryable, retryAfterMs, nextAction, details] = [
+    field("code"),
+    field("retryable"),
+    field("retryAfterMs"),
+    field("nextAction"),
+    field("details"),
+  ];
+  if (typeof code !== "string" || typeof retryable !== "boolean") {
+    return {};
+  }
+  return {
+    code,
+    retryable,
+    ...(typeof retryAfterMs === "number" ? { retryAfterMs } : {}),
+    ...(typeof nextAction === "string" ? { nextAction } : {}),
+    ...(typeof details === "object" && details !== null
+      ? { details: Object.fromEntries(Object.entries(details)) }
+      : {}),
+  };
+}
+
 /** The deviceFailures response field, omitted when no device failures were reported. */
 function planDeviceFailuresField(deviceFailures: PlanDeviceFailure[] | undefined): {
   deviceFailures?: PlanDeviceFailure[];
@@ -495,6 +528,7 @@ export class PlanExecutionOrchestrator {
         executedSteps: 0,
         totalSteps: 0,
         error: `${error}`,
+        ...planRefusalFields(error),
         platform: this.device.platform,
         deviceId: this.device.deviceId,
         ...healthSummaryField(failureHealth),

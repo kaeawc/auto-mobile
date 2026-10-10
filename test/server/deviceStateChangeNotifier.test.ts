@@ -51,4 +51,29 @@ describe("createDeviceStateChangeNotifier (#11413)", () => {
     timer.advanceTime(DEVICE_STATE_NOTIFY_DEBOUNCE_MS);
     expect(attempts).toBe(2);
   });
+
+  test("dispose cancels the pending notification and ignores later changes", () => {
+    const timer = new FakeTimer();
+    let invalidations = 0;
+    let notifications = 0;
+    const onChange = createDeviceStateChangeNotifier({
+      timer,
+      invalidate: () => {
+        invalidations++;
+      },
+      notify: async () => {
+        notifications++;
+      },
+    });
+
+    onChange("a");
+    onChange.dispose();
+    timer.advanceTime(DEVICE_STATE_NOTIFY_DEBOUNCE_MS * 2);
+    expect(notifications).toBe(0);
+
+    onChange("b");
+    timer.advanceTime(DEVICE_STATE_NOTIFY_DEBOUNCE_MS * 2);
+    expect(notifications).toBe(0);
+    expect(invalidations).toBe(2);
+  });
 });

@@ -152,7 +152,7 @@ log_file="$work_dir/run.log"
 echo "Safe integration tier: running ${#safe_files[@]} file(s) isolated under ${work_dir}."
 
 status=0
-bun test --isolate --timeout "$per_test_timeout_ms" "${safe_files[@]}" > "$log_file" 2>&1 || status=$?
+bun test --isolate --timeout "$per_test_timeout_ms" ${safe_files[@]+"${safe_files[@]}"} > "$log_file" 2>&1 || status=$?
 
 if [[ "$status" -eq 0 ]]; then
   summary="$(grep -E '^ *[0-9]+ pass' "$log_file" | tail -1 | tr -d ' ' || true)"

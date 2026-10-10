@@ -146,8 +146,16 @@ describe("managed connection executePlan device labels (#11397)", () => {
       success: false,
       code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
       retryable: false,
+      // #11421: the refusal's own evidence is on the wire, not only in the message.
+      action: "executePlan",
+      reason: "tool",
+      scopeKey: keyA.scopeKey,
+      deviceLabel: "B",
+      // The plan result's own fields are not replaced by the refusal payload.
+      platform: "ios",
+      deviceId: slotA.deviceId,
     });
-    expect(String(result.error)).toContain("Device label 'B'");
+    expect(typeof result.error).toBe("string");
     expect(sessionManager.getDeviceLabels(execA)).toBeUndefined();
     expect(sessionManager.getSession(`${execA}:B`)).toBeFalsy();
   });
@@ -158,8 +166,9 @@ describe("managed connection executePlan device labels (#11397)", () => {
     const viaSession = await runPlan(PLAN, { __mcpSessionId: undefined });
 
     expect(allocatorCalls).toEqual([]);
-    expect(viaSocket.code).toBe(DEVICE_OUTSIDE_MANAGED_SLOTS_CODE);
-    expect(viaSession.code).toBe(DEVICE_OUTSIDE_MANAGED_SLOTS_CODE);
+    const refusal = { code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE, reason: "tool", deviceLabel: "B" };
+    expect(viaSocket).toMatchObject(refusal);
+    expect(viaSession).toMatchObject(refusal);
   });
 
   test("a label whose declared platform the slot device cannot satisfy is refused", async () => {
@@ -178,8 +187,7 @@ describe("managed connection executePlan device labels (#11397)", () => {
     );
 
     expect(allocatorCalls).toEqual([]);
-    expect(result.code).toBe(DEVICE_OUTSIDE_MANAGED_SLOTS_CODE);
-    expect(String(result.error)).toContain("Device label 'A'");
+    expect(result).toMatchObject({ code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE, deviceLabel: "A" });
   });
 
   test("a single label is served by the slot device without the generic allocator", async () => {

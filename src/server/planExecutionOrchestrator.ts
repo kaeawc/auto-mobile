@@ -61,6 +61,7 @@ import type { Plan } from "../models/Plan";
 import { isDeviceLostError } from "./deviceLossOutcome";
 import { errorMessage } from "../utils/describeUnknownError";
 import { typedRefusalFields } from "../models/typedRefusalFields";
+import { isTypedToolRefusal, shapeToolCallError } from "./shapeToolCallError";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
@@ -241,11 +242,40 @@ function planToolResultsTruncatedField(truncated: PlanToolResultsTruncation | un
 /**
  * The typed refusal fields of an error that failed the plan, so a typed retryable refusal (e.g.
  * `capacity_exhausted` from device allocation) is not flattened into the `error` string (#11236).
+ * A refusal with its own wire payload also keeps that evidence (`deviceLabel`, `reason`,
+ * `scopeKey`, ...), so a client can branch on fields instead of parsing the message (#11421).
  */
 export function planRefusalFields(
   error: unknown,
-): Pick<ExecutePlanResult, "code" | "retryable" | "retryAfterMs" | "nextAction" | "details"> {
-  return typedRefusalFields(error) ?? {};
+): Pick<ExecutePlanResult, "code" | "retryable" | "retryAfterMs" | "nextAction" | "details"> &
+  Record<string, unknown> {
+  const fields = typedRefusalFields(error);
+  return fields ? { ...refusalPayloadEvidence(error, fields.details ?? {}), ...fields } : {};
+}
+
+/**
+ * The evidence a thrown `tools/call` gives the same refusal, read from `shapeToolCallError`'s
+ * payload so the two surfaces cannot drift. `success` and `error` are the plan result's own, and
+ * fields `details` already carries are not repeated beside it.
+ */
+function refusalPayloadEvidence(
+  error: unknown,
+  details: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!isTypedToolRefusal(error)) {
+    return {};
+  }
+  const wire: unknown = JSON.parse(
+    shapeToolCallError(error, { toolName: "executePlan", source: "MCP" }).content[0].text,
+  );
+  if (typeof wire !== "object" || wire === null || typeof Reflect.get(wire, "code") !== "string") {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(wire).filter(
+      ([key]) => key !== "success" && key !== "error" && !(key in details),
+    ),
+  );
 }
 
 /** The deviceFailures response field, omitted when no device failures were reported. */

@@ -17,7 +17,7 @@ const SESSIONLESS_DEVICE_ACQUIRED_REMEDY =
   "Acquire the device (setActiveDevice) and retry with that session's sessionUuid, or wait for " +
   "the holder to release it.";
 
-interface ActiveExecution {
+export interface ActiveExecution {
   id: string;
   toolName: string;
   sessionId?: string;

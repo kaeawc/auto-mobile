@@ -801,7 +801,11 @@ export type ActiveSessionExecutionChecker = (
  * clock; `Number.POSITIVE_INFINITY` or undefined when some execution carries no deadline. Same
  * contract as `SessionExecutionProbe.latestExecutionDeadlineMs` (#10712).
  */
-export type SessionExecutionDeadlineLookup = (sessionId: string) => number | undefined;
+export type SessionExecutionDeadlineLookup = (
+  sessionId: string,
+  /** With `excludeReads`, reads' deadlines are left out, as the reads themselves are (#11322). */
+  query?: Pick<ActiveSessionExecutionQuery, "excludeReads">,
+) => number | undefined;
 
 /**
  * Aborts a session's in-flight executions before an idle-expiry release overrides them (#10820).
@@ -3033,7 +3037,8 @@ export class SessionManager {
       await this.refuseControlCallOnLapsedOwnerLease(
         existing,
         access,
-        execution?.executionId ?? callerExecutionId,
+        execution,
+        callerExecutionId,
       );
       await this.refreshExistingSessionForAccess(existing, access);
       return existing;
@@ -8267,11 +8272,13 @@ export class SessionManager {
   private async refuseControlCallOnLapsedOwnerLease(
     session: Session,
     access: SessionAccess,
-    callerExecutionId: string | undefined,
+    execution: SessionExecutionMetadata | undefined,
+    unnamedCallerExecutionId: string | undefined,
   ): Promise<void> {
     if (access === "read-only" || !this.isOwnerLeaseLapsed(session)) {
       return;
     }
+    const callerExecutionId = execution?.executionId ?? unnamedCallerExecutionId;
     // Only a control call in flight keeps the session (#5343). A read admitted since the owner
     // went quiet is watching, not use: it must not turn this refusal retryable (#11322). Nor must
     // the refused call itself, which is tracked under the session when it arrived through
@@ -8713,14 +8720,23 @@ export class SessionManager {
 
   /**
    * What bounds an in-flight execution's idle-release veto for `sessionId`, or undefined when
-   * nothing is in flight. Hold diagnostics derive `idleReleaseAt` from it with the same shared
+   * nothing that vetoes the release is in flight. Hold diagnostics derive `idleReleaseAt` from it with the same shared
    * policy the idle sweep applies (#10671, #10712, #10713).
    */
   getIdleReleaseExecutionVeto(sessionId: string): { latestDeadlineMs?: number } | undefined {
-    if (!this.sessions.has(sessionId) || !this.activeSessionExecutionChecker(sessionId)) {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
       return undefined;
     }
-    return { latestDeadlineMs: this.sessionExecutionDeadlineLookup(sessionId) };
+    // Report the deadline the releaser will apply (#11393). A `cli-idle` session's idle release
+    // is the heartbeat monitor's, whose veto never counts a read (#11322); every other session's
+    // is the idle sweep's, which judges with the unfiltered checker ({@link isSessionExpired}).
+    const query: Pick<ActiveSessionExecutionQuery, "excludeReads"> =
+      session.livenessPolicy === "cli-idle" ? { excludeReads: true } : {};
+    if (!this.activeSessionExecutionChecker(sessionId, query)) {
+      return undefined;
+    }
+    return { latestDeadlineMs: this.sessionExecutionDeadlineLookup(sessionId, query) };
   }
 
   /**

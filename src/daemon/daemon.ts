@@ -1146,8 +1146,8 @@ export class Daemon {
     this.sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       this.hasActiveSessionExecution(sessionId, query),
     );
-    this.sessionManager.setSessionExecutionDeadlineLookup((sessionId) =>
-      this.latestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true }),
+    this.sessionManager.setSessionExecutionDeadlineLookup((sessionId, query) =>
+      this.latestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true, ...query }),
     );
     // Deadlines are stamped on the wall clock; remember how far the session clock stood from it
     // so the idle veto can judge them without a later wall step (#11105).
@@ -3211,7 +3211,7 @@ export class Daemon {
   /** Mirrors {@link hasActiveSessionExecution}; a recovery in flight carries no deadline. */
   private latestSessionExecutionDeadlineMs(
     sessionId: string,
-    options: { onSessionClock?: boolean } = {},
+    options: { onSessionClock?: boolean; excludeReads?: boolean } = {},
   ): number | undefined {
     return latestSessionExecutionDeadlineMs(
       executionTracker,

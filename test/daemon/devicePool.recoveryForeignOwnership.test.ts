@@ -149,10 +149,17 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
     const shaped = JSON.parse(
       shapeToolCallError(refusal, { toolName: "observe", source: "MCP" }).content[0].text,
     );
-    expect(shaped).toMatchObject({
-      code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+    // The session is terminal: the caller gets the standard terminal refusal, never the wait-class
+    // acquisition code (#11391).
+    expect(shaped.error).toMatchObject({
+      code: "session_ownership_lost",
+      sessionUuid: SESSION,
+      reason: "identity-recovery-owned-by-other-daemon",
+      recoveryReason: "owned-by-other-daemon",
       deviceId: DEVICE_ID,
+      ownerPid: DAEMON_B_PID,
       retryable: false,
+      nextAction: "acquire_new_session",
     });
 
     // The resuming client's next call hits the terminal session: it must be told to acquire a new

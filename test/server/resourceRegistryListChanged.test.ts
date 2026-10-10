@@ -45,11 +45,33 @@ async function unsubscribe(server: FakeMcpServer, uri: string): Promise<void> {
   await handler!({ params: { uri } });
 }
 
+function stubClearDeviceSession() {
+  return spyOn(InstalledAppsRepository.prototype, "clearDeviceSession").mockResolvedValue(
+    undefined as never,
+  );
+}
+
 describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
-  beforeEach(() => {
+  // Every device a test registers is dropped again by that test's final sync, which would reach the
+  // real file-backed InstalledAppsRepository; the first test to do so paid the cold DB open and
+  // timed out under random ordering. Stub the cleanup write for the whole suite.
+  let clearDeviceSession: ReturnType<typeof stubClearDeviceSession>;
+
+  beforeEach(async () => {
     // The registry singleton is shared across suites; drop servers registered
     // by other tests so counts here are hermetic.
     ResourceRegistry.clearServersForTesting();
+    clearDeviceSession = stubClearDeviceSession();
+    // Other files leave device app resources registered in appResources' module state; the first
+    // sync here would then unregister them and run (or block on) this suite's cleanup stubs.
+    PlatformDeviceManagerFactory.setInstance(new FakeDeviceUtils());
+    await syncInstalledAppResourceRegistry();
+    clearDeviceSession.mockClear();
+    PlatformDeviceManagerFactory.setInstance(null);
+  });
+
+  afterEach(() => {
+    clearDeviceSession.mockRestore();
   });
 
   test("installed-app registry sync does not wait for list-change delivery", async () => {
@@ -102,10 +124,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
     const manager = new FakeDeviceUtils();
     manager.setBootedDevices("ios", [device]);
     PlatformDeviceManagerFactory.setInstance(manager);
-    const clearSession = spyOn(
-      InstalledAppsRepository.prototype,
-      "clearDeviceSession",
-    ).mockResolvedValue(undefined as never);
+    const getBootedDevices = manager.getBootedDevices.bind(manager);
     try {
       expect(await syncInstalledAppResourceRegistry()).toBe(true);
       manager.getBootedDevices = async () => {
@@ -117,9 +136,12 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
       expect(
         ResourceRegistry.getResource(`automobile:devices/${device.deviceId}/apps`),
       ).toBeDefined();
-      expect(clearSession).not.toHaveBeenCalled();
+      expect(clearDeviceSession).not.toHaveBeenCalled();
     } finally {
-      clearSession.mockRestore();
+      // Drop the device this test registered so it does not leak into the next test's snapshot.
+      manager.getBootedDevices = getBootedDevices;
+      manager.setBootedDevices("ios", []);
+      await syncInstalledAppResourceRegistry();
       PlatformDeviceManagerFactory.setInstance(null);
     }
   });
@@ -202,10 +224,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
     ResourceRegistry.registerWithServer(server as unknown as McpServer);
     const cleanupStarted = Promise.withResolvers<void>();
     const releaseCleanup = Promise.withResolvers<void>();
-    const clearDeviceSession = spyOn(
-      InstalledAppsRepository.prototype,
-      "clearDeviceSession",
-    ).mockImplementation(async () => {
+    clearDeviceSession.mockImplementation(async () => {
       cleanupStarted.resolve();
       await releaseCleanup.promise;
     });
@@ -236,8 +255,8 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
       ResourceRegistry.clearServersForTesting();
       manager.setBootedDevices("android", []);
       manager.setBootedDevices("ios", []);
+      clearDeviceSession.mockResolvedValue(undefined as never);
       await syncInstalledAppResourceRegistry();
-      clearDeviceSession.mockRestore();
       PlatformDeviceManagerFactory.setInstance(null);
     }
   });

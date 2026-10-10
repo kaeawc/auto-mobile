@@ -20,6 +20,8 @@ import { LIVE_OWNER_HANDOFF_ALLOWANCE_MS } from "../../src/daemon/proxyLivenessR
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { UNSETTLED_EXECUTION_VETO_CEILING_MS } from "../../src/daemon/unsettledExecutionVeto";
 import { OWNER_DISCONNECT_GRACE_MS } from "../../src/daemon/ownerDisconnectRelease";
+import { AppearanceSyncScheduler } from "../../src/daemon/AppearanceSyncScheduler";
+import type { AppearanceConfig } from "../../src/models";
 import {
   AUTOLOCK_WINDOW_MS,
   IDLE_WINDOW_MS,
@@ -208,6 +210,59 @@ describe("the daemon's idle instant outranks the proxy's own idle clock (#10823)
     await scenario.idle(1_000);
     expectFreed();
   });
+
+  // #10972 part 1 (#11442 h2): the keeper evicts a held session before the tick's heartbeats, so
+  // at the reported instant it still reads the ack from one interval earlier. A call the daemon
+  // admitted in between (inside its grace) moved the instant: the passed instant is not evidence,
+  // only a heartbeat answered at or after it is.
+  for (const beforeInstantMs of [KEEPER_INTERVAL_MS - 100, 500]) {
+    test(`a held session used ${beforeInstantMs} ms before its reported idle instant is not dropped on the stale report: it stays heartbeated and is freed as idle one window after that call`, async () => {
+      scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
+      const a = await scenario.acquire(DEVICE_A);
+      await scenario.idle(30_000);
+      // B becomes the latest binding; A is now held behind it.
+      const b = await scenario.acquire(DEVICE_B);
+      const reportedInstant = (
+        (await scenario.daemonMethod("daemon/sessionInfo", { sessionId: a })) as {
+          result: { idleReleaseAt: number };
+        }
+      ).result.idleReleaseAt;
+
+      // The agent keeps driving B; A is used once, inside the last keeper interval before its
+      // instant, by a call the proxy never saw: no ack before the instant can report the restart.
+      await scenario.idle(60_000);
+      await scenario.toolCall(b);
+      await scenario.idle(reportedInstant - beforeInstantMs - scenario.timer.now());
+      await scenario.daemonToolCallWith({ sessionUuid: a }, "homeScreen", scenario.proxyConnection);
+      const usedAt = scenario.timer.now();
+      expect(reportedInstant - usedAt).toBeLessThan(KEEPER_INTERVAL_MS);
+      const beatsBeforeInstant = scenario.heartbeatsBySession.get(a) ?? 0;
+
+      // Held side: the proxy heartbeats A through the stale instant and the whole new window, so
+      // the daemon never sees a silent owner.
+      const heldUntil = usedAt + IDLE_WINDOW_MS - 15_000;
+      for (let at = usedAt + 30_000; at < heldUntil; at += 30_000) {
+        expect(await scenario.idleWhileHeld(a, at, 5_000)).toBe(undefined);
+        await scenario.toolCall(b);
+      }
+      expect(await scenario.idleWhileHeld(a, heldUntil, 5_000)).toBe(undefined);
+      expectHeld(a, DEVICE_A);
+      expect(scenario.reaped).toEqual([]);
+      expect(scenario.heartbeatsBySession.get(a) ?? 0).toBeGreaterThanOrEqual(
+        beatsBeforeInstant + (heldUntil - reportedInstant) / KEEPER_INTERVAL_MS,
+      );
+
+      // Released side: the daemon's window, counted from that call, frees A as an idle expiry.
+      const releasedAt = await scenario.idleUntilReleased(a, 15_000 + RELEASE_SLACK_MS);
+      expect(releasedAt).toBeGreaterThan(usedAt + IDLE_WINDOW_MS);
+      expect(releasedAt).toBeLessThanOrEqual(usedAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+      expect(IDLE_REASONS).toContain(scenario.releaseOf(a)?.reason!);
+      expect(scenario.reaped).toEqual([]);
+      await scenario.idle(1_000);
+      expectFreed(DEVICE_A);
+      expectHeld(b, DEVICE_B);
+    });
+  }
 });
 
 describe("daemon release wiring (#10975)", () => {
@@ -806,6 +861,61 @@ describe("the daemon echoes the session a call used (#10974)", () => {
     expect(routedSessionUuidFromResult(control)).toBe(session);
     expect(routedSessionUuidFromResult(read)).toBeUndefined();
   });
+});
+
+describe("host appearance sync follows the session that holds the device (#8361, #10976)", () => {
+  const DEVICE_C = "emulator-5558";
+  const config = (defaultMode: "light" | "dark"): AppearanceConfig => ({
+    syncWithHost: true,
+    defaultMode,
+    applyOnConnect: true,
+  });
+
+  // #11442 o2: both target sources must name only held devices, each with its holder's session.
+  // The scheduler's own source is what a sync runs on until the daemon scopes it at startup.
+  for (const source of ["the running daemon's scope", "the scheduler's own targets"] as const) {
+    test(`two sessions with different configs and a free device, from ${source}: a tick applies each config to its holder's device only, and a freed device is left alone`, async () => {
+      scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B, DEVICE_C] });
+      const a = await scenario.acquire(DEVICE_A);
+      const b = await scenario.acquire(DEVICE_B);
+      // The global config would turn any device it reached dark.
+      const configs = new Map<string | undefined, AppearanceConfig>([
+        [a, config("light")],
+        [b, config("dark")],
+      ]);
+      const applied: string[] = [];
+      const scheduler = new AppearanceSyncScheduler(scenario.timer, {
+        isEnabled: () => true,
+        getConfig: async (sessionKey) => configs.get(sessionKey) ?? config("dark"),
+        resolveMode: async (resolved) => (resolved?.defaultMode === "dark" ? "dark" : "light"),
+        apply: async (device, mode) => {
+          applied.push(`${device.deviceId}:${mode}`);
+        },
+        ...(source === "the running daemon's scope"
+          ? { getTargets: () => scenario.appearanceSyncTargets() }
+          : {}),
+      });
+
+      // Held side: each held device gets its own session's mode; the free device gets nothing.
+      await scheduler.trigger();
+      expect(applied.toSorted()).toEqual([`${DEVICE_A}:light`, `${DEVICE_B}:dark`]);
+
+      // Released side: once A's session idles out, no tick re-themes its device from the global
+      // config, while B's session still decides for B.
+      for (let step = 0; step < 6 && scenario.isHeld(a); step++) {
+        await scenario.idle(30_000);
+        await scenario.toolCall(b);
+      }
+      await scenario.idle(1_000);
+      expectFreed(DEVICE_A);
+      expectHeld(b, DEVICE_B);
+      configs.set(b, config("light"));
+      applied.length = 0;
+      await scheduler.trigger();
+      expect(applied).toEqual([`${DEVICE_B}:light`]);
+      await scheduler.stop();
+    });
+  }
 });
 
 describe("reads are not activity (#10964)", () => {

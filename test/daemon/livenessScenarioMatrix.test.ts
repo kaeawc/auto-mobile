@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
-import { defaultTimer } from "../../src/utils/SystemTimer";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
@@ -53,6 +52,11 @@ const DEVICE_A = "emulator-5554";
 const DEVICE_B = "emulator-5556";
 
 let scenario: LivenessScenario;
+
+/** One event-loop turn for real socket I/O to settle (a 2 ms sleep cost ~2 ms per poll spin). */
+function realIoTurn(): Promise<void> {
+  return new Promise<void>((resolve) => setImmediate(resolve));
+}
 
 // The first scenario pays for module-level one-time costs (database template, Daemon module graph);
 // beforeAll is outside the per-test budget, and the first row would otherwise sit at ~70 ms of 100.
@@ -1419,9 +1423,35 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
       if (spins > 500) {
         throw new Error(`Timed out waiting for ${what}`);
       }
-      await new Promise<void>((resolve) => defaultTimer.setTimeout(resolve, 2));
+      await realIoTurn();
     }
   }
+
+  // The first acquisition through a real socket server pays ~12 ms of one-time setup (socket
+  // listen, request framing, first forwarded tool call); beforeAll is outside the per-test budget.
+  beforeAll(async () => {
+    scenario = await LivenessScenario.start({ autolock: true });
+    const forwarded: Array<{ tool: string; connection: string; settle(): void }> = [];
+    const { server, socketPath } = await serveOverRealSocket(forwarded);
+    try {
+      const socket = new Socket();
+      await new Promise<void>((resolve) => socket.connect(socketPath, resolve));
+      socket.on("data", () => {});
+      socket.on("error", () => {});
+      const warmUp: DaemonRequest = {
+        id: "warm",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: "getAndroid", arguments: { deviceId: DEVICE_A } },
+      };
+      socket.write(JSON.stringify(warmUp) + "\n");
+      await until(() => forwarded.length === 1, "the warm-up acquisition to be forwarded");
+      socket.destroy();
+    } finally {
+      await server.close();
+      await scenario.stop();
+    }
+  });
 
   test("the connection's bindings are dropped within a second of the death, not kept until daemon stop; the silent owner's session is then freed within about 10 s", async () => {
     scenario = await LivenessScenario.start({ autolock: true });
@@ -1465,7 +1495,7 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
       // Released side: the socket closes (peer-end flush grace, 1 s) and the pool drops the
       // connection's bindings.
       for (let spins = 0; spins < 200; spins++) {
-        await new Promise<void>((resolve) => defaultTimer.setTimeout(resolve, 2));
+        await realIoTurn();
         await scenario.idle(250);
         if (scenario.daemon.pool.resolveAutolockSessionForMcpSession(connection) === undefined) {
           break;
@@ -1475,7 +1505,7 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
       expect(scenario.timer.now() - diedAt).toBeLessThanOrEqual(2_000);
       let releasedAt: number | undefined;
       for (let spins = 0; releasedAt === undefined && spins < 100; spins++) {
-        await new Promise<void>((resolve) => defaultTimer.setTimeout(resolve, 2));
+        await realIoTurn();
         await scenario.idle(1_000);
         releasedAt = scenario.isHeld(session!) ? undefined : scenario.timer.now();
       }

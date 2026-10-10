@@ -9,13 +9,17 @@ import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import {
   SessionManager,
   SessionSuspectError,
+  TerminalSessionError,
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
+import {
+  DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
+  NO_HEARTBEAT_RELEASE_BUDGET_MS,
+} from "../../src/daemon/sessionLivenessWindows";
 
 // #10051: after lease expiry a session is held as suspect for a short grace window
 // with its device reserved for the owner token, and the daemon never reaps on the
@@ -45,6 +49,8 @@ describe("suspect grace window and daemon stall (#10051)", () => {
   let sessionManager: SessionManager;
   let reaped: Reaped[];
   let monitor: SessionHeartbeatMonitor;
+  /** When the owner's only heartbeat (the claim) started its lease. */
+  let leaseStartedAt: number;
 
   function state(manager: SessionManager = sessionManager): DaemonStateAccess {
     return {
@@ -103,6 +109,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
     await sessionManager.createSession(SESSION, DEVICE, "android", 60_000);
     const claim = await heartbeat(OWNER, true);
     expect(claim.success).toBe(true);
+    leaseStartedAt = timer.now();
   });
 
   afterEach(async () => {
@@ -299,6 +306,121 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
       expect(claim.success).toBe(true);
       expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBe(FOREIGN);
+    });
+
+    // #11285: between the end of the grace and the monitor's next scan the session is lapsed but
+    // still in the map. A control call admitted there would veto the scan's release and hold the
+    // dead owner's device past the no-heartbeat budget.
+    describe("before the monitor's next scan (#11285)", () => {
+      beforeEach(() => {
+        timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS + 1);
+        expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
+      });
+
+      function admitControlCall(executionId: string) {
+        return sessionManager.admitIssuedSessionForAutomation(SESSION, {
+          executionId,
+          startTime: timer.now(),
+        });
+      }
+
+      test("a control call is refused terminally and the session is released", async () => {
+        const releases: string[] = [];
+        sessionManager.onSessionRelease((_sessionId, _deviceId, reason) => {
+          releases.push(reason);
+        });
+
+        const refusal = await admitControlCall("exec-lapsed").catch((error: unknown) => error);
+
+        expect(refusal).toBeInstanceOf(TerminalSessionError);
+        expect((refusal as TerminalSessionError).release).toMatchObject({
+          releaseReason: "heartbeat-timeout",
+          terminal: true,
+        });
+        expect(releases).toEqual(["heartbeat-timeout"]);
+        expect(sessionManager.getSession(SESSION)).toBeNull();
+        expect(sessionManager.getAssignedDevices().has(DEVICE)).toBe(false);
+        // The retry gets the same terminal answer, not a restorable one.
+        expect(
+          await admitControlCall("exec-retry").catch((error: unknown) => error),
+        ).toBeInstanceOf(TerminalSessionError);
+      });
+
+      test("a control call that names no execution is refused the same way", async () => {
+        await expect(sessionManager.getOrCreateSession(SESSION)).rejects.toBeInstanceOf(
+          TerminalSessionError,
+        );
+      });
+
+      test("the refused call cannot hold the device past the release budget", async () => {
+        let inFlight = false;
+        sessionManager.setActiveSessionExecutionChecker(() => inFlight);
+        const vetoMonitor = new SessionHeartbeatMonitor(
+          sessionManager,
+          () => inFlight,
+          async (sessionId, reason) => {
+            reaped.push({ sessionId, reason });
+            await sessionManager.releaseSession(sessionId, reason);
+          },
+          timer,
+        );
+
+        await admitControlCall("exec-lapsed").then(
+          () => {
+            inFlight = true;
+          },
+          () => undefined,
+        );
+        timer.advanceTime(SCAN_MS - 1);
+        expect(timer.now() - leaseStartedAt).toBe(NO_HEARTBEAT_RELEASE_BUDGET_MS);
+        await vetoMonitor.tick();
+        await vetoMonitor.stop();
+
+        expect(inFlight).toBe(false);
+        expect(sessionManager.getSession(SESSION)).toBeNull();
+        expect(sessionManager.getTerminalReleaseSnapshot(SESSION)).toMatchObject({
+          releaseReason: "heartbeat-timeout",
+        });
+      });
+
+      test("a call already in flight keeps the session, and the new call is refused as suspect", async () => {
+        // #5343: never release mid-call. The earlier call was admitted while the owner was live.
+        sessionManager.setActiveSessionExecutionChecker(() => true);
+
+        await expect(admitControlCall("exec-late")).rejects.toBeInstanceOf(SessionSuspectError);
+
+        expect(sessionManager.getSession(SESSION)).not.toBeNull();
+        expect(sessionManager.getSession(SESSION)?.lastUsedAt).toBe(leaseStartedAt);
+      });
+
+      test("a read is still answered and releases nothing", async () => {
+        const observed = await sessionManager.admitIssuedSessionForAutomation(
+          SESSION,
+          { executionId: "exec-read", startTime: timer.now() },
+          { access: "read-only" },
+        );
+
+        expect(observed?.assignedDevice).toBe(DEVICE);
+        expect(sessionManager.getSession(SESSION)).not.toBeNull();
+      });
+
+      test("the owner's heartbeat before any call still restores the session", async () => {
+        expect((await heartbeat(OWNER)).success).toBe(true);
+
+        await expect(admitControlCall("exec-restored")).resolves.toMatchObject({
+          sessionId: SESSION,
+        });
+      });
+    });
+
+    test("a session no owner token judges is still kept alive by its tool calls", async () => {
+      const unowned = "unowned-session";
+      await sessionManager.createSession(unowned, "emulator-5556", "android", 60_000);
+      timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS + 1);
+
+      await expect(sessionManager.getOrCreateSession(unowned)).resolves.toMatchObject({
+        sessionId: unowned,
+      });
     });
 
     test("a silent owner is still reaped by on-schedule ticks after lease plus grace", async () => {

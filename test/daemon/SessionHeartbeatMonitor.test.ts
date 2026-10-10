@@ -352,7 +352,11 @@ describe("SessionHeartbeatMonitor", () => {
       for (let elapsed = 0; elapsed <= 1_000 + SUSPECT_GRACE_MS; elapsed += 500) {
         timer.advanceTime(500);
         // Once the lease lapses the session is suspect and refuses the other connection's calls.
-        await sessionManager.getOrCreateSession("s1").catch(() => undefined);
+        // The last step is past the grace, where a call would itself release the session
+        // (#11285); leave that release to the scan this test is about.
+        if (elapsed + 500 <= 1_000 + SUSPECT_GRACE_MS) {
+          await sessionManager.getOrCreateSession("s1").catch(() => undefined);
+        }
       }
       await monitor.tick();
 

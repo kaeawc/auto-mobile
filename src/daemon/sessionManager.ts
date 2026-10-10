@@ -76,6 +76,7 @@ import { onSessionClock } from "./sessionClockPersistence";
 import {
   isLivenessOwnerLeaseLive,
   judgedLeaseHeartbeat,
+  judgesOwnerHeartbeats,
   ownerLeaseLiveAt,
   livenessLeaseState,
   livenessOwnerHold,
@@ -2956,6 +2957,7 @@ export class SessionManager {
         `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
       );
       this.assertSessionNotSuspect(existing);
+      await this.refuseControlCallOnLapsedOwnerLease(existing, access, execution);
       await this.refreshExistingSessionForAccess(existing, access);
       return existing;
     }
@@ -8019,6 +8021,57 @@ export class SessionManager {
       );
       throw new SessionSuspectError(session.sessionId, remainingMs);
     }
+  }
+
+  /**
+   * Whether the owner's lease and suspect grace have both run out, so the heartbeat monitor's
+   * next scan releases the session (#11285). Only a session judged on its owner's own heartbeats
+   * qualifies: one no proxy owns is kept alive by its tool calls, which are its only liveness.
+   */
+  private isOwnerLeaseLapsed(session: Session): boolean {
+    return (
+      judgesOwnerHeartbeats(session) &&
+      suspectGraceMsFor(session) > 0 &&
+      livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow())).phase === "lapsed"
+    );
+  }
+
+  /**
+   * Refuse a control call that reached a session whose owner is gone but which the heartbeat
+   * monitor has not scanned yet (#11285). Admitting it would refresh the session and let the call
+   * veto the scan's release, holding the dead owner's device past `NO_HEARTBEAT_RELEASE_BUDGET_MS`.
+   * The session is released now exactly as the scan would release it, and the caller gets the
+   * terminal refusal. A call already in flight keeps the session (#5343), bounded by the monitor's
+   * unsettled-execution veto; the new call is still refused, as it is in the suspect window.
+   * Reads are never refused here.
+   */
+  private async refuseControlCallOnLapsedOwnerLease(
+    session: Session,
+    access: SessionAccess,
+    execution: SessionExecutionMetadata | undefined,
+  ): Promise<void> {
+    if (access === "read-only" || !this.isOwnerLeaseLapsed(session)) {
+      return;
+    }
+    const query: ActiveSessionExecutionQuery =
+      execution === undefined ? {} : { excludeExecutionId: execution.executionId };
+    if (this.activeSessionExecutionChecker(session.sessionId, query)) {
+      throw new SessionSuspectError(session.sessionId, 0);
+    }
+    logger.info(
+      `Session ${session.sessionId} lost its owner's heartbeat lease before this call; releasing`,
+    );
+    await this.releaseSession(session.sessionId, "heartbeat-timeout", true, undefined, {
+      expiryOrigin: "lazy-expiry",
+    });
+    const terminalRelease =
+      this.terminalReleaseSnapshots.get(session.sessionId) ??
+      (await this.getPersistedTerminalRelease(session.sessionId));
+    if (terminalRelease) {
+      throw new TerminalSessionError(session.sessionId, terminalRelease);
+    }
+    // The release did not finish terminally; never admit the call on the strength of that.
+    throw new SessionSuspectError(session.sessionId, 0);
   }
 
   /**

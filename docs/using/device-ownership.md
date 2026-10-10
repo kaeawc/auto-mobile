@@ -222,6 +222,29 @@ and the per-platform overrides.
 
 Appearance configuration is per session (owner decision 2026-10-09, #10982).
 
+## Display and system settings between owners
+
+Display and system settings a session changes are not restored when it
+releases the device. They are reset when a different session next acquires the
+device (owner decision 2026-10-09, #11145):
+
+- Before a session first changes a setting on a device, the daemon records the
+  setting's current value as the device default. Later changes keep the first
+  recorded value. Changes made with no session holding the device are not
+  recorded.
+- The covered settings are font scale, display density and night mode
+  (`displayConfig`), and the 24-hour format and calendar system
+  (`changeLocalization`). The iOS Simulator device-wide locale is also covered.
+  Android locale changes are not: on Android 13 and later they apply per app,
+  and the older device-wide path needs root and a framework restart.
+- When a different session acquires the device, each recorded setting whose
+  current value differs from its default is reset, and the record is cleared.
+  The same session acquiring the device again resets nothing.
+- The reset runs in the background while the new session starts. A setting that
+  fails to reset is logged and stays recorded, so the next acquisition by
+  another session tries again. A failed reset does not quarantine the device.
+- Records are stored in the daemon database, so they survive a daemon restart.
+
 ## Related
 
 - [Environment variables](environment-variables.md#session-heartbeat-timeout):

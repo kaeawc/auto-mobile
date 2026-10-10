@@ -1,4 +1,4 @@
-import { sql, type Kysely } from "kysely";
+import { sql, type ExpressionBuilder, type Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database, DeviceSession, DeviceSessionStatus, NewDeviceSession } from "./types";
 import { logger } from "../utils/logger";
@@ -40,6 +40,14 @@ export function isRecoverableDeviceSession(session: DeviceSession, nowMs: number
   );
 }
 
+/** SQL form of {@link isRecoverableDaemonReleaseReason} on `device_sessions.release_reason`. */
+function hasRecoverableReleaseReason(eb: ExpressionBuilder<Database, "device_sessions">) {
+  return eb.or([
+    eb("release_reason", "in", Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS)),
+    eb("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`),
+  ]);
+}
+
 function shouldRetainLivenessOwner(reason: string): boolean {
   return isRecoverableDaemonReleaseReason(reason);
 }
@@ -53,6 +61,32 @@ export class DeviceSessionNotActiveError extends ActionableError {
     super(`Device session ${sessionUuid} has no active row to record activity or ownership on.`);
     this.name = "DeviceSessionNotActiveError";
   }
+}
+
+/**
+ * A recovery's upsert of a claimed recoverable row (#11243) found the row no longer the incarnation
+ * it claimed: a terminal release, a peer, or the claim's own hand-back changed it first. Nothing
+ * was written.
+ */
+export class DeviceSessionRowChangedError extends ActionableError {
+  constructor(readonly sessionUuid: string) {
+    super(
+      `Device session ${sessionUuid} changed while it was being recovered; the recovery did not ` +
+        "persist it.",
+    );
+    this.name = "DeviceSessionRowChangedError";
+  }
+}
+
+/** Options for {@link DeviceSessionPersistence.upsertActiveSession}. */
+export interface UpsertActiveSessionOptions {
+  /**
+   * The recoverable row incarnation a recovery claimed (#11243): the write replaces the row only
+   * while it is still that incarnation (same generation and owner, still released for a
+   * recoverable reason), so a terminal release landing after the claim is not revived. A mismatch
+   * rejects with {@link DeviceSessionRowChangedError}.
+   */
+  claimedRow?: RecoverableRowIncarnation;
 }
 
 export interface DeviceSessionRecord {
@@ -94,8 +128,10 @@ export interface DeviceSessionActivityUpdate {
 /**
  * Optional precondition for {@link DeviceSessionPersistence.markReleased} (#11129): apply the
  * release only to the row incarnation it was captured from. `stable_identity_generation` advances
- * on every upsert of the UUID (create, rebind, resume, rehydrate) and on nothing else, so a delayed
- * or retried release of an earlier incarnation cannot clobber a re-acquired row.
+ * on every upsert of the UUID (create, rebind, resume, rehydrate) and on a recovery's claim of a
+ * recoverable row or its hand-back (#11200, #11243), and on nothing else (a release does not
+ * advance it), so a delayed or retried release of an earlier incarnation cannot clobber a
+ * re-acquired row.
  */
 export interface MarkReleasedOptions {
   expectedRowGeneration?: number;
@@ -111,12 +147,21 @@ export interface DeviceSessionPersistence {
   /**
    * Resolves with the row's `stable_identity_generation` after the write when the implementation
    * reports it; that is the value a later release of this incarnation passes as
-   * {@link MarkReleasedOptions.expectedRowGeneration}. `nowMs` is the session clock the row's
-   * stamps are written with (#11129), used for the retention prune; it defaults to the timer.
+   * {@link MarkReleasedOptions.expectedRowGeneration}. `nowMs` is on the clock the row's stamps
+   * are written with, used for the retention prune; it defaults to the timer. Stored stamps are
+   * wall-clock epoch ms (#11162): the session manager converts its session-clock instants,
+   * `nowMs` included, on the way in (`sessionClockPersistence.ts`).
    */
-  upsertActiveSession(record: DeviceSessionRecord, nowMs?: number): Promise<number | void>;
+  upsertActiveSession(
+    record: DeviceSessionRecord,
+    nowMs?: number,
+    options?: UpsertActiveSessionOptions,
+  ): Promise<number | void>;
   getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
-  /** `nowMs` is the session clock the persisted stamps were written with (#11129). */
+  /**
+   * `nowMs` is on the clock the persisted stamps were written with: wall-clock epoch ms (#11162),
+   * converted from the session clock by the session manager's `sessionClockPersistence.ts`.
+   */
   listRecoverableSessions?(nowMs?: number): Promise<DeviceSession[]>;
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
   /**
@@ -137,6 +182,20 @@ export interface DeviceSessionPersistence {
     expected: RecoverableRowIncarnation,
     daemonSessionId: string,
   ): Promise<number | undefined>;
+  /**
+   * Hand back a claim {@link claimRecoverableSession} took, after the recovery failed without
+   * recovering or terminalizing the row (#11243): restore `previousOwner` and advance the
+   * generation, only while the row is still the recoverable incarnation `claimed` describes.
+   * Advancing (rather than restoring the pre-claim generation) keeps any late write of the failed
+   * recovery, conditioned on the claimed generation, from landing. Resolves with whether the
+   * claim was handed back; false when another writer (the recovery's own upsert, a terminal
+   * release, a peer) changed the row first.
+   */
+  releaseRecoverableSessionClaim?(
+    sessionUuid: string,
+    claimed: RecoverableRowIncarnation,
+    previousOwner: string | null,
+  ): Promise<boolean>;
   recordLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
   replaceLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
   markReleased(
@@ -280,13 +339,16 @@ export class DeviceSessionRepository {
   async upsertActiveSession(
     record: DeviceSessionRecord,
     nowMs: number = this.timer.now(),
+    options: UpsertActiveSessionOptions = {},
   ): Promise<number> {
+    const { claimedRow } = options;
     // A cheap, unconditional, indexed range
     // delete run before the write rather than gated behind amortization —
     // session starts are far less frequent than the amortized-per-insert
     // tables (#6464). Self-contained: a prune failure must never block a new
     // session from being persisted, so it swallows its own errors.
     await this.pruneExpiredSessions(nowMs);
+    let written: { stable_identity_generation?: number } | undefined;
     try {
       const db = await this.getDb();
       const now = this.nowIso();
@@ -313,11 +375,11 @@ export class DeviceSessionRepository {
         updated_at: now,
       };
 
-      const written = await db
+      written = await db
         .insertInto("device_sessions")
         .values(row)
-        .onConflict((oc) =>
-          oc.column("session_uuid").doUpdateSet({
+        .onConflict((oc) => {
+          const update = oc.column("session_uuid").doUpdateSet({
             device_id: row.device_id,
             stable_device_id: row.stable_device_id,
             // Distinguishes this writer from a forward-compatible older binary
@@ -339,17 +401,46 @@ export class DeviceSessionRepository {
             ...livenessColumnsFromRow(row),
             liveness_contract_generation: sql`liveness_contract_generation + 1`,
             updated_at: now,
-          }),
-        )
+          });
+          if (!claimedRow) {
+            return update;
+          }
+          return update
+            .where("device_sessions.status", "!=", "active")
+            .where("device_sessions.stable_identity_generation", "=", claimedRow.rowGeneration)
+            .where((eb) =>
+              claimedRow.daemonSessionId === null
+                ? eb("device_sessions.daemon_session_id", "is", null)
+                : eb("device_sessions.daemon_session_id", "=", claimedRow.daemonSessionId),
+            )
+            .where((eb) =>
+              eb.or([
+                eb(
+                  "device_sessions.release_reason",
+                  "in",
+                  Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS),
+                ),
+                eb(
+                  "device_sessions.release_reason",
+                  "like",
+                  `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`,
+                ),
+              ]),
+            );
+        })
         .returning("stable_identity_generation")
-        .executeTakeFirstOrThrow();
-      return written.stable_identity_generation ?? 0;
+        .executeTakeFirst();
     } catch (error) {
       logger.warn(
         `[DeviceSessionRepository] Failed to upsert device session ${record.sessionUuid}: ${error}`,
       );
       throw error;
     }
+    if (!written) {
+      // The claimed row's precondition failed: an expected race outcome, not a storage failure.
+      throw new DeviceSessionRowChangedError(record.sessionUuid);
+    }
+    return written.stable_identity_generation ?? 0;
   }
 
   async recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void> {
@@ -429,6 +520,35 @@ export class DeviceSessionRepository {
       return claimed?.stable_identity_generation ?? undefined;
     } catch (error) {
       throw toActionableError(error, `Failed to claim recoverable session ${sessionUuid}`);
+    }
+  }
+
+  async releaseRecoverableSessionClaim(
+    sessionUuid: string,
+    claimed: RecoverableRowIncarnation,
+    previousOwner: string | null,
+  ): Promise<boolean> {
+    try {
+      const released = await this.getDb()
+        .updateTable("device_sessions")
+        .set({
+          daemon_session_id: previousOwner,
+          stable_identity_generation: sql`stable_identity_generation + 1`,
+          updated_at: this.nowIso(),
+        })
+        .where("session_uuid", "=", sessionUuid)
+        .where("status", "!=", "active")
+        .where("stable_identity_generation", "=", claimed.rowGeneration)
+        .where((eb) =>
+          claimed.daemonSessionId === null
+            ? eb("daemon_session_id", "is", null)
+            : eb("daemon_session_id", "=", claimed.daemonSessionId),
+        )
+        .where((eb) => hasRecoverableReleaseReason(eb))
+        .executeTakeFirst();
+      return Number(released.numUpdatedRows) === 1;
+    } catch (error) {
+      throw toActionableError(error, `Failed to release the claim on session ${sessionUuid}`);
     }
   }
 
@@ -600,22 +720,16 @@ export class DeviceSessionRepository {
 
   /**
    * Terminalizes expired recoverable rows before reading and returning sessions. `nowMs` must be
-   * on the clock the stamps were written with (the session clock, #11129); the timer is only a
-   * fallback for callers without one.
+   * on the clock the stamps were written with: wall-clock epoch ms (#11162), which the session
+   * manager converts its session clock to; the timer is only a fallback for callers without one.
    */
   async listRecoverableSessions(nowMs: number = this.timer.now()): Promise<DeviceSession[]> {
     const db = await this.getDb();
     await this.pruneExpiredSessions(nowMs);
-    const reasons = Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS);
     const expired = await db
       .selectFrom("device_sessions")
       .select(["session_uuid", "stable_identity_generation"])
-      .where((eb) =>
-        eb.or([
-          eb("release_reason", "in", reasons),
-          eb("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`),
-        ]),
-      )
+      .where((eb) => hasRecoverableReleaseReason(eb))
       .where("expires_at_ms", "<=", nowMs)
       .execute();
     for (const row of expired) {
@@ -634,12 +748,7 @@ export class DeviceSessionRepository {
     return await db
       .selectFrom("device_sessions")
       .selectAll()
-      .where((eb) =>
-        eb.or([
-          eb("release_reason", "in", reasons),
-          eb("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`),
-        ]),
-      )
+      .where((eb) => hasRecoverableReleaseReason(eb))
       .where((eb) =>
         eb.or([
           eb("released_at_ms", "is", null),

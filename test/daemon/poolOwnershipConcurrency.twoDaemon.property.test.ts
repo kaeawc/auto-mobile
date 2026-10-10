@@ -29,6 +29,7 @@ const PROFILES: Record<string, TwoDaemonProfile> = {
     weights: {
       acquire: 6,
       acquireAny: 2,
+      cancelRecovery: 3,
       release: 5,
       control: 2,
       advance: 3,
@@ -61,6 +62,7 @@ const PROFILES: Record<string, TwoDaemonProfile> = {
     weights: {
       acquire: 7,
       acquireAny: 2,
+      cancelRecovery: 3,
       release: 3,
       control: 3,
       loseHeartbeat: 2,

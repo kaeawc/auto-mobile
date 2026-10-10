@@ -52,4 +52,20 @@ describe("cross-daemon ownership regressions", () => {
     ]);
     expect(result.violation).toBeUndefined();
   });
+
+  // A recovery a client cancelled after it claimed the session's recoverable row (#11200 claim)
+  // left the row owned by the live daemon, which never retried it: the peer and that daemon's own
+  // startup refused the row as owned by another daemon until the daemon exited or the row
+  // expired. The failed recovery now hands the claim back. #11243
+  test("a cancelled recovery hands its claim on the row back", async () => {
+    const result = await runTwoDaemonSteps([
+      step("acquireAny", { daemon: 0 }),
+      step("settle"),
+      step("stop", { daemon: 0 }),
+      step("settle"),
+      step("cancelRecovery", { daemon: 1, turns: 3 }),
+      step("settle"),
+    ]);
+    expect(result.violation).toBeUndefined();
+  });
 });

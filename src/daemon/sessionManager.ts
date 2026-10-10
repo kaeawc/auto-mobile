@@ -37,11 +37,14 @@ import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScree
 import {
   DeviceSessionNotActiveError,
   DeviceSessionRepository,
+  DeviceSessionRowChangedError,
   isDeviceRestartReleaseReason,
   isRecoverableDeviceSession,
   type DeviceSessionActivityUpdate,
   type DeviceSessionPersistence,
   type MarkReleasedOptions,
+  type RecoverableRowIncarnation,
+  type UpsertActiveSessionOptions,
 } from "../db/deviceSessionRepository";
 import type { DeviceSession } from "../db/types";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
@@ -948,6 +951,12 @@ export type SessionRecoveryFailureReason =
   | "identity-continuity-lost"
   | "owned-by-other-daemon";
 
+/** A recoverable row this daemon claimed for recovery, and the owner a failed recovery restores. */
+interface ClaimedRecoverableRow {
+  row: DeviceSession;
+  previousOwner: string | null;
+}
+
 /** Which other daemon holds a recovery target (reason `owned-by-other-daemon`, #11076). */
 export interface SessionRecoveryForeignOwner {
   deviceId: string;
@@ -1449,6 +1458,8 @@ export class SessionManager {
   private readonly sharedSessionAssignments = new Map<string, SharedSessionAssignment>();
   /** Persisted recovery state consumed by createSession before it publishes an assigned session. */
   private readonly pendingPersistedRecoveries: Map<string, DeviceSession> = new Map();
+  /** Rows this daemon claimed for recovery (#11200); their upsert is conditioned on the claim. */
+  private readonly claimedRecoverableRows = new WeakSet<DeviceSession>();
   /**
    * Last tool-call activity (a call starting, joining, or ending) against a session that is
    * waiting out a device restart. The released row's `expires_at_ms` froze at the device loss,
@@ -2402,7 +2413,11 @@ export class SessionManager {
     };
 
     const creation: PendingSessionCreation = { promise: Promise.resolve(session) };
-    creation.promise = this.persistAndPublishSession(session, creation);
+    creation.promise = this.persistAndPublishSession(
+      session,
+      creation,
+      this.claimedIncarnation(persistedRecovery),
+    );
     this.pendingSessionCreations.set(sessionId, creation);
     try {
       const created = await this.withinCreateDeadline(
@@ -2465,9 +2480,57 @@ export class SessionManager {
     });
   }
 
+  /** The claimed incarnation a recovery's upsert is conditioned on, when `row` is a claim. */
+  private claimedIncarnation(
+    row: DeviceSession | undefined,
+  ): RecoverableRowIncarnation | undefined {
+    if (!row || !this.claimedRecoverableRows.has(row)) {
+      return undefined;
+    }
+    return {
+      rowGeneration: row.stable_identity_generation ?? 0,
+      daemonSessionId: row.daemon_session_id ?? null,
+    };
+  }
+
+  /**
+   * Persist a new session; a recovery of a claimed row writes only while the row is still its claim
+   * (#11243). The terminal-row check before this write cannot fence a peer's terminal release that
+   * lands between them; the conditioned upsert does, and that release ends this recovery as terminal.
+   */
+  private async persistCreatedSession(
+    session: Session,
+    claimedRow: RecoverableRowIncarnation | undefined,
+  ): Promise<void> {
+    try {
+      await this.persistSession(session, session, claimedRow && { claimedRow });
+    } catch (error) {
+      if (!(error instanceof DeviceSessionRowChangedError)) {
+        throw error;
+      }
+      const current = await this.readPersistedSession(session.sessionId);
+      const terminalRelease =
+        current && this.terminalReleaseFromPersisted(session.sessionId, current);
+      if (terminalRelease) {
+        this.terminalReleaseSnapshots.set(session.sessionId, terminalRelease);
+        throw new TerminalSessionError(session.sessionId, terminalRelease);
+      }
+      const owner = current?.daemon_session_id ?? null;
+      if (owner !== null && owner !== this.daemonSessionId) {
+        logger.info(
+          `[SessionManager] Not recovering session ${session.sessionId}: another AutoMobile ` +
+            `daemon (${owner}) took its row during the recovery`,
+        );
+        throw new DeviceOwnedByOtherDaemonError(session.assignedDevice, undefined);
+      }
+      throw error;
+    }
+  }
+
   private async persistAndPublishSession(
     session: Session,
     creation?: PendingSessionCreation,
+    claimedRow?: RecoverableRowIncarnation,
   ): Promise<Session> {
     const persistedTerminalRelease = await this.getPersistedTerminalRelease(session.sessionId);
     if (persistedTerminalRelease) {
@@ -2476,7 +2539,7 @@ export class SessionManager {
     }
     this.assertCreationNotAbandoned(session, creation);
     await this.rejectCreationAfterShutdownFence(session);
-    await this.persistSession(session, session);
+    await this.persistCreatedSession(session, claimedRow);
     await this.retireCreationIfAbandoned(session, creation);
     await this.rejectCreationAfterShutdownFence(session);
     this.assertTerminalReleaseAdmission(session.sessionId, session);
@@ -3259,10 +3322,35 @@ export class SessionManager {
     initialOwnership: "owned" | "awaiting-owner",
     shared: SharedSessionAssignment,
   ): Promise<Session> {
-    const persisted =
+    const claim =
       listed && this.isRecoverablePersistedSession(listed)
         ? await this.claimRecoverableRow(sessionId, listed)
-        : listed;
+        : undefined;
+    try {
+      return await this.recoverPersistedRow(
+        sessionId,
+        devicePool,
+        platform,
+        claim?.row ?? listed,
+        initialOwnership,
+        shared,
+      );
+    } catch (error) {
+      if (claim) {
+        await this.releaseFailedRecoveryClaim(sessionId, claim);
+      }
+      throw error;
+    }
+  }
+
+  private async recoverPersistedRow(
+    sessionId: string,
+    devicePool: SessionDeviceAssigner,
+    platform: Platform | undefined,
+    persisted: DeviceSession | undefined,
+    initialOwnership: "owned" | "awaiting-owner",
+    shared: SharedSessionAssignment,
+  ): Promise<Session> {
     const recoveryTarget = await this.recoveryTargetFromPersisted(
       sessionId,
       persisted,
@@ -3323,43 +3411,146 @@ export class SessionManager {
    * that peer's to recover. A refusal writes nothing; the returned copy carries the claimed
    * generation, which this recovery's own later writes are conditioned on.
    *
-   * Throws `DeviceOwnedByOtherDaemonError` (code `device_owned_by_other_daemon`).
+   * A compare-and-set that misses re-reads the row once and claims the current incarnation
+   * (#11243): a startup listing can predate this daemon's own on-demand claim of the row, or that
+   * claim's hand-back, and must not refuse the row as if a peer had taken it. A second miss is a
+   * writer racing this one, and refuses.
+   *
+   * Resolves undefined when the persistence cannot claim rows (the row is recovered as read).
+   * Throws `DeviceOwnedByOtherDaemonError` (code `device_owned_by_other_daemon`), or
+   * `TerminalSessionError` when the re-read finds the row terminal.
    */
   private async claimRecoverableRow(
     sessionId: string,
-    persisted: DeviceSession,
-  ): Promise<DeviceSession> {
+    listed: DeviceSession,
+  ): Promise<ClaimedRecoverableRow | undefined> {
     const daemonSessionId = this.daemonSessionId;
     const claim = this.deviceSessionRepository.claimRecoverableSession?.bind(
       this.deviceSessionRepository,
     );
     if (!claim || daemonSessionId === undefined) {
-      return persisted;
+      return undefined;
     }
-    const owner = persisted.daemon_session_id ?? null;
-    const refused = () => {
-      logger.info(
-        `[SessionManager] Not recovering session ${sessionId}: another AutoMobile daemon ` +
-          `${owner === null ? "" : `(${owner}) `}took its row first`,
+    const claimed = await this.tryClaimRecoverableRow(sessionId, listed, claim, daemonSessionId);
+    if (claimed) {
+      return claimed;
+    }
+    const current = await this.readPersistedSession(sessionId);
+    const terminalRelease = current && this.terminalReleaseFromPersisted(sessionId, current);
+    if (terminalRelease) {
+      this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
+      throw new TerminalSessionError(sessionId, terminalRelease);
+    }
+    if (current && this.isRecoverablePersistedSession(current)) {
+      const reclaimed = await this.tryClaimRecoverableRow(
+        sessionId,
+        current,
+        claim,
+        daemonSessionId,
       );
-      return new DeviceOwnedByOtherDaemonError(persisted.device_id, undefined);
-    };
+      if (reclaimed) {
+        return reclaimed;
+      }
+    }
+    throw this.recoverableRowClaimRefusal(sessionId, current ?? listed);
+  }
+
+  /** One compare-and-set against `row`; undefined when the row is no longer that incarnation. */
+  private async tryClaimRecoverableRow(
+    sessionId: string,
+    row: DeviceSession,
+    claim: NonNullable<DeviceSessionPersistence["claimRecoverableSession"]>,
+    daemonSessionId: string,
+  ): Promise<ClaimedRecoverableRow | undefined> {
+    const owner = row.daemon_session_id ?? null;
     if (owner !== null && owner !== daemonSessionId && this.isLiveDaemonSession(owner)) {
-      throw refused();
+      throw this.recoverableRowClaimRefusal(sessionId, row);
     }
     const generation = await claim(
       sessionId,
-      { rowGeneration: persisted.stable_identity_generation ?? 0, daemonSessionId: owner },
+      { rowGeneration: row.stable_identity_generation ?? 0, daemonSessionId: owner },
       daemonSessionId,
     );
     if (generation === undefined) {
-      throw refused();
+      return undefined;
     }
-    return {
-      ...persisted,
+    const claimed = {
+      ...row,
       stable_identity_generation: generation,
       daemon_session_id: daemonSessionId,
     };
+    this.claimedRecoverableRows.add(claimed);
+    return {
+      row: claimed,
+      // This daemon's own stale claim is handed back unowned, so a peer can take it.
+      previousOwner: owner === daemonSessionId ? null : owner,
+    };
+  }
+
+  private recoverableRowClaimRefusal(sessionId: string, row: DeviceSession): Error {
+    const owner = row.daemon_session_id ?? null;
+    if (owner !== null && owner !== this.daemonSessionId) {
+      logger.info(
+        `[SessionManager] Not recovering session ${sessionId}: another AutoMobile daemon ` +
+          `(${owner}) took its row first`,
+      );
+      return new DeviceOwnedByOtherDaemonError(row.device_id, undefined);
+    }
+    logger.info(
+      `[SessionManager] Not recovering session ${sessionId}: its row changed during recovery ` +
+        `(now ${row.status}, ${row.release_reason ?? "no release reason"})`,
+    );
+    return new ActionableError(
+      `Session ${sessionId} is no longer recoverable: its persisted row changed during recovery. ` +
+        "Retry, or acquire a new device with getAndroid or getApple.",
+    );
+  }
+
+  /**
+   * A recovery that failed after claiming its row, without recovering or terminalizing it
+   * (#11243): its caller cancelled or ran out of time, the requested platform did not match, or
+   * the device assignment failed. Hand the claim back, so the row is not left owned by a live
+   * daemon that will not retry it — which a peer, and this daemon's own startup, would refuse
+   * until this daemon exited or the row expired. Releasing rather than retrying here keeps the
+   * retry with whoever asks next (the session's owner reconnecting, or a peer's startup), which
+   * already re-runs the full admission; a retry loop inside the daemon would recover a session no
+   * caller is waiting for. The hand-back is conditioned on the claimed incarnation, so it is a
+   * no-op once the recovery's own upsert, a terminal release, or a peer changed the row.
+   */
+  private async releaseFailedRecoveryClaim(
+    sessionId: string,
+    claim: ClaimedRecoverableRow,
+  ): Promise<void> {
+    const release = this.deviceSessionRepository.releaseRecoverableSessionClaim?.bind(
+      this.deviceSessionRepository,
+    );
+    if (!release || this.sessions.has(sessionId) || this.terminalReleaseSnapshots.has(sessionId)) {
+      return;
+    }
+    try {
+      const released = await release(
+        sessionId,
+        {
+          rowGeneration: claim.row.stable_identity_generation ?? 0,
+          daemonSessionId: claim.row.daemon_session_id ?? null,
+        },
+        claim.previousOwner,
+      );
+      if (released) {
+        logger.info(
+          `[SessionManager] Recovery of session ${sessionId} failed; handed its row back to ` +
+            `${claim.previousOwner ?? "no owner"} so another recovery can take it`,
+        );
+      }
+    } catch (error) {
+      // The recovery's own error is what the caller sees; the row stays claimed until this daemon
+      // exits or the row expires, as before #11243.
+      logger.warn(
+        `[SessionManager] Failed to hand back the claim on session ${sessionId}: ` +
+          errorMessage(error),
+        error,
+      );
+    }
   }
 
   /** Whether `daemonSessionId` names a live daemon, by the attached provider (#11200). */
@@ -8432,7 +8623,11 @@ export class SessionManager {
   // (issue #2885) only drains fire-and-forget writers at graceful shutdown; an
   // awaited write is already sequenced by its caller and must not be wrapped in
   // `track()`. Do not "fix" this by adding a barrier — that would be a non-bug fix.
-  private async persistSession(session: Session, incarnation: Session): Promise<void> {
+  private async persistSession(
+    session: Session,
+    incarnation: Session,
+    upsertOptions?: UpsertActiveSessionOptions,
+  ): Promise<void> {
     const rowGeneration = await this.deviceSessionRepository.upsertActiveSession(
       {
         sessionUuid: session.sessionId,
@@ -8457,6 +8652,7 @@ export class SessionManager {
       },
       // The retention prune compares release stamps (#11129); converted to wall ms with them.
       this.sessionNow(),
+      upsertOptions,
     );
     // Recorded before the ownership write, which can fail after the row already advanced.
     this.recordPersistedRowGeneration(incarnation, rowGeneration);

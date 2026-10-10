@@ -6,6 +6,7 @@ import {
   deviceRestartReleaseReason,
   DeviceSessionNotActiveError,
   DeviceSessionRepository,
+  DeviceSessionRowChangedError,
   isRecoverableDaemonReleaseReason,
   RECOVERABLE_DAEMON_RELEASE_REASONS,
   type DeviceSessionRecord,
@@ -656,6 +657,96 @@ describe("DeviceSessionRepository", () => {
       expect(await repo.getSession("s2")).toMatchObject({
         status: "active",
         daemon_session_id: "winner",
+      });
+    });
+
+    test("a failed recovery hands its claim back only while the row is still its claim (#11243)", async () => {
+      const listed = await releaseRecoverable("s4", "dead-daemon");
+      const generation = listed.stable_identity_generation!;
+      const claimed = await repo.claimRecoverableSession(
+        "s4",
+        { rowGeneration: generation, daemonSessionId: "dead-daemon" },
+        "daemon-a",
+      );
+      const mine = { rowGeneration: claimed!, daemonSessionId: "daemon-a" };
+
+      expect(await repo.releaseRecoverableSessionClaim("s4", mine, "dead-daemon")).toBe(true);
+      expect(await repo.getSession("s4")).toMatchObject({
+        status: "released",
+        release_reason: "daemon-shutdown",
+        daemon_session_id: "dead-daemon",
+        stable_identity_generation: claimed! + 1,
+      });
+      // Already handed back: the claimed incarnation is gone.
+      expect(await repo.releaseRecoverableSessionClaim("s4", mine, "dead-daemon")).toBe(false);
+
+      const reclaimed = await repo.claimRecoverableSession(
+        "s4",
+        { rowGeneration: claimed! + 1, daemonSessionId: "dead-daemon" },
+        "daemon-b",
+      );
+      await repo.markReleased("s4", "released", 3000, "explicit-release");
+      expect(
+        await repo.releaseRecoverableSessionClaim(
+          "s4",
+          { rowGeneration: reclaimed!, daemonSessionId: "daemon-b" },
+          "dead-daemon",
+        ),
+      ).toBe(false);
+      expect(await repo.getSession("s4")).toMatchObject({
+        release_reason: "explicit-release",
+        daemon_session_id: "daemon-b",
+      });
+    });
+
+    test("a recovery's upsert writes only while the row is still its claim (#11243)", async () => {
+      const listed = await releaseRecoverable("s5", "dead-daemon");
+      const claimed = await repo.claimRecoverableSession(
+        "s5",
+        { rowGeneration: listed.stable_identity_generation!, daemonSessionId: "dead-daemon" },
+        "daemon-a",
+      );
+      const record: DeviceSessionRecord = {
+        sessionUuid: "s5",
+        deviceId: "emulator-5554",
+        platform: "android",
+        daemonSessionId: "daemon-a",
+        createdAtMs: 1000,
+        lastUsedAtMs: 3000,
+        expiresAtMs: 10_000_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+        hasReceivedHeartbeat: true,
+      };
+      const claimedRow = { rowGeneration: claimed!, daemonSessionId: "daemon-a" };
+      await repo.markReleased("s5", "released", 2500, "explicit-release", {
+        expectedRowGeneration: claimed!,
+      });
+
+      await expect(repo.upsertActiveSession(record, 3000, { claimedRow })).rejects.toBeInstanceOf(
+        DeviceSessionRowChangedError,
+      );
+      expect(await repo.getSession("s5")).toMatchObject({
+        status: "released",
+        release_reason: "explicit-release",
+        stable_identity_generation: claimed,
+      });
+
+      const other = await releaseRecoverable("s6", "dead-daemon");
+      const mine = await repo.claimRecoverableSession(
+        "s6",
+        { rowGeneration: other.stable_identity_generation!, daemonSessionId: "dead-daemon" },
+        "daemon-a",
+      );
+      expect(
+        await repo.upsertActiveSession({ ...record, sessionUuid: "s6" }, 3000, {
+          claimedRow: { rowGeneration: mine!, daemonSessionId: "daemon-a" },
+        }),
+      ).toBe(mine! + 1);
+      expect(await repo.getSession("s6")).toMatchObject({
+        status: "active",
+        release_reason: null,
+        daemon_session_id: "daemon-a",
       });
     });
 

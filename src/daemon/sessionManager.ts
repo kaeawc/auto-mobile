@@ -3239,7 +3239,13 @@ export class SessionManager {
       timer: this.timer,
       timeoutMs:
         requestDeadlineMs !== undefined && Number.isFinite(requestDeadlineMs)
-          ? Math.max(0, requestDeadlineMs - (wait?.responseMarginMs ?? 0) - this.sessionNow())
+          ? Math.max(
+              0,
+              // The request deadline is wall time (#11359); judge it on the session clock.
+              this.wallToSessionClock(requestDeadlineMs) -
+                (wait?.responseMarginMs ?? 0) -
+                this.sessionNow(),
+            )
           : undefined,
       signal: getAbortSignal(),
       label: "Session restart recovery",
@@ -3283,7 +3289,8 @@ export class SessionManager {
       }
       const deadline =
         requestDeadlineMs !== undefined && Number.isFinite(requestDeadlineMs)
-          ? requestDeadlineMs - wait.responseMarginMs
+          ? // The request deadline is wall time (#11359); `restartDeadlineMs` is on the session clock.
+            this.wallToSessionClock(requestDeadlineMs) - wait.responseMarginMs
           : undefined;
       return await raceWithDeadline(assignment, {
         timer: this.timer,

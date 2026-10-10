@@ -276,6 +276,7 @@ import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService"
 import { serverConfig } from "../utils/ServerConfig";
 import { setDebugPerfEnabled } from "../utils/PerformanceTracker";
 import {
+  installHangupShutdownHandler,
   installProcessLifecycleHandlers,
   PROCESS_SHUTDOWN_TIMEOUT_MS,
   setFatalProcessHandler,
@@ -4333,6 +4334,8 @@ export class Daemon {
     }
     this.shutdownHandlersRegistered = true;
     installProcessLifecycleHandlers();
+    // A terminal-attached daemon must clean up on hangup like on SIGTERM (#11156).
+    installHangupShutdownHandler();
 
     const shutdown = async (signal: string) => {
       if (this.shutdownInProgress) {

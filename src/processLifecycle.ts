@@ -2,7 +2,7 @@ import { defaultTimer, type Timer } from "./utils/SystemTimer";
 import { writeEmergencyLog } from "./utils/loggingConfig";
 import { raceWithDeadline } from "./utils/raceWithDeadline";
 
-export type ShutdownSignal = "SIGINT" | "SIGTERM" | "stdin";
+export type ShutdownSignal = "SIGINT" | "SIGTERM" | "SIGHUP" | "stdin";
 
 // A clean recording finalization alone requires one second. Leave enough time
 // for every child owner to receive a bounded stop or force-stop attempt, while
@@ -45,6 +45,7 @@ export async function runAllCleanupOperations(
 export type ProcessLifecycleEventMap = {
   SIGINT: [];
   SIGTERM: [];
+  SIGHUP: [];
   uncaughtException: [Error];
   unhandledRejection: [unknown, Promise<unknown>];
 };
@@ -73,6 +74,7 @@ export type FatalProcessHandler = (event: FatalProcessEvent) => Promise<void> | 
 export class ProcessLifecycleHandlers {
   private installed = false;
   private stdinShutdownHandlersInstalled = false;
+  private hangupShutdownHandlerInstalled = false;
   private shutdownInProgress = false;
   private shutdownHandler: ProcessShutdownHandler | undefined;
   private shutdownTimeoutHandler: ProcessShutdownTimeoutHandler | undefined;
@@ -114,6 +116,20 @@ export class ProcessLifecycleHandlers {
 
   setFatalProcessHandler(handler: FatalProcessHandler): void {
     this.fatalProcessHandler = handler;
+  }
+
+  /**
+   * Treat SIGHUP like SIGTERM. Only the daemon opts in (#11156): a daemon left
+   * attached to a terminal otherwise dies on hangup without any cleanup.
+   */
+  installHangupShutdownHandler(): void {
+    if (this.hangupShutdownHandlerInstalled) {
+      return;
+    }
+    this.hangupShutdownHandlerInstalled = true;
+    this.lifecycleProcess.on("SIGHUP", () => {
+      void this.shutdown("SIGHUP");
+    });
   }
 
   installStdinShutdownHandlers(stdin: StdinShutdownSource): void {
@@ -227,6 +243,10 @@ const processLifecycleHandlers = new ProcessLifecycleHandlers(process);
 
 export function installProcessLifecycleHandlers(): void {
   processLifecycleHandlers.install();
+}
+
+export function installHangupShutdownHandler(): void {
+  processLifecycleHandlers.installHangupShutdownHandler();
 }
 
 export function installStdinShutdownHandlers(stdin: StdinShutdownSource = process.stdin): void {

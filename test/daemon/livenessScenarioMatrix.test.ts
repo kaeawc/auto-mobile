@@ -1501,13 +1501,17 @@ describe("behaviours only narrow tests protected (#11444, #10655)", () => {
     expect(scenario.ctrlProxyWrites).toEqual([]);
     expectHeld(holder, DEVICE_A);
 
-    // Allowed side: the holder's own frame reaches the device.
+    // Allowed side: the holder's own frame reaches the device, and is a tracked control call
+    // (#11515): the holder's window runs from it.
     expect(await setKeyValue(holder)).toMatchObject({ success: true });
     expect(scenario.ctrlProxyWrites).toEqual(["setPreference"]);
+    const ownerFrameAt = scenario.timer.now();
+    expect(ownerFrameAt).toBeGreaterThan(lastCallAt);
 
-    // Refusals were not use: the holder's window still ended one window after its last tool call.
+    // Refusals were not use: nothing but the holder's own frame moved its window.
     const releasedAt = await scenario.idleUntilReleased(holder, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
-    expect(releasedAt).toBeLessThanOrEqual(lastCallAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(releasedAt).toBeGreaterThan(ownerFrameAt + IDLE_WINDOW_MS);
+    expect(releasedAt).toBeLessThanOrEqual(ownerFrameAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
     expectFreed(DEVICE_A);
   });
 

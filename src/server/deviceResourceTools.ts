@@ -11,7 +11,6 @@ import type { DeviceToolsDependencies } from "./deviceTools";
 import { reconcileDeviceResourcesSchema, setDeviceResourcesSchema } from "./deviceResourceSchemas";
 import type { BootedDevice } from "../models/DeviceInfo";
 import { ToolRegistry } from "./toolRegistry";
-import { INTERNAL_NO_DIFF_PARAM } from "./internalToolCall";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { getAbortSignal } from "../utils/AbortContext";
 import {
@@ -36,7 +35,6 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
       const external: Record<string, unknown> = { ...args };
       const transportDeadline = external[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
       deleteInternalToolParams(external);
-      delete external[INTERNAL_NO_DIFF_PARAM];
       const parsed = setDeviceResourcesSchema.parse(external);
       const deps = dependencies();
       const deadlineMs = resolveResourceDeadline(deps, parsed.timeoutMs, transportDeadline);
@@ -80,7 +78,6 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
       const external: Record<string, unknown> = { ...args };
       const transportDeadline = external[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
       deleteInternalToolParams(external);
-      delete external[INTERNAL_NO_DIFF_PARAM];
       const parsed = reconcileDeviceResourcesSchema.parse(external);
       const deps = dependencies();
       const deadlineMs = resolveResourceDeadline(deps, parsed.timeoutMs, transportDeadline);

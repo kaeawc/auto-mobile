@@ -443,6 +443,16 @@ export const DAEMON_RELEASED_SESSION_PARAM = "__autoMobileReleasedSessionUuid";
  */
 
 /**
+ * Internal tool-to-tool marker (#3053 / #3087) that `ToolRegistry.callInternal` stamps onto the
+ * args of every internal call (see `server/internalToolCall.ts`). Defined here so it takes part in
+ * the canonical {@link INTERNAL_TOOL_PARAM_NAMES} list without an import cycle: a handler that
+ * re-parses its own arguments against a `.strict()` schema must strip it like every other internal
+ * param, or every internal caller (e.g. the managed-slot reconciler's `provisionDevice`, #11266)
+ * gets an "Unrecognized key" refusal.
+ */
+export const INTERNAL_NO_DIFF_PARAM = "__internalNoDiff";
+
+/**
  * Every internal argument name `server/index.ts` may inject into a tool call's
  * params. This is the CANONICAL list: `stripInternalToolParams` strips exactly
  * these before the tool runs, and a handler that re-parses its own public
@@ -466,6 +476,7 @@ export const INTERNAL_TOOL_PARAM_NAMES = [
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
+  INTERNAL_NO_DIFF_PARAM,
 ] as const;
 
 /** Delete every {@link INTERNAL_TOOL_PARAM_NAMES} key from `params`, in place. */

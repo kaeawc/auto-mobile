@@ -1,5 +1,4 @@
 import { INTERNAL_TOOL_PARAM_NAMES } from "../../daemon/constants";
-import { INTERNAL_NO_DIFF_PARAM } from "../../server/internalToolCall";
 import { PlanStep } from "../../models/Plan";
 import { logger } from "../../utils/logger";
 import { isInternalStepParam } from "../../constants/internalStepParams";
@@ -197,7 +196,6 @@ export const INTERNAL_PARAMS = new Set([
   "keepScreenAwake",
   ...INTERNAL_TOOL_PARAM_NAMES,
   "__lockNamespace",
-  INTERNAL_NO_DIFF_PARAM,
 ]);
 
 export function stripInternalParams(args: Record<string, unknown>): Record<string, unknown> {

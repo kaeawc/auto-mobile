@@ -51,8 +51,12 @@ export interface DaemonManagedSlotAcquisitionOptions {
   resetSupersededScope?: ManagedSlotAcquisitionDependencies["resetSupersededScope"];
 }
 
-/** Resolved lazily: the tool registry pulls in every tool module. */
-const defaultInvokeTool: ManagedSlotToolInvoker = async (name, args, signal) => {
+/**
+ * The in-process registry invoker the daemon uses by default: the same handlers MCP callers run,
+ * reached through `ToolRegistry.callInternal`. Resolved lazily: the tool registry pulls in every
+ * tool module. Exported so the real-handler integration test drives exactly this seam (#11266).
+ */
+export const defaultManagedSlotToolInvoker: ManagedSlotToolInvoker = async (name, args, signal) => {
   const { ToolRegistry } = await import("../../server/toolRegistry");
   return await ToolRegistry.callInternal(name, args, undefined, signal);
 };
@@ -71,7 +75,7 @@ export interface DaemonManagedSlotAcquisitionHandle {
 export function createDaemonManagedSlotAcquisition(
   options: DaemonManagedSlotAcquisitionOptions,
 ): DaemonManagedSlotAcquisitionHandle {
-  const invokeTool = options.invokeTool ?? defaultInvokeTool;
+  const invokeTool = options.invokeTool ?? defaultManagedSlotToolInvoker;
   const reconcilers = new WeakMap<SlotRegistry, ManagedSlotReconciler>();
   const reconcilerFor = (registry: SlotRegistry): ManagedSlotReconciler => {
     let reconciler = reconcilers.get(registry);

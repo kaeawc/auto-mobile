@@ -64,6 +64,10 @@ class FakeDevicePool {
     return this.devices;
   }
 
+  getDevice(deviceId: string): PooledDevice | null {
+    return this.devices.find((device) => device.id === deviceId) ?? null;
+  }
+
   isPooledIdentityUnresolved(deviceId: string): boolean {
     return this.devices.find((device) => device.id === deviceId)?.identityUnresolved === true;
   }
@@ -1369,6 +1373,38 @@ describe("handleDaemonRequest", () => {
     expect(
       (await handleDaemonRequest(buildRequest("daemon/deviceLeaseStatus", {}), state)).success,
     ).toBe(false);
+  });
+
+  test("reports a pool-assigned device as in use before its session is published (#11158)", async () => {
+    const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+    devicePool.devices.push({
+      id: "emulator-5600",
+      name: "emulator-5600",
+      platform: "android",
+      sessionId: "session-unpublished",
+      status: "assigned",
+      lastUsedAt: 0,
+      assignmentCount: 1,
+      errorCount: 0,
+      incarnation: 1,
+    });
+    const state = new FakeDaemonState(sessionManager, devicePool);
+    spyOn(sessionManager, "getSessionForDevice").mockReturnValue(null);
+
+    const status = await handleDaemonRequest(
+      buildRequest("daemon/deviceLeaseStatus", { deviceId: "emulator-5600" }),
+      state,
+    );
+    const relinquish = await handleDaemonRequest(
+      buildRequest("daemon/relinquishDeviceLease", { deviceId: "emulator-5600" }),
+      state,
+    );
+
+    expect(status.result).toMatchObject({ sessionId: "session-unpublished" });
+    expect(relinquish.result).toMatchObject({
+      sessionId: "session-unpublished",
+      released: false,
+    });
   });
 
   test("reports CtrlProxy requests and idleness that no tool call is bound to (#10497 review)", async () => {

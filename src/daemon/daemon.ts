@@ -593,6 +593,8 @@ export class Daemon {
   private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
+  /** Live peer daemon ids captured at startup, consulted by the appearance sweep (#11158). */
+  private startupLiveDaemonSessionIds: ReadonlySet<string> = new Set();
   private shutdownSessionReleasesDrained = true;
   /** Session IDs whose normal callback emitted the daemon-shutdown reason. */
   private shutdownReleaseNotifications: Set<string> | null = null;
@@ -1123,7 +1125,12 @@ export class Daemon {
 
       // Adopt terminal releases a crashed predecessor never persisted (#10959) before any
       // listener can admit a session; startup rehydration writes their rows.
-      this.sessionManager.attachTerminalReleaseJournal(createDaemonTerminalReleaseJournal());
+      this.sessionManager.attachTerminalReleaseJournal(
+        createDaemonTerminalReleaseJournal({
+          daemonSessionId: this.daemonSessionId,
+          liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
+        }),
+      );
 
       this.warmAndroidAvdProvenanceCache();
       // iOS device-type profiles are memoized per SimCtlClient and populated inline
@@ -1158,7 +1165,12 @@ export class Daemon {
         const rehydration = await startupBenchmark.runPhase("sessionRehydration", () =>
           this.sessionManager.rehydratePersistedSessions(this.devicePool),
         );
-        await sweepStaleAppearanceConfigs(rehydration, this.sessionManager);
+        await sweepStaleAppearanceConfigs(rehydration, this.sessionManager, {
+          liveDaemonSessionIds: this.startupLiveDaemonSessionIds,
+          ownDaemonSessionId: this.daemonSessionId,
+          getPersistedSession: (sessionUuid) =>
+            this.deviceSessionRepository.getSession(sessionUuid),
+        });
       } catch (error) {
         logger.warn(`[Daemon] Session rehydration failed; continuing startup: ${error}`);
       }
@@ -4187,8 +4199,6 @@ export class Daemon {
       // the registry empty (the pre-#6225 behavior) rather than blocking the
       // FATAL database bring-up this method guards.
       await this.toolSelectionProfileProvenanceLoader.load();
-      // Clear installed apps cache from previous daemon sessions
-      await this.installedAppsRepository.clearOldDaemonSessions(this.daemonSessionId);
       // A discovery failure is intentionally startup-fatal through this method's
       // catch: treating it as an empty live set would let this daemon steal a
       // live peer's sessions, which is less safe than refusing startup.
@@ -4200,6 +4210,13 @@ export class Daemon {
       if (incumbentDaemonSessionId !== undefined) {
         liveDaemonSessionIds.add(incumbentDaemonSessionId);
       }
+      this.startupLiveDaemonSessionIds = liveDaemonSessionIds;
+      // Clear installed apps cache from previous daemon sessions, keeping a live
+      // peer's rows (issue #11158) — hence after the live set is computed.
+      await this.installedAppsRepository.clearOldDaemonSessions(
+        this.daemonSessionId,
+        liveDaemonSessionIds,
+      );
       await this.deviceSessionRepository.markStaleActiveSessionsExpired(
         this.daemonSessionId,
         // released_at_ms is judged against the session clock everywhere else (#11129).

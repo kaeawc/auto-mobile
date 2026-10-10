@@ -204,12 +204,16 @@ export class InstalledAppsRepository implements InstalledAppsStore {
     await db.deleteFrom("installed_apps").where("device_id", "=", deviceId).execute();
   }
 
-  async clearOldDaemonSessions(currentDaemonSessionId: string): Promise<void> {
+  async clearOldDaemonSessions(
+    currentDaemonSessionId: string,
+    liveDaemonSessionIds: ReadonlySet<string> = new Set(),
+  ): Promise<void> {
     const db = await this.getDb();
+    const keep = [...new Set([currentDaemonSessionId, ...liveDaemonSessionIds])];
     await db
       .deleteFrom("installed_apps")
       .where("daemon_session_id", "is not", null)
-      .where("daemon_session_id", "!=", currentDaemonSessionId)
+      .where("daemon_session_id", "not in", keep)
       .execute();
   }
 

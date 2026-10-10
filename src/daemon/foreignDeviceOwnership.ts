@@ -87,6 +87,15 @@ export interface DeviceOwnershipFileSource {
   release(path: string, owner: { pid: number; ownerToken: string }): void;
 }
 
+/**
+ * How long after publishing a claim its live owner may still be unreachable on its control socket
+ * without the claim lapsing (#11158). A restarting daemon republishes the claims of the sessions
+ * it rehydrates before it binds that socket (rehydration alone may take
+ * `SESSION_REHYDRATION_DEADLINE_MS`), so "unreachable" then means "still starting", not "gone".
+ * A crashed owner's PID is normally dead, which lapses its claim regardless of this window.
+ */
+export const DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS = 60_000;
+
 /** Directory of device allocation claims, one lock per device, under each ADB server's scope. */
 export const DEVICE_ALLOCATION_CLAIM_SUBDIR = "device-allocations";
 
@@ -370,7 +379,10 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       return pid;
     }
     const report = await this.probe.query(metadata.socketPath, deviceId);
-    return ownerStillHolds(report, pid, kind, deviceId) ? pid : undefined;
+    const startingUp =
+      kind === "claim" &&
+      this.timer.now() - metadata.acquiredAt < DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS;
+    return ownerStillHolds(report, pid, kind, deviceId, startingUp) ? pid : undefined;
   }
 }
 
@@ -378,16 +390,25 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
  * Whether the owner `pid` recorded in a lock still holds it, judged from its control socket's
  * answer. An unreachable socket, or one now served by another PID, means the owner is gone and
  * its PID may name an unrelated process (#10497). A claim also lapses once the owner reports no
- * session and no running tool call on the device.
+ * session and no running tool call on the device. A live owner that published its claim within
+ * {@link DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS} may not have bound its socket yet (`startingUp`), so
+ * an unreachable socket does not lapse that claim (#11158).
  */
 function ownerStillHolds(
   report: ForwardLeaseOwnerReport,
   pid: number,
   kind: "lease" | "claim",
   deviceId: string,
+  startingUp: boolean,
 ): boolean {
   switch (report.kind) {
     case "unreachable":
+      if (startingUp) {
+        logger.debug(
+          `[DevicePool] ${kind} owner PID ${pid} of ${deviceId} is live but not yet reachable; treating its fresh claim as held`,
+        );
+        return true;
+      }
       // Expected after the owner crashed or the host rebooted.
       logger.debug(
         `[DevicePool] ${kind} owner PID ${pid} of ${deviceId} is orphaned: ${report.detail}`,

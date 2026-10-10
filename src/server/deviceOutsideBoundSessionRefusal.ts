@@ -16,14 +16,17 @@ export class DeviceOutsideBoundSessionError extends ActionableError {
     readonly boundSessionUuid: string | undefined,
     readonly boundDevice: { deviceId: string; platform: string },
     readonly requested: { deviceId?: string; platform?: string },
+    /** Replaces the composed message where a caller's existing wording must stay stable. */
+    message?: string,
   ) {
     super(
-      `Bound device session ${boundSessionUuid} controls only ${boundDevice.platform} device ` +
-        `'${boundDevice.deviceId}', but this call named ` +
-        `${requested.deviceId ? `device '${requested.deviceId}'` : `platform '${requested.platform}'`}` +
-        ` (code ${DEVICE_OUTSIDE_BOUND_SESSION_CODE}). Use a separate MCP connection for that ` +
-        "device, release the bound session first, or omit the device selector to target the " +
-        "bound device.",
+      message ??
+        `Bound device session ${boundSessionUuid} controls only ${boundDevice.platform} device ` +
+          `'${boundDevice.deviceId}', but this call named ` +
+          `${requested.deviceId ? `device '${requested.deviceId}'` : `platform '${requested.platform}'`}` +
+          ` (code ${DEVICE_OUTSIDE_BOUND_SESSION_CODE}). Use a separate MCP connection for that ` +
+          "device, release the bound session first, or omit the device selector to target the " +
+          "bound device.",
     );
     this.name = "DeviceOutsideBoundSessionError";
   }

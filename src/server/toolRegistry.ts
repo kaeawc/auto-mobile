@@ -8,6 +8,7 @@ import { runWithToolDispatchReporter } from "../utils/ToolDispatchContext";
 import type { NavigationToolCallHandle } from "../utils/interfaces/NavigationGraph";
 import { runSessionDisplayPin } from "./sessionDisplayPin";
 import { toActionableError } from "../models/ActionableError";
+import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
 import {
   clearToolTransportRecovery,
   setToolTransportRecovery,
@@ -1117,6 +1118,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         providedDeviceId,
         sessionUuid,
         admittedSession?.assignedDevice,
+        admittedSession?.platform,
       );
       const context = await createToolExecutionContext(
         sessionUuid,
@@ -1152,7 +1154,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         true,
         signal,
       );
-      assertSessionDeviceRouting(name, providedDeviceId, sessionUuid, context.deviceId);
+      assertSessionDeviceRouting(
+        name,
+        providedDeviceId,
+        sessionUuid,
+        context.deviceId,
+        context.devicePlatform,
+      );
       if (context.deviceId && !providedDeviceId) {
         providedDeviceId = context.deviceId;
         logger.info(`[ToolRegistry] Resolved device from session: ${providedDeviceId}`);
@@ -2355,9 +2363,15 @@ function assertSessionDeviceRouting(
   providedDeviceId: string | undefined,
   sessionUuid: string,
   sessionDeviceId: string | undefined,
+  sessionPlatform: string | undefined,
 ): void {
   if (providedDeviceId && sessionDeviceId && providedDeviceId !== sessionDeviceId) {
-    throw new ActionableError(
+    // The same refusal a pinned connection gets for a foreign device (#11351), typed so clients
+    // branch on `device_outside_bound_session`; the long-standing wording is kept.
+    throw new DeviceOutsideBoundSessionError(
+      sessionUuid,
+      { deviceId: sessionDeviceId, platform: sessionPlatform ?? "unknown" },
+      { deviceId: providedDeviceId },
       `${toolName} deviceId '${providedDeviceId}' does not match session '${sessionUuid}' device '${sessionDeviceId}'.`,
     );
   }

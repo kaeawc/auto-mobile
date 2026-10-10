@@ -722,6 +722,11 @@ interface DeviceRemovedListener {
   (deviceId: string, platform: "android" | "ios"): void;
 }
 
+/** Fired after a pooled device's status or holding session changed and the change committed. */
+export interface DeviceStateChangedListener {
+  (deviceId: string, platform: Platform): void;
+}
+
 export interface DeviceSessionExecutionCanceller {
   /** Same injected cancellation/drain seam, for work with no bound session. */
   cancelDeviceExecutions?(
@@ -873,6 +878,7 @@ export interface DevicePoolDependencies {
   androidDeviceReboot?: AndroidDeviceReboot;
   recoveryPolicy?: DeviceRecoveryPolicy;
   onDeviceRemoved?: DeviceRemovedListener;
+  onDeviceStateChanged?: DeviceStateChangedListener;
   onDeviceFramesInvalidated?: (deviceId: string) => void;
   emulatorLossIncidentStore?: EmulatorLossIncidentStore;
   cancelDeviceSessionExecutions?: DeviceSessionExecutionCanceller;
@@ -1071,6 +1077,7 @@ export class DevicePool {
   private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
   private readonly onDeviceReady: DeviceReadyListener | undefined;
   private readonly onDeviceRemoved: DeviceRemovedListener | undefined;
+  private readonly onDeviceStateChanged: DeviceStateChangedListener | undefined;
   private readonly onDeviceFramesInvalidated: ((deviceId: string) => void) | undefined;
   private readonly cancelDeviceSessionExecutions: DeviceSessionExecutionCanceller;
   private readonly ambientExecutionIdReader: AmbientExecutionIdReader | undefined;
@@ -1231,6 +1238,7 @@ export class DevicePool {
     androidDeviceReboot,
     recoveryPolicy,
     onDeviceRemoved,
+    onDeviceStateChanged,
     onDeviceFramesInvalidated,
     emulatorLossIncidentStore = new InMemoryEmulatorLossIncidentStore(timer),
     cancelDeviceSessionExecutions,
@@ -1294,6 +1302,7 @@ export class DevicePool {
     this.criteriaMatcher = criteriaMatcher;
     this.onDeviceReady = onDeviceReady;
     this.onDeviceRemoved = onDeviceRemoved;
+    this.onDeviceStateChanged = onDeviceStateChanged;
     this.onDeviceFramesInvalidated = onDeviceFramesInvalidated;
     this.cancelDeviceSessionExecutions = cancelDeviceSessionExecutions ?? (async () => 0);
     this.ambientExecutionIdReader = ambientExecutionIdReader;
@@ -2105,6 +2114,16 @@ export class DevicePool {
     }
   }
 
+  /** Tell observers a device's status or holder changed; call only after the change committed. */
+  private notifyDeviceStateChanged(device: Pick<PooledDevice, "id" | "platform">): void {
+    try {
+      this.onDeviceStateChanged?.(device.id, device.platform);
+    } catch (error) {
+      // Observers cannot roll back a committed state change; never fail the pool operation.
+      logger.warn(`[DevicePool] Device-state listener failed for ${device.id}: ${error}`);
+    }
+  }
+
   private notifyDeviceFramesInvalidated(deviceId: string): void {
     try {
       this.onDeviceFramesInvalidated?.(deviceId);
@@ -2159,6 +2178,7 @@ export class DevicePool {
           this.criteriaMatcher.getBootedDeviceSimulatorType(device) ?? existing.simulatorType;
         existing.lastUsedAt = this.seedLastUsedAt(this.timer.now());
         logger.info(`Recovered errored device ${device.deviceId} after successful boot`);
+        this.notifyDeviceStateChanged(existing);
       } else {
         logger.warn(`Device ${device.deviceId} already in pool`);
       }
@@ -6170,6 +6190,7 @@ export class DevicePool {
       this.restoreSessionAssignment(device, assignmentSnapshot);
       return { deviceId: session.assignedDevice };
     }
+    this.notifyDeviceStateChanged(device);
     return existingSession === session ? { deviceId: device.id } : { deviceId: device.id, session };
   }
 
@@ -6644,6 +6665,7 @@ export class DevicePool {
     this.notifyMultiDeviceAllocationWaiters();
 
     logger.info(`Released device ${deviceId} from session ${sessionId}`);
+    this.notifyDeviceStateChanged(device);
   }
 
   // releaseCapturedDevice checks assignment generation, but permits release after
@@ -7086,6 +7108,7 @@ export class DevicePool {
     // lock forward so the original session keeps exclusive access.
     replacementDevice.autolockSessionId = autolockSessionId;
     replacementDevice.lastUsedAt = this.nextLastUsedAt();
+    this.notifyDeviceStateChanged(replacementDevice);
   }
 
   /**
@@ -7135,6 +7158,7 @@ export class DevicePool {
     device.status = "idle";
     device.errorCount = 0;
     this.lastReleasedDeviceId = device.id;
+    this.notifyDeviceStateChanged(device);
   }
 
   reserveDeviceForReadiness(
@@ -7752,6 +7776,7 @@ export class DevicePool {
       ),
     );
     this.recordBindOwnership(caller.mcpSessionId, sessionId);
+    this.notifyDeviceStateChanged(device);
   }
 
   /**
@@ -8587,6 +8612,7 @@ export class DevicePool {
       logger.error(
         `Device ${deviceId} marked as error ` + `(${device.errorCount} consecutive errors)`,
       );
+      this.notifyDeviceStateChanged(device);
     } else {
       logger.warn(`Device ${deviceId} error count: ${device.errorCount}/${this.MAX_DEVICE_ERRORS}`);
     }

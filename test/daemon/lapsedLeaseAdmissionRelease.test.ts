@@ -10,6 +10,7 @@ import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../src/models";
+import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
 import { executionTracker, type ActiveExecution } from "../../src/server/executionTracker";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
@@ -118,6 +119,30 @@ describe("a control call on a lapsed owner lease before the monitor's scan (#112
 
     expect(refusal).toBeInstanceOf(SessionSuspectError);
     expect(daemon.getSessionManager().hasSession(SESSION)).toBe(true);
+  });
+
+  // The scan cancels the read it cuts with the typed terminal refusal (#11322); the release this
+  // admission performs in its place leaves the read running with no answer about the session.
+  test("the release cuts an in-flight read with the terminal refusal, as the scan's release does", async () => {
+    const read = track(executionTracker.startExecution("observe", undefined, SESSION));
+    executionTracker.markDeviceReadCall(read.id, read.toolName);
+    lapseOwnerLease();
+    const call = track(executionTracker.startExecution("tapOn", undefined, SESSION));
+
+    const refusal = await daemon
+      .getSessionManager()
+      .getOrCreateSession(SESSION, undefined, undefined, {
+        executionId: call.id,
+        startTime: call.startTime,
+      })
+      .catch((error: unknown) => error);
+
+    expect(refusal).toBeInstanceOf(TerminalSessionError);
+    expect(daemon.getSessionManager().hasSession(SESSION)).toBe(false);
+    expect(read.abortController.signal.aborted).toBe(true);
+    expect(sessionReleasedDuringCallPayload(read.cancelReason)).toMatchObject({
+      error: { code: "session_ownership_lost", sessionUuid: SESSION, reason: "heartbeat-timeout" },
+    });
   });
 });
 

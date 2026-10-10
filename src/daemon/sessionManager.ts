@@ -8286,6 +8286,9 @@ export class SessionManager {
     logger.info(
       `Session ${session.sessionId} lost its owner's heartbeat lease before this call; releasing`,
     );
+    // Cut what the scan's reap would cut, through the routine it uses: a read still in flight is
+    // answered with the typed release instead of being left running on a freed device (#11400).
+    this.cancelExecutionsCutByRelease(session.sessionId, "heartbeat-timeout", callerExecutionId);
     await this.releaseSession(session.sessionId, "heartbeat-timeout", true, undefined, {
       expiryOrigin: "lazy-expiry",
     });

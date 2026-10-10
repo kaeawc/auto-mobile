@@ -174,7 +174,10 @@ export function parseArgs(
   // Throws a typed ManagedSlotConfigError before any daemon or device work (#11173).
   const managedSlotConfig = resolveManagedSlotConfig({
     flagValue: scalarOptions.managedSlotConfigValue,
-    envValue: environment[MANAGED_SLOT_CONFIG_ENV],
+    // The env var is per-proxy launch state: daemon and CLI invocations that merely inherit it
+    // must not parse it (#11286). The explicit flag stays honored.
+    envValue:
+      cliMode || daemonMode || daemonRequested ? undefined : environment[MANAGED_SLOT_CONFIG_ENV],
     readFile,
     hasInitialSessionUuid: scalarOptions.initialSessionUuid !== undefined,
     noProxy,

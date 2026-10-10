@@ -476,3 +476,35 @@ describe("--managed-slot-config (#11173)", () => {
     ).toThrow("managed_slot_config_invalid");
   });
 });
+
+describe("inherited AUTOMOBILE_MANAGED_SLOT_CONFIG (#11286)", () => {
+  const missingFile = (path: string): string => {
+    throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+  };
+  const env = { AUTOMOBILE_MANAGED_SLOT_CONFIG: "p1.json" };
+
+  test("--daemon-mode ignores an env config it cannot read from its own cwd", () => {
+    expect(() => parseArgs(["--daemon-mode"], logger, env, missingFile)).not.toThrow();
+  });
+
+  test("--daemon reset-slot-scope ignores an inherited env config", () => {
+    expect(() =>
+      parseArgs(
+        ["--daemon", "reset-slot-scope", "--runner-namespace", "r", "--incarnation", "b1"],
+        logger,
+        env,
+        missingFile,
+      ),
+    ).not.toThrow();
+  });
+
+  test("--cli ignores an inherited env config", () => {
+    expect(
+      parseArgs(["--cli", "observe"], logger, env, missingFile).managedSlotConfig,
+    ).toBeUndefined();
+  });
+
+  test("the STDIO proxy still refuses an unreadable env config", () => {
+    expect(() => parseArgs([], logger, env, missingFile)).toThrow("managed_slot_config_invalid");
+  });
+});

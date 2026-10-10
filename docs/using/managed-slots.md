@@ -221,6 +221,11 @@ A managed-execution session uses the `managed-execution` liveness policy:
   for the default owner, that it has not been re-parented. Either loss shuts the
   proxy down and releases its sessions. Stdin EOF ends the execution the same
   way. If the proxy is killed outright, the ~10 s no-heartbeat release applies.
+  Limit: with the default owner, a launch parent pid of 1 is treated as already
+  orphaned and a parent pid of 0 (for example `docker exec`) as exited. When the
+  runner is PID 1 in a container, or the proxy is started by `docker exec`, set
+  `executionOwnerPid` to a live pid; an explicit owner takes precedence over the
+  parent-pid heuristic.
 
 Values are the defaults in `src/daemon/sessionLivenessWindows.ts`; see
 [Device ownership](device-ownership.md#when-a-session-is-released) for the

@@ -84,6 +84,14 @@ describe("ExecutionOwnerWatch", () => {
     expect(losses.map((loss) => loss.reason)).toEqual(["parent-changed"]);
   });
 
+  test("a live explicit owner keeps a PID-1-launched proxy running (#11287)", async () => {
+    const { timer, watch, losses } = harness({ launchParentPid: 1, ownerPid: SUPERVISOR });
+    watch.start();
+    timer.advanceTime(3 * EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    await settle();
+    expect(losses).toEqual([]);
+  });
+
   test("a declared owner pid is watched besides the parent", async () => {
     const { timer, watch, losses, kill } = harness({ ownerPid: SUPERVISOR });
     watch.start();

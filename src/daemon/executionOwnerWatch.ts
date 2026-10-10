@@ -113,7 +113,9 @@ export class ExecutionOwnerWatch {
   private judge(): ExecutionOwnerLossReason | undefined {
     // Launched already orphaned (#11232): the launcher died before `main()` captured the parent, so
     // init adopted the proxy and the parent pid never changes again. Nothing owns this execution.
-    if (this.options.launchParentPid === INIT_PID) {
+    // An explicit live owner takes precedence: a container whose entrypoint is the runner (PID 1)
+    // legitimately launches the proxy (#11287). Without one, pid 1 means orphaned before startup.
+    if (this.options.ownerPid === undefined && this.options.launchParentPid === INIT_PID) {
       return "parent-changed";
     }
     if (this.probe.currentParentPid() !== this.options.launchParentPid) {

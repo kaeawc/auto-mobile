@@ -21,9 +21,10 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ProgressCallback } from "./toolRegistry";
 import type { DeviceResourceConfigurationResult } from "../models/DeviceResourceConfiguration";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
-import { BootedDevice, DeviceInfo } from "../models";
+import { BootedDevice, DeviceInfo, Platform } from "../models";
 import { DeviceLostError } from "../models/DeviceLostError";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
+import { assertBootCapacityAvailable } from "../features/bootAdmission/sharedBootAdmissionGates";
 import { describeDevice, projectProvisionedDevice } from "./deviceDescription";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
@@ -1457,6 +1458,10 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
           markDeviceCreationStarted: () => {
             creationStarted = true;
           },
+          checkBootCapacity:
+            deps.checkBootCapacity ??
+            ((platform, capacitySignal) =>
+              assertBootCapacityAvailable(platform, { signal: capacitySignal })),
           lifecycleLease: lifecycleLease,
           collectPendingSettlement: (settlement) => {
             settlementState.exactProvisioning = settlement;
@@ -1570,8 +1575,10 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       lifecycleLease,
       collectPendingSettlement,
       signal,
+      checkBootCapacity,
     }: {
       totalDeadlineMs: number;
+      checkBootCapacity: (platform: Platform, signal?: AbortSignal) => Promise<void>;
       markDeviceCreationStarted: () => void;
       lifecycleLease: VirtualDeviceLifecycleLease;
       collectPendingSettlement: (settlement: Promise<unknown>) => void;
@@ -1597,6 +1604,13 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
               ...(args.device.deviceId === undefined ? {} : { deviceId: args.device.deviceId }),
               spec: args.device.spec,
               onBeforeCreate: markDeviceCreationStarted,
+              // A device created only to be refused at boot would then be deleted (#11236).
+              ...(args.boot
+                ? {
+                    assertCapacityBeforeCreate: async (capacitySignal?: AbortSignal) =>
+                      await checkBootCapacity(args.device.platform, capacitySignal),
+                  }
+                : {}),
               lifecycleLease,
               deadlineMs: totalDeadlineMs,
               signal: deadlineSignal,
@@ -1626,6 +1640,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       lifecycleLease,
       allowExternalLeaseAdoptionRecheck: true,
       lifecycleCoordinator: deps.lifecycleCoordinator,
+      checkBootCapacity: deps.checkBootCapacity,
       onAndroidColdBootTrackingChanged: () => {
         void deps.notifyDeviceInventoryResourcesChanged(false).catch((error) => {
           logger.warn(

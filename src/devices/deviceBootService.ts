@@ -44,6 +44,7 @@ import { logger } from "../utils/logger";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
+import { assertBootCapacityAvailable } from "../features/bootAdmission/sharedBootAdmissionGates";
 import type { StableVirtualDeviceIdentity } from "./virtualDeviceLifecycleCoordinator";
 import {
   getVirtualDeviceLifecycleCoordinator,
@@ -444,6 +445,12 @@ export interface DeviceBootServiceDependencies {
     failure: unknown,
     options?: { pendingCreation?: Promise<unknown> },
   ) => Promise<void>;
+  /**
+   * Read-only boot capacity check run before creating a device (createIfMissing), so at the
+   * limit the request is refused with `capacity_exhausted` instead of creating, being refused
+   * at boot and deleting (#11236). Defaults to the process-wide admission gates.
+   */
+  checkBootCapacity?: (platform: Platform, signal?: AbortSignal) => Promise<void>;
 }
 
 interface BootDeadlineContext {
@@ -1062,6 +1069,15 @@ export class DeviceBootService {
     if (criteria.requires?.panels !== undefined || criteria.requires?.posture !== undefined) {
       throw new ActionableError(describeDisplayRequirements(criteria, describedCandidates));
     }
+    // Nothing running or warm can serve the request, so it would create and cold-boot: refuse
+    // before creating when that boot would be refused anyway (#11236).
+    const checkBootCapacity =
+      this.dependencies.checkBootCapacity ??
+      ((platform: Platform, signal?: AbortSignal) =>
+        assertBootCapacityAvailable(platform, { signal }));
+    await this.runPhase(context, "checking boot capacity", (signal) =>
+      checkBootCapacity(criteria.platform, signal),
+    );
     let created: ProvisionedDevice | undefined;
     // Set before the platform create runs: a cancelled or timed-out create may
     // still have created the device under this identity (#11155).

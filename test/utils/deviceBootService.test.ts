@@ -23,6 +23,7 @@ import {
   type Platform,
 } from "../../src/models";
 import { DeviceAlreadyRunningError } from "../../src/models/DeviceAlreadyRunningError";
+import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
 import type { DeviceBootRecovery } from "../../src/devices/deviceBootRecovery";
 import type { Timer } from "../../src/utils/SystemTimer";
@@ -795,6 +796,45 @@ describe("DeviceBootService", () => {
     expect(String(await bootOutcome)).toContain("was preempted by teardown");
     const teardownLease = await teardown;
     teardownLease.release();
+  });
+
+  // At the boot limit createIfMissing created a device, was refused at boot, then deleted it
+  // (#11236): a read-only capacity check now refuses before anything is created.
+  it("refuses createIfMissing at the boot limit before creating", async () => {
+    const timer = new FakeTimer();
+    const provisionCalls: string[] = [];
+    const rolledBack: string[] = [];
+    const boot = new DeviceBootService({
+      deviceManager: new FakeDeviceUtils(),
+      deviceMatcher: new FakeDeviceMatcher(),
+      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async (criteria) => {
+          provisionCalls.push(criteria.platform);
+          throw new Error("unexpected device creation");
+        },
+      },
+      matchingStrategy: "LATEST",
+      timer,
+      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+      checkBootCapacity: async (platform) => {
+        throw new BootCapacityExhaustedError(
+          { platform, limit: 1, booted: 1, retryAfterMs: 5_000 },
+          "Refused to boot: no iOS simulator capacity",
+        );
+      },
+      rollbackCreatedDevice: async (device) => {
+        rolledBack.push(device.name);
+      },
+    });
+
+    const error = await boot
+      .boot({ platform: "ios", createIfMissing: true })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+    expect(provisionCalls).toEqual([]);
+    expect(rolledBack).toEqual([]);
   });
 
   it("rolls back a created simulator whose lifecycle identity cannot be bound (#11100)", async () => {

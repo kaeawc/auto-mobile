@@ -286,6 +286,7 @@ const bootAndPrepareDevice = async (
     // The daemon outlives the request, so a cancelled boot's cleanup finishes in the background (#9920).
     cleanupMayOutliveRequest: true,
     rollbackCreatedDevice: createdDeviceRollbackFor(options),
+    checkBootCapacity: deps.checkBootCapacity,
     onAndroidColdBootTrackingChanged: () => {
       void deps.notifyDeviceInventoryResourcesChanged(false).catch((error) => {
         logger.warn(

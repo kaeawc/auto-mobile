@@ -6,6 +6,7 @@ import {
   DEFAULT_ADMISSION_RETRY_AFTER_MS,
   admitBootNow,
   type BootAdmissionResult,
+  type BootCapacityChecker,
   type BootCapacityReporter,
   type BootCapacitySnapshot,
   type RefusedCapacityDecision,
@@ -64,7 +65,9 @@ export interface CapacityGateOptions {
   sustainedSamples?: number;
 }
 
-export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityReporter {
+export class IosSimCapacityGate
+  implements SimulatorCapacityGate, BootCapacityReporter, BootCapacityChecker
+{
   private readonly env: NodeJS.ProcessEnv;
   private readonly retryAfterMs: number;
   private readonly sustainedSamples: number;
@@ -151,6 +154,16 @@ export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityRe
       decide: (report) => this.decide(report, request, "hint"),
       admit: () => this.admittedBoots.admit(options.bootUdid).release,
     });
+  }
+
+  /**
+   * Refuses with `capacity_exhausted` when booting a simulator would be refused now; admits nothing.
+   * A warm simulator is not a substitute here: the caller boots its own device.
+   */
+  async assertCapacityAvailable(): Promise<void> {
+    // A capacity check is not a boot decision: it must not advance the sustained-pressure streak.
+    const report = await this.fleet.collect();
+    assertCapacityGranted({ decision: this.decide(report, undefined, "hint") });
   }
 
   /** Current limit, booted simulators (every Booted one, owned or not) and admitted boots in flight. */

@@ -51,6 +51,20 @@ describe("AndroidBootAdmissionGate (#11181)", () => {
     expect(timer.getPendingSleepCount()).toBe(0);
   });
 
+  // #11236: a read-only check lets a caller refuse before creating an AVD it would delete.
+  test("assertCapacityAvailable refuses at capacity and admits nothing below it", async () => {
+    const { source, gate } = setup();
+    source.emulatorSerials = ["emulator-5554", "emulator-5556"];
+
+    const error = await rejection(gate.assertCapacityAvailable());
+
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+    expect(error).toMatchObject({ details: { limit: 2, booted: 2, platform: "android" } });
+    source.emulatorSerials = ["emulator-5554"];
+    await gate.assertCapacityAvailable();
+    expect(await gate.describeCapacity()).toEqual({ limit: 2, booted: 1, inFlight: 0 });
+  });
+
   test("admits right away once an emulator has shut down", async () => {
     const { source, gate } = setup();
     source.emulatorSerials = ["emulator-5554", "emulator-5556"];

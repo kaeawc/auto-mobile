@@ -10,6 +10,7 @@ import {
   DEFAULT_ADMISSION_RETRY_AFTER_MS,
   admitBootNow,
   DEFAULT_SAMPLE_TIMEOUT_MS,
+  type BootCapacityChecker,
   type BootCapacityReporter,
   type BootCapacitySnapshot,
   type LedgerAdmission,
@@ -46,7 +47,7 @@ export interface AndroidBootAdmissionGateOptions {
  * counts, including ones started outside AutoMobile. Read-only: it never
  * boots, kills or reconfigures an emulator.
  */
-export class AndroidBootAdmissionGate implements BootCapacityReporter {
+export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapacityChecker {
   private readonly env: NodeJS.ProcessEnv;
   private readonly retryAfterMs: number;
   private readonly ledger: BootAdmissionLedger;
@@ -99,6 +100,12 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter {
         ledgerAdmission.handOff(deviceId, deadlineMs);
       },
     };
+  }
+
+  /** Refuses with `capacity_exhausted` when a cold boot would be refused now; admits nothing. */
+  async assertCapacityAvailable(options: { signal?: AbortSignal } = {}): Promise<void> {
+    const sample = await this.source.sample(options);
+    assertBootCapacityGranted({ decision: this.decide(sample) }, "android", "emulator");
   }
 
   /** Current limit, booted emulators (every running one, owned or not) and admitted boots in flight. */

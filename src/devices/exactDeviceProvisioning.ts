@@ -78,6 +78,11 @@ export interface ExactDeviceProvisionRequest {
   spec: ExactDeviceSpecification;
   /** Note ownership immediately before creating a previously absent device. */
   onBeforeCreate?: () => void;
+  /**
+   * Read-only check run before creating a previously absent device that is about to be booted:
+   * throws (e.g. `BootCapacityExhaustedError`) to refuse before any creation side effect.
+   */
+  assertCapacityBeforeCreate?: (signal?: AbortSignal) => Promise<void>;
   /** Shared lifecycle lease held by a higher-level operation through boot/readiness. */
   lifecycleLease?: VirtualDeviceLifecycleLease;
   /** Absolute deadline for acquiring lifecycle coordination. */
@@ -560,6 +565,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       await this.assertIosPairCompatible(request, request.spec as IosDeviceSpecification);
     }
 
+    await request.assertCapacityBeforeCreate?.(request.signal);
     request.onBeforeCreate?.();
     if (request.platform === "android") {
       return await trackAmbient("provision:createAndroid", () =>

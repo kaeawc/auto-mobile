@@ -55,6 +55,9 @@ export class PoolManagedSlotDeviceStopper implements ManagedSlotDeviceStopper {
     runtime: PooledDevice,
   ): Promise<ManagedSlotStopResult | undefined> {
     try {
+      if (!(await target.stillClaimed())) {
+        return { kind: "failed", message: "The free-pool row is no longer claimed for shutdown" };
+      }
       const response = await runAsManagedSlotReconciler(
         { scopeKey: target.fromScopeKey, slotIndex: 0 },
         () =>

@@ -1,3 +1,7 @@
+import {
+  FREE_DEVICE_STOP_CLAIM_STALE_MS,
+  type FreeDeviceStopClaim,
+} from "../../../src/daemon/managedSlots/slotRegistry";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS,
@@ -886,7 +890,7 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
 
     describe("free-pool stop state (#11337)", () => {
       async function dueFreeDevice(): Promise<{
-        target: { platform: "android"; stableDeviceId: string; freedAtMs: number };
+        target: FreeDeviceStopClaim;
         key: SlotKey;
       }> {
         const key = { scopeKey: await readyScope(), slotIndex: 0 };
@@ -900,6 +904,8 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
             platform: "android",
             stableDeviceId: "avd-1",
             freedAtMs: freed!.freedAtMs,
+            fromScopeKey: key.scopeKey,
+            claimedBy: "daemon-1",
           },
           key,
         };
@@ -925,6 +931,68 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
         ]);
       });
 
+      test("a stopping row is owned: only the claimer drives it until the claim is stale", async () => {
+        const { target } = await dueFreeDevice();
+        const other = { ...target, claimedBy: "daemon-2" };
+        await registry.beginFreeDeviceStop(target);
+
+        expect(await registry.holdsFreeDeviceStop(target)).toBe(true);
+        expect(await registry.holdsFreeDeviceStop(other)).toBe(false);
+        expect(await registry.beginFreeDeviceStop(other)).toEqual({ kind: "not_reclaimable" });
+        expect(await registry.completeFreeDeviceStop(other)).toBe(false);
+        expect(await registry.revertFreeDeviceStop(other)).toBe(false);
+        expect((await registry.listFreeDevices())[0]).toMatchObject({
+          state: "stopping",
+          stopClaimedBy: "daemon-1",
+        });
+
+        // The claimer died: past the stale bound another daemon takes the stop over.
+        timer.advanceTime(FREE_DEVICE_STOP_CLAIM_STALE_MS);
+        expect(await registry.beginFreeDeviceStop(other)).toEqual({ kind: "begun" });
+        expect(await registry.holdsFreeDeviceStop(target)).toBe(false);
+        expect(await registry.completeFreeDeviceStop(target)).toBe(false);
+        expect(await registry.completeFreeDeviceStop(other)).toBe(true);
+      });
+
+      test("a failed shutdown reverts to free so the device is adoptable again", async () => {
+        const { target } = await dueFreeDevice();
+        await registry.beginFreeDeviceStop(target);
+
+        expect(await registry.revertFreeDeviceStop(target)).toBe(true);
+        expect((await registry.listFreeDevices())[0]).toMatchObject({
+          state: "free",
+          stopClaimedBy: null,
+          stopClaimedAtMs: null,
+        });
+        expect(await registry.findReclaimableFreeDevices()).toHaveLength(1);
+
+        const slot = { scopeKey: await readyScope(SCOPE_B1), slotIndex: 0 };
+        await registry.initSlot(slot, INIT);
+        const adopted = await registry.commitBinding(
+          slot,
+          { generation: 0, stableDeviceId: null },
+          readyBinding("avd-1", 1),
+        );
+        expect(adopted).toMatchObject({ kind: "committed" });
+      });
+
+      test("a stale stopping claim no longer blocks adoption", async () => {
+        const { target } = await dueFreeDevice();
+        await registry.beginFreeDeviceStop(target);
+        timer.advanceTime(FREE_DEVICE_STOP_CLAIM_STALE_MS);
+        const slot = { scopeKey: await readyScope(SCOPE_B1), slotIndex: 0 };
+        await registry.initSlot(slot, INIT);
+
+        const adopted = await registry.commitBinding(
+          slot,
+          { generation: 0, stableDeviceId: null },
+          readyBinding("avd-1", 1),
+        );
+
+        expect(adopted).toMatchObject({ kind: "committed" });
+        expect(await registry.holdsFreeDeviceStop(target)).toBe(false);
+      });
+
       test("a device that is not yet due is not claimed", async () => {
         const key = { scopeKey: await readyScope(), slotIndex: 0 };
         await boundSlot(key, "avd-1");
@@ -937,6 +1005,8 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
             platform: "android",
             stableDeviceId: "avd-1",
             freedAtMs: freed!.freedAtMs,
+            fromScopeKey: key.scopeKey,
+            claimedBy: "daemon-1",
           }),
         ).toEqual({ kind: "not_reclaimable" });
       });

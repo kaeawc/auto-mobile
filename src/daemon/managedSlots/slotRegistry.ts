@@ -118,15 +118,41 @@ export interface FreeSlotDeviceRecord {
    * slot may adopt it and boots it (#11337).
    */
   state: FreeDeviceState;
+  /** The daemon driving a `stopping` shutdown; null in every other state. */
+  stopClaimedBy: string | null;
+  /** When that claim was made (registry clock); null in every other state. */
+  stopClaimedAtMs: number | null;
+}
+
+/**
+ * How long a `stopping` claim holds against other daemons and against adoption. Past it the claimer
+ * is presumed dead: another daemon may re-drive the stop, and a slot may adopt the device. Twice the
+ * slot journal's step budget (120 s), which bounds one delete-or-stop step, so a live claimer that
+ * is merely slow is not pre-empted.
+ */
+export const FREE_DEVICE_STOP_CLAIM_STALE_MS = 2 * 120_000;
+
+export function isStaleFreeDeviceStopClaim(
+  device: Pick<FreeSlotDeviceRecord, "state" | "stopClaimedAtMs">,
+  nowMs: number,
+): boolean {
+  return (
+    device.state === "stopping" &&
+    (device.stopClaimedAtMs === null ||
+      nowMs - device.stopClaimedAtMs >= FREE_DEVICE_STOP_CLAIM_STALE_MS)
+  );
 }
 
 export type FreeDeviceState = "free" | "stopping" | "stopped";
 
-/** The identity a reclaim sweep read; the CAS refuses when the row moved on since. */
-export type FreeDeviceStopTarget = Pick<
+/**
+ * The identity a reclaim sweep read plus the daemon claiming the stop; every CAS refuses when the
+ * row moved on since or another daemon holds a live claim.
+ */
+export type FreeDeviceStopClaim = Pick<
   FreeSlotDeviceRecord,
-  "platform" | "stableDeviceId" | "freedAtMs"
->;
+  "platform" | "stableDeviceId" | "freedAtMs" | "fromScopeKey"
+> & { claimedBy: string };
 
 export type BeginFreeDeviceStopResult =
   /** The row is now `stopping` (or already was, from an earlier interrupted attempt). */
@@ -572,15 +598,21 @@ export interface SlotRegistry {
    */
   findReclaimableFreeDevices(query?: AbandonmentQuery): Promise<FreeSlotDeviceRecord[]>;
   /**
-   * CAS `free`/`stopping` to `stopping`, only while the row is the one that was read (same
-   * `freedAtMs`) and still past the threshold. A concurrent adoption deletes the row, so it wins.
+   * CAS to `stopping` under `claim.claimedBy`, only while the row is the one that was read (same
+   * `freedAtMs`), still past the threshold, and either `free`, already claimed by the same daemon,
+   * or claimed by another daemon whose claim is stale. A concurrent adoption deletes the row, so it
+   * wins.
    */
   beginFreeDeviceStop(
-    device: FreeDeviceStopTarget,
+    claim: FreeDeviceStopClaim,
     query?: AbandonmentQuery,
   ): Promise<BeginFreeDeviceStopResult>;
-  /** CAS `stopping` to `stopped` after the shutdown was verified; false when the row moved on. */
-  completeFreeDeviceStop(device: FreeDeviceStopTarget): Promise<boolean>;
+  /** Whether the row is still `stopping` under this claim (not adopted, not taken over). */
+  holdsFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean>;
+  /** CAS `stopping` to `stopped` after the shutdown was verified; false when the claim was lost. */
+  completeFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean>;
+  /** CAS `stopping` back to `free` after a failed shutdown, so the device is adoptable again. */
+  revertFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean>;
   /** Every scope of `(namespace, incarnation)`, optionally narrowed to one host scope. */
   findScopes(query: SlotScopeQuery): Promise<SlotScopeRecord[]>;
   /**

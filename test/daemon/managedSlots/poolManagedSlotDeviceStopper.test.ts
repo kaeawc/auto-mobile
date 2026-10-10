@@ -25,6 +25,7 @@ const TARGET = {
   stableId: "amslot-a",
   name: "amslot-a",
   fromScopeKey: "scope-1",
+  stillClaimed: async () => true,
 };
 
 function harness(devices: PooledDevice[], respond: (args: Record<string, unknown>) => unknown) {
@@ -93,6 +94,18 @@ describe("PoolManagedSlotDeviceStopper", () => {
       kind: "failed",
       message: "lease timeout",
     });
+  });
+
+  test("re-checks the registry claim immediately before killing and kills nothing once lost", async () => {
+    const { stopper, calls } = harness([pooled({})], () => OK);
+
+    const result = await stopper.stopAndVerifyOffline({
+      ...TARGET,
+      stillClaimed: async () => false,
+    });
+
+    expect(result.kind).toBe("failed");
+    expect(calls).toEqual([]);
   });
 
   test("a running device with no pooled runtime is a failure, not a silent success", async () => {

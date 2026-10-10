@@ -8,8 +8,14 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`ALTER TABLE slot_free_devices
     ADD COLUMN state TEXT NOT NULL DEFAULT 'free'
     CHECK (state IN ('free', 'stopping', 'stopped'))`.execute(db);
+  // Who claimed a `stopping` row and when, so only the claimer (or another daemon once the claim
+  // is stale) drives the shutdown.
+  await sql`ALTER TABLE slot_free_devices ADD COLUMN stop_claimed_by TEXT`.execute(db);
+  await sql`ALTER TABLE slot_free_devices ADD COLUMN stop_claimed_at_ms INTEGER`.execute(db);
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
+  await sql`ALTER TABLE slot_free_devices DROP COLUMN stop_claimed_at_ms`.execute(db);
+  await sql`ALTER TABLE slot_free_devices DROP COLUMN stop_claimed_by`.execute(db);
   await sql`ALTER TABLE slot_free_devices DROP COLUMN state`.execute(db);
 }

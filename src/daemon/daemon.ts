@@ -891,6 +891,7 @@ export class Daemon {
       pool: this.devicePool,
       executions: this.sessionManager,
       timer: this.timer,
+      claimedBy: this.daemonSessionId,
     });
     this.freeDeviceReclaimer?.start();
   }

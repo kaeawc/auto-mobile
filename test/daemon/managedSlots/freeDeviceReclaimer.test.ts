@@ -9,6 +9,7 @@ import {
   type ManagedSlotStopTarget,
 } from "../../../src/daemon/managedSlots/freeDeviceReclaimer";
 import {
+  FREE_DEVICE_STOP_CLAIM_STALE_MS,
   MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS,
   type SlotKey,
 } from "../../../src/daemon/managedSlots/slotRegistry";
@@ -61,6 +62,7 @@ describe("FreeDeviceReclaimer", () => {
       claims,
       stopper,
       timer,
+      claimedBy: "daemon-1",
       ...over,
     });
   }
@@ -261,8 +263,11 @@ describe("FreeDeviceReclaimer", () => {
       expect(first.failed).toEqual([
         { platform: "android", stableDeviceId: "amslot-a", message: "emulator refused" },
       ]);
-      // The claim stays `stopping` so the interrupted shutdown is retried, never abandoned.
-      expect((await registry.listFreeDevices())[0]?.state).toBe("stopping");
+      // The claim is reverted: the device is adoptable again, not left unadoptable.
+      expect((await registry.listFreeDevices())[0]).toMatchObject({
+        state: "free",
+        stopClaimedBy: null,
+      });
 
       // Immediately again: backed off, the stopper is not called.
       expect((await sweeper.sweep()).skipped[0]?.reason).toBe("backoff");
@@ -297,17 +302,88 @@ describe("FreeDeviceReclaimer", () => {
     });
   });
 
-  test("a daemon restart resumes a device left stopping", async () => {
+  test("a never-succeeding kill is bounded: backed off, and adoptable between attempts", async () => {
     await freeDevice("amslot-a");
     pastThreshold();
-    stopper.results = [{ kind: "failed", message: "daemon died mid-stop" }];
+    stopper.results = Array.from({ length: 50 }, () => ({
+      kind: "failed" as const,
+      message: "wedged emulator",
+    }));
+    const sweeper = reclaimer({ backoff: [60_000] });
+
+    for (let sweep = 0; sweep < 20; sweep += 1) {
+      await sweeper.sweep();
+    }
+    // Twenty sweeps at one instant: one attempt, never a hot loop.
+    expect(stopper.calls).toHaveLength(1);
+    expect((await registry.listFreeDevices())[0]?.state).toBe("free");
+
+    for (let attempt = 2; attempt <= 4; attempt += 1) {
+      timer.advanceTime(60_000);
+      await sweeper.sweep();
+      expect(stopper.calls).toHaveLength(attempt);
+      // After every failed attempt the row is `free` again, so a slot can adopt it.
+      expect((await registry.listFreeDevices())[0]?.state).toBe("free");
+    }
+  });
+
+  test("a device with no pooled runtime reverts immediately and stays adoptable", async () => {
+    await freeDevice("amslot-a");
+    pastThreshold();
+    stopper.results = [{ kind: "failed", message: "pool has no runtime" }];
+
     await reclaimer().sweep();
 
-    // A new daemon has no backoff memory and retries the interrupted shutdown at once.
-    const restarted = await reclaimer().sweep();
+    expect((await registry.listFreeDevices())[0]?.state).toBe("free");
+  });
 
-    expect(restarted.stopped).toHaveLength(1);
-    expect((await registry.listFreeDevices())[0]?.state).toBe("stopped");
+  test("daemon death mid-stop: the next daemon recovers once the dead claim is stale", async () => {
+    await freeDevice("amslot-a");
+    pastThreshold();
+    const [free] = await registry.listFreeDevices();
+    // daemon-1 claimed the stop and died before finishing.
+    await registry.beginFreeDeviceStop({ ...free!, claimedBy: "daemon-1" });
+    const next = reclaimer({ claimedBy: "daemon-2" });
+
+    // While the dead claim is still live the new daemon leaves the row alone.
+    expect((await next.sweep()).skipped).toEqual([
+      { platform: "android", stableDeviceId: "amslot-a", reason: "not_reclaimable" },
+    ]);
+    expect(stopper.calls).toEqual([]);
+
+    timer.advanceTime(FREE_DEVICE_STOP_CLAIM_STALE_MS);
+    const recovered = await next.sweep();
+
+    expect(recovered.stopped).toHaveLength(1);
+    expect((await registry.listFreeDevices())[0]).toMatchObject({
+      state: "stopped",
+      stopClaimedBy: null,
+    });
+  });
+
+  test("the stopper is handed a claim check that is true only while the row is ours", async () => {
+    await freeDevice("amslot-a");
+    pastThreshold();
+    let seen: boolean[] = [];
+    stopper.beforeStop = async () => {
+      const [call] = stopper.calls;
+      seen = [await call!.stillClaimed()];
+      // Another daemon takes the stale claim over mid-stop.
+      timer.advanceTime(FREE_DEVICE_STOP_CLAIM_STALE_MS);
+      const [row] = await registry.listFreeDevices();
+      await registry.beginFreeDeviceStop({ ...row!, claimedBy: "daemon-2" });
+      seen.push(await call!.stillClaimed());
+    };
+
+    const report = await reclaimer().sweep();
+
+    expect(seen).toEqual([true, false]);
+    // The original claimer lost the row: it neither completes nor reverts it.
+    expect(report.stopped).toEqual([]);
+    expect((await registry.listFreeDevices())[0]).toMatchObject({
+      state: "stopping",
+      stopClaimedBy: "daemon-2",
+    });
   });
 
   test("sweeps are single-flight", async () => {

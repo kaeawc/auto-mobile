@@ -9,7 +9,8 @@
  * threshold (the registry's `freed_at_ms`, so the clock survives a daemon restart) and, for each:
  *
  * 1. Skips it unless it is a configured device this daemon created (generated managed name), no
- *    session holds it, no other daemon claims it and no boot or lifecycle operation is on it.
+ *    session holds it, no other daemon claims it and the injected `isBusy` finds no in-flight boot,
+ *    control call or lifecycle operation on it.
  * 2. Claims it with a compare-and-set to `stopping` (adoption of a `stopping` row is refused, and an
  *    adoption that already deleted the row makes the claim fail, so an adoption racing the sweep
  *    keeps its device).
@@ -17,8 +18,11 @@
  *    The row stays, so a matching slot adopts it and its provision path boots it through the normal
  *    boot-capacity gate.
  *
- * A crash between 2 and 3 leaves `stopping`, which the next sweep retries. A failed shutdown is
- * logged and retried with {@link Backoff} per device; it never loops hot. Single-flight: concurrent
+ * The `stopping` row records the claiming daemon and time; only the claimer, or another daemon once
+ * the claim is stale, drives the stop, and adoption is refused only while a claim is live. A crash
+ * between 2 and 3 therefore leaves a claim that goes stale and is re-driven by the next daemon. A
+ * failed shutdown reverts the row to `free` at once (the device stays adoptable), is logged, and is
+ * retried with {@link Backoff} per device; it never loops hot. Single-flight: concurrent
  * callers share the in-flight sweep.
  */
 
@@ -40,6 +44,7 @@ import {
 import { deviceStableId } from "./slotDeviceIdentity";
 import type {
   AbandonmentQuery,
+  FreeDeviceStopClaim,
   FreeSlotDeviceRecord,
   SlotPlatform,
   SlotRegistry,
@@ -56,7 +61,11 @@ export const DEFAULT_FREE_DEVICE_STOP_BACKOFF = exponentialBackoff({
 
 export type FreeDeviceReclaimRegistry = Pick<
   SlotRegistry,
-  "findReclaimableFreeDevices" | "beginFreeDeviceStop" | "completeFreeDeviceStop"
+  | "findReclaimableFreeDevices"
+  | "beginFreeDeviceStop"
+  | "holdsFreeDeviceStop"
+  | "completeFreeDeviceStop"
+  | "revertFreeDeviceStop"
 >;
 
 export interface ManagedSlotStopTarget {
@@ -65,6 +74,12 @@ export interface ManagedSlotStopTarget {
   name: string;
   /** The free-pool row's source scope, for the lifecycle guard's slot context. */
   fromScopeKey: string;
+  /**
+   * Whether the registry row is still `stopping` under this sweep's claim. The stopper checks it
+   * immediately before it shuts the device down: the registry row, not the slot context the stopper
+   * runs under, is the authority that the device was not adopted meanwhile.
+   */
+  stillClaimed(): Promise<boolean>;
 }
 
 /** `stopped` only when the device is verified not running; anything else is `failed`. */
@@ -106,6 +121,8 @@ export interface FreeDeviceReclaimerOptions {
    */
   isBusy?: (device: DeviceInfo) => string | undefined;
   timer: Pick<Timer, "now" | "setInterval" | "clearInterval">;
+  /** This daemon's id, recorded on every `stopping` claim it makes. */
+  claimedBy: string;
   intervalMs?: number;
   /** Retry delay after a failed shutdown, per device. */
   backoff?: BackoffInput;
@@ -223,7 +240,8 @@ export class FreeDeviceReclaimer {
       return;
     }
     const device = reason;
-    const begun = await registry.beginFreeDeviceStop(free, this.options.reclaim);
+    const claim: FreeDeviceStopClaim = { ...free, claimedBy: this.options.claimedBy };
+    const begun = await registry.beginFreeDeviceStop(claim, this.options.reclaim);
     if (begun.kind !== "begun") {
       skip("not_reclaimable");
       return;
@@ -233,25 +251,13 @@ export class FreeDeviceReclaimer {
     const result: ManagedSlotStopResult =
       device.isRunning === false && device.isRunningStateKnown !== false
         ? { kind: "stopped" }
-        : await this.stopDevice(free, device);
+        : await this.stopDevice(registry, claim, device);
     if (result.kind === "failed") {
-      const attempts = (failure?.attempts ?? 0) + 1;
-      this.failures.set(key, {
-        attempts,
-        retryAtMs: this.options.timer.now() + this.backoff.delayForAttempt(attempts),
-      });
-      logger.warn(
-        `[ManagedSlots] Shutting down unadopted free-pool device '${device.name}' failed (attempt ${attempts}): ${result.message}`,
-      );
-      report.failed.push({
-        platform: free.platform,
-        stableDeviceId: free.stableDeviceId,
-        message: result.message,
-      });
+      await this.recordFailure(registry, claim, device, result.message, report);
       return;
     }
     this.failures.delete(key);
-    if (!(await registry.completeFreeDeviceStop(free))) {
+    if (!(await registry.completeFreeDeviceStop(claim))) {
       // An adoption or reset moved the row while it shut down; the registry is the authority.
       skip("row_moved");
       return;
@@ -260,6 +266,39 @@ export class FreeDeviceReclaimer {
       `[ManagedSlots] Free-pool device '${device.name}' unadopted past the threshold: shut down, image kept`,
     );
     report.stopped.push({ platform: free.platform, stableDeviceId: free.stableDeviceId });
+  }
+
+  /**
+   * A failed shutdown never leaves the device unadoptable: the claim is reverted to `free` right
+   * away (a no-op when the claim was already lost), the failure is backed off per device, and a
+   * later sweep tries again. Warned once; later failures of the same device are debug only.
+   */
+  private async recordFailure(
+    registry: FreeDeviceReclaimRegistry,
+    claim: FreeDeviceStopClaim,
+    device: DeviceInfo,
+    message: string,
+    report: FreeDeviceSweepReport,
+  ): Promise<void> {
+    const key = deviceKey(claim);
+    const attempts = (this.failures.get(key)?.attempts ?? 0) + 1;
+    this.failures.set(key, {
+      attempts,
+      retryAtMs: this.options.timer.now() + this.backoff.delayForAttempt(attempts),
+    });
+    const text = `Shutting down unadopted free-pool device '${device.name}' failed (attempt ${attempts}): ${message}; it stays adoptable`;
+    if (attempts === 1) {
+      logger.warn(`[ManagedSlots] ${text}`);
+    } else {
+      logger.debug(`[ManagedSlots] ${text}`);
+    }
+    try {
+      await registry.revertFreeDeviceStop(claim);
+    } catch (error) {
+      // The claim goes stale on its own (FREE_DEVICE_STOP_CLAIM_STALE_MS), which frees the device.
+      logger.warn(`[ManagedSlots] Could not revert the stop claim: ${errorMessage(error)}`, error);
+    }
+    report.failed.push({ platform: claim.platform, stableDeviceId: claim.stableDeviceId, message });
   }
 
   /** Why this device is left alone this sweep, or the configured device when it is reclaimable. */
@@ -305,15 +344,17 @@ export class FreeDeviceReclaimer {
   }
 
   private async stopDevice(
-    free: FreeSlotDeviceRecord,
+    registry: FreeDeviceReclaimRegistry,
+    claim: FreeDeviceStopClaim,
     device: DeviceInfo,
   ): Promise<ManagedSlotStopResult> {
     try {
       return await this.options.stopper.stopAndVerifyOffline({
-        platform: free.platform,
-        stableId: free.stableDeviceId,
+        platform: claim.platform,
+        stableId: claim.stableDeviceId,
         name: device.name,
-        fromScopeKey: free.fromScopeKey,
+        fromScopeKey: claim.fromScopeKey,
+        stillClaimed: () => registry.holdsFreeDeviceStop(claim),
       });
     } catch (error) {
       // An unverified shutdown is a failed shutdown: the device may still be running.

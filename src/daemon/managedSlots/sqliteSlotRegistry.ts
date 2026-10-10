@@ -38,6 +38,7 @@ import {
   isRevivableScope,
   lastScopeActivityMs,
   resolveAbandonmentThresholdMs,
+  FREE_DEVICE_STOP_CLAIM_STALE_MS,
   type AbandonmentQuery,
   type BeginFreeDeviceStopResult,
   type BeginScopeInvalidationResult,
@@ -48,7 +49,7 @@ import {
   type DeviceHolder,
   type EnsureScopeResult,
   type FreeDeviceState,
-  type FreeDeviceStopTarget,
+  type FreeDeviceStopClaim,
   type FreeSlotDeviceRecord,
   type InitSlotResult,
   type ManagedDeviceEntry,
@@ -159,6 +160,8 @@ interface SlotFreeDevicesTable {
   from_scope_key: string;
   freed_at_ms: number;
   state: Generated<FreeDeviceState>;
+  stop_claimed_by: string | null;
+  stop_claimed_at_ms: number | null;
 }
 
 interface SlotJournalTable {
@@ -282,6 +285,8 @@ function toFreeDevice(row: FreeDeviceRow): FreeSlotDeviceRecord {
     fromScopeKey: row.from_scope_key,
     freedAtMs: row.freed_at_ms,
     state: row.state,
+    stopClaimedBy: row.stop_claimed_by,
+    stopClaimedAtMs: row.stop_claimed_at_ms,
   };
 }
 
@@ -1069,34 +1074,73 @@ export class SqliteSlotRegistry implements SlotRegistry {
   }
 
   async beginFreeDeviceStop(
-    device: FreeDeviceStopTarget,
+    claim: FreeDeviceStopClaim,
     query?: AbandonmentQuery,
   ): Promise<BeginFreeDeviceStopResult> {
-    const cutoffMs = this.timer.now() - resolveAbandonmentThresholdMs(query);
+    const nowMs = this.timer.now();
+    const cutoffMs = nowMs - resolveAbandonmentThresholdMs(query);
+    const staleBeforeMs = nowMs - FREE_DEVICE_STOP_CLAIM_STALE_MS;
     const claimed = await this.db
       .updateTable("slot_free_devices")
-      .set({ state: "stopping" })
-      .where("platform", "=", device.platform)
-      .where("stable_device_id", "=", device.stableDeviceId)
-      .where("freed_at_ms", "=", device.freedAtMs)
+      .set({ state: "stopping", stop_claimed_by: claim.claimedBy, stop_claimed_at_ms: nowMs })
+      .where("platform", "=", claim.platform)
+      .where("stable_device_id", "=", claim.stableDeviceId)
+      .where("freed_at_ms", "=", claim.freedAtMs)
       .where("freed_at_ms", "<=", cutoffMs)
-      .where("state", "in", ["free", "stopping"])
+      .where((eb) =>
+        eb.or([
+          eb("state", "=", "free"),
+          eb.and([
+            eb("state", "=", "stopping"),
+            eb.or([
+              eb("stop_claimed_by", "=", claim.claimedBy),
+              eb("stop_claimed_at_ms", "is", null),
+              eb("stop_claimed_at_ms", "<=", staleBeforeMs),
+            ]),
+          ]),
+        ]),
+      )
       .returning("stable_device_id")
       .executeTakeFirst();
     return claimed ? { kind: "begun" } : { kind: "not_reclaimable" };
   }
 
-  async completeFreeDeviceStop(device: FreeDeviceStopTarget): Promise<boolean> {
-    const stopped = await this.db
-      .updateTable("slot_free_devices")
-      .set({ state: "stopped" })
-      .where("platform", "=", device.platform)
-      .where("stable_device_id", "=", device.stableDeviceId)
-      .where("freed_at_ms", "=", device.freedAtMs)
+  async holdsFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean> {
+    const row = await this.db
+      .selectFrom("slot_free_devices")
+      .select("stable_device_id")
+      .where("platform", "=", claim.platform)
+      .where("stable_device_id", "=", claim.stableDeviceId)
+      .where("freed_at_ms", "=", claim.freedAtMs)
       .where("state", "=", "stopping")
+      .where("stop_claimed_by", "=", claim.claimedBy)
+      .executeTakeFirst();
+    return row !== undefined;
+  }
+
+  async completeFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean> {
+    return this.releaseFreeDeviceStop(claim, "stopped");
+  }
+
+  async revertFreeDeviceStop(claim: FreeDeviceStopClaim): Promise<boolean> {
+    return this.releaseFreeDeviceStop(claim, "free");
+  }
+
+  private async releaseFreeDeviceStop(
+    claim: FreeDeviceStopClaim,
+    next: "free" | "stopped",
+  ): Promise<boolean> {
+    const updated = await this.db
+      .updateTable("slot_free_devices")
+      .set({ state: next, stop_claimed_by: null, stop_claimed_at_ms: null })
+      .where("platform", "=", claim.platform)
+      .where("stable_device_id", "=", claim.stableDeviceId)
+      .where("freed_at_ms", "=", claim.freedAtMs)
+      .where("state", "=", "stopping")
+      .where("stop_claimed_by", "=", claim.claimedBy)
       .returning("stable_device_id")
       .executeTakeFirst();
-    return stopped !== undefined;
+    return updated !== undefined;
   }
 
   async openSlotJournal(key: SlotKey, input: OpenSlotJournalInput): Promise<OpenSlotJournalResult> {
@@ -1379,7 +1423,13 @@ export class SqliteSlotRegistry implements SlotRegistry {
       .deleteFrom("slot_free_devices")
       .where("platform", "=", platform)
       .where("stable_device_id", "=", stableDeviceId)
-      .where("state", "<>", "stopping")
+      .where((eb) =>
+        eb.or([
+          eb("state", "<>", "stopping"),
+          eb("stop_claimed_at_ms", "is", null),
+          eb("stop_claimed_at_ms", "<=", this.timer.now() - FREE_DEVICE_STOP_CLAIM_STALE_MS),
+        ]),
+      )
       .returningAll()
       .executeTakeFirst();
     if (taken) {
@@ -1422,6 +1472,8 @@ export class SqliteSlotRegistry implements SlotRegistry {
               fromScopeKey: scopeKey,
               freedAtMs: nowMs,
               state: "free",
+              stopClaimedBy: null,
+              stopClaimedAtMs: null,
             },
           ],
     );

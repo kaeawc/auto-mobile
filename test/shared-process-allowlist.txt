@@ -125,6 +125,7 @@ test/daemon/managedSlots/abandonedScopeReclaimer.test.ts
 test/daemon/managedSlots/capacityExternalDevices.test.ts
 test/daemon/managedSlots/daemonManagedSlotAcquisition.ownDevice.test.ts
 test/daemon/managedSlots/daemonManagedSlotAcquisition.redrive.test.ts
+test/daemon/managedSlots/defaultFreeDeviceReclaimer.test.ts
 test/daemon/managedSlots/freeDeviceReclaimer.test.ts
 test/daemon/managedSlots/managedExecutionDaemonRestart.test.ts
 test/daemon/managedSlots/managedSlotAcquisition.test.ts

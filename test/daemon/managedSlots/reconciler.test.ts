@@ -285,8 +285,9 @@ describe("ManagedSlotReconciler", () => {
     test("adopts a stopped free-pool device and boots it through the adopt provision path (#11337)", async () => {
       await freeStoppableIosDevice();
       const [free] = await registry.listFreeDevices();
-      await registry.beginFreeDeviceStop(free!);
-      await registry.completeFreeDeviceStop(free!);
+      const claim = { ...free!, claimedBy: "daemon-1" };
+      await registry.beginFreeDeviceStop(claim);
+      await registry.completeFreeDeviceStop(claim);
 
       const result = expectReady(await reconciler.reconcile(request()));
 
@@ -296,10 +297,37 @@ describe("ManagedSlotReconciler", () => {
       expect(await registry.listFreeDevices()).toEqual([]);
     });
 
+    test("adopting a stopped device at the boot limit fails typed capacity_exhausted without queueing (#11337)", async () => {
+      await freeStoppableIosDevice();
+      const [free] = await registry.listFreeDevices();
+      const claim = { ...free!, claimedBy: "daemon-1" };
+      await registry.beginFreeDeviceStop(claim);
+      await registry.completeFreeDeviceStop(claim);
+      provisioner.failWith = () =>
+        new BootCapacityExhaustedError(
+          { platform: "ios", limit: 1, booted: 1, retryAfterMs: 1_000 },
+          "full",
+        );
+
+      const result = expectFailed(await reconciler.reconcile(request()));
+
+      expect(result.failure).toMatchObject({ code: "capacity_exhausted", retryable: true });
+      // One refused boot attempt, no wait. The device is still offline and now reserved by the
+      // slot (adoption commits first), so the caller's retry reuses it once capacity frees up.
+      expect(provisioner.calls).toHaveLength(1);
+      expect(result.assignment).toMatchObject({
+        stableDeviceId: "UDID-FREE",
+        state: "provisioning",
+      });
+      expect(inventory.devices.find((device) => device.deviceId === "UDID-FREE")?.isRunning).toBe(
+        false,
+      );
+    });
+
     test("does not adopt a free-pool device that is mid-shutdown (#11337)", async () => {
       await freeStoppableIosDevice();
       const [free] = await registry.listFreeDevices();
-      await registry.beginFreeDeviceStop(free!);
+      await registry.beginFreeDeviceStop({ ...free!, claimedBy: "daemon-1" });
 
       const result = expectReady(await reconciler.reconcile(request()));
 

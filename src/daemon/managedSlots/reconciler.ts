@@ -45,6 +45,7 @@ import { stableStringify } from "../../utils/stableStringify";
 import type { Timer } from "../../utils/SystemTimer";
 import {
   bindingMatches,
+  isStaleFreeDeviceStopClaim,
   type SlotAssignmentRecord,
   type SlotBindingExpectation,
   type SlotCasFailure,
@@ -1467,7 +1468,10 @@ export class ManagedSlotReconciler {
       (await this.deps.registry.listFreeDevices())
         .filter((entry) => entry.platform === request.platform)
         // A `stopping` device is mid-shutdown (#11337); a `stopped` one is adopted and booted.
-        .filter((entry) => entry.state !== "stopping")
+        .filter(
+          (entry) =>
+            entry.state !== "stopping" || isStaleFreeDeviceStopClaim(entry, this.deps.timer.now()),
+        )
         .map((entry) => entry.stableDeviceId),
     );
     const prefix = managedSlotDeviceNamePrefix(request.key);

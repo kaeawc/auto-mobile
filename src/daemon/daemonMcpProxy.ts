@@ -83,6 +83,7 @@ import {
   isDeviceSessionAcquisitionTool,
   isDeviceBindingTool,
   readDeviceCleanupInProgressRefusal,
+  readTerminalSessionRefusal,
 } from "../server/deviceSessionResult";
 import {
   foreignOwnedSessionUuidFromResult,
@@ -4085,6 +4086,8 @@ export class DaemonMcpProxy {
           allowSuspectRetry,
         );
         this.bindForwardedSessionOnErrorResult(name, forwardedArgs, result, callReleaseEpoch);
+        // The daemon's own terminal refusal (a cut call's answer included) told this caller.
+        this.noteReleaseSurfacedBy(result);
         return { result, retryableSuspectRefusal };
       }
       this.rememberToolSelectionProfile(name, callerArgs, result);
@@ -4105,6 +4108,8 @@ export class DaemonMcpProxy {
       return { result };
     } catch (error) {
       signal?.throwIfAborted();
+      // A fence raised while this call was in flight names the session it lost: the caller is told.
+      this.noteReleaseSurfacedBy(error);
       // The success-only rememberSessionUuid above never runs when the handler
       // rejects, but an admitted-then-rejected call still reached
       // getOrCreateSession() and refreshed the LIVE daemon session. Without
@@ -4294,6 +4299,22 @@ export class DaemonMcpProxy {
       !this.stallHandovers.has(terminal.sessionUuid) &&
       this.isDeviceReadOnlyTool(name)
     );
+  }
+
+  /**
+   * Record that a tool call's answer named the fenced binding as released (#11483), as the entry
+   * gate does: `answer` is a terminal refusal the daemon answered and this proxy relayed, or the
+   * fence error raised while the call was in flight. Any other answer, and a session that is not
+   * the fenced binding, records nothing.
+   */
+  private noteReleaseSurfacedBy(answer: unknown): void {
+    const sessionUuid =
+      answer instanceof DaemonBoundSessionExpiredError
+        ? answer.sessionUuid
+        : readTerminalSessionRefusal(answer)?.sessionUuid;
+    if (sessionUuid !== undefined && sessionUuid === this.terminalBoundSession?.sessionUuid) {
+      this.releaseSurfacedFor = sessionUuid;
+    }
   }
 
   private isDeviceReadOnlyTool(name: string): boolean {

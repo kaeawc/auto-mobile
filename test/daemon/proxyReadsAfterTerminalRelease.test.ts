@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  DaemonBoundSessionExpiredError,
   DaemonConnectionSessionReleasedError,
   DaemonMcpProxy,
 } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -46,12 +48,15 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
   let spies: Array<ReturnType<typeof spyOn>>;
   /** Set to hold the next `tapOn` in flight until the test answers it. */
   let tapGate: PromiseWithResolvers<void> | undefined;
+  /** Set to make the gated `tapOn` fail instead of answering. */
+  let tapError: Error | undefined;
   /** The result the daemon answers the gated `tapOn` with. */
   let tapResult: unknown;
 
   beforeEach(() => {
     timer = new FakeTimer();
     tapGate = undefined;
+    tapError = undefined;
     tapResult = undefined;
     client = new FakeDaemonClient({
       daemonMethodResults: new Map<string, unknown>([
@@ -61,6 +66,9 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
       onCallTool: async (name) => {
         if (name === "tapOn" && tapGate) {
           await tapGate.promise;
+          if (tapError) {
+            throw tapError;
+          }
         }
       },
       toolResultFor: (name) =>
@@ -141,5 +149,78 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
       proxy.readResource(`automobile:observation/session/${ANDROID.sessionUuid}/latest`),
     ).rejects.toBeInstanceOf(DaemonConnectionSessionReleasedError);
     expect(client.readResourceCalls).toEqual([BOOTED_URI]);
+  });
+
+  // A call still running when its session is released is cut by the daemon and
+  // answered with the typed terminal refusal (docs: "A call still running when its session is
+  // released ... is cut and answered with session_ownership_lost"). That answer IS the agent being
+  // told, so the next read is forwarded.
+  test("a read is forwarded after the daemon's cut-call answer already reported the release", async () => {
+    await proxy.callTool("getAndroid", {});
+
+    // A control call is in flight when another party releases the session explicitly.
+    tapGate = Promise.withResolvers<void>();
+    const tap = proxy.callTool("tapOn", { text: "OK" });
+    await timer.advanceTimeAsync(0);
+    expect(client.callToolCalls.at(-1)?.toolName).toBe("tapOn");
+    client.emitNotification(
+      SESSION_RELEASED_NOTIFICATION_METHOD,
+      ANDROID.sessionUuid,
+      "explicit-release",
+    );
+    // The daemon's answer to the cut call (src/server/index.ts sessionReleasedDuringCallPayload).
+    tapResult = {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            sessionOwnershipLostPayload({
+              message: `Session ${ANDROID.sessionUuid} was released while this call was running.`,
+              sessionUuid: ANDROID.sessionUuid,
+              reason: "explicit-release",
+            }),
+          ),
+        },
+      ],
+    };
+    tapGate.resolve();
+    const told = await tap;
+    expect(JSON.parse(told.content[0].text).error).toMatchObject({
+      code: "session_ownership_lost",
+      nextAction: "acquire_new_session",
+      sessionUuid: ANDROID.sessionUuid,
+    });
+
+    // The agent was told. Its next read needs no session and must be forwarded.
+    const forwardedBefore = client.callToolCalls.length;
+    await expect(proxy.callTool("observe", { deviceId: ANDROID.deviceId })).resolves.toBeDefined();
+    expect(client.callToolCalls.length).toBe(forwardedBefore + 1);
+    expect(client.callToolCalls.at(-1)?.params.sessionUuid).toBeUndefined();
+  });
+
+  // The same for a call the proxy itself answers: its transport failed after the session was
+  // released under it, and the fence raised for that call names the session it lost.
+  test("a read is forwarded after a fence raised mid-flight reported the release", async () => {
+    await proxy.callTool("getAndroid", {});
+
+    tapGate = Promise.withResolvers<void>();
+    tapError = new Error("socket hang up");
+    const tap = proxy.callTool("tapOn", { text: "OK" });
+    await timer.advanceTimeAsync(0);
+    client.emitNotification(
+      SESSION_RELEASED_NOTIFICATION_METHOD,
+      ANDROID.sessionUuid,
+      "explicit-release",
+    );
+    tapGate.resolve();
+    const told = await tap.catch((error: unknown) => error);
+    expect(told).toBeInstanceOf(DaemonBoundSessionExpiredError);
+    expect((told as DaemonBoundSessionExpiredError).sessionUuid).toBe(ANDROID.sessionUuid);
+
+    const forwardedBefore = client.callToolCalls.length;
+    await expect(proxy.callTool("observe", { deviceId: ANDROID.deviceId })).resolves.toBeDefined();
+    expect(client.callToolCalls.length).toBe(forwardedBefore + 1);
+    expect(client.callToolCalls.at(-1)?.params.sessionUuid).toBeUndefined();
   });
 });

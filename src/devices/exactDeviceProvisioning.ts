@@ -11,7 +11,12 @@ import {
   FileAvdConfigReader,
   resolveAndroidAvdHome,
 } from "../utils/android-cmdline-tools/AvdConfigReader";
-import { parseAndroidSystemImageRuntime } from "../utils/android-cmdline-tools/AndroidSystemImageRuntime";
+import {
+  evaluateIosPairCompatibility,
+  iosDeviceSpecificationMismatch,
+  matchesAndroidDeviceSpecification,
+  resolveDisplayCutoutPreference,
+} from "./deviceSpecMatching";
 import { AvdManagerClient } from "../utils/android-cmdline-tools/AvdManagerClient";
 import { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/AndroidInventoryInvalidation";
 import type { CreateAvdParams } from "../utils/android-cmdline-tools/avdmanager";
@@ -20,10 +25,7 @@ import {
   type AppleDeviceRuntime,
   type AppleDeviceType,
 } from "../utils/ios-cmdline-tools/SimCtlClient";
-import {
-  evaluateRuntimeCompatibility,
-  type DeviceTypeRuntimeBounds,
-} from "../utils/ios-cmdline-tools/runtimeCompatibility";
+import { type DeviceTypeRuntimeBounds } from "../utils/ios-cmdline-tools/runtimeCompatibility";
 import type { ProvisionDeviceRecoveryEvidence } from "../server/provisionDeviceRecoveryEvidence";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -36,7 +38,6 @@ import {
   type AndroidAvdConfiguration,
 } from "../models/AndroidAvdConfiguration";
 import {
-  classifyDisplayCutout,
   type DisplayCutoutClassification,
   type DisplayCutoutPreference,
 } from "../utils/displayCutout";
@@ -345,44 +346,6 @@ export interface DefaultExactDeviceProvisionerDependencies {
   timer?: Pick<Timer, "now">;
 }
 
-function sameAndroidDeviceIdentity(
-  spec: AndroidDeviceSpecification,
-  config: Awaited<ReturnType<AvdConfigReader["readConfig"]>>,
-): boolean {
-  const runtime = parseAndroidSystemImageRuntime(spec.runtime);
-  if (!runtime || !config) {
-    return false;
-  }
-  if (
-    config.apiLevel !== runtime.apiLevel ||
-    config.tag !== runtime.tag ||
-    config.architecture !== runtime.architecture ||
-    config.deviceName !== spec.deviceType ||
-    config.systemImagePackage !== runtime.systemImagePackage
-  ) {
-    return false;
-  }
-  return true;
-}
-
-function sameAndroidSpecification(
-  spec: AndroidDeviceSpecification,
-  config: Awaited<ReturnType<AvdConfigReader["readConfig"]>>,
-): boolean {
-  return (
-    sameAndroidDeviceIdentity(spec, config) &&
-    (spec.configuration?.memoryMb === undefined ||
-      config?.ramSizeMb === spec.configuration.memoryMb) &&
-    Object.entries(spec.configuration ?? {}).every(
-      ([key, value]) =>
-        key === "memoryMb" ||
-        value === undefined ||
-        ((key !== "gpuMode" || config?.gpuEnabled === true) &&
-          config?.hardware?.[key as keyof AndroidAvdConfiguration] === value),
-    )
-  );
-}
-
 /**
  * Exact virtual-device creation used by trusted controllers. It intentionally
  * never falls back to a "close enough" image, runtime, or device profile.
@@ -570,52 +533,30 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     if (!discovered) {
       return;
     }
-    const { runtimes, deviceTypes } = discovered;
-    const runtime = runtimes.find((entry) => entry.identifier === spec.runtime);
-    const deviceType = deviceTypes.find((entry) => entry.identifier === spec.deviceType);
-    if (!runtime || !deviceType) {
+    const incompatibility = evaluateIosPairCompatibility(
+      spec,
+      discovered.runtimes,
+      discovered.deviceTypes,
+    );
+    if (!incompatibility) {
       return;
     }
-    const evaluation = evaluateRuntimeCompatibility(deviceType, runtime.version);
-    const unavailable = !runtime.isAvailable;
-    if (!unavailable && evaluation.status !== "unsupported") {
-      return;
-    }
-    const compatibleRuntimes = runtimes
-      .filter(
-        (entry) =>
-          entry.isAvailable &&
-          evaluateRuntimeCompatibility(deviceType, entry.version).status === "supported",
-      )
-      .map((entry) => ({ id: entry.identifier, version: entry.version }));
+    const { runtime, bounds, compatibleRuntimes, unavailable } = incompatibility;
     throw runtimeIncompatibleError(request, spec, {
       reason: unavailable
         ? `Runtime '${spec.runtime}' is not available (${runtime.availabilityError ?? "CoreSimulator marked it unavailable"}), so iOS simulator '${request.name}' with device type '${spec.deviceType}' cannot be created.`
-        : `Device type '${spec.deviceType}' does not support runtime '${spec.runtime}' (version ${runtime.version}; supported ${describeBounds(evaluation.bounds)}), so iOS simulator '${request.name}' was not created.`,
-      bounds: evaluation.bounds,
+        : `Device type '${spec.deviceType}' does not support runtime '${spec.runtime}' (version ${runtime.version}; supported ${describeBounds(bounds)}), so iOS simulator '${request.name}' was not created.`,
+      bounds,
       compatibleRuntimes,
     });
   }
 
   private resolveDisplayCutout(request: ExactDeviceProvisionRequest): DisplayCutoutClassification {
-    const resolved = classifyDisplayCutout(request.platform, request.spec.deviceType);
-    const preference = request.spec.displayCutout;
-    if (preference === undefined || preference === "any") {
-      return resolved;
+    const resolution = resolveDisplayCutoutPreference(request.platform, request.spec);
+    if (resolution.kind !== "resolved") {
+      throw new ProvisionDeviceError(resolution.kind, resolution.message);
     }
-    if (resolved === "unknown") {
-      throw new ProvisionDeviceError(
-        "unsupported",
-        `Display cutout preference '${preference}' is unsupported for ${request.platform} device type '${request.spec.deviceType}' because its cutout class is unknown.`,
-      );
-    }
-    if (resolved !== preference) {
-      throw new ProvisionDeviceError(
-        "identity_conflict",
-        `Exact ${request.platform} device type '${request.spec.deviceType}' has display cutout '${resolved}', not requested '${preference}'.`,
-      );
-    }
-    return resolved;
+    return resolution.displayCutout;
   }
 
   private withResolvedDisplayCutout(
@@ -688,7 +629,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
   ): Promise<void> {
     const spec = request.spec as AndroidDeviceSpecification;
     const config = await this.dependencies.androidConfigReader.readConfig(existing.name);
-    if (sameAndroidSpecification(spec, config)) {
+    if (matchesAndroidDeviceSpecification(spec, config)) {
       return;
     }
     throw new ProvisionDeviceError(
@@ -702,13 +643,14 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     existing: DeviceInfo,
   ): void {
     const spec = request.spec as IosDeviceSpecification;
-    if (existing.isAvailable === false) {
+    const mismatch = iosDeviceSpecificationMismatch(spec, existing);
+    if (mismatch === "unavailable") {
       throw new ProvisionDeviceError(
         "identity_conflict",
         `Existing iOS simulator '${existing.name}' is unavailable: ${existing.availabilityError ?? "CoreSimulator marked it unavailable"}.`,
       );
     }
-    if (existing.runtime !== spec.runtime || existing.deviceType !== spec.deviceType) {
+    if (mismatch === "mismatch") {
       throw new ProvisionDeviceError(
         "identity_conflict",
         `Existing iOS simulator '${existing.name}' does not match the requested runtime and device type.`,

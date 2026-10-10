@@ -8080,6 +8080,24 @@ export class DevicePool {
     mcpSessionId: string,
     livenessOwnerToken?: string,
   ): Promise<readonly RefusedOwnedSessionRestore[]> {
+    // Tracked like a bind (#11192): the connection may close while this waits for the mutex.
+    const endBind = this.beginMcpBind(mcpSessionId);
+    try {
+      return await this.restoreOwnedDeviceSessionsUnderBindClaim(
+        sessionIds,
+        mcpSessionId,
+        livenessOwnerToken,
+      );
+    } finally {
+      endBind();
+    }
+  }
+
+  private async restoreOwnedDeviceSessionsUnderBindClaim(
+    sessionIds: readonly string[],
+    mcpSessionId: string,
+    livenessOwnerToken: string | undefined,
+  ): Promise<readonly RefusedOwnedSessionRestore[]> {
     return await this.assignmentMutex.runExclusive(() => {
       const refused: RefusedOwnedSessionRestore[] = [];
       for (const sessionId of sessionIds) {
@@ -8097,7 +8115,8 @@ export class DevicePool {
             refused.push({ sessionId, deviceId: device.id, reason: "owned-by-other-connection" });
             continue;
           }
-          this.recordMcpSessionOwnership(mcpSessionId, sessionId);
+          // A connection that closed while this restore waited is not recorded (#11192).
+          this.recordBindOwnership(mcpSessionId, sessionId);
         }
       }
       return refused;

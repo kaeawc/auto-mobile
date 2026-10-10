@@ -264,6 +264,33 @@ describe("pool ownership races found by the seeded concurrency harness", () => {
     expect(world.pool.hasConnectedMcpSessionOwner(sessionId)).toBe(false);
   });
 
+  // Harness: autolockAttach profile, AUTOMOBILE_POOL_OWNERSHIP_SEED_BASE=112 shrank to an owner
+  // reconnecting (`reopenConnection`) and closing the new connection before its restore ran.
+  //
+  // Root cause (fixed, #11192): DevicePool.restoreOwnedDeviceSessionsForMcpSession recorded the
+  // reconnected connection as owner after waiting for the assignment mutex without checking it was
+  // still open, so a close in that wait left a dead owner. It is now tracked like a bind.
+  test("a connection that closed while its owned-session restore waited owns nothing", async () => {
+    const { pool, timer, manager, releases } = await createPoolWorld();
+    await bindForConnection(pool, "owner-session", "first-connection");
+    pool.releaseMcpSessionBindings("first-connection");
+
+    const restore = pool.restoreOwnedDeviceSessionsForMcpSession(
+      ["owner-session"],
+      "second-connection",
+    );
+    pool.releaseMcpSessionBindings("second-connection");
+    await restore;
+
+    expect(pool.resolveOwnedDeviceSessionForMcpSession("second-connection", DEVICE.deviceId)).toBe(
+      undefined,
+    );
+    timer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+    expect(manager.getSession("owner-session")).toBeNull();
+    expect(releases.map((r) => r.reason)).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
+  });
+
   // Harness: contention profile, AUTOMOBILE_POOL_OWNERSHIP_SEED_BASE=1375 (before the disconnect
   // reason was made terminal) shrank to `acquireMcp c0 d0`, `kill d0`, `disconnect d0`; with the
   // real terminal device-loss reason the same class still shows as `plan-auto-release` or

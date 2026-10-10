@@ -893,6 +893,7 @@ test/server/internalToolCall.property.test.ts
 test/server/internalToolCall.test.ts
 test/server/internalToolPayloads.property.test.ts
 test/server/internalToolPayloads.test.ts
+test/server/inventoryDeviceDescription.test.ts
 test/server/iosSimulatorMediaClient.test.ts
 test/server/isMutationQuery.test.ts
 test/server/listChangedBroadcast.test.ts

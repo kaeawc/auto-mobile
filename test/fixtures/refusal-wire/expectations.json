@@ -14,6 +14,6 @@
     "session_no_longer_owns_device": { "expected": "fail" },
     "session_ownership_lost": { "expected": "acquire-new-session" },
     "session_rebinding": { "expected": "retry" },
-    "session_terminal_release_in_progress": { "expected": "fail" }
+    "session_terminal_release_in_progress": { "expected": "acquire-new-session" }
   }
 }

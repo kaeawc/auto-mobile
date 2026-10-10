@@ -236,7 +236,7 @@ and an owner-less one stops on acquisition (#10961). Acquisition refusals that c
 clear on their own are typed and retryable: `device_cleanup_in_progress` (#10960)
 `device_owned_by_other_daemon`, and `device_shutting_down` (#11088). A session UUID
 under a kill's terminal release is refused as `session_terminal_release_in_progress`
-with `retryable: false` (#11189). See `docs/using/device-ownership.md`.
+with `retryable: false` and `nextAction: "acquire_new_session"` (#11189, #11231). See `docs/using/device-ownership.md`.
 
 Open owner question: is non-persistence acceptable? Clients must register again
 after daemon restart. (Resolved question: watching is allowed on any device and

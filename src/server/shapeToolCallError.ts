@@ -10,6 +10,7 @@ import {
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
 } from "../daemon/McpTimeoutError";
 import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignmentError";
+import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
@@ -110,6 +111,9 @@ function typedRefusalPayload(error: unknown): Record<string, unknown> | undefine
       sessionUuid: error.sessionUuid,
       ...(typeof error.deviceId === "string" ? { deviceId: error.deviceId } : {}),
       retryable: error.retryable,
+      ...(error.nextAction === ACQUIRE_NEW_SESSION_NEXT_ACTION
+        ? { nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION }
+        : {}),
       ...(typeof error.retryAfterMs === "number" ? { retryAfterMs: error.retryAfterMs } : {}),
     };
   }
@@ -168,6 +172,7 @@ function isTypedSessionRefusal(error: unknown): error is Error & {
   sessionUuid: string;
   deviceId?: unknown;
   retryable: boolean;
+  nextAction?: unknown;
   retryAfterMs?: unknown;
 } {
   return (

@@ -42,30 +42,30 @@ describe("hunt: an explicit but empty --session-uuid is not silently dropped", (
     isolated.restore();
   });
 
-  test.each([[["--session-uuid", "", "tapOn", "--text", "OK"]], [["--session-uuid", "", "observe"]]])(
-    "%j exits 1 and makes no tool call",
-    async (args) => {
-      const exits: unknown[] = [];
-      const stop = new Error("fake exit");
-      const exit = spyOn(process, "exit").mockImplementation((code) => {
-        exits.push(code);
-        throw stop;
+  test.each([
+    [["--session-uuid", "", "tapOn", "--text", "OK"]],
+    [["--session-uuid", "", "observe"]],
+  ])("%j exits 1 and makes no tool call", async (args) => {
+    const exits: unknown[] = [];
+    const stop = new Error("fake exit");
+    const exit = spyOn(process, "exit").mockImplementation((code) => {
+      exits.push(code);
+      throw stop;
+    });
+    const err = spyOn(console, "error").mockImplementation(() => {});
+    const out = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await runCliCommand(args).catch((error: unknown) => {
+        if (error !== stop) {
+          throw error;
+        }
       });
-      const err = spyOn(console, "error").mockImplementation(() => {});
-      const out = spyOn(console, "log").mockImplementation(() => {});
-      try {
-        await runCliCommand(args).catch((error: unknown) => {
-          if (error !== stop) {
-            throw error;
-          }
-        });
-      } finally {
-        exit.mockRestore();
-        err.mockRestore();
-        out.mockRestore();
-      }
-      expect(calls.filter((call) => call.toolName !== "setToolEnabled")).toEqual([]);
-      expect(exits).toEqual([1]);
-    },
-  );
+    } finally {
+      exit.mockRestore();
+      err.mockRestore();
+      out.mockRestore();
+    }
+    expect(calls.filter((call) => call.toolName !== "setToolEnabled")).toEqual([]);
+    expect(exits).toEqual([1]);
+  });
 });

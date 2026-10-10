@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
 import {
+  MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS,
   openSqliteSlotRegistry,
   defaultSlotRegistryPath,
 } from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
+import { SQLITE_BUSY_TIMEOUT_MS } from "../../../src/db/database";
 import { describeSlotRegistryContract } from "./slotRegistryContract";
 
 // `:memory:` keeps the shared contract fast; the file-backed and cross-process behaviour lives in
@@ -36,5 +38,12 @@ describe("defaultSlotRegistryPath", () => {
       "/home/agent",
     );
     expect(resolved).toBe(path.join("/srv/am-shared", "managed-slots", "registry", "slots.sqlite"));
+  });
+});
+
+describe("registry lock waits", () => {
+  test("wait far less than the per-daemon DB so contention cannot stall the heartbeat path", () => {
+    expect(MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS).toBeLessThan(SQLITE_BUSY_TIMEOUT_MS);
+    expect(MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS).toBeLessThanOrEqual(1_000);
   });
 });

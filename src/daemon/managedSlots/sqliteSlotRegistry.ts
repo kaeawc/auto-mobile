@@ -57,8 +57,15 @@ export const MANAGED_SLOTS_REGISTRY_SUBDIR = "registry";
 export const MANAGED_SLOTS_REGISTRY_FILE = "slots.sqlite";
 
 /**
- * The host-wide registry path (#11174). It is NOT under `AUTOMOBILE_DB_DIR` or the coordination
- * dir, which can differ per daemon; every daemon on the host resolves this same file.
+ * The host-wide registry path (#11174). It is NOT under `AUTOMOBILE_DATA_DIR`, `AUTOMOBILE_DB_DIR`
+ * or the coordination dir, which can differ per daemon (worktree daemons included); every daemon
+ * on the host resolves this same file under the user's home.
+ *
+ * `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` is the one override, and it creates a SEPARATE slot
+ * authority (#11242 item 8). That is sound for Android only when the daemons sharing it also share
+ * the AVD home; iOS simulators are host-global regardless, so two daemons with different overrides
+ * must never manage slots on the same simulator set. Daemons that should share slots must resolve
+ * the same override (or none).
  */
 export function defaultSlotRegistryPath(
   env: NodeJS.ProcessEnv = process.env,
@@ -237,6 +244,15 @@ export interface OpenSqliteSlotRegistryOptions extends SqliteSlotRegistryOptions
   dbPath?: string;
 }
 
+/**
+ * bun:sqlite waits for a busy lock synchronously, blocking this daemon's event loop (heartbeat
+ * lease handling included) for up to the busy timeout per attempt of the dialect's bounded retry.
+ * Registry transactions are a few short statements, so the registry waits far less than the
+ * per-daemon DB's {@link SQLITE_BUSY_TIMEOUT_MS} and surfaces contention as a retryable busy error
+ * instead of stalling (#11242 item 9). Keep registry transactions short and off the heartbeat path.
+ */
+export const MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS = Math.min(1_000, SQLITE_BUSY_TIMEOUT_MS);
+
 /** The slice of a bun:sqlite handle this module touches before handing it to the dialect. */
 interface RegistrySqliteHandle {
   exec(sql: string): void;
@@ -248,7 +264,7 @@ function openRegistrySqlite(dbPath: string): RegistrySqliteHandle {
     Database: new (path: string) => RegistrySqliteHandle;
   };
   const sqliteDb = new Database(dbPath);
-  sqliteDb.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`);
+  sqliteDb.exec(`PRAGMA busy_timeout = ${MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS};`);
   sqliteDb.exec("PRAGMA journal_mode = WAL;");
   // Assignment authority must survive power loss; writes are rare, so pay for the fsync.
   sqliteDb.exec("PRAGMA synchronous = FULL;");

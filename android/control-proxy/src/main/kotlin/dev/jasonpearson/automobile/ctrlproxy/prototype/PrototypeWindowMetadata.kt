@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.accessibility.AccessibilityWindowInfo
 import androidx.compose.ui.graphics.Color
+import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeDimension
 
 /**
@@ -16,7 +17,12 @@ const val PROTOTYPE_WINDOW_TITLE = "AutoMobile Prototype"
  * (`prototype_window_metadata_v1`). [placement] is `fullscreen`, `sheet` or `floating`. [opaque] is
  * true only when nothing of the app can show through the prototype's own pixels.
  */
-data class PrototypeWindowMetadata(val placement: String, val opaque: Boolean)
+data class PrototypeWindowMetadata(
+  val placement: String,
+  val opaque: Boolean,
+  /** The mode the window is drawn in; null when it was not derived from a controller show. */
+  val appearance: PrototypeAppearance? = null,
+)
 
 /**
  * Whether the host's own dismiss bar, drawn above the spec in every fullscreen window, is fully
@@ -32,13 +38,17 @@ const val FULLSCREEN_DISMISS_BAR_OPAQUE = false
  * opaque surface that fills the window: the root's own background at alpha 1 sized to fill with no
  * node alpha, or, for fullscreen, a fully opaque scrim painted behind it. A modal sheet's scrim is
  * drawn over content and never makes anything more opaque. Colours are resolved as they are drawn,
- * against every mode the prototype can resolve to: a role name counts when its scheme colour is
- * opaque, a `{light, dark}` pair only when the side for each reachable mode is, and the `scrim`
- * role in a scrim slot never does, because it is drawn at the default scrim opacity.
+ * against [palettes]: a role name counts when its scheme colour is opaque, a `{light, dark}` pair
+ * only when the side for each palette's mode is, and the `scrim` role in a scrim slot never does,
+ * because it is drawn at the default scrim opacity. The controller passes the one palette of the
+ * mode the show resolved to, with that [appearance]; without it every mode the spec can resolve to
+ * is checked.
  */
-fun prototypeWindowMetadata(
+internal fun prototypeWindowMetadata(
   model: PrototypeRenderModel,
   dismissBarOpaque: Boolean = FULLSCREEN_DISMISS_BAR_OPAQUE,
+  palettes: List<PrototypePalette>? = null,
+  appearance: PrototypeAppearance? = null,
 ): PrototypeWindowMetadata {
   val placement = model.placement
   val name =
@@ -49,25 +59,26 @@ fun prototypeWindowMetadata(
     }
   val style = model.root.style
   // What is drawn decides: a colour is solid only if it resolves opaque in every reachable mode.
-  val palettes = prototypeReachablePalettes(model)
+  val drawn = palettes ?: prototypeReachablePalettes(model)
   fun opaque(color: Color?) = (color?.alpha ?: 0f) >= 1f
   // An omitted dimension is wrap-content, so only an explicit fill spans the window.
   val rootFills =
     style.source.width == PrototypeDimension.Fill && style.source.height == PrototypeDimension.Fill
   val rootSolid =
     rootFills &&
-      palettes.all {
+      drawn.all {
         opaque(prototypeResolveColor(it, style.background, style.source.background))
       } &&
       (style.source.alpha?.let { it >= 1.0 } ?: true)
   val fullscreen = placement as? PrototypePlacement.Fullscreen
   val scrimSolid =
     fullscreen != null &&
-      palettes.all { opaque(prototypeResolveScrim(it, fullscreen.scrim, fullscreen.scrimSpec)) }
+      drawn.all { opaque(prototypeResolveScrim(it, fullscreen.scrim, fullscreen.scrimSpec)) }
   val chromeOpaque = placement !is PrototypePlacement.Fullscreen || dismissBarOpaque
   return PrototypeWindowMetadata(
     name,
     model.opacityPercent == 100 && chromeOpaque && (rootSolid || scrimSolid),
+    appearance,
   )
 }
 

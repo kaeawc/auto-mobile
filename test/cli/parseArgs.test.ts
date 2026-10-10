@@ -442,9 +442,9 @@ describe("--managed-slot-config (#11173)", () => {
     expect(() => parseArgs(["--managed-slot-config"], logger, env, noFile)).toThrow(
       "managed_slot_config_invalid",
     );
-    expect(() =>
-      parseArgs(["--managed-slot-config", "--debug"], logger, env, noFile),
-    ).toThrow("managed_slot_config_invalid");
+    expect(() => parseArgs(["--managed-slot-config", "--debug"], logger, env, noFile)).toThrow(
+      "managed_slot_config_invalid",
+    );
   });
 
   test("does not echo inline JSON snippets in parse errors", () => {

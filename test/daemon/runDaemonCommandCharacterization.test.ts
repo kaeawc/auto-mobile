@@ -62,6 +62,11 @@ describe("daemon command characterization with fake I/O", () => {
             "stdout",
             "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
           ],
+          ["stdout", "\nOptions:"],
+          [
+            "stdout",
+            "  --allow-shared-namespace  Let start/stop/restart/release act on the shared daemon while AUTOMOBILE_DATA_DIR or DB dirs are set without AUTOMOBILE_AUX_SOCKET_DIR",
+          ],
           ["exit", 1],
           ["stderr", "Unexpected error: fake exit"],
           ["exit", 1],

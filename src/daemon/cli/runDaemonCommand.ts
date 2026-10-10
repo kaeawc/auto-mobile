@@ -39,6 +39,10 @@ import {
   type DaemonCommandFlagSpec,
 } from "./daemonArgs";
 import { describeForeignForwardLeaseHolders } from "../forwardLeaseHolders";
+import {
+  ALLOW_SHARED_NAMESPACE_FLAG,
+  assertDaemonNamespaceMatchesState,
+} from "../sharedNamespaceGuard";
 
 /**
  * Run daemon management command
@@ -47,6 +51,11 @@ export interface RunDaemonCommandOptions {
   clientFactory?: DaemonClientFactory;
   stateProvider?: () => DaemonStateLike;
   startupToolDefaults?: Pick<DaemonOptions, "enabledTools" | "disabledTools">;
+  /**
+   * Environment the shared-namespace guard reads (#11252). The CLI entry point passes
+   * `process.env`; unset skips the guard, so injected-manager tests are unaffected.
+   */
+  namespaceEnv?: NodeJS.ProcessEnv;
 }
 
 export function daemonCommandOptions(
@@ -803,6 +812,10 @@ function printDaemonUsageError(message: string): void {
     console.log(
       "  heartbeat <id>        Heartbeat a session (one-shot CLI: no-op; proxy-owned: refused)",
     );
+    console.log("\nOptions:");
+    console.log(
+      `  ${ALLOW_SHARED_NAMESPACE_FLAG}  Let start/stop/restart/release act on the shared daemon while AUTOMOBILE_DATA_DIR or DB dirs are set without AUTOMOBILE_AUX_SOCKET_DIR`,
+    );
     process.exit(1);
   } catch (error) {
     if (error instanceof ActionableError) {
@@ -814,15 +827,49 @@ function printDaemonUsageError(message: string): void {
   }
 }
 
+/**
+ * Commands that stop, replace or release on a daemon. With a private state env but the shared
+ * namespace they would act on the resident daemon (#11252), so they pass the namespace guard.
+ */
+const NAMESPACE_GUARDED_DAEMON_COMMANDS = new Set([
+  "start",
+  "stop",
+  "restart",
+  "restart-admitted",
+  "restart-acceptance-session",
+  "release-session",
+  "release-liveness-ownership",
+]);
+
+function refuseSharedNamespaceAction(
+  command: string,
+  env: NodeJS.ProcessEnv,
+  allowShared: boolean,
+): boolean {
+  if (!NAMESPACE_GUARDED_DAEMON_COMMANDS.has(command)) {
+    return false;
+  }
+  try {
+    assertDaemonNamespaceMatchesState(`run daemon ${command}`, env, allowShared);
+    return false;
+  } catch (error) {
+    console.error(`Error: ${errorMessage(error)}`);
+    process.exit(1);
+    return true;
+  }
+}
+
 export async function runDaemonCommand(
   command: string,
-  args: string[],
+  rawArgs: string[],
   options: RunDaemonCommandOptions,
   DaemonManager: new (
     clientFactory?: DaemonClientFactory,
     stateProvider?: () => DaemonStateLike,
   ) => DaemonManager,
 ): Promise<void> {
+  const allowSharedNamespace = rawArgs.includes(ALLOW_SHARED_NAMESPACE_FLAG);
+  const args = rawArgs.filter((arg) => arg !== ALLOW_SHARED_NAMESPACE_FLAG);
   const manager = new DaemonManager(options.clientFactory, options.stateProvider);
 
   const handlers: Partial<Record<string, () => Promise<void> | void>> = {
@@ -848,6 +895,12 @@ export async function runDaemonCommand(
   const argumentError = daemonCommandArgumentError(command, args);
   if (argumentError !== undefined) {
     return printDaemonUsageError(argumentError);
+  }
+  if (
+    options.namespaceEnv &&
+    refuseSharedNamespaceAction(command, options.namespaceEnv, allowSharedNamespace)
+  ) {
+    return;
   }
   return handler();
 }

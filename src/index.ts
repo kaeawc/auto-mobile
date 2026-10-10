@@ -300,7 +300,7 @@ async function main() {
       return;
     }
     if (daemonCommand && PROFILE_TOLERANT_DAEMON_COMMANDS.has(daemonCommand)) {
-      await runDaemonCommand(daemonCommand, daemonArgs);
+      await runDaemonCommand(daemonCommand, daemonArgs, { namespaceEnv: process.env });
       await exitAfterSuccessfulDaemonCommand(logger, process);
       return;
     }
@@ -605,6 +605,7 @@ async function main() {
         disabledTools.length > 0 || process.env.AUTOMOBILE_DISABLED_TOOLS !== undefined;
       const hasStartupToolDefaults = hasEnabledToolDefaults || hasDisabledToolDefaults;
       await runDaemonCommand(daemonCommand, daemonArgs, {
+        namespaceEnv: process.env,
         ...(hasStartupToolDefaults
           ? {
               startupToolDefaults: {
@@ -739,6 +740,7 @@ async function main() {
           const result = createProxyMcpServer({
             proxyConfig: {
               autoStartDaemon: !noDaemon,
+              lifecycleNamespaceEnv: process.env,
               daemonOptions: daemonStartupOptions,
               initialSessionUuid,
               livenessOwnerToken,

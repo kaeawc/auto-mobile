@@ -312,7 +312,11 @@ async function runToolViaDaemon(
   daemonOptions?: DaemonOptions,
 ): Promise<any> {
   // One-shot: the daemon treats this connection's acquisitions as anonymous (#11096).
-  const proxy = daemonProxyFactory({ daemonOptions, oneShotCli: true });
+  const proxy = daemonProxyFactory({
+    daemonOptions,
+    oneShotCli: true,
+    lifecycleNamespaceEnv: process.env,
+  });
 
   try {
     await ensureCliToolEnabled(proxy, toolName);

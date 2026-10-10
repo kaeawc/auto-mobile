@@ -188,7 +188,8 @@ public final class AutoMobilePlanExecutor: Sendable {
                     testMetadata: testMetadata
                 )
             } catch let ExecutorError.refused(_, refusal) where refusal.waitsForDevice {
-                guard let delayMs = deviceWait.nextDelayMs(retryAfterMs: refusal.retryAfterMs) else {
+                guard let delayMs = deviceWait.nextDelayMs(retryAfterMs: refusal.retryAfterMs, code: refusal.code)
+                else {
                     throw ExecutorError.deviceUnavailable(
                         Self.deviceWaitGiveUpMessage(refusal, waitedMs: deviceWait.waitedMs)
                     )

@@ -133,3 +133,27 @@ run_script() {
   [ "$status" -eq 2 ]
   [[ "$output" == *"No safe integration files"* ]]
 }
+
+@test "unsets ambient database and alias overrides and sets test mode" {
+  run_script AUTOMOBILE_DB_PATH="$FAKE_HOME/.auto-mobile/auto-mobile.db" \
+    AUTO_MOBILE_DB_PATH="$FAKE_HOME/.auto-mobile/alias.db" \
+    AUTO_MOBILE_DATA_DIR="$FAKE_HOME/.auto-mobile" \
+    AUTOMOBILE_TOOL_OUTPUTS_DIR="$FAKE_HOME/.auto-mobile/out"
+
+  [ "$status" -eq 0 ]
+  ! grep -q 'DB_PATH=' "$BUN_LOG"
+  ! grep -q 'AUTO_MOBILE_' "$BUN_LOG"
+  ! grep -q 'TOOL_OUTPUTS_DIR' "$BUN_LOG"
+  grep -q '^AUTOMOBILE_TEST_MODE=true$' "$BUN_LOG"
+}
+
+@test "refuses a temp base that reaches ~/.auto-mobile through doubled slashes" {
+  mkdir -p "$FAKE_HOME/.auto-mobile/tmp"
+  RUN_TMPDIR="$FAKE_HOME//.auto-mobile/tmp"
+
+  run_script
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Refusing to run"* ]]
+  [ ! -e "$BUN_LOG" ]
+}

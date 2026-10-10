@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // Every `*.integration.test.ts` must be classified in test/integration-safe-tier.txt,
@@ -57,7 +57,7 @@ beforeAll(() => {
     { cwd: root, encoding: "utf8" },
   )
     .split("\0")
-    .filter((path) => path !== "");
+    .filter((path) => path !== "" && existsSync(join(root, path)));
   ({ entries, malformed } = parseTierFile(readFileSync(join(root, TIER_FILE), "utf8")));
 });
 

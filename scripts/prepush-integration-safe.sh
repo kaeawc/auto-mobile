@@ -43,14 +43,21 @@ ISOLATION_VARS=(
 # Prints a reason when the path lies under a shared AutoMobile location, in both
 # its literal and symlink-resolved (macOS /private/tmp) form; prints nothing otherwise.
 shared_location_reason() {
-  local path="$1" candidate
+  local path="$1" candidate home_physical
   local -a candidates=("$path")
   if [[ -d "$path" ]]; then
     candidates+=("$(cd -P "$path" && pwd -P)")
   fi
+  home_physical="$HOME"
+  if [[ -d "$HOME" ]]; then
+    home_physical="$(cd -P "$HOME" && pwd -P)"
+  fi
   for candidate in "${candidates[@]}"; do
+    while [[ "$candidate" == *//* ]]; do
+      candidate="${candidate//\/\//\/}"
+    done
     case "$candidate" in
-      "$HOME/.auto-mobile" | "$HOME/.auto-mobile/"*)
+      "$HOME/.auto-mobile" | "$HOME/.auto-mobile/"* | "$home_physical/.auto-mobile" | "$home_physical/.auto-mobile/"*)
         echo "under ~/.auto-mobile"
         return
         ;;
@@ -110,6 +117,15 @@ cleanup() {
   rm -rf "$work_dir"
 }
 trap cleanup EXIT
+
+# Variables that would override or bypass the isolation above (the DB path wins
+# over DB_DIR; the AUTO_MOBILE_ aliases are read as fallbacks) or point at other
+# shared state. Unset so a test falls back to the data dir under $work_dir.
+while IFS= read -r name; do
+  unset "$name"
+done < <(compgen -e | grep -E '^AUTO_MOBILE_|^AUTOMOBILE_(DB_PATH|TOOL_OUTPUTS_DIR|PLAN_HEALTH_DIR|CTRL_PROXY_IOS_CACHE_DIR|DAEMON_LAUNCH_CWD|DAEMON_LAUNCH_LOG_PATH)$' || true)
+# Keeps AdbClient and friends away from real adb, as scripts/prepush-node.sh does.
+export AUTOMOBILE_TEST_MODE=true
 
 export AUTOMOBILE_DATA_DIR="$work_dir/d"
 export AUTOMOBILE_LOG_DIR="$work_dir/l"

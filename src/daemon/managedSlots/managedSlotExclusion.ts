@@ -6,7 +6,7 @@ import {
   ManagedSlotDiscoveryIncompleteError,
 } from "./managedSlotRefusal";
 import type { ManagedDeviceEntry, SlotPlatform, SlotRegistry } from "./slotRegistry";
-import { openSqliteSlotRegistry } from "./sqliteSlotRegistry";
+import { openSqliteSlotRegistry, slotRegistryFileExists } from "./sqliteSlotRegistry";
 
 /**
  * A device as generic allocation sees it: its platform and every stable identity it is known by
@@ -85,6 +85,11 @@ export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
   constructor(
     private readonly openRegistry: () => Promise<SlotRegistry>,
     private readonly timer: Pick<Timer, "now">,
+    /**
+     * Whether the registry exists yet. While it does not, nothing is managed: the snapshot is empty
+     * and the registry is not opened (opening would create it). Defaults to always existing.
+     */
+    private readonly registryExists: () => boolean = () => true,
   ) {}
 
   async refresh(options: ManagedSlotRefreshOptions = {}): Promise<void> {
@@ -123,7 +128,12 @@ export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
   private async load(): Promise<void> {
     let entries: ManagedDeviceEntry[];
     try {
-      entries = await (await this.openRegistryOnce()).snapshotManagedDevices();
+      // A host that never served a managed slot has no registry: an empty snapshot, not a refusal,
+      // and no file created by reading. Once opened, an unreadable registry fails closed below.
+      entries =
+        this.registry === undefined && !this.registryExists()
+          ? []
+          : await (await this.openRegistryOnce()).snapshotManagedDevices();
     } catch (error) {
       if (this.snapshot) {
         logger.warn(
@@ -162,11 +172,15 @@ let sharedHostRegistry: Promise<SlotRegistry> | undefined;
  * every pool in this process. A failed open is retried on the next refresh.
  */
 export function createDefaultManagedSlotExclusion(timer: Pick<Timer, "now">): ManagedSlotExclusion {
-  return new RegistryManagedSlotExclusion(() => {
-    sharedHostRegistry ??= openSqliteSlotRegistry().catch((error: unknown) => {
-      sharedHostRegistry = undefined;
-      throw error;
-    });
-    return sharedHostRegistry;
-  }, timer);
+  return new RegistryManagedSlotExclusion(
+    () => {
+      sharedHostRegistry ??= openSqliteSlotRegistry().catch((error: unknown) => {
+        sharedHostRegistry = undefined;
+        throw error;
+      });
+      return sharedHostRegistry;
+    },
+    timer,
+    () => sharedHostRegistry !== undefined || slotRegistryFileExists(),
+  );
 }

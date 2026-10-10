@@ -52,6 +52,7 @@ import {
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_RELEASE_EXECUTION_METHOD,
+  DAEMON_RESET_SLOT_SCOPE_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
@@ -72,6 +73,8 @@ import {
 } from "./managedExecutionLiveness";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
 import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
+import type { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
+import { SLOT_SCOPE_RESET_MAX_WAIT_MS, type SlotScopeReset } from "./managedSlots/slotScopeReset";
 import {
   daemonDeviceLeaseActivitySources,
   daemonDeviceLeaseRelinquishPort,
@@ -109,6 +112,10 @@ export interface DaemonStateAccess {
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   /** The managed-slot execution drain behind `daemon/releaseExecution` (#11177). */
   getManagedExecutionRelease?(): Pick<ManagedExecutionRelease, "releaseExecution"> | undefined;
+  /** The managed slot scope reset behind `daemon/resetSlotScope` (#11174). */
+  getSlotScopeReset?(): Pick<SlotScopeReset, "reset"> | undefined;
+  /** Socket sessions bound to managed slots (#11178). */
+  getManagedConnectionScopes?(): Pick<ManagedConnectionScopes, "get" | "unbind">;
   getSessionManager(): {
     hasSession(sessionId: string): boolean;
     getSession(sessionId: string): Session | null;
@@ -342,6 +349,7 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
       (request, state, executions) => handleReleaseSession(request, state, executions),
     ],
     [DAEMON_RELEASE_EXECUTION_METHOD, handleReleaseExecution],
+    [DAEMON_RESET_SLOT_SCOPE_METHOD, handleResetSlotScope],
     [DAEMON_LIST_DEVICE_SESSIONS_METHOD, handleListDeviceSessions],
     [DAEMON_DEVICE_LEASE_STATUS_METHOD, handleDeviceLeaseStatus],
     [DAEMON_RELINQUISH_DEVICE_LEASE_METHOD, handleRelinquishDeviceLease],
@@ -1032,6 +1040,39 @@ async function handleReleaseExecution(
     return { success: false, error: "Managed execution release is not available in this daemon" };
   }
   const result = await drain.releaseExecution(parsed.data.sessionId);
+  return { success: true, result: { ...result } };
+}
+
+const resetSlotScopeParams = z
+  .object({
+    runnerNamespace: z.string().trim().min(1),
+    runnerIncarnation: z.string().trim().min(1),
+    managedHostScope: z.string().trim().min(1).optional(),
+    waitMs: z.number().int().min(0).max(SLOT_SCOPE_RESET_MAX_WAIT_MS).optional(),
+  })
+  .strict();
+
+/**
+ * Invalidate one runner incarnation's managed slot scope (#11174, operator recovery for Q2): wait
+ * (bounded) for its owners and cleanup to settle, then move its devices to the managed free pool.
+ * Idempotent; an unsettled scope is reported `pending` with what it waits on, and stays blocked.
+ */
+async function handleResetSlotScope(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  const parsed = resetSlotScopeParams.safeParse(request.params);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: `Invalid resetSlotScope parameters: ${parsed.error.message}`,
+    };
+  }
+  const reset = state.getSlotScopeReset?.();
+  if (!reset) {
+    return { success: false, error: "Managed slot scope reset is not available in this daemon" };
+  }
+  const result = await reset.reset(parsed.data);
   return { success: true, result: { ...result } };
 }
 

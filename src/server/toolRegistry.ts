@@ -49,6 +49,10 @@ import {
   type SessionManager,
 } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
+import { managedConnectionControlRefusal } from "../daemon/managedSlots/managedConnectionScope";
+import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
+import { MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS } from "../daemon/inputDeviceOwnership";
+import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import type { DevicePool } from "../daemon/devicePool";
 import { releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
 import { assertInputRequesterHoldsDevice, TOOL_CALL_REMEDY } from "../daemon/inputDeviceOwnership";
@@ -1057,6 +1061,14 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
     // An explicit target held by another session is refused before admission or any device work,
     // so a non-holder (including an observer-only or sessionless caller) gets the typed code.
+    const managedSlotAccess = {
+      toolName: name,
+      readOnly,
+      sessionUuid,
+      mcpSessionId,
+      platform: args.platform,
+    };
+    await assertManagedSlotControlAccess({ ...managedSlotAccess, deviceId: providedDeviceId });
     assertToolCallerHoldsDevice(name, readOnly, providedDeviceId, sessionUuid, autolockEnabled);
 
     logger.info(
@@ -1212,6 +1224,9 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // Check and mark in one turn, before readiness: a session acquiring the target while
         // readiness runs cancels this call, and readiness stops at its next device step (#10905).
         // A read is marked for its readiness phase only (#10970); once ready it watches.
+        if (readinessTarget !== providedDeviceId) {
+          await assertManagedSlotControlAccess({ ...managedSlotAccess, deviceId: readinessTarget });
+        }
         assertToolCallerHoldsDevice(name, readOnly, readinessTarget, sessionUuid, autolockEnabled);
         if (readinessTarget && execution && !sessionUuid) {
           executionTracker.markSessionlessDeviceUse(execution.executionId, readinessTarget);
@@ -1244,6 +1259,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
 
     // The resolved target too: a call without a deviceId can land on a held device.
+    if (device && device.deviceId !== providedDeviceId) {
+      await assertManagedSlotControlAccess({
+        ...managedSlotAccess,
+        deviceId: device.deviceId,
+        platform: device.platform,
+      });
+    }
     assertToolCallerHoldsDevice(name, readOnly, device?.deviceId, sessionUuid, autolockEnabled);
     if (device && execution && !sessionUuid && !readOnly) {
       // Admitted on a device no session holds: a session acquiring it from here on cancels this
@@ -2340,6 +2362,71 @@ function assertToolCallerHoldsDevice(
     sessionManager,
     remedy: TOOL_CALL_REMEDY,
   });
+}
+
+/**
+ * Managed slots (#11178), beside the session-holder check: a control call may not act on a device
+ * another managed slot holds, idle or not, unless it runs as that slot's execution
+ * (`device_assigned_to_managed_slot`); and a managed connection may control only its own slot
+ * devices and sessions (`device_outside_managed_slots`). Reads stay open everywhere (Q6).
+ */
+async function assertManagedSlotControlAccess(input: {
+  toolName: string;
+  readOnly: boolean;
+  deviceId: string | undefined;
+  sessionUuid: string | undefined;
+  mcpSessionId: string | undefined;
+  platform: unknown;
+}): Promise<void> {
+  const daemonState = DaemonState.getInstance();
+  if (input.readOnly || !daemonState.isInitialized()) {
+    return;
+  }
+  const sessionManager = daemonState.getSessionManager();
+  const requesterSessionUuid = input.sessionUuid
+    ? (resolveToolSelectionBaseSessionUuid(input.sessionUuid, sessionManager) ?? input.sessionUuid)
+    : undefined;
+  const connectionRefusal = managedConnectionControlRefusal({
+    binding: daemonState.getManagedConnectionScopes().get(input.mcpSessionId),
+    action: input.toolName,
+    deviceId: input.deviceId,
+    requesterSessionUuid,
+    slotDeviceOf: (slotSessionUuid) =>
+      sessionManager.getSession(slotSessionUuid)?.assignedDevice ?? undefined,
+  });
+  if (connectionRefusal) {
+    throw connectionRefusal;
+  }
+  const deviceId = input.deviceId;
+  if (!deviceId) {
+    return;
+  }
+  const pool = daemonState.getDevicePool();
+  for (const platform of managedSlotPlatformsFor(
+    pool.getDevice(deviceId)?.platform,
+    input.platform,
+  )) {
+    await managedSlotPoolGate(pool).assertNotAssignedToManagedSlot?.({
+      action: input.toolName,
+      deviceId,
+      platform,
+      requesterSessionUuid,
+      maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
+    });
+  }
+}
+
+/** The platforms a target may be on: the pool's record, else the call's platform, else both. */
+function managedSlotPlatformsFor(
+  pooledPlatform: "android" | "ios" | undefined,
+  requestedPlatform: unknown,
+): Array<"android" | "ios"> {
+  if (pooledPlatform) {
+    return [pooledPlatform];
+  }
+  return requestedPlatform === "android" || requestedPlatform === "ios"
+    ? [requestedPlatform]
+    : ["android", "ios"];
 }
 
 /**

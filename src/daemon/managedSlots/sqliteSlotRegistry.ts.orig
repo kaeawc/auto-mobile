@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Kysely, type Generated, type Selectable, type Transaction } from "kysely";
 import { BunSqliteDialect } from "../../db/bunSqliteDialect";
@@ -101,15 +100,6 @@ export function defaultSlotRegistryPath(
     ),
     MANAGED_SLOTS_REGISTRY_FILE,
   );
-}
-
-/**
- * Whether the host registry file exists. A host that never served a managed slot has none, and
- * readers must treat that as "no managed devices" without creating it: only slot acquisition (or
- * another writer) creates the registry.
- */
-export function slotRegistryFileExists(dbPath: string = defaultSlotRegistryPath()): boolean {
-  return existsSync(dbPath);
 }
 
 interface SlotScopesTable {

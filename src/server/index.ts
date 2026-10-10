@@ -392,6 +392,7 @@ import {
   type ToolSelectionSessionManager,
 } from "../features/toolSelection/selectionSessionResolver";
 import { DaemonState } from "../daemon/daemonState";
+import { assertManagedConnectionPlainToolCall } from "./managedConnectionToolGate";
 import { redactTypedTextArguments } from "../utils/redactTypedTextArguments";
 import {
   defaultToolSelectionProfileRegistry,
@@ -1255,6 +1256,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         `Invalid parameters for tool ${name}: ${formatToolParamError(name, error, strippedToolParams, tool.schema)}`,
       );
     }
+
+    // A managed connection controls only its own slots (#11178).
+    assertManagedConnectionPlainToolCall({
+      daemonMode,
+      requiresDevice: tool.requiresDevice === true,
+      toolName: name,
+      mcpSessionId: requestMcpSessionId,
+      args: parsedParams,
+      sessionUuid: providedSessionUuid,
+    });
 
     // #6869: the capabilities this acquisition declares, validated up front.
     const requestedEnableTools = resolveRequestedEnableTools(name, parsedParams);

@@ -541,6 +541,9 @@ export const DAEMON_RELEASE_SESSION_METHOD = "daemon/releaseSession";
  */
 export const DAEMON_RELEASE_EXECUTION_METHOD = "daemon/releaseExecution";
 
+/** Operator reset of one runner incarnation's managed slot scope (#11174; `--daemon reset-slot-scope`). */
+export const DAEMON_RESET_SLOT_SCOPE_METHOD = "daemon/resetSlotScope";
+
 /**
  * Lists the live device sessions whose liveness owner is the given token (#10990). A proxy
  * restarted with its harness-supplied stable `--liveness-owner-token` asks this on connect, then

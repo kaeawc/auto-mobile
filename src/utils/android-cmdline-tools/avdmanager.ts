@@ -8,10 +8,7 @@ import {
   getBestAndroidToolsLocation,
   validateRequiredTools,
 } from "./detection";
-import {
-  AvdManagerClient,
-  type AvdManagerExecutionOptions,
-} from "./AvdManagerClient";
+import { AvdManagerClient, type AvdManagerExecutionOptions } from "./AvdManagerClient";
 import {
   SdkManagerClient,
   type SdkManagerCommandResult,

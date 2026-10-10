@@ -37,7 +37,9 @@ describe("cliDeviceOwnershipHint (#10743, #10783, #10785)", () => {
     (toolName) => {
       const hint = cliDeviceOwnershipHint({ code: "device_owned_by_other_session" }, toolName);
       expect(hint).toContain("pass --session-uuid <uuid> to your follow-up calls");
-      expect(hint).toContain("--daemon release-session <uuid>");
+      expect(hint).toContain("--daemon active-sessions");
+      expect(hint).toContain("break another agent");
+      expect(hint).not.toContain("release-session <uuid>");
       expect(hint).not.toContain("Re-run with --session-uuid");
       expect(hint).not.toContain("--force");
     },

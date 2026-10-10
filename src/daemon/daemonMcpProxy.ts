@@ -4120,7 +4120,11 @@ export class DaemonMcpProxy {
           : this.withBoundSessionUuid(callerArgs, usesDeviceSelector);
     const canUseSurvivingSession = this.canUseSurvivingSession(callerArgs, usesDeviceSelector);
     const forwardedArgs = this.withToolSelectionProfile(
-      this.withOwnedSessionCapabilities(routingArgs, usesDeviceSelector || isSessionAcquisition),
+      this.withOwnedSessionCapabilities(
+        routingArgs,
+        usesDeviceSelector || isSessionAcquisition,
+        this.namesOwnedSession(callerArgs),
+      ),
     );
     return {
       forwardedArgs,
@@ -4170,11 +4174,27 @@ export class DaemonMcpProxy {
     );
   }
 
+  /**
+   * The caller explicitly named a session this proxy owns. After a reconnect the daemon may still
+   * record a stale connection of this proxy as the session's owner, and it refuses a control call
+   * naming a session another connection owns (#11344): such a call carries the owned sessions and
+   * the owner token, so the daemon restores ownership to this connection first.
+   */
+  private namesOwnedSession(callerArgs: Record<string, unknown>): boolean {
+    const named = this.sessionUuidFromArgs(callerArgs);
+    return (
+      named !== undefined &&
+      named !== this.terminalBoundSession?.sessionUuid &&
+      this.ownedDeviceSessions.has(named)
+    );
+  }
+
   private withOwnedSessionCapabilities(
     args: Record<string, unknown>,
     restore: boolean,
+    namesOwnedSession = false,
   ): Record<string, unknown> {
-    if (!restore || this.sessionUuidFromArgs(args)) {
+    if (!namesOwnedSession && (!restore || this.sessionUuidFromArgs(args))) {
       return args;
     }
     const retained = [...this.ownedDeviceSessions].filter(

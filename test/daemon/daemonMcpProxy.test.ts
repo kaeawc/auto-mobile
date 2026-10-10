@@ -4086,8 +4086,15 @@ describe("DaemonMcpProxy", () => {
             await expect(proxy.callTool("observe", {})).rejects.toBeInstanceOf(
               DaemonBoundSessionExpiredError,
             );
+            // Naming the owned session carries the owner proof beside it (#11344).
             expect(client.callToolCalls).toEqual([
-              { toolName: "executePlan", params: { sessionUuid: "session-a" } },
+              {
+                toolName: "executePlan",
+                params: expect.objectContaining({
+                  sessionUuid: "session-a",
+                  __autoMobileOwnedSessionUuids: ["session-a"],
+                }),
+              },
             ]);
           } else {
             await expect(proxy.callTool("observe", {})).resolves.toEqual({

@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_BOUND_SESSION_PARAM, DAEMON_VERSION } from "../../src/daemon/constants";
+import {
+  DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
+  DAEMON_OWNED_SESSIONS_PARAM,
+  DAEMON_VERSION,
+} from "../../src/daemon/constants";
 import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -187,5 +192,56 @@ describe("an explicit sessionUuid never moves the connection's default (#11347)"
 
     expect(rawParams.at(-1)).not.toHaveProperty(DAEMON_BOUND_SESSION_PARAM);
     expect(await sessionOfUntargetedCall(proxy, client)).toBe("named");
+  });
+});
+
+describe("setActiveDevice and owner proof on a named session (#11344 review)", () => {
+  test("a refused setActiveDevice never selects the connection's default", async () => {
+    const { proxy, client } = connect((name) => {
+      if (name === "getAndroid") {
+        return acquired("mine");
+      }
+      if (name === "setActiveDevice") {
+        // Even a refusal that names the session it refused selects nothing.
+        const refusal = {
+          success: false,
+          code: "device_owned_by_other_session",
+          deviceId: "emulator-5554",
+          sessionUuid: "theirs",
+        };
+        return { content: [{ type: "text", text: JSON.stringify(refusal) }], isError: true };
+      }
+      return undefined;
+    });
+    await proxy.callTool("getAndroid", {});
+
+    const refused = await proxy.callTool("setActiveDevice", {
+      deviceId: "emulator-5554",
+      sessionUuid: "theirs",
+    });
+
+    expect(refused.isError).toBe(true);
+    expect(await sessionOfUntargetedCall(proxy, client)).toBe("mine");
+  });
+
+  test("a call naming a session this proxy owns carries the owner proof; any other does not", async () => {
+    const rawParams: Array<Record<string, unknown>> = [];
+    const { proxy } = connect((name, params) => {
+      rawParams.push(params);
+      return name === "getAndroid" ? acquired("mine") : undefined;
+    });
+    await proxy.callTool("getAndroid", {});
+
+    // A reconnected owner's explicit call restores its ownership instead of being refused.
+    await proxy.callTool("tapOn", { sessionUuid: "mine", text: "Go" });
+    expect(rawParams.at(-1)?.[DAEMON_OWNED_SESSIONS_PARAM]).toEqual(["mine"]);
+    expect(typeof rawParams.at(-1)?.[DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]).toBe("string");
+
+    await proxy.callTool("tapOn", { sessionUuid: "theirs", text: "Go" });
+    expect(rawParams.at(-1)).not.toHaveProperty(DAEMON_OWNED_SESSIONS_PARAM);
+
+    // A sessionless call under the binding is unchanged.
+    await proxy.callTool("pressButton", { button: "home" });
+    expect(rawParams.at(-1)).not.toHaveProperty(DAEMON_OWNED_SESSIONS_PARAM);
   });
 });

@@ -105,6 +105,7 @@ import {
 import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
 import {
   isExpiryReleaseReason,
+  isReissuableByNameReleaseReason,
   isTerminalReleaseReason,
   outranksReleaseReason,
   releasedRowStatus,
@@ -1289,7 +1290,7 @@ function releaseSuperseded(shouldCommit: ReleaseCommitFence | undefined): boolea
   return shouldCommit !== undefined && shouldCommit() === false;
 }
 
-/** Plan cleanup frees devices while allowing the base and label UUIDs to be reused. */
+/** Plan cleanup frees devices; the base and label UUIDs may be issued again by name (not rehydrated). */
 export const PLAN_AUTO_RELEASE_REASON = "plan-auto-release" satisfies SessionReleaseReason;
 
 export function getDefaultSessionHeartbeatTimeoutMs(): number {
@@ -2748,7 +2749,7 @@ export class SessionManager {
     if (
       !persisted ||
       this.terminalReleaseSnapshots.has(sessionId) ||
-      !this.isRecoverablePersistedSession(persisted)
+      !this.isReissuablePersistedSession(persisted)
     ) {
       return false;
     }
@@ -2764,16 +2765,18 @@ export class SessionManager {
   }
 
   /**
-   * #6069: True when this persisted row is a non-terminal identity this daemon
-   * issued that survived a restart and may be re-materialized with a pooled
-   * device (live-during-restart recovery). Mirrors the persisted-recovery
-   * admission in {@link admitIssuedSessionForAutomation}. A missing row (never
-   * issued) is not recoverable.
+   * #6069, #11418: True when a call naming this persisted row's UUID may issue
+   * the session again with a pooled device: an active row, or one released for a
+   * re-issuable-by-name reason (a daemon/device handoff, or a plan's
+   * `plan-auto-release`), that has not expired. Terminal reasons and the
+   * never-reissuable ones (`superseded`, `allocation-rollback`, ...) are refused,
+   * as is a missing row. This is wider than startup rehydration, which only takes
+   * the recoverable handoffs. The claim and the claimed-row upsert share it.
    */
-  private isRecoverablePersistedSession(persisted: DeviceSession | undefined): boolean {
+  private isReissuablePersistedSession(persisted: DeviceSession | undefined): boolean {
     return Boolean(
       persisted &&
-      (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason)) &&
+      (!persisted.release_reason || isReissuableByNameReleaseReason(persisted.release_reason)) &&
       isRecoverableDeviceSession(persisted, this.sessionNow()),
     );
   }
@@ -3336,7 +3339,7 @@ export class SessionManager {
       this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(sessionId, persistedTerminalRelease);
     }
-    if (persisted && this.isRecoverablePersistedSession(persisted)) {
+    if (persisted && this.isReissuablePersistedSession(persisted)) {
       return undefined;
     }
     throw unissuedSessionError;
@@ -3368,7 +3371,7 @@ export class SessionManager {
     // never-issued sessionUuid (e.g. "kumquat-D") whenever the #6045 admit guard
     // was bypassed by the call path — the ownership bypass this closes. The
     // pool-less `if (!devicePool)` throw below stays as a secondary safety net.
-    if (requireIssuedSession && !this.isRecoverablePersistedSession(persisted)) {
+    if (requireIssuedSession && !this.isReissuablePersistedSession(persisted)) {
       await this.terminalizeExpiredPersistedSession(persisted);
       throw new UnissuedSessionError(
         `Session ${sessionId} is not an active daemon session (not found). ` +
@@ -3406,7 +3409,7 @@ export class SessionManager {
     shared: SharedSessionAssignment,
   ): Promise<Session> {
     const claim =
-      listed && this.isRecoverablePersistedSession(listed)
+      listed && this.isReissuablePersistedSession(listed)
         ? await this.claimRecoverableRow(sessionId, listed)
         : undefined;
     try {
@@ -3524,7 +3527,7 @@ export class SessionManager {
       this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
       throw new TerminalSessionError(sessionId, terminalRelease);
     }
-    if (current && this.isRecoverablePersistedSession(current)) {
+    if (current && this.isReissuablePersistedSession(current)) {
       const reclaimed = await this.tryClaimRecoverableRow(
         sessionId,
         current,
@@ -3790,7 +3793,7 @@ export class SessionManager {
       const stableDeviceId = persistedStableDeviceId(persisted);
       if (
         stableDeviceId === undefined ||
-        !this.isRecoverablePersistedSession(persisted) ||
+        !this.isReissuablePersistedSession(persisted) ||
         this.rehydrationSkipReason(persisted.session_uuid) !== undefined
       ) {
         return [];
@@ -3864,7 +3867,7 @@ export class SessionManager {
       summary.terminalized.push({ sessionUuid, reason: outcome.reason });
     } else if (outcome) {
       summary.skipped.push({ sessionUuid, reason: outcome.reason });
-    } else if (!this.isRecoverablePersistedSession(persisted)) {
+    } else if (!this.isReissuablePersistedSession(persisted)) {
       summary.skipped.push({ sessionUuid, reason: "not-recoverable" });
     } else if (this.sessions.has(sessionUuid)) {
       summary.skipped.push({ sessionUuid, reason: "already-live" });
@@ -3879,7 +3882,7 @@ export class SessionManager {
     devicePool: SessionDeviceAssigner,
   ): Promise<RehydrationRowOutcome> {
     const sessionId = persisted.session_uuid;
-    if (!this.isRecoverablePersistedSession(persisted)) {
+    if (!this.isReissuablePersistedSession(persisted)) {
       return { kind: "skipped", reason: "not-recoverable" };
     }
     const skipReason = this.rehydrationSkipReason(sessionId);
@@ -3941,7 +3944,7 @@ export class SessionManager {
   ): void {
     const pending = rows.filter(
       (persisted) =>
-        this.isRecoverablePersistedSession(persisted) && !this.sessions.has(persisted.session_uuid),
+        this.isReissuablePersistedSession(persisted) && !this.sessions.has(persisted.session_uuid),
     );
     if (pending.length === 0) {
       return;
@@ -4679,7 +4682,7 @@ export class SessionManager {
       const deadline = persisted && restartRecoveryDeadlineFromPersisted(persisted);
       if (
         persisted &&
-        this.isRecoverablePersistedSession(persisted) &&
+        this.isReissuablePersistedSession(persisted) &&
         deadline !== undefined &&
         this.sessionNow() < deadline
       ) {
@@ -9001,7 +9004,7 @@ export class SessionManager {
     requestedPlatform: Platform | undefined,
     callerInFlight: boolean,
   ): Promise<SessionRecoveryTarget | undefined> {
-    if (!persisted || !this.isRecoverablePersistedSession(persisted)) {
+    if (!persisted || !this.isReissuablePersistedSession(persisted)) {
       return undefined;
     }
     const stableDeviceId = persistedStableDeviceId(persisted);

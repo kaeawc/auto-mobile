@@ -77,6 +77,20 @@ function holdsStrongerReleaseReason(
   ]);
 }
 
+/**
+ * SQL form of {@link isReissuableByNameReleaseReason}: the rows a call naming the UUID may claim
+ * and re-issue. Used by the claim, its hand-back and the claimed-row upsert fence, so all three
+ * accept the same set.
+ */
+function hasReissuableByNameReleaseReason(eb: ExpressionBuilder<Database, "device_sessions">) {
+  return eb.or([
+    eb("release_reason", "in", literalReleaseReasonsWhere("reissuableByName")),
+    ...releaseReasonFamiliesWhere("reissuableByName").map((family) =>
+      eb("release_reason", "like", `${family}_%`),
+    ),
+  ]);
+}
+
 function shouldRetainLivenessOwner(reason: string): boolean {
   return isRecoverableDaemonReleaseReason(reason);
 }
@@ -448,20 +462,7 @@ export class DeviceSessionRepository {
                 ? eb("device_sessions.daemon_session_id", "is", null)
                 : eb("device_sessions.daemon_session_id", "=", claimedRow.daemonSessionId),
             )
-            .where((eb) =>
-              eb.or([
-                eb(
-                  "device_sessions.release_reason",
-                  "in",
-                  Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS),
-                ),
-                eb(
-                  "device_sessions.release_reason",
-                  "like",
-                  `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`,
-                ),
-              ]),
-            );
+            .where((eb) => hasReissuableByNameReleaseReason(eb));
         })
         .returning("stable_identity_generation")
         .executeTakeFirst();
@@ -550,6 +551,8 @@ export class DeviceSessionRepository {
             ? eb("daemon_session_id", "is", null)
             : eb("daemon_session_id", "=", expected.daemonSessionId),
         )
+        // Only a row a call naming the UUID may issue again; any other row is left untouched.
+        .where((eb) => hasReissuableByNameReleaseReason(eb))
         .returning("stable_identity_generation")
         .executeTakeFirst();
       return claimed?.stable_identity_generation ?? undefined;
@@ -579,7 +582,7 @@ export class DeviceSessionRepository {
             ? eb("daemon_session_id", "is", null)
             : eb("daemon_session_id", "=", claimed.daemonSessionId),
         )
-        .where((eb) => hasRecoverableReleaseReason(eb))
+        .where((eb) => hasReissuableByNameReleaseReason(eb))
         .executeTakeFirst();
       return Number(released.numUpdatedRows) === 1;
     } catch (error) {

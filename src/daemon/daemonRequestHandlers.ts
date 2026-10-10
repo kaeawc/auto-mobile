@@ -713,6 +713,13 @@ async function handleHeartbeat(
     return { success: true, result: { sessionId } };
   }
   if (livenessOwnerToken) {
+    // The current owner's heartbeat renews its lease on arrival, before ownership resolves across
+    // an await (#11321). A control call arriving right behind it would otherwise read the lapsed
+    // lease, release the session, and leave this heartbeat answered "not found". Only the token
+    // that already owns the session is stamped here, so a rejected claim stays a no-op (#10050).
+    if (manager.hasLivenessOwnership?.(sessionId, livenessOwnerToken)) {
+      manager.recordHeartbeat?.(sessionId);
+    }
     const outcome = await resolveLivenessOwnership(
       manager,
       sessionId,

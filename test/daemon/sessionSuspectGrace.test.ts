@@ -411,6 +411,44 @@ describe("suspect grace window and daemon stall (#10051)", () => {
           sessionId: SESSION,
         });
       });
+
+      // #11321: the heartbeat handler resolves ownership across an await. The owner's heartbeat
+      // must renew the lease before that await, or a control call arriving right behind it reads
+      // the lapsed lease, releases the session, and the heartbeat is answered "not found".
+      for (const claim of [false, true]) {
+        test(`the owner's ${claim ? "claiming heartbeat" : "keeper tick"} wins over a control call arriving right after it`, async () => {
+          const pendingHeartbeat = heartbeat(OWNER, claim);
+          const pendingCall = admitControlCall("exec-behind-heartbeat");
+
+          expect(await pendingHeartbeat).toMatchObject({ success: true });
+          await expect(pendingCall).resolves.toMatchObject({ sessionId: SESSION });
+          expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("live");
+          expect(sessionManager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+        });
+      }
+
+      test("a heartbeat arriving after the control call released the session stays refused", async () => {
+        const pendingCall = admitControlCall("exec-ahead-of-heartbeat");
+        const pendingHeartbeat = heartbeat(OWNER, true);
+
+        await expect(pendingCall).rejects.toBeInstanceOf(TerminalSessionError);
+        expect(await pendingHeartbeat).toMatchObject({
+          success: false,
+          code: "daemon_session_not_found",
+        });
+        expect(sessionManager.getSession(SESSION)).toBeNull();
+        // The release was terminal: a later heartbeat does not bring the session back either.
+        expect(await heartbeat(OWNER, true)).toMatchObject({ success: false });
+        expect(sessionManager.getSession(SESSION)).toBeNull();
+      });
+
+      test("a foreign token's keeper tick does not renew the lapsed owner's lease", async () => {
+        const pendingHeartbeat = heartbeat(FOREIGN);
+        const pendingCall = admitControlCall("exec-behind-foreign-tick");
+
+        expect(await pendingHeartbeat).toMatchObject({ success: false });
+        await expect(pendingCall).rejects.toBeInstanceOf(TerminalSessionError);
+      });
     });
 
     test("a session no owner token judges is still kept alive by its tool calls", async () => {

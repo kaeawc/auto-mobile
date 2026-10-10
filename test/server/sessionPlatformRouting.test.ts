@@ -54,9 +54,18 @@ describe("connection device selectors", () => {
     const binding = new SessionToolBinding();
     binding.bind("one", "ios-a");
     binding.bind("two", "android-a");
-    expect(() => binding.resolveDeviceSessionUuid("one", { platform: "android" }, lookup)).toThrow(
-      /sessionUuid/,
-    );
+    // The connection holds nothing for android: fall through, never borrow another's (#11193).
+    expect(
+      binding.resolveDeviceSessionUuid("one", { platform: "android" }, lookup),
+    ).toBeUndefined();
+  });
+
+  test("a platform with no matching acquired session falls through instead of throwing (#11193)", () => {
+    const binding = new SessionToolBinding();
+    binding.bind(undefined, "android-a");
+    expect(
+      binding.resolveDeviceSessionUuid(undefined, { platform: "ios" }, lookup),
+    ).toBeUndefined();
   });
 
   test("explicit session remains authoritative over platform", () => {
@@ -79,9 +88,9 @@ describe("connection device selectors", () => {
   test("released sessions are removed from candidates", () => {
     const binding = acquired();
     binding.unbindSession("android-a");
-    expect(() =>
+    expect(
       binding.resolveDeviceSessionUuid(undefined, { platform: "android" }, lookup),
-    ).toThrow(/sessionUuid/);
+    ).toBeUndefined();
   });
 
   test("seeded connection cannot switch device", () => {

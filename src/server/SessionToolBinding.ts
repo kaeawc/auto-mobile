@@ -125,16 +125,18 @@ export class SessionToolBinding {
     ) {
       return rebindFallback;
     }
-    if (selected.length === 0 && deviceId) {
-      // An explicit device outside this connection's sessions must continue to
-      // ordinary discovery, where the standard admission gate runs.
+    if (selected.length === 0) {
+      // Nothing held for the requested platform/device is not ambiguous (#11193):
+      // an explicit device outside this connection's sessions, or a platform the
+      // connection holds nothing for, continues to ordinary discovery, where the
+      // standard admission gate runs.
       return undefined;
     }
     if (selected.length === 1) {
       return selected[0].sessionUuid;
     }
     throw new Error(
-      `Cannot resolve requested platform/deviceId unambiguously. Candidate sessions: ${candidates
+      `Cannot resolve requested platform/deviceId unambiguously. Candidate sessions: ${selected
         .map(
           (candidate) => `${candidate.sessionUuid} (${candidate.deviceId}, ${candidate.platform})`,
         )

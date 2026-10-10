@@ -4,6 +4,7 @@ import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_BOUND_SESSION_REPLAY_TTL_MS, DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
@@ -49,7 +50,14 @@ describe("proxy keeps a bound session alive while a call on it is in flight", ()
     timer = new FakeTimer();
     finishLongCall = undefined;
     client = new FakeDaemonClient({
-      toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult(SESSION) : undefined),
+      // The daemon echoes the session an admitted control call used when it answers (#10974);
+      // that echo, arriving as the call ends, is what restarts the idle window.
+      toolResultFor: (name) =>
+        name === "getAndroid"
+          ? deviceStartResult(SESSION)
+          : name === "explore"
+            ? withRoutedSessionMeta({ content: [{ type: "text", text: "ok" }] }, SESSION)
+            : undefined,
       onCallTool: (name) =>
         name === "explore"
           ? new Promise<void>((resolve) => {

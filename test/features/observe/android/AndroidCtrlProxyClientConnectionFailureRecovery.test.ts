@@ -612,6 +612,35 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     expect(manager.setupCallCount).toBe(0);
   });
 
+  test("recovery attempts against an absent device never consume the forced-restart budget (#11246)", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = new FakeManager();
+    client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      buildFakeAdb(false),
+      createInstantFailureWebSocketFactory(timer),
+      timer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => manager,
+    );
+    const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+    for (let i = 0; i < 5; i++) {
+      client.ensureRecoveryStarted();
+      expect(await client.awaitRecovery(10_000)).toBe("failed");
+    }
+    expect(budget.snapshot()).toEqual({ state: "idle", attempts: 0 });
+    expect(manager.isAccessibilityServiceHealthyCallCount).toBe(0);
+  });
+
   test("falls back to full setup when rebind does not restore health", async function () {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();

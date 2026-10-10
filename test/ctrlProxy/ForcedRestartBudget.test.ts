@@ -26,6 +26,21 @@ describe("ForcedRestartBudget", () => {
     expect(budget.snapshot().nextAttemptAtMs).toBe(90_000);
   });
 
+  test("releasing an attempt consumes no budget, starts no backoff, and ignores stale tokens", () => {
+    const timer = new FakeTimer();
+    const budget = new ForcedRestartBudget(timer, 1, undefined, 1_000);
+    const first = budget.tryBeginAttempt()!;
+    timer.advanceTime(5_000);
+    budget.releaseAttempt(first);
+    expect(budget.snapshot()).toEqual({ state: "idle", attempts: 0 });
+    const second = budget.tryBeginAttempt();
+    expect(second).toBeDefined();
+    budget.releaseAttempt(first);
+    expect(budget.tryBeginAttempt()).toBeUndefined();
+    budget.recordFailure("real failure", second!);
+    expect(budget.snapshot().state).toBe("exhausted");
+  });
+
   test("exhaustion is terminal until success or explicit rearm", () => {
     const timer = new FakeTimer();
     const budget = new ForcedRestartBudget(timer);

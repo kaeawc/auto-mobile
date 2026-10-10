@@ -2831,6 +2831,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  private releasePendingRecoveryStability(token: number): void {
+    const pending = this.pendingRecoveryStability;
+    if (pending?.token === token) {
+      this.pendingRecoveryStability = undefined;
+      pending.resolve(false);
+    }
+    this.forcedRestartBudget.releaseAttempt(token);
+  }
+
   private completePendingRecoveryStability(): void {
     const pending = this.pendingRecoveryStability;
     if (pending?.eligible && pending.stableSocket === this.ws && this.isConnected()) {
@@ -2911,7 +2920,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       stableConnection = replaceStabilityWaiter();
     })
       .then(async (outcome) => {
-        if (this.closed || outcome === "failed" || outcome === "unavailable") {
+        if (!this.closed && outcome === "unavailable") {
+          // The device is absent, so the runner was never exercised: give the attempt back
+          // instead of burning one of the forced-restart slots (#11246).
+          this.releasePendingRecoveryStability(token);
+          return false;
+        }
+        if (this.closed || outcome === "failed") {
           this.failPendingRecoveryStability(`service recovery ${outcome}`);
           this.forcedRestartBudget.recordFailure(`service recovery ${outcome}`, token);
           return false;

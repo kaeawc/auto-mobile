@@ -8539,11 +8539,20 @@ export class DevicePool {
   }
 
   /**
-   * Whether `sessionId` is a live autolock session that a still-connected MCP client other than
-   * `mcpSessionId` owns or routes to by autolock.
+   * Whether a still-connected MCP client other than `mcpSessionId` owns the live session
+   * `sessionId` (#11344): it acquired or restored it, or routes to it by autolock. The general
+   * rule {@link mayRestoreMcpSessionOwnership} applies, with autolock on or off.
    */
-  isAutolockSessionOwnedByOtherConnection(sessionId: string, mcpSessionId?: string): boolean {
-    if (!this.autolockManager.hasMcpSessionOwner(sessionId, mcpSessionId)) {
+  isSessionOwnedByOtherConnection(sessionId: string, mcpSessionId?: string): boolean {
+    if (mcpSessionId !== undefined) {
+      return (
+        this.hasConnectedMcpSessionOwner(sessionId, mcpSessionId) &&
+        this.sessionManager.getSession(sessionId) !== null
+      );
+    }
+    // A caller with no connection identity cannot be told apart from the owner of an ordinary
+    // session, so only a live autolock, which is owned by connection, is foreign to it (#11235).
+    if (!this.autolockManager.hasMcpSessionOwner(sessionId)) {
       return false;
     }
     const session = this.sessionManager.getSession(sessionId);

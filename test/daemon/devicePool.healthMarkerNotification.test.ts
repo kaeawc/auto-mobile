@@ -1,23 +1,23 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { DaemonState } from "../../../src/daemon/daemonState";
-import { DevicePool } from "../../../src/daemon/devicePool";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import type { BootedDevice } from "../../../src/models";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import type { BootedDevice } from "../../src/models";
 import {
   getBootedDevicesForPlatforms,
   resetBootedDevicesResourceCache,
   setDeviceManager,
-} from "../../../src/server/bootedDeviceResources";
+} from "../../src/server/bootedDeviceResources";
 import {
   createDeviceStateChangeNotifier,
   DEVICE_STATE_NOTIFY_DEBOUNCE_MS,
-} from "../../../src/server/deviceStateChangeNotifier";
-import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
+} from "../../src/server/deviceStateChangeNotifier";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Inventory contract: a device's status is the same on every surface, and a transition between
 // idle and assigned reaches subscribers (#11413). A health marker (an app-cleanup, clock, network
@@ -112,5 +112,69 @@ describe("health marker transitions reach the booted-devices resource", () => {
       resourcePoolStatus: afterRecovery.devices[0]?.runtime.poolStatus,
       subscribersNotified: ctx.notifications() > notifiedBeforeRecovery,
     }).toEqual({ resourcePoolStatus: "idle", subscribersNotified: true });
+  });
+
+  // The other reservations that hide an idle device from allocation move it to `assigned` too.
+  async function expectBucketChangeNotifies(
+    ctx: Awaited<ReturnType<typeof setup>>,
+    change: () => Promise<void> | void,
+    expected: "idle" | "assigned",
+  ): Promise<void> {
+    await ctx.timer.advanceTimeAsync(DEVICE_STATE_NOTIFY_DEBOUNCE_MS);
+    const before = ctx.notifications();
+    await change();
+    expect(ctx.pool.poolBucket(android.deviceId)).toBe(expected);
+    await ctx.timer.advanceTimeAsync(DEVICE_STATE_NOTIFY_DEBOUNCE_MS);
+    expect(ctx.notifications()).toBeGreaterThan(before);
+  }
+
+  test("a readiness reservation and its release notify subscribers", async () => {
+    const ctx = await setup();
+    let release: (() => Promise<void>) | undefined;
+    await expectBucketChangeNotifies(
+      ctx,
+      async () => {
+        release = await ctx.pool.reserveDeviceForReadiness(android.deviceId, android);
+      },
+      "assigned",
+    );
+    await expectBucketChangeNotifies(ctx, () => release!(), "idle");
+  });
+
+  test("a shutdown reservation and its release notify subscribers", async () => {
+    const ctx = await setup();
+    let release: (() => Promise<void>) | undefined;
+    await expectBucketChangeNotifies(
+      ctx,
+      async () => {
+        release = (await ctx.pool.reserveDeviceForShutdown(android.deviceId))?.release;
+      },
+      "assigned",
+    );
+    await expectBucketChangeNotifies(ctx, () => release!(), "idle");
+  });
+
+  test("a restart-recovery reservation and its release notify subscribers", async () => {
+    const ctx = await setup();
+    await expectBucketChangeNotifies(
+      ctx,
+      () =>
+        ctx.pool.reserveDevicesForRehydration([
+          {
+            sessionId: "row-a",
+            target: {
+              platform: "android",
+              stableDeviceId: android.name,
+              deviceId: android.deviceId,
+            },
+          },
+        ]),
+      "assigned",
+    );
+    await expectBucketChangeNotifies(
+      ctx,
+      () => ctx.pool.releaseRehydrationReservation("row-a"),
+      "idle",
+    );
   });
 });

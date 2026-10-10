@@ -25,6 +25,7 @@ import {
 } from "./foreignDeviceOwnership";
 import {
   InMemoryDeviceHealthMarkers,
+  NotifyingDeviceHealthMarkers,
   type DeviceHealthMarkers,
   type DeviceHealthMarker,
 } from "./deviceHealthMarkers";
@@ -67,6 +68,7 @@ import {
   waitForDeviceReadyOrCancel,
 } from "../devices/deviceUtils";
 import { BootedDeviceDiscoveryIncompleteError } from "../devices/deviceBootService";
+import { adbOfflineHeldDevices } from "../server/adbOfflineHeldDevices";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -106,6 +108,7 @@ import {
 import {
   didSourceSucceedForDevice,
   discoverySourceFor,
+  sourcesForPlatform,
   type DiscoveryCompleteness,
 } from "../utils/discoverySource";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
@@ -1283,7 +1286,9 @@ export class DevicePool {
       ttlMs: this.RECOVERY_RETRY_REFRESH_INTERVAL_MS,
       maxEntries: 1,
     });
-    this.deviceHealthMarkers = resolveDeviceHealthMarkers(deviceHealthMarkers, timer);
+    this.deviceHealthMarkers = this.notifyingHealthMarkers(
+      resolveDeviceHealthMarkers(deviceHealthMarkers, timer),
+    );
     this.wireSessionDeviceHealth(deviceHealthRecoveryBackoff);
     this.refreshMissingDeviceMisses = resolveMissingDeviceMisses(missingDeviceMisses);
     this.idGenerator = idGenerator;
@@ -1382,6 +1387,19 @@ export class DevicePool {
       });
     this.ownerDisconnectRelease = this.createOwnerDisconnectRelease(ownerDisconnect);
     this.registerSessionReleaseHandlers();
+  }
+
+  /**
+   * Every marker mutation moves a device between idle and assigned: publish it from this one
+   * wrapper rather than from each session-manager call site (#11568).
+   */
+  private notifyingHealthMarkers(inner: DeviceHealthMarkers): DeviceHealthMarkers {
+    return new NotifyingDeviceHealthMarkers(inner, (deviceId) => {
+      const device = this.devices.get(deviceId);
+      if (device) {
+        this.notifyDeviceStateChanged(device);
+      }
+    });
   }
 
   /** Health recovery may only act on an idle, unowned device with no cleanup in flight. */
@@ -5857,7 +5875,52 @@ export class DevicePool {
   /** {@link getStats} after {@link refreshInventoryOwnership}: what `availableDevices` surfaces report. */
   async getRefreshedStats(): Promise<ReturnType<DevicePool["getStats"]>> {
     await this.refreshInventoryOwnership();
-    return this.getStats();
+    return this.getStats(await this.readLiveInventoryDeviceIds());
+  }
+
+  /**
+   * The pooled device ids the booted-devices resource and listDevices would list: what discovery
+   * reports now plus held Android devices adb still lists offline. A pooled entry outside this set
+   * is a phantom (shut down since the last refresh) and must not be counted (#11568). Only
+   * platforms with pooled entries are read, through the manager's own discovery cache, so a stats
+   * read adds no adb/simctl call beyond one cached listing per such platform. An incomplete
+   * listing throws {@link BootedDeviceDiscoveryIncompleteError}: the count is unknown, never the
+   * stale pool tally and never zero.
+   */
+  private async readLiveInventoryDeviceIds(): Promise<Set<string>> {
+    const live = new Set<string>();
+    for (const platform of ["android", "ios"] as const) {
+      if (this.getDevicesByPlatform(platform).length === 0) {
+        continue;
+      }
+      const discovery = await this.deviceManager.getBootedDevicesDetailed(platform, {
+        signal: getAbortSignal(),
+      });
+      const complete = discovery.succeededSources
+        ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
+        : discovery.succeededPlatforms.has(platform);
+      if (!complete) {
+        throw new BootedDeviceDiscoveryIncompleteError(
+          platform,
+          discovery.discoveryErrors?.[platform],
+        );
+      }
+      const devices =
+        platform === "android" ? this.mapAndroidDiscovery(discovery.devices) : discovery.devices;
+      for (const device of devices) {
+        live.add(device.deviceId);
+      }
+      const offlineHeld = await adbOfflineHeldDevices({
+        platform,
+        discovered: devices,
+        devicePool: this,
+        deviceManager: this.deviceManager,
+      });
+      for (const held of offlineHeld) {
+        live.add(held.device.deviceId);
+      }
+    }
+    return live;
   }
 
   /** Re-read which idle Android devices other daemons drive, for this allocation pass. */
@@ -7248,7 +7311,7 @@ export class DevicePool {
     this.notifyDeviceStateChanged(device);
   }
 
-  reserveDeviceForReadiness(
+  async reserveDeviceForReadiness(
     deviceId: string,
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     stableRuntimeName = expectedIdentity.name,
@@ -7256,7 +7319,7 @@ export class DevicePool {
     autolockClient?: AutolockClient,
     enforceAndroidRecoveryExclusion = false,
   ): Promise<DeviceReadinessReservation> {
-    return this.shutdownReservationCoordinator.reserveDeviceForReadiness(
+    const reservation = await this.shutdownReservationCoordinator.reserveDeviceForReadiness(
       deviceId,
       expectedIdentity,
       stableRuntimeName,
@@ -7264,6 +7327,33 @@ export class DevicePool {
       autolockClient,
       enforceAndroidRecoveryExclusion,
     );
+    // A reservation hides an idle device from allocation, so taking and giving it back are
+    // idle/assigned transitions subscribers must hear about (#11568).
+    this.notifyReservationChanged(deviceId, expectedIdentity.platform);
+    const release = async (): Promise<void> => {
+      await reservation();
+      this.notifyReservationChanged(deviceId, expectedIdentity.platform);
+    };
+    return Object.assign(release, { owner: reservation.owner });
+  }
+
+  private notifyReservationChanged(deviceId: string, platform: Platform): void {
+    this.notifyDeviceStateChanged({ id: deviceId, platform });
+  }
+
+  /** Report the shutdown reservation being taken now and being given back later (#11568). */
+  private notifyingShutdownReservation(
+    reservation: ShutdownDeviceReservation,
+  ): ShutdownDeviceReservation {
+    const { device } = reservation;
+    this.notifyReservationChanged(device.id, device.platform);
+    return {
+      ...reservation,
+      release: async () => {
+        await reservation.release();
+        this.notifyReservationChanged(device.id, device.platform);
+      },
+    };
   }
 
   /**
@@ -7277,12 +7367,13 @@ export class DevicePool {
     assertHolder?: () => void,
     foreignClaim?: ShutdownForeignClaim,
   ): Promise<ShutdownDeviceReservation | undefined> {
-    const reservation = await this.shutdownReservationCoordinator.reserveDeviceForShutdown(
+    const reserved = await this.shutdownReservationCoordinator.reserveDeviceForShutdown(
       deviceId,
       abortSignal,
       autolockClient,
       assertHolder,
     );
+    const reservation = reserved && this.notifyingShutdownReservation(reserved);
     if (!reservation || !foreignClaim) {
       return reservation;
     }
@@ -7591,14 +7682,30 @@ export class DevicePool {
       );
       if (!managed && !alreadyReserved) {
         this.rehydrationReservations.set(sessionId, target);
+        this.notifyRehydrationReservationChanged(target);
+      }
+    }
+  }
+
+  /** The reserved device's bucket moved, but the reservation names it by identity: tell observers of every match. */
+  private notifyRehydrationReservationChanged(
+    target: Pick<RehydrationDeviceReservation["target"], "platform" | "stableDeviceId">,
+  ): void {
+    for (const device of this.getDevicesByPlatform(target.platform)) {
+      if (this.stableDeviceIdFor(device) === target.stableDeviceId) {
+        this.notifyDeviceStateChanged(device);
       }
     }
   }
 
   /** Give up the restart-recovery reservation made for `sessionId`, if any (#11294). */
   releaseRehydrationReservation(sessionId: string): void {
+    const target = this.rehydrationReservations.get(sessionId);
     if (this.rehydrationReservations.delete(sessionId)) {
       logger.info(`[DevicePool] Released the restart-recovery reservation for ${sessionId}`);
+      if (target) {
+        this.notifyRehydrationReservationChanged(target);
+      }
     }
   }
 
@@ -9306,13 +9413,18 @@ export class DevicePool {
     return device ? this.poolBucketFor(device) : null;
   }
 
-  getStatsForPlatform(platform?: Platform): {
+  getStatsForPlatform(
+    platform?: Platform,
+    live?: ReadonlySet<string>,
+  ): {
     total: number;
     idle: number;
     assigned: number;
     error: number;
   } {
-    const devices = this.getDevicesByPlatform(platform);
+    const devices = this.getDevicesByPlatform(platform).filter(
+      (device) => !live || live.has(device.id),
+    );
     // Same derivation as getStats (#11317, #11387): one bucket per device. `total` (capacity
     // gating) is the device count.
     const buckets = devices.map((device) => this.poolBucketFor(device));
@@ -9331,15 +9443,15 @@ export class DevicePool {
   /**
    * Get pool statistics for monitoring
    */
-  getStats(): {
+  getStats(live?: ReadonlySet<string>): {
     total: number;
     idle: number;
     assigned: number;
     error: number;
     avgAssignments: number;
   } {
-    const all = this.getAllDevices();
-    const { idle, assigned, error } = this.getStatsForPlatform();
+    const all = this.getAllDevices().filter((device) => !live || live.has(device.id));
+    const { idle, assigned, error } = this.getStatsForPlatform(undefined, live);
     const avgAssignments =
       all.length > 0
         ? Math.round(all.reduce((sum, d) => sum + d.assignmentCount, 0) / all.length)

@@ -161,6 +161,7 @@ test/daemon/performancePushSocketServerCharacterization.test.ts
 test/daemon/performanceStreamSocketServerCharacterization.test.ts
 test/daemon/poolOwnershipConcurrency.property.test.ts
 test/daemon/poolOwnershipConcurrency.regressions.test.ts
+test/daemon/poolOwnershipConcurrency.slotsAndTools.property.test.ts
 test/daemon/poolOwnershipConcurrency.twoDaemon.property.test.ts
 test/daemon/poolOwnershipConcurrency.twoDaemon.regressions.test.ts
 test/daemon/privateDaemonOrphanExitRecord.test.ts
@@ -801,6 +802,7 @@ test/scripts/ffmpegInstallHoist.test.ts
 test/scripts/generateMdmProfile.test.ts
 test/scripts/gradleTaskRunAction.test.ts
 test/scripts/installerStartupDiagnostics.test.ts
+test/scripts/integrationSafeTier.test.ts
 test/scripts/iosIntegrationWorkflowChangeGuard.test.ts
 test/scripts/iosSimulatorProductBootLifecycle.test.ts
 test/scripts/ipaInstallFanOut.test.ts

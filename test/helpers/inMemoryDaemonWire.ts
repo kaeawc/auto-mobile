@@ -331,6 +331,13 @@ export class InMemoryDaemonClient extends DaemonClient {
     this.attachSocketForTesting(socket as unknown as Duplex);
   }
 
+  /** The socket this client is connected on now, if it is. */
+  get liveSocket(): InMemoryClientSocket | undefined {
+    const internals = this as unknown as DaemonClientInternals;
+    const socket = internals.socket as InMemoryClientSocket | null;
+    return internals.connected && socket && !socket.destroyed ? socket : undefined;
+  }
+
   /** `DaemonClient.connectOnce`'s `close` listener. */
   private socketClosed(socket: InMemoryClientSocket): void {
     const internals = this as unknown as DaemonClientInternals;

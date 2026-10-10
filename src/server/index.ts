@@ -1456,6 +1456,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
     let cleanupAcquisitionRelease: (() => void) | undefined;
     const releasedAcquisitionSessions = new Set<string>();
+    // The explicit-UUID attach below runs after the handler. Claim the bind for the whole call, so
+    // a connection that closes mid-handler is refused as owner instead of recorded dead (#11348).
+    const endExplicitSessionBindClaim =
+      providedSessionUuid &&
+      tool.requiresDevice &&
+      implicitAutolockMcpSessionId &&
+      DaemonState.getInstance().isInitialized()
+        ? DaemonState.getInstance().getDevicePool().beginMcpBind(implicitAutolockMcpSessionId)
+        : undefined;
     try {
       if (isDeviceSessionAcquisitionTool(name)) {
         // A handler can mint and release a session before returning its UUID.
@@ -1816,6 +1825,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         }) as McpToolCallResult,
       );
     } finally {
+      endExplicitSessionBindClaim?.();
       try {
         cleanupAcquisitionRelease?.();
       } finally {

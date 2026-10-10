@@ -674,6 +674,7 @@ interface SocketDaemonStateAccess extends DaemonStateAccess {
       mcpSessionId: string | undefined,
       deviceId: string,
     ): string | undefined;
+    isAutolockSessionOwnedByOtherConnection?(sessionId: string, mcpSessionId?: string): boolean;
   };
 }
 
@@ -3284,6 +3285,18 @@ export class UnixSocketServer {
     );
   }
 
+  private isAutolockSessionOwnedByOtherConnection(
+    sessionUuid: string,
+    socketSessionId: string,
+  ): boolean {
+    return (
+      this.daemonState.isInitialized() &&
+      this.daemonState
+        .getDevicePool()
+        .isAutolockSessionOwnedByOtherConnection?.(sessionUuid, socketSessionId) === true
+    );
+  }
+
   private isRetryableSessionRecoveryResult(response: unknown, sessionUuid: string): boolean {
     if (
       !response ||
@@ -3313,6 +3326,11 @@ export class UnixSocketServer {
   ): void {
     if (this.isReleasedBoundSession(args)) {
       this.clearBoundMcpClientKey(socketSessionId);
+      return;
+    }
+    if (this.isAutolockSessionOwnedByOtherConnection(sessionUuid, socketSessionId)) {
+      // Naming another connected client's autolock session is not ownership (#11235): the call
+      // ran there, but this socket keeps its own route so its sessionless calls never follow it.
       return;
     }
     const sessionIsActiveAfterForward = this.hasActiveDaemonSession(sessionUuid);

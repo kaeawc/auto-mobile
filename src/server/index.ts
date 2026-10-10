@@ -30,6 +30,7 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { executionTracker } from "./executionTracker";
 import { withAdmittedSessionEcho } from "./routedSessionEcho";
+import { withForeignOwnedSessionMeta } from "./routedSessionMeta";
 import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
@@ -1329,8 +1330,26 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // The daemon echoes the session it routed an admitted, non-read call to, so a proxy credits
     // exactly that session instead of guessing it from a selector (#10974). Read before the
     // execution ends.
+    // #11235: an explicitly named session another connected client owns by autolock. Naming a
+    // UUID is not proof of ownership (#11164): the call may still run on that session, but this
+    // connection must never bind it for later sessionless calls. Decided before any bind, and
+    // read at bind time so an ownership change during the handler is honored.
+    const foreignOwnedExplicitSessionUuid = (): string | undefined =>
+      providedSessionUuid &&
+      DaemonState.getInstance().isInitialized() &&
+      DaemonState.getInstance()
+        .getDevicePool()
+        .isAutolockSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)
+        ? providedSessionUuid
+        : undefined;
+    // The proxy learns from the marker not to remember a foreign-owned session it named.
     const withRoutedSession = <T>(result: T): T =>
-      daemonMode ? withAdmittedSessionEcho(result, execution.id) : result;
+      daemonMode
+        ? withForeignOwnedSessionMeta(
+            withAdmittedSessionEcho(result, execution.id),
+            foreignOwnedExplicitSessionUuid(),
+          )
+        : result;
     let executionEnded = false;
     const endExecutionOnce = (): void => {
       if (!executionEnded) {
@@ -1613,6 +1632,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         name !== SET_TOOL_ENABLED_TOOL_NAME &&
         !result?.isError &&
         providedSessionUuid &&
+        // Ownership first (#11235): a foreign-owned session never binds this connection.
+        foreignOwnedExplicitSessionUuid() === undefined &&
         !isRecordingIdCleanup &&
         (daemonSessionManager
           ? sessionForBinding !== null &&

@@ -77,7 +77,10 @@ import {
   isDeviceBindingTool,
   readDeviceCleanupInProgressRefusal,
 } from "../server/deviceSessionResult";
-import { routedSessionUuidFromResult } from "../server/routedSessionMeta";
+import {
+  foreignOwnedSessionUuidFromResult,
+  routedSessionUuidFromResult,
+} from "../server/routedSessionMeta";
 import {
   toolSelectionProfileUuidFromResponse,
   SET_TOOL_ENABLED_TOOL_NAME,
@@ -3915,7 +3918,9 @@ export class DaemonMcpProxy {
       // replay lease off forwardedArgs keeps continuous implicit activity from
       // being mistaken for idleness, so a later reconnect re-seeds the still-live
       // session instead of creating an unseeded transport (issue #4610).
-      this.rememberSessionUuid(name, forwardedArgs, callReleaseEpoch);
+      if (!this.namesForeignOwnedSession(forwardedArgs, result)) {
+        this.rememberSessionUuid(name, forwardedArgs, callReleaseEpoch);
+      }
       this.rememberActiveDeviceSession(name, result, callReleaseEpoch);
       return { result };
     } catch (error) {
@@ -6493,7 +6498,11 @@ export class DaemonMcpProxy {
       return;
     }
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
-    if (!forwardedSessionUuid || declaresDeviceSessionInvalid(result)) {
+    if (
+      !forwardedSessionUuid ||
+      declaresDeviceSessionInvalid(result) ||
+      this.namesForeignOwnedSession(forwardedArgs, result)
+    ) {
       return;
     }
     const alreadyBound = forwardedSessionUuid === this.boundSessionUuid;
@@ -6507,6 +6516,22 @@ export class DaemonMcpProxy {
     }
     this.updateBoundSessionUuid(forwardedSessionUuid);
     this.startBoundSessionHeartbeat();
+  }
+
+  /**
+   * The daemon reports the session this call named as another connection's autolock (#11235):
+   * the call may run on it, but naming it is not ownership, so this connection never binds it
+   * and its later sessionless calls keep their own routing.
+   */
+  private namesForeignOwnedSession(
+    forwardedArgs: Record<string, unknown>,
+    result: unknown,
+  ): boolean {
+    const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
+    return (
+      forwardedSessionUuid !== undefined &&
+      foreignOwnedSessionUuidFromResult(result) === forwardedSessionUuid
+    );
   }
 
   private mayBindSessionFromErrorResult(name: string): boolean {

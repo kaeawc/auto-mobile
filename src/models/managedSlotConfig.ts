@@ -110,6 +110,11 @@ export const managedSlotConfigSchema = z
       .min(MIN_MANAGED_SLOT_IDLE_TIMEOUT_MS)
       .max(MAX_MANAGED_SLOT_IDLE_TIMEOUT_MS)
       .optional(),
+    /**
+     * Supervising process whose death ends the execution even while the proxy's own parent is
+     * alive (e.g. a wrapper shell between the runner and the proxy). Defaults to the launch parent.
+     */
+    executionOwnerPid: z.number().int().positive().optional(),
   })
   .strict()
   .superRefine((config, context) => {
@@ -164,6 +169,23 @@ export function assertManagedSlotsSupported(
       "managed_slots_unsupported",
       "managed slots not yet supported by this build; remove --managed-slot-config / " +
         `${MANAGED_SLOT_CONFIG_ENV} to run an unmanaged proxy`,
+    );
+  }
+}
+
+/**
+ * Startup check that a declared `executionOwnerPid` names a running process, so a typo or an
+ * already-dead owner fails typed instead of shutting the proxy down a second later.
+ */
+export function assertManagedSlotOwnerRunning(
+  config: ManagedSlotConfig | undefined,
+  isProcessRunning: (pid: number) => boolean,
+): void {
+  const ownerPid = config?.executionOwnerPid;
+  if (ownerPid !== undefined && !isProcessRunning(ownerPid)) {
+    throw new ManagedSlotConfigError(
+      "managed_slot_config_invalid",
+      `executionOwnerPid ${ownerPid} is not a running process`,
     );
   }
 }

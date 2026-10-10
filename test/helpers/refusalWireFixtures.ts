@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import {
   assertBootCapacityGranted,
   atCapacityDecision,
@@ -64,7 +65,9 @@ export interface RefusalWireFixture {
   result: RefusalWireResult;
 }
 
-export const REFUSAL_FIXTURES_DIR = new URL("../fixtures/refusal-wire/", import.meta.url).pathname;
+export const REFUSAL_FIXTURES_DIR = fileURLToPath(
+  new URL("../fixtures/refusal-wire/", import.meta.url),
+);
 
 const SESSION = "11111111-2222-4333-8444-555555555555";
 const DEVICE = "emulator-5554";

@@ -271,4 +271,22 @@ describe("capacity_exhausted names external devices (#11209)", () => {
     expect(error.details.externalDevices).toBeUndefined();
     expect(error.message).not.toContain("not started by AutoMobile");
   });
+
+  test("forgets a started serial once its emulator exits, so a later emulator on it is external (#11254)", async () => {
+    const { timer, source, gate } = setup({ [ANDROID_MAX_BOOTED_ENV]: "1" });
+    timer.enableAutoAdvance();
+    const owned = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    owned.handOff("emulator-5554");
+    source.emulatorSerials = ["emulator-5554"];
+    await rejection(gate.admit({ timeoutMs: 6_000, avdName: AVD }));
+    source.emulatorSerials = [];
+    await gate.assertCapacityAvailable();
+    source.emulatorSerials = ["emulator-5554"];
+
+    const error = (await rejection(
+      gate.admit({ timeoutMs: 6_000, avdName: AVD }),
+    )) as BootCapacityExhaustedError;
+
+    expect(error.details.externalDevices).toEqual(["emulator-5554"]);
+  });
 });

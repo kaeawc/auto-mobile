@@ -512,7 +512,10 @@ class HeldSessionNotFoundError extends Error {
     readonly sessionUuid: string,
     /** Why the daemon released the session, when it said (#10730). */
     readonly releaseReason?: string,
-    /** The answer to the heartbeat that re-establishes ownership on a new connection (#11529). */
+    /**
+     * The answer to the heartbeat that re-establishes ownership on a new connection (#11529),
+     * for the latest binding or a held session alike (#11557).
+     */
     readonly onNewConnection = false,
   ) {
     // Deliberately not the daemon's "Session not found" wording, which the reconnect machinery matches on.
@@ -1216,12 +1219,15 @@ export class DaemonMcpProxy {
     { since: number; rehydrating: boolean }
   >();
   /**
-   * The connection whose establishment dispatched the latest binding's ownership heartbeat, until
-   * the daemon answers a heartbeat for that session on it (#11529). That first answer comes from
-   * the daemon this proxy just connected to, on a socket that has carried nothing else for the
-   * session: a not-found there is about the session, never a stale connection.
+   * The connection that was established with sessions already held, and the sessions the daemon
+   * has not yet answered a heartbeat for on it: the latest binding (#11529) and every session held
+   * besides it (#11557). That first answer comes from the daemon this proxy just connected to, on
+   * a socket that has carried nothing else for the session: a not-found there is about the
+   * session, never a stale connection.
    */
-  private ownershipReestablishment: { client: DaemonClientLike; sessionUuid: string } | undefined;
+  private ownershipReestablishment:
+    | { client: DaemonClientLike; sessionUuids: Set<string> }
+    | undefined;
   /**
    * Whether this connection already declared its bound session CLI-owned
    * (issue #6870 review). Once declared, this proxy's remaining heartbeats must
@@ -3357,7 +3363,7 @@ export class DaemonMcpProxy {
    * attempt this request may be part of, and every sibling call in flight, to ask a question
    * already answered. An answer with no reason, or with a recoverable one, says nothing final and
    * keeps the reconnect-and-retry, unless it is a heartbeat's first answer on a connection that
-   * was just established ({@link askLatestBindingHeartbeat}).
+   * was just established ({@link askSessionHeartbeat}).
    */
   private sessionEndedAnswerReason(
     error: unknown,
@@ -4963,10 +4969,11 @@ export class DaemonMcpProxy {
    * |   recoverable reason (a daemon restart or shutdown,  |            | claiming, no| restores it or refuses    |
    * |   `device-restart:<id>`), within the recovery window |            | socket reset|                           |
    * |   of the first such answer (#11461)                  |            |             |                           |
-   * | latest, the first heartbeat on a connection that was | runs       | once a tick,| forwarded: the daemon     |
-   * |   just established answered not-found with no reason |            | claiming, no| restores it or refuses    |
-   * |   (a restarted daemon that has not rehydrated it),   |            | socket reset|                           |
-   * |   within the same window from that answer (#11529)   |            |             |                           |
+   * | latest or held, the first heartbeat on a connection  | runs       | once a tick,| forwarded: the daemon     |
+   * |   that was just established answered not-found with  |            | claiming, no| restores it or refuses    |
+   * |   no reason (a restarted daemon that has not         |            | socket reset|                           |
+   * |   rehydrated it), within the same window from that   |            |             |                           |
+   * |   answer (#11529, #11557)                            |            |             |                           |
    * | latest, heartbeat answered not-found with no release | for others | not until a | forwarded: the daemon     |
    * |   reason on a connection that had answered before    |            | call reaches| restores it or refuses,   |
    * |   (asked once more on a fresh one), or past the      |            | it again    | and success re-arms it    |
@@ -5051,6 +5058,11 @@ export class DaemonMcpProxy {
    * emitting a duplicate.
    */
   private async establishBoundSessionHeartbeat(established?: DaemonClientLike): Promise<void> {
+    if (established !== undefined && this.client === established && this.heartbeatKeeperStarted) {
+      // With or without a latest binding: the sessions held besides it are re-established on
+      // this connection by the keeper's next tick too (#11557).
+      this.noteOwnershipReestablishment(established);
+    }
     if (
       !(this.boundSessionUuid && !this.terminalBoundSession && this.transportLive && !this.closing)
     ) {
@@ -5071,9 +5083,6 @@ export class DaemonMcpProxy {
       // lands on the fresh transport before the retried operation (#2737/#4610
       // ordering). doConnect defers this flip only on the first establishment.
       this.connected = true;
-      if (established !== undefined && this.client === established) {
-        this.noteOwnershipReestablishment(established);
-      }
       this.startBoundSessionHeartbeat();
       return;
     }
@@ -5192,31 +5201,27 @@ export class DaemonMcpProxy {
 
   /**
    * `client` was just connected with the keeper already running, so the keeper's next heartbeat
-   * for the latest binding re-establishes ownership on it (#11529).
+   * for each session it heartbeats re-establishes ownership on it: the latest binding (#11529)
+   * and every session held besides it (#11557).
    */
   private noteOwnershipReestablishment(client: DaemonClientLike): void {
-    const sessionUuid = this.boundSessionUuid;
-    this.ownershipReestablishment =
-      sessionUuid !== undefined && this.latestBindingHeartbeatable()
-        ? { client, sessionUuid }
-        : undefined;
+    const latest = this.latestBindingHeartbeatable() ? [this.boundSessionUuid!] : [];
+    const sessionUuids = new Set([...latest, ...this.otherHeldSessions.keys()]);
+    this.ownershipReestablishment = sessionUuids.size > 0 ? { client, sessionUuids } : undefined;
   }
 
   /**
    * The daemon answered a heartbeat for `sessionUuid` on `client`. True for the first answer on a
    * connection that was established to re-assert ownership of that session
-   * ({@link ownershipReestablishment}), and only for that one.
+   * ({@link ownershipReestablishment}), and only for that one. Each session has its own first
+   * answer: one session's says nothing about its siblings'.
    */
   private answersOwnershipReestablishment(
     client: DaemonClientLike | null,
     sessionUuid: string,
   ): boolean {
     const pending = this.ownershipReestablishment;
-    if (pending === undefined || pending.client !== client || pending.sessionUuid !== sessionUuid) {
-      return false;
-    }
-    this.ownershipReestablishment = undefined;
-    return true;
+    return pending?.client === client && pending.sessionUuids.delete(sessionUuid);
   }
 
   /**
@@ -6069,7 +6074,7 @@ export class DaemonMcpProxy {
             // that replaced it (#11018), and a dropped one not at all.
             async () => {
               if (this.otherHeldSessions.get(sessionUuid) === held) {
-                await this.sendHeldSessionHeartbeat(sessionUuid, claimLivenessOwnership);
+                await this.askSessionHeartbeat(sessionUuid, claimLivenessOwnership);
                 sent = true;
               }
             },
@@ -6086,32 +6091,6 @@ export class DaemonMcpProxy {
       });
     } catch (error) {
       this.handleHeldSessionHeartbeatError(sessionUuid, claimLivenessOwnership, error);
-    }
-  }
-
-  /**
-   * One held session's heartbeat. The daemon answering "session not found" is an answer about this
-   * session alone: it is raised as {@link HeldSessionNotFoundError}, which the shared reconnect
-   * machinery does not treat as a stale connection, so it never resets the one socket every other
-   * session and tool call is using.
-   */
-  private async sendHeldSessionHeartbeat(
-    sessionUuid: string,
-    claimLivenessOwnership: boolean,
-  ): Promise<void> {
-    try {
-      this.noteDaemonIdleEvidence(
-        sessionUuid,
-        await this.requireClient().callDaemonMethod(
-          DAEMON_HEARTBEAT_METHOD,
-          this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership, true),
-        ),
-      );
-    } catch (error) {
-      if (this.isDaemonSessionNotFoundError(error)) {
-        throw new HeldSessionNotFoundError(sessionUuid, releaseReasonFromError(error));
-      }
-      throw error;
     }
   }
 
@@ -6220,9 +6199,10 @@ export class DaemonMcpProxy {
       return;
     }
     if (error instanceof HeldSessionNotFoundError) {
-      // The daemon does not know this session. Drop it once; retrying every tick would only
-      // keep asking, and resetting the socket to ask again would hurt its siblings.
-      this.heartbeatSessionNotFound(sessionUuid, error.releaseReason);
+      // The daemon does not know this session. Unless it is still being recovered, drop it once;
+      // retrying every tick would only keep asking, and resetting the socket to ask again would
+      // hurt its siblings.
+      this.heartbeatSessionNotFound(sessionUuid, error.releaseReason, error.onNewConnection);
       return;
     }
     if (isLivenessOwnerConflictError(error)) {
@@ -6299,6 +6279,8 @@ export class DaemonMcpProxy {
     this.livenessConflictLogged.delete(sessionUuid);
     this.recoveryNotFoundReasons.delete(sessionUuid);
     this.recoverableNotFoundSince.delete(sessionUuid);
+    // Held again later on this connection, its next heartbeat is not the connection's first.
+    this.ownershipReestablishment?.sessionUuids.delete(sessionUuid);
     if (!keepHandover) {
       this.sessionDeviceIds.delete(sessionUuid);
       this.stallHandovers.delete(sessionUuid);
@@ -6372,17 +6354,24 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * One heartbeat for the latest binding on the current connection. A not-found answer is about
-   * this session, not a stale connection, when the session is already known recoverable-not-found
-   * (#11461) or when it is the first answer on a connection that was just established (#11529).
-   * It is then raised as the held-session error, which the reconnect machinery neither resets the
-   * shared socket for nor retries. Any other not-found is asked once more on a fresh connection,
-   * and that second answer (`asked.notFound`) is the same daemon's, not a re-established one's.
+   * One heartbeat on the current connection for a session this proxy holds: the one path for the
+   * latest binding and for every session held besides it (#11557). A not-found answer that is
+   * about the session, not a stale connection, is raised as {@link HeldSessionNotFoundError},
+   * which the reconnect machinery neither resets the shared socket for nor retries. It carries
+   * whether it was the first answer on a connection that was just established (#11529), which
+   * {@link heartbeatSessionNotFound} decides on for both kinds of session alike.
+   *
+   * A held session's not-found is always about that session: the socket is its siblings' too.
+   *
+   * The latest binding passes `asked`: its not-found is about the session when the session is
+   * already known recoverable-not-found (#11461) or the answer is that first one. Any other is
+   * asked once more on a fresh connection, and that second answer (`asked.notFound`) is the same
+   * daemon's, not a re-established one's.
    */
-  private askLatestBindingHeartbeat(
+  private askSessionHeartbeat(
     sessionUuid: string,
     claimLivenessOwnership: boolean,
-    asked: { notFound: boolean },
+    asked?: { notFound: boolean },
   ): Promise<void> {
     const client = this.requireClient();
     return client
@@ -6400,9 +6389,15 @@ export class DaemonMcpProxy {
           if (!this.isDaemonSessionNotFoundError(error)) {
             throw error;
           }
-          const onNewConnection = reestablishes && !asked.notFound;
-          asked.notFound = true;
-          throw onNewConnection || this.recoverableNotFoundSince.has(sessionUuid)
+          const onNewConnection = reestablishes && asked?.notFound !== true;
+          const aboutSession =
+            asked === undefined ||
+            onNewConnection ||
+            this.recoverableNotFoundSince.has(sessionUuid);
+          if (asked !== undefined) {
+            asked.notFound = true;
+          }
+          throw aboutSession
             ? new HeldSessionNotFoundError(
                 sessionUuid,
                 releaseReasonFromError(error),
@@ -6423,7 +6418,7 @@ export class DaemonMcpProxy {
       const asked = { notFound: false };
       await runWithoutDaemonLifecycle(() =>
         this.withRecoverableReconnect(
-          () => this.askLatestBindingHeartbeat(sessionUuid, claimLivenessOwnership, asked),
+          () => this.askSessionHeartbeat(sessionUuid, claimLivenessOwnership, asked),
           sessionUuid,
           undefined,
           // A replacement daemon has not materialized a persisted session until a
@@ -6475,9 +6470,10 @@ export class DaemonMcpProxy {
    * session is then treated as one answered with no reason.
    *
    * `onNewConnection`: the answer is the first on a connection that was just established to
-   * re-assert ownership of the latest binding (#11529). The connection is not reset for it, with
-   * or without a reason: the daemon behind it is the one to wait for, and the reset would cut the
-   * call that established the connection. With no reason it is what a restarted daemon answers
+   * re-assert ownership of the session, latest or held (#11529, #11557). The connection is not
+   * reset for it, with or without a reason: the daemon behind it is the one to wait for, and the
+   * reset would cut the call that established the connection. Every session held then has its own
+   * first answer and its own window. With no reason it is what a restarted daemon answers
    * until it has rehydrated the session, so it opens the same window, and later answers with no
    * reason keep it open until it ends.
    *

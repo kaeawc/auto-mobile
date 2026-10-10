@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.test.runTest
@@ -11,24 +11,24 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** Which overlay lifecycle events end the asset session, and which deliberately do not. */
+/** Which prototype lifecycle events end the asset session, and which deliberately do not. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayAssetLifecycleTest {
-  private val host = FakeInteractiveOverlayHost()
-  private val timer = FakeOverlayTimer()
-  private val events = mutableListOf<OverlayEvent>()
-  private val store = OverlayAssetStore(FakeOverlayAssetFiles())
+class PrototypeAssetLifecycleTest {
+  private val host = FakePrototypeHost()
+  private val timer = FakePrototypeTimer()
+  private val events = mutableListOf<PrototypeEvent>()
+  private val store = PrototypeAssetStore(FakePrototypeAssetFiles())
   private var blocked = false
   private var session = 1
   private var clearFailure: Exception? = null
   private val lifecycle =
-    OverlayLifecycle(timer, TTL, isBlocked = { blocked }, observerSession = { session })
+    PrototypeLifecycle(timer, TTL, isBlocked = { blocked }, observerSession = { session })
   private val controller =
-    OverlayController(
+    PrototypeController(
       host,
-      OverlayResultSink { _, _, _ -> },
-      eventSink = OverlayEventSink { events += it },
+      PrototypeResultSink { _, _, _ -> },
+      eventSink = PrototypeEventSink { events += it },
       clock = { timer.now },
       lifecycle = lifecycle,
       clearAssets = {
@@ -38,15 +38,15 @@ class OverlayAssetLifecycleTest {
     )
 
   private fun spec(id: String = "panel") =
-    OverlaySpec(
+    PrototypeSpec(
       id,
-      OverlayWindow(OverlayFullscreenPlacement()),
-      root = OverlayImageNode(asset = "hero"),
+      PrototypeWindow(PrototypeFullscreenPlacement()),
+      root = PrototypeImageNode(asset = "hero"),
     )
 
   private fun upload() {
-    store.put("hero", "image/png", OverlayAssetBytes.png())
-    store.put("alt", "image/jpeg", OverlayAssetBytes.jpeg())
+    store.put("hero", "image/png", PrototypeAssetBytes.png())
+    store.put("alt", "image/jpeg", PrototypeAssetBytes.jpeg())
   }
 
   private suspend fun showWithAssets() {
@@ -74,7 +74,7 @@ class OverlayAssetLifecycleTest {
     showWithAssets()
     controller.interact(
       checkNotNull(controller.activeRuntime),
-      OverlayInteraction.Tap(listOf(OverlayDismissAction)),
+      PrototypeInteraction.Tap(listOf(PrototypeDismissAction)),
     )
     assertCleared()
   }
@@ -87,7 +87,7 @@ class OverlayAssetLifecycleTest {
   }
 
   @Test
-  fun `last client disconnect clears assets whether or not an overlay is showing`() = runTest {
+  fun `last client disconnect clears assets whether or not a prototype is showing`() = runTest {
     showWithAssets()
     controller.onClientCountChanged(0)
     assertCleared()
@@ -124,7 +124,7 @@ class OverlayAssetLifecycleTest {
   }
 
   @Test
-  fun `show and replacement keep assets because the overlay uses them`() = runTest {
+  fun `show and replacement keep assets because the prototype uses them`() = runTest {
     showWithAssets()
     controller.show(null, spec())
     controller.show(null, spec(), reset = true)
@@ -132,7 +132,7 @@ class OverlayAssetLifecycleTest {
   }
 
   @Test
-  fun `a temporary lock screen hide keeps assets and the restored overlay can still use them`() =
+  fun `a temporary lock screen hide keeps assets and the restored prototype can still use them`() =
     runTest {
       showWithAssets()
       blocked = true
@@ -156,7 +156,7 @@ class OverlayAssetLifecycleTest {
   }
 
   @Test
-  fun `service unbind clears assets with or without an overlay`() = runTest {
+  fun `service unbind clears assets with or without a prototype`() = runTest {
     showWithAssets()
     controller.dismissForUnbind()
     assertCleared()
@@ -175,12 +175,12 @@ class OverlayAssetLifecycleTest {
   }
 
   @Test
-  fun `an overlay that cannot be re-shown is abandoned and its assets cleared`() = runTest {
+  fun `a prototype that cannot be re-shown is abandoned and its assets cleared`() = runTest {
     showWithAssets()
     host.isShowing = false
     host.accept = false
     controller.onConfigurationChanged()
-    assertEquals(OverlayEventKind.DISMISSED, events.last().kind)
+    assertEquals(PrototypeEventKind.DISMISSED, events.last().kind)
     assertCleared()
   }
 
@@ -189,7 +189,7 @@ class OverlayAssetLifecycleTest {
     showWithAssets()
     clearFailure = IllegalStateException("disk gone")
     controller.dismiss(null, "panel", null)
-    assertEquals(OverlayEventKind.DISMISSED, events.single().kind)
+    assertEquals(PrototypeEventKind.DISMISSED, events.single().kind)
     assertFalse(host.isShowing)
     controller.destroy()
     assertKept() // the injected failure stopped the clear; nothing else was affected

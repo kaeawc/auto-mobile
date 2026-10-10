@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.os.Looper
 import android.provider.Settings
@@ -28,23 +28,23 @@ import org.robolectric.shadows.ShadowChoreographer
 
 /** What observe and tapOn see for the last Material component slice (#10439). */
 @RunWith(RobolectricTestRunner::class)
-class OverlayMaterialSemanticsTest {
+class PrototypeMaterialSemanticsTest {
   private companion object {
     const val FRAME_INTERVAL_MS = 16L
     const val INFINITE_ANIMATION_SETTLE_MS = 200L
   }
 
-  private val interactions = mutableListOf<OverlayInteraction>()
-  private val save = listOf<OverlayAction>(OverlayEmitAction("save"))
-  private val editing = OverlaySheetCondition("editing", true)
-  private val saved = OverlaySheetCondition("saved", true)
+  private val interactions = mutableListOf<PrototypeInteraction>()
+  private val save = listOf<PrototypeAction>(PrototypeEmitAction("save"))
+  private val editing = PrototypeSheetCondition("editing", true)
+  private val saved = PrototypeSheetCondition("saved", true)
 
   private fun render(
-    root: OverlayNode,
-    state: Map<String, OverlayScalar> = emptyMap(),
+    root: PrototypeNode,
+    state: Map<String, PrototypeScalar> = emptyMap(),
     hasInfiniteAnimation: Boolean = false,
   ): SemanticsNode {
-    val spec = OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), state, root)
+    val spec = PrototypeSpec("panel", PrototypeWindow(PrototypeFullscreenPlacement()), state, root)
     // An indeterminate progress indicator runs an infinite transition, and idle() on the paused
     // main looper keeps drawing its frames until the heap runs out (a ten-minute test whose
     // OutOfMemoryError then fails the next class's runTest with UncaughtExceptionsBeforeTest).
@@ -55,7 +55,7 @@ class OverlayMaterialSemanticsTest {
       Settings.Global.ANIMATOR_DURATION_SCALE,
       0f,
     )
-    activity.setContent { OverlaySpecContent(mapOverlaySpec(spec).root) { interactions += it } }
+    activity.setContent { PrototypeSpecContent(mapPrototypeSpec(spec).root) { interactions += it } }
     // An indeterminate progress indicator reschedules a frame forever. Robolectric's Choreographer
     // posts each frame at the current virtual time, so idle() (and idleFor) never gets past it and
     // every frame appends to the ShadowTrace queue until the heap is gone (9 minutes, ~1 GB dump).
@@ -95,18 +95,18 @@ class OverlayMaterialSemanticsTest {
   fun `an icon button and a FAB are labelled Buttons that run their onTap`() {
     val root =
       render(
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayIconButtonNode(testTag = "delete", icon = "delete", onTap = save),
-              OverlayIconButtonNode(
+              PrototypeIconButtonNode(testTag = "delete", icon = "delete", onTap = save),
+              PrototypeIconButtonNode(
                 testTag = "edit",
                 icon = "edit",
                 variant = "outlined",
                 contentDescription = "Edit alarm",
               ),
-              OverlayFabNode(testTag = "add", icon = "add", label = "New alarm", onTap = save),
-              OverlayFabNode(testTag = "small", icon = "add", size = "small"),
+              PrototypeFabNode(testTag = "add", icon = "add", label = "New alarm", onTap = save),
+              PrototypeFabNode(testTag = "small", icon = "add", size = "small"),
             ),
         ),
       )
@@ -121,21 +121,24 @@ class OverlayMaterialSemanticsTest {
     delete.click()
     add.click()
     root.tagged("small").click()
-    assertEquals(listOf(OverlayInteraction.Tap(save), OverlayInteraction.Tap(save)), interactions)
+    assertEquals(
+      listOf(PrototypeInteraction.Tap(save), PrototypeInteraction.Tap(save)),
+      interactions,
+    )
   }
 
   @Test
   fun `each segment is a selectable tagged node and a tap chooses its value`() {
     val root =
       render(
-        OverlaySegmentedButtonNode(
+        PrototypeSegmentedButtonNode(
           testTag = "repeat",
           stateKey = "repeat",
           onTap = save,
           options =
-            listOf(OverlayRadioOption("once", "Once"), OverlayRadioOption("daily", "Daily")),
+            listOf(PrototypeRadioOption("once", "Once"), PrototypeRadioOption("daily", "Daily")),
         ),
-        mapOf("repeat" to OverlayScalar.Text("once")),
+        mapOf("repeat" to PrototypeScalar.Text("once")),
       )
     val once = root.tagged("repeat.once")
     assertTrue(once.config[SemanticsProperties.Selected])
@@ -143,22 +146,22 @@ class OverlayMaterialSemanticsTest {
     val daily = root.tagged("repeat.daily")
     assertFalse(daily.config[SemanticsProperties.Selected])
     daily.click()
-    assertEquals(listOf(OverlayInteraction.Choose("repeat", "daily", save)), interactions)
+    assertEquals(listOf(PrototypeInteraction.Choose("repeat", "daily", save)), interactions)
   }
 
   @Test
   fun `a top app bar reports its title and tags its navigation and action buttons`() {
     val root =
       render(
-        OverlayTopAppBarNode(
+        PrototypeTopAppBarNode(
           testTag = "bar",
           title = "Alarms",
           variant = "centerAligned",
-          navigationIcon = OverlayAppBarAction("menu", "Menu", save),
+          navigationIcon = PrototypeAppBarAction("menu", "Menu", save),
           actions =
             listOf(
-              OverlayAppBarAction("settings", "Settings"),
-              OverlayAppBarAction("search", "Search", listOf(OverlayEmitAction("search"))),
+              PrototypeAppBarAction("settings", "Settings"),
+              PrototypeAppBarAction("search", "Search", listOf(PrototypeEmitAction("search"))),
             ),
         ),
       )
@@ -174,8 +177,8 @@ class OverlayMaterialSemanticsTest {
     root.tagged("bar.actions.1").click()
     assertEquals(
       listOf(
-        OverlayInteraction.Tap(save),
-        OverlayInteraction.Tap(listOf(OverlayEmitAction("search"))),
+        PrototypeInteraction.Tap(save),
+        PrototypeInteraction.Tap(listOf(PrototypeEmitAction("search"))),
       ),
       interactions,
     )
@@ -185,16 +188,16 @@ class OverlayMaterialSemanticsTest {
   fun `progress reports range info and a divider and badge report no kind label`() {
     val root =
       render(
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayProgressNode(testTag = "upload", stateKey = "upload", max = 100.0),
-              OverlayProgressNode(testTag = "busy", variant = "circular"),
-              OverlayDividerNode(testTag = "line"),
-              OverlayBadgeNode(testTag = "count", text = "3"),
+              PrototypeProgressNode(testTag = "upload", stateKey = "upload", max = 100.0),
+              PrototypeProgressNode(testTag = "busy", variant = "circular"),
+              PrototypeDividerNode(testTag = "line"),
+              PrototypeBadgeNode(testTag = "count", text = "3"),
             ),
         ),
-        mapOf("upload" to OverlayScalar.Numeric(40.0)),
+        mapOf("upload" to PrototypeScalar.Numeric(40.0)),
         hasInfiniteAnimation = true,
       )
     val upload = root.tagged("upload").config[SemanticsProperties.ProgressBarRangeInfo]
@@ -211,16 +214,16 @@ class OverlayMaterialSemanticsTest {
   @Test
   fun `an open dialog shows its title and text and its buttons close it`() {
     val dialog =
-      OverlayDialogNode(
+      PrototypeDialogNode(
         testTag = "edit",
         openWhen = editing,
         title = "Edit alarm",
         text = "Set the time.",
-        confirm = OverlayDialogButton("Save", save),
-        dismiss = OverlayDialogButton("Cancel"),
-        child = OverlayButtonNode(testTag = "inner", label = "Inner"),
+        confirm = PrototypeDialogButton("Save", save),
+        dismiss = PrototypeDialogButton("Cancel"),
+        child = PrototypeButtonNode(testTag = "inner", label = "Inner"),
       )
-    val root = render(dialog, mapOf("editing" to OverlayScalar.BooleanValue(true)))
+    val root = render(dialog, mapOf("editing" to PrototypeScalar.BooleanValue(true)))
     val surface = root.tagged("edit")
     assertEquals(listOf("Edit alarm"), surface.description())
     assertTrue(
@@ -236,7 +239,10 @@ class OverlayMaterialSemanticsTest {
     root.tagged("edit.dismiss").click()
     root.tagged("edit.confirm").click()
     assertEquals(
-      listOf(OverlayInteraction.CloseModal(editing), OverlayInteraction.CloseModal(editing, save)),
+      listOf(
+        PrototypeInteraction.CloseModal(editing),
+        PrototypeInteraction.CloseModal(editing, save),
+      ),
       interactions,
     )
   }
@@ -244,8 +250,12 @@ class OverlayMaterialSemanticsTest {
   @Test
   fun `a closed dialog draws nothing`() {
     val dialog =
-      OverlayDialogNode(testTag = "edit", openWhen = editing, confirm = OverlayDialogButton("OK"))
-    val root = render(dialog, mapOf("editing" to OverlayScalar.BooleanValue(false)))
+      PrototypeDialogNode(
+        testTag = "edit",
+        openWhen = editing,
+        confirm = PrototypeDialogButton("OK"),
+      )
+    val root = render(dialog, mapOf("editing" to PrototypeScalar.BooleanValue(false)))
     assertNull(root.findTagged("edit"))
     assertNull(root.findTagged("edit.confirm"))
   }
@@ -254,39 +264,39 @@ class OverlayMaterialSemanticsTest {
   fun `an open snackbar shows its text and its action closes it`() {
     val root =
       render(
-        OverlaySnackbarNode(
+        PrototypeSnackbarNode(
           testTag = "toast",
           openWhen = saved,
           text = "Alarm saved",
-          action = OverlayDialogButton("Undo", save),
+          action = PrototypeDialogButton("Undo", save),
         ),
-        mapOf("saved" to OverlayScalar.BooleanValue(true)),
+        mapOf("saved" to PrototypeScalar.BooleanValue(true)),
       )
     assertEquals(listOf("Alarm saved"), root.tagged("toast").description())
     root.tagged("toast.action").click()
-    assertEquals(listOf(OverlayInteraction.CloseModal(saved, save)), interactions)
+    assertEquals(listOf(PrototypeInteraction.CloseModal(saved, save)), interactions)
   }
 
   @Test
   fun `time and date pickers report their bound value as state`() {
     val root =
       render(
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayTimePickerNode(
+              PrototypeTimePickerNode(
                 testTag = "time",
                 hourKey = "hour",
                 minuteKey = "minute",
                 is24Hour = true,
               ),
-              OverlayDatePickerNode(testTag = "date", stateKey = "date"),
+              PrototypeDatePickerNode(testTag = "date", stateKey = "date"),
             ),
         ),
         mapOf(
-          "hour" to OverlayScalar.Numeric(7.0),
-          "minute" to OverlayScalar.Numeric(30.0),
-          "date" to OverlayScalar.Text("2026-10-08"),
+          "hour" to PrototypeScalar.Numeric(7.0),
+          "minute" to PrototypeScalar.Numeric(30.0),
+          "date" to PrototypeScalar.Text("2026-10-08"),
         ),
       )
     assertEquals("07:30", root.tagged("time").config[SemanticsProperties.StateDescription])

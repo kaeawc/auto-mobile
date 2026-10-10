@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.test.runTest
@@ -11,38 +11,38 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayLifecycleTest {
-  private val host = FakeInteractiveOverlayHost()
-  private val timer = FakeOverlayTimer()
-  private val events = mutableListOf<OverlayEvent>()
+class PrototypeLifecycleTest {
+  private val host = FakePrototypeHost()
+  private val timer = FakePrototypeTimer()
+  private val events = mutableListOf<PrototypeEvent>()
   private var blocked = false
   private var session = 1
   private val lifecycle =
-    OverlayLifecycle(timer, TTL, isBlocked = { blocked }, observerSession = { session })
+    PrototypeLifecycle(timer, TTL, isBlocked = { blocked }, observerSession = { session })
   private val controller =
-    OverlayController(
+    PrototypeController(
       host,
-      OverlayResultSink { _, success, error -> check(success) { error.orEmpty() } },
-      eventSink = OverlayEventSink { events += it },
+      PrototypeResultSink { _, success, error -> check(success) { error.orEmpty() } },
+      eventSink = PrototypeEventSink { events += it },
       clock = { timer.now },
       lifecycle = lifecycle,
     )
 
   private fun spec(id: String = "panel") =
-    OverlaySpec(
+    PrototypeSpec(
       id,
-      OverlayWindow(OverlayFullscreenPlacement()),
-      root = OverlayPagerNode("pager", children = List(4) { OverlayTextNode(text = "page") }),
+      PrototypeWindow(PrototypeFullscreenPlacement()),
+      root = PrototypePagerNode("pager", children = List(4) { PrototypeTextNode(text = "page") }),
     )
 
   private suspend fun show(id: String = "panel") = controller.show(null, spec(id))
 
-  private suspend fun interact(interaction: OverlayInteraction) =
+  private suspend fun interact(interaction: PrototypeInteraction) =
     controller.interact(checkNotNull(controller.activeRuntime), interaction)
 
   private fun assertDismiss(reason: String, sequence: Long = 1L) {
     val event = events.last()
-    assertEquals(OverlayEventKind.DISMISSED, event.kind)
+    assertEquals(PrototypeEventKind.DISMISSED, event.kind)
     assertNull(event.name)
     assertEquals(Json.parseToJsonElement("""{"reason":"$reason"}"""), event.payload)
     assertEquals(sequence, event.sequence)
@@ -56,12 +56,12 @@ class OverlayLifecycleTest {
       val before = events.size
       when (trigger) {
         "host" -> host.requests.last().onHostDismiss()
-        "spec" -> interact(OverlayInteraction.Tap(listOf(OverlayDismissAction)))
+        "spec" -> interact(PrototypeInteraction.Tap(listOf(PrototypeDismissAction)))
         else -> controller.dismiss(null, "panel", null)
       }
       assertDismiss(if (trigger == "agent") "agent" else "user", (before + 1).toLong())
-      controller.interact(runtime, OverlayInteraction.HostDismiss)
-      runtime.dismiss(OverlayDismissReason.DISCONNECT)
+      controller.interact(runtime, PrototypeInteraction.HostDismiss)
+      runtime.dismiss(PrototypeDismissReason.DISCONNECT)
       timer.advance(TTL)
       assertEquals(before + 1, events.size)
       assertTrue(timer.tasks.last().cancelled)
@@ -72,7 +72,7 @@ class OverlayLifecycleTest {
   fun `last client disconnect dismisses once with next sequence but remaining clients do not`() =
     runTest {
       show()
-      interact(OverlayInteraction.SettledPage("pager", 2))
+      interact(PrototypeInteraction.SettledPage("pager", 2))
       controller.onClientCountChanged(2)
       controller.onClientCountChanged(1)
       assertTrue(host.isShowing)
@@ -86,7 +86,7 @@ class OverlayLifecycleTest {
     }
 
   @Test
-  fun `delayed last-client event cannot dismiss overlay shown by a new observer session`() =
+  fun `delayed last-client event cannot dismiss prototype shown by a new observer session`() =
     runTest {
       show()
       session++
@@ -105,18 +105,20 @@ class OverlayLifecycleTest {
       assertEquals(TTL, timer.tasks.single().deadline)
       timer.advance(TTL - 1)
       interact(
-        OverlayInteraction.Tap(listOf(OverlaySetStateAction("label", OverlayScalar.Text("new")))),
+        PrototypeInteraction.Tap(
+          listOf(PrototypeSetStateAction("label", PrototypeScalar.Text("new"))),
+        ),
       )
       assertTrue(timer.tasks.first().cancelled)
       timer.advance(TTL - 1)
-      controller.show(null, spec().copy(state = mapOf("label" to OverlayScalar.Text("patch"))))
+      controller.show(null, spec().copy(state = mapOf("label" to PrototypeScalar.Text("patch"))))
       timer.advance(TTL - 1)
       assertTrue(host.isShowing)
       timer.advance(1)
       assertDismiss("ttl", 2L)
       // The tap's one change event precedes the ttl dismissal.
       assertEquals(listOf("change", null), events.map { it.name })
-      assertEquals(OverlayScalar.Text("patch"), events.last().state["label"])
+      assertEquals(PrototypeScalar.Text("patch"), events.last().state["label"])
       timer.advance(TTL)
       controller.onClientCountChanged(0)
       assertEquals(2, events.size)
@@ -127,13 +129,13 @@ class OverlayLifecycleTest {
     runTest {
       show()
       val task = timer.tasks.single()
-      interact(OverlayInteraction.PagerMotion("pager", 0, false))
+      interact(PrototypeInteraction.PagerMotion("pager", 0, false))
       controller.onConfigurationChanged()
-      interact(OverlayInteraction.PagerMotion("pager", 0, false))
+      interact(PrototypeInteraction.PagerMotion("pager", 0, false))
       assertSame(task, timer.tasks.single())
       assertTrue(events.isEmpty())
       timer.advance(TTL - 1)
-      interact(OverlayInteraction.PagerMotion("pager", 0, true))
+      interact(PrototypeInteraction.PagerMotion("pager", 0, true))
       assertTrue(task.cancelled)
       timer.advance(1)
       assertTrue(host.isShowing)
@@ -180,12 +182,12 @@ class OverlayLifecycleTest {
     runTest {
       show()
       val runtime = checkNotNull(controller.activeRuntime)
-      interact(OverlayInteraction.SettledPage("pager", 2))
+      interact(PrototypeInteraction.SettledPage("pager", 2))
       controller.destroy()
       assertDismiss("teardown", 2L)
       controller.destroy()
       controller.onClientCountChanged(0)
-      runtime.dismiss(OverlayDismissReason.USER)
+      runtime.dismiss(PrototypeDismissReason.USER)
       timer.advance(TTL)
       assertFalse(host.isShowing)
       assertEquals(2, events.size)
@@ -194,15 +196,15 @@ class OverlayLifecycleTest {
   @Test
   fun `rejected same-id show leaves the idle deadline unchanged`() = runTest {
     val rejecting =
-      OverlayController(
+      PrototypeController(
         host,
-        OverlayResultSink { _, _, _ -> },
-        eventSink = OverlayEventSink { events += it },
+        PrototypeResultSink { _, _, _ -> },
+        eventSink = PrototypeEventSink { events += it },
         lifecycle = lifecycle,
       )
     rejecting.show(null, spec())
     val task = timer.tasks.single()
-    rejecting.show(null, spec().copy(state = mapOf("bad-key" to OverlayScalar.Text("invalid"))))
+    rejecting.show(null, spec().copy(state = mapOf("bad-key" to PrototypeScalar.Text("invalid"))))
     assertSame(task, timer.tasks.single())
     timer.advance(TTL)
     assertDismiss("ttl")
@@ -211,17 +213,17 @@ class OverlayLifecycleTest {
   @Test
   fun `teardown allocates one terminal sequence even when delivery or window removal fails`() =
     runTest {
-      val attempted = mutableListOf<OverlayEvent>()
+      val attempted = mutableListOf<PrototypeEvent>()
       val failing =
-        OverlayController(
+        PrototypeController(
           host,
-          OverlayResultSink { _, _, _ -> },
+          PrototypeResultSink { _, _, _ -> },
           eventSink =
-            OverlayEventSink {
+            PrototypeEventSink {
               attempted += it
               error("sink gone")
             },
-          lifecycle = OverlayLifecycle(timer, TTL),
+          lifecycle = PrototypeLifecycle(timer, TTL),
         )
       failing.show(null, spec())
       val runtime = checkNotNull(failing.activeRuntime)
@@ -241,10 +243,10 @@ class OverlayLifecycleTest {
   fun `configuration changes retain page three state timer and sequence without emitting`() =
     runTest {
       show()
-      interact(OverlayInteraction.SettledPage("pager", 2))
+      interact(PrototypeInteraction.SettledPage("pager", 2))
       interact(
-        OverlayInteraction.Tap(
-          listOf(OverlaySetStateAction("label", OverlayScalar.Text("changed"))),
+        PrototypeInteraction.Tap(
+          listOf(PrototypeSetStateAction("label", PrototypeScalar.Text("changed"))),
         ),
       )
       val runtime = checkNotNull(controller.activeRuntime)
@@ -254,7 +256,7 @@ class OverlayLifecycleTest {
       assertSame(runtime, controller.activeRuntime)
       assertSame(snapshot, runtime.current)
       assertEquals(2, runtime.current.pages["pager"])
-      assertEquals(OverlayScalar.Text("changed"), runtime.current.state["label"])
+      assertEquals(PrototypeScalar.Text("changed"), runtime.current.state["label"])
       assertEquals(3, host.calls.count { it == "relayout" })
       assertSame(task, timer.tasks.last())
       // Only the tap's change event; configuration changes emit nothing.
@@ -274,14 +276,14 @@ class OverlayLifecycleTest {
       assertFalse(host.isShowing)
       assertEquals(1, events.size)
       assertEquals(1, host.requests.size)
-      assertEquals(OverlayWindowDecision.DISMISS, overlayWindowDecision(false, true))
+      assertEquals(PrototypeWindowDecision.DISMISS, prototypeWindowDecision(false, true))
     }
 
   @Test
   fun `keyguard hides and restores the same runtime with state and no events while ttl keeps running`() =
     runTest {
       show()
-      interact(OverlayInteraction.SettledPage("pager", 2))
+      interact(PrototypeInteraction.SettledPage("pager", 2))
       val runtime = checkNotNull(controller.activeRuntime)
       blocked = true
       controller.onConfigurationChanged()
@@ -316,7 +318,7 @@ class OverlayLifecycleTest {
       blocked = false
       controller.onConfigurationChanged()
       assertTrue(host.requests.isEmpty())
-      assertEquals(DEFAULT_OVERLAY_IDLE_TTL_MILLIS, OverlayLifecycle(timer).ttlMillis)
+      assertEquals(DEFAULT_PROTOTYPE_IDLE_TTL_MILLIS, PrototypeLifecycle(timer).ttlMillis)
     }
 
   @Test
@@ -324,27 +326,27 @@ class OverlayLifecycleTest {
     val malicious =
       spec()
         .copy(
-          window = OverlayWindow(OverlayFullscreenPlacement(), 0),
-          state = mapOf("open" to OverlayScalar.BooleanValue(true)),
+          window = PrototypeWindow(PrototypeFullscreenPlacement(), 0),
+          state = mapOf("open" to PrototypeScalar.BooleanValue(true)),
           root =
-            OverlayBottomSheetNode(
-              child = OverlaySpacerNode(style = OverlayStyle(alpha = 0.0)),
-              openWhen = OverlaySheetCondition("open", true),
-              detents = listOf(OverlayDetent.Full),
+            PrototypeBottomSheetNode(
+              child = PrototypeSpacerNode(style = PrototypeStyle(alpha = 0.0)),
+              openWhen = PrototypeSheetCondition("open", true),
+              detents = listOf(PrototypeDetent.Full),
               dragHandle = false,
               dismissOnSwipe = false,
             ),
         )
-    val request = mapOverlaySpec(malicious).request()
-    val chrome = overlayHostChrome(request)
+    val request = mapPrototypeSpec(malicious).request()
+    val chrome = prototypeHostChrome(request)
     assertTrue(chrome.dismissVisible)
     assertEquals(1f, chrome.windowAlpha, 0f)
     assertEquals(0f, chrome.contentAlpha, 0f)
     assertTrue(
-      overlayHostChrome(mapOverlaySpec(spec().copy(root = OverlaySpacerNode())).request())
+      prototypeHostChrome(mapPrototypeSpec(spec().copy(root = PrototypeSpacerNode())).request())
         .dismissVisible,
     )
-    assertFalse(overlayHostChrome(InteractiveOverlayRequest()).dismissVisible)
+    assertFalse(prototypeHostChrome(PrototypeRequest()).dismissVisible)
   }
 
   @Test
@@ -355,13 +357,13 @@ class OverlayLifecycleTest {
     assertTrue(events.isEmpty())
     assertTrue(host.isShowing)
     assertEquals(2, timer.tasks.size)
-    assertEquals(timer.now + OVERLAY_DISMISS_RETRY_MILLIS, timer.tasks.last().deadline)
+    assertEquals(timer.now + PROTOTYPE_DISMISS_RETRY_MILLIS, timer.tasks.last().deadline)
     host.accept = true
-    timer.advance(OVERLAY_DISMISS_RETRY_MILLIS)
+    timer.advance(PROTOTYPE_DISMISS_RETRY_MILLIS)
     assertDismiss("ttl")
     assertEquals(1, events.size)
     assertFalse(host.isShowing)
-    timer.advance(OVERLAY_DISMISS_RETRY_MILLIS * 2)
+    timer.advance(PROTOTYPE_DISMISS_RETRY_MILLIS * 2)
     assertEquals(1, events.size)
   }
 
@@ -370,8 +372,8 @@ class OverlayLifecycleTest {
     show()
     host.accept = false
     timer.advance(TTL)
-    repeat(OVERLAY_DISMISS_MAX_RETRIES + 2) { timer.advance(OVERLAY_DISMISS_RETRY_MILLIS) }
-    assertEquals(1 + OVERLAY_DISMISS_MAX_RETRIES, timer.tasks.size)
+    repeat(PROTOTYPE_DISMISS_MAX_RETRIES + 2) { timer.advance(PROTOTYPE_DISMISS_RETRY_MILLIS) }
+    assertEquals(1 + PROTOTYPE_DISMISS_MAX_RETRIES, timer.tasks.size)
     assertTrue(events.isEmpty())
     assertTrue(host.isShowing)
   }
@@ -398,13 +400,18 @@ class OverlayLifecycleTest {
     runTest {
       var clients = 0
       val gone =
-        OverlayController(
+        PrototypeController(
           host,
-          OverlayResultSink { _, success, error -> check(success) { error.orEmpty() } },
-          eventSink = OverlayEventSink { events += it },
+          PrototypeResultSink { _, success, error -> check(success) { error.orEmpty() } },
+          eventSink = PrototypeEventSink { events += it },
           clock = { timer.now },
           lifecycle =
-            OverlayLifecycle(timer, TTL, observerSession = { session }, clientCount = { clients }),
+            PrototypeLifecycle(
+              timer,
+              TTL,
+              observerSession = { session },
+              clientCount = { clients },
+            ),
         )
       gone.show(null, spec())
       assertDismiss("disconnect")
@@ -426,12 +433,12 @@ class OverlayLifecycleTest {
     @org.junit.BeforeClass
     fun warmLifecycle() {
       runTest {}
-      OverlaySpecValidator.validate("{}")
-      mapOverlaySpec(
-        OverlaySpec(
+      PrototypeSpecValidator.validate("{}")
+      mapPrototypeSpec(
+        PrototypeSpec(
           "warm",
-          OverlayWindow(OverlayFullscreenPlacement()),
-          root = OverlaySpacerNode(),
+          PrototypeWindow(PrototypeFullscreenPlacement()),
+          root = PrototypeSpacerNode(),
         ),
       )
     }

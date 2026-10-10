@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.os.Handler
 import android.os.Looper
@@ -16,13 +16,13 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /** Narrow main queue seam; post must enqueue on main and report whether it accepted the work. */
-interface OverlayMainThread {
+interface PrototypeMainThread {
   fun isMainThread(): Boolean
 
   fun post(work: () -> Unit): Boolean
 }
 
-class AndroidOverlayMainThread : OverlayMainThread {
+class AndroidPrototypeMainThread : PrototypeMainThread {
   private val handler = Handler(Looper.getMainLooper())
 
   override fun isMainThread(): Boolean = Looper.myLooper() == Looper.getMainLooper()
@@ -31,11 +31,11 @@ class AndroidOverlayMainThread : OverlayMainThread {
 }
 
 /** Gesture-worker and desktop delay seams cannot provide the host's main-queue/settle contract. */
-fun interface OverlaySettleTimer {
+fun interface PrototypeSettleTimer {
   suspend fun awaitSettle(millis: Long)
 }
 
-object CoroutineOverlaySettleTimer : OverlaySettleTimer {
+object CoroutinePrototypeSettleTimer : PrototypeSettleTimer {
   override suspend fun awaitSettle(millis: Long) {
     delay(millis)
   }
@@ -45,7 +45,7 @@ object CoroutineOverlaySettleTimer : OverlaySettleTimer {
  * Runs inline on main, otherwise posts and awaits the actual result. Once enqueued, a mutation
  * completes even if its caller is cancelled; this prevents abandoned adds and half-applied flags.
  */
-internal suspend fun <T> OverlayMainThread.onMain(work: () -> T): T {
+internal suspend fun <T> PrototypeMainThread.onMain(work: () -> T): T {
   if (isMainThread()) return work()
   return suspendCoroutine { continuation ->
     val accepted = post {
@@ -53,31 +53,31 @@ internal suspend fun <T> OverlayMainThread.onMain(work: () -> T): T {
         try {
           work()
         } catch (error: Exception) {
-          Log.e("InteractiveOverlayHost", "Posted overlay operation failed", error)
+          Log.e("PrototypeHost", "Posted prototype operation failed", error)
           continuation.resumeWithException(error)
           return@post
         }
       continuation.resume(result)
     }
-    check(accepted) { "Main queue refused overlay operation" }
+    check(accepted) { "Main queue refused prototype operation" }
   }
 }
 
 /** The service supplies its own scope; the standalone host uses main for window-safe delivery. */
-class CoroutineOverlayScheduler(
+class CoroutinePrototypeScheduler(
   private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob()),
-) : OverlayScheduler {
-  override fun schedule(millis: Long, action: suspend () -> Unit): OverlayScheduledTask {
+) : PrototypeScheduler {
+  override fun schedule(millis: Long, action: suspend () -> Unit): PrototypeScheduledTask {
     val job = scope.launch {
       delay(millis)
       action()
     }
-    return OverlayScheduledTask { job.cancel() }
+    return PrototypeScheduledTask { job.cancel() }
   }
 }
 
 /** Waits for frames the main thread renders; the hide-for-capture seam (#9305). */
-fun interface OverlayFrameWaiter {
+fun interface PrototypeFrameWaiter {
   suspend fun awaitFrames(count: Int)
 }
 
@@ -85,7 +85,7 @@ fun interface OverlayFrameWaiter {
  * Each frame callback runs before that frame's traversal, so the first callback can precede the
  * relayout that hides a window; the second follows a frame in which the hide was applied.
  */
-object ChoreographerOverlayFrameWaiter : OverlayFrameWaiter {
+object ChoreographerPrototypeFrameWaiter : PrototypeFrameWaiter {
   override suspend fun awaitFrames(count: Int) {
     repeat(count) {
       withContext(Dispatchers.Main) {

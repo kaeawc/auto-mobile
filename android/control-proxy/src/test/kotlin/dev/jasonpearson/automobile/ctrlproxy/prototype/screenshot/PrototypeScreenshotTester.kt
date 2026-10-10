@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay.screenshot
+package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -7,11 +7,11 @@ import android.os.Looper
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlaySpecContent
-import dev.jasonpearson.automobile.ctrlproxy.overlay.mapOverlaySpec
-import dev.jasonpearson.automobile.protocol.OverlaySpec
-import dev.jasonpearson.automobile.protocol.OverlaySpecValidation
-import dev.jasonpearson.automobile.protocol.OverlaySpecValidator
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSpecContent
+import dev.jasonpearson.automobile.ctrlproxy.prototype.mapPrototypeSpec
+import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import java.io.File
 import java.time.Duration
 import kotlinx.serialization.json.Json
@@ -29,21 +29,21 @@ import org.robolectric.Shadows.shadowOf
 private val SETTLE: Duration = Duration.ofSeconds(1)
 
 /** Encodes PNGs through the platform codec, which Robolectric's native graphics mode provides. */
-internal object BitmapPngCodec : OverlayScreenshotComparator.PngCodec {
-  override fun read(file: File): OverlayScreenshotComparator.Image? =
+internal object BitmapPngCodec : PrototypeScreenshotComparator.PngCodec {
+  override fun read(file: File): PrototypeScreenshotComparator.Image? =
     if (file.isFile) BitmapFactory.decodeFile(file.path)?.let(::toImage) else null
 
-  override fun write(file: File, image: OverlayScreenshotComparator.Image) {
+  override fun write(file: File, image: PrototypeScreenshotComparator.Image) {
     val bitmap = Bitmap.createBitmap(image.width, image.height, Bitmap.Config.ARGB_8888)
     bitmap.setPixels(image.pixels, 0, image.width, 0, 0, image.width, image.height)
     file.parentFile?.mkdirs()
     file.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
   }
 
-  fun toImage(bitmap: Bitmap): OverlayScreenshotComparator.Image {
+  fun toImage(bitmap: Bitmap): PrototypeScreenshotComparator.Image {
     val pixels = IntArray(bitmap.width * bitmap.height)
     bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-    return OverlayScreenshotComparator.Image(bitmap.width, bitmap.height, pixels)
+    return PrototypeScreenshotComparator.Image(bitmap.width, bitmap.height, pixels)
   }
 }
 
@@ -53,17 +53,17 @@ internal object BitmapPngCodec : OverlayScreenshotComparator.PngCodec {
  * same alignment (and offset), standing in for the host's selector resolution: the renderer refuses
  * an unresolved element anchor.
  */
-internal fun validOverlayFixture(
+internal fun validPrototypeFixture(
   name: String,
   resolveElementAnchors: Boolean = false,
-): OverlaySpec {
+): PrototypeSpec {
   val file =
     generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
       .map { File(it, "test/fixtures/prototype-spec/valid/$name.json") }
       .first { it.isFile }
-  if (!resolveElementAnchors) return loadOverlaySpec(file)
+  if (!resolveElementAnchors) return loadPrototypeSpec(file)
   val resolved = resolveElementAnchors(Json.parseToJsonElement(file.readText()))
-  return loadOverlaySpecText(file.path, Json.encodeToString(JsonElement.serializer(), resolved))
+  return loadPrototypeSpecText(file.path, Json.encodeToString(JsonElement.serializer(), resolved))
 }
 
 private val RESOLVED_BOUNDS =
@@ -91,36 +91,39 @@ private fun resolveElementAnchors(element: JsonElement): JsonElement =
     else -> element
   }
 
-/** Reads [file] and validates it with the production [OverlaySpecValidator]. */
-internal fun loadOverlaySpec(file: File): OverlaySpec {
-  check(file.isFile) { "Overlay spec not found: ${file.path}" }
-  return loadOverlaySpecText(file.path, file.readText())
+/** Reads [file] and validates it with the production [PrototypeSpecValidator]. */
+internal fun loadPrototypeSpec(file: File): PrototypeSpec {
+  check(file.isFile) { "Prototype spec not found: ${file.path}" }
+  return loadPrototypeSpecText(file.path, file.readText())
 }
 
-private fun loadOverlaySpecText(source: String, text: String): OverlaySpec {
-  val validation = OverlaySpecValidator.validate(text)
-  check(validation is OverlaySpecValidation.Success) { "$source: $validation" }
+private fun loadPrototypeSpecText(source: String, text: String): PrototypeSpec {
+  val validation = PrototypeSpecValidator.validate(text)
+  check(validation is PrototypeSpecValidation.Success) { "$source: $validation" }
   return validation.spec
 }
 
 /**
- * Renders [spec] through the production [OverlaySpecContent] adapter in a Robolectric activity and
- * captures the composed view. Shared by the snapshot tests and the host-side preview
- * ([OverlayPreviewRenderTest]) so both draw exactly what the renderer draws.
+ * Renders [spec] through the production [PrototypeSpecContent] adapter in a Robolectric activity
+ * and captures the composed view. Shared by the snapshot tests and the host-side preview
+ * ([PrototypePreviewRenderTest]) so both draw exactly what the renderer draws.
  *
  * Must run under `RobolectricTestRunner` with `@GraphicsMode(NATIVE)`; the surface size, density
  * and night mode come from the current Robolectric qualifiers.
  */
-internal fun renderOverlay(name: String, spec: OverlaySpec): OverlayScreenshotComparator.Image {
-  val model = mapOverlaySpec(spec)
+internal fun renderPrototype(
+  name: String,
+  spec: PrototypeSpec,
+): PrototypeScreenshotComparator.Image {
+  val model = mapPrototypeSpec(spec)
   val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
   try {
     val activity = controller.get()
-    // The spec's own theme must reach the renderer, as it does in the live overlay host.
-    activity.setContent { OverlaySpecContent(model.root, theme = model.theme) }
+    // The spec's own theme must reach the renderer, as it does in the live prototype host.
+    activity.setContent { PrototypeSpecContent(model.root, theme = model.theme) }
     shadowOf(Looper.getMainLooper()).idleFor(SETTLE)
     val view = activity.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
-    check(view.width > 0 && view.height > 0) { "$name: overlay view was not laid out" }
+    check(view.width > 0 && view.height > 0) { "$name: prototype view was not laid out" }
     val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
     view.draw(Canvas(bitmap))
     return BitmapPngCodec.toImage(bitmap)
@@ -130,22 +133,22 @@ internal fun renderOverlay(name: String, spec: OverlaySpec): OverlayScreenshotCo
 }
 
 /**
- * Renders [spec] with [renderOverlay] and records or verifies it against the baseline named [name].
- * [pending] marks a test whose baseline is not recorded yet: skipped when verifying, still produced
- * when recording.
+ * Renders [spec] with [renderPrototype] and records or verifies it against the baseline named
+ * [name]. [pending] marks a test whose baseline is not recorded yet: skipped when verifying, still
+ * produced when recording.
  */
-internal fun overlayScreenshotTest(
+internal fun prototypeScreenshotTest(
   name: String,
-  spec: OverlaySpec,
+  spec: PrototypeSpec,
   pending: Boolean = false,
-  options: OverlayScreenshotComparator.Options = OverlayScreenshotComparator.Options(),
+  options: PrototypeScreenshotComparator.Options = PrototypeScreenshotComparator.Options(),
 ) {
-  OverlayScreenshotEnvironment.assumeReferencePlatform()
-  OverlayScreenshotEnvironment.skipIfPending(name, pending)
-  OverlayScreenshotEnvironment.handleResult(
+  PrototypeScreenshotEnvironment.assumeReferencePlatform()
+  PrototypeScreenshotEnvironment.skipIfPending(name, pending)
+  PrototypeScreenshotEnvironment.handleResult(
     BitmapPngCodec,
     name,
-    renderOverlay(name, spec),
+    renderPrototype(name, spec),
     options,
   )
 }

@@ -1,44 +1,44 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.ui.layout.ContentScale
-import dev.jasonpearson.automobile.protocol.OverlayBottomNavNode
-import dev.jasonpearson.automobile.protocol.OverlayFontFamily
-import dev.jasonpearson.automobile.protocol.OverlayImageNode
-import dev.jasonpearson.automobile.protocol.OverlayItem
-import dev.jasonpearson.automobile.protocol.OverlayNode
-import dev.jasonpearson.automobile.protocol.OverlayTabBarNode
+import dev.jasonpearson.automobile.protocol.PrototypeBottomNavNode
+import dev.jasonpearson.automobile.protocol.PrototypeFontFamily
+import dev.jasonpearson.automobile.protocol.PrototypeImageNode
+import dev.jasonpearson.automobile.protocol.PrototypeItem
+import dev.jasonpearson.automobile.protocol.PrototypeNode
+import dev.jasonpearson.automobile.protocol.PrototypeTabBarNode
 
 /**
  * What a nav item draws, decided without Compose or Android. An item's `image` takes precedence;
  * while it decodes the item shows [Loading]; when it cannot be drawn (unknown or unreadable asset)
  * the item falls back to its built-in `icon`, then to the visible [Placeholder].
  */
-sealed interface OverlayNavigationVisual {
-  data class Image(val image: OverlayDecodedImage) : OverlayNavigationVisual
+sealed interface PrototypeNavigationVisual {
+  data class Image(val image: PrototypeDecodedImage) : PrototypeNavigationVisual
 
-  data class Icon(val name: String) : OverlayNavigationVisual
+  data class Icon(val name: String) : PrototypeNavigationVisual
 
-  data object Loading : OverlayNavigationVisual
+  data object Loading : PrototypeNavigationVisual
 
-  data object Placeholder : OverlayNavigationVisual
+  data object Placeholder : PrototypeNavigationVisual
 }
 
 /** [imageState] is null exactly when the item names no image. */
-fun overlayNavigationVisual(
-  item: OverlayItem,
-  imageState: OverlayImageState?,
-): OverlayNavigationVisual =
+fun prototypeNavigationVisual(
+  item: PrototypeItem,
+  imageState: PrototypeImageState?,
+): PrototypeNavigationVisual =
   when (imageState) {
-    is OverlayImageState.Ready -> OverlayNavigationVisual.Image(imageState.image)
-    OverlayImageState.Loading -> OverlayNavigationVisual.Loading
-    OverlayImageState.Missing,
+    is PrototypeImageState.Ready -> PrototypeNavigationVisual.Image(imageState.image)
+    PrototypeImageState.Loading -> PrototypeNavigationVisual.Loading
+    PrototypeImageState.Missing,
     null ->
-      if (overlayIcon(item.icon) != null) OverlayNavigationVisual.Icon(checkNotNull(item.icon))
-      else OverlayNavigationVisual.Placeholder
+      if (prototypeIcon(item.icon) != null) PrototypeNavigationVisual.Icon(checkNotNull(item.icon))
+      else PrototypeNavigationVisual.Placeholder
   }
 
 /** `contentScale` names are closed by the protocol validator: fit, crop, fill. */
-fun overlayContentScale(name: String): ContentScale =
+fun prototypeContentScale(name: String): ContentScale =
   when (name) {
     "crop" -> ContentScale.Crop
     "fill" -> ContentScale.FillBounds
@@ -46,9 +46,9 @@ fun overlayContentScale(name: String): ContentScale =
   }
 
 /** Font asset ids a node's own `style` and `styleWhen` entries name, in order. */
-private fun overlayFontAssetReferences(node: OverlayNode): List<String> =
+private fun prototypeFontAssetReferences(node: PrototypeNode): List<String> =
   (listOfNotNull(node.style) + node.styleWhen.orEmpty().map { it.style }).mapNotNull {
-    (it.fontFamily as? OverlayFontFamily.Asset)?.id
+    (it.fontFamily as? PrototypeFontFamily.Asset)?.id
   }
 
 /**
@@ -57,17 +57,17 @@ private fun overlayFontAssetReferences(node: OverlayNode): List<String> =
  * pager page, because those can be revealed without another `show`. Font assets named by
  * `style.fontFamily: {asset}` (also inside `styleWhen`) are included.
  */
-fun overlayAssetReferences(root: OverlayNode): List<String> {
+fun prototypeAssetReferences(root: PrototypeNode): List<String> {
   val ids = LinkedHashSet<String>()
-  fun visit(node: OverlayNode) {
-    overlayFontAssetReferences(node).forEach { ids += it }
+  fun visit(node: PrototypeNode) {
+    prototypeFontAssetReferences(node).forEach { ids += it }
     when (node) {
-      is OverlayImageNode -> ids += node.asset
-      is OverlayTabBarNode -> node.items.mapNotNullTo(ids) { it.image }
-      is OverlayBottomNavNode -> node.items.mapNotNullTo(ids) { it.image }
+      is PrototypeImageNode -> ids += node.asset
+      is PrototypeTabBarNode -> node.items.mapNotNullTo(ids) { it.image }
+      is PrototypeBottomNavNode -> node.items.mapNotNullTo(ids) { it.image }
       else -> Unit
     }
-    overlayDescendants(node).forEach(::visit)
+    prototypeDescendants(node).forEach(::visit)
   }
   visit(root)
   return ids.toList()

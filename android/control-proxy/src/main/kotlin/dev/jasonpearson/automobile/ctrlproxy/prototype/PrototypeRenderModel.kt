@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
@@ -15,8 +15,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /** Immutable, device-free inputs for the Compose adapter. All numeric sizes remain dp. */
-data class OverlayRenderStyle(
-  val source: OverlayStyle,
+data class PrototypeRenderStyle(
+  val source: PrototypeStyle,
   val background: Color?,
   val borderColor: Color?,
   val color: Color,
@@ -35,16 +35,16 @@ data class OverlayRenderStyle(
   val overflow: TextOverflow = TextOverflow.Clip,
 )
 
-data class OverlayRenderNode(
+data class PrototypeRenderNode(
   val role: String,
   val text: String,
   val testTag: String?,
   val visible: Boolean,
-  val style: OverlayRenderStyle,
-  val safeArea: OverlaySafeAreaPadding?,
+  val style: PrototypeRenderStyle,
+  val safeArea: PrototypeSafeAreaPadding?,
   val iconName: String? = null,
-  val children: List<OverlayRenderNode> = emptyList(),
-  val source: OverlayNode? = null,
+  val children: List<PrototypeRenderNode> = emptyList(),
+  val source: PrototypeNode? = null,
   val identity: String = "root",
   val page: Int = 0,
   val selection: Int = 0,
@@ -68,25 +68,25 @@ data class OverlayRenderNode(
   val contentDescription: String? = null,
 )
 
-data class OverlayRenderModel(
-  val placement: OverlayPlacement,
+data class PrototypeRenderModel(
+  val placement: PrototypePlacement,
   val opacityPercent: Int,
-  val root: OverlayRenderNode,
+  val root: PrototypeRenderNode,
   val hasTextField: Boolean = false,
-  val theme: OverlaySpecTheme? = null,
-  val layer: OverlayWindowLayer = OverlayWindowLayer.SYSTEM,
+  val theme: PrototypeSpecTheme? = null,
+  val layer: PrototypeWindowLayer = PrototypeWindowLayer.SYSTEM,
   val persistent: Boolean = false,
   val motion: String? = null,
 ) {
   fun request() =
-    InteractiveOverlayRequest(
+    PrototypeRequest(
       placement = placement,
       opacityPercent = opacityPercent,
       hasTextField = hasTextField,
       layer = layer,
       persistent = persistent,
     ) {
-      OverlaySpecContent(root, theme = theme)
+      PrototypeSpecContent(root, theme = theme)
     }
 }
 
@@ -94,211 +94,218 @@ data class OverlayRenderModel(
  * Path spelling and traversal order match the protocol validator, including unsupported nodes.
  * `repeat` templates count once per instance, so an expanded list cannot exceed the node limit.
  */
-fun guardOverlayTree(root: OverlayNode) {
+fun guardPrototypeTree(root: PrototypeNode) {
   var count = 0
-  fun visit(node: OverlayNode, path: String, depth: Int) {
-    require(++count <= OverlaySpecValidator.MAX_OVERLAY_NODES) { "$path: Node limit exceeded" }
-    require(depth <= OverlaySpecValidator.MAX_OVERLAY_DEPTH) { "$path: Tree depth limit exceeded" }
-    overlayChildEntries(node, path, bind = false).forEach { visit(it.node, it.path, depth + 1) }
+  fun visit(node: PrototypeNode, path: String, depth: Int) {
+    require(++count <= PrototypeSpecValidator.MAX_PROTOTYPE_NODES) { "$path: Node limit exceeded" }
+    require(depth <= PrototypeSpecValidator.MAX_PROTOTYPE_DEPTH) {
+      "$path: Tree depth limit exceeded"
+    }
+    prototypeChildEntries(node, path, bind = false).forEach { visit(it.node, it.path, depth + 1) }
   }
   visit(root, "root", 1)
 }
 
-fun mapOverlaySpec(spec: OverlaySpec, pages: Map<String, Int> = emptyMap()): OverlayRenderModel {
-  guardOverlayTree(spec.root)
-  val mapped = mapOverlayNode(spec.root, spec.state.orEmpty(), pages, "root")
-  return OverlayRenderModel(
-    mapOverlayPlacement(spec.window.placement),
+fun mapPrototypeSpec(
+  spec: PrototypeSpec,
+  pages: Map<String, Int> = emptyMap(),
+): PrototypeRenderModel {
+  guardPrototypeTree(spec.root)
+  val mapped = mapPrototypeNode(spec.root, spec.state.orEmpty(), pages, "root")
+  return PrototypeRenderModel(
+    mapPrototypePlacement(spec.window.placement),
     spec.window.opacity,
     mapped,
     hasVisibleTextField(mapped),
     spec.theme,
-    OverlayWindowLayer.fromWire(spec.window.layer),
+    PrototypeWindowLayer.fromWire(spec.window.layer),
     isDevicePersistent(spec),
     spec.motion,
   )
 }
 
-private fun mapOverlayNode(
-  node: OverlayNode,
-  state: Map<String, OverlayScalar>,
+private fun mapPrototypeNode(
+  node: PrototypeNode,
+  state: Map<String, PrototypeScalar>,
   pages: Map<String, Int>,
   path: String,
   pagerContext: Pair<Int, Int>? = null,
-): OverlayRenderNode {
+): PrototypeRenderNode {
   val context =
-    if (node is OverlayPagerNode) (pages[node.id] ?: 0) to node.children.size else pagerContext
+    if (node is PrototypePagerNode) (pages[node.id] ?: 0) to node.children.size else pagerContext
   val localState =
     if (context == null) state
     else
       state +
         mapOf(
-          "page" to OverlayScalar.Numeric((context.first + 1).toDouble()),
-          "pageCount" to OverlayScalar.Numeric(context.second.toDouble()),
+          "page" to PrototypeScalar.Numeric((context.first + 1).toDouble()),
+          "pageCount" to PrototypeScalar.Numeric(context.second.toDouble()),
         )
-  requireOverlayRenderSizes(node.style, path)
+  requirePrototypeRenderSizes(node.style, path)
   node.styleWhen?.forEachIndexed { index, entry ->
-    requireOverlayRenderSizes(entry.style, "$path.styleWhen[$index]")
+    requirePrototypeRenderSizes(entry.style, "$path.styleWhen[$index]")
   }
   val role =
     when (node) {
-      is OverlayBoxNode -> "box"
-      is OverlayRowNode -> "row"
-      is OverlayColumnNode -> "column"
-      is OverlayTextNode -> "text"
-      is OverlayImageNode -> "image"
-      is OverlayIconNode -> "icon"
-      is OverlaySpacerNode -> "spacer"
-      is OverlayTextFieldNode -> "textField"
-      is OverlaySwitchNode -> "switch"
-      is OverlayCheckboxNode -> "checkbox"
-      is OverlayButtonNode -> "button"
-      is OverlayRadioGroupNode -> "radioGroup"
-      is OverlayListItemNode -> "listItem"
-      is OverlaySliderNode -> "slider"
-      is OverlayChipNode -> "chip"
-      is OverlayCardNode -> "card"
-      is OverlayIconButtonNode -> "iconButton"
-      is OverlayFabNode -> "fab"
-      is OverlaySegmentedButtonNode -> "segmentedButton"
-      is OverlayTopAppBarNode -> "topAppBar"
-      is OverlayDividerNode -> "divider"
-      is OverlayBadgeNode -> "badge"
-      is OverlayProgressNode -> "progress"
-      is OverlayDialogNode -> "dialog"
-      is OverlaySnackbarNode -> "snackbar"
-      is OverlayTimePickerNode -> "timePicker"
-      is OverlayDatePickerNode -> "datePicker"
-      is OverlayScrollNode -> "scroll"
-      is OverlayPagerNode -> "pager"
-      is OverlayTabBarNode -> "tabBar"
-      is OverlayBottomNavNode -> "bottomNav"
-      is OverlayBottomSheetNode -> "bottomSheet"
+      is PrototypeBoxNode -> "box"
+      is PrototypeRowNode -> "row"
+      is PrototypeColumnNode -> "column"
+      is PrototypeTextNode -> "text"
+      is PrototypeImageNode -> "image"
+      is PrototypeIconNode -> "icon"
+      is PrototypeSpacerNode -> "spacer"
+      is PrototypeTextFieldNode -> "textField"
+      is PrototypeSwitchNode -> "switch"
+      is PrototypeCheckboxNode -> "checkbox"
+      is PrototypeButtonNode -> "button"
+      is PrototypeRadioGroupNode -> "radioGroup"
+      is PrototypeListItemNode -> "listItem"
+      is PrototypeSliderNode -> "slider"
+      is PrototypeChipNode -> "chip"
+      is PrototypeCardNode -> "card"
+      is PrototypeIconButtonNode -> "iconButton"
+      is PrototypeFabNode -> "fab"
+      is PrototypeSegmentedButtonNode -> "segmentedButton"
+      is PrototypeTopAppBarNode -> "topAppBar"
+      is PrototypeDividerNode -> "divider"
+      is PrototypeBadgeNode -> "badge"
+      is PrototypeProgressNode -> "progress"
+      is PrototypeDialogNode -> "dialog"
+      is PrototypeSnackbarNode -> "snackbar"
+      is PrototypeTimePickerNode -> "timePicker"
+      is PrototypeDatePickerNode -> "datePicker"
+      is PrototypeScrollNode -> "scroll"
+      is PrototypePagerNode -> "pager"
+      is PrototypeTabBarNode -> "tabBar"
+      is PrototypeBottomNavNode -> "bottomNav"
+      is PrototypeBottomSheetNode -> "bottomSheet"
     }
   val text =
     when (node) {
-      is OverlayTextNode -> interpolateOverlayText(node.text, localState, context != null)
-      is OverlayTextFieldNode -> (state[node.stateKey] as? OverlayScalar.Text)?.value.orEmpty()
-      is OverlaySwitchNode -> node.label.orEmpty()
-      is OverlayCheckboxNode -> node.label.orEmpty()
-      is OverlayButtonNode -> node.label
-      is OverlayListItemNode -> node.headline
-      is OverlaySliderNode -> node.label.orEmpty()
-      is OverlayChipNode -> node.label
-      is OverlayIconNode -> node.name
-      is OverlayFabNode -> node.label.orEmpty()
-      is OverlayTopAppBarNode -> interpolateOverlayText(node.title, localState, context != null)
-      is OverlayBadgeNode ->
-        node.text?.let { interpolateOverlayText(it, localState, context != null) }.orEmpty()
-      is OverlayDialogNode ->
-        node.title?.let { interpolateOverlayText(it, localState, context != null) }.orEmpty()
-      is OverlaySnackbarNode -> interpolateOverlayText(node.text, localState, context != null)
+      is PrototypeTextNode -> interpolatePrototypeText(node.text, localState, context != null)
+      is PrototypeTextFieldNode -> (state[node.stateKey] as? PrototypeScalar.Text)?.value.orEmpty()
+      is PrototypeSwitchNode -> node.label.orEmpty()
+      is PrototypeCheckboxNode -> node.label.orEmpty()
+      is PrototypeButtonNode -> node.label
+      is PrototypeListItemNode -> node.headline
+      is PrototypeSliderNode -> node.label.orEmpty()
+      is PrototypeChipNode -> node.label
+      is PrototypeIconNode -> node.name
+      is PrototypeFabNode -> node.label.orEmpty()
+      is PrototypeTopAppBarNode -> interpolatePrototypeText(node.title, localState, context != null)
+      is PrototypeBadgeNode ->
+        node.text?.let { interpolatePrototypeText(it, localState, context != null) }.orEmpty()
+      is PrototypeDialogNode ->
+        node.title?.let { interpolatePrototypeText(it, localState, context != null) }.orEmpty()
+      is PrototypeSnackbarNode -> interpolatePrototypeText(node.text, localState, context != null)
       else -> ""
     }
   val children =
-    overlayChildEntries(node, path).map { (child, childPath) ->
-      mapOverlayNode(child, state, pages, childPath, context)
+    prototypeChildEntries(node, path).map { (child, childPath) ->
+      mapPrototypeNode(child, state, pages, childPath, context)
     }
   val pager =
     when (node) {
-      is OverlayTabBarNode -> node.pager
-      is OverlayBottomNavNode -> node.pager
+      is PrototypeTabBarNode -> node.pager
+      is PrototypeBottomNavNode -> node.pager
       else -> null
     }
   val stateKey =
     when (node) {
-      is OverlayTabBarNode -> node.stateKey
-      is OverlayBottomNavNode -> node.stateKey
+      is PrototypeTabBarNode -> node.stateKey
+      is PrototypeBottomNavNode -> node.stateKey
       else -> null
     }
   val items =
     when (node) {
-      is OverlayTabBarNode -> node.items
-      is OverlayBottomNavNode -> node.items
+      is PrototypeTabBarNode -> node.items
+      is PrototypeBottomNavNode -> node.items
       else -> emptyList()
     }
   val selected =
-    pager?.let { pages[it] } ?: (state[stateKey] as? OverlayScalar.Numeric)?.value?.toInt() ?: 0
-  return OverlayRenderNode(
+    pager?.let { pages[it] } ?: (state[stateKey] as? PrototypeScalar.Numeric)?.value?.toInt() ?: 0
+  return PrototypeRenderNode(
     role,
     text,
     node.testTag,
     node.visibleWhen?.holds(localState) ?: true,
-    mapOverlayStyle(resolveOverlayStyle(node.style, node.styleWhen, localState)),
+    mapPrototypeStyle(resolvePrototypeStyle(node.style, node.styleWhen, localState)),
     node.safeAreaPadding,
-    overlayNodeIconName(node),
+    prototypeNodeIconName(node),
     children,
     node,
     path,
-    (node as? OverlayPagerNode)?.let { pages[it.id] } ?: 0,
+    (node as? PrototypePagerNode)?.let { pages[it.id] } ?: 0,
     selected.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
-    overlayOpenWhen(node)?.let { state[it.key] == OverlayScalar.BooleanValue(it.equals) } ?: false,
+    prototypeOpenWhen(node)?.let { state[it.key] == PrototypeScalar.BooleanValue(it.equals) }
+      ?: false,
     checked =
-      (overlayToggleKey(node) ?: overlayListItemToggleKey(node))?.let {
-        state[it] == OverlayScalar.BooleanValue(true)
+      (prototypeToggleKey(node) ?: prototypeListItemToggleKey(node))?.let {
+        state[it] == PrototypeScalar.BooleanValue(true)
       } ?: false,
-    selectedValue = overlaySelectionKey(node)?.let { (state[it] as? OverlayScalar.Text)?.value },
+    selectedValue =
+      prototypeSelectionKey(node)?.let { (state[it] as? PrototypeScalar.Text)?.value },
     sliderValue =
-      overlayNumberKey(node)?.let { (state[it] as? OverlayScalar.Numeric)?.value } ?: 0.0,
+      prototypeNumberKey(node)?.let { (state[it] as? PrototypeScalar.Numeric)?.value } ?: 0.0,
     supportingText =
-      (node as? OverlayDialogNode)?.text?.let {
-        interpolateOverlayText(it, localState, context != null)
+      (node as? PrototypeDialogNode)?.text?.let {
+        interpolatePrototypeText(it, localState, context != null)
       },
-    hour = overlayStateInt(state, (node as? OverlayTimePickerNode)?.hourKey),
-    minute = overlayStateInt(state, (node as? OverlayTimePickerNode)?.minuteKey),
+    hour = prototypeStateInt(state, (node as? PrototypeTimePickerNode)?.hourKey),
+    minute = prototypeStateInt(state, (node as? PrototypeTimePickerNode)?.minuteKey),
     contentDescription =
-      node.contentDescription?.let { interpolateOverlayText(it, localState, context != null) },
+      node.contentDescription?.let { interpolatePrototypeText(it, localState, context != null) },
   )
 }
 
 /** The icon a node draws as its whole content, which labels it when nothing else does. */
-private fun overlayNodeIconName(node: OverlayNode): String? =
+private fun prototypeNodeIconName(node: PrototypeNode): String? =
   when (node) {
-    is OverlayIconNode -> node.name
-    is OverlayIconButtonNode -> node.icon
-    is OverlayFabNode -> node.icon
+    is PrototypeIconNode -> node.name
+    is PrototypeIconButtonNode -> node.icon
+    is PrototypeFabNode -> node.icon
     else -> null
   }
 
 /** The boolean condition that opens a `bottomSheet`, `dialog` or `snackbar`; null otherwise. */
-internal fun overlayOpenWhen(node: OverlayNode?): OverlaySheetCondition? =
+internal fun prototypeOpenWhen(node: PrototypeNode?): PrototypeSheetCondition? =
   when (node) {
-    is OverlayBottomSheetNode -> node.openWhen
-    is OverlayDialogNode -> node.openWhen
-    is OverlaySnackbarNode -> node.openWhen
+    is PrototypeBottomSheetNode -> node.openWhen
+    is PrototypeDialogNode -> node.openWhen
+    is PrototypeSnackbarNode -> node.openWhen
     else -> null
   }
 
 /** The string key a `radioGroup`, `segmentedButton` or `datePicker` is bound to. */
-private fun overlaySelectionKey(node: OverlayNode): String? =
+private fun prototypeSelectionKey(node: PrototypeNode): String? =
   when (node) {
-    is OverlayRadioGroupNode -> node.stateKey
-    is OverlaySegmentedButtonNode -> node.stateKey
-    is OverlayDatePickerNode -> node.stateKey
+    is PrototypeRadioGroupNode -> node.stateKey
+    is PrototypeSegmentedButtonNode -> node.stateKey
+    is PrototypeDatePickerNode -> node.stateKey
     else -> null
   }
 
 /** The number key a `slider` or a determinate `progress` is bound to. */
-private fun overlayNumberKey(node: OverlayNode): String? =
+private fun prototypeNumberKey(node: PrototypeNode): String? =
   when (node) {
-    is OverlaySliderNode -> node.stateKey
-    is OverlayProgressNode -> node.stateKey
+    is PrototypeSliderNode -> node.stateKey
+    is PrototypeProgressNode -> node.stateKey
     else -> null
   }
 
-private fun overlayStateInt(state: Map<String, OverlayScalar>, key: String?): Int =
-  key?.let { (state[it] as? OverlayScalar.Numeric)?.value?.toInt() } ?: 0
+private fun prototypeStateInt(state: Map<String, PrototypeScalar>, key: String?): Int =
+  key?.let { (state[it] as? PrototypeScalar.Numeric)?.value?.toInt() } ?: 0
 
 /**
  * Pager placeholders use one-based page labels in the nearest pager; outside it they stay literal.
  *
  * Tokens (`{key}` with an ASCII identifier key) are found by a plain string scan rather than a
  * regex: Android's ICU regex engine rejects a lone `}` that the desktop JVM accepts, which broke
- * every overlay `show` on a device (#9947) while the JVM unit tests stayed green.
+ * every prototype `show` on a device (#9947) while the JVM unit tests stayed green.
  */
-fun interpolateOverlayText(
+fun interpolatePrototypeText(
   text: String,
-  state: Map<String, OverlayScalar>,
+  state: Map<String, PrototypeScalar>,
   inPager: Boolean = false,
 ): String {
   val out = StringBuilder(text.length)
@@ -335,52 +342,52 @@ private fun isInterpolationKeyPart(c: Char): Boolean = isInterpolationKeyStart(c
 
 private fun resolveInterpolation(
   token: String,
-  state: Map<String, OverlayScalar>,
+  state: Map<String, PrototypeScalar>,
   inPager: Boolean,
 ): String {
   val key = token.substring(1, token.length - 1)
   if (!inPager && (key == "page" || key == "pageCount")) return token
   return when (val value = state[key]) {
-    is OverlayScalar.Text -> value.value
-    is OverlayScalar.BooleanValue -> value.value.toString()
-    is OverlayScalar.Numeric -> value.value.toString().removeSuffix(".0")
+    is PrototypeScalar.Text -> value.value
+    is PrototypeScalar.BooleanValue -> value.value.toString()
+    is PrototypeScalar.Numeric -> value.value.toString().removeSuffix(".0")
     null -> token
   }
 }
 
 /** The settled design specifies AARRGGBB (alpha first), not CSS RRGGBBAA. */
-fun overlayColor(value: String): Color {
+fun prototypeColor(value: String): Color {
   require(value.matches(Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?"))) { "Invalid color: $value" }
   val argb = value.drop(1).toLong(16)
   return Color(if (value.length == 7) argb or 0xff000000L else argb)
 }
 
 /** The colour of a hex value, or null for a Material ColorScheme role name (resolved in render). */
-private fun overlayHexColor(value: String?): Color? =
-  value?.takeIf { it.startsWith("#") }?.let(::overlayColor)
+private fun prototypeHexColor(value: String?): Color? =
+  value?.takeIf { it.startsWith("#") }?.let(::prototypeColor)
 
-fun mapOverlayStyle(style: OverlayStyle): OverlayRenderStyle =
-  OverlayRenderStyle(
+fun mapPrototypeStyle(style: PrototypeStyle): PrototypeRenderStyle =
+  PrototypeRenderStyle(
     style,
-    overlayHexColor(style.background),
-    overlayHexColor(style.border?.color),
+    prototypeHexColor(style.background),
+    prototypeHexColor(style.border?.color),
     // Unspecified: an unstyled node takes the theme's content colour, not a fixed black.
-    overlayHexColor(style.color) ?: Color.Unspecified,
-    overlayAlignment(style.alignment),
-    overlayHorizontalAlignment(style.alignment),
-    overlayVerticalAlignment(style.alignment),
+    prototypeHexColor(style.color) ?: Color.Unspecified,
+    prototypeAlignment(style.alignment),
+    prototypeHorizontalAlignment(style.alignment),
+    prototypeVerticalAlignment(style.alignment),
     FontWeight(style.fontWeight ?: 400),
     builtInFontFamily(style.fontFamily),
-    (style.fontFamily as? OverlayFontFamily.Asset)?.id,
+    (style.fontFamily as? PrototypeFontFamily.Asset)?.id,
     when (style.textAlign) {
       "center" -> TextAlign.Center
       "end" -> TextAlign.End
       "justify" -> TextAlign.Justify
       else -> TextAlign.Start
     },
-    overlayHexColor(style.shadowColor),
+    prototypeHexColor(style.shadowColor),
     if (style.fontStyle == "italic") FontStyle.Italic else FontStyle.Normal,
-    overlayTextDecoration(style.textDecoration),
+    prototypeTextDecoration(style.textDecoration),
     when (style.overflow) {
       "ellipsis" -> TextOverflow.Ellipsis
       "visible" -> TextOverflow.Visible
@@ -388,7 +395,7 @@ fun mapOverlayStyle(style: OverlayStyle): OverlayRenderStyle =
     },
   )
 
-private fun overlayTextDecoration(value: String?): TextDecoration =
+private fun prototypeTextDecoration(value: String?): TextDecoration =
   when (value) {
     "underline" -> TextDecoration.Underline
     "lineThrough" -> TextDecoration.LineThrough
@@ -397,15 +404,15 @@ private fun overlayTextDecoration(value: String?): TextDecoration =
     else -> TextDecoration.None
   }
 
-private fun builtInFontFamily(family: OverlayFontFamily?): FontFamily =
-  when ((family as? OverlayFontFamily.Named)?.name) {
+private fun builtInFontFamily(family: PrototypeFontFamily?): FontFamily =
+  when ((family as? PrototypeFontFamily.Named)?.name) {
     "sansSerif" -> FontFamily.SansSerif
     "serif" -> FontFamily.Serif
     "monospace" -> FontFamily.Monospace
     else -> FontFamily.Default
   }
 
-private fun overlayAlignment(value: String?): Alignment =
+private fun prototypeAlignment(value: String?): Alignment =
   when (value) {
     "topCenter" -> Alignment.TopCenter
     "topEnd" -> Alignment.TopEnd
@@ -418,7 +425,7 @@ private fun overlayAlignment(value: String?): Alignment =
     else -> Alignment.TopStart
   }
 
-private fun overlayHorizontalAlignment(value: String?): Alignment.Horizontal =
+private fun prototypeHorizontalAlignment(value: String?): Alignment.Horizontal =
   when (value) {
     "topCenter",
     "center",
@@ -429,7 +436,7 @@ private fun overlayHorizontalAlignment(value: String?): Alignment.Horizontal =
     else -> Alignment.Start
   }
 
-private fun overlayVerticalAlignment(value: String?): Alignment.Vertical =
+private fun prototypeVerticalAlignment(value: String?): Alignment.Vertical =
   when (value) {
     "centerStart",
     "center",
@@ -445,7 +452,7 @@ private fun overlayVerticalAlignment(value: String?): Alignment.Vertical =
  * clockwise from "toward the end edge": 0 runs left to right, 90 top to bottom. The line passes
  * through the center and is long enough that the corners take the first and last stop colors.
  */
-fun overlayLinearGradientLine(angle: Double, width: Float, height: Float): Pair<Offset, Offset> {
+fun prototypeLinearGradientLine(angle: Double, width: Float, height: Float): Pair<Offset, Offset> {
   val radians = Math.toRadians(angle)
   val dx = cos(radians).toFloat()
   val dy = sin(radians).toFloat()
@@ -460,8 +467,8 @@ fun overlayLinearGradientLine(angle: Double, width: Float, height: Float): Pair<
  * made non-decreasing (a stop never starts before the previous one), which is what Skia does to a
  * descending list anyway, so the rendered result is deterministic and documented.
  */
-fun overlayGradientStops(stops: List<OverlayGradientStop>): Pair<List<Color>, List<Float>?> {
-  val colors = stops.map { overlayColor(it.color) }
+fun prototypeGradientStops(stops: List<PrototypeGradientStop>): Pair<List<Color>, List<Float>?> {
+  val colors = stops.map { prototypeColor(it.color) }
   val positions = stops.map { it.position?.toFloat() }
   if (!positions.all { it != null }) return colors to null
   var floor = 0f
@@ -473,16 +480,16 @@ fun overlayGradientStops(stops: List<OverlayGradientStop>): Pair<List<Color>, Li
 }
 
 /** Compose uses Float dp; reject unrepresentable values before installing a content lambda. */
-private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
+private fun requirePrototypeRenderSizes(style: PrototypeStyle?, path: String) {
   if (style == null) return
   val sizes =
     mapOf(
-      "width.dp" to (style.width as? OverlayDimension.Dp)?.dp,
-      "height.dp" to (style.height as? OverlayDimension.Dp)?.dp,
+      "width.dp" to (style.width as? PrototypeDimension.Dp)?.dp,
+      "height.dp" to (style.height as? PrototypeDimension.Dp)?.dp,
       "weight" to style.weight,
       "elevation" to style.elevation,
       "aspectRatio" to style.aspectRatio,
-      "gradient.angle" to (style.gradient as? OverlayLinearGradient)?.angle,
+      "gradient.angle" to (style.gradient as? PrototypeLinearGradient)?.angle,
       "minWidth" to style.minWidth,
       "maxWidth" to style.maxWidth,
       "minHeight" to style.minHeight,
@@ -491,12 +498,12 @@ private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
       "padding.bottom" to style.padding?.bottom,
       "padding.start" to style.padding?.start,
       "padding.end" to style.padding?.end,
-      "cornerRadius" to (style.cornerRadius as? OverlayCornerRadius.Dp)?.dp,
-      "cornerRadius.topStart" to (style.cornerRadius as? OverlayCornerRadius.Corners)?.topStart,
-      "cornerRadius.topEnd" to (style.cornerRadius as? OverlayCornerRadius.Corners)?.topEnd,
-      "cornerRadius.bottomEnd" to (style.cornerRadius as? OverlayCornerRadius.Corners)?.bottomEnd,
+      "cornerRadius" to (style.cornerRadius as? PrototypeCornerRadius.Dp)?.dp,
+      "cornerRadius.topStart" to (style.cornerRadius as? PrototypeCornerRadius.Corners)?.topStart,
+      "cornerRadius.topEnd" to (style.cornerRadius as? PrototypeCornerRadius.Corners)?.topEnd,
+      "cornerRadius.bottomEnd" to (style.cornerRadius as? PrototypeCornerRadius.Corners)?.bottomEnd,
       "cornerRadius.bottomStart" to
-        (style.cornerRadius as? OverlayCornerRadius.Corners)?.bottomStart,
+        (style.cornerRadius as? PrototypeCornerRadius.Corners)?.bottomStart,
       "offset.x" to style.offset?.x,
       "offset.y" to style.offset?.y,
       "border.width" to style.border?.width,
@@ -515,55 +522,55 @@ private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
 /**
  * True only while an editable field is actually on screen: not hidden by `visibleWhen`, not on a
  * pager page other than the settled one, and not inside a closed bottom sheet. Open sheets are
- * hoisted and rendered by [modalOverlaySheets], so their fields count and their closed twins do
+ * hoisted and rendered by [modalPrototypeSheets], so their fields count and their closed twins do
  * not. The window may take input focus only while this holds.
  */
-fun hasVisibleTextField(root: OverlayRenderNode): Boolean =
+fun hasVisibleTextField(root: PrototypeRenderNode): Boolean =
   inlineTextFieldVisible(root) ||
-    modalOverlaySheets(root).any { sheet -> sheet.children.any(::inlineTextFieldVisible) }
+    modalPrototypeSheets(root).any { sheet -> sheet.children.any(::inlineTextFieldVisible) }
 
-private fun inlineTextFieldVisible(node: OverlayRenderNode): Boolean =
+private fun inlineTextFieldVisible(node: PrototypeRenderNode): Boolean =
   when {
     !node.visible -> false
     node.role == "textField" -> true
-    node.role in OVERLAY_MODAL_ROLES -> false // Hoisted: only modalOverlaySheets renders it.
+    node.role in PROTOTYPE_MODAL_ROLES -> false // Hoisted: only modalPrototypeSheets renders it.
     node.role == "pager" ->
       node.children.getOrNull(node.page)?.let(::inlineTextFieldVisible) == true
     else -> node.children.any(::inlineTextFieldVisible)
   }
 
 /** Roles drawn above the whole author tree while their `openWhen` holds, never inline. */
-internal val OVERLAY_MODAL_ROLES = setOf("bottomSheet", "dialog", "snackbar")
+internal val PROTOTYPE_MODAL_ROLES = setOf("bottomSheet", "dialog", "snackbar")
 
 /**
  * Open sheets, dialogs and snackbars are rendered last, in tree order, so a modal scrim covers the
- * entire overlay window.
+ * entire prototype window.
  */
-fun modalOverlaySheets(node: OverlayRenderNode): List<OverlayRenderNode> {
+fun modalPrototypeSheets(node: PrototypeRenderNode): List<PrototypeRenderNode> {
   if (!node.visible) return emptyList()
-  val modal = node.role in OVERLAY_MODAL_ROLES
+  val modal = node.role in PROTOTYPE_MODAL_ROLES
   if (modal && !node.sheetOpen) return emptyList()
   val children =
     if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page)) else node.children
-  return (if (modal) listOf(node) else emptyList()) + children.flatMap(::modalOverlaySheets)
+  return (if (modal) listOf(node) else emptyList()) + children.flatMap(::modalPrototypeSheets)
 }
 
 /** Roles that compose their children inline through the node renderer; others never draw them. */
-private val OVERLAY_INLINE_CONTAINER_ROLES =
+private val PROTOTYPE_INLINE_CONTAINER_ROLES =
   setOf("box", "row", "column", "scroll", "card", "pager")
 
 /** A non-root anchored node: drawn in the window-level anchor layer, never in its parent. */
-internal fun isLayeredOverlayAnchor(node: OverlayRenderNode): Boolean =
-  node.source?.anchor is OverlayBoundsAnchor
+internal fun isLayeredPrototypeAnchor(node: PrototypeRenderNode): Boolean =
+  node.source?.anchor is PrototypeBoundsAnchor
 
 /**
  * An anchored node drawn in a window-level layer, with the [ancestors] it was authored under (the
  * outermost first). The layer keeps it composed while any of them animates out, so it fades with
  * them instead of vanishing when they hide (#10803).
  */
-data class LayeredOverlayAnchor(
-  val node: OverlayRenderNode,
-  val ancestors: List<OverlayRenderNode> = emptyList(),
+data class LayeredPrototypeAnchor(
+  val node: PrototypeRenderNode,
+  val ancestors: List<PrototypeRenderNode> = emptyList(),
 ) {
   /** Every ancestor is shown; the node's own `visible` is left to the renderer. */
   val ancestorsShown: Boolean
@@ -574,7 +581,7 @@ data class LayeredOverlayAnchor(
    * is hiding (its exit contains the others), else the nearest animated one. Null when no ancestor
    * is animated, so the node appears and disappears with them instantly.
    */
-  val animatedAncestor: OverlayRenderNode?
+  val animatedAncestor: PrototypeRenderNode?
     get() {
       val animated = ancestors.filter { it.source?.visibleWhen != null }
       return animated.firstOrNull { !it.visible } ?: animated.lastOrNull()
@@ -585,21 +592,21 @@ data class LayeredOverlayAnchor(
  * The anchored nodes under [node] that the renderer draws in a window-level layer above the author
  * tree (#10803), in tree order. Drawn inside their parent they were clipped to its slot (a
  * wrap-content parent animating its size clips) and took a slot there. Nodes under a hidden
- * ancestor are listed too, flagged by [LayeredOverlayAnchor.ancestorsShown], so the layer can fade
- * them with it; nodes on a pager page other than the settled one and nodes inside a modal (modals
- * list their own through [layeredOverlayAnchorsIn]) are not. The anchored node's own visibility is
- * left to the renderer, so its `visibleWhen` transition still runs. [node] itself is never listed:
- * a window root keeps its own anchored placement.
+ * ancestor are listed too, flagged by [LayeredPrototypeAnchor.ancestorsShown], so the layer can
+ * fade them with it; nodes on a pager page other than the settled one and nodes inside a modal
+ * (modals list their own through [layeredPrototypeAnchorsIn]) are not. The anchored node's own
+ * visibility is left to the renderer, so its `visibleWhen` transition still runs. [node] itself is
+ * never listed: a window root keeps its own anchored placement.
  */
-fun layeredOverlayAnchors(node: OverlayRenderNode): List<LayeredOverlayAnchor> =
+fun layeredPrototypeAnchors(node: PrototypeRenderNode): List<LayeredPrototypeAnchor> =
   anchorsBelow(node, listOf(node))
 
-/** [layeredOverlayAnchors] for content drawn as [children], such as a modal's body. */
-fun layeredOverlayAnchorsIn(children: List<OverlayRenderNode>): List<LayeredOverlayAnchor> =
+/** [layeredPrototypeAnchors] for content drawn as [children], such as a modal's body. */
+fun layeredPrototypeAnchorsIn(children: List<PrototypeRenderNode>): List<LayeredPrototypeAnchor> =
   anchorsAmong(children, emptyList())
 
-private fun anchorsBelow(parent: OverlayRenderNode, ancestors: List<OverlayRenderNode>) =
-  if (parent.role !in OVERLAY_INLINE_CONTAINER_ROLES) emptyList()
+private fun anchorsBelow(parent: PrototypeRenderNode, ancestors: List<PrototypeRenderNode>) =
+  if (parent.role !in PROTOTYPE_INLINE_CONTAINER_ROLES) emptyList()
   else
     anchorsAmong(
       if (parent.role == "pager") listOfNotNull(parent.children.getOrNull(parent.page))
@@ -608,9 +615,9 @@ private fun anchorsBelow(parent: OverlayRenderNode, ancestors: List<OverlayRende
     )
 
 private fun anchorsAmong(
-  children: List<OverlayRenderNode>,
-  ancestors: List<OverlayRenderNode>,
-): List<LayeredOverlayAnchor> = children.flatMap { child ->
-  (if (isLayeredOverlayAnchor(child)) listOf(LayeredOverlayAnchor(child, ancestors))
+  children: List<PrototypeRenderNode>,
+  ancestors: List<PrototypeRenderNode>,
+): List<LayeredPrototypeAnchor> = children.flatMap { child ->
+  (if (isLayeredPrototypeAnchor(child)) listOf(LayeredPrototypeAnchor(child, ancestors))
   else emptyList()) + anchorsBelow(child, ancestors + child)
 }

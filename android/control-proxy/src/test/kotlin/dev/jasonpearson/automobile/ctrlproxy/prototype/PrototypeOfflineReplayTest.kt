@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.test.runTest
@@ -8,36 +8,36 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** Offline buffering, replay and `inspect_overlays` for device-persistent overlays (#10494). */
+/** Offline buffering, replay and `inspect_prototypes` for device-persistent prototypes (#10494). */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayOfflineReplayTest {
-  private val host = FakeInteractiveOverlayHost()
-  private val timer = FakeOverlayTimer()
-  private val events = mutableListOf<OverlayEvent>()
-  private val statuses = mutableListOf<Triple<String?, List<OverlayStatusEntry>, Long>>()
+class PrototypeOfflineReplayTest {
+  private val host = FakePrototypeHost()
+  private val timer = FakePrototypeTimer()
+  private val events = mutableListOf<PrototypeEvent>()
+  private val statuses = mutableListOf<Triple<String?, List<PrototypeStatusEntry>, Long>>()
   private val failures = mutableListOf<String?>()
   private var clients = 1
   private var failSends = 0
 
-  private fun controller(buffer: OverlayOfflineEventBuffer = OverlayOfflineEventBuffer()) =
-    OverlayController(
+  private fun controller(buffer: PrototypeOfflineEventBuffer = PrototypeOfflineEventBuffer()) =
+    PrototypeController(
       host,
-      object : OverlayResultSink {
+      object : PrototypeResultSink {
         override suspend fun send(requestId: String?, success: Boolean, error: String?) {
           if (!success) failures += error
         }
 
-        override suspend fun sendOverlayStatus(
+        override suspend fun sendPrototypeStatus(
           requestId: String?,
-          overlays: List<OverlayStatusEntry>,
+          prototypes: List<PrototypeStatusEntry>,
           droppedEvents: Long,
         ) {
-          statuses += Triple(requestId, overlays, droppedEvents)
+          statuses += Triple(requestId, prototypes, droppedEvents)
         }
       },
       eventSink =
-        OverlayEventSink {
+        PrototypeEventSink {
           if (failSends > 0) {
             failSends--
             error("socket closed")
@@ -45,25 +45,28 @@ class OverlayOfflineReplayTest {
           events += it
         },
       clock = { timer.now },
-      lifecycle = OverlayLifecycle(timer, TTL, clientCount = { clients }),
+      lifecycle = PrototypeLifecycle(timer, TTL, clientCount = { clients }),
       offlineEvents = buffer,
     )
 
   private fun spec(persistence: String? = "device") =
-    OverlaySpec(
+    PrototypeSpec(
       "proto",
-      OverlayWindow(OverlayFullscreenPlacement(), persistence = persistence),
-      state = mapOf("label" to OverlayScalar.Text("start")),
-      root = OverlayPagerNode("pager", children = List(3) { OverlayTextNode(text = "screen") }),
+      PrototypeWindow(PrototypeFullscreenPlacement(), persistence = persistence),
+      state = mapOf("label" to PrototypeScalar.Text("start")),
+      root = PrototypePagerNode("pager", children = List(3) { PrototypeTextNode(text = "screen") }),
     )
 
-  private suspend fun OverlayController.emit(name: String) =
-    interact(checkNotNull(activeRuntime), OverlayInteraction.Tap(listOf(OverlayEmitAction(name))))
-
-  private suspend fun OverlayController.nextPage() =
+  private suspend fun PrototypeController.emit(name: String) =
     interact(
       checkNotNull(activeRuntime),
-      OverlayInteraction.Tap(listOf(OverlaySetPageAction("pager", OverlayPageTarget.Next))),
+      PrototypeInteraction.Tap(listOf(PrototypeEmitAction(name))),
+    )
+
+  private suspend fun PrototypeController.nextPage() =
+    interact(
+      checkNotNull(activeRuntime),
+      PrototypeInteraction.Tap(listOf(PrototypeSetPageAction("pager", PrototypePageTarget.Next))),
     )
 
   @Test
@@ -83,7 +86,7 @@ class OverlayOfflineReplayTest {
 
       assertEquals(listOf("tap", null, "again"), events.map { it.name })
       assertEquals(
-        listOf(OverlayEventKind.EMIT, OverlayEventKind.PAGE_CHANGED, OverlayEventKind.EMIT),
+        listOf(PrototypeEventKind.EMIT, PrototypeEventKind.PAGE_CHANGED, PrototypeEventKind.EMIT),
         events.map { it.kind },
       )
       assertEquals(listOf(1L, 2L, 3L), events.map { it.sequence })
@@ -170,9 +173,9 @@ class OverlayOfflineReplayTest {
 
   @Test
   fun `restore puts events back ahead of newer ones and respects capacity`() {
-    val buffer = OverlayOfflineEventBuffer(capacity = 3)
+    val buffer = PrototypeOfflineEventBuffer(capacity = 3)
     fun event(sequence: Long) =
-      OverlayEvent(0, "id", sequence, OverlayEventKind.EMIT, null, null, emptyMap())
+      PrototypeEvent(0, "id", sequence, PrototypeEventKind.EMIT, null, null, emptyMap())
     buffer.add(event(4))
     buffer.restore(listOf(event(1), event(2), event(3)))
     assertEquals(1L, buffer.dropped)
@@ -181,7 +184,7 @@ class OverlayOfflineReplayTest {
 
   @Test
   fun `the buffer is bounded, drops the oldest and counts what it dropped`() = runTest {
-    val controller = controller(OverlayOfflineEventBuffer(capacity = 2))
+    val controller = controller(PrototypeOfflineEventBuffer(capacity = 2))
     controller.show(null, spec())
     clients = 0
     for (name in listOf("a", "b", "c", "d")) controller.emit(name)
@@ -195,8 +198,8 @@ class OverlayOfflineReplayTest {
   }
 
   @Test
-  fun `session overlays never use the offline buffer`() = runTest {
-    val controller = controller(OverlayOfflineEventBuffer(capacity = 1))
+  fun `session prototypes never use the offline buffer`() = runTest {
+    val controller = controller(PrototypeOfflineEventBuffer(capacity = 1))
     controller.show(null, spec(persistence = "session"))
     controller.emit("one")
     controller.emit("two")
@@ -206,7 +209,7 @@ class OverlayOfflineReplayTest {
   }
 
   @Test
-  fun `inspect delivers held events first then reports the persisted overlay`() = runTest {
+  fun `inspect delivers held events first then reports the persisted prototype`() = runTest {
     val controller = controller()
     controller.show(null, spec())
     clients = 0
@@ -214,21 +217,21 @@ class OverlayOfflineReplayTest {
     controller.nextPage()
     controller.interact(
       checkNotNull(controller.activeRuntime),
-      OverlayInteraction.TextChange("label", "typed"),
+      PrototypeInteraction.TextChange("label", "typed"),
     )
     clients = 1
 
     controller.inspect("inspect-1")
 
     assertEquals(listOf("held", null, "change"), events.map { it.name })
-    val (requestId, overlays, dropped) = statuses.single()
+    val (requestId, prototypes, dropped) = statuses.single()
     assertEquals("inspect-1", requestId)
     assertEquals(0L, dropped)
-    val entry = overlays.single()
+    val entry = prototypes.single()
     assertEquals("proto", entry.id)
     assertTrue(entry.persistent)
     assertEquals(1, entry.pages["pager"])
-    assertEquals(OverlayScalar.Text("typed"), entry.state["label"])
+    assertEquals(PrototypeScalar.Text("typed"), entry.state["label"])
     assertEquals(3L, entry.lastSequence)
     // Sequences continue from the ledger; there is no rewind.
     controller.emit("next")
@@ -252,16 +255,16 @@ class OverlayOfflineReplayTest {
     assertTrue(events.isEmpty())
     clients = 1
     controller.onClientConnected()
-    assertEquals(listOf(OverlayEventKind.DISMISSED), events.map { it.kind })
+    assertEquals(listOf(PrototypeEventKind.DISMISSED), events.map { it.kind })
     controller.inspect("after")
     assertTrue(statuses.single().second.isEmpty())
   }
 
   @Test
   fun `the offline buffer drops the oldest and drains oldest first`() {
-    val buffer = OverlayOfflineEventBuffer(capacity = 2)
+    val buffer = PrototypeOfflineEventBuffer(capacity = 2)
     fun event(sequence: Long) =
-      OverlayEvent(0, "id", sequence, OverlayEventKind.EMIT, null, null, emptyMap())
+      PrototypeEvent(0, "id", sequence, PrototypeEventKind.EMIT, null, null, emptyMap())
     buffer.add(event(1))
     buffer.add(event(2))
     buffer.add(event(3))
@@ -270,7 +273,7 @@ class OverlayOfflineReplayTest {
     assertEquals(listOf(2L, 3L), buffer.drain().map { it.sequence })
     assertEquals(0, buffer.size)
     assertEquals(1L, buffer.dropped)
-    assertThrows(IllegalArgumentException::class.java) { OverlayOfflineEventBuffer(0) }
+    assertThrows(IllegalArgumentException::class.java) { PrototypeOfflineEventBuffer(0) }
   }
 
   private companion object {

@@ -1,9 +1,9 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import org.junit.Assert.*
 import org.junit.Test
 
-internal class FakeOverlayBackRegistrar : OverlayBackCallbackRegistrar {
+internal class FakePrototypeBackRegistrar : PrototypeBackCallbackRegistrar {
   val calls = mutableListOf<String>()
   var available = true
   var callback: (() -> Unit)? = null
@@ -22,11 +22,11 @@ internal class FakeOverlayBackRegistrar : OverlayBackCallbackRegistrar {
 }
 
 /** When the predictive-back callback may be registered: only while focusable, only on API 33+. */
-class OverlayBackBindingTest {
-  private val registrar = FakeOverlayBackRegistrar()
+class PrototypeBackBindingTest {
+  private val registrar = FakePrototypeBackRegistrar()
   private var backs = 0
 
-  private fun binding(sdk: Int) = OverlayBackBinding(sdk, registrar) { backs++ }
+  private fun binding(sdk: Int) = PrototypeBackBinding(sdk, registrar) { backs++ }
 
   @Test
   fun `registers while focusable and unregisters when focus is removed`() {

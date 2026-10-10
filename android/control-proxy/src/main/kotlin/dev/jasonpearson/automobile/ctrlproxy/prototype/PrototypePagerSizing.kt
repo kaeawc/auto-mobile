@@ -1,10 +1,10 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import dev.jasonpearson.automobile.protocol.OverlayDimension
-import dev.jasonpearson.automobile.protocol.OverlayStyle
+import dev.jasonpearson.automobile.protocol.PrototypeDimension
+import dev.jasonpearson.automobile.protocol.PrototypeStyle
 
 /** Which axes a pager page expands to fill. */
-internal data class OverlayPageFill(val width: Boolean, val height: Boolean)
+internal data class PrototypePageFill(val width: Boolean, val height: Boolean)
 
 /**
  * A page fills the pager unless the pager is explicitly `wrap` on that axis (#10086).
@@ -14,8 +14,8 @@ internal data class OverlayPageFill(val width: Boolean, val height: Boolean)
  * controls ended up under the status bar. An omitted dimension keeps filling, which is what pagers
  * authored without a size have always rendered; only an explicit `wrap` opts into content size.
  */
-internal fun overlayPageFill(style: OverlayStyle): OverlayPageFill =
-  OverlayPageFill(
-    width = style.width != OverlayDimension.Wrap,
-    height = style.height != OverlayDimension.Wrap,
+internal fun prototypePageFill(style: PrototypeStyle): PrototypePageFill =
+  PrototypePageFill(
+    width = style.width != PrototypeDimension.Wrap,
+    height = style.height != PrototypeDimension.Wrap,
   )

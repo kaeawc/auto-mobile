@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay.screenshot
+package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import java.io.File
 import org.junit.Assert.assertArrayEquals
@@ -8,25 +8,25 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class OverlayPreviewRequestTest {
+class PrototypePreviewRequestTest {
 
-  private fun parse(vararg pairs: Pair<String, String>): OverlayPreviewRequest? {
+  private fun parse(vararg pairs: Pair<String, String>): PrototypePreviewRequest? {
     val map = mapOf(*pairs)
-    return OverlayPreviewRequest.fromProperties(map::get, pathSeparator = ":")
+    return PrototypePreviewRequest.fromProperties(map::get, pathSeparator = ":")
   }
 
   @Test
   fun `no spec property means no preview`() {
     assertNull(parse())
-    assertNull(parse(OverlayPreviewRequest.SPEC_PROPERTY to " : "))
+    assertNull(parse(PrototypePreviewRequest.SPEC_PROPERTY to " : "))
   }
 
   @Test
   fun `defaults to a 360x640 dp light mdpi surface`() {
     val request =
       parse(
-        OverlayPreviewRequest.SPEC_PROPERTY to "/specs/a.json",
-        OverlayPreviewRequest.OUT_PROPERTY to "/out",
+        PrototypePreviewRequest.SPEC_PROPERTY to "/specs/a.json",
+        PrototypePreviewRequest.OUT_PROPERTY to "/out",
       )!!
     assertEquals(listOf(File("/specs/a.json")), request.specs)
     assertEquals("w360dp-h640dp-notnight-160dpi", request.qualifiers)
@@ -38,12 +38,12 @@ class OverlayPreviewRequestTest {
   fun `size density and theme map to qualifiers`() {
     val request =
       parse(
-        OverlayPreviewRequest.SPEC_PROPERTY to "/a.json:/b.json",
-        OverlayPreviewRequest.OUT_PROPERTY to "/out",
-        OverlayPreviewRequest.WIDTH_PROPERTY to "411",
-        OverlayPreviewRequest.HEIGHT_PROPERTY to "891",
-        OverlayPreviewRequest.DENSITY_PROPERTY to "420",
-        OverlayPreviewRequest.THEME_PROPERTY to "Dark",
+        PrototypePreviewRequest.SPEC_PROPERTY to "/a.json:/b.json",
+        PrototypePreviewRequest.OUT_PROPERTY to "/out",
+        PrototypePreviewRequest.WIDTH_PROPERTY to "411",
+        PrototypePreviewRequest.HEIGHT_PROPERTY to "891",
+        PrototypePreviewRequest.DENSITY_PROPERTY to "420",
+        PrototypePreviewRequest.THEME_PROPERTY to "Dark",
       )!!
     assertEquals(2, request.specs.size)
     assertEquals("w411dp-h891dp-night-420dpi", request.qualifiers)
@@ -53,20 +53,20 @@ class OverlayPreviewRequestTest {
   fun `malformed switches name the switch`() {
     val base =
       arrayOf(
-        OverlayPreviewRequest.SPEC_PROPERTY to "/a.json",
-        OverlayPreviewRequest.OUT_PROPERTY to "/out",
+        PrototypePreviewRequest.SPEC_PROPERTY to "/a.json",
+        PrototypePreviewRequest.OUT_PROPERTY to "/out",
       )
     fun message(vararg extra: Pair<String, String>) =
       assertThrows(IllegalArgumentException::class.java) { parse(*base, *extra) }.message!!
-    assertTrue(message(OverlayPreviewRequest.WIDTH_PROPERTY to "wide").contains("width"))
-    assertTrue(message(OverlayPreviewRequest.HEIGHT_PROPERTY to "0").contains("height"))
-    assertTrue(message(OverlayPreviewRequest.DENSITY_PROPERTY to "5000").contains("density"))
-    assertTrue(message(OverlayPreviewRequest.THEME_PROPERTY to "sepia").contains("theme"))
+    assertTrue(message(PrototypePreviewRequest.WIDTH_PROPERTY to "wide").contains("width"))
+    assertTrue(message(PrototypePreviewRequest.HEIGHT_PROPERTY to "0").contains("height"))
+    assertTrue(message(PrototypePreviewRequest.DENSITY_PROPERTY to "5000").contains("density"))
+    assertTrue(message(PrototypePreviewRequest.THEME_PROPERTY to "sepia").contains("theme"))
     val noOut =
       assertThrows(IllegalArgumentException::class.java) {
-        parse(OverlayPreviewRequest.SPEC_PROPERTY to "/a.json")
+        parse(PrototypePreviewRequest.SPEC_PROPERTY to "/a.json")
       }
-    assertTrue(noOut.message!!.contains(OverlayPreviewRequest.OUT_PROPERTY))
+    assertTrue(noOut.message!!.contains(PrototypePreviewRequest.OUT_PROPERTY))
   }
 
   @Test
@@ -74,8 +74,8 @@ class OverlayPreviewRequestTest {
     val error =
       assertThrows(IllegalArgumentException::class.java) {
         parse(
-          OverlayPreviewRequest.SPEC_PROPERTY to "/x/a.json:/y/a.json",
-          OverlayPreviewRequest.OUT_PROPERTY to "/out",
+          PrototypePreviewRequest.SPEC_PROPERTY to "/x/a.json:/y/a.json",
+          PrototypePreviewRequest.OUT_PROPERTY to "/out",
         )
       }
     assertTrue(error.message!!.contains("a.png"))
@@ -85,9 +85,9 @@ class OverlayPreviewRequestTest {
   fun `contact sheet lays images out in a near-square grid`() {
     val bg = 0
     fun solid(width: Int, height: Int, color: Int) =
-      OverlayScreenshotComparator.Image(width, height, IntArray(width * height) { color })
+      PrototypeScreenshotComparator.Image(width, height, IntArray(width * height) { color })
     val sheet =
-      overlayContactSheet(
+      prototypeContactSheet(
         listOf(solid(2, 2, 1), solid(2, 1, 2), solid(1, 2, 3)),
         gutter = 1,
         background = bg,
@@ -153,8 +153,8 @@ class OverlayPreviewRequestTest {
   @Test
   fun `contact sheet of one image only frames it`() {
     val sheet =
-      overlayContactSheet(
-        listOf(OverlayScreenshotComparator.Image(1, 1, intArrayOf(5))),
+      prototypeContactSheet(
+        listOf(PrototypeScreenshotComparator.Image(1, 1, intArrayOf(5))),
         gutter = 2,
         background = 0,
       )

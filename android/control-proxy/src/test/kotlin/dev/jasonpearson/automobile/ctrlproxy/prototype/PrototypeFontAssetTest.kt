@@ -1,13 +1,13 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.ui.text.font.FontFamily
-import dev.jasonpearson.automobile.protocol.OverlayColumnNode
-import dev.jasonpearson.automobile.protocol.OverlayCondition
-import dev.jasonpearson.automobile.protocol.OverlayFontFamily
-import dev.jasonpearson.automobile.protocol.OverlayImageNode
-import dev.jasonpearson.automobile.protocol.OverlayStyle
-import dev.jasonpearson.automobile.protocol.OverlayStyleWhen
-import dev.jasonpearson.automobile.protocol.OverlayTextNode
+import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
+import dev.jasonpearson.automobile.protocol.PrototypeCondition
+import dev.jasonpearson.automobile.protocol.PrototypeFontFamily
+import dev.jasonpearson.automobile.protocol.PrototypeImageNode
+import dev.jasonpearson.automobile.protocol.PrototypeStyle
+import dev.jasonpearson.automobile.protocol.PrototypeStyleWhen
+import dev.jasonpearson.automobile.protocol.PrototypeTextNode
 import java.io.File
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -39,41 +39,41 @@ private object FontBytes {
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayFontAssetTest {
+class PrototypeFontAssetTest {
   @get:Rule val folder = TemporaryFolder()
 
-  private val files = FakeOverlayAssetFiles()
-  private val limits = OverlayAssetLimits(maxAssetBytes = 100, maxFontBytes = 64, maxCount = 4)
-  private val store = OverlayAssetStore(files, limits)
+  private val files = FakePrototypeAssetFiles()
+  private val limits = PrototypeAssetLimits(maxAssetBytes = 100, maxFontBytes = 64, maxCount = 4)
+  private val store = PrototypeAssetStore(files, limits)
 
   @Test
   fun `stores ttf and otf fonts with any sfnt version tag`() {
-    assertTrue(store.put("a", "font/ttf", FontBytes.ttf()) is OverlayAssetPutResult.Stored)
-    assertTrue(store.put("b", "font/otf", FontBytes.otf()) is OverlayAssetPutResult.Stored)
-    assertTrue(store.put("c", "font/ttf", FontBytes.trueTag()) is OverlayAssetPutResult.Stored)
+    assertTrue(store.put("a", "font/ttf", FontBytes.ttf()) is PrototypeAssetPutResult.Stored)
+    assertTrue(store.put("b", "font/otf", FontBytes.otf()) is PrototypeAssetPutResult.Stored)
+    assertTrue(store.put("c", "font/ttf", FontBytes.trueTag()) is PrototypeAssetPutResult.Stored)
     // An OpenType file may carry TrueType outlines (version 0x00010000).
-    assertTrue(store.put("d", "font/otf", FontBytes.ttf()) is OverlayAssetPutResult.Stored)
-    assertEquals(OverlayAssetInfo("b", "font/otf", 32), store.lookup("b"))
+    assertTrue(store.put("d", "font/otf", FontBytes.ttf()) is PrototypeAssetPutResult.Stored)
+    assertEquals(PrototypeAssetInfo("b", "font/otf", 32), store.lookup("b"))
   }
 
   @Test
   fun `rejects an image labelled as a font and a font labelled as an image`() {
     val fakeFont =
-      store.put("a", "font/ttf", OverlayAssetBytes.png()) as OverlayAssetPutResult.Rejected
-    assertEquals(OverlayAssetRejection.CONTENT_MISMATCH, fakeFont.reason)
+      store.put("a", "font/ttf", PrototypeAssetBytes.png()) as PrototypeAssetPutResult.Rejected
+    assertEquals(PrototypeAssetRejection.CONTENT_MISMATCH, fakeFont.reason)
     assertTrue(fakeFont.message, fakeFont.message.contains("font"))
-    val fakeImage = store.put("b", "image/png", FontBytes.ttf()) as OverlayAssetPutResult.Rejected
-    assertEquals(OverlayAssetRejection.CONTENT_MISMATCH, fakeImage.reason)
+    val fakeImage = store.put("b", "image/png", FontBytes.ttf()) as PrototypeAssetPutResult.Rejected
+    assertEquals(PrototypeAssetRejection.CONTENT_MISMATCH, fakeImage.reason)
   }
 
   @Test
   fun `fonts use the tighter font cap while images keep the image cap`() {
-    assertTrue(store.put("f", "font/ttf", FontBytes.ttf(64)) is OverlayAssetPutResult.Stored)
-    val over = store.put("g", "font/ttf", FontBytes.ttf(65)) as OverlayAssetPutResult.Rejected
-    assertEquals(OverlayAssetRejection.TOO_LARGE, over.reason)
+    assertTrue(store.put("f", "font/ttf", FontBytes.ttf(64)) is PrototypeAssetPutResult.Stored)
+    val over = store.put("g", "font/ttf", FontBytes.ttf(65)) as PrototypeAssetPutResult.Rejected
+    assertEquals(PrototypeAssetRejection.TOO_LARGE, over.reason)
     assertTrue(over.message, over.message.contains("limit is 64"))
     assertTrue(
-      store.put("i", "image/png", OverlayAssetBytes.png(100)) is OverlayAssetPutResult.Stored,
+      store.put("i", "image/png", PrototypeAssetBytes.png(100)) is PrototypeAssetPutResult.Stored,
     )
   }
 
@@ -88,10 +88,10 @@ class OverlayFontAssetTest {
   fun `file resolves the stored font from a file-backed store and follows removal`() {
     val onDisk = folder.newFile("asset-0")
     val backed =
-      object : OverlayAssetFiles by files {
+      object : PrototypeAssetFiles by files {
         override fun file(name: String): File? = onDisk.takeIf { name == "asset-0" }
       }
-    val fileStore = OverlayAssetStore(backed, limits)
+    val fileStore = PrototypeAssetStore(backed, limits)
     fileStore.put("brand", "font/ttf", FontBytes.ttf())
     assertEquals(onDisk, fileStore.file("brand"))
     fileStore.remove("brand")
@@ -101,64 +101,64 @@ class OverlayFontAssetTest {
   @Test
   fun `a font family spec decodes and round-trips as an asset or a built-in name`() {
     val json = Json { ignoreUnknownKeys = false }
-    val asset = json.decodeFromString<OverlayStyle>("""{"fontFamily":{"asset":"brand"}}""")
-    assertEquals(OverlayFontFamily.Asset("brand"), asset.fontFamily)
+    val asset = json.decodeFromString<PrototypeStyle>("""{"fontFamily":{"asset":"brand"}}""")
+    assertEquals(PrototypeFontFamily.Asset("brand"), asset.fontFamily)
     assertEquals("""{"fontFamily":{"asset":"brand"}}""", json.encodeToString(asset))
-    val named = json.decodeFromString<OverlayStyle>("""{"fontFamily":"serif"}""")
-    assertEquals(OverlayFontFamily.Named("serif"), named.fontFamily)
+    val named = json.decodeFromString<PrototypeStyle>("""{"fontFamily":"serif"}""")
+    assertEquals(PrototypeFontFamily.Named("serif"), named.fontFamily)
     assertEquals("""{"fontFamily":"serif"}""", json.encodeToString(named))
   }
 
   @Test
   fun `the render style keeps the font asset id and a built-in fallback family`() {
-    val style = mapOverlayStyle(OverlayStyle(fontFamily = OverlayFontFamily.Asset("brand")))
+    val style = mapPrototypeStyle(PrototypeStyle(fontFamily = PrototypeFontFamily.Asset("brand")))
     assertEquals("brand", style.fontAsset)
     assertEquals(FontFamily.Default, style.fontFamily)
     assertNull(
-      mapOverlayStyle(OverlayStyle(fontFamily = OverlayFontFamily.Named("serif"))).fontAsset,
+      mapPrototypeStyle(PrototypeStyle(fontFamily = PrototypeFontFamily.Named("serif"))).fontAsset,
     )
   }
 
   @Test
   fun `asset references include font assets from style and styleWhen`() {
     val root =
-      OverlayColumnNode(
+      PrototypeColumnNode(
         children =
           listOf(
-            OverlayTextNode(
+            PrototypeTextNode(
               text = "a",
-              style = OverlayStyle(fontFamily = OverlayFontFamily.Asset("font-a")),
+              style = PrototypeStyle(fontFamily = PrototypeFontFamily.Asset("font-a")),
               styleWhen =
                 listOf(
-                  OverlayStyleWhen(
-                    OverlayCondition(key = "k"),
-                    OverlayStyle(fontFamily = OverlayFontFamily.Asset("font-b")),
+                  PrototypeStyleWhen(
+                    PrototypeCondition(key = "k"),
+                    PrototypeStyle(fontFamily = PrototypeFontFamily.Asset("font-b")),
                   ),
                 ),
             ),
-            OverlayImageNode(asset = "pic"),
-            OverlayTextNode(
+            PrototypeImageNode(asset = "pic"),
+            PrototypeTextNode(
               text = "b",
-              style = OverlayStyle(fontFamily = OverlayFontFamily.Named("serif")),
+              style = PrototypeStyle(fontFamily = PrototypeFontFamily.Named("serif")),
             ),
           ),
       )
-    assertEquals(listOf("font-a", "font-b", "pic"), overlayAssetReferences(root))
+    assertEquals(listOf("font-a", "font-b", "pic"), prototypeAssetReferences(root))
   }
 
-  private class FakeFontSource : OverlayAssetSource {
+  private class FakeFontSource : PrototypeAssetSource {
     val present = mutableMapOf<String, File>()
 
-    override fun lookup(id: String) = present[id]?.let { OverlayAssetInfo(id, "font/ttf", 1) }
+    override fun lookup(id: String) = present[id]?.let { PrototypeAssetInfo(id, "font/ttf", 1) }
 
     override fun read(id: String): ByteArray? = null
 
     override fun file(id: String): File? = present[id]
 
-    override fun setChangeListener(listener: OverlayAssetChangeListener?) = Unit
+    override fun setChangeListener(listener: PrototypeAssetChangeListener?) = Unit
   }
 
-  private class CountingLoader(private val result: () -> FontFamily?) : OverlayFontLoader {
+  private class CountingLoader(private val result: () -> FontFamily?) : PrototypeFontLoader {
     var loads = 0
 
     override fun load(file: File): FontFamily? {
@@ -170,8 +170,8 @@ class OverlayFontAssetTest {
   private val source = FakeFontSource().apply { present["brand"] = File("asset-0") }
   private val warnings = mutableListOf<String>()
 
-  private fun cache(loader: OverlayFontLoader) =
-    OverlayFontCache(source, loader) { message, _ -> warnings += message }
+  private fun cache(loader: PrototypeFontLoader) =
+    PrototypeFontCache(source, loader) { message, _ -> warnings += message }
 
   @Test
   fun `a font loads once per asset and is served from the cache after that`() {

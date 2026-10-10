@@ -3,7 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.util.JsonReader
 import android.util.JsonToken
 import android.util.Log
-import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetLimits
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetLimits
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStreamReader
@@ -47,8 +47,9 @@ class InboundFrameLimits internal constructor(private val maxBytesByType: Map<St
     val DEFAULT: InboundFrameLimits =
       InboundFrameLimits(
         mapOf(
-          "put_overlay_asset" to OverlayAssetLimits().maxEncodedLength + ENVELOPE_ALLOWANCE_BYTES,
-          "remove_overlay_asset" to ENVELOPE_ALLOWANCE_BYTES,
+          "put_prototype_asset" to
+            PrototypeAssetLimits().maxEncodedLength + ENVELOPE_ALLOWANCE_BYTES,
+          "remove_prototype_asset" to ENVELOPE_ALLOWANCE_BYTES,
         ),
       )
   }

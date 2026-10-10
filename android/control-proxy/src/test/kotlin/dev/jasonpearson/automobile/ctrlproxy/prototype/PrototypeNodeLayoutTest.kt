@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.os.Looper
 import android.view.View
@@ -23,15 +23,15 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 
-/** Layout, hit area and accessibility bounds of rendered overlay nodes (#10435, #10436). */
+/** Layout, hit area and accessibility bounds of rendered prototype nodes (#10435, #10436). */
 @RunWith(RobolectricTestRunner::class)
-class OverlayNodeLayoutTest {
-  private val tap = listOf<OverlayAction>(OverlayEmitAction("tapped"))
+class PrototypeNodeLayoutTest {
+  private val tap = listOf<PrototypeAction>(PrototypeEmitAction("tapped"))
 
-  private fun render(root: OverlayNode, theme: OverlaySpecTheme? = null): SemanticsNode {
-    val spec = OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), root = root)
+  private fun render(root: PrototypeNode, theme: PrototypeSpecTheme? = null): SemanticsNode {
+    val spec = PrototypeSpec("panel", PrototypeWindow(PrototypeFullscreenPlacement()), root = root)
     val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
-    activity.setContent { OverlaySpecContent(mapOverlaySpec(spec).root, theme) }
+    activity.setContent { PrototypeSpecContent(mapPrototypeSpec(spec).root, theme) }
     shadowOf(Looper.getMainLooper()).idle()
     val view = checkNotNull(composeView(activity.window.decorView))
     return (view as RootForTest).semanticsOwner.unmergedRootSemanticsNode
@@ -75,18 +75,18 @@ class OverlayNodeLayoutTest {
   fun `a padded tappable node reports its padding inside its bounds`() {
     val root =
       render(
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayBoxNode(
+              PrototypeBoxNode(
                 testTag = "done",
                 onTap = tap,
                 style =
-                  OverlayStyle(
-                    padding = OverlayPadding(start = 24.0, end = 24.0, top = 10.0, bottom = 10.0),
+                  PrototypeStyle(
+                    padding = PrototypePadding(start = 24.0, end = 24.0, top = 10.0, bottom = 10.0),
                   ),
                 children =
-                  listOf(OverlayTextNode(text = "Done", style = OverlayStyle(textSize = 30.0))),
+                  listOf(PrototypeTextNode(text = "Done", style = PrototypeStyle(textSize = 30.0))),
               ),
             ),
         ),
@@ -108,15 +108,21 @@ class OverlayNodeLayoutTest {
 
   @Test
   fun `a small tappable node keeps its drawn size inside a 48 dp touch target`() {
-    val small = OverlayStyle(width = OverlayDimension.Dp(20.0), height = OverlayDimension.Dp(20.0))
+    val small =
+      PrototypeStyle(width = PrototypeDimension.Dp(20.0), height = PrototypeDimension.Dp(20.0))
     val root =
       render(
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayBoxNode(testTag = "small", onTap = tap, style = small, children = emptyList()),
-              OverlayBoxNode(testTag = "plain", style = small, children = emptyList()),
-              OverlayBoxNode(testTag = "after", style = small, children = emptyList()),
+              PrototypeBoxNode(
+                testTag = "small",
+                onTap = tap,
+                style = small,
+                children = emptyList(),
+              ),
+              PrototypeBoxNode(testTag = "plain", style = small, children = emptyList()),
+              PrototypeBoxNode(testTag = "after", style = small, children = emptyList()),
             ),
         ),
       )
@@ -134,7 +140,7 @@ class OverlayNodeLayoutTest {
   @Test
   fun `text size is in sp and follows the system font scale`() {
     RuntimeEnvironment.setFontScale(2f)
-    val root = render(OverlayTextNode(text = "Scaled", style = OverlayStyle(textSize = 20.0)))
+    val root = render(PrototypeTextNode(text = "Scaled", style = PrototypeStyle(textSize = 20.0)))
     val layouts = mutableListOf<TextLayoutResult>()
     checkNotNull(root.labelled("Scaled").config[SemanticsActions.GetTextLayoutResult].action)(
       layouts,
@@ -155,16 +161,16 @@ class OverlayNodeLayoutTest {
 
   @Test
   fun `weighted children without a width share the row`() {
-    val weighted = OverlayStyle(weight = 1.0, height = OverlayDimension.Dp(20.0))
+    val weighted = PrototypeStyle(weight = 1.0, height = PrototypeDimension.Dp(20.0))
     val root =
       render(
-        OverlayRowNode(
+        PrototypeRowNode(
           testTag = "row",
-          style = OverlayStyle(width = OverlayDimension.Dp(200.0)),
+          style = PrototypeStyle(width = PrototypeDimension.Dp(200.0)),
           children =
             listOf(
-              OverlayBoxNode(testTag = "a", style = weighted, children = emptyList()),
-              OverlayBoxNode(testTag = "b", style = weighted, children = emptyList()),
+              PrototypeBoxNode(testTag = "a", style = weighted, children = emptyList()),
+              PrototypeBoxNode(testTag = "b", style = weighted, children = emptyList()),
             ),
         ),
       )
@@ -175,15 +181,15 @@ class OverlayNodeLayoutTest {
 
   @Test
   fun `weighted children without a height share the column`() {
-    val weighted = OverlayStyle(weight = 1.0, width = OverlayDimension.Dp(20.0))
+    val weighted = PrototypeStyle(weight = 1.0, width = PrototypeDimension.Dp(20.0))
     val root =
       render(
-        OverlayColumnNode(
-          style = OverlayStyle(height = OverlayDimension.Dp(120.0)),
+        PrototypeColumnNode(
+          style = PrototypeStyle(height = PrototypeDimension.Dp(120.0)),
           children =
             listOf(
-              OverlayBoxNode(testTag = "a", style = weighted, children = emptyList()),
-              OverlayBoxNode(
+              PrototypeBoxNode(testTag = "a", style = weighted, children = emptyList()),
+              PrototypeBoxNode(
                 testTag = "b",
                 style = weighted.copy(weight = 2.0),
                 children = emptyList(),
@@ -199,35 +205,35 @@ class OverlayNodeLayoutTest {
   fun `min and max bounds clamp the authored size`() {
     val root =
       render(
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayBoxNode(
+              PrototypeBoxNode(
                 testTag = "maxFill",
                 style =
-                  OverlayStyle(
-                    width = OverlayDimension.Fill,
+                  PrototypeStyle(
+                    width = PrototypeDimension.Fill,
                     maxWidth = 50.0,
-                    height = OverlayDimension.Dp(10.0),
+                    height = PrototypeDimension.Dp(10.0),
                   ),
                 children = emptyList(),
               ),
-              OverlayBoxNode(
+              PrototypeBoxNode(
                 testTag = "minDp",
                 style =
-                  OverlayStyle(
-                    width = OverlayDimension.Dp(10.0),
+                  PrototypeStyle(
+                    width = PrototypeDimension.Dp(10.0),
                     minWidth = 80.0,
-                    height = OverlayDimension.Dp(10.0),
+                    height = PrototypeDimension.Dp(10.0),
                   ),
                 children = emptyList(),
               ),
-              OverlayBoxNode(
+              PrototypeBoxNode(
                 testTag = "maxDp",
                 style =
-                  OverlayStyle(
-                    width = OverlayDimension.Dp(10.0),
-                    height = OverlayDimension.Dp(200.0),
+                  PrototypeStyle(
+                    width = PrototypeDimension.Dp(10.0),
+                    height = PrototypeDimension.Dp(200.0),
                     maxHeight = 40.0,
                   ),
                 children = emptyList(),
@@ -244,23 +250,24 @@ class OverlayNodeLayoutTest {
   fun `an icon-only tappable container is labelled by its icon, not its kind`() {
     val root =
       render(
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayBoxNode(
+              PrototypeBoxNode(
                 testTag = "fab",
                 onTap = tap,
-                children = listOf(OverlayIconNode(name = "add")),
+                children = listOf(PrototypeIconNode(name = "add")),
               ),
-              OverlayRowNode(
+              PrototypeRowNode(
                 testTag = "settings",
                 onTap = tap,
-                children = listOf(OverlayIconNode(name = "settings")),
+                children = listOf(PrototypeIconNode(name = "settings")),
               ),
-              OverlayRowNode(
+              PrototypeRowNode(
                 testTag = "save",
                 onTap = tap,
-                children = listOf(OverlayIconNode(name = "save"), OverlayTextNode(text = "Save")),
+                children =
+                  listOf(PrototypeIconNode(name = "save"), PrototypeTextNode(text = "Save")),
               ),
             ),
         ),
@@ -277,17 +284,17 @@ class OverlayNodeLayoutTest {
   fun `plain text inherits the theme font family unless it names its own`() {
     val root =
       render(
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayTextNode(text = "Plain"),
-              OverlayTextNode(
+              PrototypeTextNode(text = "Plain"),
+              PrototypeTextNode(
                 text = "Mono",
-                style = OverlayStyle(fontFamily = OverlayFontFamily.Named("monospace")),
+                style = PrototypeStyle(fontFamily = PrototypeFontFamily.Named("monospace")),
               ),
             ),
         ),
-        OverlaySpecTheme(typography = OverlaySpecThemeTypography(fontFamily = "serif")),
+        PrototypeSpecTheme(typography = PrototypeSpecThemeTypography(fontFamily = "serif")),
       )
     assertEquals(FontFamily.Serif, root.textStyleOf("Plain").fontFamily)
     assertEquals(FontFamily.Monospace, root.textStyleOf("Mono").fontFamily)

@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -18,43 +18,43 @@ import org.robolectric.RobolectricTestRunner
  * translucent frame while its non-anchored sibling kept fading.
  */
 @RunWith(RobolectricTestRunner::class)
-class OverlayAnchorFadeTest {
+class PrototypeAnchorFadeTest {
   @get:Rule val compose = createComposeRule()
 
-  private fun exitingParent(transition: String?): OverlayNode =
-    OverlayBoxNode(
+  private fun exitingParent(transition: String?): PrototypeNode =
+    PrototypeBoxNode(
       testTag = "parent",
       transition = transition,
-      visibleWhen = OverlayCondition("show", OverlayScalar.BooleanValue(true)),
+      visibleWhen = PrototypeCondition("show", PrototypeScalar.BooleanValue(true)),
       children =
         listOf(
-          OverlayBoxNode(
+          PrototypeBoxNode(
             testTag = "child",
-            style = OverlayStyle(background = "#FF0000"),
-            anchor = OverlayBoundsAnchor(OverlayBounds(100.0, 200.0, 200.0, 200.0), "cover"),
+            style = PrototypeStyle(background = "#FF0000"),
+            anchor = PrototypeBoundsAnchor(PrototypeBounds(100.0, 200.0, 200.0, 200.0), "cover"),
             children = emptyList(),
           ),
-          OverlayTextNode(text = "sibling", testTag = "sibling"),
+          PrototypeTextNode(text = "sibling", testTag = "sibling"),
         ),
     )
 
   private fun startExit(transition: String?) {
     val spec =
-      OverlaySpec(
+      PrototypeSpec(
         "panel",
-        OverlayWindow(OverlayFullscreenPlacement()),
-        mapOf("show" to OverlayScalar.BooleanValue(true)),
+        PrototypeWindow(PrototypeFullscreenPlacement()),
+        mapOf("show" to PrototypeScalar.BooleanValue(true)),
         exitingParent(transition),
       )
     var sequence = 0L
-    val runtime = OverlayRuntime(spec, nextSequence = { ++sequence })
-    compose.setContent { OverlayRuntimeContent(runtime) { runtime.handle(it) } }
+    val runtime = PrototypeRuntime(spec, nextSequence = { ++sequence })
+    compose.setContent { PrototypeRuntimeContent(runtime) { runtime.handle(it) } }
     compose.waitForIdle()
     compose.mainClock.autoAdvance = false
     runBlocking {
       runtime.handle(
-        OverlayInteraction.Tap(
-          listOf(OverlaySetStateAction("show", OverlayScalar.BooleanValue(false))),
+        PrototypeInteraction.Tap(
+          listOf(PrototypeSetStateAction("show", PrototypeScalar.BooleanValue(false))),
         ),
       )
     }
@@ -66,11 +66,11 @@ class OverlayAnchorFadeTest {
   /** The anchored child's fade, or null once it is no longer composed. */
   private fun childFade(): Float? =
     compose
-      .onAllNodes(SemanticsMatcher.keyIsDefined(OverlayAnchorFadeKey), useUnmergedTree = true)
+      .onAllNodes(SemanticsMatcher.keyIsDefined(PrototypeAnchorFadeKey), useUnmergedTree = true)
       .fetchSemanticsNodes()
       .singleOrNull()
       ?.config
-      ?.get(OverlayAnchorFadeKey)
+      ?.get(PrototypeAnchorFadeKey)
 
   private fun assertTracksParentThroughExit(transition: String?) {
     startExit(transition)

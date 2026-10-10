@@ -5,15 +5,15 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.*
 
 /** Canonical errors are computed from JSON structure, never from decoder exception strings. */
-data class OverlaySpecError(val path: String, val message: String)
+data class PrototypeSpecError(val path: String, val message: String)
 
-sealed class OverlaySpecValidation {
-  data class Success(val spec: OverlaySpec) : OverlaySpecValidation()
+sealed class PrototypeSpecValidation {
+  data class Success(val spec: PrototypeSpec) : PrototypeSpecValidation()
 
-  data class Failure(val error: OverlaySpecError) : OverlaySpecValidation()
+  data class Failure(val error: PrototypeSpecError) : PrototypeSpecValidation()
 }
 
-object OverlaySpecValidator {
+object PrototypeSpecValidator {
   private val pathKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
   private val stateKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
   private val colorPattern = Regex("^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$")
@@ -27,7 +27,7 @@ object OverlaySpecValidator {
     json
       .parseToJsonElement(
         checkNotNull(javaClass.getResourceAsStream("/prototype-spec-contract.json")) {
-            "Missing overlay structural contract"
+            "Missing prototype structural contract"
           }
           .bufferedReader()
           .use { it.readText() },
@@ -35,14 +35,14 @@ object OverlaySpecValidator {
       .jsonObject
   private val definitions = contract.getValue("definitions").jsonObject
   private val limits = contract.getValue("limits").jsonObject
-  val MAX_OVERLAY_NODES: Int = limit("MAX_OVERLAY_NODES")
-  val MAX_OVERLAY_DEPTH: Int = limit("MAX_OVERLAY_DEPTH")
-  val MAX_OVERLAY_IMAGES: Int = limit("MAX_OVERLAY_IMAGES")
-  val MAX_OVERLAY_SPEC_BYTES: Int = limit("MAX_OVERLAY_SPEC_BYTES")
-  val MAX_OVERLAY_EMIT_PAYLOAD_BYTES: Int = limit("MAX_OVERLAY_EMIT_PAYLOAD_BYTES")
-  val MAX_OVERLAY_EMIT_PAYLOAD_DEPTH: Int = limit("MAX_OVERLAY_EMIT_PAYLOAD_DEPTH")
-  val MAX_OVERLAY_SELECTOR_DEPTH: Int = limit("MAX_OVERLAY_SELECTOR_DEPTH")
-  val MAX_OVERLAY_CONDITION_DEPTH: Int = limit("MAX_OVERLAY_CONDITION_DEPTH")
+  val MAX_PROTOTYPE_NODES: Int = limit("MAX_PROTOTYPE_NODES")
+  val MAX_PROTOTYPE_DEPTH: Int = limit("MAX_PROTOTYPE_DEPTH")
+  val MAX_PROTOTYPE_IMAGES: Int = limit("MAX_PROTOTYPE_IMAGES")
+  val MAX_PROTOTYPE_SPEC_BYTES: Int = limit("MAX_PROTOTYPE_SPEC_BYTES")
+  val MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES: Int = limit("MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES")
+  val MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH: Int = limit("MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH")
+  val MAX_PROTOTYPE_SELECTOR_DEPTH: Int = limit("MAX_PROTOTYPE_SELECTOR_DEPTH")
+  val MAX_PROTOTYPE_CONDITION_DEPTH: Int = limit("MAX_PROTOTYPE_CONDITION_DEPTH")
   val nodeTypes: Set<String> = variants("node")
   val actionTypes: Set<String> = variants("action")
   val placementTypes: Set<String> = variants("placement")
@@ -52,19 +52,19 @@ object OverlaySpecValidator {
   private fun variants(name: String) =
     definitions.getValue(name).jsonObject.getValue("variants").jsonObject.keys
 
-  fun validate(input: String): OverlaySpecValidation {
-    if (input.toByteArray(Charsets.UTF_8).size > MAX_OVERLAY_SPEC_BYTES) {
-      return OverlaySpecValidation.Failure(fail("", "Spec byte limit exceeded"))
+  fun validate(input: String): PrototypeSpecValidation {
+    if (input.toByteArray(Charsets.UTF_8).size > MAX_PROTOTYPE_SPEC_BYTES) {
+      return PrototypeSpecValidation.Failure(fail("", "Spec byte limit exceeded"))
     }
-    if (hasUnescapedControl(input)) return OverlaySpecValidation.Failure(fail("", "Invalid JSON"))
+    if (hasUnescapedControl(input)) return PrototypeSpecValidation.Failure(fail("", "Invalid JSON"))
     return try {
       val element = json.parseToJsonElement(input)
-      if (!validNumberTokens(element)) OverlaySpecValidation.Failure(fail("", "Invalid JSON"))
+      if (!validNumberTokens(element)) PrototypeSpecValidation.Failure(fail("", "Invalid JSON"))
       else validateElement(element)
     } catch (_: SerializationException) {
-      OverlaySpecValidation.Failure(fail("", "Invalid JSON"))
+      PrototypeSpecValidation.Failure(fail("", "Invalid JSON"))
     } catch (_: IllegalArgumentException) {
-      OverlaySpecValidation.Failure(fail("", "Invalid JSON"))
+      PrototypeSpecValidation.Failure(fail("", "Invalid JSON"))
     }
   }
 
@@ -130,22 +130,22 @@ object OverlaySpecValidator {
     }
   }
 
-  private fun validateElement(value: JsonElement): OverlaySpecValidation {
+  private fun validateElement(value: JsonElement): PrototypeSpecValidation {
     val context = Context()
     val error =
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
-        ?: OverlayRepeatValidator.validate(value)
+        ?: PrototypeRepeatValidator.validate(value)
         ?: pagerErrors(context)
         ?: stateTypeErrors(value, context)
-    if (error != null) return OverlaySpecValidation.Failure(error)
+    if (error != null) return PrototypeSpecValidation.Failure(error)
     return try {
-      OverlaySpecValidation.Success(
-        json.decodeFromJsonElement<OverlaySpec>(
+      PrototypeSpecValidation.Success(
+        json.decodeFromJsonElement<PrototypeSpec>(
           normalizeIntegers(value, definitions.getValue("spec").jsonObject),
         ),
       )
     } catch (_: SerializationException) {
-      OverlaySpecValidation.Failure(fail("", "Internal model/contract mismatch"))
+      PrototypeSpecValidation.Failure(fail("", "Internal model/contract mismatch"))
     }
   }
 
@@ -184,18 +184,18 @@ object OverlaySpecValidator {
   /** A node or action; [item] is the repeat item its state keys were bound to, if any. */
   private data class Located(val value: JsonObject, val path: String, val item: Int? = null)
 
-  private fun OverlaySpecError.forItem(item: Int?): OverlaySpecError =
+  private fun PrototypeSpecError.forItem(item: Int?): PrototypeSpecError =
     if (item == null) this else copy(message = "$message (repeat item $item)")
 
   /**
    * State-type checks over every repeat instance: a node or action whose state keys hold
    * placeholders is checked once per item with those keys bound (#11051).
    */
-  private fun stateTypeErrors(value: JsonElement, context: Context): OverlaySpecError? {
+  private fun stateTypeErrors(value: JsonElement, context: Context): PrototypeSpecError? {
     val data = value as? JsonObject ?: JsonObject(emptyMap())
-    val scopes = OverlayRepeatValidator.scopes(value)
+    val scopes = PrototypeRepeatValidator.scopes(value)
     fun List<Located>.instances() = flatMap { located ->
-      OverlayRepeatValidator.keyInstances(scopes, located.value, located.path).map { (bound, item)
+      PrototypeRepeatValidator.keyInstances(scopes, located.value, located.path).map { (bound, item)
         ->
         Located(bound, located.path, item)
       }
@@ -217,7 +217,8 @@ object OverlaySpecValidator {
     var conditionDepth = 0
   }
 
-  private fun fail(path: String, message: String) = OverlaySpecError(path.ifEmpty { "$" }, message)
+  private fun fail(path: String, message: String) =
+    PrototypeSpecError(path.ifEmpty { "$" }, message)
 
   private fun keyPath(path: String, key: String): String =
     if (pathKeyPattern.matches(key)) {
@@ -239,7 +240,7 @@ object OverlaySpecValidator {
     path: String,
     context: Context,
     depth: Int,
-  ): OverlaySpecError? =
+  ): PrototypeSpecError? =
     when (rule.text("kind")) {
       "ref" -> visitReference(value, rule, path, context, depth)
       "tagged" -> visitTagged(value, rule, path, context, depth)
@@ -259,21 +260,21 @@ object OverlaySpecValidator {
     path: String,
     context: Context,
     depth: Int,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     val target = definitions.getValue(checkNotNull(rule.text("name"))).jsonObject
     if (rule.text("name") == "container") return visitContainer(value, target, path, context, depth)
     if (rule.text("name") == "item" && (value as? JsonObject)?.text("image") != null) {
       context.images++
-      if (context.images > MAX_OVERLAY_IMAGES) return fail("$path.image", "Image limit exceeded")
+      if (context.images > MAX_PROTOTYPE_IMAGES) return fail("$path.image", "Image limit exceeded")
     }
     if (rule.text("name") == "condition") return visitCondition(value, target, path, context, depth)
     if (rule.text("name") != "node") return walk(value, target, path, context, depth)
     val node = value as? JsonObject ?: return fail(path, "Expected object")
     context.nodes.add(Located(node, path))
-    if (context.nodes.size > MAX_OVERLAY_NODES) return fail(path, "Node limit exceeded")
-    if (depth + 1 > MAX_OVERLAY_DEPTH) return fail(path, "Tree depth limit exceeded")
+    if (context.nodes.size > MAX_PROTOTYPE_NODES) return fail(path, "Node limit exceeded")
+    if (depth + 1 > MAX_PROTOTYPE_DEPTH) return fail(path, "Tree depth limit exceeded")
     if (node.text("type") == "image") context.images++
-    if (context.images > MAX_OVERLAY_IMAGES) return fail(path, "Image limit exceeded")
+    if (context.images > MAX_PROTOTYPE_IMAGES) return fail(path, "Image limit exceeded")
     return walk(value, target, path, context, depth + 1)
   }
 
@@ -283,9 +284,9 @@ object OverlaySpecValidator {
     path: String,
     context: Context,
     depth: Int,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     context.selectorDepth++
-    if (context.selectorDepth > MAX_OVERLAY_SELECTOR_DEPTH)
+    if (context.selectorDepth > MAX_PROTOTYPE_SELECTOR_DEPTH)
       return fail(path, "Selector depth limit exceeded")
     val error = walk(value, target, path, context, depth)
     context.selectorDepth--
@@ -298,9 +299,9 @@ object OverlaySpecValidator {
     path: String,
     context: Context,
     depth: Int,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     context.conditionDepth++
-    if (context.conditionDepth > MAX_OVERLAY_CONDITION_DEPTH)
+    if (context.conditionDepth > MAX_PROTOTYPE_CONDITION_DEPTH)
       return fail(path, "Condition depth limit exceeded")
     val error = walk(value, target, path, context, depth)
     context.conditionDepth--
@@ -313,7 +314,7 @@ object OverlaySpecValidator {
     path: String,
     context: Context,
     depth: Int,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     val data = value as? JsonObject ?: return fail(path, "Expected object")
     val variant =
       rule.getValue("variants").jsonObject[data.text("type")] as? JsonObject
@@ -328,7 +329,7 @@ object OverlaySpecValidator {
     path: String,
     context: Context,
     depth: Int,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     val data = value as? JsonObject ?: return fail(path, "Expected object")
     val fields = rule.getValue("fields").jsonObject
     for (key in (data.keys + fields.keys).sorted()) {
@@ -349,7 +350,7 @@ object OverlaySpecValidator {
     data: JsonObject,
     rule: JsonObject,
     path: String,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     if (rule.flag("binding") && data.containsKey("pager") == data.containsKey("stateKey")) {
       return fail(keyPath(path, "pager"), "Exactly one of pager or stateKey is required")
     }
@@ -369,7 +370,11 @@ object OverlaySpecValidator {
   }
 
   /** `exactlyOne` picks one form of a union-like object; `dependents` ties fields to a trigger. */
-  private fun formConstraint(data: JsonObject, rule: JsonObject, path: String): OverlaySpecError? {
+  private fun formConstraint(
+    data: JsonObject,
+    rule: JsonObject,
+    path: String,
+  ): PrototypeSpecError? {
     val exactlyOne = (rule["exactlyOne"] as? JsonArray)?.map { it.jsonPrimitive.content }
     if (exactlyOne != null && exactlyOne.count { data.containsKey(it) } != 1) {
       return fail(
@@ -399,7 +404,7 @@ object OverlaySpecValidator {
     path: String,
     context: Context,
     depth: Int,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     val array = value as? JsonArray ?: return fail(path, "Expected array")
     if (
       array.size < rule.number("min", 0.0) ||
@@ -428,7 +433,7 @@ object OverlaySpecValidator {
     path: String,
     context: Context,
     depth: Int,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     val data = value as? JsonObject ?: return fail(path, "Expected object")
     for (key in data.keys.sorted()) {
       val childPath = keyPath(path, key)
@@ -446,7 +451,7 @@ object OverlaySpecValidator {
     path: String,
     context: Context,
     depth: Int,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     val options = rule.getValue("options").jsonArray.map { it.jsonObject }
     val candidates = options.filter { option ->
       when (option.text("kind")) {
@@ -480,7 +485,7 @@ object OverlaySpecValidator {
           (rule.flag("empty") || text.isNotEmpty()) &&
           (!rule.flag("nonblank") || !blankTextPattern.matches(text))
       "key" -> text != null && stateKeyPattern.matches(text)
-      "boundKey" -> text != null && OverlayRepeatTemplate.isBoundKey(text)
+      "boundKey" -> text != null && PrototypeRepeatTemplate.isBoundKey(text)
       "color" -> text != null && colorPattern.matches(text)
       "number" -> numberValid(value, rule)
       "boolean" -> primitive != null && !primitive.isString && primitive.booleanOrNull != null
@@ -498,7 +503,7 @@ object OverlaySpecValidator {
 
   // Numeric reserve avoids depending on JSON number token spellings across runtimes.
   private fun jsonCost(value: JsonElement, depth: Int = 0): Double {
-    if (depth > MAX_OVERLAY_EMIT_PAYLOAD_DEPTH) return Double.POSITIVE_INFINITY
+    if (depth > MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH) return Double.POSITIVE_INFINITY
     return when (value) {
       JsonNull -> 4.0
       is JsonObject ->
@@ -519,7 +524,7 @@ object OverlaySpecValidator {
     return if (value.doubleOrNull?.isFinite() == true) 32.0 else Double.POSITIVE_INFINITY
   }
 
-  private fun pagerErrors(context: Context): OverlaySpecError? {
+  private fun pagerErrors(context: Context): PrototypeSpecError? {
     val pagers = mutableSetOf<String>()
     for ((value, path) in context.nodes) {
       if (value.text("type") != "pager") continue
@@ -538,7 +543,7 @@ object OverlaySpecValidator {
     value: JsonObject,
     path: String,
     stored: JsonPrimitive?,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     val name = if (value.text("type") == "segmentedButton") "Segmented button" else "Radio group"
     if (stored == null || !stored.isString)
       return fail("$path.stateKey", "$name requires a string state key")
@@ -551,7 +556,7 @@ object OverlaySpecValidator {
   }
 
   /** A list item's trailing switch or checkbox binds a boolean, like the standalone controls. */
-  private fun listItemBindingErrors(context: Context, data: JsonObject): OverlaySpecError? {
+  private fun listItemBindingErrors(context: Context, data: JsonObject): PrototypeSpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
     for ((value, path, item) in context.nodes) {
       if (value.text("type") != "listItem") continue
@@ -574,7 +579,7 @@ object OverlaySpecValidator {
     value: JsonObject,
     path: String,
     stored: JsonPrimitive?,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     fun JsonObject.double(key: String) = (get(key) as? JsonPrimitive)?.doubleOrNull
     val min = value.double("min")
     val max = value.double("max")
@@ -594,7 +599,7 @@ object OverlaySpecValidator {
     value: JsonObject,
     path: String,
     stored: JsonPrimitive?,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     val bound = value.text("stateKey") != null
     val variant = value.text("variant")
     if (variant == "filter" && !bound)
@@ -607,7 +612,7 @@ object OverlaySpecValidator {
   }
 
   /** An extended FAB (one with a label) has a single size, so `size` applies only to icon FABs. */
-  private fun fabErrors(value: JsonObject, path: String): OverlaySpecError? =
+  private fun fabErrors(value: JsonObject, path: String): PrototypeSpecError? =
     if (value.text("label") != null && value.containsKey("size"))
       fail("$path.size", "Extended FAB cannot set size")
     else null
@@ -619,7 +624,7 @@ object OverlaySpecValidator {
     value: JsonObject,
     path: String,
     stored: JsonPrimitive?,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     if (value.text("stateKey") == null)
       return if (value.containsKey("max")) fail("$path.max", "Requires stateKey") else null
     val max = (value["max"] as? JsonPrimitive)?.doubleOrNull ?: 1.0
@@ -635,7 +640,7 @@ object OverlaySpecValidator {
     value: JsonObject,
     path: String,
     state: JsonObject,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     for ((field, max, unit) in
       listOf(Triple("hourKey", 23, "hour"), Triple("minuteKey", 59, "minute"))) {
       val stored = value.text(field)?.let { state[it] as? JsonPrimitive }
@@ -652,7 +657,7 @@ object OverlaySpecValidator {
     value: JsonObject,
     path: String,
     state: JsonObject,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     val stored = value.text("stateKey")?.let { state[it] as? JsonPrimitive }
     return when (value.text("type")) {
       "slider" -> sliderErrors(value, path, stored)
@@ -661,13 +666,13 @@ object OverlaySpecValidator {
       "progress" -> progressErrors(value, path, stored)
       "timePicker" -> timePickerErrors(value, path, state)
       "datePicker" ->
-        if (isOverlayDate(stored?.takeIf { it.isString }?.content)) null
+        if (isPrototypeDate(stored?.takeIf { it.isString }?.content)) null
         else fail("$path.stateKey", "Date picker requires a YYYY-MM-DD state key in 1900..2100")
       else -> null
     }
   }
 
-  private fun bindingErrors(context: Context, data: JsonObject): OverlaySpecError? {
+  private fun bindingErrors(context: Context, data: JsonObject): PrototypeSpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
     for ((value, path, item) in context.nodes) {
       componentBindingErrors(value, path, state)?.let {
@@ -701,7 +706,7 @@ object OverlaySpecValidator {
   private val modalNames =
     mapOf("bottomSheet" to "Sheet", "dialog" to "Dialog", "snackbar" to "Snackbar")
 
-  private fun sheetBindingErrors(context: Context, data: JsonObject): OverlaySpecError? {
+  private fun sheetBindingErrors(context: Context, data: JsonObject): PrototypeSpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
     for ((value, path, item) in context.nodes) {
       val name = modalNames[value.text("type")] ?: continue
@@ -718,7 +723,7 @@ object OverlaySpecValidator {
     return null
   }
 
-  private fun stateActionErrors(context: Context, data: JsonObject): OverlaySpecError? {
+  private fun stateActionErrors(context: Context, data: JsonObject): PrototypeSpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
     for ((value, path, item) in context.actions) {
       val stored = state[value.text("key") ?: continue] as? JsonPrimitive
@@ -750,7 +755,7 @@ object OverlaySpecValidator {
   private val daysInMonth = intArrayOf(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 
   /** A `YYYY-MM-DD` calendar date in 1900..2100, the Material date picker's year range. */
-  fun isOverlayDate(value: String?): Boolean {
+  fun isPrototypeDate(value: String?): Boolean {
     if (value == null || !datePattern.matches(value)) return false
     val (year, month, day) = value.split("-").map(String::toInt)
     if (year !in 1900..2100 || month !in 1..12) return false

@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.protocol.*
@@ -9,24 +9,24 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** An overlay follows the app it was shown over (#10261). */
+/** A prototype follows the app it was shown over (#10261). */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayForegroundTest {
+class PrototypeForegroundTest {
   private val app = AccessibilityWindowInfo.TYPE_APPLICATION
   private val ime = AccessibilityWindowInfo.TYPE_INPUT_METHOD
   private val system = AccessibilityWindowInfo.TYPE_SYSTEM
   private val a11yOverlay = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
 
-  private val host = FakeInteractiveOverlayHost()
-  private val timer = FakeOverlayTimer()
-  private val events = mutableListOf<OverlayEvent>()
-  private val statuses = mutableListOf<List<OverlayStatusEntry>>()
+  private val host = FakePrototypeHost()
+  private val timer = FakePrototypeTimer()
+  private val events = mutableListOf<PrototypeEvent>()
+  private val statuses = mutableListOf<List<PrototypeStatusEntry>>()
   private var detached = 0
   private var foreground: String? = "com.example.app"
-  private lateinit var controller: OverlayController
+  private lateinit var controller: PrototypeController
   private val tracker =
-    OverlayForegroundTracker(
+    PrototypeForegroundTracker(
       timer,
       ownPackage = "dev.jasonpearson.automobile.ctrlproxy",
       foregroundNow = { foreground },
@@ -35,45 +35,45 @@ class OverlayForegroundTest {
 
   init {
     controller =
-      OverlayController(
+      PrototypeController(
         host,
-        object : OverlayResultSink {
+        object : PrototypeResultSink {
           override suspend fun send(requestId: String?, success: Boolean, error: String?) = Unit
 
-          override suspend fun sendOverlayStatus(
+          override suspend fun sendPrototypeStatus(
             requestId: String?,
-            overlays: List<OverlayStatusEntry>,
+            prototypes: List<PrototypeStatusEntry>,
             droppedEvents: Long,
           ) {
-            statuses += overlays
+            statuses += prototypes
           }
         },
         onDismissed = { detached++ },
-        eventSink = OverlayEventSink { events += it },
+        eventSink = PrototypeEventSink { events += it },
         clock = { timer.now },
         // Mirrors CtrlProxy: the lock-screen check is false here, suspension alone blocks.
-        lifecycle = OverlayLifecycle(timer, isBlocked = { tracker.suspended }),
+        lifecycle = PrototypeLifecycle(timer, isBlocked = { tracker.suspended }),
         foreground = tracker,
       )
   }
 
   private fun spec(id: String = "panel") =
-    OverlaySpec(
+    PrototypeSpec(
       id,
-      OverlayWindow(OverlayFullscreenPlacement()),
-      root = OverlayTextNode(text = "panel"),
-      state = mapOf("count" to OverlayScalar.Numeric(3.0)),
+      PrototypeWindow(PrototypeFullscreenPlacement()),
+      root = PrototypeTextNode(text = "panel"),
+      state = mapOf("count" to PrototypeScalar.Numeric(3.0)),
     )
 
-  private suspend fun settle() = timer.advance(OVERLAY_FOREGROUND_DEBOUNCE_MILLIS)
+  private suspend fun settle() = timer.advance(PROTOTYPE_FOREGROUND_DEBOUNCE_MILLIS)
 
-  private suspend fun status(): OverlayStatusEntry {
+  private suspend fun status(): PrototypeStatusEntry {
     controller.inspect("inspect")
     return statuses.last().single()
   }
 
   @Test
-  fun `leaving the app hides the overlay keeping state and returning restores it`() = runTest {
+  fun `leaving the app hides the prototype keeping state and returning restores it`() = runTest {
     controller.show("s", spec())
     assertTrue(host.isShowing)
 
@@ -82,10 +82,10 @@ class OverlayForegroundTest {
     assertFalse(host.isShowing)
     assertTrue(controller.isSuspendedByForeground)
     assertTrue(status().suspended)
-    assertEquals(OverlayScalar.Numeric(3.0), status().state["count"])
+    assertEquals(PrototypeScalar.Numeric(3.0), status().state["count"])
     assertTrue(
       "no dismissed event for a temporary hide",
-      events.none { it.kind == OverlayEventKind.DISMISSED },
+      events.none { it.kind == PrototypeEventKind.DISMISSED },
     )
 
     tracker.onWindowEvent("com.example.app", app)
@@ -93,12 +93,12 @@ class OverlayForegroundTest {
     assertTrue(host.isShowing)
     assertFalse(controller.isSuspendedByForeground)
     assertFalse(status().suspended)
-    assertEquals(OverlayScalar.Numeric(3.0), status().state["count"])
-    assertTrue(events.none { it.kind == OverlayEventKind.DISMISSED })
+    assertEquals(PrototypeScalar.Numeric(3.0), status().state["count"])
+    assertTrue(events.none { it.kind == PrototypeEventKind.DISMISSED })
   }
 
   @Test
-  fun `a capture while suspended treats the overlay as not showing and never re-shows it`() =
+  fun `a capture while suspended treats the prototype as not showing and never re-shows it`() =
     runTest {
       controller.show("s", spec())
       tracker.onWindowEvent("com.android.settings", app)
@@ -108,8 +108,8 @@ class OverlayForegroundTest {
 
       val capture = controller.withHiddenForCapture { "pixels" }
 
-      assertEquals(OverlayHiddenCapture("pixels", overlayExcluded = true), capture)
-      // Neither a capture hide nor a restore reached the host: the overlay stays hidden.
+      assertEquals(PrototypeHiddenCapture("pixels", prototypeExcluded = true), capture)
+      // Neither a capture hide nor a restore reached the host: the prototype stays hidden.
       assertEquals(calls, host.calls.size)
       assertFalse(host.isShowing)
       assertTrue(controller.isSuspendedByForeground)
@@ -123,7 +123,7 @@ class OverlayForegroundTest {
   }
 
   @Test
-  fun `notification shade and system dialogs do not hide the overlay`() = runTest {
+  fun `notification shade and system dialogs do not hide the prototype`() = runTest {
     controller.show("s", spec())
     tracker.onWindowEvent("com.android.systemui", app)
     tracker.onWindowEvent("com.android.systemui", system)
@@ -135,7 +135,7 @@ class OverlayForegroundTest {
   }
 
   @Test
-  fun `the keyboard and the overlay's own windows do not hide the overlay`() = runTest {
+  fun `the keyboard and the prototype's own windows do not hide the prototype`() = runTest {
     controller.show("s", spec())
     tracker.onWindowEvent("com.google.android.inputmethod.latin", ime)
     tracker.onWindowEvent("dev.jasonpearson.automobile.ctrlproxy", ime)
@@ -148,7 +148,7 @@ class OverlayForegroundTest {
   }
 
   @Test
-  fun `a dialog of the same app does not hide the overlay`() = runTest {
+  fun `a dialog of the same app does not hide the prototype`() = runTest {
     controller.show("s", spec())
     tracker.onWindowEvent("com.example.app", app)
     settle()
@@ -160,7 +160,7 @@ class OverlayForegroundTest {
     controller.show("s", spec())
     val calls = host.calls.size
     tracker.onWindowEvent("com.android.settings", app)
-    timer.advance(OVERLAY_FOREGROUND_DEBOUNCE_MILLIS - 1)
+    timer.advance(PROTOTYPE_FOREGROUND_DEBOUNCE_MILLIS - 1)
     tracker.onWindowEvent("com.example.app", app)
     settle()
     assertTrue(host.isShowing)
@@ -196,7 +196,7 @@ class OverlayForegroundTest {
   }
 
   @Test
-  fun `a rejected show keeps the previous overlay suspended and anchored`() = runTest {
+  fun `a rejected show keeps the previous prototype suspended and anchored`() = runTest {
     controller.show("s", spec())
     tracker.onWindowEvent("com.android.settings", app)
     settle()
@@ -209,9 +209,9 @@ class OverlayForegroundTest {
     } catch (_: Exception) {}
     host.accept = true
 
-    assertTrue("the previous overlay stays suspended", tracker.suspended)
+    assertTrue("the previous prototype stays suspended", tracker.suspended)
     assertTrue(controller.isSuspendedByForeground)
-    // Still anchored to the original app: Settings in front does not draw the overlay.
+    // Still anchored to the original app: Settings in front does not draw the prototype.
     host.calls.clear()
     tracker.onWindowEvent("com.android.settings", app)
     settle()
@@ -225,7 +225,7 @@ class OverlayForegroundTest {
   }
 
   @Test
-  fun `an unknown foreground leaves the overlay unscoped`() = runTest {
+  fun `an unknown foreground leaves the prototype unscoped`() = runTest {
     foreground = null
     controller.show("s", spec())
     tracker.onWindowEvent("com.android.settings", app)
@@ -236,15 +236,15 @@ class OverlayForegroundTest {
   @Test
   fun `only application windows outside the ignore set pick the foreground`() {
     val own = "dev.jasonpearson.automobile.ctrlproxy"
-    assertEquals("com.example.app", overlayForegroundCandidate("com.example.app", app, own))
-    assertNull(overlayForegroundCandidate("com.example.app", ime, own))
-    assertNull(overlayForegroundCandidate("com.example.app", system, own))
-    assertNull(overlayForegroundCandidate("com.example.app", a11yOverlay, own))
-    assertNull(overlayForegroundCandidate("com.example.app", null, own))
-    assertNull(overlayForegroundCandidate(null, app, own))
-    assertNull(overlayForegroundCandidate(own, app, own))
-    OVERLAY_FOREGROUND_IGNORED_PACKAGES.forEach {
-      assertNull(overlayForegroundCandidate(it, app, own))
+    assertEquals("com.example.app", prototypeForegroundCandidate("com.example.app", app, own))
+    assertNull(prototypeForegroundCandidate("com.example.app", ime, own))
+    assertNull(prototypeForegroundCandidate("com.example.app", system, own))
+    assertNull(prototypeForegroundCandidate("com.example.app", a11yOverlay, own))
+    assertNull(prototypeForegroundCandidate("com.example.app", null, own))
+    assertNull(prototypeForegroundCandidate(null, app, own))
+    assertNull(prototypeForegroundCandidate(own, app, own))
+    PROTOTYPE_FOREGROUND_IGNORED_PACKAGES.forEach {
+      assertNull(prototypeForegroundCandidate(it, app, own))
     }
   }
 
@@ -253,16 +253,16 @@ class OverlayForegroundTest {
     val own = "dev.jasonpearson.automobile.ctrlproxy"
     val windows =
       listOf(
-        OverlayForegroundWindow(system, false, "com.android.systemui"),
-        OverlayForegroundWindow(ime, false, "com.keyboard"),
-        OverlayForegroundWindow(app, false, "com.example.top"),
-        OverlayForegroundWindow(app, true, "com.example.active"),
+        PrototypeForegroundWindow(system, false, "com.android.systemui"),
+        PrototypeForegroundWindow(ime, false, "com.keyboard"),
+        PrototypeForegroundWindow(app, false, "com.example.top"),
+        PrototypeForegroundWindow(app, true, "com.example.active"),
       )
-    assertEquals("com.example.active", overlayForegroundFromWindows(windows, own))
+    assertEquals("com.example.active", prototypeForegroundFromWindows(windows, own))
     assertEquals(
       "com.example.top",
-      overlayForegroundFromWindows(windows.map { it.copy(active = false) }, own),
+      prototypeForegroundFromWindows(windows.map { it.copy(active = false) }, own),
     )
-    assertNull(overlayForegroundFromWindows(windows.take(2), own))
+    assertNull(prototypeForegroundFromWindows(windows.take(2), own))
   }
 }

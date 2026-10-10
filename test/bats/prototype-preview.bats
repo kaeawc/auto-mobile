@@ -1,13 +1,13 @@
 #!/usr/bin/env bats
 #
-# scripts/android/overlay-preview.sh with Gradle stubbed out: the test proves the
-# argument mapping to the -Doverlay.preview.* switches and the output listing,
-# not the renderer (OverlayPreviewRenderTest covers that on the JVM).
+# scripts/android/prototype-preview.sh with Gradle stubbed out: the test proves the
+# argument mapping to the -Dprototype.preview.* switches and the output listing,
+# not the renderer (PrototypePreviewRenderTest covers that on the JVM).
 
 setup() {
   bats_require_minimum_version 1.5.0
   REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
-  SCRIPT="${REPO_ROOT}/scripts/android/overlay-preview.sh"
+  SCRIPT="${REPO_ROOT}/scripts/android/prototype-preview.sh"
   CALLS="${BATS_TEST_TMPDIR}/calls.log"
   OUT="${BATS_TEST_TMPDIR}/out"
   SPECS="${BATS_TEST_TMPDIR}/specs"
@@ -16,7 +16,7 @@ setup() {
   printf '{}\n' > "${SPECS}/two.json"
 
   # Stub Gradle: record each argument on its own line, then write the PNGs the
-  # renderer would, named after each spec in -Doverlay.preview.spec.
+  # renderer would, named after each spec in -Dprototype.preview.spec.
   STUB="${BATS_TEST_TMPDIR}/gradlew"
   cat > "${STUB}" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -25,8 +25,8 @@ printf '%s\n' "$@" > "${CALLS}"
 out="" specs=""
 for arg in "$@"; do
   case "${arg}" in
-    -Doverlay.preview.out=*) out="${arg#*=}" ;;
-    -Doverlay.preview.spec=*) specs="${arg#*=}" ;;
+    -Dprototype.preview.out=*) out="${arg#*=}" ;;
+    -Dprototype.preview.spec=*) specs="${arg#*=}" ;;
   esac
 done
 IFS=: read -r -a list <<< "${specs}"
@@ -38,7 +38,7 @@ exit 0
 SCRIPT
   chmod +x "${STUB}"
   export CALLS
-  export OVERLAY_PREVIEW_GRADLEW="${STUB}"
+  export PROTOTYPE_PREVIEW_GRADLEW="${STUB}"
 }
 
 @test "maps options to preview switches and prints the PNG" {
@@ -47,28 +47,28 @@ SCRIPT
   [ "$status" -eq 0 ]
   [ "$output" = "${OUT}/one.png" ]
   grep -qxF ':control-proxy:testDebugUnitTest' "${CALLS}"
-  grep -qxF '*OverlayPreviewRenderTest' "${CALLS}"
+  grep -qxF '*PrototypePreviewRenderTest' "${CALLS}"
   grep -qxF -- '--rerun' "${CALLS}"
-  grep -qxF -- "-Doverlay.preview.spec=${SPECS}/one.json" "${CALLS}"
-  grep -qxF -- "-Doverlay.preview.out=${OUT}" "${CALLS}"
-  grep -qxF -- '-Doverlay.preview.width=411' "${CALLS}"
-  grep -qxF -- '-Doverlay.preview.height=891' "${CALLS}"
-  grep -qxF -- '-Doverlay.preview.density=420' "${CALLS}"
-  grep -qxF -- '-Doverlay.preview.theme=dark' "${CALLS}"
+  grep -qxF -- "-Dprototype.preview.spec=${SPECS}/one.json" "${CALLS}"
+  grep -qxF -- "-Dprototype.preview.out=${OUT}" "${CALLS}"
+  grep -qxF -- '-Dprototype.preview.width=411' "${CALLS}"
+  grep -qxF -- '-Dprototype.preview.height=891' "${CALLS}"
+  grep -qxF -- '-Dprototype.preview.density=420' "${CALLS}"
+  grep -qxF -- '-Dprototype.preview.theme=dark' "${CALLS}"
 }
 
 @test "omits unset switches so the renderer defaults apply" {
   run bash "${SCRIPT}" --out "${OUT}" "${SPECS}/one.json"
   [ "$status" -eq 0 ]
-  run ! grep -q -- '-Doverlay.preview.width' "${CALLS}"
-  run ! grep -q -- '-Doverlay.preview.theme' "${CALLS}"
+  run ! grep -q -- '-Dprototype.preview.width' "${CALLS}"
+  run ! grep -q -- '-Dprototype.preview.theme' "${CALLS}"
 }
 
 @test "relative spec paths are made absolute and several specs list a contact sheet" {
   cd "${SPECS}"
   run bash "${SCRIPT}" --out "${OUT}" one.json two.json
   [ "$status" -eq 0 ]
-  grep -qxF -- "-Doverlay.preview.spec=${SPECS}/one.json:${SPECS}/two.json" "${CALLS}"
+  grep -qxF -- "-Dprototype.preview.spec=${SPECS}/one.json:${SPECS}/two.json" "${CALLS}"
   [ "${lines[0]}" = "${OUT}/one.png" ]
   [ "${lines[1]}" = "${OUT}/two.png" ]
   [ "${lines[2]}" = "${OUT}/contact-sheet.png" ]

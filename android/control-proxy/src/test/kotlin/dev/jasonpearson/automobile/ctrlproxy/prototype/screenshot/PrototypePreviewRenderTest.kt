@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay.screenshot
+package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.app.Application
 import org.junit.Assume
@@ -10,10 +10,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Host-side overlay preview (issue #10445): renders the spec files named by `-Doverlay.preview.*`
- * through the production renderer, with no device attached, and writes PNGs. Skipped unless a spec
- * is requested, so it is a no-op in the normal unit-test run. Run it through
- * `scripts/overlay/preview.sh`; see [OverlayPreviewRequest] for the switches.
+ * Host-side prototype preview (issue #10445): renders the spec files named by
+ * `-Dprototype.preview.*` through the production renderer, with no device attached, and writes
+ * PNGs. Skipped unless a spec is requested, so it is a no-op in the normal unit-test run. Run it
+ * through `scripts/prototype/preview.sh`; see [PrototypePreviewRequest] for the switches.
  *
  * Unlike the snapshot tests it runs on any OS: nothing is compared, so cross-OS font rasterization
  * differences do not matter.
@@ -21,25 +21,25 @@ import org.robolectric.annotation.GraphicsMode
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], application = Application::class)
-class OverlayPreviewRenderTest {
+class PrototypePreviewRenderTest {
 
   @Test
   fun renderPreview() {
-    val request = OverlayPreviewRequest.fromProperties(System::getProperty)
+    val request = PrototypePreviewRequest.fromProperties(System::getProperty)
     Assume.assumeTrue(
-      "No -D${OverlayPreviewRequest.SPEC_PROPERTY}; nothing to preview",
+      "No -D${PrototypePreviewRequest.SPEC_PROPERTY}; nothing to preview",
       request != null,
     )
     request!!
     RuntimeEnvironment.setQualifiers(request.qualifiers)
     val images =
       request.specs.map { spec ->
-        val image = renderOverlay(spec.name, loadOverlaySpec(spec))
+        val image = renderPrototype(spec.name, loadPrototypeSpec(spec))
         BitmapPngCodec.write(request.outputFor(spec), image)
         image
       }
     if (images.size > 1) {
-      BitmapPngCodec.write(request.contactSheet, overlayContactSheet(images))
+      BitmapPngCodec.write(request.contactSheet, prototypeContactSheet(images))
     }
   }
 }

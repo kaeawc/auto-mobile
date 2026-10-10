@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.test.runTest
@@ -7,30 +7,30 @@ import org.junit.Assert.*
 import org.junit.BeforeClass
 import org.junit.Test
 
-class OverlayRuntimeTest {
+class PrototypeRuntimeTest {
   companion object {
     @JvmStatic
     @BeforeClass
     fun warmValidator() {
-      OverlaySpecValidator.validate("{}")
+      PrototypeSpecValidator.validate("{}")
     }
   }
 
-  private val events = mutableListOf<OverlayEvent>()
+  private val events = mutableListOf<PrototypeEvent>()
   private var sequence = 0L
   private var delivered = true
-  private val sink = OverlayEventSink { if (delivered) events += it }
+  private val sink = PrototypeEventSink { if (delivered) events += it }
 
   private fun spec(
-    root: OverlayNode =
-      OverlayPagerNode("pager", children = List(4) { OverlayTextNode(text = "page") }),
-    state: Map<String, OverlayScalar> = emptyMap(),
-  ) = OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), state, root)
+    root: PrototypeNode =
+      PrototypePagerNode("pager", children = List(4) { PrototypeTextNode(text = "page") }),
+    state: Map<String, PrototypeScalar> = emptyMap(),
+  ) = PrototypeSpec("panel", PrototypeWindow(PrototypeFullscreenPlacement()), state, root)
 
-  private fun runtime(spec: OverlaySpec = spec(), dismiss: suspend () -> Boolean = { true }) =
-    OverlayRuntime(spec, sink, { 42L }, { ++sequence }, dismiss)
+  private fun runtime(spec: PrototypeSpec = spec(), dismiss: suspend () -> Boolean = { true }) =
+    PrototypeRuntime(spec, sink, { 42L }, { ++sequence }, dismiss)
 
-  private fun tap(vararg actions: OverlayAction) = OverlayInteraction.Tap(actions.toList())
+  private fun tap(vararg actions: PrototypeAction) = PrototypeInteraction.Tap(actions.toList())
 
   @Test
   fun `every action runs in order and dismissal is terminal even within an action list`() =
@@ -39,33 +39,33 @@ class OverlayRuntimeTest {
       val payload = Json.parseToJsonElement("""{"nested":[true,null]}""")
       runtime.handle(
         tap(
-          OverlayEmitAction("before", payload),
-          OverlaySetStateAction("label", OverlayScalar.Text("Next")),
-          OverlaySetPageAction("pager", OverlayPageTarget.Next),
-          OverlayEmitAction("after"),
-          OverlayDismissAction,
-          OverlayEmitAction("too-late"),
-          OverlaySetStateAction("label", OverlayScalar.Text("too-late")),
+          PrototypeEmitAction("before", payload),
+          PrototypeSetStateAction("label", PrototypeScalar.Text("Next")),
+          PrototypeSetPageAction("pager", PrototypePageTarget.Next),
+          PrototypeEmitAction("after"),
+          PrototypeDismissAction,
+          PrototypeEmitAction("too-late"),
+          PrototypeSetStateAction("label", PrototypeScalar.Text("too-late")),
         ),
       )
       assertEquals(listOf(1L, 2L, 3L, 4L), events.map { it.sequence })
       assertEquals(
         listOf(
-          OverlayEventKind.EMIT,
-          OverlayEventKind.PAGE_CHANGED,
-          OverlayEventKind.EMIT,
-          OverlayEventKind.DISMISSED,
+          PrototypeEventKind.EMIT,
+          PrototypeEventKind.PAGE_CHANGED,
+          PrototypeEventKind.EMIT,
+          PrototypeEventKind.DISMISSED,
         ),
         events.map { it.kind },
       )
-      assertEquals(emptyMap<String, OverlayScalar>(), events.first().state)
+      assertEquals(emptyMap<String, PrototypeScalar>(), events.first().state)
       assertEquals(payload, events.first().payload)
-      assertEquals(mapOf("label" to OverlayScalar.Text("Next")), events[1].state)
+      assertEquals(mapOf("label" to PrototypeScalar.Text("Next")), events[1].state)
       assertEquals(mapOf("pager" to 1), events[1].pages)
       assertEquals("after", events[2].name)
       assertTrue(events.all { it.timestamp == 42L })
-      runtime.handle(OverlayInteraction.TextChange("label", "late"))
-      runtime.handle(OverlayInteraction.SettledPage("pager", 3))
+      runtime.handle(PrototypeInteraction.TextChange("label", "late"))
+      runtime.handle(PrototypeInteraction.SettledPage("pager", 3))
       runtime.replace(spec())
       runtime.dismiss()
       assertEquals(4, events.size)
@@ -77,13 +77,13 @@ class OverlayRuntimeTest {
     val runtime = runtime()
     for (target in
       listOf(
-        OverlayPageTarget.Prev,
-        OverlayPageTarget.Next,
-        OverlayPageTarget.Index(Int.MAX_VALUE),
-        OverlayPageTarget.Next,
-        OverlayPageTarget.Prev,
-        OverlayPageTarget.Index(0),
-      )) runtime.handle(tap(OverlaySetPageAction("pager", target)))
+        PrototypePageTarget.Prev,
+        PrototypePageTarget.Next,
+        PrototypePageTarget.Index(Int.MAX_VALUE),
+        PrototypePageTarget.Next,
+        PrototypePageTarget.Prev,
+        PrototypePageTarget.Index(0),
+      )) runtime.handle(tap(PrototypeSetPageAction("pager", target)))
     assertEquals(listOf(1, 3, 2, 0), events.map { it.pages.getValue("pager") })
     assertTrue(events.all { it.name == null && it.payload == null })
   }
@@ -91,12 +91,12 @@ class OverlayRuntimeTest {
   @Test
   fun `fling intermediate pages are ignored and only the settled page emits`() = runTest {
     val runtime = runtime()
-    runtime.handle(OverlayInteraction.PagerMotion("pager", 1, true))
-    runtime.handle(OverlayInteraction.PagerMotion("pager", 2, true))
+    runtime.handle(PrototypeInteraction.PagerMotion("pager", 1, true))
+    runtime.handle(PrototypeInteraction.PagerMotion("pager", 2, true))
     assertTrue(events.isEmpty())
     assertEquals(0, runtime.current.pages["pager"])
-    runtime.handle(OverlayInteraction.PagerMotion("pager", 3, false))
-    runtime.handle(OverlayInteraction.PagerMotion("pager", 3, false))
+    runtime.handle(PrototypeInteraction.PagerMotion("pager", 3, false))
+    runtime.handle(PrototypeInteraction.PagerMotion("pager", 3, false))
     assertEquals(1, events.size)
     assertEquals(3, events.single().pages["pager"])
   }
@@ -105,24 +105,24 @@ class OverlayRuntimeTest {
   fun `state and spec replacement preserve pages clamp remaining ids and initialize new ids`() =
     runTest {
       val runtime = runtime()
-      runtime.handle(OverlayInteraction.SettledPage("pager", 3))
+      runtime.handle(PrototypeInteraction.SettledPage("pager", 3))
       runtime.replace(
-        runtime.current.spec.copy(state = mapOf("label" to OverlayScalar.Text("patch"))),
+        runtime.current.spec.copy(state = mapOf("label" to PrototypeScalar.Text("patch"))),
       )
       assertEquals(3, runtime.current.pages["pager"])
       runtime.replace(
         spec(
-          OverlayRowNode(
+          PrototypeRowNode(
             children =
               listOf(
-                OverlayPagerNode("pager", children = List(2) { OverlaySpacerNode() }),
-                OverlayPagerNode("new", children = listOf(OverlaySpacerNode())),
+                PrototypePagerNode("pager", children = List(2) { PrototypeSpacerNode() }),
+                PrototypePagerNode("new", children = listOf(PrototypeSpacerNode())),
               ),
           ),
         ),
       )
       assertEquals(mapOf("pager" to 1, "new" to 0), runtime.current.pages)
-      runtime.replace(spec(OverlaySpacerNode()))
+      runtime.replace(spec(PrototypeSpacerNode()))
       assertTrue(runtime.current.pages.isEmpty())
       runtime.replace(spec())
       assertEquals(0, runtime.current.pages["pager"])
@@ -132,29 +132,29 @@ class OverlayRuntimeTest {
   @Test
   fun `tabBar and bottomNav selections bind to pager and numeric state with clamped rendering`() =
     runTest {
-      val items = listOf(OverlayItem("First", "home"), OverlayItem("Second", image = "future"))
+      val items = listOf(PrototypeItem("First", "home"), PrototypeItem("Second", image = "future"))
       val nodes =
         listOf(
-          OverlayPagerNode("pager", children = List(4) { OverlaySpacerNode() }),
-          OverlayTabBarNode(items = items, pager = "pager"),
-          OverlayBottomNavNode(items = items, pager = "pager"),
-          OverlayTabBarNode(items = items, stateKey = "tab"),
-          OverlayBottomNavNode(items = items, stateKey = "tab"),
+          PrototypePagerNode("pager", children = List(4) { PrototypeSpacerNode() }),
+          PrototypeTabBarNode(items = items, pager = "pager"),
+          PrototypeBottomNavNode(items = items, pager = "pager"),
+          PrototypeTabBarNode(items = items, stateKey = "tab"),
+          PrototypeBottomNavNode(items = items, stateKey = "tab"),
         )
       val runtime =
         runtime(
-          spec(OverlayColumnNode(children = nodes), mapOf("tab" to OverlayScalar.Numeric(0.0))),
+          spec(PrototypeColumnNode(children = nodes), mapOf("tab" to PrototypeScalar.Numeric(0.0))),
         )
-      runtime.handle(OverlayInteraction.Select("pager", null, 1))
-      runtime.handle(OverlayInteraction.Select(null, "tab", 1))
-      var model = mapOverlaySpec(runtime.current.spec, runtime.current.pages)
+      runtime.handle(PrototypeInteraction.Select("pager", null, 1))
+      runtime.handle(PrototypeInteraction.Select(null, "tab", 1))
+      var model = mapPrototypeSpec(runtime.current.spec, runtime.current.pages)
       assertEquals(listOf(1, 1, 1, 1), model.root.children.drop(1).map { it.selection })
-      runtime.handle(OverlayInteraction.Select(null, "tab", 1))
+      runtime.handle(PrototypeInteraction.Select(null, "tab", 1))
       assertEquals(2, events.size)
       assertEquals(Json.parseToJsonElement("""{"key":"tab","value":1.0}"""), events.last().payload)
-      runtime.handle(OverlayInteraction.SettledPage("pager", 3))
-      runtime.handle(tap(OverlaySetStateAction("tab", OverlayScalar.Numeric(99.0))))
-      model = mapOverlaySpec(runtime.current.spec, runtime.current.pages)
+      runtime.handle(PrototypeInteraction.SettledPage("pager", 3))
+      runtime.handle(tap(PrototypeSetStateAction("tab", PrototypeScalar.Numeric(99.0))))
+      model = mapPrototypeSpec(runtime.current.spec, runtime.current.pages)
       assertTrue(model.root.children.drop(1).all { it.selection == 1 })
     }
 
@@ -164,34 +164,34 @@ class OverlayRuntimeTest {
       val runtime =
         runtime(
           spec(
-            OverlayTextFieldNode(stateKey = "query", placeholder = "Feedback"),
-            mapOf("query" to OverlayScalar.Text("")),
+            PrototypeTextFieldNode(stateKey = "query", placeholder = "Feedback"),
+            mapOf("query" to PrototypeScalar.Text("")),
           ),
         )
-      runtime.handle(OverlayInteraction.TextChange("query", "typed"))
-      runtime.handle(OverlayInteraction.TextChange("query", "typed"))
+      runtime.handle(PrototypeInteraction.TextChange("query", "typed"))
+      runtime.handle(PrototypeInteraction.TextChange("query", "typed"))
       assertEquals(1, events.size)
       assertEquals("change", events.single().name)
       assertEquals(
         Json.parseToJsonElement("""{"key":"query","value":"typed"}"""),
         events.single().payload,
       )
-      assertEquals("typed", mapOverlaySpec(runtime.current.spec).root.text)
+      assertEquals("typed", mapPrototypeSpec(runtime.current.spec).root.text)
     }
 
   @Test
   fun `bound types reject invalid setState without mutation and actions may create flat scalars`() =
     runTest {
       val root =
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayTextFieldNode(stateKey = "query"),
-              OverlayTabBarNode(items = listOf(OverlayItem("Tab")), stateKey = "selected"),
-              OverlayBottomSheetNode(
-                child = OverlaySpacerNode(),
-                openWhen = OverlaySheetCondition("open", true),
-                detents = listOf(OverlayDetent.Half),
+              PrototypeTextFieldNode(stateKey = "query"),
+              PrototypeTabBarNode(items = listOf(PrototypeItem("Tab")), stateKey = "selected"),
+              PrototypeBottomSheetNode(
+                child = PrototypeSpacerNode(),
+                openWhen = PrototypeSheetCondition("open", true),
+                detents = listOf(PrototypeDetent.Half),
               ),
             ),
         )
@@ -199,26 +199,26 @@ class OverlayRuntimeTest {
         runtime(
           spec(
             root,
-            mapOf("query" to OverlayScalar.Text(""), "selected" to OverlayScalar.Numeric(0.0)),
+            mapOf("query" to PrototypeScalar.Text(""), "selected" to PrototypeScalar.Numeric(0.0)),
           ),
         )
       for ((key, value) in
         listOf(
-          "query" to OverlayScalar.Numeric(1.0),
-          "selected" to OverlayScalar.Numeric(-1.0),
-          "selected" to OverlayScalar.Numeric(0.5),
-          "open" to OverlayScalar.Text("true"),
+          "query" to PrototypeScalar.Numeric(1.0),
+          "selected" to PrototypeScalar.Numeric(-1.0),
+          "selected" to PrototypeScalar.Numeric(0.5),
+          "open" to PrototypeScalar.Text("true"),
         )) {
         try {
-          runtime.handle(tap(OverlaySetStateAction(key, value)))
+          runtime.handle(tap(PrototypeSetStateAction(key, value)))
           fail("Invalid binding must fail")
         } catch (expected: IllegalArgumentException) {
           assertNotNull(expected.message)
         }
       }
       assertEquals(2, runtime.current.state.size)
-      runtime.handle(tap(OverlaySetStateAction("flag", OverlayScalar.BooleanValue(true))))
-      assertEquals(OverlayScalar.BooleanValue(true), runtime.current.state["flag"])
+      runtime.handle(tap(PrototypeSetStateAction("flag", PrototypeScalar.BooleanValue(true))))
+      assertEquals(PrototypeScalar.BooleanValue(true), runtime.current.state["flag"])
       // Only the accepted setState reports; rejected ones never mutated or emitted.
       assertEquals(listOf("change"), events.map { it.name })
     }
@@ -226,35 +226,35 @@ class OverlayRuntimeTest {
   @Test
   fun `sheet open swipe and scrim dismissal invert condition and emit only one change`() = runTest {
     for (equals in listOf(true, false)) {
-      val condition = OverlaySheetCondition("open", equals)
+      val condition = PrototypeSheetCondition("open", equals)
       val sheet =
-        OverlayBottomSheetNode(
-          child = OverlaySpacerNode(),
+        PrototypeBottomSheetNode(
+          child = PrototypeSpacerNode(),
           openWhen = condition,
-          detents = listOf(OverlayDetent.Half, OverlayDetent.Full),
+          detents = listOf(PrototypeDetent.Half, PrototypeDetent.Full),
         )
       val runtime = runtime(spec(sheet))
-      assertFalse(mapOverlaySpec(runtime.current.spec).root.sheetOpen)
-      runtime.handle(tap(OverlaySetStateAction("open", OverlayScalar.BooleanValue(equals))))
-      assertTrue(mapOverlaySpec(runtime.current.spec).root.sheetOpen)
-      runtime.handle(OverlayInteraction.SheetDismiss(condition))
-      runtime.handle(OverlayInteraction.SheetDismiss(condition))
-      assertEquals(OverlayScalar.BooleanValue(!equals), runtime.current.state["open"])
-      assertFalse(mapOverlaySpec(runtime.current.spec).root.sheetOpen)
+      assertFalse(mapPrototypeSpec(runtime.current.spec).root.sheetOpen)
+      runtime.handle(tap(PrototypeSetStateAction("open", PrototypeScalar.BooleanValue(equals))))
+      assertTrue(mapPrototypeSpec(runtime.current.spec).root.sheetOpen)
+      runtime.handle(PrototypeInteraction.SheetDismiss(condition))
+      runtime.handle(PrototypeInteraction.SheetDismiss(condition))
+      assertEquals(PrototypeScalar.BooleanValue(!equals), runtime.current.state["open"])
+      assertFalse(mapPrototypeSpec(runtime.current.spec).root.sheetOpen)
     }
     // Per iteration: the opening setState tap and the single dismissal change.
     assertEquals(4, events.size)
-    assertTrue(events.all { it.kind == OverlayEventKind.EMIT && it.name == "change" })
+    assertTrue(events.all { it.kind == PrototypeEventKind.EMIT && it.name == "change" })
   }
 
   @Test
   fun `a tap that sets state emits one change with the final state`() = runTest {
-    val runtime = runtime(spec(state = mapOf("a" to OverlayScalar.Numeric(0.0))))
-    runtime.handle(tap(OverlaySetStateAction("a", OverlayScalar.Numeric(5.0))))
+    val runtime = runtime(spec(state = mapOf("a" to PrototypeScalar.Numeric(0.0))))
+    runtime.handle(tap(PrototypeSetStateAction("a", PrototypeScalar.Numeric(5.0))))
     val event = events.single()
     assertEquals("change", event.name)
     assertEquals(Json.parseToJsonElement("""{"key":"a","value":5.0}"""), event.payload)
-    assertEquals(mapOf("a" to OverlayScalar.Numeric(5.0)), event.state)
+    assertEquals(mapOf("a" to PrototypeScalar.Numeric(5.0)), event.state)
   }
 
   @Test
@@ -263,11 +263,11 @@ class OverlayRuntimeTest {
       runtime(
         spec(
           state =
-            mapOf("on" to OverlayScalar.BooleanValue(false), "n" to OverlayScalar.Numeric(1.0)),
+            mapOf("on" to PrototypeScalar.BooleanValue(false), "n" to PrototypeScalar.Numeric(1.0)),
         ),
       )
-    runtime.handle(tap(OverlayToggleAction("on")))
-    runtime.handle(tap(OverlayIncrementAction("n", 2.0)))
+    runtime.handle(tap(PrototypeToggleAction("on")))
+    runtime.handle(tap(PrototypeIncrementAction("n", 2.0)))
     assertEquals(
       listOf(
         Json.parseToJsonElement("""{"key":"on","value":true}"""),
@@ -280,17 +280,17 @@ class OverlayRuntimeTest {
   @Test
   fun `mixed emit then setState emits in order with a trailing change carrying the final state`() =
     runTest {
-      val runtime = runtime(spec(state = mapOf("a" to OverlayScalar.Numeric(0.0))))
+      val runtime = runtime(spec(state = mapOf("a" to PrototypeScalar.Numeric(0.0))))
       runtime.handle(
         tap(
-          OverlayEmitAction("tapped"),
-          OverlaySetStateAction("a", OverlayScalar.Numeric(1.0)),
-          OverlayIncrementAction("a"),
+          PrototypeEmitAction("tapped"),
+          PrototypeSetStateAction("a", PrototypeScalar.Numeric(1.0)),
+          PrototypeIncrementAction("a"),
         ),
       )
       assertEquals(listOf("tapped", "change"), events.map { it.name })
-      assertEquals(mapOf("a" to OverlayScalar.Numeric(0.0)), events[0].state)
-      assertEquals(mapOf("a" to OverlayScalar.Numeric(2.0)), events[1].state)
+      assertEquals(mapOf("a" to PrototypeScalar.Numeric(0.0)), events[0].state)
+      assertEquals(mapOf("a" to PrototypeScalar.Numeric(2.0)), events[1].state)
       assertEquals(Json.parseToJsonElement("""{"key":"a","value":2.0}"""), events[1].payload)
     }
 
@@ -299,8 +299,8 @@ class OverlayRuntimeTest {
     val runtime = runtime()
     runtime.handle(
       tap(
-        OverlaySetStateAction("x", OverlayScalar.Numeric(1.0)),
-        OverlaySetStateAction("y", OverlayScalar.Text("hi")),
+        PrototypeSetStateAction("x", PrototypeScalar.Numeric(1.0)),
+        PrototypeSetStateAction("y", PrototypeScalar.Text("hi")),
       ),
     )
     assertEquals(
@@ -315,13 +315,13 @@ class OverlayRuntimeTest {
       runtime(
         spec(
           state =
-            mapOf("a" to OverlayScalar.Numeric(1.0), "on" to OverlayScalar.BooleanValue(false)),
+            mapOf("a" to PrototypeScalar.Numeric(1.0), "on" to PrototypeScalar.BooleanValue(false)),
         ),
       )
     runtime.handle(tap())
-    runtime.handle(tap(OverlaySetStateAction("a", OverlayScalar.Numeric(1.0))))
+    runtime.handle(tap(PrototypeSetStateAction("a", PrototypeScalar.Numeric(1.0))))
     // Toggled back to the starting value: no net mutation.
-    runtime.handle(tap(OverlayToggleAction("on"), OverlayToggleAction("on")))
+    runtime.handle(tap(PrototypeToggleAction("on"), PrototypeToggleAction("on")))
     assertTrue(events.isEmpty())
   }
 
@@ -330,81 +330,84 @@ class OverlayRuntimeTest {
     val runtime =
       runtime(
         spec(
-          OverlaySwitchNode(label = "Wi-Fi", stateKey = "on"),
-          mapOf("on" to OverlayScalar.BooleanValue(false)),
+          PrototypeSwitchNode(label = "Wi-Fi", stateKey = "on"),
+          mapOf("on" to PrototypeScalar.BooleanValue(false)),
         ),
       )
-    runtime.handle(OverlayInteraction.Toggle("on"))
+    runtime.handle(PrototypeInteraction.Toggle("on"))
     assertEquals(listOf("change"), events.map { it.name })
   }
 
   @Test
   fun `sheet detents use window height author order clamping and snapping with optional swipe dismissal`() {
     val heights =
-      overlaySheetHeights(
+      prototypeSheetHeights(
         listOf(
-          OverlayDetent.Full,
-          OverlayDetent.Half,
-          OverlayDetent.Dp(100.0),
-          OverlayDetent.Dp(900.0),
+          PrototypeDetent.Full,
+          PrototypeDetent.Half,
+          PrototypeDetent.Dp(100.0),
+          PrototypeDetent.Dp(900.0),
         ),
         600.0,
       )
     assertEquals(listOf(600.0, 300.0, 100.0, 600.0), heights)
-    assertEquals(300.0, settleOverlaySheet(heights, 600.0, 220.0, true))
-    assertEquals(600.0, settleOverlaySheet(heights, 300.0, -220.0, true))
-    assertNull(settleOverlaySheet(heights, 100.0, 60.0, true))
-    assertEquals(100.0, settleOverlaySheet(heights, 100.0, 60.0, false))
+    assertEquals(300.0, settlePrototypeSheet(heights, 600.0, 220.0, true))
+    assertEquals(600.0, settlePrototypeSheet(heights, 300.0, -220.0, true))
+    assertNull(settlePrototypeSheet(heights, 100.0, 60.0, true))
+    assertEquals(100.0, settlePrototypeSheet(heights, 100.0, 60.0, false))
   }
 
   @Test
   fun `nearest pager interpolation and visibility recompose after page and scalar changes`() =
     runTest {
       val pageText =
-        OverlayTextNode(
+        PrototypeTextNode(
           text = "{page}/{pageCount} {label}",
-          visibleWhen = OverlayCondition("page", OverlayScalar.Numeric(2.0)),
+          visibleWhen = PrototypeCondition("page", PrototypeScalar.Numeric(2.0)),
         )
       val inner =
-        OverlayPagerNode("inner", children = listOf(OverlayTextNode(text = "{page}/{pageCount}")))
+        PrototypePagerNode(
+          "inner",
+          children = listOf(PrototypeTextNode(text = "{page}/{pageCount}")),
+        )
       val runtime =
         runtime(
           spec(
-            OverlayPagerNode("pager", children = listOf(pageText, inner)),
-            mapOf("label" to OverlayScalar.Text("old")),
+            PrototypePagerNode("pager", children = listOf(pageText, inner)),
+            mapOf("label" to PrototypeScalar.Text("old")),
           ),
         )
-      var model = mapOverlaySpec(runtime.current.spec, runtime.current.pages)
+      var model = mapPrototypeSpec(runtime.current.spec, runtime.current.pages)
       assertEquals("1/2 old", model.root.children.first().text)
       assertFalse(model.root.children.first().visible)
-      runtime.handle(OverlayInteraction.SettledPage("pager", 1))
-      runtime.handle(tap(OverlaySetStateAction("label", OverlayScalar.Text("new"))))
-      model = mapOverlaySpec(runtime.current.spec, runtime.current.pages)
+      runtime.handle(PrototypeInteraction.SettledPage("pager", 1))
+      runtime.handle(tap(PrototypeSetStateAction("label", PrototypeScalar.Text("new"))))
+      model = mapPrototypeSpec(runtime.current.spec, runtime.current.pages)
       assertEquals("2/2 new", model.root.children.first().text)
       assertTrue(model.root.children.first().visible)
       assertEquals("1/1", model.root.children[1].children.single().text)
       runtime.replace(
         runtime.current.spec.copy(
-          state = runtime.current.state + ("label" to OverlayScalar.Text("patched")),
+          state = runtime.current.state + ("label" to PrototypeScalar.Text("patched")),
         ),
       )
       assertEquals(
         "2/2 patched",
-        mapOverlaySpec(runtime.current.spec, runtime.current.pages).root.children.first().text,
+        mapPrototypeSpec(runtime.current.spec, runtime.current.pages).root.children.first().text,
       )
     }
 
   @Test
   fun `disconnected delivery and state patch never rewind sequence`() = runTest {
     val runtime = runtime()
-    runtime.handle(tap(OverlayEmitAction("one")))
+    runtime.handle(tap(PrototypeEmitAction("one")))
     delivered = false
-    runtime.handle(tap(OverlayEmitAction("dropped")))
+    runtime.handle(tap(PrototypeEmitAction("dropped")))
     runtime.replace(
-      runtime.current.spec.copy(state = mapOf("patch" to OverlayScalar.BooleanValue(true))),
+      runtime.current.spec.copy(state = mapOf("patch" to PrototypeScalar.BooleanValue(true))),
     )
     delivered = true
-    runtime.handle(tap(OverlayEmitAction("three")))
+    runtime.handle(tap(PrototypeEmitAction("three")))
     assertEquals(listOf(1L, 3L), events.map { it.sequence })
   }
 
@@ -419,8 +422,8 @@ class OverlayRuntimeTest {
     }
     assertTrue(runtime.current.active)
     runtime.close()
-    runtime.handle(tap(OverlayEmitAction("late")))
-    runtime.handle(OverlayInteraction.Select("pager", null, 2))
+    runtime.handle(tap(PrototypeEmitAction("late")))
+    runtime.handle(PrototypeInteraction.Select("pager", null, 2))
     runtime.dismiss()
     assertTrue(events.isEmpty())
   }
@@ -433,26 +436,26 @@ class OverlayRuntimeTest {
           spec(
             state =
               mapOf(
-                "flag" to OverlayScalar.BooleanValue(false),
-                "count" to OverlayScalar.Numeric(1.0),
-                "label" to OverlayScalar.Text("x"),
+                "flag" to PrototypeScalar.BooleanValue(false),
+                "count" to PrototypeScalar.Numeric(1.0),
+                "label" to PrototypeScalar.Text("x"),
               ),
           ),
         )
       runtime.handle(
         tap(
-          OverlayToggleAction("flag"),
-          OverlayIncrementAction("count"),
-          OverlayIncrementAction("count", by = -3.5),
-          OverlayToggleAction("count"),
-          OverlayIncrementAction("label"),
-          OverlayIncrementAction("count", by = Double.MAX_VALUE),
-          OverlayIncrementAction("count", by = Double.MAX_VALUE),
+          PrototypeToggleAction("flag"),
+          PrototypeIncrementAction("count"),
+          PrototypeIncrementAction("count", by = -3.5),
+          PrototypeToggleAction("count"),
+          PrototypeIncrementAction("label"),
+          PrototypeIncrementAction("count", by = Double.MAX_VALUE),
+          PrototypeIncrementAction("count", by = Double.MAX_VALUE),
         ),
       )
-      assertEquals(OverlayScalar.BooleanValue(true), runtime.current.state["flag"])
-      assertEquals(OverlayScalar.Numeric(Double.MAX_VALUE - 1.5), runtime.current.state["count"])
-      assertEquals(OverlayScalar.Text("x"), runtime.current.state["label"])
+      assertEquals(PrototypeScalar.BooleanValue(true), runtime.current.state["flag"])
+      assertEquals(PrototypeScalar.Numeric(Double.MAX_VALUE - 1.5), runtime.current.state["count"])
+      assertEquals(PrototypeScalar.Text("x"), runtime.current.state["label"])
       val event = events.single()
       assertEquals(
         listOf("flag", "count"),
@@ -463,9 +466,11 @@ class OverlayRuntimeTest {
 
   @Test
   fun `decrement steps a numeric key down and reports one net change`() = runTest {
-    val runtime = runtime(spec(state = mapOf("count" to OverlayScalar.Numeric(5.0))))
-    runtime.handle(tap(OverlayDecrementAction("count"), OverlayDecrementAction("count", by = 2.5)))
-    assertEquals(OverlayScalar.Numeric(1.5), runtime.current.state["count"])
+    val runtime = runtime(spec(state = mapOf("count" to PrototypeScalar.Numeric(5.0))))
+    runtime.handle(
+      tap(PrototypeDecrementAction("count"), PrototypeDecrementAction("count", by = 2.5)),
+    )
+    assertEquals(PrototypeScalar.Numeric(1.5), runtime.current.state["count"])
     assertEquals(1, events.size)
   }
 }

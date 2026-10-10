@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.Gravity
 import androidx.compose.ui.Alignment
@@ -18,21 +18,21 @@ import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 
-class OverlayRenderModelTest {
+class PrototypeRenderModelTest {
   companion object {
     @JvmStatic
     @org.junit.BeforeClass
     fun warmMapping() {
-      OverlaySpecValidator.validate("{}")
+      PrototypeSpecValidator.validate("{}")
     }
   }
 
-  private fun spec(root: OverlayNode) =
-    OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), root = root)
+  private fun spec(root: PrototypeNode) =
+    PrototypeSpec("panel", PrototypeWindow(PrototypeFullscreenPlacement()), root = root)
 
   @Test
   fun `an unstyled node has no fixed colour so the theme content colour applies`() {
-    val node = mapOverlaySpec(spec(OverlayTextNode(text = "plain"))).root
+    val node = mapPrototypeSpec(spec(PrototypeTextNode(text = "plain"))).root
     assertEquals(Color.Unspecified, node.style.color)
   }
 
@@ -40,31 +40,31 @@ class OverlayRenderModelTest {
   fun `all static primitives expose roles text and tags`() {
     val nodes =
       listOf(
-        OverlayBoxNode(testTag = "box", children = emptyList()),
-        OverlayRowNode(testTag = "row", children = emptyList()),
-        OverlayColumnNode(testTag = "column", children = emptyList()),
-        OverlayTextNode(testTag = "text", text = "Hello"),
-        OverlayIconNode(testTag = "icon", name = "home"),
-        OverlaySpacerNode(testTag = "spacer"),
-        OverlayImageNode(testTag = "image", asset = "future"),
+        PrototypeBoxNode(testTag = "box", children = emptyList()),
+        PrototypeRowNode(testTag = "row", children = emptyList()),
+        PrototypeColumnNode(testTag = "column", children = emptyList()),
+        PrototypeTextNode(testTag = "text", text = "Hello"),
+        PrototypeIconNode(testTag = "icon", name = "home"),
+        PrototypeSpacerNode(testTag = "spacer"),
+        PrototypeImageNode(testTag = "image", asset = "future"),
       )
     for (node in nodes) {
-      val model = mapOverlaySpec(spec(node)).root
+      val model = mapPrototypeSpec(spec(node)).root
       assertEquals(node.testTag, model.role)
       assertEquals(node.testTag, model.testTag)
       assertTrue(model.visible)
       assertNotNull(model.text)
     }
-    assertEquals("Hello", mapOverlaySpec(spec(nodes[3])).root.text)
-    assertEquals("home", mapOverlaySpec(spec(nodes[4])).root.text)
-    assertNull(overlayIcon("future_icon"))
+    assertEquals("Hello", mapPrototypeSpec(spec(nodes[3])).root.text)
+    assertEquals("home", mapPrototypeSpec(spec(nodes[4])).root.text)
+    assertNull(prototypeIcon("future_icon"))
   }
 
   @Test
   fun `closed contract icon names all map and unknown names remain placeholders`() {
     val input =
       checkNotNull(
-          OverlaySpecValidator.javaClass.getResourceAsStream("/prototype-spec-contract.json"),
+          PrototypeSpecValidator.javaClass.getResourceAsStream("/prototype-spec-contract.json"),
         )
         .bufferedReader()
         .use { it.readText() }
@@ -80,72 +80,72 @@ class OverlayRenderModelTest {
     assertTrue(names.size > 2000)
     for ((index, name) in names.withIndex()) {
       val content = name.jsonPrimitive.content
-      assertNotNull(content, overlayIcon(content))
+      assertNotNull(content, prototypeIcon(content))
       // Every name loads filled; styles share the class layout, so a sample of names covers them.
       if (index % 40 != 0) continue
       for (variant in listOf("outlined", "rounded", "sharp", "twoTone")) {
-        assertNotNull("$content/$variant", overlayIcon(content, variant))
+        assertNotNull("$content/$variant", prototypeIcon(content, variant))
       }
     }
-    assertNull(overlayIcon("unknown"))
-    assertNull(overlayIcon("Home"))
-    assertNull(overlayIcon("home; drop"))
+    assertNull(prototypeIcon("unknown"))
+    assertNull(prototypeIcon("Home"))
+    assertNull(prototypeIcon("home; drop"))
   }
 
   @Test
   fun `icon variants resolve distinct artwork and unknown variants fall back to filled`() {
-    val filled = checkNotNull(overlayIcon("timer"))
-    assertSame(filled, overlayIcon("timer", "filled"))
-    assertSame(filled, overlayIcon("timer", "unheard-of"))
-    assertNotSame(filled, overlayIcon("timer", "outlined"))
-    assertNotSame(overlayIcon("timer", "rounded"), overlayIcon("timer", "sharp"))
-    assertNotNull(overlayIcon("bedtime"))
-    assertNotNull(overlayIcon("alarm_add", "twoTone"))
+    val filled = checkNotNull(prototypeIcon("timer"))
+    assertSame(filled, prototypeIcon("timer", "filled"))
+    assertSame(filled, prototypeIcon("timer", "unheard-of"))
+    assertNotSame(filled, prototypeIcon("timer", "outlined"))
+    assertNotSame(prototypeIcon("timer", "rounded"), prototypeIcon("timer", "sharp"))
+    assertNotNull(prototypeIcon("bedtime"))
+    assertNotNull(prototypeIcon("alarm_add", "twoTone"))
   }
 
   @Test
   fun `styleWhen resolves against state into the render style`() {
     val node =
-      OverlayTextNode(
+      PrototypeTextNode(
         text = "text",
-        style = OverlayStyle(background = "#111111", color = "#222222"),
+        style = PrototypeStyle(background = "#111111", color = "#222222"),
         styleWhen =
           listOf(
-            OverlayStyleWhen(
-              OverlayCondition("selected", equals = OverlayScalar.BooleanValue(true)),
-              OverlayStyle(background = "#2255CC"),
+            PrototypeStyleWhen(
+              PrototypeCondition("selected", equals = PrototypeScalar.BooleanValue(true)),
+              PrototypeStyle(background = "#2255CC"),
             ),
           ),
       )
     fun rendered(selected: Boolean) =
-      mapOverlaySpec(
-          OverlaySpec(
+      mapPrototypeSpec(
+          PrototypeSpec(
             "panel",
-            OverlayWindow(OverlayFullscreenPlacement()),
+            PrototypeWindow(PrototypeFullscreenPlacement()),
             root = node,
-            state = mapOf("selected" to OverlayScalar.BooleanValue(selected)),
+            state = mapOf("selected" to PrototypeScalar.BooleanValue(selected)),
           ),
         )
         .root
         .style
-    assertEquals(overlayColor("#2255CC"), rendered(true).background)
-    assertEquals(overlayColor("#222222"), rendered(true).color)
-    assertEquals(overlayColor("#111111"), rendered(false).background)
+    assertEquals(prototypeColor("#2255CC"), rendered(true).background)
+    assertEquals(prototypeColor("#222222"), rendered(true).color)
+    assertEquals(prototypeColor("#111111"), rendered(false).background)
   }
 
   @Test
   fun `unrepresentable styleWhen size is rejected with its path`() {
     val error =
       assertThrows(IllegalArgumentException::class.java) {
-        mapOverlaySpec(
+        mapPrototypeSpec(
           spec(
-            OverlayTextNode(
+            PrototypeTextNode(
               text = "text",
               styleWhen =
                 listOf(
-                  OverlayStyleWhen(
-                    OverlayCondition("k", equals = OverlayScalar.Numeric(1.0)),
-                    OverlayStyle(width = OverlayDimension.Dp(Double.MAX_VALUE)),
+                  PrototypeStyleWhen(
+                    PrototypeCondition("k", equals = PrototypeScalar.Numeric(1.0)),
+                    PrototypeStyle(width = PrototypeDimension.Dp(Double.MAX_VALUE)),
                   ),
                 ),
             ),
@@ -159,11 +159,11 @@ class OverlayRenderModelTest {
   fun `unrepresentable Compose size is rejected before content installation`() {
     val error =
       assertThrows(IllegalArgumentException::class.java) {
-        mapOverlaySpec(
+        mapPrototypeSpec(
           spec(
-            OverlayTextNode(
+            PrototypeTextNode(
               text = "text",
-              style = OverlayStyle(width = OverlayDimension.Dp(Double.MAX_VALUE)),
+              style = PrototypeStyle(width = PrototypeDimension.Dp(Double.MAX_VALUE)),
             ),
           ),
         )
@@ -175,29 +175,31 @@ class OverlayRenderModelTest {
   fun `unrepresentable weight and size bounds are rejected before content installation`() {
     val styles =
       mapOf(
-        "weight" to OverlayStyle(weight = Double.MAX_VALUE),
-        "maxWidth" to OverlayStyle(maxWidth = Double.MAX_VALUE),
-        "minHeight" to OverlayStyle(minHeight = Double.MAX_VALUE),
-        "elevation" to OverlayStyle(elevation = Double.MAX_VALUE),
-        "aspectRatio" to OverlayStyle(aspectRatio = Double.MAX_VALUE),
+        "weight" to PrototypeStyle(weight = Double.MAX_VALUE),
+        "maxWidth" to PrototypeStyle(maxWidth = Double.MAX_VALUE),
+        "minHeight" to PrototypeStyle(minHeight = Double.MAX_VALUE),
+        "elevation" to PrototypeStyle(elevation = Double.MAX_VALUE),
+        "aspectRatio" to PrototypeStyle(aspectRatio = Double.MAX_VALUE),
         "gradient.angle" to
-          OverlayStyle(
+          PrototypeStyle(
             gradient =
-              OverlayLinearGradient(
+              PrototypeLinearGradient(
                 Double.MAX_VALUE,
-                listOf(OverlayGradientStop("#000000"), OverlayGradientStop("#ffffff")),
+                listOf(PrototypeGradientStop("#000000"), PrototypeGradientStop("#ffffff")),
               ),
           ),
-        "offset.y" to OverlayStyle(offset = OverlayOffset(0.0, -Double.MAX_VALUE)),
-        "lineHeight" to OverlayStyle(lineHeight = Double.MAX_VALUE),
-        "letterSpacing" to OverlayStyle(letterSpacing = -Double.MAX_VALUE),
+        "offset.y" to PrototypeStyle(offset = PrototypeOffset(0.0, -Double.MAX_VALUE)),
+        "lineHeight" to PrototypeStyle(lineHeight = Double.MAX_VALUE),
+        "letterSpacing" to PrototypeStyle(letterSpacing = -Double.MAX_VALUE),
         "cornerRadius.bottomStart" to
-          OverlayStyle(cornerRadius = OverlayCornerRadius.Corners(bottomStart = Double.MAX_VALUE)),
+          PrototypeStyle(
+            cornerRadius = PrototypeCornerRadius.Corners(bottomStart = Double.MAX_VALUE),
+          ),
       )
     for ((key, style) in styles) {
       val error =
         assertThrows(IllegalArgumentException::class.java) {
-          mapOverlaySpec(spec(OverlayTextNode(text = "text", style = style)))
+          mapPrototypeSpec(spec(PrototypeTextNode(text = "text", style = style)))
         }
       assertTrue(error.message.orEmpty().contains("root.style.$key"))
     }
@@ -206,16 +208,16 @@ class OverlayRenderModelTest {
   @Test
   fun `text polish and shadow colour map to their Compose values`() {
     val style =
-      OverlayStyle(
+      PrototypeStyle(
         shadowColor = "#80FF0000",
         fontStyle = "italic",
         textDecoration = "underlineLineThrough",
         overflow = "ellipsis",
         lineHeight = 22.0,
         letterSpacing = 0.25,
-        offset = OverlayOffset(4.0, -2.0),
+        offset = PrototypeOffset(4.0, -2.0),
       )
-    val mapped = mapOverlaySpec(spec(OverlayTextNode(text = "t", style = style))).root.style
+    val mapped = mapPrototypeSpec(spec(PrototypeTextNode(text = "t", style = style))).root.style
     assertEquals(style, mapped.source)
     assertEquals(Color(0x80FF0000), mapped.shadowColor)
     assertEquals(FontStyle.Italic, mapped.fontStyle)
@@ -234,15 +236,18 @@ class OverlayRenderModelTest {
       assertEquals(
         wire,
         expected,
-        mapOverlayStyle(OverlayStyle(textDecoration = wire)).textDecoration,
+        mapPrototypeStyle(PrototypeStyle(textDecoration = wire)).textDecoration,
       )
     }
-    assertEquals(TextOverflow.Visible, mapOverlayStyle(OverlayStyle(overflow = "visible")).overflow)
+    assertEquals(
+      TextOverflow.Visible,
+      mapPrototypeStyle(PrototypeStyle(overflow = "visible")).overflow,
+    )
   }
 
   @Test
   fun `unset text polish keeps Compose defaults and a role shadow colour resolves later`() {
-    val mapped = mapOverlayStyle(OverlayStyle(shadowColor = "primary"))
+    val mapped = mapPrototypeStyle(PrototypeStyle(shadowColor = "primary"))
     assertNull(mapped.shadowColor)
     assertEquals(FontStyle.Normal, mapped.fontStyle)
     assertEquals(TextDecoration.None, mapped.textDecoration)
@@ -251,12 +256,12 @@ class OverlayRenderModelTest {
 
   @Test
   fun `linear gradient line runs corner to corner along the angle`() {
-    val (start, end) = overlayLinearGradientLine(0.0, 100f, 40f)
+    val (start, end) = prototypeLinearGradientLine(0.0, 100f, 40f)
     assertEquals(0f, start.x, 0.01f)
     assertEquals(20f, start.y, 0.01f)
     assertEquals(100f, end.x, 0.01f)
     assertEquals(20f, end.y, 0.01f)
-    val (top, bottom) = overlayLinearGradientLine(90.0, 100f, 40f)
+    val (top, bottom) = prototypeLinearGradientLine(90.0, 100f, 40f)
     assertEquals(50f, top.x, 0.01f)
     assertEquals(0f, top.y, 0.01f)
     assertEquals(40f, bottom.y, 0.01f)
@@ -265,19 +270,19 @@ class OverlayRenderModelTest {
   @Test
   fun `gradient stop positions apply only when every stop authors one`() {
     val even =
-      overlayGradientStops(
-        listOf(OverlayGradientStop("#000000", 0.2), OverlayGradientStop("#ffffff")),
+      prototypeGradientStops(
+        listOf(PrototypeGradientStop("#000000", 0.2), PrototypeGradientStop("#ffffff")),
       )
     assertEquals(listOf(Color(0xff000000), Color(0xffffffff)), even.first)
     assertNull(even.second)
     val explicit =
-      overlayGradientStops(
-        listOf(OverlayGradientStop("#000000", 0.2), OverlayGradientStop("#ffffff", 1.0)),
+      prototypeGradientStops(
+        listOf(PrototypeGradientStop("#000000", 0.2), PrototypeGradientStop("#ffffff", 1.0)),
       )
     assertEquals(listOf(0.2f, 1f), explicit.second)
     val descending =
-      overlayGradientStops(
-        listOf(OverlayGradientStop("#000000", 0.8), OverlayGradientStop("#ffffff", 0.2)),
+      prototypeGradientStops(
+        listOf(PrototypeGradientStop("#000000", 0.8), PrototypeGradientStop("#ffffff", 0.2)),
       )
     assertEquals(listOf(0.8f, 0.8f), descending.second)
   }
@@ -285,33 +290,33 @@ class OverlayRenderModelTest {
   @Test
   fun `elevation gradient and aspect ratio survive pure mapping`() {
     val style =
-      OverlayStyle(
+      PrototypeStyle(
         elevation = 4.5,
         aspectRatio = 1.5,
         gradient =
-          OverlayRadialGradient(
-            listOf(OverlayGradientStop("#000000"), OverlayGradientStop("#ffffff")),
+          PrototypeRadialGradient(
+            listOf(PrototypeGradientStop("#000000"), PrototypeGradientStop("#ffffff")),
           ),
       )
-    val node = mapOverlaySpec(spec(OverlayTextNode(text = "t", style = style))).root
+    val node = mapPrototypeSpec(spec(PrototypeTextNode(text = "t", style = style))).root
     assertEquals(style, node.style.source)
   }
 
   @Test
   fun `every style property and safe area selection survive pure mapping`() {
     val style =
-      OverlayStyle(
-        width = OverlayDimension.Fill,
-        height = OverlayDimension.Dp(40.5),
+      PrototypeStyle(
+        width = PrototypeDimension.Fill,
+        height = PrototypeDimension.Dp(40.5),
         weight = 2.5,
         minWidth = 10.0,
         maxWidth = 200.5,
         minHeight = 20.0,
         maxHeight = 90.0,
-        padding = OverlayPadding(1.0, 2.0, 3.0, 4.0),
+        padding = PrototypePadding(1.0, 2.0, 3.0, 4.0),
         background = "#112233",
-        cornerRadius = OverlayCornerRadius.Dp(6.0),
-        border = OverlayBorder(2.0, "#80112233"),
+        cornerRadius = PrototypeCornerRadius.Dp(6.0),
+        border = PrototypeBorder(2.0, "#80112233"),
         alpha = 0.4,
         alignment = "bottomEnd",
         arrangement = "spaceBetween",
@@ -321,13 +326,13 @@ class OverlayRenderModelTest {
         color = "#ff556677",
         textAlign = "justify",
         maxLines = 3,
-        fontFamily = OverlayFontFamily.Named("monospace"),
+        fontFamily = PrototypeFontFamily.Named("monospace"),
       )
     val safeArea =
-      OverlaySafeAreaPadding(listOf("top", "start"), listOf("systemBars", "cutout", "ime"))
+      PrototypeSafeAreaPadding(listOf("top", "start"), listOf("systemBars", "cutout", "ime"))
     val node =
-      mapOverlaySpec(
-          spec(OverlayTextNode(style = style, safeAreaPadding = safeArea, text = "text")),
+      mapPrototypeSpec(
+          spec(PrototypeTextNode(style = style, safeAreaPadding = safeArea, text = "text")),
         )
         .root
     assertEquals(style, node.style.source)
@@ -342,42 +347,46 @@ class OverlayRenderModelTest {
     assertEquals(FontFamily.Monospace, node.style.fontFamily)
     assertEquals(TextAlign.Justify, node.style.textAlign)
     assertEquals(
-      OverlayDimension.Wrap,
-      mapOverlayStyle(OverlayStyle(width = OverlayDimension.Wrap)).source.width,
+      PrototypeDimension.Wrap,
+      mapPrototypeStyle(PrototypeStyle(width = PrototypeDimension.Wrap)).source.width,
     )
     assertEquals(
       FontFamily.SansSerif,
-      mapOverlayStyle(OverlayStyle(fontFamily = OverlayFontFamily.Named("sansSerif"))).fontFamily,
+      mapPrototypeStyle(PrototypeStyle(fontFamily = PrototypeFontFamily.Named("sansSerif")))
+        .fontFamily,
     )
     assertEquals(
       FontFamily.Serif,
-      mapOverlayStyle(OverlayStyle(fontFamily = OverlayFontFamily.Named("serif"))).fontFamily,
+      mapPrototypeStyle(PrototypeStyle(fontFamily = PrototypeFontFamily.Named("serif"))).fontFamily,
     )
-    assertEquals(FontFamily.Default, mapOverlayStyle(OverlayStyle()).fontFamily)
-    assertEquals(TextAlign.Center, mapOverlayStyle(OverlayStyle(textAlign = "center")).textAlign)
-    assertEquals(TextAlign.End, mapOverlayStyle(OverlayStyle(textAlign = "end")).textAlign)
+    assertEquals(FontFamily.Default, mapPrototypeStyle(PrototypeStyle()).fontFamily)
+    assertEquals(
+      TextAlign.Center,
+      mapPrototypeStyle(PrototypeStyle(textAlign = "center")).textAlign,
+    )
+    assertEquals(TextAlign.End, mapPrototypeStyle(PrototypeStyle(textAlign = "end")).textAlign)
   }
 
   @Test
   fun `visibility uses exact scalar equality and missing keys hide nodes`() {
     val root =
-      OverlayTextNode(
+      PrototypeTextNode(
         text = "{name} {count} {enabled} {missing} {page} {pageCount}",
-        visibleWhen = OverlayCondition("enabled", OverlayScalar.BooleanValue(true)),
+        visibleWhen = PrototypeCondition("enabled", PrototypeScalar.BooleanValue(true)),
       )
     val state =
       mapOf(
-        "name" to OverlayScalar.Text("Jason"),
-        "count" to OverlayScalar.Numeric(2.0),
-        "enabled" to OverlayScalar.BooleanValue(true),
-        "page" to OverlayScalar.Numeric(1.0),
+        "name" to PrototypeScalar.Text("Jason"),
+        "count" to PrototypeScalar.Numeric(2.0),
+        "enabled" to PrototypeScalar.BooleanValue(true),
+        "page" to PrototypeScalar.Numeric(1.0),
       )
-    val visible = mapOverlaySpec(spec(root).copy(state = state)).root
+    val visible = mapPrototypeSpec(spec(root).copy(state = state)).root
     assertTrue(visible.visible)
     assertEquals("Jason 2 true {missing} {page} {pageCount}", visible.text)
-    assertFalse(mapOverlaySpec(spec(root)).root.visible)
+    assertFalse(mapPrototypeSpec(spec(root)).root.visible)
     assertFalse(
-      mapOverlaySpec(spec(root).copy(state = state + ("enabled" to OverlayScalar.Text("true"))))
+      mapPrototypeSpec(spec(root).copy(state = state + ("enabled" to PrototypeScalar.Text("true"))))
         .root
         .visible,
     )
@@ -387,13 +396,13 @@ class OverlayRenderModelTest {
   fun `interpolation substitutes only well formed identifier tokens`() {
     val state =
       mapOf(
-        "a" to OverlayScalar.Text("A"),
-        "b_2" to OverlayScalar.Text("B"),
-        "_x" to OverlayScalar.Text("X"),
-        "n" to OverlayScalar.Numeric(3.0),
-        "f" to OverlayScalar.Numeric(1.5),
-        "t" to OverlayScalar.BooleanValue(true),
-        "nest" to OverlayScalar.Text("{a}"),
+        "a" to PrototypeScalar.Text("A"),
+        "b_2" to PrototypeScalar.Text("B"),
+        "_x" to PrototypeScalar.Text("X"),
+        "n" to PrototypeScalar.Numeric(3.0),
+        "f" to PrototypeScalar.Numeric(1.5),
+        "t" to PrototypeScalar.BooleanValue(true),
+        "nest" to PrototypeScalar.Text("{a}"),
       )
     val cases =
       mapOf(
@@ -414,32 +423,33 @@ class OverlayRenderModelTest {
         "{page}/{pageCount}" to "{page}/{pageCount}",
       )
     cases.forEach { (input, expected) ->
-      assertEquals(input, expected, interpolateOverlayText(input, state))
+      assertEquals(input, expected, interpolatePrototypeText(input, state))
     }
   }
 
   @Test
   fun `interpolation resolves page tokens only inside a pager`() {
     val state =
-      mapOf("page" to OverlayScalar.Numeric(2.0), "pageCount" to OverlayScalar.Numeric(5.0))
-    assertEquals("2/5", interpolateOverlayText("{page}/{pageCount}", state, inPager = true))
+      mapOf("page" to PrototypeScalar.Numeric(2.0), "pageCount" to PrototypeScalar.Numeric(5.0))
+    assertEquals("2/5", interpolatePrototypeText("{page}/{pageCount}", state, inPager = true))
     assertEquals(
       "{page}/{pageCount}",
-      interpolateOverlayText("{page}/{pageCount}", state, inPager = false),
+      interpolatePrototypeText("{page}/{pageCount}", state, inPager = false),
     )
   }
 
   @Test
   fun `placement opacity and alpha first colors map without a display`() {
-    assertEquals(100, mapOverlaySpec(spec(OverlaySpacerNode())).opacityPercent)
-    val window = OverlayWindow(OverlayFullscreenPlacement("#80123456"), 37)
-    val model = mapOverlaySpec(spec(OverlaySpacerNode()).copy(window = window))
+    assertEquals(100, mapPrototypeSpec(spec(PrototypeSpacerNode())).opacityPercent)
+    val window = PrototypeWindow(PrototypeFullscreenPlacement("#80123456"), 37)
+    val model = mapPrototypeSpec(spec(PrototypeSpacerNode()).copy(window = window))
     assertEquals(37, model.request().opacityPercent)
-    assertEquals(OverlayPlacement.Fullscreen(Color(0x80123456)), model.placement)
+    assertEquals(PrototypePlacement.Fullscreen(Color(0x80123456)), model.placement)
     for (edge in listOf("top", "bottom")) {
-      val sheet = mapOverlayPlacement(OverlaySheetPlacement(edge, 240.0)) as OverlayPlacement.Sheet
+      val sheet =
+        mapPrototypePlacement(PrototypeSheetPlacement(edge, 240.0)) as PrototypePlacement.Sheet
       assertEquals(
-        if (edge == "top") OverlayPlacement.Edge.TOP else OverlayPlacement.Edge.BOTTOM,
+        if (edge == "top") PrototypePlacement.Edge.TOP else PrototypePlacement.Edge.BOTTOM,
         sheet.edge,
       )
       assertEquals(240f, sheet.sizeDp)
@@ -458,25 +468,25 @@ class OverlayRenderModelTest {
       )
     for ((name, gravity) in gravities) {
       assertEquals(
-        OverlayPlacement.Floating(gravity, -2f, 4f),
-        mapOverlayPlacement(OverlayFloatingPlacement(name, OverlayOffset(-2.0, 4.0))),
+        PrototypePlacement.Floating(gravity, -2f, 4f),
+        mapPrototypePlacement(PrototypeFloatingPlacement(name, PrototypeOffset(-2.0, 4.0))),
       )
     }
   }
 
   @Test
   fun `spacing reserves gaps while arrangement distributes free space in both directions`() {
-    val style = OverlayStyle(arrangement = "spaceBetween", spacing = 5.0)
+    val style = PrototypeStyle(arrangement = "spaceBetween", spacing = 5.0)
     val positions = IntArray(3)
-    with(overlayHorizontalArrangement(style)) {
+    with(prototypeHorizontalArrangement(style)) {
       with(Density(1f)) { arrange(100, intArrayOf(10, 10, 10), LayoutDirection.Ltr, positions) }
     }
     assertArrayEquals(intArrayOf(0, 45, 90), positions)
-    with(overlayHorizontalArrangement(style)) {
+    with(prototypeHorizontalArrangement(style)) {
       with(Density(1f)) { arrange(100, intArrayOf(10, 10, 10), LayoutDirection.Rtl, positions) }
     }
     assertArrayEquals(intArrayOf(90, 45, 0), positions)
-    with(overlayVerticalArrangement(OverlayStyle(spacing = 5.0))) {
+    with(prototypeVerticalArrangement(PrototypeStyle(spacing = 5.0))) {
       with(Density(1f)) { arrange(100, intArrayOf(10, 10, 10), positions) }
     }
     assertArrayEquals(intArrayOf(0, 15, 30), positions)
@@ -486,60 +496,61 @@ class OverlayRenderModelTest {
   fun `interactive nodes retain typed configuration actions and children`() {
     val nodes =
       listOf(
-        OverlayTextFieldNode(stateKey = "name"),
-        OverlayScrollNode(child = OverlayTextNode(text = "hidden")),
-        OverlayPagerNode(id = "pager", children = listOf(OverlayTextNode(text = "hidden"))),
-        OverlayTabBarNode(items = emptyList(), stateKey = "tab"),
-        OverlayBottomNavNode(items = emptyList(), stateKey = "tab"),
-        OverlayBottomSheetNode(
-          child = OverlaySpacerNode(),
-          openWhen = OverlaySheetCondition("open", true),
-          detents = listOf(OverlayDetent.Full),
+        PrototypeTextFieldNode(stateKey = "name"),
+        PrototypeScrollNode(child = PrototypeTextNode(text = "hidden")),
+        PrototypePagerNode(id = "pager", children = listOf(PrototypeTextNode(text = "hidden"))),
+        PrototypeTabBarNode(items = emptyList(), stateKey = "tab"),
+        PrototypeBottomNavNode(items = emptyList(), stateKey = "tab"),
+        PrototypeBottomSheetNode(
+          child = PrototypeSpacerNode(),
+          openWhen = PrototypeSheetCondition("open", true),
+          detents = listOf(PrototypeDetent.Full),
         ),
       )
     for (node in nodes) {
-      val model = mapOverlaySpec(spec(node))
+      val model = mapPrototypeSpec(spec(node))
       assertEquals(node, model.root.source)
-      assertEquals(overlayDescendants(node).size, model.root.children.size)
-      assertEquals(node is OverlayTextFieldNode, model.hasTextField)
+      assertEquals(prototypeDescendants(node).size, model.root.children.size)
+      assertEquals(node is PrototypeTextFieldNode, model.hasTextField)
       assertEquals(model.hasTextField, model.request().hasTextField)
     }
-    val actions = listOf(OverlayEmitAction("tap"))
+    val actions = listOf(PrototypeEmitAction("tap"))
     val scroll =
-      OverlayScrollNode(
+      PrototypeScrollNode(
         axis = "horizontal",
         onTap = actions,
-        child = OverlayTextFieldNode(stateKey = "name"),
+        child = PrototypeTextFieldNode(stateKey = "name"),
       )
-    val model = mapOverlaySpec(spec(scroll))
+    val model = mapPrototypeSpec(spec(scroll))
     assertTrue(model.request().hasTextField)
     assertEquals(actions, model.root.source?.onTap)
-    assertEquals("horizontal", (model.root.source as OverlayScrollNode).axis)
+    assertEquals("horizontal", (model.root.source as PrototypeScrollNode).axis)
   }
 
   @Test
   fun `node guard accepts exact limit and rejects next node with canonical path`() {
-    val limit = OverlaySpecValidator.MAX_OVERLAY_NODES
-    val root = OverlayBoxNode(children = List(limit - 1) { OverlaySpacerNode() })
-    guardOverlayTree(root)
+    val limit = PrototypeSpecValidator.MAX_PROTOTYPE_NODES
+    val root = PrototypeBoxNode(children = List(limit - 1) { PrototypeSpacerNode() })
+    guardPrototypeTree(root)
     val error =
       assertThrows(IllegalArgumentException::class.java) {
-        guardOverlayTree(root.copy(children = root.children + OverlaySpacerNode()))
+        guardPrototypeTree(root.copy(children = root.children + PrototypeSpacerNode()))
       }
     assertEquals("root.children[${limit - 1}]: Node limit exceeded", error.message)
   }
 
   @Test
   fun `depth guard accepts exact limit and rejects next child with canonical path`() {
-    fun nested(depth: Int): OverlayNode =
-      if (depth == 1) OverlaySpacerNode() else OverlayBoxNode(children = listOf(nested(depth - 1)))
-    guardOverlayTree(nested(OverlaySpecValidator.MAX_OVERLAY_DEPTH))
+    fun nested(depth: Int): PrototypeNode =
+      if (depth == 1) PrototypeSpacerNode()
+      else PrototypeBoxNode(children = listOf(nested(depth - 1)))
+    guardPrototypeTree(nested(PrototypeSpecValidator.MAX_PROTOTYPE_DEPTH))
     val error =
       assertThrows(IllegalArgumentException::class.java) {
-        mapOverlaySpec(spec(nested(OverlaySpecValidator.MAX_OVERLAY_DEPTH + 1)))
+        mapPrototypeSpec(spec(nested(PrototypeSpecValidator.MAX_PROTOTYPE_DEPTH + 1)))
       }
     assertEquals(
-      "root${".children[0]".repeat(OverlaySpecValidator.MAX_OVERLAY_DEPTH)}: Tree depth limit exceeded",
+      "root${".children[0]".repeat(PrototypeSpecValidator.MAX_PROTOTYPE_DEPTH)}: Tree depth limit exceeded",
       error.message,
     )
   }
@@ -553,17 +564,17 @@ class OverlayRenderModelTest {
     val fixtures = checkNotNull(directory.listFiles()).filter { it.extension == "json" }
     assertTrue(fixtures.isNotEmpty())
     for (file in fixtures) {
-      val validated = OverlaySpecValidator.validate(file.readText())
-      assertTrue("${file.name}: $validated", validated is OverlaySpecValidation.Success)
-      val decoded = (validated as OverlaySpecValidation.Success).spec
+      val validated = PrototypeSpecValidator.validate(file.readText())
+      assertTrue("${file.name}: $validated", validated is PrototypeSpecValidation.Success)
+      val decoded = (validated as PrototypeSpecValidation.Success).spec
       val encoded = Json.encodeToString(decoded)
-      val roundTrip = OverlaySpecValidator.validate(encoded)
+      val roundTrip = PrototypeSpecValidator.validate(encoded)
       assertEquals(
         "${file.name}: $roundTrip",
         decoded,
-        (roundTrip as OverlaySpecValidation.Success).spec,
+        (roundTrip as PrototypeSpecValidation.Success).spec,
       )
-      mapOverlaySpec(decoded)
+      mapPrototypeSpec(decoded)
     }
   }
 }

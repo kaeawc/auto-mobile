@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.content.ContentResolver
 import android.os.Looper
@@ -23,15 +23,15 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 
 /**
- * Rendered overlay motion against a manually driven frame clock: an animation is observable
+ * Rendered prototype motion against a manually driven frame clock: an animation is observable
  * mid-flight, and a zero animator duration scale must settle every change within one frame so
- * `observe` never needs to wait for the overlay (#10442).
+ * `observe` never needs to wait for the prototype (#10442).
  */
 @RunWith(RobolectricTestRunner::class)
-class OverlayMotionRenderTest {
+class PrototypeMotionRenderTest {
   @get:Rule val compose = createComposeRule()
 
-  // The overlay's own resolver once shown: Robolectric delivers a change only to observers
+  // The prototype's own resolver once shown: Robolectric delivers a change only to observers
   // registered on the resolver that is notified.
   private var resolver: ContentResolver = RuntimeEnvironment.getApplication().contentResolver
   private var sequence = 0L
@@ -43,11 +43,11 @@ class OverlayMotionRenderTest {
     shadowOf(Looper.getMainLooper()).idle()
   }
 
-  private fun show(spec: OverlaySpec): OverlayRuntime {
-    val runtime = OverlayRuntime(spec, nextSequence = { ++sequence })
+  private fun show(spec: PrototypeSpec): PrototypeRuntime {
+    val runtime = PrototypeRuntime(spec, nextSequence = { ++sequence })
     compose.setContent {
       resolver = LocalContext.current.contentResolver
-      OverlayRuntimeContent(runtime) { runtime.handle(it) }
+      PrototypeRuntimeContent(runtime) { runtime.handle(it) }
     }
     compose.waitForIdle()
     // From here on frames only advance when a test asks for one.
@@ -56,8 +56,8 @@ class OverlayMotionRenderTest {
   }
 
   /** Applies [action], then advances [frames] frames (the first recomposes the state change). */
-  private fun OverlayRuntime.tapThenAdvance(action: OverlayAction, frames: Int = 1) {
-    runBlocking { handle(OverlayInteraction.Tap(listOf(action))) }
+  private fun PrototypeRuntime.tapThenAdvance(action: PrototypeAction, frames: Int = 1) {
+    runBlocking { handle(PrototypeInteraction.Tap(listOf(action))) }
     repeat(frames) { compose.mainClock.advanceTimeByFrame() }
   }
 
@@ -66,26 +66,26 @@ class OverlayMotionRenderTest {
   private fun shown(tag: String): Int =
     compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().size
 
-  private fun visibilitySpec(): OverlaySpec =
-    OverlaySpec(
+  private fun visibilitySpec(): PrototypeSpec =
+    PrototypeSpec(
       "panel",
-      OverlayWindow(OverlayFullscreenPlacement()),
-      state = mapOf("show" to OverlayScalar.BooleanValue(true)),
+      PrototypeWindow(PrototypeFullscreenPlacement()),
+      state = mapOf("show" to PrototypeScalar.BooleanValue(true)),
       root =
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayTextNode(text = "always", testTag = "always"),
-              OverlayTextNode(
+              PrototypeTextNode(text = "always", testTag = "always"),
+              PrototypeTextNode(
                 text = "detail",
                 testTag = "detail",
-                visibleWhen = OverlayCondition("show", OverlayScalar.BooleanValue(true)),
+                visibleWhen = PrototypeCondition("show", PrototypeScalar.BooleanValue(true)),
               ),
             ),
         ),
     )
 
-  private val hide = OverlaySetStateAction("show", OverlayScalar.BooleanValue(false))
+  private val hide = PrototypeSetStateAction("show", PrototypeScalar.BooleanValue(false))
 
   @Test
   fun `a zero duration scale hides a visibleWhen node within one frame`() {
@@ -111,7 +111,7 @@ class OverlayMotionRenderTest {
   }
 
   @Test
-  fun `setting the scale to zero while the overlay is shown makes the next change instant`() {
+  fun `setting the scale to zero while the prototype is shown makes the next change instant`() {
     setDurationScale(1f)
     val runtime = show(visibilitySpec())
 
@@ -132,22 +132,22 @@ class OverlayMotionRenderTest {
     assertEquals(0, shown("detail"))
   }
 
-  private fun pressSpec(pressScale: Double?, motion: String? = null): OverlaySpec =
-    OverlaySpec(
+  private fun pressSpec(pressScale: Double?, motion: String? = null): PrototypeSpec =
+    PrototypeSpec(
       "panel",
-      OverlayWindow(OverlayFullscreenPlacement()),
+      PrototypeWindow(PrototypeFullscreenPlacement()),
       motion = motion,
       root =
-        OverlayBoxNode(
+        PrototypeBoxNode(
           testTag = "target",
-          onTap = listOf(OverlayEmitAction("tap")),
+          onTap = listOf(PrototypeEmitAction("tap")),
           style =
-            OverlayStyle(
-              width = OverlayDimension.Dp(100.0),
-              height = OverlayDimension.Dp(100.0),
+            PrototypeStyle(
+              width = PrototypeDimension.Dp(100.0),
+              height = PrototypeDimension.Dp(100.0),
               pressScale = pressScale,
             ),
-          children = listOf(OverlayTextNode(text = "go")),
+          children = listOf(PrototypeTextNode(text = "go")),
         ),
     )
 
@@ -207,14 +207,14 @@ class OverlayMotionRenderTest {
     assertEquals(rest, targetWidth(), 0.5f)
   }
 
-  private fun pagerSpec(): OverlaySpec =
-    OverlaySpec(
+  private fun pagerSpec(): PrototypeSpec =
+    PrototypeSpec(
       "panel",
-      OverlayWindow(OverlayFullscreenPlacement()),
+      PrototypeWindow(PrototypeFullscreenPlacement()),
       root =
-        OverlayPagerNode(
+        PrototypePagerNode(
           "pager",
-          children = List(3) { OverlayTextNode(text = "page $it", testTag = "page$it") },
+          children = List(3) { PrototypeTextNode(text = "page $it", testTag = "page$it") },
         ),
     )
 
@@ -228,7 +228,7 @@ class OverlayMotionRenderTest {
         it.boundsInRoot.left == 0f
       } ?: false
 
-  private val toLastPage = OverlaySetPageAction("pager", OverlayPageTarget.Index(2))
+  private val toLastPage = PrototypeSetPageAction("pager", PrototypePageTarget.Index(2))
 
   @Test
   fun `a zero duration scale snaps a setPage change within one frame`() {

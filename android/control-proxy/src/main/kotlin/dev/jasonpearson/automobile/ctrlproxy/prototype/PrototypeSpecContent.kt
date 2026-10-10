@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.LocalIndication
@@ -51,36 +51,36 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /** Per-key epochs of the controller-held text; a field adopts the shown value when its moves. */
-internal val LocalOverlayTextEpochs = compositionLocalOf<Map<String, Int>> { emptyMap() }
+internal val LocalPrototypeTextEpochs = compositionLocalOf<Map<String, Int>> { emptyMap() }
 
-val OverlayRole = SemanticsPropertyKey<String>("OverlayRole")
+val PrototypeRole = SemanticsPropertyKey<String>("PrototypeRole")
 
 /** Compose owns gesture mechanics only; all authored state/actions go through the pure runtime. */
 @Composable
-internal fun OverlayRuntimeContent(
-  runtime: OverlayRuntime,
-  images: OverlayImageCache? = null,
-  fonts: OverlayFontCache? = null,
-  interact: suspend (OverlayInteraction) -> Unit,
+internal fun PrototypeRuntimeContent(
+  runtime: PrototypeRuntime,
+  images: PrototypeImageCache? = null,
+  fonts: PrototypeFontCache? = null,
+  interact: suspend (PrototypeInteraction) -> Unit,
 ) {
   val snapshot by runtime.snapshots.collectAsState()
   val resolver = LocalContext.current.contentResolver
   val durationScale by rememberAnimatorDurationScale(resolver)
-  val motion = overlayMotionEnabled(snapshot.spec.motion, durationScale)
+  val motion = prototypeMotionEnabled(snapshot.spec.motion, durationScale)
   if (snapshot.active) {
     key(runtime) {
       // One ordered queue drained by one coroutine: interactions reach the controller exactly in
       // the order they happened, whatever the dispatcher does with separately launched jobs.
-      val queue = remember { Channel<OverlayInteraction>(Channel.UNLIMITED) }
+      val queue = remember { Channel<PrototypeInteraction>(Channel.UNLIMITED) }
       LaunchedEffect(queue) { for (interaction in queue) interact(interaction) }
       CompositionLocalProvider(
-        LocalOverlayTextEpochs provides snapshot.textEpochs,
-        LocalOverlayImageCache provides images,
-        LocalOverlayFontCache provides fonts,
-        LocalOverlayMotion provides motion,
+        LocalPrototypeTextEpochs provides snapshot.textEpochs,
+        LocalPrototypeImageCache provides images,
+        LocalPrototypeFontCache provides fonts,
+        LocalPrototypeMotion provides motion,
       ) {
-        OverlaySpecContent(
-          mapOverlaySpec(snapshot.spec, snapshot.pages).root,
+        PrototypeSpecContent(
+          mapPrototypeSpec(snapshot.spec, snapshot.pages).root,
           snapshot.spec.theme,
         ) { interaction ->
           queue.trySend(interaction)
@@ -92,17 +92,17 @@ internal fun OverlayRuntimeContent(
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun OverlaySpecContent(
-  root: OverlayRenderNode,
-  theme: OverlaySpecTheme? = null,
-  interact: (OverlayInteraction) -> Unit = {},
+fun PrototypeSpecContent(
+  root: PrototypeRenderNode,
+  theme: PrototypeSpecTheme? = null,
+  interact: (PrototypeInteraction) -> Unit = {},
 ) {
-  OverlayTheme(root, theme) {
-    val anchorLocals = remember { OverlayAnchorLocals() }
-    CompositionLocalProvider(LocalOverlayAnchorLocals provides anchorLocals) {
-      val fillsWindow = LocalOverlayFillsWindow.current
+  PrototypeTheme(root, theme) {
+    val anchorLocals = remember { PrototypeAnchorLocals() }
+    CompositionLocalProvider(LocalPrototypeAnchorLocals provides anchorLocals) {
+      val fillsWindow = LocalPrototypeFillsWindow.current
       Box(Modifier.semantics { testTagsAsResourceId = true }) {
-        val modals = modalOverlaySheets(root)
+        val modals = modalPrototypeSheets(root)
         // An open dialog is modal: the page behind it leaves the accessibility tree, as it does
         // on iOS and as touches already do. A snackbar or sheet does not block the page.
         val pageBlocked = modals.any { it.role == "dialog" }
@@ -111,13 +111,13 @@ fun OverlaySpecContent(
           Modifier.then(if (fillsWindow) Modifier.fillWhenEmpty() else Modifier)
             .then(if (pageBlocked) Modifier.clearAndSetSemantics {} else Modifier),
         ) {
-          RenderOverlayNode(root, interact, windowRoot = true)
-          OverlayAnchorLayer(layeredOverlayAnchors(root), interact)
+          RenderPrototypeNode(root, interact, windowRoot = true)
+          PrototypeAnchorLayer(layeredPrototypeAnchors(root), interact)
         }
         modals.forEach { node ->
           key(node.identity) {
-            RenderOverlayModal(node, interact)
-            OverlayAnchorLayer(layeredOverlayAnchorsIn(node.children), interact)
+            RenderPrototypeModal(node, interact)
+            PrototypeAnchorLayer(layeredPrototypeAnchorsIn(node.children), interact)
           }
         }
       }
@@ -126,19 +126,20 @@ fun OverlaySpecContent(
 }
 
 /**
- * True where the overlay content sits in a window that already covers the screen (fullscreen
+ * True where the prototype content sits in a window that already covers the screen (fullscreen
  * placement), so [fillWhenEmpty] cannot change what the window occupies. False for floating and
  * sheet windows, which wrap their content: filling there would grow the window over the app, which
  * it would then block from touches and from `observe`.
  */
-internal val LocalOverlayFillsWindow = compositionLocalOf { false }
+internal val LocalPrototypeFillsWindow = compositionLocalOf { false }
 
 /**
  * Gives a content box that measured empty the whole bounded space it was offered. A root whose
  * children are all anchored (#10814) measures 0x0 because the anchor layer takes no space, and
  * Compose clips every descendant's accessibility bounds to its ancestors, so the anchored nodes
  * reported empty, invisible bounds and `observe` dropped them (#10870). A non-empty box keeps its
- * measured size. Apply only inside a window that is already full-size ([LocalOverlayFillsWindow]).
+ * measured size. Apply only inside a window that is already full-size
+ * ([LocalPrototypeFillsWindow]).
  */
 internal fun Modifier.fillWhenEmpty(): Modifier = layout { measurable, constraints ->
   val placeable = measurable.measure(constraints)
@@ -157,7 +158,7 @@ internal fun Modifier.fillWhenEmpty(): Modifier = layout { measurable, constrain
  * sits in, so it is composed with these again: Material's content colour, content alpha and text
  * style would otherwise reset to the window's defaults.
  */
-internal class OverlayAnchorLocals {
+internal class PrototypeAnchorLocals {
   val byIdentity = mutableStateMapOf<String, CapturedAnchor>()
 }
 
@@ -169,19 +170,19 @@ internal class CapturedAnchor(
   val owner: Any = Unit,
 )
 
-private val LocalOverlayAnchorLocals = compositionLocalOf<OverlayAnchorLocals?> { null }
+private val LocalPrototypeAnchorLocals = compositionLocalOf<PrototypeAnchorLocals?> { null }
 
 /**
  * Records the locals at an anchored node's authored position, where the node itself is not drawn.
  */
 @Composable
 private fun CaptureAnchorLocals(identity: String) {
-  val registry = LocalOverlayAnchorLocals.current ?: return
+  val registry = LocalPrototypeAnchorLocals.current ?: return
   // Written while composing, not in an effect: the layer composes after this in the same pass and
   // must not draw the node a frame with the wrong locals first.
   val owner = remember { Any() }
   registry.byIdentity[identity] =
-    CapturedAnchor(currentCompositionLocalContext, LocalOverlayAnchorFade.current, owner)
+    CapturedAnchor(currentCompositionLocalContext, LocalPrototypeAnchorFade.current, owner)
   DisposableEffect(registry, identity, owner) {
     onDispose {
       // A re-registration from another call site (the motion branch flipping) composes before
@@ -193,7 +194,7 @@ private fun CaptureAnchorLocals(identity: String) {
 
 @Composable
 private fun WithAnchorLocals(identity: String, content: @Composable () -> Unit) {
-  val captured = LocalOverlayAnchorLocals.current?.byIdentity?.get(identity)
+  val captured = LocalPrototypeAnchorLocals.current?.byIdentity?.get(identity)
   if (captured != null) CompositionLocalProvider(captured.locals, content = content) else content()
 }
 
@@ -201,14 +202,14 @@ private fun WithAnchorLocals(identity: String, content: @Composable () -> Unit) 
  * Draws [nodes], the anchored nodes of the content below it, above that content and at window level
  * (#10803). Drawn inside their parents, a wrap-content parent clipped them to its slot and reserved
  * that slot for them. The layer takes no space of its own, measures each node against the whole
- * space the overlay content is given (not its parent's slot) and places it at the layer's origin,
- * from which [overlayAnchor] moves it, touch target and semantics included, onto its anchor. Only
+ * space the prototype content is given (not its parent's slot) and places it at the layer's origin,
+ * from which [prototypeAnchor] moves it, touch target and semantics included, onto its anchor. Only
  * the window and the host's content viewport clip it.
  */
 @Composable
-private fun OverlayAnchorLayer(
-  anchors: List<LayeredOverlayAnchor>,
-  interact: (OverlayInteraction) -> Unit,
+private fun PrototypeAnchorLayer(
+  anchors: List<LayeredPrototypeAnchor>,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
   if (anchors.isEmpty()) return
   Layout(
@@ -234,138 +235,142 @@ private fun OverlayAnchorLayer(
  */
 @Composable
 private fun LayeredAnchorEntry(
-  anchor: LayeredOverlayAnchor,
-  interact: (OverlayInteraction) -> Unit,
+  anchor: LayeredPrototypeAnchor,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
   val node = anchor.node
   val content: @Composable () -> Unit = {
-    WithAnchorLocals(node.identity) { RenderOverlayNode(node, interact, anchorLayer = true) }
+    WithAnchorLocals(node.identity) { RenderPrototypeNode(node, interact, anchorLayer = true) }
   }
-  if (LocalOverlayMotion.current && anchor.animatedAncestor != null) {
+  if (LocalPrototypeMotion.current && anchor.animatedAncestor != null) {
     // Composed exactly while the authored ancestors are: their exit keeps them (and so this) up
     // until it finishes, and their fade, not a transition of our own, drives the alpha (#10869).
-    val captured = LocalOverlayAnchorLocals.current?.byIdentity?.get(node.identity)
+    val captured = LocalPrototypeAnchorLocals.current?.byIdentity?.get(node.identity)
     if (captured != null) Box(Modifier.anchorFade(captured.fade)) { content() }
   } else if (anchor.ancestorsShown) content()
 }
 
 @Composable
-private fun RenderOverlayModal(node: OverlayRenderNode, interact: (OverlayInteraction) -> Unit) {
-  val modifier = overlayNodeModifier(node, interact)
+private fun RenderPrototypeModal(
+  node: PrototypeRenderNode,
+  interact: (PrototypeInteraction) -> Unit,
+) {
+  val modifier = prototypeNodeModifier(node, interact)
   when (node.role) {
     "dialog" ->
-      RenderOverlayDialog(node, modifier, interact) {
+      RenderPrototypeDialog(node, modifier, interact) {
         node.children.forEach {
-          RenderOverlayNode(
+          RenderPrototypeNode(
             it,
             interact,
             columnWeight(it),
-            it.weightAxis(OverlayWeightAxis.VERTICAL),
+            it.weightAxis(PrototypeWeightAxis.VERTICAL),
           )
         }
       }
-    "snackbar" -> RenderOverlaySnackbar(node, modifier, interact)
-    else -> RenderOverlaySheet(node, modifier, interact)
+    "snackbar" -> RenderPrototypeSnackbar(node, modifier, interact)
+    else -> RenderPrototypeSheet(node, modifier, interact)
   }
 }
 
 @Composable
-private fun RenderOverlayNode(
-  node: OverlayRenderNode,
-  interact: (OverlayInteraction) -> Unit,
+private fun RenderPrototypeNode(
+  node: PrototypeRenderNode,
+  interact: (PrototypeInteraction) -> Unit,
   parentModifier: Modifier = Modifier,
-  weightAxis: OverlayWeightAxis? = null,
+  weightAxis: PrototypeWeightAxis? = null,
   windowRoot: Boolean = false,
   anchorLayer: Boolean = false,
 ) {
   // An anchored node below the root is drawn by its window's anchor layer, not in its parent.
-  if (!windowRoot && !anchorLayer && isLayeredOverlayAnchor(node)) {
+  if (!windowRoot && !anchorLayer && isLayeredPrototypeAnchor(node)) {
     CaptureAnchorLocals(node.identity)
     return
   }
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
-  if (LocalOverlayMotion.current && node.source?.visibleWhen != null) {
+  if (LocalPrototypeMotion.current && node.source?.visibleWhen != null) {
     // The row/column weight rides on the animated container: it is the Row/Column's direct child.
     AnimatedVisibility(
       visible = node.visible,
       modifier = parentModifier,
-      enter = overlayEnterTransition(node.source.transition),
-      exit = overlayExitTransition(node.source.transition),
+      enter = prototypeEnterTransition(node.source.transition),
+      exit = prototypeExitTransition(node.source.transition),
     ) {
       ProvideAnchorFade(none = node.source.transition == "none") {
-        RenderOverlayNodeContent(node, interact, weightAxis = weightAxis, windowRoot = windowRoot)
+        RenderPrototypeNodeContent(node, interact, weightAxis = weightAxis, windowRoot = windowRoot)
       }
     }
   } else if (node.visible) {
-    RenderOverlayNodeContent(node, interact, parentModifier, weightAxis, windowRoot)
+    RenderPrototypeNodeContent(node, interact, parentModifier, weightAxis, windowRoot)
   }
 }
 
 @Composable
-private fun RenderOverlayNodeContent(
-  node: OverlayRenderNode,
-  interact: (OverlayInteraction) -> Unit,
+private fun RenderPrototypeNodeContent(
+  node: PrototypeRenderNode,
+  interact: (PrototypeInteraction) -> Unit,
   parentModifier: Modifier = Modifier,
-  weightAxis: OverlayWeightAxis? = null,
+  weightAxis: PrototypeWeightAxis? = null,
   windowRoot: Boolean = false,
 ) {
-  val modifier = parentModifier.then(overlayNodeModifier(node, interact, weightAxis, windowRoot))
+  val modifier = parentModifier.then(prototypeNodeModifier(node, interact, weightAxis, windowRoot))
   // Containers whose children can appear, disappear or change animate their size with them.
-  val containerModifier = modifier.overlayAnimateSize(LocalOverlayMotion.current)
+  val containerModifier = modifier.prototypeAnimateSize(LocalPrototypeMotion.current)
   when (node.role) {
     "box" ->
       Box(containerModifier, contentAlignment = node.style.alignment) {
-        node.children.forEach { RenderOverlayNode(it, interact) }
+        node.children.forEach { RenderPrototypeNode(it, interact) }
       }
     "row" ->
       Row(
         containerModifier,
-        horizontalArrangement = overlayHorizontalArrangement(node.style.source),
+        horizontalArrangement = prototypeHorizontalArrangement(node.style.source),
         verticalAlignment = node.style.verticalAlignment,
       ) {
         node.children.forEach {
-          RenderOverlayNode(
+          RenderPrototypeNode(
             it,
             interact,
             rowWeight(it),
-            it.weightAxis(OverlayWeightAxis.HORIZONTAL),
+            it.weightAxis(PrototypeWeightAxis.HORIZONTAL),
           )
         }
       }
     "column" ->
       Column(
         containerModifier,
-        verticalArrangement = overlayVerticalArrangement(node.style.source),
+        verticalArrangement = prototypeVerticalArrangement(node.style.source),
         horizontalAlignment = node.style.horizontalAlignment,
       ) {
         node.children.forEach {
-          RenderOverlayNode(
+          RenderPrototypeNode(
             it,
             interact,
             columnWeight(it),
-            it.weightAxis(OverlayWeightAxis.VERTICAL),
+            it.weightAxis(PrototypeWeightAxis.VERTICAL),
           )
         }
       }
     "text" -> {
       val source = node.style.source
-      val role = overlayTextRole(MaterialTheme.typography, source.textStyle)
+      val role = prototypeTextRole(MaterialTheme.typography, source.textStyle)
       // A styled text node with no colour of its own reads as on-surface text, not black.
       val textColor =
         if (source.color == null && role != null) MaterialTheme.colorScheme.onSurface
-        else overlayThemedColor(node.style.color, source.color) ?: node.style.color
+        else prototypeThemedColor(node.style.color, source.color) ?: node.style.color
       Text(
         node.text,
         modifier,
         color = textColor,
-        // sp, so overlay text follows the system font scale like the app it prototypes (#10436).
+        // sp, so prototype text follows the system font scale like the app it prototypes (#10436).
         // A `textStyle` role supplies size, weight and family; explicit style fields still win.
         fontSize =
           source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
         fontWeight = if (role == null || source.fontWeight != null) node.style.fontWeight else null,
         // Only an authored family overrides; otherwise the text inherits the theme's family through
         // its role or the themed body style, as plain text in the prototyped app would (#10561).
-        fontFamily = if (source.fontFamily != null) rememberOverlayFontFamily(node.style) else null,
+        fontFamily =
+          if (source.fontFamily != null) rememberPrototypeFontFamily(node.style) else null,
         // Authored-only, like fontWeight: an unset property keeps what the role or theme gives.
         fontStyle = if (source.fontStyle != null) node.style.fontStyle else null,
         letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
@@ -378,14 +383,14 @@ private fun RenderOverlayNodeContent(
       )
     }
     "icon" -> {
-      val icon = overlayIcon(node.iconName, (node.source as? OverlayIconNode)?.variant)
+      val icon = prototypeIcon(node.iconName, (node.source as? PrototypeIconNode)?.variant)
       if (icon != null)
         Icon(
           icon,
           contentDescription = null,
           modifier = modifier,
           tint =
-            (overlayThemedColor(node.style.color, node.style.source.color) ?: node.style.color)
+            (prototypeThemedColor(node.style.color, node.style.source.color) ?: node.style.color)
               .takeOrElse { LocalContentColor.current },
         )
       else
@@ -393,51 +398,51 @@ private fun RenderOverlayNodeContent(
           modifier
             .defaultMinSize(24.dp, 24.dp)
             .background(
-              overlayThemedColor(node.style.background, node.style.source.background)
-                ?: overlayPlaceholderColor(MaterialTheme.colorScheme),
+              prototypeThemedColor(node.style.background, node.style.source.background)
+                ?: prototypePlaceholderColor(MaterialTheme.colorScheme),
             ),
         )
     }
-    "image" -> OverlayImageContent(node, modifier)
+    "image" -> PrototypeImageContent(node, modifier)
     "scroll" -> {
       val scroll = rememberScrollState()
-      val source = node.source as? OverlayScrollNode
+      val source = node.source as? PrototypeScrollNode
       val scrolling =
         if (source?.axis == "horizontal") modifier.horizontalScroll(scroll)
         else modifier.verticalScroll(scroll)
-      Box(scrolling) { node.children.forEach { RenderOverlayNode(it, interact) } }
+      Box(scrolling) { node.children.forEach { RenderPrototypeNode(it, interact) } }
     }
-    "pager" -> RenderOverlayPager(node, modifier, interact)
+    "pager" -> RenderPrototypePager(node, modifier, interact)
     "tabBar",
-    "bottomNav" -> RenderOverlayNavigation(node, modifier, interact)
+    "bottomNav" -> RenderPrototypeNavigation(node, modifier, interact)
     "bottomSheet",
     "dialog",
     "snackbar" -> Unit // Modal content is hoisted above the whole author tree, within this window.
-    "iconButton" -> RenderOverlayIconButton(node, modifier, interact)
-    "fab" -> RenderOverlayFab(node, modifier, interact)
-    "segmentedButton" -> RenderOverlaySegmentedButton(node, modifier, interact)
-    "topAppBar" -> RenderOverlayTopAppBar(node, modifier, interact)
-    "divider" -> RenderOverlayDivider(node, modifier)
-    "badge" -> RenderOverlayBadge(node, modifier)
-    "progress" -> RenderOverlayProgress(node, modifier)
-    "timePicker" -> RenderOverlayTimePicker(node, modifier, interact)
-    "datePicker" -> RenderOverlayDatePicker(node, modifier, interact)
-    "textField" -> RenderOverlayTextField(node, modifier, interact)
+    "iconButton" -> RenderPrototypeIconButton(node, modifier, interact)
+    "fab" -> RenderPrototypeFab(node, modifier, interact)
+    "segmentedButton" -> RenderPrototypeSegmentedButton(node, modifier, interact)
+    "topAppBar" -> RenderPrototypeTopAppBar(node, modifier, interact)
+    "divider" -> RenderPrototypeDivider(node, modifier)
+    "badge" -> RenderPrototypeBadge(node, modifier)
+    "progress" -> RenderPrototypeProgress(node, modifier)
+    "timePicker" -> RenderPrototypeTimePicker(node, modifier, interact)
+    "datePicker" -> RenderPrototypeDatePicker(node, modifier, interact)
+    "textField" -> RenderPrototypeTextField(node, modifier, interact)
     "switch",
-    "checkbox" -> RenderOverlayToggle(node, modifier, interact)
-    "button" -> RenderOverlayButton(node, modifier, interact)
-    "radioGroup" -> RenderOverlayRadioGroup(node, modifier, interact)
-    "listItem" -> RenderOverlayListItem(node, modifier, interact)
-    "slider" -> RenderOverlaySlider(node, modifier, interact)
-    "chip" -> RenderOverlayChip(node, modifier, interact)
+    "checkbox" -> RenderPrototypeToggle(node, modifier, interact)
+    "button" -> RenderPrototypeButton(node, modifier, interact)
+    "radioGroup" -> RenderPrototypeRadioGroup(node, modifier, interact)
+    "listItem" -> RenderPrototypeListItem(node, modifier, interact)
+    "slider" -> RenderPrototypeSlider(node, modifier, interact)
+    "chip" -> RenderPrototypeChip(node, modifier, interact)
     "card" ->
-      RenderOverlayCard(node, modifier) {
+      RenderPrototypeCard(node, modifier) {
         node.children.forEach {
-          RenderOverlayNode(
+          RenderPrototypeNode(
             it,
             interact,
             columnWeight(it),
-            it.weightAxis(OverlayWeightAxis.VERTICAL),
+            it.weightAxis(PrototypeWeightAxis.VERTICAL),
           )
         }
       }
@@ -447,26 +452,26 @@ private fun RenderOverlayNodeContent(
 }
 
 @Composable
-private fun RenderOverlayTextField(
-  node: OverlayRenderNode,
+private fun RenderPrototypeTextField(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlayTextFieldNode ?: return
+  val source = node.source as? PrototypeTextFieldNode ?: return
   val presses = remember { MutableInteractionSource() }
   val focus = remember { FocusRequester() }
   val actions = source.onTap.orEmpty()
   // The shown value is local state, updated synchronously by the IME's own edits; the controller
   // is told afterwards. Binding it to node.text would show the controller's lagging echo, so fast
   // commitText input could be applied against a stale value.
-  val epoch = LocalOverlayTextEpochs.current[source.stateKey] ?: 0
-  val sync = remember { OverlayTextFieldSync(node.text, epoch) }
+  val epoch = LocalPrototypeTextEpochs.current[source.stateKey] ?: 0
+  val sync = remember { PrototypeTextFieldSync(node.text, epoch) }
   var shown by remember { mutableStateOf(sync.text) }
   LaunchedEffect(node.text, epoch) { if (sync.observe(node.text, epoch)) shown = sync.text }
   LaunchedEffect(presses, actions) {
     presses.interactions.collect { press ->
       if (press is PressInteraction.Release && actions.isNotEmpty())
-        interact(OverlayInteraction.Tap(actions))
+        interact(PrototypeInteraction.Tap(actions))
     }
   }
   var fieldModifier = modifier.focusRequester(focus)
@@ -474,7 +479,7 @@ private fun RenderOverlayTextField(
     fieldModifier = fieldModifier.semantics {
       onClick {
         focus.requestFocus()
-        interact(OverlayInteraction.Tap(actions))
+        interact(PrototypeInteraction.Tap(actions))
         true
       }
     }
@@ -484,7 +489,7 @@ private fun RenderOverlayTextField(
     { value ->
       if (sync.edit(value)) {
         shown = value
-        interact(OverlayInteraction.TextChange(source.stateKey, value, sync.epoch))
+        interact(PrototypeInteraction.TextChange(source.stateKey, value, sync.epoch))
       }
     },
     modifier = fieldModifier,
@@ -494,14 +499,14 @@ private fun RenderOverlayTextField(
 }
 
 @Composable
-private fun RenderOverlayPager(
-  node: OverlayRenderNode,
+private fun RenderPrototypePager(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlayPagerNode ?: return
+  val source = node.source as? PrototypePagerNode ?: return
   val pager = rememberPagerState(initialPage = node.page) { node.children.size }
-  val animate = LocalOverlayMotion.current
+  val animate = LocalPrototypeMotion.current
   // Keyed on motion too: turning motion off mid-scroll cancels the animation and snaps to the page.
   // The offset check matters then: past the halfway point currentPage already reads the target.
   LaunchedEffect(node.page, animate) {
@@ -513,35 +518,35 @@ private fun RenderOverlayPager(
     snapshotFlow { pager.isScrollInProgress to pager.settledPage }
       .distinctUntilChanged()
       .collect { (scrolling, page) ->
-        interact(OverlayInteraction.PagerMotion(source.id, page, scrolling))
+        interact(PrototypeInteraction.PagerMotion(source.id, page, scrolling))
       }
   }
-  val fill = overlayPageFill(node.style.source)
+  val fill = prototypePageFill(node.style.source)
   val pageModifier =
     Modifier.then(if (fill.width) Modifier.fillMaxWidth() else Modifier)
       .then(if (fill.height) Modifier.fillMaxHeight() else Modifier)
   HorizontalPager(pager, modifier) { page ->
-    Box(pageModifier) { RenderOverlayNode(node.children[page], interact) }
+    Box(pageModifier) { RenderPrototypeNode(node.children[page], interact) }
   }
 }
 
 @Composable
-private fun RenderOverlayNavigation(
-  node: OverlayRenderNode,
+private fun RenderPrototypeNavigation(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source
-  val items: List<OverlayItem>
+  val items: List<PrototypeItem>
   val pager: String?
   val key: String?
   when (source) {
-    is OverlayTabBarNode -> {
+    is PrototypeTabBarNode -> {
       items = source.items
       pager = source.pager
       key = source.stateKey
     }
-    is OverlayBottomNavNode -> {
+    is PrototypeBottomNavNode -> {
       items = source.items
       pager = source.pager
       key = source.stateKey
@@ -549,65 +554,68 @@ private fun RenderOverlayNavigation(
     else -> return
   }
   val select: (Int) -> Unit = { index ->
-    interact(OverlayInteraction.Select(pager, key, index, source.onTap.orEmpty()))
+    interact(PrototypeInteraction.Select(pager, key, index, source.onTap.orEmpty()))
   }
-  if (source is OverlayBottomNavNode)
+  if (source is PrototypeBottomNavNode)
     NavigationBar(modifier) {
       items.forEachIndexed { index, item ->
         NavigationBarItem(
           node.selection == index,
           { select(index) },
-          icon = { OverlayNavigationIcon(item) },
+          icon = { PrototypeNavigationIcon(item) },
           label = { Text(item.label) },
         )
       }
     }
-  else if (source is OverlayTabBarNode && source.scrollable)
+  else if (source is PrototypeTabBarNode && source.scrollable)
     ScrollableTabRow(node.selection, modifier) {
       items.forEachIndexed { index, item ->
-        OverlayNavigationTab(item, node.selection == index) { select(index) }
+        PrototypeNavigationTab(item, node.selection == index) { select(index) }
       }
     }
   else
     TabRow(node.selection, modifier) {
       items.forEachIndexed { index, item ->
-        OverlayNavigationTab(item, node.selection == index) { select(index) }
+        PrototypeNavigationTab(item, node.selection == index) { select(index) }
       }
     }
 }
 
 @Composable
-private fun OverlayNavigationTab(item: OverlayItem, selected: Boolean, select: () -> Unit) {
+private fun PrototypeNavigationTab(item: PrototypeItem, selected: Boolean, select: () -> Unit) {
   Tab(
     selected,
     select,
     text = { Text(item.label) },
     icon = {
-      if (item.icon != null || item.image != null) OverlayNavigationIcon(item)
+      if (item.icon != null || item.image != null) PrototypeNavigationIcon(item)
     },
   )
 }
 
-/** An in-window sheet: no Dialog/extra window, so scrim and gestures stay inside overlay bounds. */
+/**
+ * An in-window sheet: no Dialog/extra window, so scrim and gestures stay inside prototype bounds.
+ */
 @Composable
-private fun RenderOverlaySheet(
-  node: OverlayRenderNode,
+private fun RenderPrototypeSheet(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlayBottomSheetNode ?: return
+  val source = node.source as? PrototypeBottomSheetNode ?: return
   if (!node.sheetOpen) return
   BoxWithConstraints(Modifier.fillMaxSize()) {
-    val heights = overlaySheetHeights(source.detents, maxHeight.value.toDouble())
+    val heights = prototypeSheetHeights(source.detents, maxHeight.value.toDouble())
     var height by remember(node.identity, heights) { mutableDoubleStateOf(heights.first()) }
     var drag by remember(node.identity) { mutableDoubleStateOf(0.0) }
     val density = LocalDensity.current.density
     Box(
       Modifier.fillMaxSize()
         .background(
-          source.scrim?.let(::overlayColor) ?: overlaySheetScrimFallback(MaterialTheme.colorScheme),
+          source.scrim?.let(::prototypeColor)
+            ?: prototypeSheetScrimFallback(MaterialTheme.colorScheme),
         )
-        .clickable { interact(OverlayInteraction.SheetDismiss(source.openWhen)) },
+        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) },
     )
     Column(
       modifier
@@ -630,9 +638,9 @@ private fun RenderOverlaySheet(
             },
             onDragCancel = { drag = 0.0 },
             onDragEnd = {
-              val settled = settleOverlaySheet(heights, height, drag, source.dismissOnSwipe)
+              val settled = settlePrototypeSheet(heights, height, drag, source.dismissOnSwipe)
               drag = 0.0
-              if (settled == null) interact(OverlayInteraction.SheetDismiss(source.openWhen))
+              if (settled == null) interact(PrototypeInteraction.SheetDismiss(source.openWhen))
               else height = settled
             },
           )
@@ -640,7 +648,7 @@ private fun RenderOverlaySheet(
         // Consume body taps to keep the scrim from closing the sheet through empty content.
         .clickable {
           if (!source.onTap.isNullOrEmpty())
-            interact(OverlayInteraction.Tap(source.onTap.orEmpty()))
+            interact(PrototypeInteraction.Tap(source.onTap.orEmpty()))
         },
     ) {
       if (source.dragHandle)
@@ -648,20 +656,25 @@ private fun RenderOverlaySheet(
           Modifier.align(Alignment.CenterHorizontally)
             .padding(8.dp)
             .size(32.dp, 4.dp)
-            .background(overlayHandleColor(MaterialTheme.colorScheme), RoundedCornerShape(2.dp)),
+            .background(prototypeHandleColor(MaterialTheme.colorScheme), RoundedCornerShape(2.dp)),
         )
       node.children.forEach {
-        RenderOverlayNode(it, interact, columnWeight(it), it.weightAxis(OverlayWeightAxis.VERTICAL))
+        RenderPrototypeNode(
+          it,
+          interact,
+          columnWeight(it),
+          it.weightAxis(PrototypeWeightAxis.VERTICAL),
+        )
       }
     }
   }
 }
 
 @Composable
-private fun overlayNodeModifier(
-  node: OverlayRenderNode,
-  interact: (OverlayInteraction) -> Unit,
-  weightAxis: OverlayWeightAxis? = null,
+private fun prototypeNodeModifier(
+  node: PrototypeRenderNode,
+  interact: (PrototypeInteraction) -> Unit,
+  weightAxis: PrototypeWeightAxis? = null,
   windowRoot: Boolean = false,
 ): Modifier {
   val style = node.style.source
@@ -669,17 +682,17 @@ private fun overlayNodeModifier(
   val tappable =
     actions.isNotEmpty() &&
       node.role != "textField" &&
-      node.role !in OVERLAY_MODAL_ROLES &&
-      node.role !in OVERLAY_COMPONENT_ROLES &&
-      node.role !in OVERLAY_SELECTION_ROLES &&
-      node.role !in OVERLAY_MATERIAL_ROLES
+      node.role !in PROTOTYPE_MODAL_ROLES &&
+      node.role !in PROTOTYPE_COMPONENT_ROLES &&
+      node.role !in PROTOTYPE_SELECTION_ROLES &&
+      node.role !in PROTOTYPE_MATERIAL_ROLES
   val presses = remember { MutableInteractionSource() }
   var modifier: Modifier = Modifier
   // Outermost: the anchor fixes where the whole node, offset and touch target included, lands on
   // screen (#9316). The host resolved element anchors to screen dp bounds before sending.
-  val anchor = node.source?.anchor as? OverlayBoundsAnchor
+  val anchor = node.source?.anchor as? PrototypeBoundsAnchor
   if (anchor != null) {
-    modifier = modifier.overlayAnchor(anchor, currentOverlayWindowGeometry(), windowRoot)
+    modifier = modifier.prototypeAnchor(anchor, currentPrototypeWindowGeometry(), windowRoot)
   }
   // A draw-time shift of the whole node (shadow, touch target and semantics included); siblings
   // keep the layout slot it would have had.
@@ -687,31 +700,31 @@ private fun overlayNodeModifier(
   // Outside the touch target and drawing, so the whole node (shadow included) shrinks as one.
   val pressScale = style.pressScale
   if (tappable && pressScale != null) {
-    modifier = modifier.overlayPressScale(presses, pressScale.toFloat())
+    modifier = modifier.prototypePressScale(presses, pressScale.toFloat())
   }
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).
   if (tappable) modifier = modifier.minimumInteractiveComponentSize()
   // A cover anchor sizes the node to the anchor bounds: authored sizes would only wrap or clamp it.
-  if (anchor == null || !overlayAnchorCovers(anchor))
+  if (anchor == null || !prototypeAnchorCovers(anchor))
     modifier = authoredSizeModifier(modifier, style, weightAxis)
   modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
   val shape =
-    overlayCornerShape(MaterialTheme.shapes, style.cornerRadius ?: OverlayCornerRadius.Dp(0.0))
+    prototypeCornerShape(MaterialTheme.shapes, style.cornerRadius ?: PrototypeCornerRadius.Dp(0.0))
   // Before clip/background/border so the shadow is drawn outside the clipped content.
   style.elevation?.let {
     val shadowColor =
-      overlayThemedColor(node.style.shadowColor, style.shadowColor) ?: DefaultShadowColor
+      prototypeThemedColor(node.style.shadowColor, style.shadowColor) ?: DefaultShadowColor
     modifier =
       modifier.shadow(it.toFloat().dp, shape, ambientColor = shadowColor, spotColor = shadowColor)
   }
   if (style.cornerRadius != null) modifier = modifier.clip(shape)
-  overlayThemedColor(node.style.background, style.background)?.let {
+  prototypeThemedColor(node.style.background, style.background)?.let {
     modifier = modifier.background(it, shape)
   }
-  style.gradient?.let { modifier = modifier.background(overlayGradientBrush(it), shape) }
+  style.gradient?.let { modifier = modifier.background(prototypeGradientBrush(it), shape) }
   style.border?.let {
-    val borderColor = overlayThemedColor(node.style.borderColor, it.color)
+    val borderColor = prototypeThemedColor(node.style.borderColor, it.color)
     modifier = modifier.border(it.width.toFloat().dp, checkNotNull(borderColor), shape)
   }
   // Click handling and semantics go before the inset and authored padding, so the whole drawn node
@@ -719,11 +732,11 @@ private fun overlayNodeModifier(
   if (tappable) {
     modifier =
       modifier.clickable(interactionSource = presses, indication = LocalIndication.current) {
-        interact(OverlayInteraction.Tap(actions))
+        interact(PrototypeInteraction.Tap(actions))
       }
   }
   val description =
-    overlayContentDescription(
+    prototypeContentDescription(
       node.role,
       node.text,
       node.iconName,
@@ -732,7 +745,7 @@ private fun overlayNodeModifier(
       node.contentDescription,
     )
   val state =
-    overlayStateDescription(node.role, node.page, node.children.size, overlayPickerValue(node))
+    prototypeStateDescription(node.role, node.page, node.children.size, prototypePickerValue(node))
   // A layout container with nothing of its own to report gets no semantics node, so its children
   // join the nearest reporting ancestor, as with Compose's own layouts (#10446).
   if (!isSemanticsFreeContainer(node, tappable, description, state)) {
@@ -740,15 +753,16 @@ private fun overlayNodeModifier(
       if (node.role != "textField" && node.role !in SEMANTICS_FREE_CONTAINERS) {
         text = AnnotatedString(node.text)
       }
-      this[OverlayRole] = node.role
+      this[PrototypeRole] = node.role
       if (node.role == "icon" || node.role == "image") role = Role.Image
-      // Compose has no native role for text or layout containers; the kind travels in OverlayRole.
+      // Compose has no native role for text or layout containers; the kind travels in
+      // PrototypeRole.
       description?.let { contentDescription = it }
       state?.let { stateDescription = it }
       node.testTag?.let { testTag = it }
     }
   }
-  val insetFloor = LocalOverlayInsetFloor.current
+  val insetFloor = LocalPrototypeInsetFloor.current
   node.safeArea?.let { safeArea ->
     var insets: WindowInsets = WindowInsets(0, 0, 0, 0)
     for (type in safeArea.types) {
@@ -803,7 +817,7 @@ private val CHILD_LABELLED_ROLES = setOf("tabBar", "bottomNav")
  * accessibility tree as an empty wrapper (#10446).
  */
 internal fun isSemanticsFreeContainer(
-  node: OverlayRenderNode,
+  node: PrototypeRenderNode,
   tappable: Boolean,
   description: String?,
   state: String?,
@@ -816,43 +830,43 @@ internal fun isSemanticsFreeContainer(
     state == null
 
 /**
- * The accessible label for an overlay node. An authored `contentDescription` wins, then authored
+ * The accessible label for a prototype node. An authored `contentDescription` wins, then authored
  * text; an icon-only tappable node reads as its icon name, and so does a tappable layout container
  * whose only content is an icon (a FAB). A layout container or navigation bar is never labelled by
  * its node kind ("box", "row", "tabBar") while it has content (#10524, #10608, #10446): its
  * children label it instead. Only a tappable container with no children at all keeps its kind, as
  * nothing else names it. Every other node keeps its kind as the label.
  */
-internal fun overlayContentDescription(
+internal fun prototypeContentDescription(
   role: String,
   text: String,
   iconName: String?,
   tappable: Boolean,
-  children: List<OverlayRenderNode> = emptyList(),
+  children: List<PrototypeRenderNode> = emptyList(),
   authored: String? = null,
 ): String? =
   when {
     !authored.isNullOrEmpty() -> authored
     text.isNotEmpty() -> text
-    (tappable || role in OVERLAY_ICON_CONTROL_ROLES) && !iconName.isNullOrEmpty() -> iconName
+    (tappable || role in PROTOTYPE_ICON_CONTROL_ROLES) && !iconName.isNullOrEmpty() -> iconName
     role in CHILD_LABELLED_ROLES -> null
     role !in SEMANTICS_FREE_CONTAINERS -> role
     !tappable -> null
     children.isEmpty() -> role
-    else -> overlayIconOnlyLabel(children)
+    else -> prototypeIconOnlyLabel(children)
   }
 
 /**
  * The icon name when the only visible content under a container is one named icon, possibly inside
  * plain single-child layout containers; null for any other content.
  */
-private fun overlayIconOnlyLabel(children: List<OverlayRenderNode>): String? {
+private fun prototypeIconOnlyLabel(children: List<PrototypeRenderNode>): String? {
   val only = children.filter { it.visible }.singleOrNull() ?: return null
   return when {
     only.role == "icon" -> only.iconName?.takeIf { it.isNotEmpty() }
     only.role in SEMANTICS_FREE_CONTAINERS &&
       only.text.isEmpty() &&
-      only.source?.onTap.isNullOrEmpty() -> overlayIconOnlyLabel(only.children)
+      only.source?.onTap.isNullOrEmpty() -> prototypeIconOnlyLabel(only.children)
     else -> null
   }
 }
@@ -861,7 +875,7 @@ private fun overlayIconOnlyLabel(children: List<OverlayRenderNode>): String? {
  * A pager reports its position (`Page 2 of 4`) and a time or date picker its bound [value]
  * (`07:30`, `2026-10-08`); other roles carry no state of their own here.
  */
-internal fun overlayStateDescription(
+internal fun prototypeStateDescription(
   role: String,
   page: Int,
   pageCount: Int,
@@ -874,7 +888,7 @@ internal fun overlayStateDescription(
   }
 
 /** A time picker's bound value as 24-hour `HH:mm`, or a date picker's `YYYY-MM-DD`. */
-internal fun overlayPickerValue(node: OverlayRenderNode): String? =
+internal fun prototypePickerValue(node: PrototypeRenderNode): String? =
   when (node.role) {
     "timePicker" -> String.format(java.util.Locale.ROOT, "%02d:%02d", node.hour, node.minute)
     "datePicker" -> node.selectedValue
@@ -887,8 +901,8 @@ internal fun overlayPickerValue(node: OverlayRenderNode): String? =
  */
 private fun authoredSizeModifier(
   modifier: Modifier,
-  style: OverlayStyle,
-  weightAxis: OverlayWeightAxis?,
+  style: PrototypeStyle,
+  weightAxis: PrototypeWeightAxis?,
 ): Modifier {
   // Bounds before the authored size: `width`/`height`/`fill` are then coerced into min/max, where
   // the reverse order would clamp the bounds into an already-fixed size instead (#10537).
@@ -898,58 +912,58 @@ private fun authoredSizeModifier(
       sized,
       style.width,
       horizontal = true,
-      weighted = weightAxis == OverlayWeightAxis.HORIZONTAL,
+      weighted = weightAxis == PrototypeWeightAxis.HORIZONTAL,
     )
   sized =
     dimensionModifier(
       sized,
       style.height,
       horizontal = false,
-      weighted = weightAxis == OverlayWeightAxis.VERTICAL,
+      weighted = weightAxis == PrototypeWeightAxis.VERTICAL,
     )
   return style.aspectRatio?.let { sized.aspectRatio(it.toFloat()) } ?: sized
 }
 
 private fun dimensionModifier(
   modifier: Modifier,
-  size: OverlayDimension?,
+  size: PrototypeDimension?,
   horizontal: Boolean,
   weighted: Boolean = false,
 ): Modifier =
   when (size) {
-    OverlayDimension.Fill -> if (horizontal) modifier.fillMaxWidth() else modifier.fillMaxHeight()
-    is OverlayDimension.Dp ->
+    PrototypeDimension.Fill -> if (horizontal) modifier.fillMaxWidth() else modifier.fillMaxHeight()
+    is PrototypeDimension.Dp ->
       if (horizontal) modifier.width(size.dp.toFloat().dp)
       else modifier.height(size.dp.toFloat().dp)
     null -> if (weighted) modifier else wrapContent(modifier, horizontal)
-    OverlayDimension.Wrap -> wrapContent(modifier, horizontal)
+    PrototypeDimension.Wrap -> wrapContent(modifier, horizontal)
   }
 
 private fun wrapContent(modifier: Modifier, horizontal: Boolean): Modifier =
   if (horizontal) modifier.wrapContentWidth() else modifier.wrapContentHeight()
 
 /** The main axis a Row/Column child's `weight` fills. */
-internal enum class OverlayWeightAxis {
+internal enum class PrototypeWeightAxis {
   HORIZONTAL,
   VERTICAL,
 }
 
 /** [axis] when this child carries a `weight`, so its own size on that axis does not wrap. */
-private fun OverlayRenderNode.weightAxis(axis: OverlayWeightAxis): OverlayWeightAxis? =
+private fun PrototypeRenderNode.weightAxis(axis: PrototypeWeightAxis): PrototypeWeightAxis? =
   axis.takeIf {
     style.source.weight != null
   }
 
 /** Child `weight` takes the remaining main-axis space; only meaningful inside a Row. */
-private fun RowScope.rowWeight(child: OverlayRenderNode): Modifier =
+private fun RowScope.rowWeight(child: PrototypeRenderNode): Modifier =
   child.style.source.weight?.let { Modifier.weight(it.toFloat()) } ?: Modifier
 
 /** Child `weight` takes the remaining main-axis space; only meaningful inside a Column. */
-private fun ColumnScope.columnWeight(child: OverlayRenderNode): Modifier =
+private fun ColumnScope.columnWeight(child: PrototypeRenderNode): Modifier =
   child.style.source.weight?.let { Modifier.weight(it.toFloat()) } ?: Modifier
 
 /** Applied before width/height so `fill` and `dp` are clamped by the authored min/max. */
-private fun sizeConstraintModifier(modifier: Modifier, style: OverlayStyle): Modifier =
+private fun sizeConstraintModifier(modifier: Modifier, style: PrototypeStyle): Modifier =
   if (
     style.minWidth == null &&
       style.maxWidth == null &&
@@ -966,17 +980,17 @@ private fun sizeConstraintModifier(modifier: Modifier, style: OverlayStyle): Mod
     )
 
 /** A shader brush so the gradient line is computed from the node's measured size. */
-private fun overlayGradientBrush(gradient: OverlayGradient): Brush =
+private fun prototypeGradientBrush(gradient: PrototypeGradient): Brush =
   object : ShaderBrush() {
     override fun createShader(size: Size): Shader =
       when (gradient) {
-        is OverlayLinearGradient -> {
-          val (colors, positions) = overlayGradientStops(gradient.stops)
-          val (from, to) = overlayLinearGradientLine(gradient.angle, size.width, size.height)
+        is PrototypeLinearGradient -> {
+          val (colors, positions) = prototypeGradientStops(gradient.stops)
+          val (from, to) = prototypeLinearGradientLine(gradient.angle, size.width, size.height)
           LinearGradientShader(from, to, colors, positions)
         }
-        is OverlayRadialGradient -> {
-          val (colors, positions) = overlayGradientStops(gradient.stops)
+        is PrototypeRadialGradient -> {
+          val (colors, positions) = prototypeGradientStops(gradient.stops)
           RadialGradientShader(
             size.center,
             hypot(size.width, size.height) / 2f,

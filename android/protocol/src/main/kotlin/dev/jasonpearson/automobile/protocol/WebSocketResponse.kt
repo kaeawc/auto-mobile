@@ -322,11 +322,11 @@ data class ScreenshotResult(
   val screenshotByteLength: Int? = null,
   val screenshotBase64Length: Int? = null,
   /**
-   * Answers a request that carried `hideOverlays`: true when the image contains no CtrlProxy
-   * interactive overlay (none was showing, or it was hidden and a frame confirmed it gone), false
-   * when the hide could not be confirmed before capture. Absent for requests without the flag.
+   * Answers a request that carried `hidePrototypes`: true when the image contains no CtrlProxy
+   * prototype (none was showing, or it was hidden and a frame confirmed it gone), false when the
+   * hide could not be confirmed before capture. Absent for requests without the flag.
    */
-  val overlaysHidden: Boolean? = null,
+  val prototypesHidden: Boolean? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -733,47 +733,47 @@ data class HighlightResponse(
 ) : WebSocketResponse()
 
 /**
- * [missingAssets] is a warning, not a failure: after a successful `show_overlay` it lists the asset
- * ids the spec references that the device has no copy of (never uploaded, or cleared since), so the
- * host can re-upload them. It is omitted from the frame when empty or absent, so peers that predate
- * it see exactly the frame they always did.
+ * [missingAssets] is a warning, not a failure: after a successful `show_prototype` it lists the
+ * asset ids the spec references that the device has no copy of (never uploaded, or cleared since),
+ * so the host can re-upload them. It is omitted from the frame when empty or absent, so peers that
+ * predate it see exactly the frame they always did.
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
-@SerialName("overlay_result")
-data class OverlayResult(
+@SerialName("prototype_result")
+data class PrototypeResult(
   override val timestamp: Long,
   val requestId: String? = null,
   val success: Boolean,
   val error: String? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val missingAssets: List<String>? = null,
-  /** Only the reply to `inspect_overlays`: what the device is showing right now. */
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val overlays: List<OverlayStatusEntry>? = null,
-  /** Only with [overlays]: events dropped from the offline buffer since the service started. */
+  /** Only the reply to `inspect_prototypes`: what the device is showing right now. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypes: List<PrototypeStatusEntry>? = null,
+  /** Only with [prototypes]: events dropped from the offline buffer since the service started. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val droppedEvents: Long? = null,
 ) : WebSocketResponse()
 
 /**
- * One overlay the device is showing. [id] is the overlay id, which is its spec id. [lastSequence]
- * is the highest `overlay_event` sequence allocated for it, so a host resumes from there without a
- * rewind. [persistent] is true for `window.persistence: "device"`.
+ * One prototype the device is showing. [id] is the prototype id, which is its spec id.
+ * [lastSequence] is the highest `prototype_event` sequence allocated for it, so a host resumes from
+ * there without a rewind. [persistent] is true for `window.persistence: "device"`.
  */
 @Serializable
-data class OverlayStatusEntry(
+data class PrototypeStatusEntry(
   val id: String,
   val persistent: Boolean,
-  val state: Map<String, OverlayScalar>,
+  val state: Map<String, PrototypeScalar>,
   val pages: Map<String, Int> = emptyMap(),
   val lastSequence: Long,
   /**
-   * True while the overlay's app is not in front: the window is hidden and untouchable, its state
+   * True while the prototype's app is not in front: the window is hidden and untouchable, its state
    * kept, and it returns with the app. Omitted when false and by older APKs.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val suspended: Boolean = false,
 )
 
 @Serializable
-enum class OverlayEventKind {
+enum class PrototypeEventKind {
   @SerialName("emit") EMIT,
   @SerialName("page_changed") PAGE_CHANGED,
   @SerialName("dismissed") DISMISSED,
@@ -781,19 +781,19 @@ enum class OverlayEventKind {
 
 /** Unsolicited frame. Pager selection is separate from authored scalar state. */
 @Serializable
-@SerialName("overlay_event")
-data class OverlayEvent(
+@SerialName("prototype_event")
+data class PrototypeEvent(
   override val timestamp: Long,
   val id: String,
   /**
-   * Future emitter contract: per overlay id, monotonic starting at 1. Reconnects must not reset it;
-   * hosts should treat lower-or-equal sequences for the same id as duplicates.
+   * Future emitter contract: per prototype id, monotonic starting at 1. Reconnects must not reset
+   * it; hosts should treat lower-or-equal sequences for the same id as duplicates.
    */
   val sequence: Long,
-  val kind: OverlayEventKind,
+  val kind: PrototypeEventKind,
   val name: String?,
   val payload: JsonElement?,
-  val state: Map<String, OverlayScalar>,
+  val state: Map<String, PrototypeScalar>,
   val pages: Map<String, Int> = emptyMap(),
 ) : WebSocketResponse()
 

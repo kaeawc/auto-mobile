@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
@@ -21,10 +21,10 @@ import androidx.compose.ui.semantics.semantics
  * so it reads their exit transition's progress from here instead of running a transition of its
  * own: it then fades exactly with them, and stays composed exactly as long as they do.
  */
-internal val LocalOverlayAnchorFade = compositionLocalOf<() -> Float> { { 1f } }
+internal val LocalPrototypeAnchorFade = compositionLocalOf<() -> Float> { { 1f } }
 
 /** The anchored node's current fade, for tests: 1 while its ancestors are shown, 0 once gone. */
-internal val OverlayAnchorFadeKey = SemanticsPropertyKey<Float>("OverlayAnchorFade")
+internal val PrototypeAnchorFadeKey = SemanticsPropertyKey<Float>("PrototypeAnchorFade")
 
 /**
  * Provides this `visibleWhen` node's own enter/exit progress, times its ancestors', to the anchored
@@ -35,12 +35,12 @@ internal fun AnimatedVisibilityScope.ProvideAnchorFade(
   none: Boolean,
   content: @Composable () -> Unit,
 ) {
-  val outer = LocalOverlayAnchorFade.current
+  val outer = LocalPrototypeAnchorFade.current
   // Not animated for `none`: a child animation of the transition would hold the node on screen.
   val own =
     if (none) null
     else
-      transition.animateFloat(label = "overlayAnchorFade") {
+      transition.animateFloat(label = "prototypeAnchorFade") {
         if (it == EnterExitState.Visible) 1f else 0f
       }
   // The layer drops the anchored node a recomposition after this leaves the composition; until
@@ -51,7 +51,7 @@ internal fun AnimatedVisibilityScope.ProvideAnchorFade(
     remember(outer, own) {
       { if (present.value) outer() * (own?.value ?: 1f) else 0f }
     }
-  CompositionLocalProvider(LocalOverlayAnchorFade provides fade, content = content)
+  CompositionLocalProvider(LocalPrototypeAnchorFade provides fade, content = content)
 }
 
 /**
@@ -64,4 +64,4 @@ internal fun Modifier.anchorFade(fade: () -> Float): Modifier = graphicsLayer {
   alpha = fade()
   compositingStrategy = CompositingStrategy.ModulateAlpha
 }
-  .semantics { this[OverlayAnchorFadeKey] = fade() }
+  .semantics { this[PrototypeAnchorFadeKey] = fade() }

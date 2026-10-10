@@ -7,12 +7,12 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
 
 /** One piece of a string with `{as.field}` / `{index}` placeholders resolved into segments. */
-sealed interface OverlayRepeatSegment {
-  data class Literal(val text: String) : OverlayRepeatSegment
+sealed interface PrototypeRepeatSegment {
+  data class Literal(val text: String) : PrototypeRepeatSegment
 
-  data object Index : OverlayRepeatSegment
+  data object Index : PrototypeRepeatSegment
 
-  data class Field(val name: String) : OverlayRepeatSegment
+  data class Field(val name: String) : PrototypeRepeatSegment
 }
 
 /**
@@ -21,9 +21,9 @@ sealed interface OverlayRepeatSegment {
  * `}` that the desktop JVM accepts, #9947). `{index}` and `{<as>.<field>}` are placeholders; any
  * other brace text, including `{state_key}`, is left for the ordinary state interpolation.
  */
-object OverlayRepeatTemplate {
-  fun segments(text: String, alias: String): List<OverlayRepeatSegment> {
-    val segments = mutableListOf<OverlayRepeatSegment>()
+object PrototypeRepeatTemplate {
+  fun segments(text: String, alias: String): List<PrototypeRepeatSegment> {
+    val segments = mutableListOf<PrototypeRepeatSegment>()
     val literal = StringBuilder()
     var index = 0
     while (index < text.length) {
@@ -33,24 +33,24 @@ object OverlayRepeatTemplate {
         literal.append(text[index])
         index++
       } else {
-        if (literal.isNotEmpty()) segments.add(OverlayRepeatSegment.Literal(literal.toString()))
+        if (literal.isNotEmpty()) segments.add(PrototypeRepeatSegment.Literal(literal.toString()))
         literal.clear()
         segments.add(token)
         index = close + 1
       }
     }
-    if (literal.isNotEmpty()) segments.add(OverlayRepeatSegment.Literal(literal.toString()))
+    if (literal.isNotEmpty()) segments.add(PrototypeRepeatSegment.Literal(literal.toString()))
     return segments
   }
 
   fun fieldReferences(text: String, alias: String): List<String> =
-    segments(text, alias).filterIsInstance<OverlayRepeatSegment.Field>().map { it.name }
+    segments(text, alias).filterIsInstance<PrototypeRepeatSegment.Field>().map { it.name }
 
-  private fun token(inner: String, alias: String): OverlayRepeatSegment? {
-    if (inner == "index") return OverlayRepeatSegment.Index
+  private fun token(inner: String, alias: String): PrototypeRepeatSegment? {
+    if (inner == "index") return PrototypeRepeatSegment.Index
     val prefix = "$alias."
     val field = inner.removePrefix(prefix)
-    return if (inner.startsWith(prefix) && isFieldName(field)) OverlayRepeatSegment.Field(field)
+    return if (inner.startsWith(prefix) && isFieldName(field)) PrototypeRepeatSegment.Field(field)
     else null
   }
 
@@ -83,9 +83,9 @@ object OverlayRepeatTemplate {
   fun bind(text: String, alias: String, item: Map<String, JsonElement>, index: Int): String =
     segments(text, alias).joinToString("") { segment ->
       when (segment) {
-        is OverlayRepeatSegment.Literal -> segment.text
-        is OverlayRepeatSegment.Index -> index.toString()
-        is OverlayRepeatSegment.Field ->
+        is PrototypeRepeatSegment.Literal -> segment.text
+        is PrototypeRepeatSegment.Index -> index.toString()
+        is PrototypeRepeatSegment.Field ->
           (item[segment.name] as? JsonPrimitive)?.let(::rendered) ?: "{$alias.${segment.name}}"
       }
     }
@@ -114,8 +114,8 @@ object OverlayRepeatTemplate {
       name.all { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '_' }
 }
 
-/** How a bindable field binds; mirrors `FieldKind` in the TypeScript `overlayTemplate.ts`. */
-internal enum class OverlayBindableKind {
+/** How a bindable field binds; mirrors `FieldKind` in the TypeScript `prototypeTemplate.ts`. */
+internal enum class PrototypeBindableKind {
   TEXT,
   OPERAND,
   EMIT_NAME,
@@ -127,20 +127,20 @@ internal enum class OverlayBindableKind {
  * `mapBindableFields`: `text`, component fields, `visibleWhen`, `styleWhen`, `onTap`, then the
  * state-key fields. Stops at the first non-null result of [visit].
  */
-internal object OverlayBindableFields {
+internal object PrototypeBindableFields {
   fun <T : Any> first(
     node: JsonObject,
     path: String,
-    visit: (JsonElement?, String, OverlayBindableKind) -> T?,
+    visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
   ): T? {
     val visitor = Visitor(visit)
     return visitor.node(node, path)
   }
 
   private class Visitor<T : Any>(
-    val visit: (JsonElement?, String, OverlayBindableKind) -> T?,
+    val visit: (JsonElement?, String, PrototypeBindableKind) -> T?,
   ) {
-    fun field(data: JsonObject, key: String, path: String, kind: OverlayBindableKind): T? =
+    fun field(data: JsonObject, key: String, path: String, kind: PrototypeBindableKind): T? =
       data[key]?.let { visit(it, "$path.$key", kind) }
 
     fun objects(data: JsonObject, key: String, path: String): List<Pair<JsonObject, String>> =
@@ -150,13 +150,13 @@ internal object OverlayBindableFields {
 
     fun condition(value: JsonElement?, path: String): T? {
       val condition = value as? JsonObject ?: return null
-      field(condition, "key", path, OverlayBindableKind.KEY)?.let {
+      field(condition, "key", path, PrototypeBindableKind.KEY)?.let {
         return it
       }
-      field(condition, "equals", path, OverlayBindableKind.OPERAND)?.let {
+      field(condition, "equals", path, PrototypeBindableKind.OPERAND)?.let {
         return it
       }
-      field(condition, "notEquals", path, OverlayBindableKind.OPERAND)?.let {
+      field(condition, "notEquals", path, PrototypeBindableKind.OPERAND)?.let {
         return it
       }
       condition(condition["not"], "$path.not")?.let {
@@ -175,12 +175,12 @@ internal object OverlayBindableFields {
     fun action(action: JsonObject, path: String): T? =
       when ((action["type"] as? JsonPrimitive)?.content) {
         "setState" ->
-          field(action, "key", path, OverlayBindableKind.KEY)
-            ?: field(action, "value", path, OverlayBindableKind.OPERAND)
-        "emit" -> field(action, "name", path, OverlayBindableKind.EMIT_NAME)
+          field(action, "key", path, PrototypeBindableKind.KEY)
+            ?: field(action, "value", path, PrototypeBindableKind.OPERAND)
+        "emit" -> field(action, "name", path, PrototypeBindableKind.EMIT_NAME)
         "toggle",
         "increment",
-        "decrement" -> field(action, "key", path, OverlayBindableKind.KEY)
+        "decrement" -> field(action, "key", path, PrototypeBindableKind.KEY)
         else -> null
       }
 
@@ -196,53 +196,53 @@ internal object OverlayBindableFields {
     /** A `{label, onTap?}` part (dialog or snackbar button, app bar action). */
     fun part(value: JsonElement?, path: String): T? {
       val part = value as? JsonObject ?: return null
-      return field(part, "label", path, OverlayBindableKind.TEXT) ?: actions(part, path)
+      return field(part, "label", path, PrototypeBindableKind.TEXT) ?: actions(part, path)
     }
 
     fun component(node: JsonObject, path: String): T? =
       when ((node["type"] as? JsonPrimitive)?.content) {
         "button",
-        "fab" -> field(node, "label", path, OverlayBindableKind.TEXT)
+        "fab" -> field(node, "label", path, PrototypeBindableKind.TEXT)
         "segmentedButton" ->
           objects(node, "options", path).firstNotNullOfOrNull { (option, optionPath) ->
-            field(option, "label", optionPath, OverlayBindableKind.TEXT)
+            field(option, "label", optionPath, PrototypeBindableKind.TEXT)
           }
         "topAppBar" ->
-          field(node, "title", path, OverlayBindableKind.TEXT)
+          field(node, "title", path, PrototypeBindableKind.TEXT)
             ?: part(node["navigationIcon"], "$path.navigationIcon")
             ?: objects(node, "actions", path).firstNotNullOfOrNull { (entry, entryPath) ->
               part(entry, entryPath)
             }
         "dialog" ->
-          field(node, "title", path, OverlayBindableKind.TEXT)
-            ?: field(node, "text", path, OverlayBindableKind.TEXT)
+          field(node, "title", path, PrototypeBindableKind.TEXT)
+            ?: field(node, "text", path, PrototypeBindableKind.TEXT)
             ?: part(node["confirm"], "$path.confirm")
             ?: part(node["dismiss"], "$path.dismiss")
         "snackbar" ->
-          field(node, "text", path, OverlayBindableKind.TEXT)
+          field(node, "text", path, PrototypeBindableKind.TEXT)
             ?: part(node["action"], "$path.action")
         else -> null
       }
 
     fun keys(node: JsonObject, path: String): T? {
       for (key in listOf("stateKey", "hourKey", "minuteKey")) {
-        field(node, key, path, OverlayBindableKind.KEY)?.let {
+        field(node, key, path, PrototypeBindableKind.KEY)?.let {
           return it
         }
       }
       (node["trailing"] as? JsonObject)?.let { trailing ->
-        field(trailing, "stateKey", "$path.trailing", OverlayBindableKind.KEY)?.let {
+        field(trailing, "stateKey", "$path.trailing", PrototypeBindableKind.KEY)?.let {
           return it
         }
       }
       return (node["openWhen"] as? JsonObject)?.let { openWhen ->
-        field(openWhen, "key", "$path.openWhen", OverlayBindableKind.KEY)
+        field(openWhen, "key", "$path.openWhen", PrototypeBindableKind.KEY)
       }
     }
 
     fun node(node: JsonObject, path: String): T? {
       if ((node["type"] as? JsonPrimitive)?.content == "text") {
-        field(node, "text", path, OverlayBindableKind.TEXT)?.let {
+        field(node, "text", path, PrototypeBindableKind.TEXT)?.let {
           return it
         }
       }
@@ -263,7 +263,7 @@ internal object OverlayBindableFields {
  * item, a template holds no nested `repeat` or pager, and the expanded tree still fits the node and
  * image limits. Depth is unchanged because instances are siblings.
  */
-internal object OverlayRepeatValidator {
+internal object PrototypeRepeatValidator {
   /** A repeat container's path, its alias and its items. */
   data class Scope(val path: String, val alias: String, val items: List<JsonObject>)
 
@@ -273,12 +273,12 @@ internal object OverlayRepeatValidator {
 
   private val stateKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 
-  fun validate(spec: JsonElement): OverlaySpecError? {
+  fun validate(spec: JsonElement): PrototypeSpecError? {
     val root = (spec as? JsonObject)?.get("root") as? JsonObject ?: return null
     return templateErrors(root, "root", null) ?: expandedErrors(root, "root", Budget(), null)
   }
 
-  private fun fail(path: String, message: String) = OverlaySpecError(path, message)
+  private fun fail(path: String, message: String) = PrototypeSpecError(path, message)
 
   private fun JsonObject.text(key: String): String? =
     (get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content
@@ -287,10 +287,10 @@ internal object OverlayRepeatValidator {
     (this as? JsonPrimitive)?.takeIf { it.isString }?.content
 
   private fun hasPlaceholder(text: String, alias: String): Boolean =
-    OverlayRepeatTemplate.segments(text, alias).any { it !is OverlayRepeatSegment.Literal }
+    PrototypeRepeatTemplate.segments(text, alias).any { it !is PrototypeRepeatSegment.Literal }
 
-  private fun unknownField(text: String, path: String, scope: Scope): OverlaySpecError? {
-    for (name in OverlayRepeatTemplate.fieldReferences(text, scope.alias)) {
+  private fun unknownField(text: String, path: String, scope: Scope): PrototypeSpecError? {
+    for (name in PrototypeRepeatTemplate.fieldReferences(text, scope.alias)) {
       if (!scope.items.all { it.containsKey(name) }) {
         return fail(path, "Unknown repeat field ${JsonPrimitive(name)}")
       }
@@ -299,21 +299,21 @@ internal object OverlayRepeatValidator {
   }
 
   /** An emit name must stay non-empty for every item once its placeholders are bound. */
-  private fun emptyEmitName(text: String, path: String, scope: Scope): OverlaySpecError? {
+  private fun emptyEmitName(text: String, path: String, scope: Scope): PrototypeSpecError? {
     val empty =
       scope.items.withIndex().indexOfFirst { (index, item) ->
-        OverlayRepeatTemplate.bind(text, scope.alias, item, index).isEmpty()
+        PrototypeRepeatTemplate.bind(text, scope.alias, item, index).isEmpty()
       }
     return if (empty < 0) null else fail(path, "Expanded emit name is empty for item $empty")
   }
 
   /** A state key must bind to a literal key for every item; the failing item is reported. */
-  private fun invalidBoundKey(key: String, path: String, scope: Scope): OverlaySpecError? {
+  private fun invalidBoundKey(key: String, path: String, scope: Scope): PrototypeSpecError? {
     if (!hasPlaceholder(key, scope.alias)) {
       return if (stateKeyPattern.matches(key)) null else fail(path, "Invalid key value")
     }
     for ((index, item) in scope.items.withIndex()) {
-      val bound = OverlayRepeatTemplate.bind(key, scope.alias, item, index)
+      val bound = PrototypeRepeatTemplate.bind(key, scope.alias, item, index)
       if (!stateKeyPattern.matches(bound)) {
         return fail(
           "${scope.path}.repeat.items[$index]",
@@ -327,30 +327,30 @@ internal object OverlayRepeatValidator {
   private fun fieldError(
     value: JsonElement?,
     path: String,
-    kind: OverlayBindableKind,
+    kind: PrototypeBindableKind,
     scope: Scope,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     val text = value.string() ?: return null
     unknownField(text, path, scope)?.let {
       return it
     }
     return when (kind) {
-      OverlayBindableKind.EMIT_NAME -> emptyEmitName(text, path, scope)
-      OverlayBindableKind.KEY -> invalidBoundKey(text, path, scope)
+      PrototypeBindableKind.EMIT_NAME -> emptyEmitName(text, path, scope)
+      PrototypeBindableKind.KEY -> invalidBoundKey(text, path, scope)
       else -> null
     }
   }
 
-  private fun checkOwnFields(node: JsonObject, path: String, scope: Scope): OverlaySpecError? =
-    OverlayBindableFields.first(node, path) { value, fieldPath, kind ->
+  private fun checkOwnFields(node: JsonObject, path: String, scope: Scope): PrototypeSpecError? =
+    PrototypeBindableFields.first(node, path) { value, fieldPath, kind ->
       fieldError(value, fieldPath, kind, scope)
     }
 
   /** Outside every template a state key is literal, so a placeholder there is an invalid key. */
-  private fun checkLiteralKeys(node: JsonObject, path: String): OverlaySpecError? =
-    OverlayBindableFields.first(node, path) { value, fieldPath, kind ->
+  private fun checkLiteralKeys(node: JsonObject, path: String): PrototypeSpecError? =
+    PrototypeBindableFields.first(node, path) { value, fieldPath, kind ->
       val text = value.string()
-      if (kind == OverlayBindableKind.KEY && text != null && !stateKeyPattern.matches(text))
+      if (kind == PrototypeBindableKind.KEY && text != null && !stateKeyPattern.matches(text))
         fail(fieldPath, "State key placeholder outside a repeat template")
       else null
     }
@@ -371,7 +371,7 @@ internal object OverlayRepeatValidator {
     return Scope(path, alias, items)
   }
 
-  private fun templateErrors(node: JsonObject, path: String, scope: Scope?): OverlaySpecError? {
+  private fun templateErrors(node: JsonObject, path: String, scope: Scope?): PrototypeSpecError? {
     if (scope != null) {
       if (node.containsKey("repeat")) return fail("$path.repeat", "Nested repeat is not supported")
       if (node.text("type") == "pager")
@@ -399,12 +399,12 @@ internal object OverlayRepeatValidator {
     path: String,
     budget: Budget,
     repeatPath: String?,
-  ): OverlaySpecError? {
+  ): PrototypeSpecError? {
     val at = repeatPath ?: path
-    if (++budget.nodes > OverlaySpecValidator.MAX_OVERLAY_NODES)
+    if (++budget.nodes > PrototypeSpecValidator.MAX_PROTOTYPE_NODES)
       return fail(at, "Expanded node limit exceeded")
     budget.images += imageUses(node)
-    if (budget.images > OverlaySpecValidator.MAX_OVERLAY_IMAGES)
+    if (budget.images > PrototypeSpecValidator.MAX_PROTOTYPE_IMAGES)
       return fail(at, "Expanded image limit exceeded")
     val scope = scopeOf(node, path)
     val nestedPath = if (scope != null) "$path.repeat" else repeatPath
@@ -444,7 +444,8 @@ internal object OverlayRepeatValidator {
     fun JsonObject.bound(field: String): JsonObject {
       val text = text(field) ?: return this
       return JsonObject(
-        this + (field to JsonPrimitive(OverlayRepeatTemplate.bind(text, scope.alias, item, index))),
+        this +
+          (field to JsonPrimitive(PrototypeRepeatTemplate.bind(text, scope.alias, item, index))),
       )
     }
     var bound = value

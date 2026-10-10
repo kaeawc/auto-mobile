@@ -5,25 +5,28 @@ import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 
-class OverlayEventFrameTest {
+class PrototypeEventFrameTest {
   @Test
   fun `emit frame exactly matches protocol literal and has no request id`() {
     val literal =
-      """{"type":"overlay_event","timestamp":42,"id":"panel","sequence":1,"kind":"emit","name":"next","payload":{"nested":[true,null]},"state":{"label":"Next","enabled":true},"pages":{"pager":0}}"""
+      """{"type":"prototype_event","timestamp":42,"id":"panel","sequence":1,"kind":"emit","name":"next","payload":{"nested":[true,null]},"state":{"label":"Next","enabled":true},"pages":{"pager":0}}"""
     val event =
-      OverlayEvent(
+      PrototypeEvent(
         42,
         "panel",
         1,
-        OverlayEventKind.EMIT,
+        PrototypeEventKind.EMIT,
         "next",
         Json.parseToJsonElement("""{"nested":[true,null]}"""),
-        mapOf("label" to OverlayScalar.Text("Next"), "enabled" to OverlayScalar.BooleanValue(true)),
+        mapOf(
+          "label" to PrototypeScalar.Text("Next"),
+          "enabled" to PrototypeScalar.BooleanValue(true),
+        ),
         mapOf("pager" to 0),
       )
-    assertEquals(literal, overlayEventFrame(event))
+    assertEquals(literal, prototypeEventFrame(event))
     assertFalse(
-      Json.parseToJsonElement(overlayEventFrame(event)).jsonObject.containsKey("requestId"),
+      Json.parseToJsonElement(prototypeEventFrame(event)).jsonObject.containsKey("requestId"),
     )
   }
 
@@ -31,14 +34,14 @@ class OverlayEventFrameTest {
   fun `page and dismiss frames match protocol null name payload literals`() {
     for ((kind, name) in
       listOf(
-        OverlayEventKind.PAGE_CHANGED to "page_changed",
-        OverlayEventKind.DISMISSED to "dismissed",
+        PrototypeEventKind.PAGE_CHANGED to "page_changed",
+        PrototypeEventKind.DISMISSED to "dismissed",
       )) {
       val literal =
-        """{"type":"overlay_event","timestamp":42,"id":"panel","sequence":2,"kind":"$name","name":null,"payload":null,"state":{},"pages":{}}"""
+        """{"type":"prototype_event","timestamp":42,"id":"panel","sequence":2,"kind":"$name","name":null,"payload":null,"state":{},"pages":{}}"""
       assertEquals(
         literal,
-        overlayEventFrame(OverlayEvent(42, "panel", 2, kind, null, null, emptyMap())),
+        prototypeEventFrame(PrototypeEvent(42, "panel", 2, kind, null, null, emptyMap())),
       )
     }
   }
@@ -46,18 +49,18 @@ class OverlayEventFrameTest {
   @Test
   fun `change frame carries key value current scalars pages and sequence`() {
     val event =
-      OverlayEvent(
+      PrototypeEvent(
         42,
         "panel",
         3,
-        OverlayEventKind.EMIT,
+        PrototypeEventKind.EMIT,
         "change",
         Json.parseToJsonElement("""{"key":"query","value":"typed"}"""),
-        mapOf("query" to OverlayScalar.Text("typed")),
+        mapOf("query" to PrototypeScalar.Text("typed")),
         mapOf("pager" to 1),
       )
     val literal =
-      """{"type":"overlay_event","timestamp":42,"id":"panel","sequence":3,"kind":"emit","name":"change","payload":{"key":"query","value":"typed"},"state":{"query":"typed"},"pages":{"pager":1}}"""
-    assertEquals(literal, overlayEventFrame(event))
+      """{"type":"prototype_event","timestamp":42,"id":"panel","sequence":3,"kind":"emit","name":"change","payload":{"key":"query","value":"typed"},"state":{"query":"typed"},"pages":{"pager":1}}"""
+    assertEquals(literal, prototypeEventFrame(event))
   }
 }

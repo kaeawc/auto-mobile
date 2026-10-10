@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.content.ContentResolver
 import android.database.ContentObserver
@@ -30,16 +30,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 
 /**
- * Whether overlay state changes (visibility, page) animate. Off by default so previews and direct
- * [OverlaySpecContent] callers stay settled; [OverlayRuntimeContent] turns it on from the spec.
+ * Whether prototype state changes (visibility, page) animate. Off by default so previews and direct
+ * [PrototypeSpecContent] callers stay settled; [PrototypeRuntimeContent] turns it on from the spec.
  */
-internal val LocalOverlayMotion = compositionLocalOf { false }
+internal val LocalPrototypeMotion = compositionLocalOf { false }
 
 /**
  * Animation is on unless the spec opts out (`motion: "none"`) or the system animator duration scale
  * is 0 (`settings put global animator_duration_scale 0`), which keeps screenshots settled.
  */
-internal fun overlayMotionEnabled(motion: String?, durationScale: Float): Boolean =
+internal fun prototypeMotionEnabled(motion: String?, durationScale: Float): Boolean =
   motion != "none" && durationScale > 0f
 
 /** Reads the system animator duration scale; 1 (the platform default) when unset. */
@@ -47,8 +47,8 @@ internal fun readAnimatorDurationScale(resolver: ContentResolver): Float =
   Settings.Global.getFloat(resolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
 
 /**
- * The system animator duration scale as Compose state, kept current while the overlay is shown.
- * Automation commonly sets the scale to 0 after an overlay is already up; observing the setting
+ * The system animator duration scale as Compose state, kept current while the prototype is shown.
+ * Automation commonly sets the scale to 0 after a prototype is already up; observing the setting
  * (rather than reading it once per spec) makes the very next state change instant, so `observe`
  * never captures an in-flight animation.
  */
@@ -75,7 +75,7 @@ internal fun rememberAnimatorDurationScale(resolver: ContentResolver): State<Flo
 }
 
 /** The `visibleWhen` enter transition for a node's `transition`; absent keeps fade + expand. */
-internal fun overlayEnterTransition(transition: String?): EnterTransition =
+internal fun prototypeEnterTransition(transition: String?): EnterTransition =
   when (transition) {
     "none" -> EnterTransition.None
     "fade" -> fadeIn()
@@ -85,7 +85,7 @@ internal fun overlayEnterTransition(transition: String?): EnterTransition =
   }
 
 /** The `visibleWhen` exit transition for a node's `transition`; absent keeps fade + shrink. */
-internal fun overlayExitTransition(transition: String?): ExitTransition =
+internal fun prototypeExitTransition(transition: String?): ExitTransition =
   when (transition) {
     "none" -> ExitTransition.None
     "fade" -> fadeOut()
@@ -98,7 +98,7 @@ internal fun overlayExitTransition(transition: String?): ExitTransition =
  * Animates a container's size as its children appear, disappear or change; unchanged when motion is
  * off so settled screenshots never see an in-flight size.
  */
-internal fun Modifier.overlayAnimateSize(enabled: Boolean): Modifier =
+internal fun Modifier.prototypeAnimateSize(enabled: Boolean): Modifier =
   if (enabled) animateContentSize() else this
 
 /**
@@ -107,10 +107,11 @@ internal fun Modifier.overlayAnimateSize(enabled: Boolean): Modifier =
  * for a screenshot is deterministic.
  */
 @Composable
-internal fun Modifier.overlayPressScale(source: InteractionSource, scale: Float): Modifier {
+internal fun Modifier.prototypePressScale(source: InteractionSource, scale: Float): Modifier {
   val pressed by source.collectIsPressedAsState()
-  val spec = if (LocalOverlayMotion.current) spring<Float>() else snap()
-  val current by animateFloatAsState(if (pressed) scale else 1f, spec, label = "overlayPressScale")
+  val spec = if (LocalPrototypeMotion.current) spring<Float>() else snap()
+  val current by
+    animateFloatAsState(if (pressed) scale else 1f, spec, label = "prototypePressScale")
   return graphicsLayer {
     scaleX = current
     scaleY = current

@@ -1,17 +1,18 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.accessibility.AccessibilityWindowInfo
 
-/** How long a foreground change must hold before the overlay hides or comes back (#10261). */
-const val OVERLAY_FOREGROUND_DEBOUNCE_MILLIS = 400L
+/** How long a foreground change must hold before the prototype hides or comes back (#10261). */
+const val PROTOTYPE_FOREGROUND_DEBOUNCE_MILLIS = 400L
 
 /**
- * Packages whose application windows are transient system surfaces, never "the app the overlay was
- * shown over": System UI (shade, recents, volume, screenshot preview), the permission and package
- * installer dialogs, and the framework's own `android` package (resolver, ANR and crash dialogs).
- * Input methods and non-application windows are excluded by window type, not by this list.
+ * Packages whose application windows are transient system surfaces, never "the app the prototype
+ * was shown over": System UI (shade, recents, volume, screenshot preview), the permission and
+ * package installer dialogs, and the framework's own `android` package (resolver, ANR and crash
+ * dialogs). Input methods and non-application windows are excluded by window type, not by this
+ * list.
  */
-internal val OVERLAY_FOREGROUND_IGNORED_PACKAGES: Set<String> =
+internal val PROTOTYPE_FOREGROUND_IGNORED_PACKAGES: Set<String> =
   setOf(
     "com.android.systemui",
     "com.google.android.permissioncontroller",
@@ -24,23 +25,23 @@ internal val OVERLAY_FOREGROUND_IGNORED_PACKAGES: Set<String> =
 /**
  * The package a window event says is in front, or null when the event must not move the foreground:
  * only application-type windows count (so the IME, dialogs of type system, accessibility overlays
- * such as this overlay's own windows, and the shade are skipped), minus [ownPackage] and
- * [OVERLAY_FOREGROUND_IGNORED_PACKAGES]. A dialog of the same app is an application window of the
+ * such as this prototype's own windows, and the shade are skipped), minus [ownPackage] and
+ * [PROTOTYPE_FOREGROUND_IGNORED_PACKAGES]. A dialog of the same app is an application window of the
  * same package, so it never changes the answer.
  */
-internal fun overlayForegroundCandidate(
+internal fun prototypeForegroundCandidate(
   packageName: String?,
   windowType: Int?,
   ownPackage: String,
 ): String? {
   if (packageName.isNullOrEmpty() || packageName == ownPackage) return null
   if (windowType != AccessibilityWindowInfo.TYPE_APPLICATION) return null
-  if (packageName in OVERLAY_FOREGROUND_IGNORED_PACKAGES) return null
+  if (packageName in PROTOTYPE_FOREGROUND_IGNORED_PACKAGES) return null
   return packageName
 }
 
 /** The facts about one accessibility window that decide whether it is the foreground app. */
-internal data class OverlayForegroundWindow(
+internal data class PrototypeForegroundWindow(
   val type: Int,
   val active: Boolean,
   val packageName: String?,
@@ -49,42 +50,42 @@ internal data class OverlayForegroundWindow(
 /**
  * The foreground app among [windows] (z-ordered, topmost first): the active application window if
  * it qualifies, otherwise the topmost qualifying one. Null when no application window qualifies, in
- * which case the overlay is not scoped to any app.
+ * which case the prototype is not scoped to any app.
  */
-internal fun overlayForegroundFromWindows(
-  windows: List<OverlayForegroundWindow>,
+internal fun prototypeForegroundFromWindows(
+  windows: List<PrototypeForegroundWindow>,
   ownPackage: String,
 ): String? {
   val candidates = windows.mapNotNull { window ->
-    overlayForegroundCandidate(window.packageName, window.type, ownPackage)?.let {
+    prototypeForegroundCandidate(window.packageName, window.type, ownPackage)?.let {
       it to window.active
     }
   }
   return (candidates.firstOrNull { it.second } ?: candidates.firstOrNull())?.first
 }
 
-/** What [OverlayController] needs from foreground scoping. */
-interface OverlayForegroundScope {
-  /** True while the overlay's app is not in front; the window is hidden and untouchable. */
+/** What [PrototypeController] needs from foreground scoping. */
+interface PrototypeForegroundScope {
+  /** True while the prototype's app is not in front; the window is hidden and untouchable. */
   val suspended: Boolean
 
-  /** A show: tie the overlay to the app now in front and clear any suspension. */
+  /** A show: tie the prototype to the app now in front and clear any suspension. */
   fun anchor()
 
-  /** The overlay ended (or is not app-scoped): forget the anchor and any suspension. */
+  /** The prototype ended (or is not app-scoped): forget the anchor and any suspension. */
   fun release()
 
   /** The anchor and suspension now, so a show the host rejects can put them back. */
-  fun capture(): OverlayForegroundState = OverlayForegroundState(null, false)
+  fun capture(): PrototypeForegroundState = PrototypeForegroundState(null, false)
 
   /** Put back what [capture] returned: a rejected show keeps the previous window's scoping. */
-  fun restore(state: OverlayForegroundState) = Unit
+  fun restore(state: PrototypeForegroundState) = Unit
 }
 
-/** An opaque snapshot of foreground scoping taken by [OverlayForegroundScope.capture]. */
-data class OverlayForegroundState(val anchor: String?, val suspended: Boolean)
+/** An opaque snapshot of foreground scoping taken by [PrototypeForegroundScope.capture]. */
+data class PrototypeForegroundState(val anchor: String?, val suspended: Boolean)
 
-object NoOverlayForegroundScope : OverlayForegroundScope {
+object NoPrototypeForegroundScope : PrototypeForegroundScope {
   override val suspended = false
 
   override fun anchor() = Unit
@@ -93,25 +94,25 @@ object NoOverlayForegroundScope : OverlayForegroundScope {
 }
 
 /**
- * Tracks the foreground application from window events and suspends an anchored overlay while
+ * Tracks the foreground application from window events and suspends an anchored prototype while
  * another app is in front. Suspension is its own state: it is not the lock-screen block and not a
- * capture-time hide, so ending one never re-shows the overlay for another. [onChanged] runs after a
- * debounced flip so the controller can hide or restore the window.
+ * capture-time hide, so ending one never re-shows the prototype for another. [onChanged] runs after
+ * a debounced flip so the controller can hide or restore the window.
  *
  * Thread-safe: events arrive on the service thread, the debounce fires on the scheduler.
  */
-class OverlayForegroundTracker(
-  private val scheduler: OverlayScheduler,
+class PrototypeForegroundTracker(
+  private val scheduler: PrototypeScheduler,
   private val ownPackage: String,
-  private val debounceMillis: Long = OVERLAY_FOREGROUND_DEBOUNCE_MILLIS,
-  /** The application package in front right now, read when an overlay is shown. */
+  private val debounceMillis: Long = PROTOTYPE_FOREGROUND_DEBOUNCE_MILLIS,
+  /** The application package in front right now, read when a prototype is shown. */
   private val foregroundNow: () -> String? = { null },
   private val onChanged: suspend () -> Unit = {},
-) : OverlayForegroundScope {
+) : PrototypeForegroundScope {
   private val lock = Any()
   private var anchor: String? = null
   private var pendingTarget: Boolean? = null
-  private var pending: OverlayScheduledTask? = null
+  private var pending: PrototypeScheduledTask? = null
 
   @Volatile
   override var suspended = false
@@ -133,10 +134,10 @@ class OverlayForegroundTracker(
     }
   }
 
-  override fun capture(): OverlayForegroundState =
-    synchronized(lock) { OverlayForegroundState(anchor, suspended) }
+  override fun capture(): PrototypeForegroundState =
+    synchronized(lock) { PrototypeForegroundState(anchor, suspended) }
 
-  override fun restore(state: OverlayForegroundState) {
+  override fun restore(state: PrototypeForegroundState) {
     synchronized(lock) {
       cancelPending()
       anchor = state.anchor
@@ -146,7 +147,7 @@ class OverlayForegroundTracker(
 
   /** Feed every window-state/windows-changed event with its package and window type. */
   fun onWindowEvent(packageName: String?, windowType: Int?) {
-    val candidate = overlayForegroundCandidate(packageName, windowType, ownPackage) ?: return
+    val candidate = prototypeForegroundCandidate(packageName, windowType, ownPackage) ?: return
     synchronized(lock) {
       val scoped = anchor ?: return
       val want = candidate != scoped

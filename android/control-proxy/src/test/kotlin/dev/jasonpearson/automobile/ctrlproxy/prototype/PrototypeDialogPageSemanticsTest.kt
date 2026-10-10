@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -14,22 +14,22 @@ import org.robolectric.RobolectricTestRunner
  * and like touches. A snackbar is not modal and leaves the page in.
  */
 @RunWith(RobolectricTestRunner::class)
-class OverlayDialogPageSemanticsTest {
+class PrototypeDialogPageSemanticsTest {
   @get:Rule val compose = createComposeRule()
 
-  private val open = OverlaySheetCondition("open", true)
+  private val open = PrototypeSheetCondition("open", true)
 
-  private fun show(modal: OverlayNode, isOpen: Boolean) {
+  private fun show(modal: PrototypeNode, isOpen: Boolean) {
     val spec =
-      OverlaySpec(
+      PrototypeSpec(
         "panel",
-        OverlayWindow(OverlayFullscreenPlacement()),
-        mapOf("open" to OverlayScalar.BooleanValue(isOpen)),
-        OverlayColumnNode(
-          children = listOf(OverlayButtonNode(testTag = "page", label = "Page"), modal),
+        PrototypeWindow(PrototypeFullscreenPlacement()),
+        mapOf("open" to PrototypeScalar.BooleanValue(isOpen)),
+        PrototypeColumnNode(
+          children = listOf(PrototypeButtonNode(testTag = "page", label = "Page"), modal),
         ),
       )
-    compose.setContent { OverlaySpecContent(mapOverlaySpec(spec).root) {} }
+    compose.setContent { PrototypeSpecContent(mapPrototypeSpec(spec).root) {} }
     compose.waitForIdle()
   }
 
@@ -37,9 +37,9 @@ class OverlayDialogPageSemanticsTest {
     compose.onAllNodesWithTag(tag, useUnmergedTree = unmerged).fetchSemanticsNodes().size
 
   private fun dialog() =
-    OverlayDialogNode(testTag = "dlg", openWhen = open, confirm = OverlayDialogButton("OK"))
+    PrototypeDialogNode(testTag = "dlg", openWhen = open, confirm = PrototypeDialogButton("OK"))
 
-  private fun snackbar() = OverlaySnackbarNode(testTag = "toast", openWhen = open, text = "Saved")
+  private fun snackbar() = PrototypeSnackbarNode(testTag = "toast", openWhen = open, text = "Saved")
 
   @Test
   fun `an open dialog removes the page from the accessibility tree and keeps its own buttons`() {

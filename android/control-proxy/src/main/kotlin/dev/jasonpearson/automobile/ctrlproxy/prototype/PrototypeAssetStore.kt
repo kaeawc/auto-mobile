@@ -1,7 +1,7 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.util.Log
-import dev.jasonpearson.automobile.protocol.OverlayAssetContract
+import dev.jasonpearson.automobile.protocol.PrototypeAssetContract
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.Executor
@@ -11,7 +11,7 @@ import java.util.concurrent.Executor
  * tests use an in-memory fake. Names are opaque store-generated tokens, never asset ids, so an id
  * can never reach the file system.
  */
-interface OverlayAssetFiles {
+interface PrototypeAssetFiles {
   @Throws(IOException::class) fun write(name: String, bytes: ByteArray)
 
   @Throws(IOException::class) fun read(name: String): ByteArray?
@@ -25,13 +25,13 @@ interface OverlayAssetFiles {
 }
 
 /** Caps and allowed types, defaulting to the contract shared with the TypeScript host. */
-data class OverlayAssetLimits(
-  val maxAssetBytes: Int = OverlayAssetContract.MAX_OVERLAY_ASSET_BYTES,
-  val maxFontBytes: Int = OverlayAssetContract.MAX_OVERLAY_FONT_ASSET_BYTES,
-  val maxCount: Int = OverlayAssetContract.MAX_OVERLAY_ASSET_COUNT,
-  val maxTotalBytes: Int = OverlayAssetContract.MAX_OVERLAY_ASSET_TOTAL_BYTES,
-  val maxIdLength: Int = OverlayAssetContract.MAX_OVERLAY_ASSET_ID_LENGTH,
-  val mimeTypes: Set<String> = OverlayAssetContract.MIME_TYPES,
+data class PrototypeAssetLimits(
+  val maxAssetBytes: Int = PrototypeAssetContract.MAX_PROTOTYPE_ASSET_BYTES,
+  val maxFontBytes: Int = PrototypeAssetContract.MAX_PROTOTYPE_FONT_ASSET_BYTES,
+  val maxCount: Int = PrototypeAssetContract.MAX_PROTOTYPE_ASSET_COUNT,
+  val maxTotalBytes: Int = PrototypeAssetContract.MAX_PROTOTYPE_ASSET_TOTAL_BYTES,
+  val maxIdLength: Int = PrototypeAssetContract.MAX_PROTOTYPE_ASSET_ID_LENGTH,
+  val mimeTypes: Set<String> = PrototypeAssetContract.MIME_TYPES,
 ) {
   /** Longest base64 text that can still decode to [maxAssetBytes]; longer is rejected unread. */
   val maxEncodedLength: Long = (maxAssetBytes.toLong() + 2) / 3 * 4
@@ -39,9 +39,9 @@ data class OverlayAssetLimits(
 
 /**
  * Metadata the renderer needs to decide how to decode; the bytes come from
- * [OverlayAssetStore.read].
+ * [PrototypeAssetStore.read].
  */
-data class OverlayAssetInfo(val id: String, val mimeType: String, val byteCount: Int)
+data class PrototypeAssetInfo(val id: String, val mimeType: String, val byteCount: Int)
 
 /**
  * Tells the renderer's decoded-image cache that stored assets changed. [ids] names the assets whose
@@ -50,13 +50,13 @@ data class OverlayAssetInfo(val id: String, val mimeType: String, val byteCount:
  * before that call returns. A listener may therefore call back into the store (`lookup`, `read`)
  * without deadlocking; it must still be quick, since it runs on the caller's thread.
  */
-fun interface OverlayAssetChangeListener {
+fun interface PrototypeAssetChangeListener {
   fun onAssetsChanged(ids: Set<String>?)
 }
 
 /** What the renderer needs from the store: metadata, bytes, and a change signal. */
-interface OverlayAssetSource {
-  fun lookup(id: String): OverlayAssetInfo?
+interface PrototypeAssetSource {
+  fun lookup(id: String): PrototypeAssetInfo?
 
   /** Call off the main thread. Null when unknown, or when the OS evicted the file. */
   fun read(id: String): ByteArray?
@@ -65,10 +65,10 @@ interface OverlayAssetSource {
   fun file(id: String): File? = null
 
   /** Replaces the single registered listener; null unregisters. */
-  fun setChangeListener(listener: OverlayAssetChangeListener?)
+  fun setChangeListener(listener: PrototypeAssetChangeListener?)
 }
 
-enum class OverlayAssetRejection {
+enum class PrototypeAssetRejection {
   INVALID_ID,
   UNSUPPORTED_MIME_TYPE,
   EMPTY,
@@ -80,18 +80,18 @@ enum class OverlayAssetRejection {
   SESSION_ENDED,
 }
 
-sealed interface OverlayAssetPutResult {
-  data class Stored(val info: OverlayAssetInfo, val replaced: Boolean) : OverlayAssetPutResult
+sealed interface PrototypeAssetPutResult {
+  data class Stored(val info: PrototypeAssetInfo, val replaced: Boolean) : PrototypeAssetPutResult
 
   /** [message] is the caller-facing text; the store is left exactly as it was. */
-  data class Rejected(val reason: OverlayAssetRejection, val message: String) :
-    OverlayAssetPutResult
+  data class Rejected(val reason: PrototypeAssetRejection, val message: String) :
+    PrototypeAssetPutResult
 }
 
 /**
- * Bounded, replace-by-id asset store. Pure logic over [OverlayAssetFiles]: no image decoding, so it
- * runs in plain JVM tests. When full a put is rejected, never evicting: the agent gets a clear
- * error and chooses what to remove, because silently dropping an asset a live overlay references
+ * Bounded, replace-by-id asset store. Pure logic over [PrototypeAssetFiles]: no image decoding, so
+ * it runs in plain JVM tests. When full a put is rejected, never evicting: the agent gets a clear
+ * error and chooses what to remove, because silently dropping an asset a live prototype references
  * would turn into a placeholder. A rejected put, including a rejected replacement, leaves every
  * existing asset untouched. Bytes are never logged.
  *
@@ -112,20 +112,20 @@ sealed interface OverlayAssetPutResult {
  * The lock order is therefore store monitor, never listener; the listener's own locks (the image
  * cache's) are only ever taken with none of the store's locks held.
  */
-class OverlayAssetStore(
-  private val files: OverlayAssetFiles,
-  val limits: OverlayAssetLimits = OverlayAssetLimits(),
+class PrototypeAssetStore(
+  private val files: PrototypeAssetFiles,
+  val limits: PrototypeAssetLimits = PrototypeAssetLimits(),
   private val session: () -> Int = { 0 },
   private val fileWorker: Executor = Executor { it.run() },
-) : OverlayAssetSource {
-  private class Entry(val info: OverlayAssetInfo, val fileName: String)
+) : PrototypeAssetSource {
+  private class Entry(val info: PrototypeAssetInfo, val fileName: String)
 
   /** Either a slot to write into or the rejection that explains why there is none. */
   private class Reservation(
     val generation: Long,
     val fileName: String,
-    val info: OverlayAssetInfo,
-    val rejection: OverlayAssetPutResult.Rejected? = null,
+    val info: PrototypeAssetInfo,
+    val rejection: PrototypeAssetPutResult.Rejected? = null,
   )
 
   private val entries = LinkedHashMap<String, Entry>()
@@ -139,7 +139,7 @@ class OverlayAssetStore(
   // Serializes puts and the one-time orphan purge; never taken by clear, lookup or read.
   private val putLock = Any()
   private var orphansPurged = false
-  @Volatile private var changeListener: OverlayAssetChangeListener? = null
+  @Volatile private var changeListener: PrototypeAssetChangeListener? = null
 
   /**
    * What one call changed, collected under the monitor and delivered by [deliver] once every lock
@@ -160,12 +160,12 @@ class OverlayAssetStore(
       everything = true
     }
 
-    fun deliver(listener: OverlayAssetChangeListener?) {
+    fun deliver(listener: PrototypeAssetChangeListener?) {
       if (changed) listener?.onAssetsChanged(if (everything) null else ids)
     }
   }
 
-  override fun setChangeListener(listener: OverlayAssetChangeListener?) {
+  override fun setChangeListener(listener: PrototypeAssetChangeListener?) {
     changeListener = listener
   }
 
@@ -196,7 +196,7 @@ class OverlayAssetStore(
     entries.keys.toList()
   }
 
-  fun put(id: String, mimeType: String, bytes: ByteArray): OverlayAssetPutResult {
+  fun put(id: String, mimeType: String, bytes: ByteArray): PrototypeAssetPutResult {
     val changes = Changes()
     try {
       return synchronized(putLock) {
@@ -216,23 +216,23 @@ class OverlayAssetStore(
     changes: Changes,
   ): Reservation {
     dropStaleSessionLocked(changes)
-    val info = OverlayAssetInfo(id, mimeType, bytes.size)
+    val info = PrototypeAssetInfo(id, mimeType, bytes.size)
     val rejection = rejectionFor(id, mimeType, bytes) ?: limitRejection(id, bytes.size)
     return Reservation(generation, "asset-${nextFile++}", info, rejection)
   }
 
-  private fun limitRejection(id: String, size: Int): OverlayAssetPutResult.Rejected? {
+  private fun limitRejection(id: String, size: Int): PrototypeAssetPutResult.Rejected? {
     val replacedBytes = entries[id]?.info?.byteCount ?: 0
     return when {
       entries[id] == null && entries.size >= limits.maxCount ->
         rejected(
-          OverlayAssetRejection.COUNT_LIMIT,
-          "Overlay asset limit reached (${limits.maxCount} assets); remove one first.",
+          PrototypeAssetRejection.COUNT_LIMIT,
+          "Prototype asset limit reached (${limits.maxCount} assets); remove one first.",
         )
       totalBytes - replacedBytes + size > limits.maxTotalBytes ->
         rejected(
-          OverlayAssetRejection.TOTAL_LIMIT,
-          "Overlay asset storage full (${limits.maxTotalBytes} bytes in total); remove an asset first.",
+          PrototypeAssetRejection.TOTAL_LIMIT,
+          "Prototype asset storage full (${limits.maxTotalBytes} bytes in total); remove an asset first.",
         )
       else -> null
     }
@@ -242,25 +242,25 @@ class OverlayAssetStore(
     reservation: Reservation,
     bytes: ByteArray,
     changes: Changes,
-  ): OverlayAssetPutResult {
+  ): PrototypeAssetPutResult {
     try {
       files.write(reservation.fileName, bytes)
     } catch (error: IOException) {
-      Log.w(TAG, "Overlay asset write failed (${bytes.size} bytes)", error)
+      Log.w(TAG, "Prototype asset write failed (${bytes.size} bytes)", error)
       discardFile(reservation.fileName)
-      return rejected(OverlayAssetRejection.STORAGE_FAILURE, "Failed to store overlay asset.")
+      return rejected(PrototypeAssetRejection.STORAGE_FAILURE, "Failed to store prototype asset.")
     }
     val result = synchronized(this) { commit(reservation, changes) }
-    if (result is OverlayAssetPutResult.Rejected) discardFile(reservation.fileName)
+    if (result is PrototypeAssetPutResult.Rejected) discardFile(reservation.fileName)
     return result
   }
 
-  private fun commit(reservation: Reservation, changes: Changes): OverlayAssetPutResult {
+  private fun commit(reservation: Reservation, changes: Changes): PrototypeAssetPutResult {
     dropStaleSessionLocked(changes)
     if (reservation.generation != generation) {
       return rejected(
-        OverlayAssetRejection.SESSION_ENDED,
-        "Overlay asset session ended before the upload finished; upload it again.",
+        PrototypeAssetRejection.SESSION_ENDED,
+        "Prototype asset session ended before the upload finished; upload it again.",
       )
     }
     val info = reservation.info
@@ -271,7 +271,7 @@ class OverlayAssetStore(
     replaced?.let { discardFile(it.fileName) }
     // Also for a new id: a placeholder drawn while it was missing must now pick it up.
     changes.add(info.id)
-    return OverlayAssetPutResult.Stored(info, replaced != null)
+    return PrototypeAssetPutResult.Stored(info, replaced != null)
   }
 
   /** Idempotent: returns whether an asset was actually removed. */
@@ -311,7 +311,7 @@ class OverlayAssetStore(
     try {
       files.deleteAll()
     } catch (error: RuntimeException) {
-      Log.w(TAG, "Overlay asset orphan cleanup failed", error)
+      Log.w(TAG, "Prototype asset orphan cleanup failed", error)
     }
   }
 
@@ -337,13 +337,13 @@ class OverlayAssetStore(
       try {
         files.delete(name)
       } catch (error: RuntimeException) {
-        Log.w(TAG, "Overlay asset file cleanup failed", error)
+        Log.w(TAG, "Prototype asset file cleanup failed", error)
       }
     }
   }
 
   /** Renderer lookup: null means the id is unknown, which the renderer shows as a placeholder. */
-  override fun lookup(id: String): OverlayAssetInfo? = locked { changes ->
+  override fun lookup(id: String): PrototypeAssetInfo? = locked { changes ->
     dropStaleSessionLocked(changes)
     entries[id]?.info
   }
@@ -358,7 +358,7 @@ class OverlayAssetStore(
     return try {
       files.read(fileName)
     } catch (error: IOException) {
-      Log.w(TAG, "Overlay asset read failed", error)
+      Log.w(TAG, "Prototype asset read failed", error)
       null
     }
   }
@@ -377,28 +377,28 @@ class OverlayAssetStore(
     id: String,
     mimeType: String,
     bytes: ByteArray,
-  ): OverlayAssetPutResult.Rejected? =
+  ): PrototypeAssetPutResult.Rejected? =
     when {
       id.isEmpty() || id.length > limits.maxIdLength ->
         rejected(
-          OverlayAssetRejection.INVALID_ID,
-          "Overlay asset id must be 1 to ${limits.maxIdLength} characters.",
+          PrototypeAssetRejection.INVALID_ID,
+          "Prototype asset id must be 1 to ${limits.maxIdLength} characters.",
         )
       mimeType !in limits.mimeTypes ->
         rejected(
-          OverlayAssetRejection.UNSUPPORTED_MIME_TYPE,
-          "Unsupported overlay asset MIME type; use one of ${limits.mimeTypes.sorted()}.",
+          PrototypeAssetRejection.UNSUPPORTED_MIME_TYPE,
+          "Unsupported prototype asset MIME type; use one of ${limits.mimeTypes.sorted()}.",
         )
-      bytes.isEmpty() -> rejected(OverlayAssetRejection.EMPTY, "Overlay asset has no data.")
+      bytes.isEmpty() -> rejected(PrototypeAssetRejection.EMPTY, "Prototype asset has no data.")
       bytes.size > maxBytesFor(mimeType) ->
         rejected(
-          OverlayAssetRejection.TOO_LARGE,
-          "Overlay asset is ${bytes.size} bytes; the limit is ${maxBytesFor(mimeType)}.",
+          PrototypeAssetRejection.TOO_LARGE,
+          "Prototype asset is ${bytes.size} bytes; the limit is ${maxBytesFor(mimeType)}.",
         )
       !matchesSignature(mimeType, bytes) ->
         rejected(
-          OverlayAssetRejection.CONTENT_MISMATCH,
-          "Overlay asset bytes are not a valid $mimeType ${if (isFontMimeType(mimeType)) "font" else "image"}.",
+          PrototypeAssetRejection.CONTENT_MISMATCH,
+          "Prototype asset bytes are not a valid $mimeType ${if (isFontMimeType(mimeType)) "font" else "image"}.",
         )
       else -> null
     }
@@ -407,11 +407,11 @@ class OverlayAssetStore(
     if (isFontMimeType(mimeType)) minOf(limits.maxFontBytes, limits.maxAssetBytes)
     else limits.maxAssetBytes
 
-  private fun rejected(reason: OverlayAssetRejection, message: String) =
-    OverlayAssetPutResult.Rejected(reason, message)
+  private fun rejected(reason: PrototypeAssetRejection, message: String) =
+    PrototypeAssetPutResult.Rejected(reason, message)
 
   private companion object {
-    const val TAG = "OverlayAssetStore"
+    const val TAG = "PrototypeAssetStore"
   }
 }
 

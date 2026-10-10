@@ -4,10 +4,10 @@ import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.DragResult
 import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
-import dev.jasonpearson.automobile.protocol.OverlayResult
-import dev.jasonpearson.automobile.protocol.OverlaySpec
-import dev.jasonpearson.automobile.protocol.OverlayTextNode
 import dev.jasonpearson.automobile.protocol.PinchResult
+import dev.jasonpearson.automobile.protocol.PrototypeResult
+import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import dev.jasonpearson.automobile.protocol.PrototypeTextNode
 import dev.jasonpearson.automobile.protocol.RequestDrag
 import dev.jasonpearson.automobile.protocol.RequestPinch
 import dev.jasonpearson.automobile.protocol.RequestSwipe
@@ -108,10 +108,13 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
-  fun `dispatches request_screenshot hideOverlays to the hide-capture-restore action`() = runTest {
-    dispatch("""{"type":"request_screenshot","requestId":"s2","displayId":3,"hideOverlays":true}""")
-    assertEquals("requestScreenshot" to listOf<Any?>("s2", 3, true), lastCall)
-  }
+  fun `dispatches request_screenshot hidePrototypes to the hide-capture-restore action`() =
+    runTest {
+      dispatch(
+        """{"type":"request_screenshot","requestId":"s2","displayId":3,"hidePrototypes":true}""",
+      )
+      assertEquals("requestScreenshot" to listOf<Any?>("s2", 3, true), lastCall)
+    }
 
   // ---------------------------------------------------------------------------
   // Gestures
@@ -1151,46 +1154,46 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
-  fun `dispatch typed overlay requests`() = runTest {
+  fun `dispatch typed prototype requests`() = runTest {
     val spec =
       """{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}"""
-    dispatch("""{"type":"show_overlay","requestId":"s","spec":$spec}""")
-    assertEquals("showOverlay", lastCall.first)
+    dispatch("""{"type":"show_prototype","requestId":"s","spec":$spec}""")
+    assertEquals("showPrototype", lastCall.first)
     assertEquals("s", lastCall.second[0])
-    assertEquals("panel", (lastCall.second[1] as OverlaySpec).id)
-    assertEquals(OverlayTextNode(text = "Hello"), (lastCall.second[1] as OverlaySpec).root)
+    assertEquals("panel", (lastCall.second[1] as PrototypeSpec).id)
+    assertEquals(PrototypeTextNode(text = "Hello"), (lastCall.second[1] as PrototypeSpec).root)
     assertEquals(false, lastCall.second[3])
-    dispatch("""{"type":"show_overlay","requestId":"r","spec":$spec,"reset":true}""")
-    assertEquals("showOverlay", lastCall.first)
+    dispatch("""{"type":"show_prototype","requestId":"r","spec":$spec,"reset":true}""")
+    assertEquals("showPrototype", lastCall.first)
     assertEquals(true, lastCall.second[3])
-    dispatch("""{"type":"dismiss_overlay","requestId":"d","id":"panel"}""")
-    assertEquals("dismissOverlay", lastCall.first)
+    dispatch("""{"type":"dismiss_prototype","requestId":"d","id":"panel"}""")
+    assertEquals("dismissPrototype", lastCall.first)
     assertEquals(listOf("d", "panel", null), lastCall.second)
-    dispatch("""{"type":"dismiss_overlay","requestId":"a","all":true}""")
+    dispatch("""{"type":"dismiss_prototype","requestId":"a","all":true}""")
     assertEquals(listOf("a", null, true), lastCall.second)
   }
 
   @Test
-  fun `show_overlay carries an absent or explicit displayId to the action`() = runTest {
+  fun `show_prototype carries an absent or explicit displayId to the action`() = runTest {
     val spec =
       """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hi"}}"""
-    dispatch("""{"type":"show_overlay","requestId":"s","spec":$spec}""")
+    dispatch("""{"type":"show_prototype","requestId":"s","spec":$spec}""")
     assertNull(lastCall.second[2])
-    dispatch("""{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":null}""")
+    dispatch("""{"type":"show_prototype","requestId":"s","spec":$spec,"displayId":null}""")
     assertNull(lastCall.second[2])
     // The handler's default SDK is Build.VERSION.SDK_INT (0 off-device); API 30+ may route.
     val api30 = CtrlProxyMessageHandler(actions, sdkInt = { 30 })
     api30.handleMessage(
       json.decodeFromString<WebSocketRequest>(
-        """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":2}""",
+        """{"type":"show_prototype","requestId":"s","spec":$spec,"displayId":2}""",
       ),
     )
-    assertEquals("showOverlay", lastCall.first)
+    assertEquals("showPrototype", lastCall.first)
     assertEquals(2, lastCall.second[2])
   }
 
   @Test
-  fun `show_overlay rejects an unroutable displayId with a correlated result and no action`() =
+  fun `show_prototype rejects an unroutable displayId with a correlated result and no action`() =
     runTest {
       val spec =
         """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hi"}}"""
@@ -1200,11 +1203,11 @@ class CtrlProxyMessageHandlerTest {
           CtrlProxyMessageHandler(actions, sdkInt = { sdk })
             .handleMessage(
               json.decodeFromString<WebSocketRequest>(
-                """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":$displayId}""",
+                """{"type":"show_prototype","requestId":"s","spec":$spec,"displayId":$displayId}""",
               ),
             )
-        assertTrue(response is OverlayResult)
-        response as OverlayResult
+        assertTrue(response is PrototypeResult)
+        response as PrototypeResult
         assertFalse(response.success)
         assertEquals("s", response.requestId)
         assertTrue(response.error.orEmpty().contains("display", ignoreCase = true))
@@ -1214,49 +1217,49 @@ class CtrlProxyMessageHandlerTest {
       CtrlProxyMessageHandler(actions, sdkInt = { 29 })
         .handleMessage(
           json.decodeFromString<WebSocketRequest>(
-            """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":0}""",
+            """{"type":"show_prototype","requestId":"s","spec":$spec,"displayId":0}""",
           ),
         )
-      assertEquals("showOverlay", lastCall.first)
+      assertEquals("showPrototype", lastCall.first)
       assertEquals(0, lastCall.second[2])
     }
 
   @Test
-  fun `dispatch inspect overlays request`() = runTest {
-    dispatch("""{"type":"inspect_overlays","requestId":"i"}""")
-    assertEquals("inspectOverlays", lastCall.first)
+  fun `dispatch inspect prototypes request`() = runTest {
+    dispatch("""{"type":"inspect_prototypes","requestId":"i"}""")
+    assertEquals("inspectPrototypes", lastCall.first)
     assertEquals(listOf<Any?>("i"), lastCall.second)
   }
 
   @Test
-  fun `dispatch typed overlay asset requests`() = runTest {
+  fun `dispatch typed prototype asset requests`() = runTest {
     dispatch(
-      """{"type":"put_overlay_asset","requestId":"p","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}""",
+      """{"type":"put_prototype_asset","requestId":"p","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}""",
     )
-    assertEquals("putOverlayAsset", lastCall.first)
+    assertEquals("putPrototypeAsset", lastCall.first)
     assertEquals(listOf("p", "hero", "image/png", "iVBORw0KGgo="), lastCall.second)
-    dispatch("""{"type":"remove_overlay_asset","requestId":"r","id":"hero"}""")
-    assertEquals("removeOverlayAsset", lastCall.first)
+    dispatch("""{"type":"remove_prototype_asset","requestId":"r","id":"hero"}""")
+    assertEquals("removePrototypeAsset", lastCall.first)
     assertEquals(listOf("r", "hero"), lastCall.second)
   }
 
   @Test
-  fun `invalid overlay combinations return precise correlated failures without actions`() =
+  fun `invalid prototype combinations return precise correlated failures without actions`() =
     runTest {
       val spec =
         """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hello"}}"""
-      val dismissError = "dismiss_overlay requires exactly one of id or all:true"
+      val dismissError = "dismiss_prototype requires exactly one of id or all:true"
       val cases =
         listOf(
-          """{"type":"dismiss_overlay","requestId":"bad"}""" to dismissError,
-          """{"type":"dismiss_overlay","requestId":"bad","id":"panel","all":true}""" to
+          """{"type":"dismiss_prototype","requestId":"bad"}""" to dismissError,
+          """{"type":"dismiss_prototype","requestId":"bad","id":"panel","all":true}""" to
             dismissError,
-          """{"type":"dismiss_overlay","requestId":"bad","all":false}""" to dismissError,
-          """{"type":"dismiss_overlay","requestId":"bad","id":"panel","all":false}""" to
+          """{"type":"dismiss_prototype","requestId":"bad","all":false}""" to dismissError,
+          """{"type":"dismiss_prototype","requestId":"bad","id":"panel","all":false}""" to
             dismissError,
         )
       for ((literal, error) in cases) {
-        val result = dispatchForResponse(literal) as OverlayResult
+        val result = dispatchForResponse(literal) as PrototypeResult
         assertEquals("bad", result.requestId)
         assertFalse(result.success)
         assertEquals(error, result.error)
@@ -1265,12 +1268,12 @@ class CtrlProxyMessageHandlerTest {
     }
 
   @Test
-  fun `overlay result frame carries failure and escaped echoed request id`() {
+  fun `prototype result frame carries failure and escaped echoed request id`() {
     val requestId = "quoted" + '"'
     val result =
       json.decodeFromString<WebSocketResponse>(
-        overlayResultFrame(requestId, false, "render failed"),
-      ) as OverlayResult
+        prototypeResultFrame(requestId, false, "render failed"),
+      ) as PrototypeResult
     assertEquals(requestId, result.requestId)
     assertFalse(result.success)
     assertEquals("render failed", result.error)

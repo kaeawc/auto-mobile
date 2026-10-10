@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -47,29 +47,29 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.unit.dp
-import dev.jasonpearson.automobile.protocol.OverlayButtonNode
-import dev.jasonpearson.automobile.protocol.OverlayCardNode
-import dev.jasonpearson.automobile.protocol.OverlayCheckboxNode
-import dev.jasonpearson.automobile.protocol.OverlayChipNode
-import dev.jasonpearson.automobile.protocol.OverlayNode
-import dev.jasonpearson.automobile.protocol.OverlaySliderNode
-import dev.jasonpearson.automobile.protocol.OverlaySwitchNode
+import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
+import dev.jasonpearson.automobile.protocol.PrototypeCardNode
+import dev.jasonpearson.automobile.protocol.PrototypeCheckboxNode
+import dev.jasonpearson.automobile.protocol.PrototypeChipNode
+import dev.jasonpearson.automobile.protocol.PrototypeNode
+import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
+import dev.jasonpearson.automobile.protocol.PrototypeSwitchNode
 
 /**
  * Material 3 component nodes (#10439). Each draws its own Material control and owns its tap, so
- * [overlayNodeModifier] must not add a second click handler for these roles.
+ * [prototypeNodeModifier] must not add a second click handler for these roles.
  */
-internal val OVERLAY_COMPONENT_ROLES = setOf("switch", "checkbox", "button", "slider", "chip")
+internal val PROTOTYPE_COMPONENT_ROLES = setOf("switch", "checkbox", "button", "slider", "chip")
 
 /**
  * The boolean state key a `switch`, `checkbox` or filter `chip` is bound to; null for every other
  * node, including an assist chip.
  */
-internal fun overlayToggleKey(node: OverlayNode): String? =
+internal fun prototypeToggleKey(node: PrototypeNode): String? =
   when (node) {
-    is OverlaySwitchNode -> node.stateKey
-    is OverlayCheckboxNode -> node.stateKey
-    is OverlayChipNode -> node.stateKey
+    is PrototypeSwitchNode -> node.stateKey
+    is PrototypeCheckboxNode -> node.stateKey
+    is PrototypeChipNode -> node.stateKey
     else -> null
   }
 
@@ -79,26 +79,26 @@ internal fun overlayToggleKey(node: OverlayNode): String? =
  * `testTag` toggles it. The inner Material control is display-only (`onCheckedChange = null`).
  */
 @Composable
-internal fun RenderOverlayToggle(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeToggle(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source ?: return
-  val key = overlayToggleKey(source) ?: return
+  val key = prototypeToggleKey(source) ?: return
   val actions = source.onTap.orEmpty()
   val isSwitch = node.role == "switch"
   Row(
     Modifier.minimumInteractiveComponentSize()
       .toggleable(node.checked, role = if (isSwitch) Role.Switch else Role.Checkbox) {
-        interact(OverlayInteraction.Toggle(key, actions))
+        interact(PrototypeInteraction.Toggle(key, actions))
       }
       .then(modifier),
     horizontalArrangement = Arrangement.spacedBy(12.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     if (!isSwitch) Checkbox(node.checked, onCheckedChange = null)
-    if (node.text.isNotEmpty()) OverlayComponentLabel(node)
+    if (node.text.isNotEmpty()) PrototypeComponentLabel(node)
     if (isSwitch) Switch(node.checked, onCheckedChange = null)
   }
 }
@@ -108,15 +108,15 @@ internal fun RenderOverlayToggle(
  * icon, whose tap runs the node's `onTap`.
  */
 @Composable
-internal fun RenderOverlayButton(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeButton(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlayButtonNode ?: return
+  val source = node.source as? PrototypeButtonNode ?: return
   val actions = source.onTap.orEmpty()
-  val onClick = { if (actions.isNotEmpty()) interact(OverlayInteraction.Tap(actions)) }
-  val icon = overlayIcon(source.icon)
+  val onClick = { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) }
+  val icon = prototypeIcon(source.icon)
   val padding =
     if (icon != null) ButtonDefaults.ButtonWithIconContentPadding else ButtonDefaults.ContentPadding
   val content: @Composable RowScope.() -> Unit = {
@@ -125,11 +125,11 @@ internal fun RenderOverlayButton(
         icon,
         contentDescription = null,
         Modifier.size(ButtonDefaults.IconSize),
-        tint = overlayForeground(node),
+        tint = prototypeForeground(node),
       )
       Spacer(Modifier.size(ButtonDefaults.IconSpacing))
     }
-    OverlayComponentLabel(node)
+    PrototypeComponentLabel(node)
   }
   when (source.variant) {
     "tonal" -> FilledTonalButton(onClick, modifier, contentPadding = padding, content = content)
@@ -153,21 +153,21 @@ internal fun RenderOverlayButton(
 
 /** The authored `style.color` when set, else the enclosing Material component's content color. */
 @Composable
-internal fun overlayForeground(node: OverlayRenderNode): Color =
+internal fun prototypeForeground(node: PrototypeRenderNode): Color =
   if (node.style.source.color != null) node.style.color else LocalContentColor.current
 
 /** The node-level semantics already carry the label, so the drawn text adds none of its own. */
 @Composable
-private fun OverlayComponentLabel(node: OverlayRenderNode) {
+private fun PrototypeComponentLabel(node: PrototypeRenderNode) {
   Text(
     node.text,
     Modifier.clearAndSetSemantics {},
-    color = overlayForeground(node),
+    color = prototypeForeground(node),
   )
 }
 
 /** The step-aligned, in-range value a drag or set-progress lands on, rounded to micro-units. */
-internal fun snapOverlaySlider(raw: Double, min: Double, max: Double, step: Double?): Double {
+internal fun snapPrototypeSlider(raw: Double, min: Double, max: Double, step: Double?): Double {
   val clamped = raw.coerceIn(min, max)
   if (step == null) return clamped
   val snapped = min + Math.round((clamped - min) / step) * step
@@ -175,7 +175,7 @@ internal fun snapOverlaySlider(raw: Double, min: Double, max: Double, step: Doub
 }
 
 /** Compose counts the discrete positions strictly between the ends. */
-internal fun overlaySliderSteps(min: Double, max: Double, step: Double?): Int =
+internal fun prototypeSliderSteps(min: Double, max: Double, step: Double?): Int =
   if (step == null) 0 else (Math.round((max - min) / step).toInt() - 1).coerceAtLeast(0)
 
 /**
@@ -184,18 +184,18 @@ internal fun overlaySliderSteps(min: Double, max: Double, step: Double?): Int =
  * whose value observe reads from the range info.
  */
 @Composable
-internal fun RenderOverlaySlider(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeSlider(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlaySliderNode ?: return
+  val source = node.source as? PrototypeSliderNode ?: return
   val actions = source.onTap.orEmpty()
   val range = source.min.toFloat()..source.max.toFloat()
-  val steps = overlaySliderSteps(source.min, source.max, source.step)
+  val steps = prototypeSliderSteps(source.min, source.max, source.step)
   val change = { raw: Float ->
-    val value = snapOverlaySlider(raw.toDouble(), source.min, source.max, source.step)
-    interact(OverlayInteraction.Slide(source.stateKey, value, actions))
+    val value = snapPrototypeSlider(raw.toDouble(), source.min, source.max, source.step)
+    interact(PrototypeInteraction.Slide(source.stateKey, value, actions))
   }
   Column(
     modifier.semantics(mergeDescendants = true) {
@@ -206,7 +206,7 @@ internal fun RenderOverlaySlider(
       }
     },
   ) {
-    if (node.text.isNotEmpty()) OverlayComponentLabel(node)
+    if (node.text.isNotEmpty()) PrototypeComponentLabel(node)
     Slider(
       node.sliderValue.toFloat(),
       change,
@@ -222,18 +222,18 @@ internal fun RenderOverlaySlider(
  * and exposes the Checkbox role with its checked state.
  */
 @Composable
-internal fun RenderOverlayChip(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeChip(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlayChipNode ?: return
+  val source = node.source as? PrototypeChipNode ?: return
   val actions = source.onTap.orEmpty()
   val key = source.stateKey
   if (key == null) {
     AssistChip(
-      { if (actions.isNotEmpty()) interact(OverlayInteraction.Tap(actions)) },
-      { OverlayComponentLabel(node) },
+      { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) },
+      { PrototypeComponentLabel(node) },
       modifier,
     )
     return
@@ -242,7 +242,7 @@ internal fun RenderOverlayChip(
   Row(
     Modifier.minimumInteractiveComponentSize()
       .toggleable(node.checked, role = Role.Checkbox) {
-        interact(OverlayInteraction.Toggle(key, actions))
+        interact(PrototypeInteraction.Toggle(key, actions))
       }
       .then(modifier),
   ) {
@@ -258,7 +258,7 @@ internal fun RenderOverlayChip(
         verticalAlignment = Alignment.CenterVertically,
       ) {
         if (node.checked) Icon(Icons.Default.Check, null, Modifier.size(18.dp))
-        ProvideTextStyle(MaterialTheme.typography.labelLarge) { OverlayComponentLabel(node) }
+        ProvideTextStyle(MaterialTheme.typography.labelLarge) { PrototypeComponentLabel(node) }
       }
     }
   }
@@ -266,13 +266,13 @@ internal fun RenderOverlayChip(
 
 /** A filled (default), elevated or outlined Material card holding the node's children. */
 @Composable
-internal fun RenderOverlayCard(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeCard(
+  node: PrototypeRenderNode,
   modifier: Modifier,
   content: @Composable ColumnScope.() -> Unit,
 ) {
   val container = node.style.background
-  when ((node.source as? OverlayCardNode)?.variant) {
+  when ((node.source as? PrototypeCardNode)?.variant) {
     "elevated" ->
       ElevatedCard(
         modifier,

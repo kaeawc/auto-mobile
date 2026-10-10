@@ -8,15 +8,15 @@ import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 
-class OverlaySpecTest {
+class PrototypeSpecTest {
   @TestFactory
   fun validFixtures(): List<DynamicTest> = valid.map { file ->
     DynamicTest.dynamicTest("decode ${file.name}") {
-      val result = OverlaySpecValidator.validate(validJson.getValue(file))
-      assertTrue(result is OverlaySpecValidation.Success, result.toString())
-      val spec = (result as OverlaySpecValidation.Success).spec
-      val encoded = Json.encodeToString(OverlaySpec.serializer(), spec)
-      assertTrue(OverlaySpecValidator.validate(encoded) is OverlaySpecValidation.Success)
+      val result = PrototypeSpecValidator.validate(validJson.getValue(file))
+      assertTrue(result is PrototypeSpecValidation.Success, result.toString())
+      val spec = (result as PrototypeSpecValidation.Success).spec
+      val encoded = Json.encodeToString(PrototypeSpec.serializer(), spec)
+      assertTrue(PrototypeSpecValidator.validate(encoded) is PrototypeSpecValidation.Success)
     }
   }
 
@@ -24,11 +24,11 @@ class OverlaySpecTest {
   fun invalidFixtures(): List<DynamicTest> = invalid.map { file ->
     val fixture = invalidJson.getValue(file)
     DynamicTest.dynamicTest("reject ${file.name}") {
-      val result = OverlaySpecValidator.validate(invalidSpec.getValue(file))
-      assertTrue(result is OverlaySpecValidation.Failure, result.toString())
+      val result = PrototypeSpecValidator.validate(invalidSpec.getValue(file))
+      assertTrue(result is PrototypeSpecValidation.Failure, result.toString())
       assertEquals(
         fixture.getValue("expectedPath").jsonPrimitive.content,
-        (result as OverlaySpecValidation.Failure).error.path,
+        (result as PrototypeSpecValidation.Failure).error.path,
       )
     }
   }
@@ -40,9 +40,9 @@ class OverlaySpecTest {
     val tags = mutableSetOf<String>()
     for (file in valid) collectTags(Json.parseToJsonElement(validJson.getValue(file)), tags)
     for (type in
-      OverlaySpecValidator.nodeTypes +
-        OverlaySpecValidator.actionTypes +
-        OverlaySpecValidator.placementTypes) {
+      PrototypeSpecValidator.nodeTypes +
+        PrototypeSpecValidator.actionTypes +
+        PrototypeSpecValidator.placementTypes) {
       assertTrue(tags.contains(type), "Missing fixture for $type")
     }
   }
@@ -65,7 +65,7 @@ class OverlaySpecTest {
         .getValue("variants")
         .jsonObject
     // A sealed serializer's descriptor holds the discriminator, then one element per subclass.
-    val subclasses = OverlayNode.serializer().descriptor.getElementDescriptor(1)
+    val subclasses = PrototypeNode.serializer().descriptor.getElementDescriptor(1)
     val models =
       (0 until subclasses.elementsCount).associate { index ->
         val node = subclasses.getElementDescriptor(index)
@@ -89,7 +89,7 @@ class OverlaySpecTest {
         .getValue("definitions")
         .jsonObject
     val fields = definitions.getValue("themeColors").jsonObject.getValue("fields").jsonObject.keys
-    val descriptor = OverlaySpecThemeColors.serializer().descriptor
+    val descriptor = PrototypeSpecThemeColors.serializer().descriptor
     assertEquals(fields, (0 until descriptor.elementsCount).map(descriptor::getElementName).toSet())
     // Every override is exactly one of the colour roles a style colour can name.
     val roles =
@@ -125,7 +125,7 @@ class OverlaySpecTest {
         .getValue("fields")
         .jsonObject
         .keys
-    val descriptor = OverlayStyle.serializer().descriptor
+    val descriptor = PrototypeStyle.serializer().descriptor
     assertEquals(fields, (0 until descriptor.elementsCount).map(descriptor::getElementName).toSet())
   }
 
@@ -134,15 +134,15 @@ class OverlaySpecTest {
     fun spec(radius: String) =
       """{"id":"a","window":{"placement":{"type":"fullscreen"}},""" +
         """"root":{"type":"box","children":[],"style":{"cornerRadius":$radius}}}"""
-    val accepted = OverlaySpecValidator.validate(spec("""{"topStart":12,"bottomEnd":0}"""))
-    assertTrue(accepted is OverlaySpecValidation.Success, accepted.toString())
+    val accepted = PrototypeSpecValidator.validate(spec("""{"topStart":12,"bottomEnd":0}"""))
+    assertTrue(accepted is PrototypeSpecValidation.Success, accepted.toString())
     assertEquals(
-      OverlayCornerRadius.Corners(topStart = 12.0, bottomEnd = 0.0),
-      (accepted as OverlaySpecValidation.Success).spec.root.style?.cornerRadius,
+      PrototypeCornerRadius.Corners(topStart = 12.0, bottomEnd = 0.0),
+      (accepted as PrototypeSpecValidation.Success).spec.root.style?.cornerRadius,
     )
     for (bad in listOf("""{"top":1}""", """{"topEnd":-1}""", """{"topEnd":"large"}""")) {
-      val rejected = OverlaySpecValidator.validate(spec(bad))
-      assertTrue(rejected is OverlaySpecValidation.Failure, bad)
+      val rejected = PrototypeSpecValidator.validate(spec(bad))
+      assertTrue(rejected is PrototypeSpecValidation.Failure, bad)
     }
   }
 
@@ -155,22 +155,22 @@ class OverlaySpecTest {
         """{"type":"listItem","headline":"Wi-Fi","trailing":{"type":"icon","name":"wifi"}}""",
       )) {
       val spec = """{"id":"a","window":{"placement":{"type":"fullscreen"}},"root":$root}"""
-      val accepted = OverlaySpecValidator.validate(spec)
-      assertTrue(accepted is OverlaySpecValidation.Success, accepted.toString())
-      val unknown = OverlaySpecValidator.validate(spec.replace("\"wifi\"", "\"not_an_icon\""))
-      assertTrue(unknown is OverlaySpecValidation.Failure, root)
+      val accepted = PrototypeSpecValidator.validate(spec)
+      assertTrue(accepted is PrototypeSpecValidation.Success, accepted.toString())
+      val unknown = PrototypeSpecValidator.validate(spec.replace("\"wifi\"", "\"not_an_icon\""))
+      assertTrue(unknown is PrototypeSpecValidation.Failure, root)
     }
   }
 
   @Test
   fun `bound state keys take placeholders and reject any other brace text`() {
     for (key in listOf("liked", "liked_{item.id}", "{index}_{props.k}", "9_{item.id}")) assertTrue(
-      OverlayRepeatTemplate.isBoundKey(key),
+      PrototypeRepeatTemplate.isBoundKey(key),
       key,
     )
     for (key in
       listOf("9a", "", "liked_{item}", "liked-{item.id}", "liked_{item.id", "{}")) assertFalse(
-      OverlayRepeatTemplate.isBoundKey(key),
+      PrototypeRepeatTemplate.isBoundKey(key),
       key,
     )
   }
@@ -179,35 +179,36 @@ class OverlaySpecTest {
   fun `raw byte limit includes whitespace and accepts its exact boundary`() {
     val input = validJson.getValue(valid.first())
     val padding =
-      OverlaySpecValidator.MAX_OVERLAY_SPEC_BYTES - input.toByteArray(Charsets.UTF_8).size
+      PrototypeSpecValidator.MAX_PROTOTYPE_SPEC_BYTES - input.toByteArray(Charsets.UTF_8).size
     assertTrue(
-      OverlaySpecValidator.validate(input + " ".repeat(padding)) is OverlaySpecValidation.Success,
+      PrototypeSpecValidator.validate(input + " ".repeat(padding))
+        is PrototypeSpecValidation.Success,
     )
     val rejected =
-      OverlaySpecValidator.validate(input + " ".repeat(padding + 1))
-        as OverlaySpecValidation.Failure
+      PrototypeSpecValidator.validate(input + " ".repeat(padding + 1))
+        as PrototypeSpecValidation.Failure
     assertEquals("$", rejected.error.path)
   }
 
   @Test
   fun `payload accepts the exact compact JSON boundary`() {
-    val payload = "x".repeat(OverlaySpecValidator.MAX_OVERLAY_EMIT_PAYLOAD_BYTES - 2)
+    val payload = "x".repeat(PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES - 2)
     val input =
       """{"id":"a","window":{"placement":{"type":"fullscreen"}},"root":{"type":"spacer","onTap":[{"type":"emit","name":"a","payload":"$payload"}]}}"""
-    assertTrue(OverlaySpecValidator.validate(input) is OverlaySpecValidation.Success)
+    assertTrue(PrototypeSpecValidator.validate(input) is PrototypeSpecValidation.Success)
   }
 
   @Test
   fun `non JSON numeric tokens and literal string controls are rejected`() {
     for (input in listOf("NaN", "Infinity", "01", "+1", "1.", "1e", "\"literal\nnewline\"")) {
-      val result = OverlaySpecValidator.validate(input) as OverlaySpecValidation.Failure
+      val result = PrototypeSpecValidator.validate(input) as PrototypeSpecValidation.Failure
       assertEquals("$", result.error.path, input)
     }
   }
 
   @Test
   fun `malformed JSON reports the envelope path`() {
-    val result = OverlaySpecValidator.validate("{") as OverlaySpecValidation.Failure
+    val result = PrototypeSpecValidator.validate("{") as PrototypeSpecValidation.Failure
     assertEquals("$", result.error.path)
   }
 
@@ -254,9 +255,9 @@ class OverlaySpecTest {
       invalidSpec = invalidJson.mapValues { it.value.getValue("spec").toString() }
       // Materialize every lazy serializer before JUnit starts measuring each test.
       for (input in validJson.values) {
-        val decoded = OverlaySpecValidator.validate(input)
-        if (decoded is OverlaySpecValidation.Success)
-          Json.encodeToString(OverlaySpec.serializer(), decoded.spec)
+        val decoded = PrototypeSpecValidator.validate(input)
+        if (decoded is PrototypeSpecValidation.Success)
+          Json.encodeToString(PrototypeSpec.serializer(), decoded.spec)
       }
     }
   }

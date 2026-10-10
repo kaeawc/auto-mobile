@@ -53,19 +53,19 @@ class OverlayManagerTest {
   }
 
   @Test
-  fun `interactive attach restacks same highlight view above it and dismissal restores normal type`() {
+  fun `prototype attach restacks same highlight view above it and dismissal restores normal type`() {
     val manager = createOverlayManager(canDrawOverlays = true)
     manager.show()
     val original = manager.getOverlayViewForTest()
     manager.hide()
-    assertTrue(manager.setInteractiveOverlayAttached(true))
+    assertTrue(manager.setPrototypeAttached(true))
     assertTrue(original === manager.getOverlayViewForTest())
     assertFalse(manager.isOverlayVisibleForTest())
     var params = paramsSlot.captured as WindowManager.LayoutParams
     assertEquals(WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, params.type)
     assertTrue(params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0)
     assertTrue(params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
-    assertTrue(manager.setInteractiveOverlayAttached(false))
+    assertTrue(manager.setPrototypeAttached(false))
     params = paramsSlot.captured as WindowManager.LayoutParams
     assertEquals(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, params.type)
     verify(exactly = 2) { windowManager.removeViewImmediate(any()) }
@@ -75,7 +75,7 @@ class OverlayManagerTest {
   @Test
   fun `restack before first highlight sets accessibility type without creating a view`() {
     val manager = createOverlayManager(canDrawOverlays = true)
-    assertTrue(manager.setInteractiveOverlayAttached(true))
+    assertTrue(manager.setPrototypeAttached(true))
     assertNull(manager.getOverlayViewForTest())
     manager.show()
     assertEquals(

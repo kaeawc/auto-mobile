@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.WindowManager
 import androidx.compose.ui.platform.ComposeView
@@ -18,37 +18,37 @@ import org.robolectric.annotation.Config
 /** The host attaches to the requested display's own window manager, or fails without a window. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayDisplayHostTest {
+class PrototypeDisplayHostTest {
   companion object {
     @JvmStatic
     @BeforeClass
     fun warmRuntime() {
       runTest {}
-      InteractiveOverlayRequest()
+      PrototypeRequest()
     }
   }
 
   private val history = mutableListOf<String>()
-  private lateinit var main: FakeOverlayMainThread
-  private lateinit var defaultManager: RecordingOverlayWindowManager
-  private lateinit var displays: FakeOverlayDisplays
-  private lateinit var host: InteractiveOverlayHost
+  private lateinit var main: FakePrototypeMainThread
+  private lateinit var defaultManager: RecordingPrototypeWindowManager
+  private lateinit var displays: FakePrototypeDisplays
+  private lateinit var host: PrototypeHost
   private var lost = 0
 
   @Before
   fun setUp() {
     history.clear()
     lost = 0
-    main = FakeOverlayMainThread()
-    defaultManager = RecordingOverlayWindowManager(main, history)
-    displays = FakeOverlayDisplays(main, history, RuntimeEnvironment.getApplication())
+    main = FakePrototypeMainThread()
+    defaultManager = RecordingPrototypeWindowManager(main, history)
+    displays = FakePrototypeDisplays(main, history, RuntimeEnvironment.getApplication())
     host =
-      DefaultInteractiveOverlayHost(
+      DefaultPrototypeHost(
         RuntimeEnvironment.getApplication(),
         defaultManager,
         sdkInt = 30,
         mainThread = main,
-        settleTimer = FakeOverlaySettleTimer(history),
+        settleTimer = FakePrototypeSettleTimer(history),
         densityProvider = { 2.5f },
         onWindowLost = { lost++ },
         displayWindows = displays,
@@ -57,8 +57,8 @@ class OverlayDisplayHostTest {
   }
 
   private fun sheet(displayId: Int) =
-    InteractiveOverlayRequest(
-      OverlayPlacement.Sheet(OverlayPlacement.Edge.BOTTOM, 20f),
+    PrototypeRequest(
+      PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 20f),
       displayId = displayId,
     )
 
@@ -91,7 +91,7 @@ class OverlayDisplayHostTest {
   }
 
   @Test
-  fun `unknown display leaves the overlay already shown untouched`() = runTest {
+  fun `unknown display leaves the prototype already shown untouched`() = runTest {
     assertTrue(host.show(sheet(0)))
     assertTrue(runCatching { host.show(sheet(7)) }.exceptionOrNull() is IllegalArgumentException)
     assertTrue(host.isShowing)
@@ -141,7 +141,10 @@ class OverlayDisplayHostTest {
     assertEquals(1, inner.added.size)
     assertEquals(1, defaultManager.removals)
     assertTrue(host.isShowing)
-    assertEquals(OverlayPlacement.Sheet(OverlayPlacement.Edge.BOTTOM, 20f), host.currentPlacement)
+    assertEquals(
+      PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 20f),
+      host.currentPlacement,
+    )
     // The retained window is the new one: dismiss removes it from display 2.
     assertTrue(host.dismiss())
     assertEquals(1, inner.removals)
@@ -149,7 +152,7 @@ class OverlayDisplayHostTest {
   }
 
   @Test
-  fun `a failed add on the new display keeps the old overlay`() = runTest {
+  fun `a failed add on the new display keeps the old prototype`() = runTest {
     val inner = displays.connect(2)
     inner.failAdd = true
     host.show(sheet(0))
@@ -177,8 +180,8 @@ class OverlayDisplayHostTest {
       // The service's WindowManager carries the accessibility-overlay token, which would stack an
       // app-layer window above the notification shade and status bar (#10529).
       val appManager = displays.connect(0)
-      assertTrue(host.show(sheet(0).copy(layer = OverlayWindowLayer.APP)))
-      assertEquals(listOf(OverlayWindowLayer.APP), displays.openedLayers)
+      assertTrue(host.show(sheet(0).copy(layer = PrototypeWindowLayer.APP)))
+      assertEquals(listOf(PrototypeWindowLayer.APP), displays.openedLayers)
       assertEquals(
         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
         appManager.added.single().type,
@@ -191,14 +194,14 @@ class OverlayDisplayHostTest {
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
         defaultManager.added.single().type,
       )
-      assertEquals(listOf(OverlayWindowLayer.APP), displays.openedLayers)
+      assertEquals(listOf(PrototypeWindowLayer.APP), displays.openedLayers)
       assertEquals(1, appManager.removals)
       assertTrue(defaultManager.updated.isEmpty())
     }
 
   @Test
   fun `an app layer window that cannot be opened attaches nothing`() = runTest {
-    val error = runCatching { host.show(sheet(0).copy(layer = OverlayWindowLayer.APP)) }
+    val error = runCatching { host.show(sheet(0).copy(layer = PrototypeWindowLayer.APP)) }
     assertEquals("Cannot attach an app-layer window", error.exceptionOrNull()?.message)
     assertTrue(defaultManager.added.isEmpty())
     assertFalse(host.isShowing)
@@ -207,10 +210,13 @@ class OverlayDisplayHostTest {
   @Test
   fun `secondary display contexts are created for the requested layer`() = runTest {
     val inner = displays.connect(2)
-    assertTrue(host.show(sheet(2).copy(layer = OverlayWindowLayer.APP)))
-    assertTrue(host.replace(sheet(2).copy(layer = OverlayWindowLayer.APP)))
+    assertTrue(host.show(sheet(2).copy(layer = PrototypeWindowLayer.APP)))
+    assertTrue(host.replace(sheet(2).copy(layer = PrototypeWindowLayer.APP)))
     assertTrue(host.replace(sheet(2)))
-    assertEquals(listOf(OverlayWindowLayer.APP, OverlayWindowLayer.SYSTEM), displays.openedLayers)
+    assertEquals(
+      listOf(PrototypeWindowLayer.APP, PrototypeWindowLayer.SYSTEM),
+      displays.openedLayers,
+    )
     assertEquals(
       listOf(
         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -227,7 +233,7 @@ class OverlayDisplayHostTest {
   @Test
   fun `negative display ids are rejected when the request is built`() {
     assertThrows(IllegalArgumentException::class.java) {
-      InteractiveOverlayRequest(displayId = -1)
+      PrototypeRequest(displayId = -1)
     }
   }
 }

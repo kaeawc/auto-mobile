@@ -53,12 +53,12 @@ data class RequestScreenshot(
   override val requestId: String? = null,
   val displayId: Int? = null,
   /**
-   * Hide CtrlProxy's interactive overlay window for this capture only: hide, wait for a rendered
-   * frame, capture, restore, all on the device in this one request
-   * (`screenshot_hide_overlay_v1`, #9305). Older APKs ignore the field and capture with the overlay
-   * showing.
+   * Hide CtrlProxy's prototype window for this capture only: hide, wait for a rendered frame,
+   * capture, restore, all on the device in this one request
+   * (`screenshot_hide_prototype_v1`, #9305). Older APKs ignore the field and capture with the
+   * prototype showing.
    */
-  val hideOverlays: Boolean = false,
+  val hidePrototypes: Boolean = false,
 ) : WebSocketRequest()
 
 // =============================================================================
@@ -439,66 +439,66 @@ data class AddHighlight(
   val shape: HighlightShape? = null,
 ) : WebSocketRequest()
 
-// Agent-authored overlays
+// Agent-authored prototypes
 /**
  * [displayId] is the Android logical display, with the same meaning as the gesture requests'
  * `displayId`. Absent/null means the service's default display (the pre-#9308 behaviour); hosts
- * only send it to a device advertising `overlay_display_id_v1`, because an older device would
- * ignore the unknown field and silently show the overlay on the wrong display.
+ * only send it to a device advertising `prototype_display_id_v1`, because an older device would
+ * ignore the unknown field and silently show the prototype on the wrong display.
  *
- * A show whose `spec.id` is the overlay already on screen replaces it in place: it keeps the
+ * A show whose `spec.id` is the prototype already on screen replaces it in place: it keeps the
  * display it is on (ignoring [displayId]) and each pager's page. [reset] true starts it fresh
  * instead. Hosts send `reset` only when true; an older device ignores it and always starts fresh.
  */
 @Serializable
-@SerialName("show_overlay")
-data class ShowOverlay(
+@SerialName("show_prototype")
+data class ShowPrototype(
   override val requestId: String? = null,
-  val spec: OverlaySpec,
+  val spec: PrototypeSpec,
   val displayId: Int? = null,
   val reset: Boolean = false,
 ) : WebSocketRequest()
 
 @Serializable
-@SerialName("dismiss_overlay")
-data class DismissOverlay(
+@SerialName("dismiss_prototype")
+data class DismissPrototype(
   override val requestId: String? = null,
   val id: String? = null,
   val all: Boolean? = null,
 ) : WebSocketRequest()
 
 /**
- * Asks the device which overlays it is showing. Answered by one `overlay_result` carrying
- * `overlays`. Any events buffered while no host was connected (device-persistent overlays, #10494)
- * are delivered first, as ordinary `overlay_event` frames. Hosts only send it to a device
- * advertising `overlay_persistence_replay_v1`.
+ * Asks the device which prototypes it is showing. Answered by one `prototype_result` carrying
+ * `prototypes`. Any events buffered while no host was connected (device-persistent
+ * prototypes, #10494) are delivered first, as ordinary `prototype_event` frames. Hosts only send it
+ * to a device advertising `prototype_persistence_replay_v1`.
  */
 @Serializable
-@SerialName("inspect_overlays")
-data class InspectOverlays(override val requestId: String? = null) : WebSocketRequest()
+@SerialName("inspect_prototypes")
+data class InspectPrototypes(override val requestId: String? = null) : WebSocketRequest()
 
 /**
- * Uploads one overlay image asset, replacing any asset with the same [id]. [dataBase64] is the
+ * Uploads one prototype image asset, replacing any asset with the same [id]. [dataBase64] is the
  * encoded image (PNG, JPEG or WebP) in standard base64 without line breaks. Answered by one
- * `overlay_result`. [toString] never renders the payload, so a stray log line cannot dump bytes.
+ * `prototype_result`. [toString] never renders the payload, so a stray log line cannot dump bytes.
  */
 @Serializable
-@SerialName("put_overlay_asset")
-data class PutOverlayAsset(
+@SerialName("put_prototype_asset")
+data class PutPrototypeAsset(
   override val requestId: String? = null,
   val id: String,
   val mimeType: String,
   val dataBase64: String,
 ) : WebSocketRequest() {
   override fun toString(): String =
-    "PutOverlayAsset(requestId=$requestId, id=$id, mimeType=$mimeType, " +
+    "PutPrototypeAsset(requestId=$requestId, id=$id, mimeType=$mimeType, " +
       "dataBase64=<${dataBase64.length} chars>)"
 }
 
-/** Removes one overlay asset. Idempotent: removing an unknown [id] still succeeds. */
+/** Removes one prototype asset. Idempotent: removing an unknown [id] still succeeds. */
 @Serializable
-@SerialName("remove_overlay_asset")
-data class RemoveOverlayAsset(override val requestId: String? = null, val id: String) :
+@SerialName("remove_prototype_asset")
+data class RemovePrototypeAsset(override val requestId: String? = null, val id: String) :
   WebSocketRequest()
 
 // =============================================================================

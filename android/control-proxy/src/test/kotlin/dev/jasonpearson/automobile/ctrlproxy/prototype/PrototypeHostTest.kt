@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.KeyEvent
 import android.view.WindowManager.LayoutParams
@@ -35,22 +35,22 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class InteractiveOverlayHostTest {
+class PrototypeHostTest {
   companion object {
     @JvmStatic
     @BeforeClass
     fun warmRuntime() {
       // Robolectric has no application before the first method; warm only coroutine machinery here.
       runTest {}
-      InteractiveOverlayRequest()
+      PrototypeRequest()
     }
   }
 
   private val history = mutableListOf<String>()
-  private lateinit var main: FakeOverlayMainThread
-  private lateinit var timer: FakeOverlaySettleTimer
-  private lateinit var manager: RecordingOverlayWindowManager
-  private lateinit var host: InteractiveOverlayHost
+  private lateinit var main: FakePrototypeMainThread
+  private lateinit var timer: FakePrototypeSettleTimer
+  private lateinit var manager: RecordingPrototypeWindowManager
+  private lateinit var host: PrototypeHost
   private var density = 2.5f
   private var blocked = false
   private var lost = 0
@@ -61,11 +61,11 @@ class InteractiveOverlayHostTest {
     density = 2.5f
     blocked = false
     lost = 0
-    main = FakeOverlayMainThread()
-    timer = FakeOverlaySettleTimer(history)
-    manager = RecordingOverlayWindowManager(main, history)
+    main = FakePrototypeMainThread()
+    timer = FakePrototypeSettleTimer(history)
+    manager = RecordingPrototypeWindowManager(main, history)
     host =
-      DefaultInteractiveOverlayHost(
+      DefaultPrototypeHost(
         RuntimeEnvironment.getApplication(),
         manager,
         sdkInt = 30,
@@ -86,7 +86,7 @@ class InteractiveOverlayHostTest {
   fun `relayout refreshes density without recreating view owner or composition and keeps touch through`() =
     runTest {
       host.show(
-        InteractiveOverlayRequest(OverlayPlacement.Sheet(OverlayPlacement.Edge.BOTTOM, 20f)),
+        PrototypeRequest(PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 20f)),
       )
       val view = manager.view!!
       val owner = view.findViewTreeLifecycleOwner()
@@ -118,7 +118,7 @@ class InteractiveOverlayHostTest {
 
   @Test
   fun `fullscreen opacity cannot fade host dismiss control`() = runTest {
-    host.show(InteractiveOverlayRequest(OverlayPlacement.Fullscreen(), opacityPercent = 0))
+    host.show(PrototypeRequest(PrototypePlacement.Fullscreen(), opacityPercent = 0))
     assertEquals(1f, manager.view!!.alpha, 0f)
     host.setOpacity(25)
     assertEquals(1f, manager.view!!.alpha, 0f)
@@ -139,7 +139,7 @@ class InteractiveOverlayHostTest {
     assertNotNull(view.findViewTreeSavedStateRegistryOwner())
     assertNotNull(view.findViewTreeViewModelStoreOwner())
     assertTrue(host.isShowing)
-    assertEquals(OverlayPlacement.Floating(), host.currentPlacement)
+    assertEquals(PrototypePlacement.Floating(), host.currentPlacement)
     assertEquals(LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, manager.added.single().type)
   }
 
@@ -148,8 +148,8 @@ class InteractiveOverlayHostTest {
     host.show()
     val view = manager.view
     val owner = view!!.findViewTreeLifecycleOwner()
-    val placement = OverlayPlacement.Sheet(OverlayPlacement.Edge.TOP, 20f)
-    assertTrue(host.show(InteractiveOverlayRequest(placement, hasTextField = true)))
+    val placement = PrototypePlacement.Sheet(PrototypePlacement.Edge.TOP, 20f)
+    assertTrue(host.show(PrototypeRequest(placement, hasTextField = true)))
     assertSame(view, manager.view)
     assertSame(owner, view.findViewTreeLifecycleOwner())
     assertEquals(1, manager.added.size)
@@ -157,14 +157,14 @@ class InteractiveOverlayHostTest {
     assertEquals(50, manager.updated.last().height)
     assertFalse(manager.updated.last().flags and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
     assertEquals(placement, host.currentPlacement)
-    assertTrue(host.replace(InteractiveOverlayRequest()))
+    assertTrue(host.replace(PrototypeRequest()))
     assertTrue(manager.updated.last().flags and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
     assertEquals(1, history.count { it == "hook" })
   }
 
   @Test
   fun `replace without a window shows it`() = runTest {
-    assertTrue(host.replace(InteractiveOverlayRequest()))
+    assertTrue(host.replace(PrototypeRequest()))
     assertEquals(1, manager.added.size)
   }
 
@@ -191,7 +191,7 @@ class InteractiveOverlayHostTest {
     assertTrue(host.destroy())
     assertTrue(host.destroy())
     assertFalse(host.show())
-    assertFalse(host.replace(InteractiveOverlayRequest()))
+    assertFalse(host.replace(PrototypeRequest()))
     assertEquals(1, manager.added.size)
     assertEquals(1, manager.removals)
     assertEquals(Lifecycle.State.DESTROYED, owner.lifecycle.currentState)
@@ -222,9 +222,9 @@ class InteractiveOverlayHostTest {
     host.show()
     manager.failUpdate = true
     assertFalse(
-      host.replace(InteractiveOverlayRequest(OverlayPlacement.Fullscreen(), opacityPercent = 40)),
+      host.replace(PrototypeRequest(PrototypePlacement.Fullscreen(), opacityPercent = 40)),
     )
-    assertEquals(OverlayPlacement.Floating(), host.currentPlacement)
+    assertEquals(PrototypePlacement.Floating(), host.currentPlacement)
     assertEquals(1f, manager.view!!.alpha, 0f)
     assertEquals(1, manager.added.size)
   }
@@ -286,7 +286,7 @@ class InteractiveOverlayHostTest {
     val owner = oldView.findViewTreeLifecycleOwner()!!
     manager.failUpdate = true
     manager.updateFailure = IllegalArgumentException("not attached")
-    assertFalse(host.show(InteractiveOverlayRequest(OverlayPlacement.Fullscreen())))
+    assertFalse(host.show(PrototypeRequest(PrototypePlacement.Fullscreen())))
     assertFalse(host.isShowing)
     assertNull(host.currentPlacement)
     assertFalse(host.isTouchThroughActive)
@@ -306,7 +306,7 @@ class InteractiveOverlayHostTest {
     var ran = false
     val error = runCatching { host.withTouchThrough { ran = true } }.exceptionOrNull()
     assertTrue(error is IllegalStateException)
-    assertEquals("Failed to enable overlay touch-through", error!!.message)
+    assertEquals("Failed to enable prototype touch-through", error!!.message)
     assertFalse(ran)
     assertFalse(host.isShowing)
     assertNull(host.currentPlacement)
@@ -328,7 +328,7 @@ class InteractiveOverlayHostTest {
     }
       .exceptionOrNull()
     assertTrue(error is IllegalStateException)
-    assertEquals("Failed to restore overlay touchability", error!!.message)
+    assertEquals("Failed to restore prototype touchability", error!!.message)
     assertEquals(1, lost)
     assertFalse(host.isShowing)
     assertNull(host.currentPlacement)
@@ -357,7 +357,7 @@ class InteractiveOverlayHostTest {
     manager.failRemove = true
     assertFalse(host.dismiss())
     assertTrue(host.isShowing)
-    assertEquals(OverlayPlacement.Floating(), host.currentPlacement)
+    assertEquals(PrototypePlacement.Floating(), host.currentPlacement)
     assertEquals(Lifecycle.State.RESUMED, owner.lifecycle.currentState)
     manager.failRemove = false
     assertTrue(host.dismiss())
@@ -366,7 +366,7 @@ class InteractiveOverlayHostTest {
 
   @Test
   fun `opacity changes whole view with no window add remove or layout update`() = runTest {
-    host.show(InteractiveOverlayRequest(opacityPercent = 70))
+    host.show(PrototypeRequest(opacityPercent = 70))
     assertEquals(0.7f, manager.view!!.alpha, 0f)
     host.setOpacity(0)
     assertEquals(0f, manager.view!!.alpha, 0f)
@@ -382,10 +382,10 @@ class InteractiveOverlayHostTest {
   @Test
   fun `opacity rejects invalid requests and setter values`() = runTest {
     assertThrows(IllegalArgumentException::class.java) {
-      InteractiveOverlayRequest(opacityPercent = -1)
+      PrototypeRequest(opacityPercent = -1)
     }
     assertThrows(IllegalArgumentException::class.java) {
-      InteractiveOverlayRequest(opacityPercent = 101)
+      PrototypeRequest(opacityPercent = 101)
     }
     for (percent in listOf(-1, 101)) {
       val error = runCatching { host.setOpacity(percent) }.exceptionOrNull()
@@ -496,7 +496,7 @@ class InteractiveOverlayHostTest {
   fun `replace during gesture preserves touch through and restores the new params`() = runTest {
     host.show()
     host.withTouchThrough {
-      host.replace(InteractiveOverlayRequest(hasTextField = true))
+      host.replace(PrototypeRequest(hasTextField = true))
       assertTrue(host.isTouchThroughActive)
       assertTrue(manager.updated.last().flags and LayoutParams.FLAG_NOT_TOUCHABLE != 0)
       assertFalse(manager.updated.last().flags and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
@@ -512,7 +512,7 @@ class InteractiveOverlayHostTest {
   fun `show during gesture restores new placement flags after the block`() = runTest {
     host.show()
     host.withTouchThrough {
-      assertTrue(host.show(InteractiveOverlayRequest(OverlayPlacement.Fullscreen())))
+      assertTrue(host.show(PrototypeRequest(PrototypePlacement.Fullscreen())))
       assertTrue(host.isTouchThroughActive)
       assertTrue(manager.updated.last().flags and LayoutParams.FLAG_NOT_TOUCHABLE != 0)
     }
@@ -576,7 +576,7 @@ class InteractiveOverlayHostTest {
     assertTrue(show.await())
     val replace =
       async(start = CoroutineStart.UNDISPATCHED) {
-        host.replace(InteractiveOverlayRequest(hasTextField = true))
+        host.replace(PrototypeRequest(hasTextField = true))
       }
     assertTrue(manager.updated.isEmpty())
     main.drain()
@@ -604,7 +604,7 @@ class InteractiveOverlayHostTest {
     var ran = false
     val error = runCatching { host.withTouchThrough { ran = true } }.exceptionOrNull()
     assertTrue(error is IllegalStateException)
-    assertEquals("Failed to enable overlay touch-through", error!!.message)
+    assertEquals("Failed to enable prototype touch-through", error!!.message)
     assertFalse(ran)
     assertFalse(host.isTouchThroughActive)
     assertTrue(timer.waits.isEmpty())
@@ -618,7 +618,7 @@ class InteractiveOverlayHostTest {
     }
       .exceptionOrNull()
     assertTrue(error is IllegalStateException)
-    assertEquals("Failed to restore overlay touchability", error!!.message)
+    assertEquals("Failed to restore prototype touchability", error!!.message)
     assertTrue(host.isTouchThroughActive)
     host.dismiss()
     assertFalse(host.isTouchThroughActive)
@@ -714,9 +714,9 @@ class InteractiveOverlayHostTest {
     )
 
   @Test
-  fun `back on a focusable overlay dismisses once on key up and swallows the key`() = runTest {
+  fun `back on a focusable prototype dismisses once on key up and swallows the key`() = runTest {
     var dismissals = 0
-    host.show(InteractiveOverlayRequest(hasTextField = true, onHostDismiss = { dismissals++ }))
+    host.show(PrototypeRequest(hasTextField = true, onHostDismiss = { dismissals++ }))
     val view = manager.view!!
     assertTrue(view.dispatchKeyEvent(key(KeyEvent.ACTION_DOWN)))
     assertEquals(0, dismissals)
@@ -730,7 +730,7 @@ class InteractiveOverlayHostTest {
   fun `back is not taken without a visible text field and other keys always pass through`() =
     runTest {
       var dismissals = 0
-      host.show(InteractiveOverlayRequest(hasTextField = false, onHostDismiss = { dismissals++ }))
+      host.show(PrototypeRequest(hasTextField = false, onHostDismiss = { dismissals++ }))
       val view = manager.view!!
       assertFalse(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
       host.setTextFieldVisible(true)
@@ -743,7 +743,7 @@ class InteractiveOverlayHostTest {
   @Test
   fun `back follows the live text field setting after the field is hidden again`() = runTest {
     var dismissals = 0
-    host.show(InteractiveOverlayRequest(hasTextField = true, onHostDismiss = { dismissals++ }))
+    host.show(PrototypeRequest(hasTextField = true, onHostDismiss = { dismissals++ }))
     host.setTextFieldVisible(false)
     assertFalse(manager.view!!.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
     assertEquals(0, dismissals)
@@ -751,7 +751,7 @@ class InteractiveOverlayHostTest {
 
   @Test
   fun `setTextFieldVisible flips only focusability keeping the view and touch through`() = runTest {
-    host.show(InteractiveOverlayRequest(hasTextField = false))
+    host.show(PrototypeRequest(hasTextField = false))
     val view = manager.view
     assertTrue(manager.added.single().flags and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
     host.withTouchThrough {
@@ -772,7 +772,7 @@ class InteractiveOverlayHostTest {
   fun `setTextFieldVisible without a window is a no-op and a failed update keeps the old flag`() =
     runTest {
       assertTrue(host.setTextFieldVisible(true))
-      host.show(InteractiveOverlayRequest(hasTextField = false))
+      host.show(PrototypeRequest(hasTextField = false))
       manager.failUpdate = true
       assertFalse(host.setTextFieldVisible(true))
       assertTrue(host.isShowing)
@@ -783,7 +783,7 @@ class InteractiveOverlayHostTest {
 
   @Test
   fun `setTextFieldVisible on a detached window clears it and reports the loss`() = runTest {
-    host.show(InteractiveOverlayRequest(hasTextField = false))
+    host.show(PrototypeRequest(hasTextField = false))
     manager.failUpdate = true
     manager.updateFailure = IllegalArgumentException("View not attached to window manager")
     assertFalse(host.setTextFieldVisible(true))
@@ -793,10 +793,10 @@ class InteractiveOverlayHostTest {
 
   // --- Predictive back (API 33+): the callback is registered only while focusable --------------
 
-  private val registrar = FakeOverlayBackRegistrar()
+  private val registrar = FakePrototypeBackRegistrar()
 
   private fun hostOnApi(sdk: Int) =
-    DefaultInteractiveOverlayHost(
+    DefaultPrototypeHost(
       RuntimeEnvironment.getApplication(),
       manager,
       sdkInt = sdk,
@@ -813,7 +813,7 @@ class InteractiveOverlayHostTest {
     runTest {
       val api33 = hostOnApi(33)
       var dismissals = 0
-      val request = InteractiveOverlayRequest(hasTextField = true, onHostDismiss = { dismissals++ })
+      val request = PrototypeRequest(hasTextField = true, onHostDismiss = { dismissals++ })
       assertTrue(api33.show(request))
       assertEquals(listOf("register"), registrar.calls)
       registrar.callback!!()
@@ -823,7 +823,7 @@ class InteractiveOverlayHostTest {
       api33.setTextFieldVisible(true)
       assertEquals(listOf("register", "unregister", "register"), registrar.calls)
       // A replace that removes the text field also unregisters.
-      assertTrue(api33.replace(InteractiveOverlayRequest(hasTextField = false)))
+      assertTrue(api33.replace(PrototypeRequest(hasTextField = false)))
       assertEquals("unregister", registrar.calls.last())
     }
 
@@ -831,7 +831,7 @@ class InteractiveOverlayHostTest {
   fun `a callback invoked after focus was removed does nothing`() = runTest {
     val api33 = hostOnApi(33)
     var dismissals = 0
-    api33.show(InteractiveOverlayRequest(hasTextField = true, onHostDismiss = { dismissals++ }))
+    api33.show(PrototypeRequest(hasTextField = true, onHostDismiss = { dismissals++ }))
     val stale = registrar.callback!!
     api33.setTextFieldVisible(false)
     stale()
@@ -841,11 +841,11 @@ class InteractiveOverlayHostTest {
   @Test
   fun `the back callback is unregistered on dismiss destroy and window loss`() = runTest {
     val api33 = hostOnApi(33)
-    api33.show(InteractiveOverlayRequest(hasTextField = true))
+    api33.show(PrototypeRequest(hasTextField = true))
     api33.dismiss()
     assertEquals(listOf("register", "unregister"), registrar.calls)
     registrar.calls.clear()
-    api33.show(InteractiveOverlayRequest(hasTextField = true))
+    api33.show(PrototypeRequest(hasTextField = true))
     manager.failUpdate = true
     manager.updateFailure = IllegalArgumentException("View not attached to window manager")
     assertFalse(api33.relayout())
@@ -853,7 +853,7 @@ class InteractiveOverlayHostTest {
     assertEquals(1, lost)
     manager.failUpdate = false
     registrar.calls.clear()
-    api33.show(InteractiveOverlayRequest(hasTextField = true))
+    api33.show(PrototypeRequest(hasTextField = true))
     api33.destroy()
     assertEquals(listOf("register", "unregister"), registrar.calls)
   }
@@ -862,7 +862,7 @@ class InteractiveOverlayHostTest {
   fun `below API 33 the key path is the only route and nothing registers`() = runTest {
     val api32 = hostOnApi(32)
     var dismissals = 0
-    api32.show(InteractiveOverlayRequest(hasTextField = true, onHostDismiss = { dismissals++ }))
+    api32.show(PrototypeRequest(hasTextField = true, onHostDismiss = { dismissals++ }))
     assertTrue(registrar.calls.isEmpty())
     assertTrue(manager.view!!.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
     assertEquals(1, dismissals)
@@ -871,7 +871,7 @@ class InteractiveOverlayHostTest {
   @Test
   fun `hiding the text field asks for the keyboard to close without failing on an unattached view`() =
     runTest {
-      host.show(InteractiveOverlayRequest(hasTextField = true))
+      host.show(PrototypeRequest(hasTextField = true))
       assertTrue(host.setTextFieldVisible(false))
       assertTrue(manager.updated.last().flags and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
     }

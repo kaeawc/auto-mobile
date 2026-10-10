@@ -1,11 +1,11 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import dev.jasonpearson.automobile.protocol.OverlayEvent
-import dev.jasonpearson.automobile.protocol.OverlayEventKind
-import dev.jasonpearson.automobile.protocol.OverlayFullscreenPlacement
-import dev.jasonpearson.automobile.protocol.OverlaySpec
-import dev.jasonpearson.automobile.protocol.OverlayTextNode
-import dev.jasonpearson.automobile.protocol.OverlayWindow
+import dev.jasonpearson.automobile.protocol.PrototypeEvent
+import dev.jasonpearson.automobile.protocol.PrototypeEventKind
+import dev.jasonpearson.automobile.protocol.PrototypeFullscreenPlacement
+import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import dev.jasonpearson.automobile.protocol.PrototypeTextNode
+import dev.jasonpearson.automobile.protocol.PrototypeWindow
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -20,33 +20,37 @@ import org.robolectric.annotation.Config
 /** Display targeting decisions, driven by a fake display provider and the fake host. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayDisplayControllerTest {
+class PrototypeDisplayControllerTest {
   private class Results {
     val all = mutableListOf<Pair<Boolean, String?>>()
     val last
       get() = all.last()
   }
 
-  private val host = FakeInteractiveOverlayHost()
-  private val events = mutableListOf<OverlayEvent>()
+  private val host = FakePrototypeHost()
+  private val events = mutableListOf<PrototypeEvent>()
   private val results = Results()
   private val connected = mutableSetOf<Int>()
   private val controller =
-    OverlayController(
+    PrototypeController(
       host,
-      OverlayResultSink { _, success, error -> results.all += success to error },
-      eventSink = OverlayEventSink { events += it },
+      PrototypeResultSink { _, success, error -> results.all += success to error },
+      eventSink = PrototypeEventSink { events += it },
       clock = { 42L },
-      lifecycle = OverlayLifecycle(FakeOverlayTimer()),
-      displays = OverlayDisplayProvider { it in connected },
+      lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+      displays = PrototypeDisplayProvider { it in connected },
     )
 
   private fun spec(id: String = "panel") =
-    OverlaySpec(id, OverlayWindow(OverlayFullscreenPlacement()), root = OverlayTextNode(text = "x"))
+    PrototypeSpec(
+      id,
+      PrototypeWindow(PrototypeFullscreenPlacement()),
+      root = PrototypeTextNode(text = "x"),
+    )
 
   private fun assertTeardown() {
     val event = events.last()
-    assertEquals(OverlayEventKind.DISMISSED, event.kind)
+    assertEquals(PrototypeEventKind.DISMISSED, event.kind)
     assertEquals(Json.parseToJsonElement("""{"reason":"teardown"}"""), event.payload)
   }
 
@@ -83,7 +87,7 @@ class OverlayDisplayControllerTest {
   }
 
   @Test
-  fun `unknown display leaves the overlay already shown in place`() = runTest {
+  fun `unknown display leaves the prototype already shown in place`() = runTest {
     controller.show("a", spec("first"))
     controller.show("b", spec("second"), displayId = 9)
     assertFalse(results.last.first)
@@ -93,7 +97,7 @@ class OverlayDisplayControllerTest {
   }
 
   @Test
-  fun `a same-id show stays on the display the overlay was shown on`() = runTest {
+  fun `a same-id show stays on the display the prototype was shown on`() = runTest {
     connected += 2
     controller.show("a", spec(), displayId = 2)
     controller.show("b", spec())
@@ -122,7 +126,7 @@ class OverlayDisplayControllerTest {
   }
 
   @Test
-  fun `removal of the overlay's display dismisses it as teardown`() = runTest {
+  fun `removal of the prototype's display dismisses it as teardown`() = runTest {
     connected += 2
     controller.show("a", spec(), displayId = 2)
     connected -= 2
@@ -135,7 +139,7 @@ class OverlayDisplayControllerTest {
   }
 
   @Test
-  fun `removal reaches the overlay even when the callback reports the display as present`() =
+  fun `removal reaches the prototype even when the callback reports the display as present`() =
     runTest {
       connected += 2
       controller.show("a", spec(), displayId = 2)
@@ -167,7 +171,7 @@ class OverlayDisplayControllerTest {
     }
 
   @Test
-  fun `another display's transition does not touch the overlay`() = runTest {
+  fun `another display's transition does not touch the prototype`() = runTest {
     connected += 2
     controller.show("a", spec(), displayId = 2)
     controller.onDisplayTransition(3, removed = true)
@@ -178,7 +182,7 @@ class OverlayDisplayControllerTest {
   }
 
   @Test
-  fun `a change on the overlay's own display relayouts`() = runTest {
+  fun `a change on the prototype's own display relayouts`() = runTest {
     connected += 2
     controller.show("a", spec(), displayId = 2)
     controller.onDisplayTransition(2, removed = false)
@@ -187,7 +191,7 @@ class OverlayDisplayControllerTest {
   }
 
   @Test
-  fun `default display removal still tears down a default display overlay`() = runTest {
+  fun `default display removal still tears down a default display prototype`() = runTest {
     controller.show("a", spec())
     controller.onDisplayTransition(0, removed = true)
     assertNull(controller.activeRuntime)

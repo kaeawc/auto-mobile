@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap
  * `proguard-rules.pro` keeping that package if shrinking is ever turned on. Unknown names keep the
  * neutral placeholder (`null`).
  */
-fun overlayIcon(name: String?, variant: String? = null): ImageVector? {
+fun prototypeIcon(name: String?, variant: String? = null): ImageVector? {
   if (name == null || !ICON_NAME.matches(name)) return null
   val style = IconStyle.fromContract(variant)
   return ICON_CACHE.computeIfAbsent("${style.packageName}:$name") {

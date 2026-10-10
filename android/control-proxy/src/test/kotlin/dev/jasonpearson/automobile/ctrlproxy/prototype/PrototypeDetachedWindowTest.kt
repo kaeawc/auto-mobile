@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.KeyEvent
 import dev.jasonpearson.automobile.protocol.*
@@ -20,55 +20,55 @@ import org.robolectric.annotation.Config
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayDetachedWindowTest {
+class PrototypeDetachedWindowTest {
   private val history = mutableListOf<String>()
-  private val events = mutableListOf<OverlayEvent>()
+  private val events = mutableListOf<PrototypeEvent>()
   private val results = mutableListOf<Pair<Boolean, String?>>()
-  private val timer = FakeOverlayTimer()
+  private val timer = FakePrototypeTimer()
   private var blocked = false
   private val blockedScript = ArrayDeque<Boolean>()
   private var detached = 0
   private var lost = 0
-  private lateinit var main: FakeOverlayMainThread
-  private lateinit var manager: RecordingOverlayWindowManager
-  private lateinit var host: DefaultInteractiveOverlayHost
-  private lateinit var controller: OverlayController
+  private lateinit var main: FakePrototypeMainThread
+  private lateinit var manager: RecordingPrototypeWindowManager
+  private lateinit var host: DefaultPrototypeHost
+  private lateinit var controller: PrototypeController
 
   /** Scripted reads let a test flip the lock between the controller's and the host's checks. */
   private fun isBlocked() = blockedScript.removeFirstOrNull() ?: blocked
 
   @Before
   fun setUp() {
-    main = FakeOverlayMainThread()
-    manager = RecordingOverlayWindowManager(main, history)
+    main = FakePrototypeMainThread()
+    manager = RecordingPrototypeWindowManager(main, history)
     host =
-      DefaultInteractiveOverlayHost(
+      DefaultPrototypeHost(
         RuntimeEnvironment.getApplication(),
         manager,
         sdkInt = 30,
         mainThread = main,
-        settleTimer = FakeOverlaySettleTimer(history),
+        settleTimer = FakePrototypeSettleTimer(history),
         densityProvider = { 2.5f },
         onWindowLost = { lost++ },
         isBlocked = ::isBlocked,
         backScope = CoroutineScope(Dispatchers.Unconfined),
       )
     controller =
-      OverlayController(
+      PrototypeController(
         host,
-        OverlayResultSink { _, success, error -> results += success to error },
+        PrototypeResultSink { _, success, error -> results += success to error },
         onDismissed = { detached++ },
-        eventSink = OverlayEventSink { events += it },
+        eventSink = PrototypeEventSink { events += it },
         clock = { timer.now },
-        lifecycle = OverlayLifecycle(timer, TTL, isBlocked = ::isBlocked),
+        lifecycle = PrototypeLifecycle(timer, TTL, isBlocked = ::isBlocked),
       )
   }
 
   private fun spec() =
-    OverlaySpec(
+    PrototypeSpec(
       "panel",
-      OverlayWindow(OverlayFullscreenPlacement()),
-      root = OverlayTextNode(text = "panel"),
+      PrototypeWindow(PrototypeFullscreenPlacement()),
+      root = PrototypeTextNode(text = "panel"),
     )
 
   private fun detachPlatformWindow() {
@@ -79,7 +79,7 @@ class OverlayDetachedWindowTest {
   }
 
   private fun assertSingleDismiss(reason: String, sequence: Long = 1L) {
-    val dismissals = events.filter { it.kind == OverlayEventKind.DISMISSED }
+    val dismissals = events.filter { it.kind == PrototypeEventKind.DISMISSED }
     assertEquals(1, dismissals.size)
     assertEquals(Json.parseToJsonElement("""{"reason":"$reason"}"""), dismissals.single().payload)
     assertEquals(sequence, dismissals.single().sequence)
@@ -96,23 +96,24 @@ class OverlayDetachedWindowTest {
   }
 
   @Test
-  fun `back on a focusable text overlay dismisses through the controller once as user`() = runTest {
-    val field = OverlayTextFieldNode(stateKey = "query")
-    controller.show(
-      null,
-      spec().copy(root = field, state = mapOf("query" to OverlayScalar.Text(""))),
-    )
-    fun back(action: Int) =
-      manager.view!!.dispatchKeyEvent(KeyEvent(0L, 0L, action, KeyEvent.KEYCODE_BACK, 0))
-    assertTrue(back(KeyEvent.ACTION_DOWN))
-    assertTrue(host.isShowing)
-    assertTrue(back(KeyEvent.ACTION_UP))
-    assertFalse(host.isShowing)
-    assertNull(controller.activeRuntime)
-    assertSingleDismiss("user")
-    assertEquals(1, detached)
-    assertNoFurtherEvents()
-  }
+  fun `back on a focusable text prototype dismisses through the controller once as user`() =
+    runTest {
+      val field = PrototypeTextFieldNode(stateKey = "query")
+      controller.show(
+        null,
+        spec().copy(root = field, state = mapOf("query" to PrototypeScalar.Text(""))),
+      )
+      fun back(action: Int) =
+        manager.view!!.dispatchKeyEvent(KeyEvent(0L, 0L, action, KeyEvent.KEYCODE_BACK, 0))
+      assertTrue(back(KeyEvent.ACTION_DOWN))
+      assertTrue(host.isShowing)
+      assertTrue(back(KeyEvent.ACTION_UP))
+      assertFalse(host.isShowing)
+      assertNull(controller.activeRuntime)
+      assertSingleDismiss("user")
+      assertEquals(1, detached)
+      assertNoFurtherEvents()
+    }
 
   @Test
   fun `relayout of a detached window re-shows the same runtime without an event`() = runTest {
@@ -194,7 +195,7 @@ class OverlayDetachedWindowTest {
   fun `host dismiss row on a detached window emits user`() = runTest {
     controller.show(null, spec())
     detachPlatformWindow()
-    controller.interact(checkNotNull(controller.activeRuntime), OverlayInteraction.HostDismiss)
+    controller.interact(checkNotNull(controller.activeRuntime), PrototypeInteraction.HostDismiss)
     assertFalse(host.isShowing)
     assertSingleDismiss("user")
     assertEquals(1, detached)
@@ -308,7 +309,7 @@ class OverlayDetachedWindowTest {
     @org.junit.BeforeClass
     fun warm() {
       runTest {}
-      OverlaySpecValidator.validate("{}")
+      PrototypeSpecValidator.validate("{}")
     }
   }
 }

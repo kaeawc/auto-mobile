@@ -1,17 +1,17 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import dev.jasonpearson.automobile.protocol.OverlayEvent
+import dev.jasonpearson.automobile.protocol.PrototypeEvent
 
-/** Most events a device-persistent overlay keeps for a host that is not connected (#10494). */
-const val OVERLAY_OFFLINE_EVENT_CAPACITY = 200
+/** Most events a device-persistent prototype keeps for a host that is not connected (#10494). */
+const val PROTOTYPE_OFFLINE_EVENT_CAPACITY = 200
 
 /**
- * Bounded ring of overlay events produced while no host was connected. Overflow drops the oldest
+ * Bounded ring of prototype events produced while no host was connected. Overflow drops the oldest
  * event and counts it; the sequence gap tells the host how many it missed. Not thread-safe: the
  * controller touches it only under its mutex.
  */
-class OverlayOfflineEventBuffer(private val capacity: Int = OVERLAY_OFFLINE_EVENT_CAPACITY) {
-  private val events = ArrayDeque<OverlayEvent>()
+class PrototypeOfflineEventBuffer(private val capacity: Int = PROTOTYPE_OFFLINE_EVENT_CAPACITY) {
+  private val events = ArrayDeque<PrototypeEvent>()
 
   init {
     require(capacity > 0) { "capacity must be positive" }
@@ -24,7 +24,7 @@ class OverlayOfflineEventBuffer(private val capacity: Int = OVERLAY_OFFLINE_EVEN
   val size: Int
     get() = events.size
 
-  fun add(event: OverlayEvent) {
+  fun add(event: PrototypeEvent) {
     if (events.size == capacity) {
       events.removeFirst()
       dropped++
@@ -33,13 +33,13 @@ class OverlayOfflineEventBuffer(private val capacity: Int = OVERLAY_OFFLINE_EVEN
   }
 
   /** Removes and returns the buffered events, oldest first. */
-  fun drain(): List<OverlayEvent> = events.toList().also { events.clear() }
+  fun drain(): List<PrototypeEvent> = events.toList().also { events.clear() }
 
   /**
    * Puts events a delivery attempt did not complete back ahead of anything buffered since, keeping
    * their order. Overflow still drops the oldest and counts it.
    */
-  fun restore(undelivered: List<OverlayEvent>) {
+  fun restore(undelivered: List<PrototypeEvent>) {
     for (event in undelivered.asReversed()) {
       if (events.size == capacity) {
         events.removeLast()

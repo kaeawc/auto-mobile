@@ -1,114 +1,122 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.ui.layout.ContentScale
 import dev.jasonpearson.automobile.protocol.*
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class OverlayImageSelectionTest {
-  private class StubImage : OverlayDecodedImage {
+class PrototypeImageSelectionTest {
+  private class StubImage : PrototypeDecodedImage {
     override val width = 1
     override val height = 1
     override val byteCount = 4L
   }
 
-  private val ready = OverlayImageState.Ready(StubImage())
+  private val ready = PrototypeImageState.Ready(StubImage())
 
   @Test
   fun `a nav image takes precedence over its icon once it is ready`() {
-    val item = OverlayItem("Home", icon = "home", image = "logo")
-    assertEquals(OverlayNavigationVisual.Image(ready.image), overlayNavigationVisual(item, ready))
+    val item = PrototypeItem("Home", icon = "home", image = "logo")
+    assertEquals(
+      PrototypeNavigationVisual.Image(ready.image),
+      prototypeNavigationVisual(item, ready),
+    )
   }
 
   @Test
   fun `a nav item shows a neutral box while its image decodes`() {
-    val item = OverlayItem("Home", icon = "home", image = "logo")
+    val item = PrototypeItem("Home", icon = "home", image = "logo")
     assertEquals(
-      OverlayNavigationVisual.Loading,
-      overlayNavigationVisual(item, OverlayImageState.Loading),
+      PrototypeNavigationVisual.Loading,
+      prototypeNavigationVisual(item, PrototypeImageState.Loading),
     )
   }
 
   @Test
   fun `a missing nav image falls back to the icon then to the placeholder`() {
     assertEquals(
-      OverlayNavigationVisual.Icon("home"),
-      overlayNavigationVisual(
-        OverlayItem("Home", icon = "home", image = "logo"),
-        OverlayImageState.Missing,
+      PrototypeNavigationVisual.Icon("home"),
+      prototypeNavigationVisual(
+        PrototypeItem("Home", icon = "home", image = "logo"),
+        PrototypeImageState.Missing,
       ),
     )
     assertEquals(
-      OverlayNavigationVisual.Placeholder,
-      overlayNavigationVisual(OverlayItem("Home", image = "logo"), OverlayImageState.Missing),
+      PrototypeNavigationVisual.Placeholder,
+      prototypeNavigationVisual(PrototypeItem("Home", image = "logo"), PrototypeImageState.Missing),
     )
   }
 
   @Test
   fun `an item without an image uses its icon or the placeholder`() {
     assertEquals(
-      OverlayNavigationVisual.Icon("search"),
-      overlayNavigationVisual(OverlayItem("Find", icon = "search"), null),
+      PrototypeNavigationVisual.Icon("search"),
+      prototypeNavigationVisual(PrototypeItem("Find", icon = "search"), null),
     )
     assertEquals(
-      OverlayNavigationVisual.Placeholder,
-      overlayNavigationVisual(OverlayItem("Find"), null),
+      PrototypeNavigationVisual.Placeholder,
+      prototypeNavigationVisual(PrototypeItem("Find"), null),
     )
     assertEquals(
-      OverlayNavigationVisual.Placeholder,
-      overlayNavigationVisual(OverlayItem("Find", icon = "not_a_builtin"), null),
+      PrototypeNavigationVisual.Placeholder,
+      prototypeNavigationVisual(PrototypeItem("Find", icon = "not_a_builtin"), null),
     )
   }
 
   @Test
   fun `content scale names map to Compose scales and the protocol default is fit`() {
-    assertEquals(ContentScale.Fit, overlayContentScale("fit"))
-    assertEquals(ContentScale.Crop, overlayContentScale("crop"))
-    assertEquals(ContentScale.FillBounds, overlayContentScale("fill"))
-    assertEquals(ContentScale.Fit, overlayContentScale(OverlayImageNode(asset = "a").contentScale))
+    assertEquals(ContentScale.Fit, prototypeContentScale("fit"))
+    assertEquals(ContentScale.Crop, prototypeContentScale("crop"))
+    assertEquals(ContentScale.FillBounds, prototypeContentScale("fill"))
+    assertEquals(
+      ContentScale.Fit,
+      prototypeContentScale(PrototypeImageNode(asset = "a").contentScale),
+    )
   }
 
   @Test
   fun `references cover image nodes and nav images across the whole tree without repeats`() {
     val root =
-      OverlayColumnNode(
+      PrototypeColumnNode(
         children =
           listOf(
-            OverlayImageNode(asset = "hero"),
-            OverlayRowNode(
-              children = listOf(OverlayImageNode(asset = "hero", contentScale = "crop")),
+            PrototypeImageNode(asset = "hero"),
+            PrototypeRowNode(
+              children = listOf(PrototypeImageNode(asset = "hero", contentScale = "crop")),
             ),
-            OverlayPagerNode(
+            PrototypePagerNode(
               id = "pages",
               children =
                 listOf(
-                  OverlayTextNode(text = "one"),
-                  OverlayScrollNode(child = OverlayImageNode(asset = "second-page")),
+                  PrototypeTextNode(text = "one"),
+                  PrototypeScrollNode(child = PrototypeImageNode(asset = "second-page")),
                 ),
             ),
-            OverlayBottomSheetNode(
-              child = OverlayImageNode(asset = "sheet"),
-              openWhen = OverlaySheetCondition("open", true),
-              detents = listOf(OverlayDetent.Half),
+            PrototypeBottomSheetNode(
+              child = PrototypeImageNode(asset = "sheet"),
+              openWhen = PrototypeSheetCondition("open", true),
+              detents = listOf(PrototypeDetent.Half),
             ),
-            OverlayTabBarNode(
-              items = listOf(OverlayItem("A", image = "tab-a"), OverlayItem("B", icon = "home")),
+            PrototypeTabBarNode(
+              items =
+                listOf(PrototypeItem("A", image = "tab-a"), PrototypeItem("B", icon = "home")),
               pager = "pages",
             ),
-            OverlayBottomNavNode(
-              items = listOf(OverlayItem("C", image = "hero"), OverlayItem("D", image = "nav-d")),
+            PrototypeBottomNavNode(
+              items =
+                listOf(PrototypeItem("C", image = "hero"), PrototypeItem("D", image = "nav-d")),
               stateKey = "tab",
             ),
           ),
       )
     assertEquals(
       listOf("hero", "second-page", "sheet", "tab-a", "nav-d"),
-      overlayAssetReferences(root),
+      prototypeAssetReferences(root),
     )
   }
 
   @Test
   fun `a tree with no images references nothing`() {
-    assertEquals(emptyList<String>(), overlayAssetReferences(OverlayTextNode(text = "hi")))
+    assertEquals(emptyList<String>(), prototypeAssetReferences(PrototypeTextNode(text = "hi")))
   }
 }

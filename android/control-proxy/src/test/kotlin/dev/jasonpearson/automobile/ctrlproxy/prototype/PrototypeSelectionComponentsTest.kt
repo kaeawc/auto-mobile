@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.test.runTest
@@ -7,50 +7,53 @@ import org.junit.BeforeClass
 import org.junit.Test
 
 /** Device-free mapping and runtime behaviour of `radioGroup` and `listItem` (#10439). */
-class OverlaySelectionComponentsTest {
+class PrototypeSelectionComponentsTest {
   companion object {
     @JvmStatic
     @BeforeClass
     fun warmValidator() {
-      OverlaySpecValidator.validate("{}")
+      PrototypeSpecValidator.validate("{}")
     }
   }
 
-  private val events = mutableListOf<OverlayEvent>()
+  private val events = mutableListOf<PrototypeEvent>()
   private var sequence = 0L
   private val options =
-    listOf(OverlayRadioOption("chime", "Chime"), OverlayRadioOption("beep", "Beep"))
+    listOf(PrototypeRadioOption("chime", "Chime"), PrototypeRadioOption("beep", "Beep"))
 
-  private fun spec(root: OverlayNode, state: Map<String, OverlayScalar>) =
-    OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), state, root)
+  private fun spec(root: PrototypeNode, state: Map<String, PrototypeScalar>) =
+    PrototypeSpec("panel", PrototypeWindow(PrototypeFullscreenPlacement()), state, root)
 
-  private fun runtime(spec: OverlaySpec) =
-    OverlayRuntime(spec, { events += it }, { 42L }, { ++sequence })
+  private fun runtime(spec: PrototypeSpec) =
+    PrototypeRuntime(spec, { events += it }, { 42L }, { ++sequence })
 
   @Test
   fun `radio group and list item map their role text and bound state`() {
     val state =
       mapOf(
-        "sound" to OverlayScalar.Text("beep"),
-        "sync" to OverlayScalar.BooleanValue(true),
-        "wifi" to OverlayScalar.BooleanValue(false),
+        "sound" to PrototypeScalar.Text("beep"),
+        "sync" to PrototypeScalar.BooleanValue(true),
+        "wifi" to PrototypeScalar.BooleanValue(false),
       )
     val root =
-      mapOverlaySpec(
+      mapPrototypeSpec(
           spec(
-            OverlayColumnNode(
+            PrototypeColumnNode(
               children =
                 listOf(
-                  OverlayRadioGroupNode(stateKey = "sound", options = options),
-                  OverlayListItemNode(
+                  PrototypeRadioGroupNode(stateKey = "sound", options = options),
+                  PrototypeListItemNode(
                     headline = "Sync",
-                    trailing = OverlayListItemSwitch("sync"),
+                    trailing = PrototypeListItemSwitch("sync"),
                   ),
-                  OverlayListItemNode(
+                  PrototypeListItemNode(
                     headline = "Wi-Fi",
-                    trailing = OverlayListItemCheckbox("wifi"),
+                    trailing = PrototypeListItemCheckbox("wifi"),
                   ),
-                  OverlayListItemNode(headline = "More", trailing = OverlayListItemIcon("menu")),
+                  PrototypeListItemNode(
+                    headline = "More",
+                    trailing = PrototypeListItemIcon("menu"),
+                  ),
                 ),
             ),
             state,
@@ -73,10 +76,10 @@ class OverlaySelectionComponentsTest {
   @Test
   fun `a bound value that matches no option selects nothing`() {
     val root =
-      mapOverlaySpec(
+      mapPrototypeSpec(
           spec(
-            OverlayRadioGroupNode(stateKey = "sound", options = options),
-            mapOf("sound" to OverlayScalar.Text("")),
+            PrototypeRadioGroupNode(stateKey = "sound", options = options),
+            mapOf("sound" to PrototypeScalar.Text("")),
           ),
         )
         .root
@@ -89,27 +92,29 @@ class OverlaySelectionComponentsTest {
     val runtime =
       runtime(
         spec(
-          OverlayRadioGroupNode(stateKey = "sound", options = options),
-          mapOf("sound" to OverlayScalar.Text("chime")),
+          PrototypeRadioGroupNode(stateKey = "sound", options = options),
+          mapOf("sound" to PrototypeScalar.Text("chime")),
         ),
       )
-    runtime.handle(OverlayInteraction.Choose("sound", "beep", listOf(OverlayEmitAction("picked"))))
-    assertEquals(OverlayScalar.Text("beep"), runtime.current.state["sound"])
+    runtime.handle(
+      PrototypeInteraction.Choose("sound", "beep", listOf(PrototypeEmitAction("picked"))),
+    )
+    assertEquals(PrototypeScalar.Text("beep"), runtime.current.state["sound"])
     assertEquals(listOf("change", "picked"), events.map { it.name })
     assertEquals(
       "{\"key\":\"sound\",\"value\":\"beep\"}",
       events.first().payload.toString(),
     )
-    runtime.handle(OverlayInteraction.Choose("sound", "beep"))
+    runtime.handle(PrototypeInteraction.Choose("sound", "beep"))
     assertEquals(2, events.size)
   }
 
   @Test
   fun `choose on a key that is not a string is inert`() = runTest {
-    val runtime = runtime(spec(OverlaySpacerNode(), mapOf("n" to OverlayScalar.Numeric(1.0))))
-    runtime.handle(OverlayInteraction.Choose("n", "x", listOf(OverlayEmitAction("picked"))))
-    runtime.handle(OverlayInteraction.Choose("missing", "x"))
-    assertEquals(OverlayScalar.Numeric(1.0), runtime.current.state["n"])
+    val runtime = runtime(spec(PrototypeSpacerNode(), mapOf("n" to PrototypeScalar.Numeric(1.0))))
+    runtime.handle(PrototypeInteraction.Choose("n", "x", listOf(PrototypeEmitAction("picked"))))
+    runtime.handle(PrototypeInteraction.Choose("missing", "x"))
+    assertEquals(PrototypeScalar.Numeric(1.0), runtime.current.state["n"])
     assertTrue(events.isEmpty())
   }
 
@@ -118,34 +123,36 @@ class OverlaySelectionComponentsTest {
     val runtime =
       runtime(
         spec(
-          OverlayRadioGroupNode(stateKey = "sound", options = options),
-          mapOf("sound" to OverlayScalar.Text("chime")),
+          PrototypeRadioGroupNode(stateKey = "sound", options = options),
+          mapOf("sound" to PrototypeScalar.Text("chime")),
         ),
       )
     val error = runCatching {
       runtime.handle(
-        OverlayInteraction.Tap(listOf(OverlaySetStateAction("sound", OverlayScalar.Numeric(1.0)))),
+        PrototypeInteraction.Tap(
+          listOf(PrototypeSetStateAction("sound", PrototypeScalar.Numeric(1.0))),
+        ),
       )
     }
       .exceptionOrNull()
     assertTrue("$error", error is IllegalArgumentException)
-    assertEquals(OverlayScalar.Text("chime"), runtime.current.state["sound"])
+    assertEquals(PrototypeScalar.Text("chime"), runtime.current.state["sound"])
   }
 
   @Test
   fun `a list item trailing toggle flips its key through the same toggle interaction`() = runTest {
-    val node = OverlayListItemNode(headline = "Sync", trailing = OverlayListItemSwitch("sync"))
-    val runtime = runtime(spec(node, mapOf("sync" to OverlayScalar.BooleanValue(false))))
-    assertEquals("sync", overlayListItemToggleKey(node))
-    assertNull(overlayListItemToggleKey(OverlayListItemNode(headline = "H")))
-    runtime.handle(OverlayInteraction.Toggle("sync"))
-    assertEquals(OverlayScalar.BooleanValue(true), runtime.current.state["sync"])
+    val node = PrototypeListItemNode(headline = "Sync", trailing = PrototypeListItemSwitch("sync"))
+    val runtime = runtime(spec(node, mapOf("sync" to PrototypeScalar.BooleanValue(false))))
+    assertEquals("sync", prototypeListItemToggleKey(node))
+    assertNull(prototypeListItemToggleKey(PrototypeListItemNode(headline = "H")))
+    runtime.handle(PrototypeInteraction.Toggle("sync"))
+    assertEquals(PrototypeScalar.BooleanValue(true), runtime.current.state["sync"])
     assertEquals(listOf("change"), events.map { it.name })
   }
 
   @Test
   fun `option tags join the group tag and the option value`() {
-    assertEquals("sound.beep", overlayRadioOptionTag("sound", "beep"))
-    assertNull(overlayRadioOptionTag(null, "beep"))
+    assertEquals("sound.beep", prototypeRadioOptionTag("sound", "beep"))
+    assertNull(prototypeRadioOptionTag(null, "beep"))
   }
 }

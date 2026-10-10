@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.Gravity
 import androidx.compose.ui.unit.IntOffset
@@ -17,31 +17,31 @@ import org.robolectric.annotation.Config
 /** A floating window follows its anchored root onto the anchor's screen position (#9316). */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayAnchorWindowTest {
-  private lateinit var main: FakeOverlayMainThread
-  private lateinit var manager: RecordingOverlayWindowManager
-  private lateinit var host: DefaultInteractiveOverlayHost
+class PrototypeAnchorWindowTest {
+  private lateinit var main: FakePrototypeMainThread
+  private lateinit var manager: RecordingPrototypeWindowManager
+  private lateinit var host: DefaultPrototypeHost
 
   @Before
   fun setUp() {
     val history = mutableListOf<String>()
-    main = FakeOverlayMainThread()
-    manager = RecordingOverlayWindowManager(main, history)
+    main = FakePrototypeMainThread()
+    manager = RecordingPrototypeWindowManager(main, history)
     host =
-      DefaultInteractiveOverlayHost(
+      DefaultPrototypeHost(
         RuntimeEnvironment.getApplication(),
         manager,
         sdkInt = 30,
         mainThread = main,
-        settleTimer = FakeOverlaySettleTimer(history),
+        settleTimer = FakePrototypeSettleTimer(history),
         densityProvider = { 2.625f },
         backScope = CoroutineScope(Dispatchers.Unconfined),
       )
   }
 
   private val floating =
-    InteractiveOverlayRequest(
-      OverlayPlacement.Floating(Gravity.CENTER, offsetXDp = 24f, offsetYDp = 120f),
+    PrototypeRequest(
+      PrototypePlacement.Floating(Gravity.CENTER, offsetXDp = 24f, offsetYDp = 120f),
     )
 
   @Test
@@ -78,9 +78,9 @@ class OverlayAnchorWindowTest {
 
   @Test
   fun `fullscreen and sheet windows never move to an anchor`() = runTest {
-    host.show(InteractiveOverlayRequest(OverlayPlacement.Fullscreen()))
+    host.show(PrototypeRequest(PrototypePlacement.Fullscreen()))
     assertNull(host.currentWindowGeometry()?.moveTo)
-    host.show(InteractiveOverlayRequest(OverlayPlacement.Sheet(OverlayPlacement.Edge.BOTTOM, 200f)))
+    host.show(PrototypeRequest(PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 200f)))
     assertNull(host.currentWindowGeometry()?.moveTo)
   }
 }

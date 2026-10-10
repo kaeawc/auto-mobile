@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.os.Looper
 import android.os.SystemClock
@@ -34,38 +34,41 @@ import org.robolectric.annotation.Config
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h914dp-420dpi")
-class OverlayAnchorLayerTest {
+class PrototypeAnchorLayerTest {
   private class Rendered(
     val view: View,
     val root: SemanticsNode,
     val moves: List<IntOffset>,
-    val interactions: List<OverlayInteraction>,
+    val interactions: List<PrototypeInteraction>,
   )
 
   private fun render(
-    root: OverlayNode,
-    placement: OverlayPlacement = OverlayPlacement.Fullscreen(),
+    root: PrototypeNode,
+    placement: PrototypePlacement = PrototypePlacement.Fullscreen(),
     windowOrigin: Offset = Offset.Zero,
     floating: Boolean = false,
   ): Rendered {
     val moves = mutableListOf<IntOffset>()
-    val interactions = mutableListOf<OverlayInteraction>()
+    val interactions = mutableListOf<PrototypeInteraction>()
     val geometry =
-      OverlayWindowGeometry({ windowOrigin }, if (floating) { origin -> moves += origin } else null)
-    val spec = OverlaySpec("anchor", OverlayWindow(OverlayFullscreenPlacement()), root = root)
+      PrototypeWindowGeometry(
+        { windowOrigin },
+        if (floating) { origin -> moves += origin } else null,
+      )
+    val spec = PrototypeSpec("anchor", PrototypeWindow(PrototypeFullscreenPlacement()), root = root)
     val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
     activity.setContent {
       CompositionLocalProvider(
-        LocalOverlayWindowGeometry provides geometry,
-        LocalOverlayMotion provides true,
+        LocalPrototypeWindowGeometry provides geometry,
+        LocalPrototypeMotion provides true,
       ) {
-        InteractiveOverlayWindowContent(
-          InteractiveOverlayRequest(
+        PrototypeWindowContent(
+          PrototypeRequest(
             placement = placement,
-            content = { OverlaySpecContent(mapOverlaySpec(spec).root) { interactions += it } },
+            content = { PrototypeSpecContent(mapPrototypeSpec(spec).root) { interactions += it } },
           ),
         ) {
-          OverlayInsetFloor.None
+          PrototypeInsetFloor.None
         }
       }
     }
@@ -112,24 +115,24 @@ class OverlayAnchorLayerTest {
     x: Double,
     y: Double,
     size: Double,
-    onTap: List<OverlayAction>? = null,
+    onTap: List<PrototypeAction>? = null,
   ) =
-    OverlayBoxNode(
+    PrototypeBoxNode(
       testTag = tag,
-      anchor = OverlayBoundsAnchor(OverlayBounds(x, y, size, size), "cover"),
+      anchor = PrototypeBoundsAnchor(PrototypeBounds(x, y, size, size), "cover"),
       onTap = onTap,
-      style = OverlayStyle(background = "#FF0000"),
+      style = PrototypeStyle(background = "#FF0000"),
       children = emptyList(),
     )
 
-  private val small = anchored("small", 100.0, 300.0, 100.0, listOf(OverlayEmitAction("small")))
+  private val small = anchored("small", 100.0, 300.0, 100.0, listOf(PrototypeEmitAction("small")))
   private val large = anchored("large", 100.0, 100.0, 300.0)
 
   private fun dpRect(x: Float, y: Float, size: Float) =
     Rect(x * DENSITY, y * DENSITY, (x + size) * DENSITY, (y + size) * DENSITY)
 
-  private fun wrapRoot(vararg children: OverlayNode) =
-    OverlayBoxNode(testTag = "root", children = children.toList())
+  private fun wrapRoot(vararg children: PrototypeNode) =
+    PrototypeBoxNode(testTag = "root", children = children.toList())
 
   @Test
   fun `a zero-size wrap root still exposes its anchored nodes to accessibility at their anchors`() {
@@ -160,8 +163,8 @@ class OverlayAnchorLayerTest {
     // block touches on the app below (#10870). Only a fullscreen window is already that size.
     val placements =
       listOf(
-        OverlayPlacement.Floating(offsetXDp = 24f, offsetYDp = 120f),
-        OverlayPlacement.Sheet(OverlayPlacement.Edge.BOTTOM, 200f),
+        PrototypePlacement.Floating(offsetXDp = 24f, offsetYDp = 120f),
+        PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 200f),
       )
     for (placement in placements) {
       val rendered = render(wrapRoot(small, large), placement)
@@ -194,9 +197,9 @@ class OverlayAnchorLayerTest {
     assertEquals(0, root.size.width)
     assertEquals(0, root.size.height)
     val column =
-      OverlayColumnNode(
+      PrototypeColumnNode(
         testTag = "column",
-        children = listOf(large, OverlayTextNode(testTag = "below", text = "below")),
+        children = listOf(large, PrototypeTextNode(testTag = "below", text = "below")),
       )
     val stacked = render(column)
     // The text is the column's first laid-out child: the anchored node above it took no slot.
@@ -210,9 +213,9 @@ class OverlayAnchorLayerTest {
   @Test
   fun `a fill root places the anchors exactly as before`() {
     val fill =
-      OverlayBoxNode(
+      PrototypeBoxNode(
         testTag = "root",
-        style = OverlayStyle(width = OverlayDimension.Fill, height = OverlayDimension.Fill),
+        style = PrototypeStyle(width = PrototypeDimension.Fill, height = PrototypeDimension.Fill),
         children = listOf(small, large),
       )
     val rendered = render(fill)
@@ -228,7 +231,7 @@ class OverlayAnchorLayerTest {
     rendered.view.getLocationInWindow(location)
     tap(rendered.view, target.x - location[0], target.y - location[1])
     assertEquals(
-      listOf(OverlayInteraction.Tap(listOf(OverlayEmitAction("small")))),
+      listOf(PrototypeInteraction.Tap(listOf(PrototypeEmitAction("small")))),
       rendered.interactions,
     )
   }
@@ -237,15 +240,15 @@ class OverlayAnchorLayerTest {
   fun `a floating window still moves onto its anchored root`() {
     val origin = Offset(DENSITY * 24f, DENSITY * 120f)
     val root =
-      OverlayBoxNode(
+      PrototypeBoxNode(
         testTag = "root",
-        anchor = OverlayBoundsAnchor(OverlayBounds(100.0, 300.0, 100.0, 100.0), "cover"),
+        anchor = PrototypeBoundsAnchor(PrototypeBounds(100.0, 300.0, 100.0, 100.0), "cover"),
         children = emptyList(),
       )
     val rendered =
       render(
         root,
-        OverlayPlacement.Floating(offsetXDp = 24f, offsetYDp = 120f),
+        PrototypePlacement.Floating(offsetXDp = 24f, offsetYDp = 120f),
         windowOrigin = origin,
         floating = true,
       )

@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
@@ -17,15 +17,15 @@ import org.robolectric.annotation.Config
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayAssetSessionTest {
-  private val files = FakeOverlayAssetFiles()
+class PrototypeAssetSessionTest {
+  private val files = FakePrototypeAssetFiles()
   private val worker = QueuedExecutor()
   private var session = 1
-  private val limits = OverlayAssetLimits(maxAssetBytes = 100, maxCount = 2, maxTotalBytes = 150)
-  private val store = OverlayAssetStore(files, limits, session = { session }, fileWorker = worker)
+  private val limits = PrototypeAssetLimits(maxAssetBytes = 100, maxCount = 2, maxTotalBytes = 150)
+  private val store = PrototypeAssetStore(files, limits, session = { session }, fileWorker = worker)
 
   private fun put(id: String, size: Int = 20) =
-    store.put(id, "image/png", OverlayAssetBytes.png(size))
+    store.put(id, "image/png", PrototypeAssetBytes.png(size))
 
   /** Runs [block] on another thread and fails if it cannot finish while this thread is busy. */
   private fun <T> otherThread(block: () -> T): T {
@@ -53,22 +53,22 @@ class OverlayAssetSessionTest {
   fun `a put that finishes after a clear is rejected and leaves no file or accounting`() {
     files.onWrite = { otherThread { store.clear() } }
     val result = put("late")
-    val rejected = result as OverlayAssetPutResult.Rejected
-    assertEquals(OverlayAssetRejection.SESSION_ENDED, rejected.reason)
+    val rejected = result as PrototypeAssetPutResult.Rejected
+    assertEquals(PrototypeAssetRejection.SESSION_ENDED, rejected.reason)
     worker.runAll()
     assertTrue(files.stored.isEmpty())
     assertEquals(0, store.count)
     assertEquals(0L, store.totalByteCount)
     assertNull(store.lookup("late"))
     files.onWrite = null
-    assertTrue(put("after") is OverlayAssetPutResult.Stored)
+    assertTrue(put("after") is PrototypeAssetPutResult.Stored)
   }
 
   @Test
   fun `a replacement that finishes after a clear does not bring the old asset back`() {
     put("hero", 20)
     files.onWrite = { otherThread { store.clear() } }
-    assertTrue(put("hero", 30) is OverlayAssetPutResult.Rejected)
+    assertTrue(put("hero", 30) is PrototypeAssetPutResult.Rejected)
     worker.runAll()
     assertNull(store.lookup("hero"))
     assertTrue(files.stored.isEmpty())
@@ -78,7 +78,7 @@ class OverlayAssetSessionTest {
   fun `a remove during a replacement write is not resurrected and accounting stays exact`() {
     put("hero", 20)
     files.onWrite = { otherThread { store.remove("hero") } }
-    val stored = put("hero", 30) as OverlayAssetPutResult.Stored
+    val stored = put("hero", 30) as PrototypeAssetPutResult.Stored
     worker.runAll()
     assertFalse(stored.replaced)
     assertEquals(30L, store.totalByteCount)
@@ -115,15 +115,15 @@ class OverlayAssetSessionTest {
   @Test
   fun `a failing file delete is logged and does not escape or stop later deletes`() {
     val failing =
-      object : OverlayAssetFiles by files {
+      object : PrototypeAssetFiles by files {
         override fun delete(name: String) {
           if (name == "asset-0") throw IllegalStateException("disk gone")
           files.delete(name)
         }
       }
-    val flaky = OverlayAssetStore(failing, limits, fileWorker = worker)
-    flaky.put("x", "image/png", OverlayAssetBytes.png())
-    flaky.put("y", "image/png", OverlayAssetBytes.png())
+    val flaky = PrototypeAssetStore(failing, limits, fileWorker = worker)
+    flaky.put("x", "image/png", PrototypeAssetBytes.png())
+    flaky.put("y", "image/png", PrototypeAssetBytes.png())
     flaky.clear()
     worker.runAll()
     assertEquals(0, flaky.count)
@@ -148,17 +148,17 @@ class OverlayAssetSessionTest {
   fun `a new session's first upload does not count the previous session against the caps`() {
     put("a", 100)
     put("b", 50)
-    assertTrue(put("c") is OverlayAssetPutResult.Rejected) // full: two assets, 150 bytes
+    assertTrue(put("c") is PrototypeAssetPutResult.Rejected) // full: two assets, 150 bytes
     session = 2
-    assertTrue(put("c", 100) is OverlayAssetPutResult.Stored)
+    assertTrue(put("c", 100) is PrototypeAssetPutResult.Stored)
     assertEquals(listOf("c"), store.ids())
   }
 
   @Test
   fun `an upload still writing when the session changes is rejected`() {
     files.onWrite = { session = 2 }
-    val result = put("a") as OverlayAssetPutResult.Rejected
-    assertEquals(OverlayAssetRejection.SESSION_ENDED, result.reason)
+    val result = put("a") as PrototypeAssetPutResult.Rejected
+    assertEquals(PrototypeAssetRejection.SESSION_ENDED, result.reason)
     worker.runAll()
     assertTrue(files.stored.isEmpty())
   }

@@ -1,10 +1,10 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import dev.jasonpearson.automobile.protocol.OverlayColumnNode
-import dev.jasonpearson.automobile.protocol.OverlayFullscreenPlacement
-import dev.jasonpearson.automobile.protocol.OverlayImageNode
-import dev.jasonpearson.automobile.protocol.OverlaySpec
-import dev.jasonpearson.automobile.protocol.OverlayWindow
+import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
+import dev.jasonpearson.automobile.protocol.PrototypeFullscreenPlacement
+import dev.jasonpearson.automobile.protocol.PrototypeImageNode
+import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import dev.jasonpearson.automobile.protocol.PrototypeWindow
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Runnable
@@ -19,8 +19,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /** A decoded image without pixels: only the size the cache accounts for. */
-private class FakeImage(override val byteCount: Long, val target: OverlayImageTarget) :
-  OverlayDecodedImage {
+private class FakeImage(override val byteCount: Long, val target: PrototypeImageTarget) :
+  PrototypeDecodedImage {
   override val width: Int
     get() = target.widthPx
 
@@ -29,12 +29,12 @@ private class FakeImage(override val byteCount: Long, val target: OverlayImageTa
 }
 
 /** Decodes to a [FakeImage] sized by [bytesPerImage]; null for ids listed in [undecodable]. */
-private class FakeDecoder(var bytesPerImage: Long = 100) : OverlayImageDecoder {
-  val targets = mutableListOf<OverlayImageTarget>()
+private class FakeDecoder(var bytesPerImage: Long = 100) : PrototypeImageDecoder {
+  val targets = mutableListOf<PrototypeImageTarget>()
   val undecodable = mutableSetOf<Int>()
   var onDecode: (() -> Unit)? = null
 
-  override fun decode(bytes: ByteArray, target: OverlayImageTarget): OverlayDecodedImage? {
+  override fun decode(bytes: ByteArray, target: PrototypeImageTarget): PrototypeDecodedImage? {
     targets += target
     onDecode?.invoke()
     return if (bytes.size in undecodable) null else FakeImage(bytesPerImage, target)
@@ -53,20 +53,20 @@ private class CountingDispatcher : CoroutineDispatcher() {
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayImageCacheTest {
-  private val files = FakeOverlayAssetFiles()
-  private val store = OverlayAssetStore(files)
+class PrototypeImageCacheTest {
+  private val files = FakePrototypeAssetFiles()
+  private val store = PrototypeAssetStore(files)
   private val decoder = FakeDecoder()
   private val dispatcher = CountingDispatcher()
-  private val small = OverlayImageTarget(100, 100)
+  private val small = PrototypeImageTarget(100, 100)
 
   private fun cache(maxBytes: Long = 1_000) =
-    OverlayImageCache(store, decoder, maxBytes, dispatcher).also {
+    PrototypeImageCache(store, decoder, maxBytes, dispatcher).also {
       store.setChangeListener(it::invalidate)
     }
 
   private fun upload(id: String, size: Int = 16) =
-    store.put(id, "image/png", OverlayAssetBytes.png(size))
+    store.put(id, "image/png", PrototypeAssetBytes.png(size))
 
   @Test
   fun `a stored asset decodes once off the caller and is then served from the cache`() = runTest {
@@ -75,30 +75,33 @@ class OverlayImageCacheTest {
     assertNull(cache.peek("hero", small))
     val first = cache.load("hero", small)
     val second = cache.load("hero", small)
-    assertTrue(first is OverlayImageState.Ready)
-    assertSame((first as OverlayImageState.Ready).image, (second as OverlayImageState.Ready).image)
+    assertTrue(first is PrototypeImageState.Ready)
+    assertSame(
+      (first as PrototypeImageState.Ready).image,
+      (second as PrototypeImageState.Ready).image,
+    )
     assertEquals(1, decoder.targets.size)
     assertEquals(1, dispatcher.dispatched)
-    assertTrue(cache.peek("hero", small) is OverlayImageState.Ready)
+    assertTrue(cache.peek("hero", small) is PrototypeImageState.Ready)
   }
 
   @Test
   fun `the decoder is asked for a power of two bucket and nearby sizes share it`() = runTest {
     val cache = cache()
     upload("hero")
-    cache.load("hero", OverlayImageTarget(600, 1100))
-    cache.load("hero", OverlayImageTarget(650, 1500))
-    assertEquals(listOf(OverlayImageTarget(1024, 2048)), decoder.targets)
-    cache.load("hero", OverlayImageTarget(2000, 1100))
-    assertEquals(OverlayImageTarget(2048, 2048), decoder.targets.last())
+    cache.load("hero", PrototypeImageTarget(600, 1100))
+    cache.load("hero", PrototypeImageTarget(650, 1500))
+    assertEquals(listOf(PrototypeImageTarget(1024, 2048)), decoder.targets)
+    cache.load("hero", PrototypeImageTarget(2000, 1100))
+    assertEquals(PrototypeImageTarget(2048, 2048), decoder.targets.last())
     assertEquals(2, cache.cachedCount)
   }
 
   @Test
   fun `an unknown id is missing without decoding`() = runTest {
     val cache = cache()
-    assertEquals(OverlayImageState.Missing, cache.peek("nope", small))
-    assertEquals(OverlayImageState.Missing, cache.load("nope", small))
+    assertEquals(PrototypeImageState.Missing, cache.peek("nope", small))
+    assertEquals(PrototypeImageState.Missing, cache.load("nope", small))
     assertTrue(decoder.targets.isEmpty())
   }
 
@@ -109,7 +112,7 @@ class OverlayImageCacheTest {
       upload("hero")
       files.stored.clear() // Cache directory evicted: lookup still answers, read returns null.
       assertEquals("hero", store.lookup("hero")?.id)
-      assertEquals(OverlayImageState.Missing, cache.load("hero", small))
+      assertEquals(PrototypeImageState.Missing, cache.load("hero", small))
       assertTrue(decoder.targets.isEmpty())
       assertEquals(0, cache.cachedCount)
     }
@@ -119,7 +122,7 @@ class OverlayImageCacheTest {
     val cache = cache()
     upload("bad", size = 17)
     decoder.undecodable += 17
-    assertEquals(OverlayImageState.Missing, cache.load("bad", small))
+    assertEquals(PrototypeImageState.Missing, cache.load("bad", small))
     assertEquals(0, cache.cachedCount)
   }
 
@@ -132,9 +135,9 @@ class OverlayImageCacheTest {
     cache.peek("a", small) // Touch a so b is the eldest.
     cache.load("c", small)
     assertEquals(200, cache.cachedBytes)
-    assertTrue(cache.peek("a", small) is OverlayImageState.Ready)
+    assertTrue(cache.peek("a", small) is PrototypeImageState.Ready)
     assertNull(cache.peek("b", small))
-    assertTrue(cache.peek("c", small) is OverlayImageState.Ready)
+    assertTrue(cache.peek("c", small) is PrototypeImageState.Ready)
   }
 
   @Test
@@ -142,7 +145,7 @@ class OverlayImageCacheTest {
     val cache = cache(maxBytes = 250)
     upload("big")
     decoder.bytesPerImage = 300
-    assertTrue(cache.load("big", small) is OverlayImageState.Ready)
+    assertTrue(cache.load("big", small) is PrototypeImageState.Ready)
     assertEquals(0, cache.cachedBytes)
     assertEquals(0, cache.cachedCount)
   }
@@ -158,7 +161,7 @@ class OverlayImageCacheTest {
     upload("hero", size = 32)
     assertTrue(cache.version.value > before)
     assertNull(cache.peek("hero", small))
-    assertTrue(cache.peek("other", small) is OverlayImageState.Ready)
+    assertTrue(cache.peek("other", small) is PrototypeImageState.Ready)
     cache.load("hero", small)
     assertEquals(3, decoder.targets.size)
   }
@@ -170,7 +173,7 @@ class OverlayImageCacheTest {
     cache.load("hero", small)
     store.remove("hero")
     assertEquals(0, cache.cachedBytes)
-    assertEquals(OverlayImageState.Missing, cache.peek("hero", small))
+    assertEquals(PrototypeImageState.Missing, cache.peek("hero", small))
   }
 
   @Test
@@ -190,10 +193,10 @@ class OverlayImageCacheTest {
   @Test
   fun `a new observer session drops decoded images through the store`() = runTest {
     var session = 1
-    val sessionStore = OverlayAssetStore(files, session = { session })
-    val cache = OverlayImageCache(sessionStore, decoder, 1_000, dispatcher)
+    val sessionStore = PrototypeAssetStore(files, session = { session })
+    val cache = PrototypeImageCache(sessionStore, decoder, 1_000, dispatcher)
     sessionStore.setChangeListener(cache::invalidate)
-    sessionStore.put("hero", "image/png", OverlayAssetBytes.png())
+    sessionStore.put("hero", "image/png", PrototypeAssetBytes.png())
     cache.load("hero", small)
     session = 2
     sessionStore.lookup("hero")
@@ -203,11 +206,11 @@ class OverlayImageCacheTest {
   @Test
   fun `uploading an id that was missing wakes placeholders showing it`() = runTest {
     val cache = cache()
-    assertEquals(OverlayImageState.Missing, cache.load("late", small))
+    assertEquals(PrototypeImageState.Missing, cache.load("late", small))
     val before = cache.version.value
     upload("late")
     assertTrue(cache.version.value > before)
-    assertTrue(cache.load("late", small) is OverlayImageState.Ready)
+    assertTrue(cache.load("late", small) is PrototypeImageState.Ready)
   }
 
   @Test
@@ -222,7 +225,7 @@ class OverlayImageCacheTest {
       }
     }
     val state = cache.load("hero", small)
-    assertTrue(state is OverlayImageState.Ready)
+    assertTrue(state is PrototypeImageState.Ready)
     assertEquals(2, decoder.targets.size)
     assertEquals(1, cache.cachedCount)
   }
@@ -232,15 +235,15 @@ class OverlayImageCacheTest {
     val cache = cache()
     upload("hero")
     decoder.onDecode = { store.remove("hero") }
-    assertEquals(OverlayImageState.Missing, cache.load("hero", small))
+    assertEquals(PrototypeImageState.Missing, cache.load("hero", small))
     assertEquals(0, cache.cachedCount)
   }
 
   @Test
   fun `a put reaches the cache before it returns, even through a listener that reads the store`() =
     runTest {
-      val cache = OverlayImageCache(store, decoder, 1_000, dispatcher)
-      var seenByListener: OverlayAssetInfo? = null
+      val cache = PrototypeImageCache(store, decoder, 1_000, dispatcher)
+      var seenByListener: PrototypeAssetInfo? = null
       store.setChangeListener { ids ->
         seenByListener = ids?.firstOrNull()?.let(store::lookup)
         cache.invalidate(ids)
@@ -260,12 +263,12 @@ class OverlayImageCacheTest {
   fun `a session change drops the assets, wakes the cache and the next show lists them as missing`() =
     runTest {
       var session = 1
-      val sessionStore = OverlayAssetStore(files, session = { session })
-      val cache = OverlayImageCache(sessionStore, decoder, 1_000, dispatcher)
+      val sessionStore = PrototypeAssetStore(files, session = { session })
+      val cache = PrototypeImageCache(sessionStore, decoder, 1_000, dispatcher)
       sessionStore.setChangeListener(cache::invalidate)
       val replies = mutableListOf<List<String>>()
       val sink =
-        object : OverlayResultSink {
+        object : PrototypeResultSink {
           override suspend fun send(requestId: String?, success: Boolean, error: String?) {
             replies += emptyList<String>()
           }
@@ -280,25 +283,25 @@ class OverlayImageCacheTest {
           }
         }
       val controller =
-        OverlayController(
-          FakeInteractiveOverlayHost(),
+        PrototypeController(
+          FakePrototypeHost(),
           sink,
-          lifecycle = OverlayLifecycle(FakeOverlayTimer()),
+          lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
           clearAssets = { sessionStore.clear() },
           hasAsset = { sessionStore.lookup(it) != null },
           images = cache,
         )
       val spec =
-        OverlaySpec(
+        PrototypeSpec(
           "panel",
-          OverlayWindow(OverlayFullscreenPlacement()),
+          PrototypeWindow(PrototypeFullscreenPlacement()),
           root =
-            OverlayColumnNode(
-              children = listOf(OverlayImageNode(asset = "a"), OverlayImageNode(asset = "b")),
+            PrototypeColumnNode(
+              children = listOf(PrototypeImageNode(asset = "a"), PrototypeImageNode(asset = "b")),
             ),
         )
-      sessionStore.put("a", "image/png", OverlayAssetBytes.png())
-      sessionStore.put("b", "image/png", OverlayAssetBytes.png())
+      sessionStore.put("a", "image/png", PrototypeAssetBytes.png())
+      sessionStore.put("b", "image/png", PrototypeAssetBytes.png())
       cache.load("a", small)
       cache.load("b", small)
       controller.show("r1", spec)
@@ -312,25 +315,25 @@ class OverlayImageCacheTest {
       assertTrue(cache.version.value > before)
       assertEquals(0, cache.cachedCount)
       assertEquals(0L, cache.cachedBytes)
-      assertEquals(OverlayImageState.Missing, cache.peek("a", small))
+      assertEquals(PrototypeImageState.Missing, cache.peek("a", small))
     }
 
   @Test
   fun `sample size halves while both decoded dimensions stay at least the target`() {
-    val target = OverlayImageTarget(1080, 2400)
-    assertEquals(1, overlayImageSampleSize(1080, 2400, target, Long.MAX_VALUE))
-    assertEquals(1, overlayImageSampleSize(2000, 3000, target, Long.MAX_VALUE))
-    assertEquals(2, overlayImageSampleSize(2160, 4800, target, Long.MAX_VALUE))
-    assertEquals(4, overlayImageSampleSize(4320, 9600, target, Long.MAX_VALUE))
-    assertEquals(1, overlayImageSampleSize(100, 100, target, Long.MAX_VALUE))
+    val target = PrototypeImageTarget(1080, 2400)
+    assertEquals(1, prototypeImageSampleSize(1080, 2400, target, Long.MAX_VALUE))
+    assertEquals(1, prototypeImageSampleSize(2000, 3000, target, Long.MAX_VALUE))
+    assertEquals(2, prototypeImageSampleSize(2160, 4800, target, Long.MAX_VALUE))
+    assertEquals(4, prototypeImageSampleSize(4320, 9600, target, Long.MAX_VALUE))
+    assertEquals(1, prototypeImageSampleSize(100, 100, target, Long.MAX_VALUE))
   }
 
   @Test
   fun `sample size grows past the target when the pixel cap demands it`() {
-    val target = OverlayImageTarget(4000, 4000)
-    assertEquals(1, overlayImageSampleSize(4000, 4000, target, 16_000_000))
-    assertEquals(2, overlayImageSampleSize(4000, 4000, target, 5_000_000))
-    assertEquals(4, overlayImageSampleSize(4000, 4000, target, 1_000_000))
+    val target = PrototypeImageTarget(4000, 4000)
+    assertEquals(1, prototypeImageSampleSize(4000, 4000, target, 16_000_000))
+    assertEquals(2, prototypeImageSampleSize(4000, 4000, target, 5_000_000))
+    assertEquals(4, prototypeImageSampleSize(4000, 4000, target, 1_000_000))
   }
 
   @Test
@@ -344,10 +347,10 @@ class OverlayImageCacheTest {
 
   @Test
   fun `an absurd header size stays over budget at the capped sample size`() {
-    val target = OverlayImageTarget(1080, 2400)
-    val sample = overlayImageSampleSize(1_000_000, 1_000_000, target, 4L * 1024 * 1024)
+    val target = PrototypeImageTarget(1080, 2400)
+    val sample = prototypeImageSampleSize(1_000_000, 1_000_000, target, 4L * 1024 * 1024)
     assertEquals(64, sample)
-    assertTrue(!overlayImageFitsBudget(1_000_000, 1_000_000, sample, 4L * 1024 * 1024))
-    assertTrue(overlayImageFitsBudget(4320, 9600, 4, 4L * 1024 * 1024))
+    assertTrue(!prototypeImageFitsBudget(1_000_000, 1_000_000, sample, 4L * 1024 * 1024))
+    assertTrue(prototypeImageFitsBudget(4320, 9600, 4, 4L * 1024 * 1024))
   }
 }

@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.content.ContentResolver
 import android.os.Looper
@@ -25,7 +25,7 @@ import org.robolectric.Shadows.shadowOf
  * provides: the card's content colour, and the visibility of the ancestors it was authored under.
  */
 @RunWith(RobolectricTestRunner::class)
-class OverlayAnchorLayerLocalsTest {
+class PrototypeAnchorLayerLocalsTest {
   @get:Rule val compose = createComposeRule()
 
   private var resolver: ContentResolver = RuntimeEnvironment.getApplication().contentResolver
@@ -38,14 +38,14 @@ class OverlayAnchorLayerLocalsTest {
   }
 
   private fun show(
-    root: OverlayNode,
-    state: Map<String, OverlayScalar> = emptyMap(),
-  ): OverlayRuntime {
-    val spec = OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), state, root)
-    val runtime = OverlayRuntime(spec, nextSequence = { ++sequence })
+    root: PrototypeNode,
+    state: Map<String, PrototypeScalar> = emptyMap(),
+  ): PrototypeRuntime {
+    val spec = PrototypeSpec("panel", PrototypeWindow(PrototypeFullscreenPlacement()), state, root)
+    val runtime = PrototypeRuntime(spec, nextSequence = { ++sequence })
     compose.setContent {
       resolver = LocalContext.current.contentResolver
-      OverlayRuntimeContent(runtime) { runtime.handle(it) }
+      PrototypeRuntimeContent(runtime) { runtime.handle(it) }
     }
     compose.waitForIdle()
     compose.mainClock.autoAdvance = false
@@ -62,24 +62,24 @@ class OverlayAnchorLayerLocalsTest {
     return results.single().layoutInput.style.color
   }
 
-  private val bounds = OverlayBounds(10.0, 20.0, 60.0, 40.0)
+  private val bounds = PrototypeBounds(10.0, 20.0, 60.0, 40.0)
 
   private fun anchoredText(tag: String) =
-    OverlayTextNode(text = tag, testTag = tag, anchor = OverlayBoundsAnchor(bounds))
+    PrototypeTextNode(text = tag, testTag = tag, anchor = PrototypeBoundsAnchor(bounds))
 
   @Test
   fun `anchored text inside a card uses the card's content colour`() {
     setDurationScale(1f)
     show(
-      OverlayColumnNode(
+      PrototypeColumnNode(
         children =
           listOf(
-            OverlayTextNode(text = "outside", testTag = "outside"),
-            OverlayCardNode(
-              style = OverlayStyle(background = "#6750A4"),
+            PrototypeTextNode(text = "outside", testTag = "outside"),
+            PrototypeCardNode(
+              style = PrototypeStyle(background = "#6750A4"),
               children =
                 listOf(
-                  OverlayTextNode(text = "plain", testTag = "plain"),
+                  PrototypeTextNode(text = "plain", testTag = "plain"),
                   anchoredText("anchored"),
                 ),
             ),
@@ -92,20 +92,20 @@ class OverlayAnchorLayerLocalsTest {
   }
 
   private fun hideableParent() =
-    OverlayBoxNode(
+    PrototypeBoxNode(
       testTag = "parent",
-      visibleWhen = OverlayCondition("show", OverlayScalar.BooleanValue(true)),
+      visibleWhen = PrototypeCondition("show", PrototypeScalar.BooleanValue(true)),
       children = listOf(anchoredText("child")),
     )
 
-  private val hide = OverlaySetStateAction("show", OverlayScalar.BooleanValue(false))
+  private val hide = PrototypeSetStateAction("show", PrototypeScalar.BooleanValue(false))
 
-  private fun OverlayRuntime.hideAfter(frames: Int) {
-    runBlocking { handle(OverlayInteraction.Tap(listOf(hide))) }
+  private fun PrototypeRuntime.hideAfter(frames: Int) {
+    runBlocking { handle(PrototypeInteraction.Tap(listOf(hide))) }
     repeat(frames) { compose.mainClock.advanceTimeByFrame() }
   }
 
-  private val shown = mapOf("show" to OverlayScalar.BooleanValue(true))
+  private val shown = mapOf("show" to PrototypeScalar.BooleanValue(true))
 
   @Test
   fun `an anchored child fades out with its parent under animation`() {

@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.NonCancellable
@@ -7,12 +7,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
-fun interface OverlayEventSink {
-  suspend fun send(event: OverlayEvent)
+fun interface PrototypeEventSink {
+  suspend fun send(event: PrototypeEvent)
 }
 
-data class OverlayRuntimeSnapshot(
-  val spec: OverlaySpec,
+data class PrototypeRuntimeSnapshot(
+  val spec: PrototypeSpec,
   val pages: Map<String, Int>,
   val active: Boolean = true,
   /**
@@ -22,55 +22,56 @@ data class OverlayRuntimeSnapshot(
    */
   val textEpochs: Map<String, Int> = emptyMap(),
 ) {
-  val state: Map<String, OverlayScalar>
+  val state: Map<String, PrototypeScalar>
     get() = spec.state.orEmpty()
 }
 
-sealed interface OverlayInteraction {
-  data object HostDismiss : OverlayInteraction
+sealed interface PrototypeInteraction {
+  data object HostDismiss : PrototypeInteraction
 
-  data class Tap(val actions: List<OverlayAction>) : OverlayInteraction
+  data class Tap(val actions: List<PrototypeAction>) : PrototypeInteraction
 
   data class PagerMotion(val pager: String, val page: Int, val scrolling: Boolean) :
-    OverlayInteraction
+    PrototypeInteraction
 
-  data class SettledPage(val pager: String, val page: Int) : OverlayInteraction
+  data class SettledPage(val pager: String, val page: Int) : PrototypeInteraction
 
   /**
-   * [epoch] is the key's [OverlayRuntimeSnapshot.textEpochs] entry the editing field last rendered.
-   * An edit typed against text an authoritative [OverlayRuntime.replace] has since replaced is
-   * stale and is dropped, so the external value wins over reports still in flight.
+   * [epoch] is the key's [PrototypeRuntimeSnapshot.textEpochs] entry the editing field last
+   * rendered. An edit typed against text an authoritative [PrototypeRuntime.replace] has since
+   * replaced is stale and is dropped, so the external value wins over reports still in flight.
    */
-  data class TextChange(val key: String, val value: String, val epoch: Int = 0) : OverlayInteraction
+  data class TextChange(val key: String, val value: String, val epoch: Int = 0) :
+    PrototypeInteraction
 
   data class Select(
     val pager: String?,
     val key: String?,
     val index: Int,
-    val actions: List<OverlayAction> = emptyList(),
-  ) : OverlayInteraction
+    val actions: List<PrototypeAction> = emptyList(),
+  ) : PrototypeInteraction
 
-  data class SheetDismiss(val condition: OverlaySheetCondition) : OverlayInteraction
+  data class SheetDismiss(val condition: PrototypeSheetCondition) : PrototypeInteraction
 
   /** A `switch` or `checkbox` tap: flips the bound boolean, then runs the node's own actions. */
-  data class Toggle(val key: String, val actions: List<OverlayAction> = emptyList()) :
-    OverlayInteraction
+  data class Toggle(val key: String, val actions: List<PrototypeAction> = emptyList()) :
+    PrototypeInteraction
 
   /** A `radioGroup` option tap: binds the string key to the option's value, then runs actions. */
   data class Choose(
     val key: String,
     val value: String,
-    val actions: List<OverlayAction> = emptyList(),
-  ) : OverlayInteraction
+    val actions: List<PrototypeAction> = emptyList(),
+  ) : PrototypeInteraction
 
   /**
    * A `dialog` or `snackbar` button: closes its container by making [condition] false, then runs
    * the button's actions.
    */
   data class CloseModal(
-    val condition: OverlaySheetCondition,
-    val actions: List<OverlayAction> = emptyList(),
-  ) : OverlayInteraction
+    val condition: PrototypeSheetCondition,
+    val actions: List<PrototypeAction> = emptyList(),
+  ) : PrototypeInteraction
 
   /** A `timePicker` change: stores both bound keys, emitting one `change` event, then actions. */
   data class SetTime(
@@ -78,15 +79,15 @@ sealed interface OverlayInteraction {
     val minuteKey: String,
     val hour: Int,
     val minute: Int,
-    val actions: List<OverlayAction> = emptyList(),
-  ) : OverlayInteraction
+    val actions: List<PrototypeAction> = emptyList(),
+  ) : PrototypeInteraction
 
   /** A `slider` drag or accessibility set-progress: stores the (already snapped) number. */
   data class Slide(
     val key: String,
     val value: Double,
-    val actions: List<OverlayAction> = emptyList(),
-  ) : OverlayInteraction
+    val actions: List<PrototypeAction> = emptyList(),
+  ) : PrototypeInteraction
 }
 
 /**
@@ -96,9 +97,9 @@ sealed interface OverlayInteraction {
  * Dismissal finishes removal/delivery even if disposing Compose cancels the gesture coroutine.
  * Dismissal closes the runtime before delivery; its dismissed event is the final permitted event.
  */
-class OverlayRuntime(
-  spec: OverlaySpec,
-  private val sink: OverlayEventSink = OverlayEventSink {},
+class PrototypeRuntime(
+  spec: PrototypeSpec,
+  private val sink: PrototypeEventSink = PrototypeEventSink {},
   private val clock: () -> Long = System::currentTimeMillis,
   private val nextSequence: () -> Long,
   private val requestDismiss: suspend () -> Boolean = { true },
@@ -106,16 +107,16 @@ class OverlayRuntime(
 ) {
   private val mutableSnapshot = MutableStateFlow(snapshot(spec, previousPages))
   val snapshots = mutableSnapshot.asStateFlow()
-  val current: OverlayRuntimeSnapshot
+  val current: PrototypeRuntimeSnapshot
     get() = snapshots.value
 
-  fun replace(spec: OverlaySpec) {
+  fun replace(spec: PrototypeSpec) {
     if (!current.active) return
     val next = snapshot(spec, current.pages)
     val changed =
       (current.state.keys + next.state.keys).filter { key ->
         current.state[key] != next.state[key] &&
-          (current.state[key] is OverlayScalar.Text || next.state[key] is OverlayScalar.Text)
+          (current.state[key] is PrototypeScalar.Text || next.state[key] is PrototypeScalar.Text)
       }
     mutableSnapshot.value =
       next.copy(
@@ -128,43 +129,43 @@ class OverlayRuntime(
     mutableSnapshot.value = current.copy(active = false)
   }
 
-  suspend fun handle(interaction: OverlayInteraction) {
+  suspend fun handle(interaction: PrototypeInteraction) {
     if (!current.active) return
     when (interaction) {
-      OverlayInteraction.HostDismiss -> dismiss()
-      is OverlayInteraction.Tap -> tap(interaction.actions)
-      is OverlayInteraction.PagerMotion ->
+      PrototypeInteraction.HostDismiss -> dismiss()
+      is PrototypeInteraction.Tap -> tap(interaction.actions)
+      is PrototypeInteraction.PagerMotion ->
         if (!interaction.scrolling) setPage(interaction.pager, interaction.page)
-      is OverlayInteraction.SettledPage -> setPage(interaction.pager, interaction.page)
-      is OverlayInteraction.TextChange -> textChange(interaction)
-      is OverlayInteraction.Select -> {
+      is PrototypeInteraction.SettledPage -> setPage(interaction.pager, interaction.page)
+      is PrototypeInteraction.TextChange -> textChange(interaction)
+      is PrototypeInteraction.Select -> {
         if (interaction.pager != null) setPage(interaction.pager, interaction.index)
         else
-          interaction.key?.let { change(it, OverlayScalar.Numeric(interaction.index.toDouble())) }
+          interaction.key?.let { change(it, PrototypeScalar.Numeric(interaction.index.toDouble())) }
         tap(interaction.actions)
       }
-      is OverlayInteraction.SheetDismiss -> close(interaction.condition)
-      is OverlayInteraction.CloseModal -> {
+      is PrototypeInteraction.SheetDismiss -> close(interaction.condition)
+      is PrototypeInteraction.CloseModal -> {
         close(interaction.condition)
         tap(interaction.actions)
       }
-      is OverlayInteraction.SetTime -> setTime(interaction)
-      is OverlayInteraction.Toggle -> {
+      is PrototypeInteraction.SetTime -> setTime(interaction)
+      is PrototypeInteraction.Toggle -> {
         // The validator keeps the bound key boolean; anything else leaves the control inert.
-        val stored = current.state[interaction.key] as? OverlayScalar.BooleanValue ?: return
-        change(interaction.key, OverlayScalar.BooleanValue(!stored.value))
+        val stored = current.state[interaction.key] as? PrototypeScalar.BooleanValue ?: return
+        change(interaction.key, PrototypeScalar.BooleanValue(!stored.value))
         tap(interaction.actions)
       }
-      is OverlayInteraction.Choose -> {
+      is PrototypeInteraction.Choose -> {
         // The validator keeps the bound key a string; anything else leaves the group inert.
-        if (current.state[interaction.key] !is OverlayScalar.Text) return
-        change(interaction.key, OverlayScalar.Text(interaction.value))
+        if (current.state[interaction.key] !is PrototypeScalar.Text) return
+        change(interaction.key, PrototypeScalar.Text(interaction.value))
         tap(interaction.actions)
       }
-      is OverlayInteraction.Slide -> {
-        val stored = current.state[interaction.key] as? OverlayScalar.Numeric ?: return
+      is PrototypeInteraction.Slide -> {
+        val stored = current.state[interaction.key] as? PrototypeScalar.Numeric ?: return
         if (stored.value == interaction.value) return
-        change(interaction.key, OverlayScalar.Numeric(interaction.value))
+        change(interaction.key, PrototypeScalar.Numeric(interaction.value))
         tap(interaction.actions)
       }
     }
@@ -175,64 +176,64 @@ class OverlayRuntime(
    * `change` event carrying the final state follows the last action (#10622); `emit` actions fire
    * in order with the state as it was at that point. A list that nets no change emits nothing.
    */
-  private suspend fun tap(actions: List<OverlayAction>) {
+  private suspend fun tap(actions: List<PrototypeAction>) {
     val baseline = current.state
     val touched = LinkedHashSet<String>()
     for (action in actions) {
       if (!current.active) break
       when (action) {
-        is OverlayEmitAction -> emit(OverlayEventKind.EMIT, action.name, action.payload)
-        is OverlaySetStateAction -> {
+        is PrototypeEmitAction -> emit(PrototypeEventKind.EMIT, action.name, action.payload)
+        is PrototypeSetStateAction -> {
           setState(action.key, action.value)
           touched += action.key
         }
-        is OverlayToggleAction ->
+        is PrototypeToggleAction ->
           action.nextValue(current.state)?.let {
             setState(action.key, it)
             touched += action.key
           }
-        is OverlayIncrementAction ->
+        is PrototypeIncrementAction ->
           action.nextValue(current.state)?.let {
             setState(action.key, it)
             touched += action.key
           }
-        is OverlayDecrementAction ->
+        is PrototypeDecrementAction ->
           action.nextValue(current.state)?.let {
             setState(action.key, it)
             touched += action.key
           }
-        is OverlaySetPageAction -> {
+        is PrototypeSetPageAction -> {
           val page = current.pages[action.pager] ?: continue
           setPage(
             action.pager,
             when (val target = action.page) {
-              OverlayPageTarget.Next -> page + 1
-              OverlayPageTarget.Prev -> page - 1
-              is OverlayPageTarget.Index -> target.index
+              PrototypePageTarget.Next -> page + 1
+              PrototypePageTarget.Prev -> page - 1
+              is PrototypePageTarget.Index -> target.index
             },
           )
         }
-        OverlayDismissAction -> dismiss()
+        PrototypeDismissAction -> dismiss()
       }
     }
     if (current.active) emitStateChange(touched.filter { baseline[it] != current.state[it] })
   }
 
-  private suspend fun close(condition: OverlaySheetCondition) {
-    if (current.state[condition.key] == OverlayScalar.BooleanValue(condition.equals))
-      change(condition.key, OverlayScalar.BooleanValue(!condition.equals))
+  private suspend fun close(condition: PrototypeSheetCondition) {
+    if (current.state[condition.key] == PrototypeScalar.BooleanValue(condition.equals))
+      change(condition.key, PrototypeScalar.BooleanValue(!condition.equals))
   }
 
   /** Both keys change together, so a new time reports one `change` event, never a half-set one. */
-  private suspend fun setTime(interaction: OverlayInteraction.SetTime) {
+  private suspend fun setTime(interaction: PrototypeInteraction.SetTime) {
     val keys = listOf(interaction.hourKey, interaction.minuteKey)
     // The validator keeps both keys numeric; anything else leaves the picker inert.
-    if (keys.any { current.state[it] !is OverlayScalar.Numeric }) return
+    if (keys.any { current.state[it] !is PrototypeScalar.Numeric }) return
     val baseline = current.state
     val next =
       mapOf(
-        interaction.hourKey to OverlayScalar.Numeric(interaction.hour.toDouble()),
-        interaction.minuteKey to OverlayScalar.Numeric(interaction.minute.toDouble()),
+        interaction.hourKey to PrototypeScalar.Numeric(interaction.hour.toDouble()),
+        interaction.minuteKey to PrototypeScalar.Numeric(interaction.minute.toDouble()),
       )
     if (next.all { (key, value) -> baseline[key] == value }) return
     setStates(next)
@@ -248,7 +249,7 @@ class OverlayRuntime(
     if (keys.isEmpty()) return
     val state = current.state
     fun json(key: String) =
-      runtimeJson.encodeToJsonElement(OverlayScalar.serializer(), state.getValue(key))
+      runtimeJson.encodeToJsonElement(PrototypeScalar.serializer(), state.getValue(key))
     val payload = buildJsonObject {
       if (keys.size == 1) {
         put("key", keys.single())
@@ -258,7 +259,7 @@ class OverlayRuntime(
         put("values", buildJsonObject { keys.forEach { put(it, json(it)) } })
       }
     }
-    emit(OverlayEventKind.EMIT, "change", payload)
+    emit(PrototypeEventKind.EMIT, "change", payload)
   }
 
   private suspend fun setPage(id: String, requested: Int) {
@@ -266,18 +267,18 @@ class OverlayRuntime(
     val page = requested.coerceIn(0, count - 1)
     if (current.pages[id] == page) return
     mutableSnapshot.value = current.copy(pages = current.pages + (id to page))
-    emit(OverlayEventKind.PAGE_CHANGED)
+    emit(PrototypeEventKind.PAGE_CHANGED)
   }
 
-  private fun setState(key: String, value: OverlayScalar) = setStates(mapOf(key to value))
+  private fun setState(key: String, value: PrototypeScalar) = setStates(mapOf(key to value))
 
-  private fun setStates(values: Map<String, OverlayScalar>) {
+  private fun setStates(values: Map<String, PrototypeScalar>) {
     val spec = current.spec.copy(state = current.state + values)
     // Reuse the structured protocol validator to enforce keys, numeric ranges and binding types.
     val validation =
-      OverlaySpecValidator.validate(runtimeJson.encodeToString(OverlaySpec.serializer(), spec))
-    require(validation is OverlaySpecValidation.Success) {
-      (validation as? OverlaySpecValidation.Failure)?.error.toString()
+      PrototypeSpecValidator.validate(runtimeJson.encodeToString(PrototypeSpec.serializer(), spec))
+    require(validation is PrototypeSpecValidation.Success) {
+      (validation as? PrototypeSpecValidation.Failure)?.error.toString()
     }
     mutableSnapshot.value = current.copy(spec = spec)
   }
@@ -288,11 +289,11 @@ class OverlayRuntime(
    * accepted text, and edits still in flight from the abandoned text go stale. Rethrown so the
    * controller still logs the failure (never the typed text).
    */
-  private suspend fun textChange(interaction: OverlayInteraction.TextChange) {
+  private suspend fun textChange(interaction: PrototypeInteraction.TextChange) {
     val key = interaction.key
     if (interaction.epoch < (current.textEpochs[key] ?: 0)) return
     try {
-      change(key, OverlayScalar.Text(interaction.value))
+      change(key, PrototypeScalar.Text(interaction.value))
     } catch (error: IllegalArgumentException) {
       mutableSnapshot.value =
         current.copy(textEpochs = current.textEpochs + (key to (current.textEpochs[key] ?: 0) + 1))
@@ -304,40 +305,43 @@ class OverlayRuntime(
    * Changes emit once only for a changed value; wire patches are silent. A tap's action list
    * reports its own mutations via [tap].
    */
-  private suspend fun change(key: String, value: OverlayScalar) {
+  private suspend fun change(key: String, value: PrototypeScalar) {
     if (current.state[key] == value) return
     setState(key, value)
     emit(
-      OverlayEventKind.EMIT,
+      PrototypeEventKind.EMIT,
       "change",
       buildJsonObject {
         put("key", key)
-        put("value", runtimeJson.encodeToJsonElement(OverlayScalar.serializer(), value))
+        put("value", runtimeJson.encodeToJsonElement(PrototypeScalar.serializer(), value))
       },
     )
   }
 
-  suspend fun dismiss(reason: OverlayDismissReason = OverlayDismissReason.USER) =
+  suspend fun dismiss(reason: PrototypeDismissReason = PrototypeDismissReason.USER) =
     withContext(NonCancellable) {
       if (!current.active) return@withContext
-      check(requestDismiss()) { "Overlay host failed to dismiss window" }
+      check(requestDismiss()) { "Prototype host failed to dismiss window" }
       finishDismissal(reason)
     }
 
   /** Teardown is terminal even if the platform removal or event delivery fails. */
-  internal suspend fun finishDismissal(reason: OverlayDismissReason) {
+  internal suspend fun finishDismissal(reason: PrototypeDismissReason) {
     if (!current.active) return
     close()
-    emit(OverlayEventKind.DISMISSED, payload = buildJsonObject { put("reason", reason.wireValue) })
+    emit(
+      PrototypeEventKind.DISMISSED,
+      payload = buildJsonObject { put("reason", reason.wireValue) },
+    )
   }
 
   private suspend fun emit(
-    kind: OverlayEventKind,
+    kind: PrototypeEventKind,
     name: String? = null,
     payload: JsonElement? = null,
   ) {
     sink.send(
-      OverlayEvent(
+      PrototypeEvent(
         clock(),
         current.spec.id,
         nextSequence(),
@@ -350,8 +354,8 @@ class OverlayRuntime(
     )
   }
 
-  private fun snapshot(spec: OverlaySpec, previous: Map<String, Int>) =
-    OverlayRuntimeSnapshot(
+  private fun snapshot(spec: PrototypeSpec, previous: Map<String, Int>) =
+    PrototypeRuntimeSnapshot(
       spec,
       pagerCounts(spec.root).mapValues { (id, count) ->
         (previous[id] ?: 0).coerceIn(0, count - 1)
@@ -361,23 +365,23 @@ class OverlayRuntime(
 
 private val runtimeJson = Json { classDiscriminator = "type" }
 
-internal fun overlayDescendants(node: OverlayNode): List<OverlayNode> =
+internal fun prototypeDescendants(node: PrototypeNode): List<PrototypeNode> =
   when (node) {
-    is OverlayBoxNode -> node.children
-    is OverlayRowNode -> node.children
-    is OverlayColumnNode -> node.children
-    is OverlayPagerNode -> node.children
-    is OverlayCardNode -> node.children
-    is OverlayScrollNode -> listOf(node.child)
-    is OverlayBottomSheetNode -> listOf(node.child)
-    is OverlayDialogNode -> listOfNotNull(node.child)
+    is PrototypeBoxNode -> node.children
+    is PrototypeRowNode -> node.children
+    is PrototypeColumnNode -> node.children
+    is PrototypePagerNode -> node.children
+    is PrototypeCardNode -> node.children
+    is PrototypeScrollNode -> listOf(node.child)
+    is PrototypeBottomSheetNode -> listOf(node.child)
+    is PrototypeDialogNode -> listOfNotNull(node.child)
     else -> emptyList()
   }
 
-internal fun pagerCounts(root: OverlayNode): Map<String, Int> = buildMap {
-  fun visit(node: OverlayNode) {
-    if (node is OverlayPagerNode) put(node.id, node.children.size)
-    overlayDescendants(node).forEach(::visit)
+internal fun pagerCounts(root: PrototypeNode): Map<String, Int> = buildMap {
+  fun visit(node: PrototypeNode) {
+    if (node is PrototypePagerNode) put(node.id, node.children.size)
+    prototypeDescendants(node).forEach(::visit)
   }
   visit(root)
 }
@@ -385,17 +389,17 @@ internal fun pagerCounts(root: OverlayNode): Map<String, Int> = buildMap {
 /**
  * Detents retain author order; snapping uses physical height. All dimensions are window-local dp.
  */
-fun overlaySheetHeights(detents: List<OverlayDetent>, windowHeight: Double): List<Double> =
+fun prototypeSheetHeights(detents: List<PrototypeDetent>, windowHeight: Double): List<Double> =
   detents.map { detent ->
     when (detent) {
-      OverlayDetent.Half -> windowHeight / 2
-      OverlayDetent.Full -> windowHeight
-      is OverlayDetent.Dp -> detent.dp.coerceAtMost(windowHeight)
+      PrototypeDetent.Half -> windowHeight / 2
+      PrototypeDetent.Full -> windowHeight
+      is PrototypeDetent.Dp -> detent.dp.coerceAtMost(windowHeight)
     }
   }
 
 /** Positive drag is downward. Below half the smallest detent dismisses if swipe dismissal is on. */
-fun settleOverlaySheet(
+fun settlePrototypeSheet(
   heights: List<Double>,
   current: Double,
   drag: Double,

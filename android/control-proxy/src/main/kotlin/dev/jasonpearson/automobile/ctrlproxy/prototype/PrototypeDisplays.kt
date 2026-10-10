@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.annotation.TargetApi
 import android.content.Context
@@ -7,8 +7,8 @@ import android.os.Build
 import android.view.Display
 import android.view.WindowManager
 
-/** Narrow seam over DisplayManager: can this logical display host an overlay window right now? */
-fun interface OverlayDisplayProvider {
+/** Narrow seam over DisplayManager: can this logical display host a prototype window right now? */
+fun interface PrototypeDisplayProvider {
   fun isAvailable(displayId: Int): Boolean
 }
 
@@ -18,19 +18,19 @@ fun interface OverlayDisplayProvider {
  * a density read taken afresh at every layout. [navigationBarBottomPx] is the visible navigation
  * bar's height on this display, read afresh (0 when hidden or unknown).
  */
-class OverlayDisplayWindow(
+class PrototypeDisplayWindow(
   val context: Context,
   val windowManager: WindowManager,
   val navigationBarBottomPx: () -> Int = { 0 },
   val density: () -> Float,
 )
 
-fun interface OverlayDisplayWindows {
+fun interface PrototypeDisplayWindows {
   /**
    * Null when the display is unknown, disconnected, or cannot take a window of [layer]'s type. The
    * window context is created for that type, so a window added through it must use the same one.
    */
-  fun open(displayId: Int, layer: OverlayWindowLayer): OverlayDisplayWindow?
+  fun open(displayId: Int, layer: PrototypeWindowLayer): PrototypeDisplayWindow?
 }
 
 /**
@@ -41,10 +41,10 @@ fun interface OverlayDisplayWindows {
  * before they reach this class, so [open] returns null there rather than guessing; an app-layer
  * window on the default display uses the application context's WindowManager there instead.
  */
-class AndroidOverlayDisplays(
+class AndroidPrototypeDisplays(
   private val service: Context,
   private val sdkInt: Int = Build.VERSION.SDK_INT,
-) : OverlayDisplayProvider, OverlayDisplayWindows {
+) : PrototypeDisplayProvider, PrototypeDisplayWindows {
   private fun display(displayId: Int): Display? =
     (service.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)?.getDisplay(displayId)
 
@@ -52,9 +52,9 @@ class AndroidOverlayDisplays(
     displayId == Display.DEFAULT_DISPLAY || display(displayId) != null
 
   @TargetApi(Build.VERSION_CODES.R)
-  override fun open(displayId: Int, layer: OverlayWindowLayer): OverlayDisplayWindow? {
+  override fun open(displayId: Int, layer: PrototypeWindowLayer): PrototypeDisplayWindow? {
     if (sdkInt < Build.VERSION_CODES.R) {
-      return if (displayId == Display.DEFAULT_DISPLAY && layer == OverlayWindowLayer.APP) {
+      return if (displayId == Display.DEFAULT_DISPLAY && layer == PrototypeWindowLayer.APP) {
         applicationWindow()
       } else null
     }
@@ -63,7 +63,7 @@ class AndroidOverlayDisplays(
       service.createDisplayContext(display).createWindowContext(layer.windowType, null)
     val windowManager = windowContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
     return windowManager?.let {
-      OverlayDisplayWindow(
+      PrototypeDisplayWindow(
         windowContext,
         it,
         navigationBarBottomPx = { navigationBarBottomPx(it, sdkInt) },
@@ -72,11 +72,11 @@ class AndroidOverlayDisplays(
     }
   }
 
-  private fun applicationWindow(): OverlayDisplayWindow? {
+  private fun applicationWindow(): PrototypeDisplayWindow? {
     val app = service.applicationContext
     val windowManager = app.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
     return windowManager?.let {
-      OverlayDisplayWindow(
+      PrototypeDisplayWindow(
         app,
         it,
         navigationBarBottomPx = { navigationBarBottomPx(it, sdkInt) },

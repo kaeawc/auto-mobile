@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.test.runTest
@@ -13,14 +13,14 @@ import org.robolectric.annotation.Config
 /** `show` and `update` warn about referenced assets the device lacks, without failing. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayMissingAssetsTest {
+class PrototypeMissingAssetsTest {
   private data class Reply(val success: Boolean, val error: String?, val missing: List<String>)
 
-  private val host = FakeInteractiveOverlayHost()
-  private val store = OverlayAssetStore(FakeOverlayAssetFiles())
+  private val host = FakePrototypeHost()
+  private val store = PrototypeAssetStore(FakePrototypeAssetFiles())
   private val replies = mutableListOf<Reply>()
   private val sink =
-    object : OverlayResultSink {
+    object : PrototypeResultSink {
       override suspend fun send(requestId: String?, success: Boolean, error: String?) {
         replies += Reply(success, error, emptyList())
       }
@@ -35,23 +35,23 @@ class OverlayMissingAssetsTest {
       }
     }
   private val controller =
-    OverlayController(
+    PrototypeController(
       host,
       sink,
-      lifecycle = OverlayLifecycle(FakeOverlayTimer()),
-      displays = OverlayDisplayProvider { it == 2 },
+      lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+      displays = PrototypeDisplayProvider { it == 2 },
       clearAssets = { store.clear() },
       hasAsset = { store.lookup(it) != null },
     )
 
   private fun spec(vararg assets: String) =
-    OverlaySpec(
+    PrototypeSpec(
       "panel",
-      OverlayWindow(OverlayFullscreenPlacement()),
-      root = OverlayColumnNode(children = assets.map { OverlayImageNode(asset = it) }),
+      PrototypeWindow(PrototypeFullscreenPlacement()),
+      root = PrototypeColumnNode(children = assets.map { PrototypeImageNode(asset = it) }),
     )
 
-  private fun upload(id: String) = store.put(id, "image/png", OverlayAssetBytes.png())
+  private fun upload(id: String) = store.put(id, "image/png", PrototypeAssetBytes.png())
 
   @Test
   fun `show reports referenced assets that were never uploaded and still succeeds`() = runTest {
@@ -97,7 +97,7 @@ class OverlayMissingAssetsTest {
   @Test
   fun `a failed show carries no missing list`() = runTest {
     val invalid =
-      spec("gone").copy(root = OverlayTextNode(text = "x", style = OverlayStyle(alpha = 2.0)))
+      spec("gone").copy(root = PrototypeTextNode(text = "x", style = PrototypeStyle(alpha = 2.0)))
     controller.show("r1", invalid)
     assertFalse(replies.last().success)
     assertEquals(emptyList<String>(), replies.last().missing)

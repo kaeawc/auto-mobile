@@ -1,15 +1,15 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import dev.jasonpearson.automobile.protocol.OverlayStyle
+import dev.jasonpearson.automobile.protocol.PrototypeStyle
 
 /**
  * Reserve explicit gaps first, then distribute remaining free space using the chosen arrangement.
  */
-fun overlayHorizontalArrangement(style: OverlayStyle): Arrangement.Horizontal {
+fun prototypeHorizontalArrangement(style: PrototypeStyle): Arrangement.Horizontal {
   val base =
     when (style.arrangement) {
       "center" -> Arrangement.Center
@@ -45,7 +45,7 @@ fun overlayHorizontalArrangement(style: OverlayStyle): Arrangement.Horizontal {
   }
 }
 
-fun overlayVerticalArrangement(style: OverlayStyle): Arrangement.Vertical {
+fun prototypeVerticalArrangement(style: PrototypeStyle): Arrangement.Vertical {
   val base =
     when (style.arrangement) {
       "center" -> Arrangement.Center

@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.os.Looper
 import android.view.View
@@ -30,30 +30,32 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
- * Anchored overlay nodes land on their screen-space dp bounds whatever window they are in (#9316).
+ * Anchored prototype nodes land on their screen-space dp bounds whatever window they are in
+ * (#9316).
  *
- * The target is the Playground `button_elevated` from the captured API 36 overlay hierarchy
- * (`test/fixtures/android-overlay-window/floating-overlay-over-button-elevated.raw.json`):
+ * The target is the Playground `button_elevated` from the captured API 36 prototype hierarchy
+ * (`test/fixtures/android-prototype-window/floating-prototype-over-button-elevated.raw.json`):
  * [550,1589,996,1715] px at 420 dpi on a 1080x2400 screen with a 136 px top cutout. The host sends
  * it as px * 160 / 420 dp.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h914dp-420dpi")
-class OverlayAnchorLayoutTest {
+class PrototypeAnchorLayoutTest {
   private val target = Rect(550f, 1589f, 996f, 1715f)
   private val targetDp =
-    OverlayBounds(550 / DENSITY_D, 1589 / DENSITY_D, 446 / DENSITY_D, 126 / DENSITY_D)
+    PrototypeBounds(550 / DENSITY_D, 1589 / DENSITY_D, 446 / DENSITY_D, 126 / DENSITY_D)
 
-  private fun cover(offset: OverlayOffset? = null) = OverlayBoundsAnchor(targetDp, "cover", offset)
+  private fun cover(offset: PrototypeOffset? = null) =
+    PrototypeBoundsAnchor(targetDp, "cover", offset)
 
-  private fun box(anchor: OverlayAnchor?, style: OverlayStyle? = null) =
-    OverlayBoxNode(testTag = "anchored", anchor = anchor, style = style, children = emptyList())
+  private fun box(anchor: PrototypeAnchor?, style: PrototypeStyle? = null) =
+    PrototypeBoxNode(testTag = "anchored", anchor = anchor, style = style, children = emptyList())
 
   /** A column the anchored node sits in, below other content, so its slot is not the origin. */
-  private fun nested(node: OverlayNode) =
-    OverlayColumnNode(
-      style = OverlayStyle(padding = OverlayPadding(start = 12.0, top = 30.0)),
-      children = listOf(OverlayTextNode(text = "above"), node, OverlayTextNode(text = "below")),
+  private fun nested(node: PrototypeNode) =
+    PrototypeColumnNode(
+      style = PrototypeStyle(padding = PrototypePadding(start = 12.0, top = 30.0)),
+      children = listOf(PrototypeTextNode(text = "above"), node, PrototypeTextNode(text = "below")),
     )
 
   private class Rendered(val root: SemanticsNode, val moves: List<IntOffset>)
@@ -64,28 +66,31 @@ class OverlayAnchorLayoutTest {
    * screen; [floating] supplies the host's window mover, as the host does for floating windows.
    */
   private fun render(
-    placement: OverlayPlacement,
-    root: OverlayNode,
+    placement: PrototypePlacement,
+    root: PrototypeNode,
     windowOrigin: Offset = Offset.Zero,
     cutoutPx: Int = 0,
     floating: Boolean = false,
   ): Rendered {
     val moves = mutableListOf<IntOffset>()
     val geometry =
-      OverlayWindowGeometry({ windowOrigin }, if (floating) { origin -> moves += origin } else null)
-    val spec = OverlaySpec("anchor", OverlayWindow(OverlayFullscreenPlacement()), root = root)
+      PrototypeWindowGeometry(
+        { windowOrigin },
+        if (floating) { origin -> moves += origin } else null,
+      )
+    val spec = PrototypeSpec("anchor", PrototypeWindow(PrototypeFullscreenPlacement()), root = root)
     val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
     activity.setContent {
       val cutout = with(LocalDensity.current) { cutoutPx.toDp() }
-      CompositionLocalProvider(LocalOverlayWindowGeometry provides geometry) {
+      CompositionLocalProvider(LocalPrototypeWindowGeometry provides geometry) {
         Box(Modifier.padding(top = cutout)) {
-          InteractiveOverlayWindowContent(
-            InteractiveOverlayRequest(
+          PrototypeWindowContent(
+            PrototypeRequest(
               placement = placement,
-              content = { OverlaySpecContent(mapOverlaySpec(spec).root) },
+              content = { PrototypeSpecContent(mapPrototypeSpec(spec).root) },
             ),
           ) {
-            OverlayInsetFloor.None
+            PrototypeInsetFloor.None
           }
         }
       }
@@ -138,14 +143,15 @@ class OverlayAnchorLayoutTest {
 
   @Test
   fun `a cover anchor in a fullscreen window lands on the target under the cutout and host row`() {
-    val rendered = render(OverlayPlacement.Fullscreen(), nested(box(cover())), cutoutPx = CUTOUT_PX)
+    val rendered =
+      render(PrototypePlacement.Fullscreen(), nested(box(cover())), cutoutPx = CUTOUT_PX)
     assertRect(target, rendered.root.anchored().drawnInWindow())
   }
 
   @Test
   fun `a fullscreen window origin is subtracted from the anchor`() {
     val origin = Offset(0f, 48f)
-    val rendered = render(OverlayPlacement.Fullscreen(), box(cover()), windowOrigin = origin)
+    val rendered = render(PrototypePlacement.Fullscreen(), box(cover()), windowOrigin = origin)
     assertRect(target.translate(-origin), rendered.root.anchored().drawnInWindow())
   }
 
@@ -154,7 +160,7 @@ class OverlayAnchorLayoutTest {
     val origin = Offset(0f, 2400f - 1050f)
     val rendered =
       render(
-        OverlayPlacement.Sheet(OverlayPlacement.Edge.BOTTOM, 400f),
+        PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 400f),
         nested(box(cover())),
         windowOrigin = origin,
       )
@@ -164,12 +170,12 @@ class OverlayAnchorLayoutTest {
   @Test
   fun `a safe-area padded parent does not move the anchored node`() {
     val parent =
-      OverlayColumnNode(
-        safeAreaPadding = OverlaySafeAreaPadding(listOf("top", "start"), listOf("systemBars")),
-        style = OverlayStyle(padding = OverlayPadding(top = 40.0, start = 40.0)),
+      PrototypeColumnNode(
+        safeAreaPadding = PrototypeSafeAreaPadding(listOf("top", "start"), listOf("systemBars")),
+        style = PrototypeStyle(padding = PrototypePadding(top = 40.0, start = 40.0)),
         children = listOf(box(cover())),
       )
-    val rendered = render(OverlayPlacement.Fullscreen(), parent, cutoutPx = CUTOUT_PX)
+    val rendered = render(PrototypePlacement.Fullscreen(), parent, cutoutPx = CUTOUT_PX)
     assertRect(target, rendered.root.anchored().drawnInWindow())
   }
 
@@ -178,7 +184,7 @@ class OverlayAnchorLayoutTest {
     val origin = Offset(DENSITY * 24f, DENSITY * 120f)
     val rendered =
       render(
-        OverlayPlacement.Floating(offsetXDp = 24f, offsetYDp = 120f),
+        PrototypePlacement.Floating(offsetXDp = 24f, offsetYDp = 120f),
         box(cover()),
         windowOrigin = origin,
         floating = true,
@@ -195,7 +201,7 @@ class OverlayAnchorLayoutTest {
     val origin = Offset(500f, 1500f)
     val rendered =
       render(
-        OverlayPlacement.Floating(),
+        PrototypePlacement.Floating(),
         nested(box(cover())),
         windowOrigin = origin,
         floating = true,
@@ -206,10 +212,11 @@ class OverlayAnchorLayoutTest {
 
   @Test
   fun `a bottom anchor keeps the node's size, aligns its bottom edge and applies the offset`() {
-    val size = OverlayStyle(width = OverlayDimension.Dp(100.0), height = OverlayDimension.Dp(20.0))
-    val anchor = OverlayBoundsAnchor(targetDp, "bottom", OverlayOffset(0.0, 8.0))
+    val size =
+      PrototypeStyle(width = PrototypeDimension.Dp(100.0), height = PrototypeDimension.Dp(20.0))
+    val anchor = PrototypeBoundsAnchor(targetDp, "bottom", PrototypeOffset(0.0, 8.0))
     val rendered =
-      render(OverlayPlacement.Fullscreen(), nested(box(anchor, size)), cutoutPx = CUTOUT_PX)
+      render(PrototypePlacement.Fullscreen(), nested(box(anchor, size)), cutoutPx = CUTOUT_PX)
     val width = 100 * DENSITY
     val height = 20 * DENSITY
     val left = target.center.x - width / 2
@@ -224,14 +231,14 @@ class OverlayAnchorLayoutTest {
   fun `anchor rectangles at several densities`() {
     for (density in listOf(2.625f, 2.75f, 2.33125f, 1f)) {
       val bounds =
-        OverlayBounds(
+        PrototypeBounds(
           550 / density.toDouble(),
           1589 / density.toDouble(),
           446 / density.toDouble(),
           126 / density.toDouble(),
         )
       val rect =
-        overlayAnchorRect(OverlayBoundsAnchor(bounds), density, 0f, 0f, LayoutDirection.Ltr)
+        prototypeAnchorRect(PrototypeBoundsAnchor(bounds), density, 0f, 0f, LayoutDirection.Ltr)
       assertRect(target, rect)
     }
   }
@@ -239,10 +246,10 @@ class OverlayAnchorLayoutTest {
   @Test
   fun `edge alignments centre on the other axis and start and end follow layout direction`() {
     val anchor = { alignment: String ->
-      OverlayBoundsAnchor(OverlayBounds(10.0, 20.0, 100.0, 40.0), alignment)
+      PrototypeBoundsAnchor(PrototypeBounds(10.0, 20.0, 100.0, 40.0), alignment)
     }
     fun rect(alignment: String, direction: LayoutDirection = LayoutDirection.Ltr) =
-      overlayAnchorRect(anchor(alignment), 2f, 40f, 20f, direction)
+      prototypeAnchorRect(anchor(alignment), 2f, 40f, 20f, direction)
     assertEquals(Rect(100f, 40f, 140f, 60f), rect("top"))
     assertEquals(Rect(100f, 100f, 140f, 120f), rect("bottom"))
     assertEquals(Rect(20f, 70f, 60f, 90f), rect("start"))
@@ -251,10 +258,10 @@ class OverlayAnchorLayoutTest {
     assertEquals(Rect(20f, 70f, 60f, 90f), rect("end", LayoutDirection.Rtl))
     assertEquals(
       Rect(26f, 34f, 226f, 114f),
-      overlayAnchorRect(
-        OverlayBoundsAnchor(
-          OverlayBounds(10.0, 20.0, 100.0, 40.0),
-          offset = OverlayOffset(3.0, -3.0),
+      prototypeAnchorRect(
+        PrototypeBoundsAnchor(
+          PrototypeBounds(10.0, 20.0, 100.0, 40.0),
+          offset = PrototypeOffset(3.0, -3.0),
         ),
         2f,
         0f,
@@ -266,16 +273,16 @@ class OverlayAnchorLayoutTest {
 
   @Test
   fun `an element anchor that reaches the device unresolved is refused with its path`() {
-    val element = OverlayElementAnchor(OverlaySelector(testTag = "buy"), alignment = "cover")
+    val element = PrototypeElementAnchor(PrototypeSelector(testTag = "buy"), alignment = "cover")
     val error =
       assertThrows(IllegalArgumentException::class.java) {
-        requireResolvedOverlayAnchors(nested(box(element)))
+        requireResolvedPrototypeAnchors(nested(box(element)))
       }
     assertEquals(
       "root.children[1].anchor: Element anchors must be resolved to bounds by the host; update the AutoMobile host",
       error.message,
     )
-    requireResolvedOverlayAnchors(nested(box(cover())))
+    requireResolvedPrototypeAnchors(nested(box(cover())))
   }
 
   private companion object {

@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.os.Looper
 import android.view.View
@@ -23,30 +23,30 @@ import org.robolectric.Shadows.shadowOf
 
 /** What observe and tapOn see for the Material component nodes (#10439). */
 @RunWith(RobolectricTestRunner::class)
-class OverlayComponentSemanticsTest {
-  private val interactions = mutableListOf<OverlayInteraction>()
-  private val save = listOf<OverlayAction>(OverlayEmitAction("save"))
+class PrototypeComponentSemanticsTest {
+  private val interactions = mutableListOf<PrototypeInteraction>()
+  private val save = listOf<PrototypeAction>(PrototypeEmitAction("save"))
 
   private fun render(): SemanticsNode {
     val spec =
-      OverlaySpec(
+      PrototypeSpec(
         "panel",
-        OverlayWindow(OverlayFullscreenPlacement()),
+        PrototypeWindow(PrototypeFullscreenPlacement()),
         mapOf(
-          "alarm" to OverlayScalar.BooleanValue(true),
-          "repeat" to OverlayScalar.BooleanValue(false),
-          "volume" to OverlayScalar.Numeric(7.0),
-          "mon" to OverlayScalar.BooleanValue(true),
-          "tue" to OverlayScalar.BooleanValue(false),
+          "alarm" to PrototypeScalar.BooleanValue(true),
+          "repeat" to PrototypeScalar.BooleanValue(false),
+          "volume" to PrototypeScalar.Numeric(7.0),
+          "mon" to PrototypeScalar.BooleanValue(true),
+          "tue" to PrototypeScalar.BooleanValue(false),
         ),
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlaySwitchNode(testTag = "alarm", stateKey = "alarm", label = "Alarm"),
-              OverlayCheckboxNode(testTag = "repeat", stateKey = "repeat", onTap = save),
-              OverlayButtonNode(testTag = "save", label = "Save", onTap = save),
-              OverlayButtonNode(testTag = "cancel", label = "Cancel", variant = "text"),
-              OverlaySliderNode(
+              PrototypeSwitchNode(testTag = "alarm", stateKey = "alarm", label = "Alarm"),
+              PrototypeCheckboxNode(testTag = "repeat", stateKey = "repeat", onTap = save),
+              PrototypeButtonNode(testTag = "save", label = "Save", onTap = save),
+              PrototypeButtonNode(testTag = "cancel", label = "Cancel", variant = "text"),
+              PrototypeSliderNode(
                 testTag = "volume",
                 stateKey = "volume",
                 label = "Volume",
@@ -54,19 +54,19 @@ class OverlayComponentSemanticsTest {
                 max = 10.0,
                 step = 1.0,
               ),
-              OverlayChipNode(testTag = "mon", label = "Mon", stateKey = "mon"),
-              OverlayChipNode(testTag = "tue", label = "Tue", stateKey = "tue"),
-              OverlayChipNode(testTag = "add", label = "Add", onTap = save),
-              OverlayCardNode(
+              PrototypeChipNode(testTag = "mon", label = "Mon", stateKey = "mon"),
+              PrototypeChipNode(testTag = "tue", label = "Tue", stateKey = "tue"),
+              PrototypeChipNode(testTag = "add", label = "Add", onTap = save),
+              PrototypeCardNode(
                 testTag = "card",
                 variant = "outlined",
-                children = listOf(OverlayButtonNode(testTag = "inner", label = "Inner")),
+                children = listOf(PrototypeButtonNode(testTag = "inner", label = "Inner")),
               ),
             ),
         ),
       )
     val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
-    activity.setContent { OverlaySpecContent(mapOverlaySpec(spec).root) { interactions += it } }
+    activity.setContent { PrototypeSpecContent(mapPrototypeSpec(spec).root) { interactions += it } }
     shadowOf(Looper.getMainLooper()).idle()
     val view = checkNotNull(composeView(activity.window.decorView))
     return (view as RootForTest).semanticsOwner.rootSemanticsNode
@@ -102,7 +102,7 @@ class OverlayComponentSemanticsTest {
     assertEquals(listOf(AnnotatedString("Alarm")), node.config[SemanticsProperties.Text])
     assertEquals(listOf("Alarm"), node.config[SemanticsProperties.ContentDescription])
     node.click()
-    assertEquals(listOf(OverlayInteraction.Toggle("alarm")), interactions)
+    assertEquals(listOf(PrototypeInteraction.Toggle("alarm")), interactions)
   }
 
   @Test
@@ -111,7 +111,7 @@ class OverlayComponentSemanticsTest {
     assertEquals(Role.Checkbox, node.config[SemanticsProperties.Role])
     assertEquals(ToggleableState.Off, node.config[SemanticsProperties.ToggleableState])
     node.click()
-    assertEquals(listOf(OverlayInteraction.Toggle("repeat", save)), interactions)
+    assertEquals(listOf(PrototypeInteraction.Toggle("repeat", save)), interactions)
   }
 
   @Test
@@ -123,7 +123,7 @@ class OverlayComponentSemanticsTest {
     assertFalse(node.config.contains(SemanticsProperties.ToggleableState))
     node.click()
     root.tagged("cancel").click()
-    assertEquals(listOf(OverlayInteraction.Tap(save)), interactions)
+    assertEquals(listOf(PrototypeInteraction.Tap(save)), interactions)
   }
 
   @Test
@@ -136,7 +136,7 @@ class OverlayComponentSemanticsTest {
     assertEquals(listOf(AnnotatedString("Volume")), node.config[SemanticsProperties.Text])
     assertEquals(listOf("Volume"), node.config[SemanticsProperties.ContentDescription])
     assertEquals(true, checkNotNull(node.config[SemanticsActions.SetProgress].action)(8f))
-    assertEquals(listOf(OverlayInteraction.Slide("volume", 8.0)), interactions)
+    assertEquals(listOf(PrototypeInteraction.Slide("volume", 8.0)), interactions)
   }
 
   @Test
@@ -156,9 +156,9 @@ class OverlayComponentSemanticsTest {
     assist.click()
     assertEquals(
       listOf(
-        OverlayInteraction.Toggle("mon"),
-        OverlayInteraction.Toggle("tue"),
-        OverlayInteraction.Tap(save),
+        PrototypeInteraction.Toggle("mon"),
+        PrototypeInteraction.Toggle("tue"),
+        PrototypeInteraction.Tap(save),
       ),
       interactions,
     )

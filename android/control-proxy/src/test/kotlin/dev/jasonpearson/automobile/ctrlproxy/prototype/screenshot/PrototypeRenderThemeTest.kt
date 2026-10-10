@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay.screenshot
+package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.app.Application
 import org.junit.Assert.assertTrue
@@ -9,32 +9,32 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * [renderOverlay] must pass the spec's own theme to the renderer (#11217): a `mode: dark` spec
+ * [renderPrototype] must pass the spec's own theme to the renderer (#11217): a `mode: dark` spec
  * draws light-on-dark ink on a light device. Compares luminance, not baselines, so it runs on any
  * OS.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], application = Application::class, qualifiers = "+notnight")
-class OverlayRenderThemeTest {
+class PrototypeRenderThemeTest {
 
   @Test
   fun darkSpecThemeDrawsLightInkOnLightDevice() {
-    val image = renderOverlay("theme-seed", validOverlayFixture("theme-seed"))
+    val image = renderPrototype("theme-seed", validPrototypeFixture("theme-seed"))
     assertTrue("expected light ink, got ${luminance(image)}", luminance(image) > 0.7)
   }
 
   @Test
   fun lightSpecThemeDrawsDarkInkOnLightDevice() {
     val image =
-      renderOverlay("theme-typography-shapes", validOverlayFixture("theme-typography-shapes"))
+      renderPrototype("theme-typography-shapes", validPrototypeFixture("theme-typography-shapes"))
     assertTrue("expected dark ink, got ${luminance(image)}", luminance(image) < 0.3)
   }
 
   /** Mean luminance of the opaque-ish pixels: the surface when painted, else the text ink. */
-  private fun luminance(image: OverlayScreenshotComparator.Image): Double {
+  private fun luminance(image: PrototypeScreenshotComparator.Image): Double {
     val drawn = image.pixels.filter { (it ushr 24) > 0x80 }
-    check(drawn.isNotEmpty()) { "overlay drew nothing opaque" }
+    check(drawn.isNotEmpty()) { "prototype drew nothing opaque" }
     return drawn.map(::pixelLuminance).average()
   }
 

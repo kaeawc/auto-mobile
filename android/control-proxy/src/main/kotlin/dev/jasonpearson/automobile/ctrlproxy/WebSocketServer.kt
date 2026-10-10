@@ -111,15 +111,15 @@ class WebSocketServer(
       }
 
     /** Requests that carry image bytes; their frames and decoder snippets are never logged. */
-    private val overlayAssetRequestTypes = setOf("put_overlay_asset", "remove_overlay_asset")
+    private val prototypeAssetRequestTypes = setOf("put_prototype_asset", "remove_prototype_asset")
 
     /**
      * True for an asset request, including one too broken for its `type` to parse: the raw text
      * still names the type, and such a frame can be as full of image bytes as a well-formed one.
      */
-    private fun isOverlayAssetFrame(raw: String, type: String?): Boolean =
-      if (type != null) type in overlayAssetRequestTypes
-      else overlayAssetRequestTypes.any { raw.contains("\"$it\"") }
+    private fun isPrototypeAssetFrame(raw: String, type: String?): Boolean =
+      if (type != null) type in prototypeAssetRequestTypes
+      else prototypeAssetRequestTypes.any { raw.contains("\"$it\"") }
 
     /**
      * kotlinx.serialization appends the input around the failing offset after "JSON input:"; for an
@@ -131,9 +131,12 @@ class WebSocketServer(
     private const val JSON_INPUT_MARKER = "JSON input:"
     private const val MAX_DIAGNOSIS_LENGTH = 200
 
-    /** Overlay requests answer a malformed frame with an `overlay_result` rather than an error. */
-    private val overlayRequestTypes =
-      setOf("show_overlay", "dismiss_overlay", "inspect_overlays") + overlayAssetRequestTypes
+    /**
+     * Prototype requests answer a malformed frame with a `prototype_result` rather than an error.
+     */
+    private val prototypeRequestTypes =
+      setOf("show_prototype", "dismiss_prototype", "inspect_prototypes") +
+        prototypeAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */
     private val textInputRequestTypes =
@@ -218,7 +221,7 @@ class WebSocketServer(
         is CurrentFocusResult -> response.requestId
         is TraversalOrderResult -> response.requestId
         is HighlightResponse -> response.requestId
-        is OverlayResult -> response.requestId
+        is PrototypeResult -> response.requestId
         is dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult -> response.requestId
         is dev.jasonpearson.automobile.protocol.SdkCapabilitiesResult -> response.requestId
         is PreferenceFilesResult -> response.requestId
@@ -235,7 +238,7 @@ class WebSocketServer(
         is HierarchyUpdateEvent -> response.requestId
         // Other event/status frames never echo a requestId.
         is ConnectedResponse,
-        is OverlayEvent,
+        is PrototypeEvent,
         is InteractionEvent,
         is PackageEvent,
         is NavigationEventResponse,
@@ -271,7 +274,8 @@ class WebSocketServer(
           ?: throwable::class.simpleName
           ?: "unknown error"
       val type = extractStringField(raw, "type")
-      if (isOverlayAssetFrame(raw, type)) return "Malformed request: ${withoutInputSnippet(cause)}"
+      if (isPrototypeAssetFrame(raw, type))
+        return "Malformed request: ${withoutInputSnippet(cause)}"
       if (type != null && type !in registeredRequestTypes) return "Unknown command type: $type"
       val looksLikeOutOfRangeNumber =
         cause.contains("special floating-point value", ignoreCase = true) ||
@@ -281,7 +285,7 @@ class WebSocketServer(
         return "Malformed request: a numeric value is out of range or not representable."
       }
       if (
-        type in listOf("show_overlay", "dismiss_overlay") &&
+        type in listOf("show_prototype", "dismiss_prototype") &&
           cause.contains("Class discriminator was missing") &&
           !cause.contains("at path:")
       ) {
@@ -331,30 +335,35 @@ class WebSocketServer(
     // service lacking this flag, which would otherwise read the app instance of its own user.
     add("sdk_capabilities_user_id_v1")
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
-    // show_overlay honours displayId. Hosts must not send it to a device lacking this flag: the
-    // decoder ignores unknown fields, so the overlay would silently land on the default display.
-    if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("overlay_display_id_v1")
-    // Overlay specs honour window.layer and window.persistence. The request decoder ignores unknown
-    // spec fields, so an older device would silently show a session-scoped system-layer overlay.
-    add("overlay_window_options_v1")
-    // A device-persistent overlay buffers its events while no host is connected and replays them,
-    // and inspect_overlays reports what it is showing. Older hosts never send inspect_overlays.
-    add("overlay_persistence_replay_v1")
-    // show_overlay replaces a same-id overlay in place (display and pager pages kept) unless reset
+    // show_prototype honours displayId. Hosts must not send it to a device lacking this flag: the
+    // decoder ignores unknown fields, so the prototype would silently land on the default display.
+    if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("prototype_display_id_v1")
+    // Prototype specs honour window.layer and window.persistence. The request decoder ignores
+    // unknown
+    // spec fields, so an older device would silently show a session-scoped system-layer prototype.
+    add("prototype_window_options_v1")
+    // A device-persistent prototype buffers its events while no host is connected and replays them,
+    // and inspect_prototypes reports what it is showing. Older hosts never send inspect_prototypes.
+    add("prototype_persistence_replay_v1")
+    // show_prototype replaces a same-id prototype in place (display and pager pages kept) unless
+    // reset
     // is set. Older APKs ignore reset and re-show fresh; hosts warn that pages restarted (#10642).
-    add("overlay_show_in_place_v1")
-    // Overlay nodes with a bounds anchor are laid out at those screen dp bounds, relative to the
+    add("prototype_show_in_place_v1")
+    // Prototype nodes with a bounds anchor are laid out at those screen dp bounds, relative to the
     // window's own origin. Older APKs decode anchors and ignore them, so hosts refuse anchors
     // there.
-    add("overlay_anchor_v1")
-    // Window entries for CtrlProxy's own interactive overlay carry overlayPlacement and
-    // overlayOpaque, so the host can tell how much of the app the overlay hides. Older APKs never
+    add("prototype_anchor_v1")
+    // Window entries for CtrlProxy's own prototype carry prototypePlacement and
+    // prototypeOpaque, so the host can tell how much of the app the prototype hides. Older APKs
+    // never
     // send them and the host falls back to bounds.
-    add("overlay_window_metadata_v1")
-    // request_screenshot honours hideOverlays: the interactive overlay is hidden, a frame confirms
-    // it, the capture runs and the overlay is restored, all in that one request (#9305). Older APKs
-    // ignore the field, so hosts keep reporting that an app-layer screenshot includes the overlay.
-    add("screenshot_hide_overlay_v1")
+    add("prototype_window_metadata_v1")
+    // request_screenshot honours hidePrototypes: the prototype is hidden, a frame confirms
+    // it, the capture runs and the prototype is restored, all in that one request (#9305). Older
+    // APKs
+    // ignore the field, so hosts keep reporting that an app-layer screenshot includes the
+    // prototype.
+    add("screenshot_hide_prototype_v1")
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for
     // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.
@@ -384,7 +393,7 @@ class WebSocketServer(
   }
 
   /**
-   * Host validation rejects unknown overlay fields and enforces limits. Device decoding remains
+   * Host validation rejects unknown prototype fields and enforces limits. Device decoding remains
    * lenient for compatibility; device re-validation belongs to #9297/#9299.
    */
   private val protocolJson = Json {
@@ -1093,8 +1102,8 @@ class WebSocketServer(
     Log.w(TAG, "Rejected frame from client #$connectionId: ${rejection.message}")
     sendErrorResponse(
       connection,
-      if (rejection.type in overlayRequestTypes) {
-        OverlayResult(
+      if (rejection.type in prototypeRequestTypes) {
+        PrototypeResult(
           timestamp = System.currentTimeMillis(),
           requestId = rejection.requestId,
           success = false,
@@ -1112,7 +1121,7 @@ class WebSocketServer(
   internal suspend fun handleClientMessage(message: String, connection: ConnectedClient) {
     val handler = messageHandler
     if (handler == null) {
-      // Length only: an inbound frame can carry overlay asset bytes.
+      // Length only: an inbound frame can carry prototype asset bytes.
       Log.w(
         TAG,
         "No message handler configured; ignoring inbound message (${message.length} chars)",
@@ -1133,7 +1142,7 @@ class WebSocketServer(
         // the failure: a silent return leaves the daemon's awaiter hanging until timeout. See
         // #2985.
         val type = extractStringField(message, "type")
-        if (isOverlayAssetFrame(message, type)) {
+        if (isPrototypeAssetFrame(message, type)) {
           // Never echo the frame or the decoder's input snippet: it holds asset bytes.
           Log.w(
             TAG,
@@ -1147,8 +1156,8 @@ class WebSocketServer(
         }
         sendErrorResponse(
           connection,
-          if (type in overlayRequestTypes) {
-            OverlayResult(
+          if (type in prototypeRequestTypes) {
+            PrototypeResult(
               timestamp = System.currentTimeMillis(),
               requestId = extractRequestId(message),
               success = false,

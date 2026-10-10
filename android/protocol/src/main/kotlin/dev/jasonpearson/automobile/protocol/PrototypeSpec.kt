@@ -5,13 +5,13 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
 @Serializable
-data class OverlayOffset(
+data class PrototypeOffset(
   val x: Double,
   val y: Double,
 )
 
 @Serializable
-data class OverlayBounds(
+data class PrototypeBounds(
   val x: Double,
   val y: Double,
   val width: Double,
@@ -19,48 +19,48 @@ data class OverlayBounds(
 )
 
 @Serializable
-data class OverlayContainer(
+data class PrototypeContainer(
   val elementId: String? = null,
   val text: String? = null,
   val index: Int? = null,
   val selectionStrategy: String? = null,
-  val container: OverlayContainer? = null,
+  val container: PrototypeContainer? = null,
 )
 
 @Serializable
-data class OverlaySelector(
+data class PrototypeSelector(
   val elementId: String? = null,
   val text: String? = null,
   val testTag: String? = null,
-  val container: OverlayContainer? = null,
+  val container: PrototypeContainer? = null,
 )
 
 @Serializable
-data class OverlayCondition(
+data class PrototypeCondition(
   val key: String? = null,
-  val equals: OverlayScalar? = null,
-  val notEquals: OverlayScalar? = null,
+  val equals: PrototypeScalar? = null,
+  val notEquals: PrototypeScalar? = null,
   val gt: Double? = null,
   val lt: Double? = null,
-  val all: List<OverlayCondition>? = null,
-  val any: List<OverlayCondition>? = null,
-  val not: OverlayCondition? = null,
+  val all: List<PrototypeCondition>? = null,
+  val any: List<PrototypeCondition>? = null,
+  val not: PrototypeCondition? = null,
 )
 
 @Serializable
-data class OverlaySheetCondition(
+data class PrototypeSheetCondition(
   val key: String,
   val equals: Boolean,
 )
 
 @Serializable
-data class OverlaySafeAreaPadding(
+data class PrototypeSafeAreaPadding(
   val edges: List<String>,
   val types: List<String>,
 )
 
 @Serializable
-data class OverlayPadding(
+data class PrototypePadding(
   val top: Double? = null,
   val bottom: Double? = null,
   val start: Double? = null,
@@ -68,51 +68,51 @@ data class OverlayPadding(
 )
 
 @Serializable
-data class OverlayBorder(
+data class PrototypeBorder(
   val width: Double,
   val color: String,
 )
 
 @Serializable
-data class OverlayGradientStop(
+data class PrototypeGradientStop(
   val color: String,
   val position: Double? = null,
 )
 
-@Serializable sealed class OverlayGradient
+@Serializable sealed class PrototypeGradient
 
 @SerialName("linear")
 @Serializable
-data class OverlayLinearGradient(
+data class PrototypeLinearGradient(
   val angle: Double,
-  val stops: List<OverlayGradientStop>,
-) : OverlayGradient()
+  val stops: List<PrototypeGradientStop>,
+) : PrototypeGradient()
 
 @SerialName("radial")
 @Serializable
-data class OverlayRadialGradient(val stops: List<OverlayGradientStop>) : OverlayGradient()
+data class PrototypeRadialGradient(val stops: List<PrototypeGradientStop>) : PrototypeGradient()
 
 @Serializable
-data class OverlayStyle(
-  val width: OverlayDimension? = null,
-  val height: OverlayDimension? = null,
+data class PrototypeStyle(
+  val width: PrototypeDimension? = null,
+  val height: PrototypeDimension? = null,
   val weight: Double? = null,
   val minWidth: Double? = null,
   val maxWidth: Double? = null,
   val minHeight: Double? = null,
   val maxHeight: Double? = null,
-  val padding: OverlayPadding? = null,
+  val padding: PrototypePadding? = null,
   val background: String? = null,
   /** A dp number, a Material Shapes token, or per-corner dp radii. */
-  val cornerRadius: OverlayCornerRadius? = null,
-  val border: OverlayBorder? = null,
+  val cornerRadius: PrototypeCornerRadius? = null,
+  val border: PrototypeBorder? = null,
   val elevation: Double? = null,
   /** Hex or colour role tinting the `elevation` shadow; absent keeps the platform shadow colour. */
   val shadowColor: String? = null,
-  val gradient: OverlayGradient? = null,
+  val gradient: PrototypeGradient? = null,
   val aspectRatio: Double? = null,
   /** A dp draw offset; it moves the drawn and touchable node without changing its layout slot. */
-  val offset: OverlayOffset? = null,
+  val offset: PrototypeOffset? = null,
   val alpha: Double? = null,
   /** Scale (0.5-1) a tappable node shrinks to while pressed; absent leaves it unscaled. */
   val pressScale: Double? = null,
@@ -134,7 +134,7 @@ data class OverlayStyle(
   val fontStyle: String? = null,
   /** How text past `maxLines` or its width ends: `clip` (default), `ellipsis` or `visible`. */
   val overflow: String? = null,
-  val fontFamily: OverlayFontFamily? = null,
+  val fontFamily: PrototypeFontFamily? = null,
   /** A Material 3 type role (`titleLarge`, ...); explicit size, weight and family still win. */
   val textStyle: String? = null,
 )
@@ -144,18 +144,19 @@ data class OverlayStyle(
  * `{as.field}` and `{index}` bound per instance. Each item maps field names to scalar values.
  */
 @Serializable
-data class OverlayRepeat(val items: List<Map<String, OverlayScalar>>, val `as`: String)
-
-@Serializable data class OverlayStyleWhen(val `when`: OverlayCondition, val style: OverlayStyle)
+data class PrototypeRepeat(val items: List<Map<String, PrototypeScalar>>, val `as`: String)
 
 @Serializable
-data class OverlayItem(
+data class PrototypeStyleWhen(val `when`: PrototypeCondition, val style: PrototypeStyle)
+
+@Serializable
+data class PrototypeItem(
   val label: String,
   val icon: String? = null,
   val image: String? = null,
 )
 
-@Serializable sealed class OverlayAnchor
+@Serializable sealed class PrototypeAnchor
 
 /**
  * Screen-space dp [bounds]. [alignment] (`cover` when absent) lays the node over them or along one
@@ -164,507 +165,507 @@ data class OverlayItem(
  */
 @SerialName("bounds")
 @Serializable
-data class OverlayBoundsAnchor(
-  val bounds: OverlayBounds,
+data class PrototypeBoundsAnchor(
+  val bounds: PrototypeBounds,
   val alignment: String? = null,
-  val offset: OverlayOffset? = null,
-) : OverlayAnchor()
+  val offset: PrototypeOffset? = null,
+) : PrototypeAnchor()
 
 @SerialName("element")
 @Serializable
-data class OverlayElementAnchor(
-  val selector: OverlaySelector,
+data class PrototypeElementAnchor(
+  val selector: PrototypeSelector,
   val alignment: String,
-  val offset: OverlayOffset? = null,
-) : OverlayAnchor()
+  val offset: PrototypeOffset? = null,
+) : PrototypeAnchor()
 
-@Serializable sealed class OverlayPlacement
+@Serializable sealed class PrototypePlacement
 
 @SerialName("fullscreen")
 @Serializable
-data class OverlayFullscreenPlacement(val scrim: String? = null) : OverlayPlacement()
+data class PrototypeFullscreenPlacement(val scrim: String? = null) : PrototypePlacement()
 
 @SerialName("sheet")
 @Serializable
-data class OverlaySheetPlacement(
+data class PrototypeSheetPlacement(
   val edge: String,
   val height: Double,
-) : OverlayPlacement()
+) : PrototypePlacement()
 
 @SerialName("floating")
 @Serializable
-data class OverlayFloatingPlacement(
+data class PrototypeFloatingPlacement(
   val gravity: String,
-  val offset: OverlayOffset,
-) : OverlayPlacement()
+  val offset: PrototypeOffset,
+) : PrototypePlacement()
 
-@Serializable sealed class OverlayAction
+@Serializable sealed class PrototypeAction
 
 @SerialName("emit")
 @Serializable
-data class OverlayEmitAction(
+data class PrototypeEmitAction(
   val name: String,
   val payload: JsonElement? = null,
-) : OverlayAction()
+) : PrototypeAction()
 
 @SerialName("setPage")
 @Serializable
-data class OverlaySetPageAction(
+data class PrototypeSetPageAction(
   val pager: String,
-  val page: OverlayPageTarget,
-) : OverlayAction()
+  val page: PrototypePageTarget,
+) : PrototypeAction()
 
 @SerialName("setState")
 @Serializable
-data class OverlaySetStateAction(
+data class PrototypeSetStateAction(
   val key: String,
-  val value: OverlayScalar,
-) : OverlayAction()
+  val value: PrototypeScalar,
+) : PrototypeAction()
 
 @SerialName("toggle")
 @Serializable
-data class OverlayToggleAction(val key: String) : OverlayAction()
+data class PrototypeToggleAction(val key: String) : PrototypeAction()
 
 @SerialName("increment")
 @Serializable
-data class OverlayIncrementAction(val key: String, val by: Double? = null) : OverlayAction()
+data class PrototypeIncrementAction(val key: String, val by: Double? = null) : PrototypeAction()
 
 @SerialName("decrement")
 @Serializable
-data class OverlayDecrementAction(val key: String, val by: Double? = null) : OverlayAction()
+data class PrototypeDecrementAction(val key: String, val by: Double? = null) : PrototypeAction()
 
-@SerialName("dismiss") @Serializable data object OverlayDismissAction : OverlayAction()
+@SerialName("dismiss") @Serializable data object PrototypeDismissAction : PrototypeAction()
 
 @Serializable
-sealed class OverlayNode {
+sealed class PrototypeNode {
   abstract val id: String?
   abstract val testTag: String?
   /** The node's accessible label; replaces the label derived from its text, icon or kind. */
   abstract val contentDescription: String?
-  abstract val onTap: List<OverlayAction>?
-  abstract val style: OverlayStyle?
-  abstract val styleWhen: List<OverlayStyleWhen>?
-  abstract val visibleWhen: OverlayCondition?
+  abstract val onTap: List<PrototypeAction>?
+  abstract val style: PrototypeStyle?
+  abstract val styleWhen: List<PrototypeStyleWhen>?
+  abstract val visibleWhen: PrototypeCondition?
   /** `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit; absent is fade + expand. */
   abstract val transition: String?
-  abstract val anchor: OverlayAnchor?
-  abstract val safeAreaPadding: OverlaySafeAreaPadding?
+  abstract val anchor: PrototypeAnchor?
+  abstract val safeAreaPadding: PrototypeSafeAreaPadding?
 }
 
 @SerialName("box")
 @Serializable
-data class OverlayBoxNode(
+data class PrototypeBoxNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
-  val children: List<OverlayNode>,
-  val repeat: OverlayRepeat? = null,
-) : OverlayNode()
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val children: List<PrototypeNode>,
+  val repeat: PrototypeRepeat? = null,
+) : PrototypeNode()
 
 @SerialName("row")
 @Serializable
-data class OverlayRowNode(
+data class PrototypeRowNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
-  val children: List<OverlayNode>,
-  val repeat: OverlayRepeat? = null,
-) : OverlayNode()
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val children: List<PrototypeNode>,
+  val repeat: PrototypeRepeat? = null,
+) : PrototypeNode()
 
 @SerialName("column")
 @Serializable
-data class OverlayColumnNode(
+data class PrototypeColumnNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
-  val children: List<OverlayNode>,
-  val repeat: OverlayRepeat? = null,
-) : OverlayNode()
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val children: List<PrototypeNode>,
+  val repeat: PrototypeRepeat? = null,
+) : PrototypeNode()
 
 @SerialName("text")
 @Serializable
-data class OverlayTextNode(
+data class PrototypeTextNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val text: String,
-) : OverlayNode()
+) : PrototypeNode()
 
 @SerialName("image")
 @Serializable
-data class OverlayImageNode(
+data class PrototypeImageNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val asset: String,
   val contentScale: String = "fit",
-) : OverlayNode()
+) : PrototypeNode()
 
 @SerialName("icon")
 @Serializable
-data class OverlayIconNode(
+data class PrototypeIconNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val name: String,
   /** One of filled (default), outlined, rounded, sharp, twoTone; closed by the contract. */
   val variant: String? = null,
-) : OverlayNode()
+) : PrototypeNode()
 
 @SerialName("spacer")
 @Serializable
-data class OverlaySpacerNode(
+data class PrototypeSpacerNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
-) : OverlayNode()
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+) : PrototypeNode()
 
 @SerialName("textField")
 @Serializable
-data class OverlayTextFieldNode(
+data class PrototypeTextFieldNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
   val placeholder: String? = null,
-) : OverlayNode()
+) : PrototypeNode()
 
 @SerialName("switch")
 @Serializable
-data class OverlaySwitchNode(
+data class PrototypeSwitchNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
   val label: String? = null,
-) : OverlayNode()
+) : PrototypeNode()
 
 @SerialName("checkbox")
 @Serializable
-data class OverlayCheckboxNode(
+data class PrototypeCheckboxNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
   val label: String? = null,
-) : OverlayNode()
+) : PrototypeNode()
 
 @SerialName("button")
 @Serializable
-data class OverlayButtonNode(
+data class PrototypeButtonNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val label: String,
   val variant: String = "filled",
   val icon: String? = null,
-) : OverlayNode()
+) : PrototypeNode()
 
-@Serializable data class OverlayRadioOption(val value: String, val label: String)
+@Serializable data class PrototypeRadioOption(val value: String, val label: String)
 
 @SerialName("radioGroup")
 @Serializable
-data class OverlayRadioGroupNode(
+data class PrototypeRadioGroupNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
-  val options: List<OverlayRadioOption>,
-) : OverlayNode()
+  val options: List<PrototypeRadioOption>,
+) : PrototypeNode()
 
 /** The control at the end of a `listItem`: a bound switch or checkbox, or a decorative icon. */
-@Serializable sealed class OverlayListItemTrailing
+@Serializable sealed class PrototypeListItemTrailing
 
 @SerialName("switch")
 @Serializable
-data class OverlayListItemSwitch(val stateKey: String) : OverlayListItemTrailing()
+data class PrototypeListItemSwitch(val stateKey: String) : PrototypeListItemTrailing()
 
 @SerialName("checkbox")
 @Serializable
-data class OverlayListItemCheckbox(val stateKey: String) : OverlayListItemTrailing()
+data class PrototypeListItemCheckbox(val stateKey: String) : PrototypeListItemTrailing()
 
 @SerialName("icon")
 @Serializable
-data class OverlayListItemIcon(val name: String) : OverlayListItemTrailing()
+data class PrototypeListItemIcon(val name: String) : PrototypeListItemTrailing()
 
 @SerialName("listItem")
 @Serializable
-data class OverlayListItemNode(
+data class PrototypeListItemNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val headline: String,
   val supporting: String? = null,
   val leadingIcon: String? = null,
-  val trailing: OverlayListItemTrailing? = null,
-) : OverlayNode()
+  val trailing: PrototypeListItemTrailing? = null,
+) : PrototypeNode()
 
 @SerialName("slider")
 @Serializable
-data class OverlaySliderNode(
+data class PrototypeSliderNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
   val label: String? = null,
   val min: Double,
   val max: Double,
   val step: Double? = null,
-) : OverlayNode()
+) : PrototypeNode()
 
 @SerialName("chip")
 @Serializable
-data class OverlayChipNode(
+data class PrototypeChipNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val label: String,
   val variant: String? = null,
   val stateKey: String? = null,
-) : OverlayNode()
+) : PrototypeNode()
 
 @SerialName("card")
 @Serializable
-data class OverlayCardNode(
+data class PrototypeCardNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val variant: String = "filled",
-  val children: List<OverlayNode>,
-) : OverlayNode()
+  val children: List<PrototypeNode>,
+) : PrototypeNode()
 
 /** An icon-only control in a `topAppBar`: the icon, its accessible label and its tap. */
 @Serializable
-data class OverlayAppBarAction(
+data class PrototypeAppBarAction(
   val icon: String,
   val label: String,
-  val onTap: List<OverlayAction>? = null,
+  val onTap: List<PrototypeAction>? = null,
 )
 
 /** A `dialog` or `snackbar` button: a tap closes its container, then runs [onTap]. */
 @Serializable
-data class OverlayDialogButton(val label: String, val onTap: List<OverlayAction>? = null)
+data class PrototypeDialogButton(val label: String, val onTap: List<PrototypeAction>? = null)
 
 /** An icon-only Material button; `variant` is standard (default), filled, tonal or outlined. */
 @SerialName("iconButton")
 @Serializable
-data class OverlayIconButtonNode(
+data class PrototypeIconButtonNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val icon: String,
   val variant: String = "standard",
-) : OverlayNode()
+) : PrototypeNode()
 
 /** A floating action button; a `label` makes it an extended FAB, which has no `size`. */
 @SerialName("fab")
 @Serializable
-data class OverlayFabNode(
+data class PrototypeFabNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val icon: String,
   val label: String? = null,
   val size: String = "regular",
-) : OverlayNode()
+) : PrototypeNode()
 
 /** A single-select Material segmented button bound to a string state key, like a `radioGroup`. */
 @SerialName("segmentedButton")
 @Serializable
-data class OverlaySegmentedButtonNode(
+data class PrototypeSegmentedButtonNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
-  val options: List<OverlayRadioOption>,
-) : OverlayNode()
+  val options: List<PrototypeRadioOption>,
+) : PrototypeNode()
 
 /** A Material top app bar with a title, an optional navigation icon and up to three actions. */
 @SerialName("topAppBar")
 @Serializable
-data class OverlayTopAppBarNode(
+data class PrototypeTopAppBarNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val title: String,
   val variant: String = "small",
-  val navigationIcon: OverlayAppBarAction? = null,
-  val actions: List<OverlayAppBarAction>? = null,
-) : OverlayNode()
+  val navigationIcon: PrototypeAppBarAction? = null,
+  val actions: List<PrototypeAppBarAction>? = null,
+) : PrototypeNode()
 
 /** A Material divider line, horizontal (default) or vertical. */
 @SerialName("divider")
 @Serializable
-data class OverlayDividerNode(
+data class PrototypeDividerNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val orientation: String = "horizontal",
-) : OverlayNode()
+) : PrototypeNode()
 
 /** A Material badge: a small dot, or a short `text` such as a count. */
 @SerialName("badge")
 @Serializable
-data class OverlayBadgeNode(
+data class PrototypeBadgeNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val text: String? = null,
-) : OverlayNode()
+) : PrototypeNode()
 
 /**
  * A Material progress indicator, linear (default) or circular: determinate over 0..[max] when bound
@@ -672,21 +673,21 @@ data class OverlayBadgeNode(
  */
 @SerialName("progress")
 @Serializable
-data class OverlayProgressNode(
+data class PrototypeProgressNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val variant: String = "linear",
   val stateKey: String? = null,
   val max: Double? = null,
-) : OverlayNode()
+) : PrototypeNode()
 
 /**
  * A Material alert dialog, open while [openWhen] holds. Its buttons and scrim close it by writing
@@ -694,25 +695,25 @@ data class OverlayProgressNode(
  */
 @SerialName("dialog")
 @Serializable
-data class OverlayDialogNode(
+data class PrototypeDialogNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
-  val openWhen: OverlaySheetCondition,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val openWhen: PrototypeSheetCondition,
   val title: String? = null,
   val text: String? = null,
   val icon: String? = null,
-  val confirm: OverlayDialogButton,
-  val dismiss: OverlayDialogButton? = null,
-  val child: OverlayNode? = null,
-) : OverlayNode()
+  val confirm: PrototypeDialogButton,
+  val dismiss: PrototypeDialogButton? = null,
+  val child: PrototypeNode? = null,
+) : PrototypeNode()
 
 /**
  * A Material snackbar at the bottom of the window, shown while [openWhen] holds. Without
@@ -721,153 +722,153 @@ data class OverlayDialogNode(
  */
 @SerialName("snackbar")
 @Serializable
-data class OverlaySnackbarNode(
+data class PrototypeSnackbarNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
-  val openWhen: OverlaySheetCondition,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val openWhen: PrototypeSheetCondition,
   val text: String,
-  val action: OverlayDialogButton? = null,
+  val action: PrototypeDialogButton? = null,
   val durationMs: Int? = null,
-) : OverlayNode()
+) : PrototypeNode()
 
 /** A Material time picker bound to integer hour (0..23) and minute (0..59) state keys. */
 @SerialName("timePicker")
 @Serializable
-data class OverlayTimePickerNode(
+data class PrototypeTimePickerNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val hourKey: String,
   val minuteKey: String,
   val is24Hour: Boolean? = null,
-) : OverlayNode()
+) : PrototypeNode()
 
 /** A Material date picker bound to a `YYYY-MM-DD` string state key. */
 @SerialName("datePicker")
 @Serializable
-data class OverlayDatePickerNode(
+data class PrototypeDatePickerNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
-) : OverlayNode()
+) : PrototypeNode()
 
 @SerialName("scroll")
 @Serializable
-data class OverlayScrollNode(
+data class PrototypeScrollNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val axis: String = "vertical",
-  val child: OverlayNode,
-) : OverlayNode()
+  val child: PrototypeNode,
+) : PrototypeNode()
 
 @SerialName("pager")
 @Serializable
-data class OverlayPagerNode(
+data class PrototypePagerNode(
   override val id: String,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
-  val children: List<OverlayNode>,
-) : OverlayNode()
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val children: List<PrototypeNode>,
+) : PrototypeNode()
 
 @SerialName("tabBar")
 @Serializable
-data class OverlayTabBarNode(
+data class PrototypeTabBarNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
-  val items: List<OverlayItem>,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val items: List<PrototypeItem>,
   val pager: String? = null,
   val stateKey: String? = null,
   val scrollable: Boolean = false,
-) : OverlayNode()
+) : PrototypeNode()
 
 @SerialName("bottomNav")
 @Serializable
-data class OverlayBottomNavNode(
+data class PrototypeBottomNavNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
-  val items: List<OverlayItem>,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val items: List<PrototypeItem>,
   val pager: String? = null,
   val stateKey: String? = null,
-) : OverlayNode()
+) : PrototypeNode()
 
 @SerialName("bottomSheet")
 @Serializable
-data class OverlayBottomSheetNode(
+data class PrototypeBottomSheetNode(
   override val id: String? = null,
   override val testTag: String? = null,
   override val contentDescription: String? = null,
-  override val onTap: List<OverlayAction>? = null,
-  override val style: OverlayStyle? = null,
-  override val styleWhen: List<OverlayStyleWhen>? = null,
-  override val visibleWhen: OverlayCondition? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
-  override val anchor: OverlayAnchor? = null,
-  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
-  val child: OverlayNode,
-  val openWhen: OverlaySheetCondition,
-  val detents: List<OverlayDetent>,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val child: PrototypeNode,
+  val openWhen: PrototypeSheetCondition,
+  val detents: List<PrototypeDetent>,
   val scrim: String? = null,
   val dragHandle: Boolean = true,
   val dismissOnSwipe: Boolean = true,
-) : OverlayNode()
+) : PrototypeNode()
 
 @Serializable
-data class OverlayWindow(
-  val placement: OverlayPlacement,
+data class PrototypeWindow(
+  val placement: PrototypePlacement,
   val opacity: Int = 100,
   /**
    * `system` (default when absent) stacks above system UI as an accessibility overlay; `app` stacks
@@ -876,7 +877,7 @@ data class OverlayWindow(
    */
   val layer: String? = null,
   /**
-   * `session` (default when absent) ends the overlay with its host session; `device` keeps it
+   * `session` (default when absent) ends the prototype with its host session; `device` keeps it
    * interactive after the last client disconnects and disables the idle timeout.
    */
   val persistence: String? = null,
@@ -888,7 +889,7 @@ data class OverlayWindow(
  * baseline one) in both light and dark.
  */
 @Serializable
-data class OverlaySpecThemeColors(
+data class PrototypeSpecThemeColors(
   val seed: String? = null,
   val source: String? = null,
   val primary: String? = null,
@@ -931,29 +932,29 @@ data class OverlaySpecThemeColors(
 
 /** `scale` multiplies every Material type role; `fontFamily` is sans, serif or mono. */
 @Serializable
-data class OverlaySpecThemeTypography(
+data class PrototypeSpecThemeTypography(
   val scale: Double? = null,
   val fontFamily: String? = null,
 )
 
 /** `corner` picks one of the Material corner families (none, small, medium, large, full). */
-@Serializable data class OverlaySpecThemeShapes(val corner: String? = null)
+@Serializable data class PrototypeSpecThemeShapes(val corner: String? = null)
 
 @Serializable
-data class OverlaySpecTheme(
+data class PrototypeSpecTheme(
   val mode: String? = null,
-  val colors: OverlaySpecThemeColors? = null,
-  val typography: OverlaySpecThemeTypography? = null,
-  val shapes: OverlaySpecThemeShapes? = null,
+  val colors: PrototypeSpecThemeColors? = null,
+  val typography: PrototypeSpecThemeTypography? = null,
+  val shapes: PrototypeSpecThemeShapes? = null,
 )
 
 @Serializable
-data class OverlaySpec(
+data class PrototypeSpec(
   val id: String,
-  val window: OverlayWindow,
-  val state: Map<String, OverlayScalar>? = null,
-  val root: OverlayNode,
-  val theme: OverlaySpecTheme? = null,
-  /** `none` opts out of overlay animation; absent or `standard` follows the system scale. */
+  val window: PrototypeWindow,
+  val state: Map<String, PrototypeScalar>? = null,
+  val root: PrototypeNode,
+  val theme: PrototypeSpecTheme? = null,
+  /** `none` opts out of prototype animation; absent or `standard` follows the system scale. */
   val motion: String? = null,
 )

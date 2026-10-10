@@ -1,38 +1,38 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import dev.jasonpearson.automobile.protocol.OverlayStyle
+import dev.jasonpearson.automobile.protocol.PrototypeStyle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class OverlaySemanticsTest {
+class PrototypeSemanticsTest {
   @Test
   fun `authored text is the label`() {
-    assertEquals("Save", overlayContentDescription("text", "Save", null, tappable = false))
-    assertEquals("Save", overlayContentDescription("box", "Save", null, tappable = true))
+    assertEquals("Save", prototypeContentDescription("text", "Save", null, tappable = false))
+    assertEquals("Save", prototypeContentDescription("box", "Save", null, tappable = true))
   }
 
   @Test
   fun `an icon-only tappable node reads as its icon name`() {
-    assertEquals("add", overlayContentDescription("icon", "", "add", tappable = true))
+    assertEquals("add", prototypeContentDescription("icon", "", "add", tappable = true))
   }
 
   @Test
   fun `layout containers without text or actions have no label`() {
     for (role in listOf("box", "row", "column", "scroll", "pager", "spacer")) {
-      assertNull(role, overlayContentDescription(role, "", null, tappable = false))
+      assertNull(role, prototypeContentDescription(role, "", null, tappable = false))
     }
   }
 
   @Test
   fun `a tappable container whose only content is an icon reads as the icon`() {
     val icon = node("icon", text = "add", iconName = "add")
-    assertEquals("add", overlayContentDescription("box", "", null, true, listOf(icon)))
+    assertEquals("add", prototypeContentDescription("box", "", null, true, listOf(icon)))
     assertEquals(
       "add",
-      overlayContentDescription(
+      prototypeContentDescription(
         "row",
         "",
         null,
@@ -46,33 +46,36 @@ class OverlaySemanticsTest {
   fun `a tappable container with other content is not labelled by its kind`() {
     val icon = node("icon", text = "add", iconName = "add")
     val text = node("text", text = "Add")
-    assertNull(overlayContentDescription("row", "", null, true, listOf(icon, text)))
-    assertNull(overlayContentDescription("box", "", null, true, listOf(text)))
+    assertNull(prototypeContentDescription("row", "", null, true, listOf(icon, text)))
+    assertNull(prototypeContentDescription("box", "", null, true, listOf(text)))
     assertNull(
-      overlayContentDescription("box", "", null, true, listOf(icon.copy(visible = false), text)),
+      prototypeContentDescription("box", "", null, true, listOf(icon.copy(visible = false), text)),
     )
   }
 
   @Test
   fun `a childless tappable container and non-container kinds keep their kind`() {
-    assertEquals("box", overlayContentDescription("box", "", null, tappable = true))
-    assertEquals("icon", overlayContentDescription("icon", "", null, tappable = false))
+    assertEquals("box", prototypeContentDescription("box", "", null, tappable = true))
+    assertEquals("icon", prototypeContentDescription("icon", "", null, tappable = false))
   }
 
   @Test
   fun `navigation bars are labelled by their tabs, not their kind`() {
-    assertNull(overlayContentDescription("tabBar", "", null, tappable = false))
-    assertNull(overlayContentDescription("bottomNav", "", null, tappable = false))
+    assertNull(prototypeContentDescription("tabBar", "", null, tappable = false))
+    assertNull(prototypeContentDescription("bottomNav", "", null, tappable = false))
   }
 
   @Test
   fun `an authored content description wins over text, icon and kind`() {
     assertEquals(
       "Close",
-      overlayContentDescription("icon", "close", "close", true, authored = "Close"),
+      prototypeContentDescription("icon", "close", "close", true, authored = "Close"),
     )
-    assertEquals("Promo", overlayContentDescription("box", "", null, false, authored = "Promo"))
-    assertEquals("Next", overlayContentDescription("button", "Go", null, false, authored = "Next"))
+    assertEquals("Promo", prototypeContentDescription("box", "", null, false, authored = "Promo"))
+    assertEquals(
+      "Next",
+      prototypeContentDescription("button", "Go", null, false, authored = "Next"),
+    )
   }
 
   @Test
@@ -88,23 +91,23 @@ class OverlaySemanticsTest {
 
   @Test
   fun `a pager reports its page`() {
-    assertEquals("Page 2 of 4", overlayStateDescription("pager", 1, 4))
-    assertNull(overlayStateDescription("pager", 0, 0))
-    assertNull(overlayStateDescription("row", 1, 4))
+    assertEquals("Page 2 of 4", prototypeStateDescription("pager", 1, 4))
+    assertNull(prototypeStateDescription("pager", 0, 0))
+    assertNull(prototypeStateDescription("row", 1, 4))
   }
 
   private fun node(
     role: String,
     text: String = "",
     iconName: String? = null,
-    children: List<OverlayRenderNode> = emptyList(),
+    children: List<PrototypeRenderNode> = emptyList(),
   ) =
-    OverlayRenderNode(
+    PrototypeRenderNode(
       role = role,
       text = text,
       testTag = null,
       visible = true,
-      style = mapOverlayStyle(OverlayStyle()),
+      style = mapPrototypeStyle(PrototypeStyle()),
       safeArea = null,
       iconName = iconName,
       children = children,

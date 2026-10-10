@@ -1,24 +1,26 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay.screenshot
+package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import java.io.File
 import kotlin.math.ceil
 import kotlin.math.sqrt
 
 /**
- * A host-side overlay preview request (issue #10445): render each spec file off-device through the
- * production renderer and write one PNG per spec, plus a contact sheet when there is more than one.
+ * A host-side prototype preview request (issue #10445): render each spec file off-device through
+ * the production renderer and write one PNG per spec, plus a contact sheet when there is more than
+ * one.
  *
- * Read from the `-Doverlay.preview.*` switches that `control-proxy/build.gradle.kts` forwards to
- * the test JVM, normally set by `scripts/overlay/preview.sh`:
- * - `overlay.preview.spec` — spec JSON files, separated by the platform path separator (required).
- * - `overlay.preview.out` — output directory (required).
- * - `overlay.preview.width` / `overlay.preview.height` — the surface the overlay lays out in, in dp
- *   (default 360 x 640). The PNG is the overlay content's own bounds, which may be smaller.
- * - `overlay.preview.density` — screen density in dpi (default 160, so 1 dp = 1 px).
- * - `overlay.preview.theme` — `light` or `dark` device night mode (default `light`). A spec whose
+ * Read from the `-Dprototype.preview.*` switches that `control-proxy/build.gradle.kts` forwards to
+ * the test JVM, normally set by `scripts/prototype/preview.sh`:
+ * - `prototype.preview.spec` — spec JSON files, separated by the platform path separator
+ *   (required).
+ * - `prototype.preview.out` — output directory (required).
+ * - `prototype.preview.width` / `prototype.preview.height` — the surface the prototype lays out in,
+ *   in dp (default 360 x 640). The PNG is the prototype content's own bounds, which may be smaller.
+ * - `prototype.preview.density` — screen density in dpi (default 160, so 1 dp = 1 px).
+ * - `prototype.preview.theme` — `light` or `dark` device night mode (default `light`). A spec whose
  *   theme mode is `light` or `dark` still decides for itself; this only drives `system`.
  */
-internal data class OverlayPreviewRequest(
+internal data class PrototypePreviewRequest(
   val specs: List<File>,
   val outputDir: File,
   val widthDp: Int = DEFAULT_WIDTH_DP,
@@ -27,10 +29,10 @@ internal data class OverlayPreviewRequest(
   val theme: Theme = Theme.LIGHT,
 ) {
   init {
-    require(specs.isNotEmpty()) { "An overlay preview needs at least one spec" }
+    require(specs.isNotEmpty()) { "A prototype preview needs at least one spec" }
     val clashes = specs.groupBy { outputFor(it).name }.filterValues { it.size > 1 }.keys
     require(clashes.isEmpty()) {
-      "Overlay preview specs would overwrite each other's PNG: $clashes"
+      "Prototype preview specs would overwrite each other's PNG: $clashes"
     }
   }
 
@@ -50,12 +52,12 @@ internal data class OverlayPreviewRequest(
     get() = File(outputDir, CONTACT_SHEET_NAME)
 
   companion object {
-    const val SPEC_PROPERTY = "overlay.preview.spec"
-    const val OUT_PROPERTY = "overlay.preview.out"
-    const val WIDTH_PROPERTY = "overlay.preview.width"
-    const val HEIGHT_PROPERTY = "overlay.preview.height"
-    const val DENSITY_PROPERTY = "overlay.preview.density"
-    const val THEME_PROPERTY = "overlay.preview.theme"
+    const val SPEC_PROPERTY = "prototype.preview.spec"
+    const val OUT_PROPERTY = "prototype.preview.out"
+    const val WIDTH_PROPERTY = "prototype.preview.width"
+    const val HEIGHT_PROPERTY = "prototype.preview.height"
+    const val DENSITY_PROPERTY = "prototype.preview.density"
+    const val THEME_PROPERTY = "prototype.preview.theme"
     const val CONTACT_SHEET_NAME = "contact-sheet.png"
 
     const val DEFAULT_WIDTH_DP = 360
@@ -71,7 +73,7 @@ internal data class OverlayPreviewRequest(
     fun fromProperties(
       property: (String) -> String?,
       pathSeparator: String = File.pathSeparator,
-    ): OverlayPreviewRequest? {
+    ): PrototypePreviewRequest? {
       val specs =
         property(SPEC_PROPERTY)
           ?.split(pathSeparator)
@@ -81,7 +83,7 @@ internal data class OverlayPreviewRequest(
       if (specs.isEmpty()) return null
       val out = property(OUT_PROPERTY)?.trim().orEmpty()
       require(out.isNotEmpty()) { "-D$OUT_PROPERTY is required with -D$SPEC_PROPERTY" }
-      return OverlayPreviewRequest(
+      return PrototypePreviewRequest(
         specs = specs.map(::File),
         outputDir = File(out),
         widthDp = intProperty(property, WIDTH_PROPERTY, DEFAULT_WIDTH_DP, 1..MAX_SIZE_DP),
@@ -118,11 +120,11 @@ internal data class OverlayPreviewRequest(
  * image's size) separated and framed by [gutter] pixels of [background]. Each image is drawn at the
  * top-left of its cell, unscaled.
  */
-internal fun overlayContactSheet(
-  images: List<OverlayScreenshotComparator.Image>,
+internal fun prototypeContactSheet(
+  images: List<PrototypeScreenshotComparator.Image>,
   gutter: Int = 16,
   background: Int = 0xFF808080.toInt(),
-): OverlayScreenshotComparator.Image {
+): PrototypeScreenshotComparator.Image {
   require(images.isNotEmpty()) { "A contact sheet needs at least one image" }
   require(gutter >= 0) { "gutter must not be negative, got $gutter" }
   val columns = ceil(sqrt(images.size.toDouble())).toInt()
@@ -139,5 +141,5 @@ internal fun overlayContactSheet(
       System.arraycopy(image.pixels, y * image.width, pixels, (top + y) * width + left, image.width)
     }
   }
-  return OverlayScreenshotComparator.Image(width, height, pixels)
+  return PrototypeScreenshotComparator.Image(width, height, pixels)
 }

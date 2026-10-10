@@ -1,7 +1,7 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 /**
- * Reconciles one overlay text field's locally typed text with the controller's state, so the
+ * Reconciles one prototype text field's locally typed text with the controller's state, so the
  * displayed value never waits on the controller mutex or the event sink.
  *
  * The IME edits [text] immediately via [edit]; each edit is reported outward in order, stamped with
@@ -13,7 +13,7 @@ package dev.jasonpearson.automobile.ctrlproxy.overlay
  * Edits stamped with an older epoch are dropped by the controller. Plain Kotlin on purpose: Compose
  * only holds the value and calls these methods.
  */
-internal class OverlayTextFieldSync(initialText: String, initialEpoch: Int = 0) {
+internal class PrototypeTextFieldSync(initialText: String, initialEpoch: Int = 0) {
   var text: String = initialText
     private set
 

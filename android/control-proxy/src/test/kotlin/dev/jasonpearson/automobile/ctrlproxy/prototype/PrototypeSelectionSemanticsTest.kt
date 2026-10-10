@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.os.Looper
 import android.view.View
@@ -23,63 +23,66 @@ import org.robolectric.Shadows.shadowOf
 
 /** What observe and tapOn see for `radioGroup`, `listItem` and the button extras (#10439). */
 @RunWith(RobolectricTestRunner::class)
-class OverlaySelectionSemanticsTest {
-  private val interactions = mutableListOf<OverlayInteraction>()
-  private val go = listOf<OverlayAction>(OverlayEmitAction("go"))
+class PrototypeSelectionSemanticsTest {
+  private val interactions = mutableListOf<PrototypeInteraction>()
+  private val go = listOf<PrototypeAction>(PrototypeEmitAction("go"))
 
   private fun render(): SemanticsNode {
     val spec =
-      OverlaySpec(
+      PrototypeSpec(
         "panel",
-        OverlayWindow(OverlayFullscreenPlacement()),
+        PrototypeWindow(PrototypeFullscreenPlacement()),
         mapOf(
-          "sound" to OverlayScalar.Text("beep"),
-          "sync" to OverlayScalar.BooleanValue(true),
-          "wifi" to OverlayScalar.BooleanValue(false),
+          "sound" to PrototypeScalar.Text("beep"),
+          "sync" to PrototypeScalar.BooleanValue(true),
+          "wifi" to PrototypeScalar.BooleanValue(false),
         ),
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayRadioGroupNode(
+              PrototypeRadioGroupNode(
                 testTag = "sound",
                 stateKey = "sound",
                 onTap = go,
                 options =
-                  listOf(OverlayRadioOption("chime", "Chime"), OverlayRadioOption("beep", "Beep")),
+                  listOf(
+                    PrototypeRadioOption("chime", "Chime"),
+                    PrototypeRadioOption("beep", "Beep"),
+                  ),
               ),
-              OverlayListItemNode(
+              PrototypeListItemNode(
                 testTag = "sync",
                 headline = "Sync",
                 supporting = "Across devices",
                 leadingIcon = "refresh",
-                trailing = OverlayListItemSwitch("sync"),
+                trailing = PrototypeListItemSwitch("sync"),
                 onTap = go,
               ),
-              OverlayListItemNode(
+              PrototypeListItemNode(
                 testTag = "wifi",
                 headline = "Wi-Fi only",
-                trailing = OverlayListItemCheckbox("wifi"),
+                trailing = PrototypeListItemCheckbox("wifi"),
               ),
-              OverlayListItemNode(
+              PrototypeListItemNode(
                 testTag = "advanced",
                 headline = "Advanced",
-                trailing = OverlayListItemIcon("chevron_right"),
+                trailing = PrototypeListItemIcon("chevron_right"),
                 onTap = go,
               ),
-              OverlayListItemNode(testTag = "about", headline = "About"),
-              OverlayButtonNode(
+              PrototypeListItemNode(testTag = "about", headline = "About"),
+              PrototypeButtonNode(
                 testTag = "save",
                 label = "Save",
                 variant = "tonal",
                 icon = "check",
                 onTap = go,
               ),
-              OverlayButtonNode(testTag = "share", label = "Share", variant = "elevated"),
+              PrototypeButtonNode(testTag = "share", label = "Share", variant = "elevated"),
             ),
         ),
       )
     val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
-    activity.setContent { OverlaySpecContent(mapOverlaySpec(spec).root) { interactions += it } }
+    activity.setContent { PrototypeSpecContent(mapPrototypeSpec(spec).root) { interactions += it } }
     shadowOf(Looper.getMainLooper()).idle()
     val view = checkNotNull(composeView(activity.window.decorView))
     return (view as RootForTest).semanticsOwner.rootSemanticsNode
@@ -117,7 +120,7 @@ class OverlaySelectionSemanticsTest {
     assertEquals(false, chime.config[SemanticsProperties.Selected])
     assertEquals(true, beep.config[SemanticsProperties.Selected])
     chime.click()
-    assertEquals(listOf(OverlayInteraction.Choose("sound", "chime", go)), interactions)
+    assertEquals(listOf(PrototypeInteraction.Choose("sound", "chime", go)), interactions)
   }
 
   @Test
@@ -130,7 +133,7 @@ class OverlaySelectionSemanticsTest {
       node.config[SemanticsProperties.Text],
     )
     node.click()
-    assertEquals(listOf(OverlayInteraction.Toggle("sync", go)), interactions)
+    assertEquals(listOf(PrototypeInteraction.Toggle("sync", go)), interactions)
   }
 
   @Test
@@ -139,7 +142,7 @@ class OverlaySelectionSemanticsTest {
     assertEquals(Role.Checkbox, node.config[SemanticsProperties.Role])
     assertEquals(ToggleableState.Off, node.config[SemanticsProperties.ToggleableState])
     node.click()
-    assertEquals(listOf(OverlayInteraction.Toggle("wifi")), interactions)
+    assertEquals(listOf(PrototypeInteraction.Toggle("wifi")), interactions)
   }
 
   @Test
@@ -149,7 +152,7 @@ class OverlaySelectionSemanticsTest {
     assertEquals(Role.Button, advanced.config[SemanticsProperties.Role])
     assertFalse(advanced.config.contains(SemanticsProperties.ToggleableState))
     advanced.click()
-    assertEquals(listOf(OverlayInteraction.Tap(go)), interactions)
+    assertEquals(listOf(PrototypeInteraction.Tap(go)), interactions)
     assertFalse(root.tagged("about").config.contains(SemanticsActions.OnClick))
   }
 
@@ -161,6 +164,6 @@ class OverlaySelectionSemanticsTest {
     assertEquals(listOf("Save"), save.config[SemanticsProperties.ContentDescription])
     assertEquals(Role.Button, root.tagged("share").config[SemanticsProperties.Role])
     save.click()
-    assertEquals(listOf(OverlayInteraction.Tap(go)), interactions)
+    assertEquals(listOf(PrototypeInteraction.Tap(go)), interactions)
   }
 }

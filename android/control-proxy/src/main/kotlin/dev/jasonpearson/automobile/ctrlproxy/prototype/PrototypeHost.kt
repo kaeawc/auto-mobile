@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -36,7 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
-import dev.jasonpearson.automobile.protocol.OverlaySpecTheme
+import dev.jasonpearson.automobile.protocol.PrototypeSpecTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -57,44 +57,46 @@ const val DEFAULT_TOUCH_THROUGH_SETTLE_MILLIS = MIN_TOUCH_THROUGH_SETTLE_MILLIS
 /** How long a hide waits for the frames that confirm the window is gone before capturing anyway. */
 const val DEFAULT_HIDE_FRAME_TIMEOUT_MILLIS = 500L
 
-/** The longest a capture may keep the overlay hidden; the window is restored when it expires. */
+/** The longest a capture may keep the prototype hidden; the window is restored when it expires. */
 const val DEFAULT_MAX_HIDDEN_MILLIS = 5_000L
 
 /** Frames awaited after hiding: the one that applies the hide, then one drawn without it. */
 internal const val HIDE_CONFIRM_FRAMES = 2
 
 /**
- * A capture taken by [InteractiveOverlayHost.withHiddenForCapture]. [overlayExcluded] is true when
- * no overlay window was showing, or when one was hidden and the confirming frames rendered before
+ * A capture taken by [PrototypeHost.withHiddenForCapture]. [prototypeExcluded] is true when no
+ * prototype window was showing, or when one was hidden and the confirming frames rendered before
  * the capture; false when the hide could not be confirmed in time (the capture still ran).
  */
-data class OverlayHiddenCapture<T>(val value: T, val overlayExcluded: Boolean)
+data class PrototypeHiddenCapture<T>(val value: T, val prototypeExcluded: Boolean)
 
 /**
  * Opacity is a whole-view integer percentage; invalid values throw IllegalArgumentException.
  * [displayId] is the Android logical display the window attaches to; the default display keeps the
  * service context. A request for another display shows there or throws, and never falls back.
  */
-data class InteractiveOverlayRequest(
-  val placement: OverlayPlacement = OverlayPlacement.Floating(),
+data class PrototypeRequest(
+  val placement: PrototypePlacement = PrototypePlacement.Floating(),
   /** True only while a text field is visible: the window is focusable (takes keys) just then. */
   val hasTextField: Boolean = false,
   val opacityPercent: Int = 100,
   val displayId: Int = Display.DEFAULT_DISPLAY,
-  /** The window type; changing it on a shown overlay adds a new window rather than relayouting. */
-  val layer: OverlayWindowLayer = OverlayWindowLayer.SYSTEM,
   /**
-   * The overlay outlives its host session (#10494), so host chrome always shows a close control
+   * The window type; changing it on a shown prototype adds a new window rather than relayouting.
+   */
+  val layer: PrototypeWindowLayer = PrototypeWindowLayer.SYSTEM,
+  /**
+   * The prototype outlives its host session (#10494), so host chrome always shows a close control
    * that a person holding the device can use, whatever the placement.
    */
   val persistent: Boolean = false,
   /** Dark or light host chrome as the spec paints it; null follows the device setting. */
   val darkTheme: Boolean? = null,
   /** The spec's render root and theme, so host chrome follows the spec; null uses the baseline. */
-  val themeRoot: OverlayRenderNode? = null,
-  val specTheme: OverlaySpecTheme? = null,
+  val themeRoot: PrototypeRenderNode? = null,
+  val specTheme: PrototypeSpecTheme? = null,
   val onHostDismiss: suspend () -> Unit = {},
-  val content: @Composable () -> Unit = { InteractiveOverlayTestContent() },
+  val content: @Composable () -> Unit = { PrototypeTestContent() },
 ) {
   init {
     require(opacityPercent in 0..100) { "Opacity must be in 0..100" }
@@ -107,14 +109,14 @@ data class InteractiveOverlayRequest(
  * results report platform success; show/replace return false after destroy. Replace without a
  * window behaves as show. Read state is a snapshot, not a cross-thread compound transaction.
  */
-interface InteractiveOverlayHost {
+interface PrototypeHost {
   val isShowing: Boolean
-  val currentPlacement: OverlayPlacement?
+  val currentPlacement: PrototypePlacement?
   val isTouchThroughActive: Boolean
 
-  suspend fun show(request: InteractiveOverlayRequest = InteractiveOverlayRequest()): Boolean
+  suspend fun show(request: PrototypeRequest = PrototypeRequest()): Boolean
 
-  suspend fun replace(request: InteractiveOverlayRequest): Boolean
+  suspend fun replace(request: PrototypeRequest): Boolean
 
   /**
    * Rebuilds only layout params, retaining the composition and its pager/scroll mechanics. A window
@@ -149,7 +151,7 @@ interface InteractiveOverlayHost {
    * Serializes gestures, waiting at least 100ms after making the live window untouchable. Restores
    * in NonCancellable, unless dismissed/destroyed. Show/replace preserve touch-through and the
    * active token; restoration clears NOT_TOUCHABLE from the newest layout params. A platform update
-   * failure throws rather than dispatching a gesture that could silently hit the overlay. Failed
+   * failure throws rather than dispatching a gesture that could silently hit the prototype. Failed
    * restoration leaves the active state set and throws; dismissal can recover it. If the window is
    * already detached, update failure clears the window and active state before throwing. Do not
    * nest on the same host.
@@ -171,7 +173,7 @@ interface InteractiveOverlayHost {
     frameTimeoutMillis: Long = DEFAULT_HIDE_FRAME_TIMEOUT_MILLIS,
     maxHiddenMillis: Long = DEFAULT_MAX_HIDDEN_MILLIS,
     block: suspend () -> T,
-  ): OverlayHiddenCapture<T>
+  ): PrototypeHiddenCapture<T>
 }
 
 /**
@@ -186,11 +188,11 @@ interface InteractiveOverlayHost {
  * path (relayout, replace, touch-through). Service wiring uses it to schedule the controller's
  * restore-or-abandon pass promptly instead of waiting for an unrelated event. Same constraints.
  *
- * While a text field is visible the window is focusable, and Back dismisses the overlay through the
- * request's `onHostDismiss` on [backScope], the same `user`-reason path as the fullscreen dismiss
- * row. Back arrives as a key event below API 33 and as an OnBackInvokedCallback (registered through
- * [backRegistrarFactory] only while focusable) from API 33; both call one target. Without a visible
- * text field the window is not focusable and never sees Back at all.
+ * While a text field is visible the window is focusable, and Back dismisses the prototype through
+ * the request's `onHostDismiss` on [backScope], the same `user`-reason path as the fullscreen
+ * dismiss row. Back arrives as a key event below API 33 and as an OnBackInvokedCallback (registered
+ * through [backRegistrarFactory] only while focusable) from API 33; both call one target. Without a
+ * visible text field the window is not focusable and never sees Back at all.
  *
  * [context] must be the service/display context used for the default display; [densityProvider]
  * defaults to its resources. A request for any other display takes its context, WindowManager and
@@ -199,42 +201,42 @@ interface InteractiveOverlayHost {
  * the window's own display. All other platform access is constructor-injected. No permission probe
  * occurs.
  */
-class DefaultInteractiveOverlayHost(
+class DefaultPrototypeHost(
   private val context: Context,
   private val windowManager: WindowManager =
     context.getSystemService(Context.WINDOW_SERVICE) as WindowManager,
   private val sdkInt: Int = Build.VERSION.SDK_INT,
-  private val mainThread: OverlayMainThread = AndroidOverlayMainThread(),
-  private val settleTimer: OverlaySettleTimer = CoroutineOverlaySettleTimer,
+  private val mainThread: PrototypeMainThread = AndroidPrototypeMainThread(),
+  private val settleTimer: PrototypeSettleTimer = CoroutinePrototypeSettleTimer,
   private val densityProvider: () -> Float = { context.resources.displayMetrics.density },
   private val onWindowAttached: () -> Unit = {},
   private val onWindowLost: () -> Unit = {},
   private val isBlocked: () -> Boolean = { false },
-  private val imeInset: OverlayImeInset = NoOverlayImeInset,
-  private val displayWindows: OverlayDisplayWindows = OverlayDisplayWindows { _, _ -> null },
+  private val imeInset: PrototypeImeInset = NoPrototypeImeInset,
+  private val displayWindows: PrototypeDisplayWindows = PrototypeDisplayWindows { _, _ -> null },
   private val backScope: CoroutineScope =
     CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
-  private val backRegistrarFactory: (View) -> OverlayBackCallbackRegistrar = { view ->
-    if (sdkInt >= OVERLAY_BACK_CALLBACK_MIN_SDK) AndroidOverlayBackRegistrar(view)
-    else NoOverlayBackCallbackRegistrar
+  private val backRegistrarFactory: (View) -> PrototypeBackCallbackRegistrar = { view ->
+    if (sdkInt >= PROTOTYPE_BACK_CALLBACK_MIN_SDK) AndroidPrototypeBackRegistrar(view)
+    else NoPrototypeBackCallbackRegistrar
   },
-  private val frames: OverlayFrameWaiter = ChoreographerOverlayFrameWaiter,
-) : InteractiveOverlayHost {
+  private val frames: PrototypeFrameWaiter = ChoreographerPrototypeFrameWaiter,
+) : PrototypeHost {
   private class Window(
-    val view: OverlayComposeView,
-    val back: OverlayBackBinding,
-    val owner: OverlayWindowOwner,
-    val target: OverlayDisplayWindow,
+    val view: PrototypeComposeView,
+    val back: PrototypeBackBinding,
+    val owner: PrototypeWindowOwner,
+    val target: PrototypeDisplayWindow,
     val displayId: Int,
     var params: WindowManager.LayoutParams,
-    var request: InteractiveOverlayRequest,
+    var request: PrototypeRequest,
   ) {
     /** A floating window's screen position as its anchored root last placed it (#9316). */
     var anchoredOrigin: IntOffset? = null
   }
 
   @Volatile private var window: Window? = null
-  @Volatile private var placement: OverlayPlacement? = null
+  @Volatile private var placement: PrototypePlacement? = null
   @Volatile private var touchThroughToken: Any? = null
   private var destroyed = false
   private val gestureMutex = Mutex()
@@ -243,17 +245,17 @@ class DefaultInteractiveOverlayHost(
   override val isShowing: Boolean
     get() = window != null
 
-  override val currentPlacement: OverlayPlacement?
+  override val currentPlacement: PrototypePlacement?
     get() = placement
 
   override val isTouchThroughActive: Boolean
     get() = touchThroughToken != null
 
-  override suspend fun show(request: InteractiveOverlayRequest): Boolean = mainThread.onMain {
+  override suspend fun show(request: PrototypeRequest): Boolean = mainThread.onMain {
     showOnMain(request)
   }
 
-  override suspend fun replace(request: InteractiveOverlayRequest): Boolean = show(request)
+  override suspend fun replace(request: PrototypeRequest): Boolean = show(request)
 
   /**
    * Only the system layer on the default display uses the service's own WindowManager: its default
@@ -262,9 +264,9 @@ class DefaultInteractiveOverlayHost(
    * notification shade and status bar (#10529), so it gets its own application-overlay window
    * context like any other display.
    */
-  private fun windowFor(displayId: Int, layer: OverlayWindowLayer): OverlayDisplayWindow =
-    if (displayId == Display.DEFAULT_DISPLAY && layer == OverlayWindowLayer.SYSTEM) {
-      OverlayDisplayWindow(
+  private fun windowFor(displayId: Int, layer: PrototypeWindowLayer): PrototypeDisplayWindow =
+    if (displayId == Display.DEFAULT_DISPLAY && layer == PrototypeWindowLayer.SYSTEM) {
+      PrototypeDisplayWindow(
         context,
         windowManager,
         navigationBarBottomPx = { navigationBarBottomPx(windowManager, sdkInt) },
@@ -277,7 +279,7 @@ class DefaultInteractiveOverlayHost(
       }
     }
 
-  private fun showOnMain(request: InteractiveOverlayRequest): Boolean {
+  private fun showOnMain(request: PrototypeRequest): Boolean {
     if (destroyed || isBlocked()) return false
     val current = window
     // An in-place update keeps the window's own display target; a fresh context per update would
@@ -288,7 +290,7 @@ class DefaultInteractiveOverlayHost(
     }
     val target = inPlace?.target ?: windowFor(request.displayId, request.layer)
     val params =
-      interactiveOverlayLayoutParams(
+      prototypeLayoutParams(
         request.placement,
         request.hasTextField,
         target.density(),
@@ -306,8 +308,8 @@ class DefaultInteractiveOverlayHost(
   }
 
   /** The keyboard's reach for a bottom sheet; other placements never read it. */
-  private fun imeLift(request: InteractiveOverlayRequest): Int =
-    if (overlayImeShiftPx(request.placement, 1) == 0) 0
+  private fun imeLift(request: PrototypeRequest): Int =
+    if (prototypeImeShiftPx(request.placement, 1) == 0) 0
     else
       try {
         imeInset.liftPx(request.displayId)
@@ -319,7 +321,7 @@ class DefaultInteractiveOverlayHost(
 
   private fun updateInPlace(
     current: Window,
-    request: InteractiveOverlayRequest,
+    request: PrototypeRequest,
     params: WindowManager.LayoutParams,
   ): Boolean {
     if (!update(current, params)) return false
@@ -332,17 +334,17 @@ class DefaultInteractiveOverlayHost(
 
   /**
    * Attaches a new window on the request's display. A window being replaced on another display is
-   * removed only after the new one is attached, so a failed add leaves the old overlay in place.
+   * removed only after the new one is attached, so a failed add leaves the old prototype in place.
    */
   private fun addWindow(
-    target: OverlayDisplayWindow,
-    request: InteractiveOverlayRequest,
+    target: PrototypeDisplayWindow,
+    request: PrototypeRequest,
     params: WindowManager.LayoutParams,
     replacing: Window?,
   ): Boolean {
-    val owner = OverlayWindowOwner()
+    val owner = PrototypeWindowOwner()
     val view =
-      OverlayComposeView(target.context, ::backDecision, ::dismissFromBack).apply {
+      PrototypeComposeView(target.context, ::backDecision, ::dismissFromBack).apply {
         setViewTreeLifecycleOwner(owner)
         setViewTreeSavedStateRegistryOwner(owner)
         setViewTreeViewModelStoreOwner(owner)
@@ -351,7 +353,7 @@ class DefaultInteractiveOverlayHost(
     val added =
       Window(
         view,
-        OverlayBackBinding(sdkInt, backRegistrarFactory(view), ::dismissFromBack),
+        PrototypeBackBinding(sdkInt, backRegistrarFactory(view), ::dismissFromBack),
         owner,
         target,
         request.displayId,
@@ -362,7 +364,7 @@ class DefaultInteractiveOverlayHost(
     try {
       target.windowManager.addView(view, params)
     } catch (error: Exception) {
-      Log.e(TAG, "Failed to add interactive overlay", error)
+      Log.e(TAG, "Failed to add prototype", error)
       owner.destroy()
       view.disposeComposition()
       return false
@@ -382,7 +384,7 @@ class DefaultInteractiveOverlayHost(
       old.target.windowManager.removeViewImmediate(old.view)
     } catch (error: Exception) {
       // The old display may already be gone, taking its windows with it; nothing else to undo.
-      Log.w(TAG, "Superseded interactive overlay was already removed", error)
+      Log.w(TAG, "Superseded prototype was already removed", error)
     }
     old.back.release()
     old.owner.destroy()
@@ -392,13 +394,13 @@ class DefaultInteractiveOverlayHost(
   private fun applyContent(current: Window) {
     val request = current.request
     // Fullscreen chrome never inherits spec opacity, styles, clipping or modal sheets.
-    current.view.alpha = overlayHostChrome(request).windowAlpha
+    current.view.alpha = prototypeHostChrome(request).windowAlpha
     val target = current.target
     val geometry = windowGeometry(current)
     current.view.setContent {
-      CompositionLocalProvider(LocalOverlayWindowGeometry provides geometry) {
-        InteractiveOverlayWindowContent(request) {
-          overlayInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
+      CompositionLocalProvider(LocalPrototypeWindowGeometry provides geometry) {
+        PrototypeWindowContent(request) {
+          prototypeInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
         }
       }
     }
@@ -408,11 +410,11 @@ class DefaultInteractiveOverlayHost(
    * Anchors are screen coordinates: nodes subtract the window's screen origin. A floating window
    * follows its anchored root instead, so it covers the anchor and nothing else (#9316).
    */
-  private fun windowGeometry(current: Window): OverlayWindowGeometry =
-    OverlayWindowGeometry(
-      originOnScreen = { overlayViewWindowOrigin(current.view) },
+  private fun windowGeometry(current: Window): PrototypeWindowGeometry =
+    PrototypeWindowGeometry(
+      originOnScreen = { prototypeViewWindowOrigin(current.view) },
       moveTo =
-        if (current.request.placement is OverlayPlacement.Floating)
+        if (current.request.placement is PrototypePlacement.Floating)
           { origin ->
             moveAnchored(current, origin)
           }
@@ -420,7 +422,7 @@ class DefaultInteractiveOverlayHost(
     )
 
   /** The current window's geometry, as its content sees it; null without a window. */
-  internal fun currentWindowGeometry(): OverlayWindowGeometry? = window?.let(::windowGeometry)
+  internal fun currentWindowGeometry(): PrototypeWindowGeometry? = window?.let(::windowGeometry)
 
   /**
    * Called from layout, so the window update is posted rather than re-entering a traversal. An
@@ -445,7 +447,7 @@ class DefaultInteractiveOverlayHost(
 
   private fun relayoutOnMain(current: Window): Boolean {
     val params =
-      interactiveOverlayLayoutParams(
+      prototypeLayoutParams(
         current.request.placement,
         current.request.hasTextField,
         current.target.density(),
@@ -476,8 +478,8 @@ class DefaultInteractiveOverlayHost(
     if (sdkInt >= 30) view.windowInsetsController?.hide(android.view.WindowInsets.Type.ime())
   }
 
-  private fun backDecision(event: KeyEvent): OverlayBackDecision =
-    overlayBackDecision(
+  private fun backDecision(event: KeyEvent): PrototypeBackDecision =
+    prototypeBackDecision(
       window?.request?.hasTextField == true,
       event.keyCode,
       event.action,
@@ -508,9 +510,9 @@ class DefaultInteractiveOverlayHost(
       current.target.windowManager.removeViewImmediate(current.view)
     } catch (error: Exception) {
       if (isNotAttached(error)) {
-        Log.w(TAG, "Interactive overlay already detached; clearing window", error)
+        Log.w(TAG, "Prototype already detached; clearing window", error)
       } else {
-        Log.e(TAG, "Failed to remove interactive overlay; dismissal can be retried", error)
+        Log.e(TAG, "Failed to remove prototype; dismissal can be retried", error)
         return false
       }
     }
@@ -546,7 +548,7 @@ class DefaultInteractiveOverlayHost(
               else {
                 val params = copyParams(current.params)
                 params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                check(update(current, params)) { "Failed to enable overlay touch-through" }
+                check(update(current, params)) { "Failed to enable prototype touch-through" }
                 touchThroughToken = token
                 true
               }
@@ -565,7 +567,7 @@ class DefaultInteractiveOverlayHost(
               if (current != null) {
                 val params = copyParams(current.params)
                 params.flags = params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-                check(update(current, params)) { "Failed to restore overlay touchability" }
+                check(update(current, params)) { "Failed to restore prototype touchability" }
               }
               touchThroughToken = null
             }
@@ -578,14 +580,14 @@ class DefaultInteractiveOverlayHost(
     frameTimeoutMillis: Long,
     maxHiddenMillis: Long,
     block: suspend () -> T,
-  ): OverlayHiddenCapture<T> = captureMutex.withLock {
+  ): PrototypeHiddenCapture<T> = captureMutex.withLock {
     val hidden = withContext(NonCancellable) { mainThread.onMain(::hideForCaptureOnMain) }
-    if (hidden == null) return@withLock OverlayHiddenCapture(block(), overlayExcluded = true)
+    if (hidden == null) return@withLock PrototypeHiddenCapture(block(), prototypeExcluded = true)
     try {
       val confirmed =
         withTimeoutOrNull(frameTimeoutMillis) { frames.awaitFrames(HIDE_CONFIRM_FRAMES) } != null
-      if (!confirmed) Log.w(TAG, "Overlay hide unconfirmed after ${frameTimeoutMillis}ms")
-      OverlayHiddenCapture(captureWhileHidden(maxHiddenMillis, block), confirmed)
+      if (!confirmed) Log.w(TAG, "Prototype hide unconfirmed after ${frameTimeoutMillis}ms")
+      PrototypeHiddenCapture(captureWhileHidden(maxHiddenMillis, block), confirmed)
     } finally {
       withContext(NonCancellable) { restoreAfterCapture(hidden) }
     }
@@ -603,7 +605,7 @@ class DefaultInteractiveOverlayHost(
       withTimeout(maxHiddenMillis) { block() }
     } catch (error: TimeoutCancellationException) {
       throw IllegalStateException(
-        "Capture kept the overlay hidden over ${maxHiddenMillis}ms",
+        "Capture kept the prototype hidden over ${maxHiddenMillis}ms",
         error,
       )
     }
@@ -611,7 +613,7 @@ class DefaultInteractiveOverlayHost(
   /**
    * Restores the hidden view itself: an in-place update kept it, and a window that replaced or
    * removed it in the meantime is unaffected (a detached view is harmless to touch). A capture hide
-   * never re-shows a blocked overlay (lock screen, or suspended because its app left the
+   * never re-shows a blocked prototype (lock screen, or suspended because its app left the
    * front, #10261): a window still attached then is removed as relayout would, and the controller's
    * own restore path shows it again once unblocked.
    */
@@ -622,7 +624,7 @@ class DefaultInteractiveOverlayHost(
         else if (window?.view === view) dismissOnMain()
       }
     } catch (error: Exception) {
-      Log.e(TAG, "Failed to restore overlay after capture", error)
+      Log.e(TAG, "Failed to restore prototype after capture", error)
     }
   }
 
@@ -630,7 +632,7 @@ class DefaultInteractiveOverlayHost(
     try {
       current.target.windowManager.updateViewLayout(current.view, params)
     } catch (error: Exception) {
-      Log.e(TAG, "Failed to update interactive overlay", error)
+      Log.e(TAG, "Failed to update prototype", error)
       if (isNotAttached(error)) {
         clearWindow(current)
         onWindowLost()
@@ -647,7 +649,7 @@ class DefaultInteractiveOverlayHost(
     WindowManager.LayoutParams().apply { copyFrom(params) }
 
   companion object {
-    private const val TAG = "InteractiveOverlayHost"
+    private const val TAG = "PrototypeHost"
   }
 }
 
@@ -658,31 +660,31 @@ private fun applyAnchoredOrigin(params: WindowManager.LayoutParams, origin: IntO
   params.y = origin.y
 }
 
-enum class OverlayBackDecision {
+enum class PrototypeBackDecision {
   /** Not ours: let the view tree and the platform handle the key. */
   PASS,
 
   /** Swallow the key without acting (the down half of a Back press, or a canceled up). */
   CONSUME,
 
-  /** Back completed on a focusable overlay: dismiss it as the user. */
+  /** Back completed on a focusable prototype: dismiss it as the user. */
   DISMISS,
 }
 
 /**
- * Back reaches the overlay only while its window is focusable, which is exactly while a text field
- * is visible. Dismissal fires once, on the up half of an uncanceled press.
+ * Back reaches the prototype only while its window is focusable, which is exactly while a text
+ * field is visible. Dismissal fires once, on the up half of an uncanceled press.
  */
-fun overlayBackDecision(
+fun prototypeBackDecision(
   focusable: Boolean,
   keyCode: Int,
   action: Int,
   canceled: Boolean,
-): OverlayBackDecision =
+): PrototypeBackDecision =
   when {
-    !focusable || keyCode != KeyEvent.KEYCODE_BACK -> OverlayBackDecision.PASS
-    action == KeyEvent.ACTION_UP && !canceled -> OverlayBackDecision.DISMISS
-    else -> OverlayBackDecision.CONSUME
+    !focusable || keyCode != KeyEvent.KEYCODE_BACK -> PrototypeBackDecision.PASS
+    action == KeyEvent.ACTION_UP && !canceled -> PrototypeBackDecision.DISMISS
+    else -> PrototypeBackDecision.CONSUME
   }
 
 /**
@@ -690,9 +692,9 @@ fun overlayBackDecision(
  * is final, so this mirrors its content hosting (state-held content, composition on attach) on
  * AbstractComposeView and keeps ComposeView's accessibility class name for hierarchy consumers.
  */
-internal class OverlayComposeView(
+internal class PrototypeComposeView(
   context: Context,
-  private val decide: (KeyEvent) -> OverlayBackDecision,
+  private val decide: (KeyEvent) -> PrototypeBackDecision,
   private val onBack: () -> Unit,
 ) : AbstractComposeView(context) {
   private val content = mutableStateOf<(@Composable () -> Unit)?>(null)
@@ -715,9 +717,9 @@ internal class OverlayComposeView(
 
   override fun dispatchKeyEvent(event: KeyEvent): Boolean =
     when (decide(event)) {
-      OverlayBackDecision.PASS -> super.dispatchKeyEvent(event)
-      OverlayBackDecision.CONSUME -> true
-      OverlayBackDecision.DISMISS -> {
+      PrototypeBackDecision.PASS -> super.dispatchKeyEvent(event)
+      PrototypeBackDecision.CONSUME -> true
+      PrototypeBackDecision.DISMISS -> {
         onBack()
         true
       }
@@ -726,30 +728,30 @@ internal class OverlayComposeView(
 
 /** Temporary hard-coded content until the spec renderer supplies the request slot. */
 @Composable
-fun InteractiveOverlayTestContent() {
-  Box(Modifier.padding(16.dp)) { Text("CtrlProxy interactive overlay") }
+fun PrototypeTestContent() {
+  Box(Modifier.padding(16.dp)) { Text("CtrlProxy prototype") }
 }
 
 /**
  * Host chrome is computed from placement and persistence only, outside the author-controlled render
- * tree. [closeVisible] is the compact close control a persistent non-fullscreen overlay carries
+ * tree. [closeVisible] is the compact close control a persistent non-fullscreen prototype carries
  * (fullscreen already has the dismiss row), so nobody holding the device is left without a way to
- * remove an overlay that outlived its session.
+ * remove a prototype that outlived its session.
  */
-data class OverlayHostChrome(
+data class PrototypeHostChrome(
   val dismissVisible: Boolean,
   val windowAlpha: Float,
   val contentAlpha: Float,
   val closeVisible: Boolean = false,
 )
 
-fun overlayHostChrome(request: InteractiveOverlayRequest): OverlayHostChrome {
-  val fullscreen = request.placement is OverlayPlacement.Fullscreen
+fun prototypeHostChrome(request: PrototypeRequest): PrototypeHostChrome {
+  val fullscreen = request.placement is PrototypePlacement.Fullscreen
   val close = request.persistent && !fullscreen
   // Host controls never inherit spec opacity: only the authored content fades.
   val opaqueWindow = fullscreen || close
   val opacity = request.opacityPercent / 100f
-  return OverlayHostChrome(
+  return PrototypeHostChrome(
     fullscreen,
     if (opaqueWindow) 1f else opacity,
     if (opaqueWindow) opacity else 1f,
@@ -758,37 +760,37 @@ fun overlayHostChrome(request: InteractiveOverlayRequest): OverlayHostChrome {
 }
 
 @Composable
-internal fun InteractiveOverlayWindowContent(
-  request: InteractiveOverlayRequest,
-  insetFloor: () -> OverlayInsetFloor,
+internal fun PrototypeWindowContent(
+  request: PrototypeRequest,
+  insetFloor: () -> PrototypeInsetFloor,
 ) {
   // Read again when the configuration changes (rotation), which is when the bar moves.
   val configuration = LocalConfiguration.current
   val floor = remember(request.placement, configuration) { insetFloor() }
-  val chrome = overlayHostChrome(request)
+  val chrome = prototypeHostChrome(request)
   val scope = rememberCoroutineScope()
-  OverlayHostTheme(
+  PrototypeHostTheme(
     request.themeRoot,
     request.specTheme,
     request.darkTheme ?: isSystemInDarkTheme(),
   ) {
-    InteractiveOverlayChrome(request, chrome, floor, scope)
+    PrototypeChrome(request, chrome, floor, scope)
   }
 }
 
 @Composable
-private fun InteractiveOverlayChrome(
-  request: InteractiveOverlayRequest,
-  chrome: OverlayHostChrome,
-  floor: OverlayInsetFloor,
+private fun PrototypeChrome(
+  request: PrototypeRequest,
+  chrome: PrototypeHostChrome,
+  floor: PrototypeInsetFloor,
   scope: CoroutineScope,
 ) {
-  val fullscreen = request.placement as? OverlayPlacement.Fullscreen
+  val fullscreen = request.placement as? PrototypePlacement.Fullscreen
   if (chrome.dismissVisible) {
     Column(Modifier.fillMaxSize()) {
       // Reserve inset-aware space and clip the spec below it. Modal scrims cannot cover it. The
       // bar is translucent, themed like the spec, and only as tall as its small button (#10437).
-      val dismissColors = overlayDismissColors(MaterialTheme.colorScheme)
+      val dismissColors = prototypeDismissColors(MaterialTheme.colorScheme)
       Box(
         Modifier.fillMaxWidth()
           .background(dismissColors.background)
@@ -804,7 +806,7 @@ private fun InteractiveOverlayChrome(
           contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
           colors = ButtonDefaults.textButtonColors(contentColor = dismissColors.content),
         ) {
-          Text("Dismiss AutoMobile overlay", style = MaterialTheme.typography.labelMedium)
+          Text("Dismiss AutoMobile prototype", style = MaterialTheme.typography.labelMedium)
         }
       }
       Box(
@@ -815,8 +817,8 @@ private fun InteractiveOverlayChrome(
           .background(fullscreen?.scrim ?: Color.Transparent),
       ) {
         CompositionLocalProvider(
-          LocalOverlayInsetFloor provides floor,
-          LocalOverlayFillsWindow provides true,
+          LocalPrototypeInsetFloor provides floor,
+          LocalPrototypeFillsWindow provides true,
         ) {
           request.content()
         }
@@ -826,10 +828,10 @@ private fun InteractiveOverlayChrome(
     Box {
       // Not `alpha`, which clips to this wrap-content box: anchored nodes are drawn outside it.
       Box(Modifier.graphicsLayer { alpha = chrome.contentAlpha }) {
-        CompositionLocalProvider(LocalOverlayInsetFloor provides floor) { request.content() }
+        CompositionLocalProvider(LocalPrototypeInsetFloor provides floor) { request.content() }
       }
       // Drawn after the content so authored nodes cannot cover it.
-      val closeColors = overlayCloseColors(MaterialTheme.colorScheme)
+      val closeColors = prototypeCloseColors(MaterialTheme.colorScheme)
       TextButton(
         onClick = { scope.launch { request.onHostDismiss() } },
         modifier = Modifier.align(Alignment.TopEnd).background(closeColors.background),
@@ -839,5 +841,5 @@ private fun InteractiveOverlayChrome(
       }
     }
   } else
-    Box { CompositionLocalProvider(LocalOverlayInsetFloor provides floor) { request.content() } }
+    Box { CompositionLocalProvider(LocalPrototypeInsetFloor provides floor) { request.content() } }
 }

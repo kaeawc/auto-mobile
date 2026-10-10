@@ -1,22 +1,22 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay.screenshot
+package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import java.io.File
 import kotlin.math.abs
 
 /**
- * Pure record/compare logic for overlay renderer screenshot tests, over plain ARGB pixel arrays so
- * it carries no Android or Compose dependency and is unit-tested on its own
- * (`OverlayScreenshotComparatorTest`). PNG encoding/decoding is injected through [PngCodec] so the
- * Robolectric harness can use the platform `Bitmap` codec while the unit tests use an in-memory
+ * Pure record/compare logic for prototype renderer screenshot tests, over plain ARGB pixel arrays
+ * so it carries no Android or Compose dependency and is unit-tested on its own
+ * (`PrototypeScreenshotComparatorTest`). PNG encoding/decoding is injected through [PngCodec] so
+ * the Robolectric harness can use the platform `Bitmap` codec while the unit tests use an in-memory
  * fake.
  *
  * Tolerances mirror desktop-core's `ScreenshotComparator` (see
  * `android/docs/screenshot-testing.md`): a small per-channel tolerance absorbs anti-aliasing jitter
  * and a tiny differing-pixel ratio keeps real layout/content changes failing. Font rasterization
  * still differs across operating systems, so baselines are pinned to one reference OS by
- * [OverlayScreenshotEnvironment], not here.
+ * [PrototypeScreenshotEnvironment], not here.
  */
-internal object OverlayScreenshotComparator {
+internal object PrototypeScreenshotComparator {
 
   /** ARGB pixels in row-major order; `pixels.size == width * height`. */
   class Image(val width: Int, val height: Int, val pixels: IntArray) {

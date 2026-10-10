@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.View
 import androidx.compose.runtime.Composable
@@ -12,13 +12,13 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
-import dev.jasonpearson.automobile.protocol.OverlayBoundsAnchor
-import dev.jasonpearson.automobile.protocol.OverlayElementAnchor
-import dev.jasonpearson.automobile.protocol.OverlayNode
+import dev.jasonpearson.automobile.protocol.PrototypeBoundsAnchor
+import dev.jasonpearson.automobile.protocol.PrototypeElementAnchor
+import dev.jasonpearson.automobile.protocol.PrototypeNode
 import kotlin.math.roundToInt
 
 /** `cover` lays the node over the anchor bounds; the edges align the same node edge to them. */
-enum class OverlayAnchorAlignment {
+enum class PrototypeAnchorAlignment {
   COVER,
   TOP,
   BOTTOM,
@@ -26,7 +26,7 @@ enum class OverlayAnchorAlignment {
   END;
 
   companion object {
-    fun fromWire(value: String?): OverlayAnchorAlignment =
+    fun fromWire(value: String?): PrototypeAnchorAlignment =
       when (value) {
         null,
         "cover" -> COVER
@@ -40,8 +40,8 @@ enum class OverlayAnchorAlignment {
 }
 
 /** Whether [anchor] lays the node over its bounds, sizing it to them. */
-fun overlayAnchorCovers(anchor: OverlayBoundsAnchor): Boolean =
-  OverlayAnchorAlignment.fromWire(anchor.alignment) == OverlayAnchorAlignment.COVER
+fun prototypeAnchorCovers(anchor: PrototypeBoundsAnchor): Boolean =
+  PrototypeAnchorAlignment.fromWire(anchor.alignment) == PrototypeAnchorAlignment.COVER
 
 /**
  * The anchored node's screen rectangle in px. [anchor] bounds and offset are screen-space dp and
@@ -50,8 +50,8 @@ fun overlayAnchorCovers(anchor: OverlayBoundsAnchor): Boolean =
  * the other axis. Start and end follow [layoutDirection]. The offset is applied last, in screen
  * axes.
  */
-fun overlayAnchorRect(
-  anchor: OverlayBoundsAnchor,
+fun prototypeAnchorRect(
+  anchor: PrototypeBoundsAnchor,
   density: Float,
   nodeWidthPx: Float,
   nodeHeightPx: Float,
@@ -65,14 +65,15 @@ fun overlayAnchorRect(
   val centredY = top + (height - nodeHeightPx) / 2f
   val rtl = layoutDirection == LayoutDirection.Rtl
   val origin =
-    when (OverlayAnchorAlignment.fromWire(anchor.alignment)) {
-      OverlayAnchorAlignment.COVER ->
+    when (PrototypeAnchorAlignment.fromWire(anchor.alignment)) {
+      PrototypeAnchorAlignment.COVER ->
         return shift(Rect(left, top, left + width, top + height), anchor, density)
-      OverlayAnchorAlignment.TOP -> Offset(centredX, top)
-      OverlayAnchorAlignment.BOTTOM -> Offset(centredX, top + height - nodeHeightPx)
-      OverlayAnchorAlignment.START ->
+      PrototypeAnchorAlignment.TOP -> Offset(centredX, top)
+      PrototypeAnchorAlignment.BOTTOM -> Offset(centredX, top + height - nodeHeightPx)
+      PrototypeAnchorAlignment.START ->
         Offset(if (rtl) left + width - nodeWidthPx else left, centredY)
-      OverlayAnchorAlignment.END -> Offset(if (rtl) left else left + width - nodeWidthPx, centredY)
+      PrototypeAnchorAlignment.END ->
+        Offset(if (rtl) left else left + width - nodeWidthPx, centredY)
     }
   return shift(
     Rect(origin.x, origin.y, origin.x + nodeWidthPx, origin.y + nodeHeightPx),
@@ -81,25 +82,25 @@ fun overlayAnchorRect(
   )
 }
 
-private fun shift(rect: Rect, anchor: OverlayBoundsAnchor, density: Float): Rect {
+private fun shift(rect: Rect, anchor: PrototypeBoundsAnchor, density: Float): Rect {
   val offset = anchor.offset ?: return rect
   return rect.translate(offset.x.toFloat() * density, offset.y.toFloat() * density)
 }
 
 /**
- * Where the overlay window sits on screen, and how a floating window follows an anchored root.
+ * Where the prototype window sits on screen, and how a floating window follows an anchored root.
  * [originOnScreen] is the screen position, in px, of the window's own (0, 0): anchors are screen
  * coordinates, so a node subtracts it together with its position inside the window (system bars,
  * cutout, host chrome and authored padding included). [moveTo] is non-null only for a floating
  * window, whose root anchor positions the window itself so the rest of the app stays touchable.
  */
-class OverlayWindowGeometry(
+class PrototypeWindowGeometry(
   val originOnScreen: () -> Offset,
   val moveTo: ((IntOffset) -> Unit)? = null,
 )
 
 /** The window origin of [view]: its screen position less its position inside its window. */
-fun overlayViewWindowOrigin(view: View): Offset {
+fun prototypeViewWindowOrigin(view: View): Offset {
   val screen = IntArray(2)
   val window = IntArray(2)
   view.getLocationOnScreen(screen)
@@ -108,15 +109,15 @@ fun overlayViewWindowOrigin(view: View): Offset {
 }
 
 /** Null outside a host window; the renderer then reads the window origin from its own view. */
-val LocalOverlayWindowGeometry = staticCompositionLocalOf<OverlayWindowGeometry?> { null }
+val LocalPrototypeWindowGeometry = staticCompositionLocalOf<PrototypeWindowGeometry?> { null }
 
 @Composable
-internal fun currentOverlayWindowGeometry(): OverlayWindowGeometry {
-  LocalOverlayWindowGeometry.current?.let {
+internal fun currentPrototypeWindowGeometry(): PrototypeWindowGeometry {
+  LocalPrototypeWindowGeometry.current?.let {
     return it
   }
   val view = LocalView.current
-  return OverlayWindowGeometry({ overlayViewWindowOrigin(view) })
+  return PrototypeWindowGeometry({ prototypeViewWindowOrigin(view) })
 }
 
 /**
@@ -126,13 +127,13 @@ internal fun currentOverlayWindowGeometry(): OverlayWindowGeometry {
  * instead stays at the window's (0, 0) and moves the window onto the rectangle through [geometry]'s
  * `moveTo`.
  */
-internal fun Modifier.overlayAnchor(
-  anchor: OverlayBoundsAnchor,
-  geometry: OverlayWindowGeometry,
+internal fun Modifier.prototypeAnchor(
+  anchor: PrototypeBoundsAnchor,
+  geometry: PrototypeWindowGeometry,
   windowRoot: Boolean,
 ): Modifier = layout { measurable, constraints ->
   val placeable =
-    if (overlayAnchorCovers(anchor)) {
+    if (prototypeAnchorCovers(anchor)) {
       val width = (anchor.bounds.width.toFloat() * density).roundToInt().coerceAtLeast(0)
       val height = (anchor.bounds.height.toFloat() * density).roundToInt().coerceAtLeast(0)
       measurable.measure(Constraints.fixed(width, height))
@@ -140,7 +141,7 @@ internal fun Modifier.overlayAnchor(
       measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
     }
   val rect =
-    overlayAnchorRect(
+    prototypeAnchorRect(
       anchor,
       density,
       placeable.width.toFloat(),
@@ -164,12 +165,12 @@ internal fun Modifier.overlayAnchor(
  * The host resolves every element anchor into screen dp bounds before sending (#9316). One that
  * still arrives was never resolved, and drawing the node unanchored would silently misplace it.
  */
-fun requireResolvedOverlayAnchors(root: OverlayNode) {
-  fun visit(node: OverlayNode, path: String) {
-    require(node.anchor !is OverlayElementAnchor) {
+fun requireResolvedPrototypeAnchors(root: PrototypeNode) {
+  fun visit(node: PrototypeNode, path: String) {
+    require(node.anchor !is PrototypeElementAnchor) {
       "$path.anchor: Element anchors must be resolved to bounds by the host; update the AutoMobile host"
     }
-    overlayChildEntries(node, path, bind = false).forEach { visit(it.node, it.path) }
+    prototypeChildEntries(node, path, bind = false).forEach { visit(it.node, it.path) }
   }
   visit(root, "root")
 }

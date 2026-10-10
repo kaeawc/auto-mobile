@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 #
-# Render overlay specs to PNG on the host, with no device attached (issue #10445).
+# Render prototype specs to PNG on the host, with no device attached (issue #10445).
 #
-# Runs control-proxy's OverlayPreviewRenderTest, which draws each spec through the
-# production Compose renderer (OverlaySpecContent) under Robolectric's native
+# Runs control-proxy's PrototypePreviewRenderTest, which draws each spec through the
+# production Compose renderer (PrototypeSpecContent) under Robolectric's native
 # graphics, and writes <spec-name>.png per spec plus contact-sheet.png when more
 # than one spec is given.
 #
 # Usage:
-#   scripts/android/overlay-preview.sh [--out DIR] [--width DP] [--height DP]
+#   scripts/android/prototype-preview.sh [--out DIR] [--width DP] [--height DP]
 #     [--density DPI] [--theme light|dark|both] SPEC.json [SPEC.json ...]
 #
-# Defaults: --out scratch/overlay-preview, 360x640 dp, 160 dpi, light.
+# Defaults: --out scratch/prototype-preview, 360x640 dp, 160 dpi, light.
 # --theme sets the device night mode; a spec whose theme mode is light or dark
 # still decides for itself. --theme both renders twice and writes
 # <name>-light.png and <name>-dark.png (plus contact-sheet-light/dark.png).
 #
-# OVERLAY_PREVIEW_GRADLEW overrides the Gradle wrapper (tests use a stub).
+# PROTOTYPE_PREVIEW_GRADLEW overrides the Gradle wrapper (tests use a stub).
 
 set -euo pipefail
 
@@ -27,7 +27,7 @@ usage() {
 }
 
 die() {
-  echo "overlay-preview: $*" >&2
+  echo "prototype-preview: $*" >&2
   exit 2
 }
 
@@ -40,7 +40,7 @@ absolute_path() {
   fi
 }
 
-out_dir="${REPO_ROOT}/scratch/overlay-preview"
+out_dir="${REPO_ROOT}/scratch/prototype-preview"
 width=""
 height=""
 density=""
@@ -99,16 +99,16 @@ run_gradle() {
   local gradle_args=(
     -p "${REPO_ROOT}/android"
     :control-proxy:testDebugUnitTest
-    --tests '*OverlayPreviewRenderTest'
+    --tests '*PrototypePreviewRenderTest'
     --rerun
-    "-Doverlay.preview.spec=${spec_list}"
-    "-Doverlay.preview.out=${run_out}"
+    "-Dprototype.preview.spec=${spec_list}"
+    "-Dprototype.preview.out=${run_out}"
   )
-  [[ -z "${width}" ]] || gradle_args+=("-Doverlay.preview.width=${width}")
-  [[ -z "${height}" ]] || gradle_args+=("-Doverlay.preview.height=${height}")
-  [[ -z "${density}" ]] || gradle_args+=("-Doverlay.preview.density=${density}")
-  [[ -z "${run_theme}" ]] || gradle_args+=("-Doverlay.preview.theme=${run_theme}")
-  "${OVERLAY_PREVIEW_GRADLEW:-${REPO_ROOT}/android/gradlew}" "${gradle_args[@]}"
+  [[ -z "${width}" ]] || gradle_args+=("-Dprototype.preview.width=${width}")
+  [[ -z "${height}" ]] || gradle_args+=("-Dprototype.preview.height=${height}")
+  [[ -z "${density}" ]] || gradle_args+=("-Dprototype.preview.density=${density}")
+  [[ -z "${run_theme}" ]] || gradle_args+=("-Dprototype.preview.theme=${run_theme}")
+  "${PROTOTYPE_PREVIEW_GRADLEW:-${REPO_ROOT}/android/gradlew}" "${gradle_args[@]}"
 }
 
 if [[ "${theme}" == "both" ]]; then

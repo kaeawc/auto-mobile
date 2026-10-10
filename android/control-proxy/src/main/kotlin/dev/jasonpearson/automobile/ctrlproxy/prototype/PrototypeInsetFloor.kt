@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.annotation.TargetApi
 import android.os.Build
@@ -17,19 +17,19 @@ import kotlin.math.roundToInt
  * Content that asks for `systemBars` safe-area padding on every edge (first seen on a carousel's
  * control row) cleared the status bar at its top edge on the device, but its bottom edge stayed
  * under the gesture navigation bar, in fullscreen and in `bottomCenter`, portrait and landscape:
- * the navigation bar inset never reached the overlay window's own Compose inset values. The
+ * the navigation bar inset never reached the prototype window's own Compose inset values. The
  * display's window metrics (the same source the observation's `insets` come from) do carry it, so
  * the renderer takes the larger of the two.
  */
-internal data class OverlayInsetFloor(val bottom: Int = 0) {
+internal data class PrototypeInsetFloor(val bottom: Int = 0) {
   fun asComposeInsets(): ComposeWindowInsets = ComposeWindowInsets(0, 0, 0, bottom)
 
   companion object {
-    val None = OverlayInsetFloor()
+    val None = PrototypeInsetFloor()
   }
 }
 
-internal val LocalOverlayInsetFloor = staticCompositionLocalOf { OverlayInsetFloor.None }
+internal val LocalPrototypeInsetFloor = staticCompositionLocalOf { PrototypeInsetFloor.None }
 
 /**
  * The part of a [navigationBarBottomPx] tall bar that [placement]'s window sits behind. A window
@@ -37,22 +37,22 @@ internal val LocalOverlayInsetFloor = staticCompositionLocalOf { OverlayInsetFlo
  * all of it; a bottom-gravity floating window is behind what its offset has not lifted it out of (a
  * positive `y` moves a bottom-gravity window up); anything else is not behind the bar.
  */
-internal fun overlayInsetFloor(
-  placement: OverlayPlacement,
+internal fun prototypeInsetFloor(
+  placement: PrototypePlacement,
   density: Float,
   navigationBarBottomPx: Int,
-): OverlayInsetFloor {
+): PrototypeInsetFloor {
   val bar = navigationBarBottomPx.coerceAtLeast(0)
   val behindBar =
     when (placement) {
-      is OverlayPlacement.Fullscreen -> bar
-      is OverlayPlacement.Sheet -> if (placement.edge == OverlayPlacement.Edge.TOP) 0 else bar
-      is OverlayPlacement.Floating ->
+      is PrototypePlacement.Fullscreen -> bar
+      is PrototypePlacement.Sheet -> if (placement.edge == PrototypePlacement.Edge.TOP) 0 else bar
+      is PrototypePlacement.Floating ->
         if ((placement.gravity and Gravity.VERTICAL_GRAVITY_MASK) == Gravity.BOTTOM)
           (bar - (placement.offsetYDp * density).roundToInt()).coerceAtLeast(0)
         else 0
     }
-  return OverlayInsetFloor(behindBar)
+  return PrototypeInsetFloor(behindBar)
 }
 
 /**
@@ -67,9 +67,9 @@ internal fun navigationBarBottomPx(windowManager: WindowManager, sdkInt: Int): I
       .getInsets(WindowInsets.Type.navigationBars())
       .bottom
   } catch (e: Exception) {
-    Log.w(TAG, "Could not read the navigation bar inset; overlay content is not lifted", e)
+    Log.w(TAG, "Could not read the navigation bar inset; prototype content is not lifted", e)
     0
   }
 }
 
-private const val TAG = "OverlayInsetFloor"
+private const val TAG = "PrototypeInsetFloor"

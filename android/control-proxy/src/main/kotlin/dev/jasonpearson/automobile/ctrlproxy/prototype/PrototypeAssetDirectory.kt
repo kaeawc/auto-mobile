@@ -1,14 +1,14 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import java.io.File
 import java.io.IOException
 
 /**
- * [OverlayAssetFiles] backed by one directory (the CtrlProxy cache). Names are store-generated
+ * [PrototypeAssetFiles] backed by one directory (the CtrlProxy cache). Names are store-generated
  * tokens; anything else is refused so no caller-influenced string can reach the file system. Writes
  * go to a temporary name first so a failed write never leaves a half-written asset.
  */
-class OverlayAssetDirectory(private val directory: File) : OverlayAssetFiles {
+class PrototypeAssetDirectory(private val directory: File) : PrototypeAssetFiles {
   override fun write(name: String, bytes: ByteArray) {
     val target = fileFor(name)
     ensureDirectory()
@@ -39,12 +39,12 @@ class OverlayAssetDirectory(private val directory: File) : OverlayAssetFiles {
 
   private fun ensureDirectory() {
     if (!directory.isDirectory && !directory.mkdirs() && !directory.isDirectory) {
-      throw IOException("Could not create overlay asset directory")
+      throw IOException("Could not create prototype asset directory")
     }
   }
 
   private fun fileFor(name: String): File {
-    require(NAME_PATTERN.matches(name)) { "Invalid overlay asset file name" }
+    require(NAME_PATTERN.matches(name)) { "Invalid prototype asset file name" }
     return File(directory, name)
   }
 

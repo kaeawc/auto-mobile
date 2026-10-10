@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.content.Context
 import android.os.Build
@@ -24,17 +24,17 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isSpecified
-import dev.jasonpearson.automobile.protocol.OverlayCornerRadius
-import dev.jasonpearson.automobile.protocol.OverlaySpecTheme
-import dev.jasonpearson.automobile.protocol.OverlaySpecThemeColors
-import dev.jasonpearson.automobile.protocol.OverlaySpecThemeShapes
-import dev.jasonpearson.automobile.protocol.OverlaySpecThemeTypography
+import dev.jasonpearson.automobile.protocol.PrototypeCornerRadius
+import dev.jasonpearson.automobile.protocol.PrototypeSpecTheme
+import dev.jasonpearson.automobile.protocol.PrototypeSpecThemeColors
+import dev.jasonpearson.automobile.protocol.PrototypeSpecThemeShapes
+import dev.jasonpearson.automobile.protocol.PrototypeSpecThemeTypography
 
 /**
- * The overlay's own Material scheme: the window has no app theme, so without one every Material
+ * The prototype's own Material scheme: the window has no app theme, so without one every Material
  * component falls back to the baseline light palette whatever the spec draws (#10434).
  */
-internal data class OverlayThemeSpec(
+internal data class PrototypeThemeSpec(
   val dark: Boolean,
   val surface: Color?,
   /** Seed colour a full scheme is generated from; null keeps the baseline palette. */
@@ -42,7 +42,7 @@ internal data class OverlayThemeSpec(
   /** The spec asked for device dynamic colour; honoured only when the OS supports it. */
   val dynamicColor: Boolean = false,
   /** Explicit per-role hex overrides, painted over whichever scheme the rest selects. */
-  val roles: OverlaySpecThemeColors? = null,
+  val roles: PrototypeSpecThemeColors? = null,
 )
 
 /**
@@ -52,36 +52,36 @@ internal data class OverlayThemeSpec(
  * background follows the device setting. An explicit spec `theme` wins over this inference: its
  * `mode` decides light or dark, and its colours replace the background-derived surfaces (#10438).
  */
-internal fun overlayThemeSpec(
-  root: OverlayRenderNode,
+internal fun prototypeThemeSpec(
+  root: PrototypeRenderNode,
   systemDark: Boolean,
-  explicit: OverlaySpecTheme? = null,
-): OverlayThemeSpec {
-  val authored = overlayAuthoredTheme(root)
+  explicit: PrototypeSpecTheme? = null,
+): PrototypeThemeSpec {
+  val authored = prototypeAuthoredTheme(root)
   val dark =
-    overlayExplicitDark(explicit?.mode, systemDark)
-      ?: overlayRoleSurfaceDark(explicit?.colors)
+    prototypeExplicitDark(explicit?.mode, systemDark)
+      ?: prototypeRoleSurfaceDark(explicit?.colors)
       ?: authored?.dark
       ?: systemDark
-  val seed = explicit?.colors?.seed?.let(::overlayColor)
+  val seed = explicit?.colors?.seed?.let(::prototypeColor)
   val dynamic = explicit?.colors?.source == DEVICE_COLOR_SOURCE
   // Authored surfaces only match a scheme of the same polarity, and never override explicit
   // colours.
   val surface = authored?.surface?.takeIf { seed == null && !dynamic && authored.dark == dark }
-  return OverlayThemeSpec(dark, surface, seed, dynamic, explicit?.colors)
+  return PrototypeThemeSpec(dark, surface, seed, dynamic, explicit?.colors)
 }
 
 /**
  * With no `mode`, an explicit `background` (else `surface`) role override is the screen colour the
  * author chose, so its luminance decides light or dark the way an authored background does.
  */
-private fun overlayRoleSurfaceDark(colors: OverlaySpecThemeColors?): Boolean? =
+private fun prototypeRoleSurfaceDark(colors: PrototypeSpecThemeColors?): Boolean? =
   (colors?.background ?: colors?.surface)?.let {
-    overlayColor(it).luminance() < DARK_LUMINANCE_CEILING
+    prototypeColor(it).luminance() < DARK_LUMINANCE_CEILING
   }
 
 /** `light`/`dark` decide outright, `system` follows the device, and null means "not specified". */
-private fun overlayExplicitDark(mode: String?, systemDark: Boolean): Boolean? =
+private fun prototypeExplicitDark(mode: String?, systemDark: Boolean): Boolean? =
   when (mode) {
     "light" -> false
     "dark" -> true
@@ -90,12 +90,12 @@ private fun overlayExplicitDark(mode: String?, systemDark: Boolean): Boolean? =
   }
 
 /** The theme the author painted, or null when the spec paints no opaque background. */
-internal fun overlayAuthoredTheme(root: OverlayRenderNode): OverlayThemeSpec? {
-  var node: OverlayRenderNode? = root
+internal fun prototypeAuthoredTheme(root: PrototypeRenderNode): PrototypeThemeSpec? {
+  var node: PrototypeRenderNode? = root
   while (node != null) {
     val background = node.style.background
     if (node.visible && background != null && background.alpha >= OPAQUE_BACKGROUND_ALPHA)
-      return OverlayThemeSpec(background.luminance() < DARK_LUMINANCE_CEILING, background)
+      return PrototypeThemeSpec(background.luminance() < DARK_LUMINANCE_CEILING, background)
     node =
       if (node.role == "pager") node.children.getOrNull(node.page)
       else node.children.firstOrNull { it.visible }
@@ -108,12 +108,13 @@ internal fun overlayAuthoredTheme(root: OverlayRenderNode): OverlayThemeSpec? {
  * explicit mode wins over the authored background: `light`/`dark` decide outright and `system`
  * follows the device, as the content scheme does. Only an absent mode infers from the background.
  */
-internal fun overlayHostDark(model: OverlayRenderModel): Boolean? =
+internal fun prototypeHostDark(model: PrototypeRenderModel): Boolean? =
   when (model.theme?.mode) {
     "light" -> false
     "dark" -> true
     "system" -> null
-    else -> overlayRoleSurfaceDark(model.theme?.colors) ?: overlayAuthoredTheme(model.root)?.dark
+    else ->
+      prototypeRoleSurfaceDark(model.theme?.colors) ?: prototypeAuthoredTheme(model.root)?.dark
   }
 
 /**
@@ -122,18 +123,18 @@ internal fun overlayHostDark(model: OverlayRenderModel): Boolean? =
  * palette is used with the authored surface painted over it. Explicit role overrides are applied
  * last, over any of those.
  */
-internal fun overlayColorScheme(
-  theme: OverlayThemeSpec,
+internal fun prototypeColorScheme(
+  theme: PrototypeThemeSpec,
   dynamicScheme: ColorScheme? = null,
-): ColorScheme = overlayBaseColorScheme(theme, dynamicScheme).withRoleOverrides(theme.roles)
+): ColorScheme = prototypeBaseColorScheme(theme, dynamicScheme).withRoleOverrides(theme.roles)
 
-private fun overlayBaseColorScheme(
-  theme: OverlayThemeSpec,
+private fun prototypeBaseColorScheme(
+  theme: PrototypeThemeSpec,
   dynamicScheme: ColorScheme?,
 ): ColorScheme {
   if (theme.dynamicColor && dynamicScheme != null) return dynamicScheme
   theme.seed?.let {
-    return overlaySeedColorScheme(it, theme.dark)
+    return prototypeSeedColorScheme(it, theme.dark)
   }
   val base = if (theme.dark) darkColorScheme() else lightColorScheme()
   val surface = theme.surface ?: return base
@@ -148,10 +149,10 @@ private fun overlayBaseColorScheme(
 }
 
 /** This scheme with every role [roles] names replaced by that hex colour; null keeps it as is. */
-internal fun ColorScheme.withRoleOverrides(roles: OverlaySpecThemeColors?): ColorScheme {
+internal fun ColorScheme.withRoleOverrides(roles: PrototypeSpecThemeColors?): ColorScheme {
   // Seed and source alone name no role: keep this scheme instance.
-  if (roles == null || roles == OverlaySpecThemeColors(roles.seed, roles.source)) return this
-  fun String?.hex(): Color? = this?.let(::overlayColor)
+  if (roles == null || roles == PrototypeSpecThemeColors(roles.seed, roles.source)) return this
+  fun String?.hex(): Color? = this?.let(::prototypeColor)
   return copy(
     primary = roles.primary.hex() ?: primary,
     onPrimary = roles.onPrimary.hex() ?: onPrimary,
@@ -198,7 +199,7 @@ internal fun ColorScheme.withRoleOverrides(roles: OverlaySpecThemeColors?): Colo
  * tertiary is rotated 60 degrees, and neutrals carry a trace of the hue. Tones follow the Material
  * light (primary 40, containers 90) and dark (primary 80, containers 30) assignments.
  */
-internal fun overlaySeedColorScheme(seed: Color, dark: Boolean): ColorScheme {
+internal fun prototypeSeedColorScheme(seed: Color, dark: Boolean): ColorScheme {
   val (hue, seedSaturation) = seed.hueAndSaturation()
   // A grey seed stays grey; only a coloured one is clamped into a usable range.
   val chroma =
@@ -297,52 +298,52 @@ private fun Color.hueAndSaturation(): Pair<Float, Float> {
 }
 
 /** Host chrome colours: a background with the content (text, ripple) drawn over it. */
-internal data class OverlayDismissColors(val background: Color, val content: Color)
+internal data class PrototypeDismissColors(val background: Color, val content: Color)
 
 /** The dismiss bar's translucency: quiet, but readable over any prototype. */
-internal const val OVERLAY_DISMISS_BAR_ALPHA = 0.6f
+internal const val PROTOTYPE_DISMISS_BAR_ALPHA = 0.6f
 
 /** Fallback scrim alphas, used when the spec authors no scrim colour. */
-internal const val OVERLAY_SHEET_SCRIM_ALPHA = 0.4f
-internal const val OVERLAY_DIALOG_SCRIM_ALPHA = 0.32f
+internal const val PROTOTYPE_SHEET_SCRIM_ALPHA = 0.4f
+internal const val PROTOTYPE_DIALOG_SCRIM_ALPHA = 0.32f
 
-/** The dismiss bar: `surfaceContainerHigh` at [OVERLAY_DISMISS_BAR_ALPHA] over `onSurface`. */
-internal fun overlayDismissColors(scheme: ColorScheme): OverlayDismissColors =
-  OverlayDismissColors(
-    scheme.surfaceContainerHigh.copy(alpha = OVERLAY_DISMISS_BAR_ALPHA),
+/** The dismiss bar: `surfaceContainerHigh` at [PROTOTYPE_DISMISS_BAR_ALPHA] over `onSurface`. */
+internal fun prototypeDismissColors(scheme: ColorScheme): PrototypeDismissColors =
+  PrototypeDismissColors(
+    scheme.surfaceContainerHigh.copy(alpha = PROTOTYPE_DISMISS_BAR_ALPHA),
     scheme.onSurface,
   )
 
 /** The persistent Close control: opaque, so authored content cannot show through it. */
-internal fun overlayCloseColors(scheme: ColorScheme): OverlayDismissColors =
-  OverlayDismissColors(scheme.surfaceContainerHigh, scheme.onSurface)
+internal fun prototypeCloseColors(scheme: ColorScheme): PrototypeDismissColors =
+  PrototypeDismissColors(scheme.surfaceContainerHigh, scheme.onSurface)
 
 /** The sheet drag handle: the M3 default role. */
-internal fun overlayHandleColor(scheme: ColorScheme): Color = scheme.onSurfaceVariant
+internal fun prototypeHandleColor(scheme: ColorScheme): Color = scheme.onSurfaceVariant
 
-internal fun overlaySheetScrimFallback(scheme: ColorScheme): Color =
-  scheme.scrim.copy(alpha = OVERLAY_SHEET_SCRIM_ALPHA)
+internal fun prototypeSheetScrimFallback(scheme: ColorScheme): Color =
+  scheme.scrim.copy(alpha = PROTOTYPE_SHEET_SCRIM_ALPHA)
 
-internal fun overlayDialogScrimFallback(scheme: ColorScheme): Color =
-  scheme.scrim.copy(alpha = OVERLAY_DIALOG_SCRIM_ALPHA)
+internal fun prototypeDialogScrimFallback(scheme: ColorScheme): Color =
+  scheme.scrim.copy(alpha = PROTOTYPE_DIALOG_SCRIM_ALPHA)
 
 /** Placeholder box and its glyph, for an image, icon or nav item with nothing to draw. */
-internal fun overlayPlaceholderColor(scheme: ColorScheme): Color = scheme.surfaceVariant
+internal fun prototypePlaceholderColor(scheme: ColorScheme): Color = scheme.surfaceVariant
 
-internal fun overlayPlaceholderContentColor(scheme: ColorScheme): Color = scheme.onSurfaceVariant
+internal fun prototypePlaceholderContentColor(scheme: ColorScheme): Color = scheme.onSurfaceVariant
 
 /**
  * Host chrome sits outside the spec content, so it needs the spec's theme itself: the resolved
- * [OverlayTheme] when the request carries the spec, else the baseline scheme for [dark].
+ * [PrototypeTheme] when the request carries the spec, else the baseline scheme for [dark].
  */
 @Composable
-internal fun OverlayHostTheme(
-  root: OverlayRenderNode?,
-  theme: OverlaySpecTheme?,
+internal fun PrototypeHostTheme(
+  root: PrototypeRenderNode?,
+  theme: PrototypeSpecTheme?,
   dark: Boolean,
   content: @Composable () -> Unit,
 ) {
-  if (root != null) OverlayTheme(root, theme, content)
+  if (root != null) PrototypeTheme(root, theme, content)
   else
     MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
       CompositionLocalProvider(
@@ -353,20 +354,20 @@ internal fun OverlayHostTheme(
 }
 
 @Composable
-internal fun OverlayTheme(
-  root: OverlayRenderNode,
-  explicit: OverlaySpecTheme? = null,
+internal fun PrototypeTheme(
+  root: PrototypeRenderNode,
+  explicit: PrototypeSpecTheme? = null,
   content: @Composable () -> Unit,
 ) {
   val systemDark = isSystemInDarkTheme()
   val context = LocalContext.current
   val scheme =
     remember(root, explicit, systemDark) {
-      val theme = overlayThemeSpec(root, systemDark, explicit)
-      overlayColorScheme(theme, overlayDynamicScheme(context, theme))
+      val theme = prototypeThemeSpec(root, systemDark, explicit)
+      prototypeColorScheme(theme, prototypeDynamicScheme(context, theme))
     }
-  val typography = remember(explicit) { overlayTypography(explicit?.typography) }
-  val shapes = remember(explicit) { overlayShapes(explicit?.shapes) }
+  val typography = remember(explicit) { prototypeTypography(explicit?.typography) }
+  val shapes = remember(explicit) { prototypeShapes(explicit?.shapes) }
   MaterialTheme(colorScheme = scheme, typography = typography, shapes = shapes) {
     // Unstyled text and icons take this, so they follow the scheme instead of a fixed black.
     CompositionLocalProvider(LocalContentColor provides scheme.onSurface, content = content)
@@ -377,7 +378,7 @@ internal fun OverlayTheme(
  * The Material 3 type scale with every role's size and line height multiplied by `scale`, and the
  * family replaced when the spec names one. No typography keeps the stock scale.
  */
-internal fun overlayTypography(spec: OverlaySpecThemeTypography?): Typography {
+internal fun prototypeTypography(spec: PrototypeSpecThemeTypography?): Typography {
   val base = Typography()
   if (spec == null) return base
   val scale = (spec.scale ?: 1.0).toFloat()
@@ -415,7 +416,7 @@ internal fun overlayTypography(spec: OverlaySpecThemeTypography?): Typography {
 }
 
 /** The Material type role a `textStyle` token names, or null for no (or an unknown) token. */
-internal fun overlayTextRole(typography: Typography, token: String?): TextStyle? =
+internal fun prototypeTextRole(typography: Typography, token: String?): TextStyle? =
   when (token) {
     "displayLarge" -> typography.displayLarge
     "displayMedium" -> typography.displayMedium
@@ -439,7 +440,7 @@ internal fun overlayTextRole(typography: Typography, token: String?): TextStyle?
  * The Material corner families for a `corner` choice. `medium` is the stock Material 3 scale; the
  * others shift every step of it, `full` making every family a pill.
  */
-internal fun overlayShapes(spec: OverlaySpecThemeShapes?): Shapes {
+internal fun prototypeShapes(spec: PrototypeSpecThemeShapes?): Shapes {
   val steps =
     when (spec?.corner) {
       "none" -> listOf(0, 0, 0, 0, 0)
@@ -459,7 +460,7 @@ internal fun overlayShapes(spec: OverlaySpecThemeShapes?): Shapes {
 /**
  * The Material 3 [ColorScheme] colour a spec role name (`primary`, `surfaceContainer`...) names.
  */
-internal fun overlayColorRole(scheme: ColorScheme, role: String): Color? =
+internal fun prototypeColorRole(scheme: ColorScheme, role: String): Color? =
   when (role) {
     "primary" -> scheme.primary
     "onPrimary" -> scheme.onPrimary
@@ -501,22 +502,22 @@ internal fun overlayColorRole(scheme: ColorScheme, role: String): Color? =
   }
 
 /** [literal] is the parsed hex colour; a role name in [spec] takes the active scheme's colour. */
-internal fun overlayResolveColor(scheme: ColorScheme, literal: Color?, spec: String?): Color? =
-  spec?.takeIf { !it.startsWith("#") }?.let { overlayColorRole(scheme, it) } ?: literal
+internal fun prototypeResolveColor(scheme: ColorScheme, literal: Color?, spec: String?): Color? =
+  spec?.takeIf { !it.startsWith("#") }?.let { prototypeColorRole(scheme, it) } ?: literal
 
-/** [overlayResolveColor] against the active overlay MaterialTheme. */
+/** [prototypeResolveColor] against the active prototype MaterialTheme. */
 @Composable
-internal fun overlayThemedColor(literal: Color?, spec: String?): Color? =
-  overlayResolveColor(MaterialTheme.colorScheme, literal, spec)
+internal fun prototypeThemedColor(literal: Color?, spec: String?): Color? =
+  prototypeResolveColor(MaterialTheme.colorScheme, literal, spec)
 
 /**
  * A `cornerRadius` as a shape: dp as a rounded corner, a token as the theme's Shapes step, and
  * per-corner radii as a rounded shape with each omitted corner square.
  */
-internal fun overlayCornerShape(shapes: Shapes, radius: OverlayCornerRadius): Shape =
+internal fun prototypeCornerShape(shapes: Shapes, radius: PrototypeCornerRadius): Shape =
   when (radius) {
-    is OverlayCornerRadius.Dp -> RoundedCornerShape(radius.dp.toFloat().dp)
-    is OverlayCornerRadius.Token ->
+    is PrototypeCornerRadius.Dp -> RoundedCornerShape(radius.dp.toFloat().dp)
+    is PrototypeCornerRadius.Token ->
       when (radius.name) {
         "extraSmall" -> shapes.extraSmall
         "small" -> shapes.small
@@ -526,7 +527,7 @@ internal fun overlayCornerShape(shapes: Shapes, radius: OverlayCornerRadius): Sh
         "full" -> RoundedCornerShape(percent = FULL_CORNER_PERCENT)
         else -> RoundedCornerShape(0.dp)
       }
-    is OverlayCornerRadius.Corners ->
+    is PrototypeCornerRadius.Corners ->
       RoundedCornerShape(
         topStart = (radius.topStart ?: 0.0).toFloat().dp,
         topEnd = (radius.topEnd ?: 0.0).toFloat().dp,
@@ -536,7 +537,7 @@ internal fun overlayCornerShape(shapes: Shapes, radius: OverlayCornerRadius): Sh
   }
 
 /** Material You colours need API 31; older devices fall through to the seed or baseline. */
-private fun overlayDynamicScheme(context: Context, theme: OverlayThemeSpec): ColorScheme? =
+private fun prototypeDynamicScheme(context: Context, theme: PrototypeThemeSpec): ColorScheme? =
   if (theme.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
     if (theme.dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
   } else null

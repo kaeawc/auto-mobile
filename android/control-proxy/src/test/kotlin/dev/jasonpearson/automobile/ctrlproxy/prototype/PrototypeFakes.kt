@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.Display
 import android.view.View
@@ -6,7 +6,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import kotlinx.coroutines.CompletableDeferred
 
-internal class FakeOverlayMainThread : OverlayMainThread {
+internal class FakePrototypeMainThread : PrototypeMainThread {
   var onMain = true
   val pending = ArrayDeque<() -> Unit>()
   var acceptPosts = true
@@ -30,8 +30,8 @@ internal class FakeOverlayMainThread : OverlayMainThread {
   }
 }
 
-internal class FakeOverlaySettleTimer(private val history: MutableList<String>) :
-  OverlaySettleTimer {
+internal class FakePrototypeSettleTimer(private val history: MutableList<String>) :
+  PrototypeSettleTimer {
   val waits = mutableListOf<Long>()
   var gate: CompletableDeferred<Unit>? = null
 
@@ -43,8 +43,8 @@ internal class FakeOverlaySettleTimer(private val history: MutableList<String>) 
 }
 
 /** Does not attach a real window or create a composition; records independent params snapshots. */
-internal class RecordingOverlayWindowManager(
-  private val mainThread: FakeOverlayMainThread,
+internal class RecordingPrototypeWindowManager(
+  private val mainThread: FakePrototypeMainThread,
   private val history: MutableList<String>,
 ) : WindowManager {
   var view: View? = null
@@ -91,16 +91,16 @@ internal class RecordingOverlayWindowManager(
     WindowManager.LayoutParams().apply { copyFrom(params as WindowManager.LayoutParams) }
 }
 
-internal class FakeInteractiveOverlayHost : InteractiveOverlayHost {
+internal class FakePrototypeHost : PrototypeHost {
   val calls = mutableListOf<String>()
-  val requests = mutableListOf<InteractiveOverlayRequest>()
+  val requests = mutableListOf<PrototypeRequest>()
   var accept = true
   var failure: Exception? = null
   override var isShowing = false
-  override var currentPlacement: OverlayPlacement? = null
+  override var currentPlacement: PrototypePlacement? = null
   override val isTouchThroughActive = false
 
-  private fun display(operation: String, request: InteractiveOverlayRequest): Boolean {
+  private fun display(operation: String, request: PrototypeRequest): Boolean {
     calls += operation
     failure?.let { throw it }
     if (accept) {
@@ -111,9 +111,9 @@ internal class FakeInteractiveOverlayHost : InteractiveOverlayHost {
     return accept
   }
 
-  override suspend fun show(request: InteractiveOverlayRequest) = display("show", request)
+  override suspend fun show(request: PrototypeRequest) = display("show", request)
 
-  override suspend fun replace(request: InteractiveOverlayRequest) = display("replace", request)
+  override suspend fun replace(request: PrototypeRequest) = display("replace", request)
 
   override suspend fun relayout(): Boolean {
     calls += "relayout"
@@ -153,9 +153,9 @@ internal class FakeInteractiveOverlayHost : InteractiveOverlayHost {
     frameTimeoutMillis: Long,
     maxHiddenMillis: Long,
     block: suspend () -> T,
-  ): OverlayHiddenCapture<T> {
+  ): PrototypeHiddenCapture<T> {
     calls += "hideForCapture"
-    return OverlayHiddenCapture(block(), overlayExcluded = true)
+    return PrototypeHiddenCapture(block(), prototypeExcluded = true)
   }
 }
 
@@ -163,38 +163,38 @@ internal class FakeInteractiveOverlayHost : InteractiveOverlayHost {
  * Fake display provider: a display is available only while it is in [connected]. Each opened
  * display gets its own recording WindowManager sharing [history], so cross-display ordering shows.
  */
-internal class FakeOverlayDisplays(
-  private val main: FakeOverlayMainThread,
+internal class FakePrototypeDisplays(
+  private val main: FakePrototypeMainThread,
   private val history: MutableList<String>,
   private val context: android.content.Context,
-) : OverlayDisplayProvider, OverlayDisplayWindows {
+) : PrototypeDisplayProvider, PrototypeDisplayWindows {
   val connected = mutableSetOf<Int>()
   val densities = mutableMapOf<Int, Float>()
   val opened = mutableListOf<Int>()
   /** The window-context layer each [opened] entry was created for, in the same order. */
-  val openedLayers = mutableListOf<OverlayWindowLayer>()
-  val managers = mutableMapOf<Int, RecordingOverlayWindowManager>()
+  val openedLayers = mutableListOf<PrototypeWindowLayer>()
+  val managers = mutableMapOf<Int, RecordingPrototypeWindowManager>()
 
-  fun connect(displayId: Int, density: Float = 2f): RecordingOverlayWindowManager {
+  fun connect(displayId: Int, density: Float = 2f): RecordingPrototypeWindowManager {
     connected += displayId
     densities[displayId] = density
-    return managers.getOrPut(displayId) { RecordingOverlayWindowManager(main, history) }
+    return managers.getOrPut(displayId) { RecordingPrototypeWindowManager(main, history) }
   }
 
   override fun isAvailable(displayId: Int) = displayId == 0 || displayId in connected
 
-  override fun open(displayId: Int, layer: OverlayWindowLayer): OverlayDisplayWindow? {
+  override fun open(displayId: Int, layer: PrototypeWindowLayer): PrototypeDisplayWindow? {
     if (displayId !in connected) return null
     opened += displayId
     openedLayers += layer
-    return OverlayDisplayWindow(context, managers.getValue(displayId)) {
+    return PrototypeDisplayWindow(context, managers.getValue(displayId)) {
       densities.getValue(displayId)
     }
   }
 }
 
 /** Virtual one-shot scheduler; cancelled callbacks can also be exercised to model queue races. */
-internal class FakeOverlayTimer : OverlayScheduler {
+internal class FakePrototypeTimer : PrototypeScheduler {
   internal data class Task(
     val deadline: Long,
     val action: suspend () -> Unit,
@@ -207,10 +207,10 @@ internal class FakeOverlayTimer : OverlayScheduler {
 
   val tasks = mutableListOf<Task>()
 
-  override fun schedule(millis: Long, action: suspend () -> Unit): OverlayScheduledTask {
+  override fun schedule(millis: Long, action: suspend () -> Unit): PrototypeScheduledTask {
     val task = Task(now + millis, action)
     tasks += task
-    return OverlayScheduledTask { task.cancelled = true }
+    return PrototypeScheduledTask { task.cancelled = true }
   }
 
   suspend fun advance(millis: Long) {

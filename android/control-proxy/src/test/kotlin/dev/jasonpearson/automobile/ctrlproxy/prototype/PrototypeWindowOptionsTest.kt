@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.test.runTest
@@ -8,24 +8,24 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** `window.persistence` (#10494) and `window.layer` (#10496) on the overlay controller. */
+/** `window.persistence` (#10494) and `window.layer` (#10496) on the prototype controller. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayWindowOptionsTest {
-  private val host = FakeInteractiveOverlayHost()
-  private val timer = FakeOverlayTimer()
-  private val events = mutableListOf<OverlayEvent>()
+class PrototypeWindowOptionsTest {
+  private val host = FakePrototypeHost()
+  private val timer = FakePrototypeTimer()
+  private val events = mutableListOf<PrototypeEvent>()
   private val results = mutableListOf<Pair<Boolean, String?>>()
   private var clients = 1
   private var assetClears = 0
   private var appLayerPermitted = true
   private val controller =
-    OverlayController(
+    PrototypeController(
       host,
-      OverlayResultSink { _, success, error -> results += success to error },
-      eventSink = OverlayEventSink { events += it },
+      PrototypeResultSink { _, success, error -> results += success to error },
+      eventSink = PrototypeEventSink { events += it },
       clock = { timer.now },
-      lifecycle = OverlayLifecycle(timer, TTL, clientCount = { clients }),
+      lifecycle = PrototypeLifecycle(timer, TTL, clientCount = { clients }),
       clearAssets = { assetClears++ },
       appLayerPermitted = { appLayerPermitted },
       packageName = "test.ctrlproxy",
@@ -34,20 +34,21 @@ class OverlayWindowOptionsTest {
   private fun spec(
     persistence: String? = null,
     layer: String? = null,
-    placement: dev.jasonpearson.automobile.protocol.OverlayPlacement = OverlayFullscreenPlacement(),
+    placement: dev.jasonpearson.automobile.protocol.PrototypePlacement =
+      PrototypeFullscreenPlacement(),
   ) =
-    OverlaySpec(
+    PrototypeSpec(
       "proto",
-      OverlayWindow(placement, layer = layer, persistence = persistence),
-      state = mapOf("label" to OverlayScalar.Text("start")),
-      root = OverlayPagerNode("pager", children = List(2) { OverlayTextNode(text = "screen") }),
+      PrototypeWindow(placement, layer = layer, persistence = persistence),
+      state = mapOf("label" to PrototypeScalar.Text("start")),
+      root = PrototypePagerNode("pager", children = List(2) { PrototypeTextNode(text = "screen") }),
     )
 
-  private suspend fun interact(interaction: OverlayInteraction) =
+  private suspend fun interact(interaction: PrototypeInteraction) =
     controller.interact(checkNotNull(controller.activeRuntime), interaction)
 
   private fun lastDismissReason(): String? =
-    events.lastOrNull { it.kind == OverlayEventKind.DISMISSED }?.payload?.toString()
+    events.lastOrNull { it.kind == PrototypeEventKind.DISMISSED }?.payload?.toString()
 
   @Test
   fun `device persistence survives the last client leaving and idle time and keeps its assets`() =
@@ -59,13 +60,13 @@ class OverlayWindowOptionsTest {
       timer.advance(TTL * 100)
       assertTrue(host.isShowing)
       assertNotNull(controller.activeRuntime)
-      assertTrue(events.none { it.kind == OverlayEventKind.DISMISSED })
+      assertTrue(events.none { it.kind == PrototypeEventKind.DISMISSED })
       assertEquals(0, assetClears)
       assertTrue(host.requests.last().persistent)
     }
 
   @Test
-  fun `the controller reports an app-layer overlay only while one is showing`() = runTest {
+  fun `the controller reports an app-layer prototype only while one is showing`() = runTest {
     assertFalse(controller.isAppLayerShowing)
     controller.show(null, spec(layer = "app"))
     assertTrue(controller.isAppLayerShowing)
@@ -77,17 +78,21 @@ class OverlayWindowOptionsTest {
   }
 
   @Test
-  fun `offline actions still apply to a device persistent overlay`() = runTest {
+  fun `offline actions still apply to a device persistent prototype`() = runTest {
     controller.show(null, spec(persistence = "device"))
     clients = 0
     controller.onClientCountChanged(0)
-    interact(OverlayInteraction.Tap(listOf(OverlaySetPageAction("pager", OverlayPageTarget.Next))))
     interact(
-      OverlayInteraction.Tap(listOf(OverlaySetStateAction("label", OverlayScalar.Text("typed")))),
+      PrototypeInteraction.Tap(listOf(PrototypeSetPageAction("pager", PrototypePageTarget.Next))),
+    )
+    interact(
+      PrototypeInteraction.Tap(
+        listOf(PrototypeSetStateAction("label", PrototypeScalar.Text("typed"))),
+      ),
     )
     val current = checkNotNull(controller.activeRuntime).current
     assertEquals(1, current.pages["pager"])
-    assertEquals(OverlayScalar.Text("typed"), current.spec.state?.get("label"))
+    assertEquals(PrototypeScalar.Text("typed"), current.spec.state?.get("label"))
     assertTrue(timer.tasks.none { !it.cancelled })
   }
 
@@ -100,7 +105,7 @@ class OverlayWindowOptionsTest {
   }
 
   @Test
-  fun `a persisted overlay still goes away through its close control and an explicit dismiss`() =
+  fun `a persisted prototype still goes away through its close control and an explicit dismiss`() =
     runTest {
       controller.show(null, spec(persistence = "device"))
       clients = 0
@@ -138,7 +143,7 @@ class OverlayWindowOptionsTest {
   }
 
   @Test
-  fun `re-showing a persisted overlay with session scope restores the disconnect dismissal`() =
+  fun `re-showing a persisted prototype with session scope restores the disconnect dismissal`() =
     runTest {
       controller.show(null, spec(persistence = "device"))
       controller.show(null, spec(persistence = "session"))
@@ -148,7 +153,7 @@ class OverlayWindowOptionsTest {
     }
 
   @Test
-  fun `app layer needs the overlay permission and a refusal replaces nothing`() = runTest {
+  fun `app layer needs the prototype permission and a refusal replaces nothing`() = runTest {
     controller.show(null, spec())
     appLayerPermitted = false
     controller.show(null, spec(layer = "app"))
@@ -161,54 +166,54 @@ class OverlayWindowOptionsTest {
       error,
     )
     assertEquals(1, host.requests.size)
-    assertEquals(OverlayWindowLayer.SYSTEM, host.requests.single().layer)
+    assertEquals(PrototypeWindowLayer.SYSTEM, host.requests.single().layer)
 
     appLayerPermitted = true
     controller.show(null, spec(layer = "app"))
     assertTrue(results.last().first)
-    assertEquals(OverlayWindowLayer.APP, host.requests.last().layer)
+    assertEquals(PrototypeWindowLayer.APP, host.requests.last().layer)
   }
 
   @Test
-  fun `system and absent layers never consult the overlay permission`() = runTest {
+  fun `system and absent layers never consult the prototype permission`() = runTest {
     appLayerPermitted = false
     controller.show(null, spec(layer = "system"))
     controller.show(null, spec())
     assertTrue(results.all { it.first })
-    assertTrue(host.requests.all { it.layer == OverlayWindowLayer.SYSTEM })
+    assertTrue(host.requests.all { it.layer == PrototypeWindowLayer.SYSTEM })
   }
 
   @Test
-  fun `persistent non-fullscreen overlays carry an opaque close control`() {
-    val floating = OverlayFloatingPlacement("center", OverlayOffset(0.0, 0.0))
+  fun `persistent non-fullscreen prototypes carry an opaque close control`() {
+    val floating = PrototypeFloatingPlacement("center", PrototypeOffset(0.0, 0.0))
     val session = spec(placement = floating).let { it.copy(window = it.window.copy(opacity = 40)) }
-    val sessionChrome = overlayHostChrome(mapOverlaySpec(session).request())
+    val sessionChrome = prototypeHostChrome(mapPrototypeSpec(session).request())
     assertFalse(sessionChrome.closeVisible)
     assertEquals(0.4f, sessionChrome.windowAlpha, 0f)
 
     val persisted = session.copy(window = session.window.copy(persistence = "device"))
-    val chrome = overlayHostChrome(mapOverlaySpec(persisted).request())
+    val chrome = prototypeHostChrome(mapPrototypeSpec(persisted).request())
     assertTrue(chrome.closeVisible)
     assertFalse(chrome.dismissVisible)
     assertEquals(1f, chrome.windowAlpha, 0f)
     assertEquals(0.4f, chrome.contentAlpha, 0f)
 
     // Fullscreen already has its dismiss row; no second control.
-    val fullscreen = overlayHostChrome(mapOverlaySpec(spec(persistence = "device")).request())
+    val fullscreen = prototypeHostChrome(mapPrototypeSpec(spec(persistence = "device")).request())
     assertTrue(fullscreen.dismissVisible)
     assertFalse(fullscreen.closeVisible)
   }
 
   @Test
   fun `window options map from the wire with absent values keeping today's behaviour`() {
-    assertEquals(OverlayWindowLayer.SYSTEM, OverlayWindowLayer.fromWire(null))
-    assertEquals(OverlayWindowLayer.SYSTEM, OverlayWindowLayer.fromWire("system"))
-    assertEquals(OverlayWindowLayer.APP, OverlayWindowLayer.fromWire("app"))
+    assertEquals(PrototypeWindowLayer.SYSTEM, PrototypeWindowLayer.fromWire(null))
+    assertEquals(PrototypeWindowLayer.SYSTEM, PrototypeWindowLayer.fromWire("system"))
+    assertEquals(PrototypeWindowLayer.APP, PrototypeWindowLayer.fromWire("app"))
     assertFalse(isDevicePersistent(spec()))
     assertFalse(isDevicePersistent(spec(persistence = "session")))
     assertTrue(isDevicePersistent(spec(persistence = "device")))
-    val request = mapOverlaySpec(spec(persistence = "device", layer = "app")).request()
-    assertEquals(OverlayWindowLayer.APP, request.layer)
+    val request = mapPrototypeSpec(spec(persistence = "device", layer = "app")).request()
+    assertEquals(PrototypeWindowLayer.APP, request.layer)
     assertTrue(request.persistent)
   }
 
@@ -219,12 +224,12 @@ class OverlayWindowOptionsTest {
     @org.junit.BeforeClass
     fun warm() {
       runTest {}
-      OverlaySpecValidator.validate("{}")
-      mapOverlaySpec(
-        OverlaySpec(
+      PrototypeSpecValidator.validate("{}")
+      mapPrototypeSpec(
+        PrototypeSpec(
           "warm",
-          OverlayWindow(OverlayFullscreenPlacement()),
-          root = OverlaySpacerNode(),
+          PrototypeWindow(PrototypeFullscreenPlacement()),
+          root = PrototypeSpacerNode(),
         ),
       )
     }

@@ -2,7 +2,7 @@
 name: Record Desktop Screenshot Baselines
 
 # Records the Compose screenshot baselines of one module (desktop-core, or the
-# control-proxy overlay renderer) on the reference OS (Linux) and opens a PR
+# control-proxy prototype renderer) on the reference OS (Linux) and opens a PR
 # with the PNGs. Screenshots are pixel-identical only on
 # one OS because font rasterization differs, so baselines cannot be recorded on a
 # developer's macOS/Windows machine and committed — they must be produced here,
@@ -23,7 +23,7 @@ name: Record Desktop Screenshot Baselines
           - control-proxy
         default: desktop-core
       test_filter:
-        description: "Gradle --tests pattern (control-proxy: *OverlaySpecContentScreenshotTest)"
+        description: "Gradle --tests pattern (control-proxy: *PrototypeSpecContentScreenshotTest)"
         required: true
         type: string
         default: "*ComponentScreenshotTest"
@@ -51,8 +51,8 @@ jobs:
       # control-proxy is an Android module, so its JVM tests run as a variant
       # task; desktop-core is a plain JVM module.
       GRADLE_TEST_TASK: ${{ inputs.module == 'control-proxy' && ':control-proxy:testDebugUnitTest' || ':desktop-core:test' }}
-      SCREENSHOT_TEST_DIR: ${{ inputs.module == 'control-proxy' && 'android/control-proxy/src/test/kotlin/dev/jasonpearson/automobile/ctrlproxy/overlay/screenshot' || 'android/desktop-core/src/test/kotlin/dev/jasonpearson/automobile/desktop/core/screenshot' }}
-      BASELINE_DIR: ${{ inputs.module == 'control-proxy' && 'android/control-proxy/src/test/resources/screenshots/overlay' || 'android/desktop-core/src/test/resources/screenshots' }}
+      SCREENSHOT_TEST_DIR: ${{ inputs.module == 'control-proxy' && 'android/control-proxy/src/test/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/screenshot' || 'android/desktop-core/src/test/kotlin/dev/jasonpearson/automobile/desktop/core/screenshot' }}
+      BASELINE_DIR: ${{ inputs.module == 'control-proxy' && 'android/control-proxy/src/test/resources/screenshots/prototype' || 'android/desktop-core/src/test/resources/screenshots' }}
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -119,7 +119,7 @@ jobs:
             android/desktop-core/build/reports/screenshots/
             android/desktop-core/src/test/resources/screenshots/*.png
             android/control-proxy/build/reports/screenshots/
-            android/control-proxy/src/test/resources/screenshots/overlay/*.png
+            android/control-proxy/src/test/resources/screenshots/prototype/*.png
           if-no-files-found: ignore
           retention-days: 7
 
@@ -127,7 +127,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
-          COMMIT_SCOPE: ${{ inputs.module == 'control-proxy' && 'overlay' || 'desktop' }}
+          COMMIT_SCOPE: ${{ inputs.module == 'control-proxy' && 'prototype' || 'desktop' }}
         run: |
           set -euo pipefail
 

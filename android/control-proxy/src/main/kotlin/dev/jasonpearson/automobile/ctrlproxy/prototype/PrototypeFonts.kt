@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.graphics.Typeface
 import android.util.Log
@@ -15,12 +15,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 
 /**
- * Supplied by [OverlayRuntimeContent]; null (previews, tests) draws every font asset as default.
+ * Supplied by [PrototypeRuntimeContent]; null (previews, tests) draws every font asset as default.
  */
-internal val LocalOverlayFontCache = compositionLocalOf<OverlayFontCache?> { null }
+internal val LocalPrototypeFontCache = compositionLocalOf<PrototypeFontCache?> { null }
 
 /** Turns a stored font file into a family. Throwing or returning null means "unusable font". */
-fun interface OverlayFontLoader {
+fun interface PrototypeFontLoader {
   fun load(file: File): FontFamily?
 }
 
@@ -31,7 +31,7 @@ fun interface OverlayFontLoader {
  * Android font parsing, so it is verified on a device; the caching and fallback logic around it is
  * unit tested with a fake loader.
  */
-class ComposeOverlayFontLoader : OverlayFontLoader {
+class ComposePrototypeFontLoader : PrototypeFontLoader {
   override fun load(file: File): FontFamily? {
     val typeface = Typeface.createFromFile(file)
     return if (typeface == null || typeface === Typeface.DEFAULT) null else FontFamily(Font(file))
@@ -48,9 +48,9 @@ class ComposeOverlayFontLoader : OverlayFontLoader {
  *
  * The cache lock is never held while calling [source] or [loader].
  */
-class OverlayFontCache(
-  private val source: OverlayAssetSource,
-  private val loader: OverlayFontLoader,
+class PrototypeFontCache(
+  private val source: PrototypeAssetSource,
+  private val loader: PrototypeFontLoader,
   private val warn: (String, Throwable?) -> Unit = { message, error -> Log.w(TAG, message, error) },
 ) {
   private val lock = Any()
@@ -77,14 +77,15 @@ class OverlayFontCache(
   private fun loadOrNull(file: File): FontFamily? =
     try {
       loader.load(file).also {
-        if (it == null) warn("Overlay font asset could not be loaded; using the default font", null)
+        if (it == null)
+          warn("Prototype font asset could not be loaded; using the default font", null)
       }
     } catch (error: RuntimeException) {
-      warn("Overlay font asset failed to load; using the default font", error)
+      warn("Prototype font asset failed to load; using the default font", error)
       null
     }
 
-  /** Matches [OverlayAssetChangeListener]: null means every asset. */
+  /** Matches [PrototypeAssetChangeListener]: null means every asset. */
   fun invalidate(ids: Set<String>?) {
     synchronized(lock) {
       epoch++
@@ -94,15 +95,15 @@ class OverlayFontCache(
   }
 
   private companion object {
-    const val TAG = "OverlayFontCache"
+    const val TAG = "PrototypeFontCache"
   }
 }
 
 /** The family to draw [style] with: its font asset when loadable, else the built-in fallback. */
 @Composable
-internal fun rememberOverlayFontFamily(style: OverlayRenderStyle): FontFamily {
+internal fun rememberPrototypeFontFamily(style: PrototypeRenderStyle): FontFamily {
   val assetId = style.fontAsset ?: return style.fontFamily
-  val cache = LocalOverlayFontCache.current ?: return style.fontFamily
+  val cache = LocalPrototypeFontCache.current ?: return style.fontFamily
   val version by cache.version.collectAsState()
   return remember(cache, assetId, version) { cache.resolve(assetId) } ?: style.fontFamily
 }

@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -10,7 +10,7 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 
 /** One owner per added window: DESTROYED is terminal, including after a failed add. */
-internal class OverlayWindowOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
+internal class PrototypeWindowOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
   private val registry = LifecycleRegistry(this)
   private val savedState = SavedStateRegistryController.create(this)
   override val lifecycle: Lifecycle = registry

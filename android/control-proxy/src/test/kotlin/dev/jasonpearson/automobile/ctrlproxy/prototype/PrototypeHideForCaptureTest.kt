@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.View
 import androidx.compose.ui.platform.ComposeView
@@ -21,8 +21,8 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /** Records frame waits; [gate] holds them open, [never] makes them outlast any timeout. */
-private class FakeOverlayFrameWaiter(private val history: MutableList<String>) :
-  OverlayFrameWaiter {
+private class FakePrototypeFrameWaiter(private val history: MutableList<String>) :
+  PrototypeFrameWaiter {
   var gate: CompletableDeferred<Unit>? = null
   var never = false
 
@@ -35,37 +35,37 @@ private class FakeOverlayFrameWaiter(private val history: MutableList<String>) :
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayHideForCaptureTest {
+class PrototypeHideForCaptureTest {
   companion object {
     @JvmStatic
     @BeforeClass
     fun warmRuntime() {
       runTest {}
-      InteractiveOverlayRequest()
+      PrototypeRequest()
     }
   }
 
   private val history = mutableListOf<String>()
-  private lateinit var main: FakeOverlayMainThread
-  private lateinit var manager: RecordingOverlayWindowManager
-  private lateinit var frames: FakeOverlayFrameWaiter
-  private lateinit var host: InteractiveOverlayHost
+  private lateinit var main: FakePrototypeMainThread
+  private lateinit var manager: RecordingPrototypeWindowManager
+  private lateinit var frames: FakePrototypeFrameWaiter
+  private lateinit var host: PrototypeHost
   private var blocked = false
 
   @Before
   fun setUp() {
     history.clear()
     blocked = false
-    main = FakeOverlayMainThread()
-    manager = RecordingOverlayWindowManager(main, history)
-    frames = FakeOverlayFrameWaiter(history)
+    main = FakePrototypeMainThread()
+    manager = RecordingPrototypeWindowManager(main, history)
+    frames = FakePrototypeFrameWaiter(history)
     host =
-      DefaultInteractiveOverlayHost(
+      DefaultPrototypeHost(
         RuntimeEnvironment.getApplication(),
         manager,
         sdkInt = 30,
         mainThread = main,
-        settleTimer = FakeOverlaySettleTimer(history),
+        settleTimer = FakePrototypeSettleTimer(history),
         backScope = CoroutineScope(Dispatchers.Unconfined),
         frames = frames,
         isBlocked = { blocked },
@@ -85,7 +85,7 @@ class OverlayHideForCaptureTest {
       "pixels"
     }
     assertEquals(listOf("frames:2", "capture:hidden"), history)
-    assertEquals(OverlayHiddenCapture("pixels", overlayExcluded = true), capture)
+    assertEquals(PrototypeHiddenCapture("pixels", prototypeExcluded = true), capture)
     assertEquals(View.VISIBLE, manager.view!!.visibility)
     // Visibility only: the window's layout params and attachment are untouched.
     assertTrue(manager.updated.isEmpty())
@@ -136,16 +136,16 @@ class OverlayHideForCaptureTest {
   }
 
   @Test
-  fun `unconfirmed hide still captures but reports the overlay may be included`() = runTest {
+  fun `unconfirmed hide still captures but reports the prototype may be included`() = runTest {
     host.show()
     frames.never = true
     val capture = host.withHiddenForCapture(frameTimeoutMillis = 50) { "capture:${visibility()}" }
-    assertEquals(OverlayHiddenCapture("capture:hidden", overlayExcluded = false), capture)
+    assertEquals(PrototypeHiddenCapture("capture:hidden", prototypeExcluded = false), capture)
     assertEquals(View.VISIBLE, manager.view!!.visibility)
   }
 
   @Test
-  fun `a capture past the hidden bound is cancelled and the overlay restored`() = runTest {
+  fun `a capture past the hidden bound is cancelled and the prototype restored`() = runTest {
     host.show()
     val error = runCatching {
       host.withHiddenForCapture(maxHiddenMillis = 100) { awaitCancellation() }
@@ -156,9 +156,9 @@ class OverlayHideForCaptureTest {
   }
 
   @Test
-  fun `without a window the capture runs as is and excludes no overlay`() = runTest {
+  fun `without a window the capture runs as is and excludes no prototype`() = runTest {
     val capture = host.withHiddenForCapture { "pixels" }
-    assertEquals(OverlayHiddenCapture("pixels", overlayExcluded = true), capture)
+    assertEquals(PrototypeHiddenCapture("pixels", prototypeExcluded = true), capture)
     assertTrue(history.none { it.startsWith("frames") })
   }
 
@@ -173,15 +173,15 @@ class OverlayHideForCaptureTest {
     // The hide ran on main; the capture then posts the restore.
     testScheduler.runCurrent()
     main.drain()
-    assertEquals(OverlayHiddenCapture("hidden", overlayExcluded = true), job.await())
+    assertEquals(PrototypeHiddenCapture("hidden", prototypeExcluded = true), job.await())
     assertEquals(View.VISIBLE, manager.view!!.visibility)
   }
 
   @Test
-  fun `a restore never re-shows an overlay blocked during the capture`() = runTest {
+  fun `a restore never re-shows a prototype blocked during the capture`() = runTest {
     host.show()
     val view = manager.view!!
-    // Suspension (its app left the front) or the lock screen lands while the overlay is hidden.
+    // Suspension (its app left the front) or the lock screen lands while the prototype is hidden.
     host.withHiddenForCapture { blocked = true }
     assertEquals(View.INVISIBLE, view.visibility)
     assertFalse(host.isShowing)
@@ -189,13 +189,13 @@ class OverlayHideForCaptureTest {
   }
 
   @Test
-  fun `a suspended overlay has no window, so the capture treats it as not showing`() = runTest {
+  fun `a suspended prototype has no window, so the capture treats it as not showing`() = runTest {
     host.show()
     blocked = true
     assertTrue(host.relayout()) // the suspension path removes the window
     history.clear()
     val capture = host.withHiddenForCapture { "pixels" }
-    assertEquals(OverlayHiddenCapture("pixels", overlayExcluded = true), capture)
+    assertEquals(PrototypeHiddenCapture("pixels", prototypeExcluded = true), capture)
     assertTrue(history.none { it.startsWith("frames") })
     assertFalse(host.isShowing)
   }

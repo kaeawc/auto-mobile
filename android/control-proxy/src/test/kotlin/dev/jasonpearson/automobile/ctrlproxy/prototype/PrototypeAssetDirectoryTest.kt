@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import java.io.File
 import java.io.IOException
@@ -13,12 +13,12 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 /** The production file seam, over a real temporary directory. No Android APIs involved. */
-class OverlayAssetDirectoryTest {
+class PrototypeAssetDirectoryTest {
   @get:Rule val temp = TemporaryFolder()
 
-  private fun directory(): Pair<File, OverlayAssetDirectory> {
-    val dir = File(temp.root, "overlay-assets") // not created yet: the first write makes it
-    return dir to OverlayAssetDirectory(dir)
+  private fun directory(): Pair<File, PrototypeAssetDirectory> {
+    val dir = File(temp.root, "prototype-assets") // not created yet: the first write makes it
+    return dir to PrototypeAssetDirectory(dir)
   }
 
   @Test
@@ -79,8 +79,8 @@ class OverlayAssetDirectoryTest {
 
   @Test
   fun `a write that cannot create the directory fails with IOException`() {
-    val blocker = temp.newFile("overlay-assets") // a file where the directory should be
-    val assets = OverlayAssetDirectory(blocker)
+    val blocker = temp.newFile("prototype-assets") // a file where the directory should be
+    val assets = PrototypeAssetDirectory(blocker)
     assertThrows(IOException::class.java) { assets.write("asset-0", byteArrayOf(1)) }
     assertTrue(blocker.isFile)
   }

@@ -3,7 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NodeSelector
-import dev.jasonpearson.automobile.protocol.OverlaySpec
+import dev.jasonpearson.automobile.protocol.PrototypeSpec
 
 /**
  * The device actions a decoded [dev.jasonpearson.automobile.protocol.WebSocketRequest] can trigger.
@@ -37,10 +37,10 @@ interface CtrlProxyActions {
   fun requestScreenshot(requestId: String?, displayId: Int?) = requestScreenshot(requestId)
 
   /**
-   * [hideOverlays] hides CtrlProxy's interactive overlay for this capture and restores it after,
-   * whatever the capture's outcome (#9305).
+   * [hidePrototypes] hides CtrlProxy's prototype for this capture and restores it after, whatever
+   * the capture's outcome (#9305).
    */
-  fun requestScreenshot(requestId: String?, displayId: Int?, hideOverlays: Boolean) =
+  fun requestScreenshot(requestId: String?, displayId: Int?, hidePrototypes: Boolean) =
     requestScreenshot(requestId, displayId)
 
   // Coordinate params are `Double` so fractional wire values pass through untruncated to the
@@ -353,16 +353,16 @@ interface CtrlProxyActions {
 
   fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?)
 
-  /** [reset] starts a same-id show fresh instead of replacing the overlay in place. */
-  fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?, reset: Boolean)
+  /** [reset] starts a same-id show fresh instead of replacing the prototype in place. */
+  fun showPrototype(requestId: String?, spec: PrototypeSpec, displayId: Int?, reset: Boolean)
 
-  fun dismissOverlay(requestId: String?, id: String?, all: Boolean?)
+  fun dismissPrototype(requestId: String?, id: String?, all: Boolean?)
 
-  fun inspectOverlays(requestId: String?)
+  fun inspectPrototypes(requestId: String?)
 
-  fun putOverlayAsset(requestId: String?, id: String, mimeType: String, dataBase64: String)
+  fun putPrototypeAsset(requestId: String?, id: String, mimeType: String, dataBase64: String)
 
-  fun removeOverlayAsset(requestId: String?, id: String)
+  fun removePrototypeAsset(requestId: String?, id: String)
 
   fun listPreferenceFiles(requestId: String?, packageName: String)
 

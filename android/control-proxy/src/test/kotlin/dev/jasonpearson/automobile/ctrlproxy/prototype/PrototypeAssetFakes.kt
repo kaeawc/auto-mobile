@@ -1,10 +1,10 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import java.io.IOException
 import java.util.concurrent.Executor
 
-/** In-memory [OverlayAssetFiles] with failure injection; nothing touches the file system. */
-internal class FakeOverlayAssetFiles : OverlayAssetFiles {
+/** In-memory [PrototypeAssetFiles] with failure injection; nothing touches the file system. */
+internal class FakePrototypeAssetFiles : PrototypeAssetFiles {
   val stored = LinkedHashMap<String, ByteArray>()
   var failWrites = false
   var failReads = false
@@ -50,7 +50,7 @@ internal class QueuedExecutor : Executor {
 }
 
 /** Smallest byte strings whose magic numbers satisfy the store's signature check. */
-internal object OverlayAssetBytes {
+internal object PrototypeAssetBytes {
   fun png(size: Int = 16): ByteArray = padded(size, 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
 
   fun jpeg(size: Int = 16): ByteArray = padded(size, 0xFF, 0xD8, 0xFF, 0xE0)

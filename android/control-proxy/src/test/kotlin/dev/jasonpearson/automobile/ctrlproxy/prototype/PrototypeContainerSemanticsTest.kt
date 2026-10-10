@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.os.Looper
 import android.view.View
@@ -22,13 +22,13 @@ import org.robolectric.Shadows.shadowOf
 
 /** The accessibility tree observe reads for layout containers and authored labels (#10446). */
 @RunWith(RobolectricTestRunner::class)
-class OverlayContainerSemanticsTest {
-  private val save = listOf<OverlayAction>(OverlayEmitAction("save"))
+class PrototypeContainerSemanticsTest {
+  private val save = listOf<PrototypeAction>(PrototypeEmitAction("save"))
 
-  private fun render(root: OverlayNode, state: Map<String, OverlayScalar> = emptyMap()) = run {
-    val spec = OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), state, root)
+  private fun render(root: PrototypeNode, state: Map<String, PrototypeScalar> = emptyMap()) = run {
+    val spec = PrototypeSpec("panel", PrototypeWindow(PrototypeFullscreenPlacement()), state, root)
     val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
-    activity.setContent { OverlaySpecContent(mapOverlaySpec(spec).root) }
+    activity.setContent { PrototypeSpecContent(mapPrototypeSpec(spec).root) }
     shadowOf(Looper.getMainLooper()).idle()
     val view = checkNotNull(composeView(activity.window.decorView))
     (view as RootForTest).semanticsOwner.unmergedRootSemanticsNode
@@ -49,19 +49,21 @@ class OverlayContainerSemanticsTest {
     }
 
   private fun SemanticsNode.kinds(): List<String> =
-    all().mapNotNull { it.config.getOrNull(OverlayRole) }
+    all().mapNotNull { it.config.getOrNull(PrototypeRole) }
 
   @Test
   fun `layout containers with nothing to report are merged into their parent`() {
     val root =
       render(
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayRowNode(
+              PrototypeRowNode(
                 children =
                   listOf(
-                    OverlayBoxNode(children = listOf(OverlayTextNode(testTag = "t", text = "Hi"))),
+                    PrototypeBoxNode(
+                      children = listOf(PrototypeTextNode(testTag = "t", text = "Hi")),
+                    ),
                   ),
               ),
             ),
@@ -71,24 +73,24 @@ class OverlayContainerSemanticsTest {
     assertEquals(listOf("text"), root.kinds())
     // The text's nearest semantics ancestor is the content root, not an empty column/row/box.
     val text = root.tagged("t")
-    assertNull(text.parent?.config?.getOrNull(OverlayRole))
+    assertNull(text.parent?.config?.getOrNull(PrototypeRole))
   }
 
   @Test
   fun `containers with a test tag, a tap, a label or state keep their node`() {
     val root =
       render(
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayBoxNode(testTag = "tagged", children = emptyList()),
-              OverlayRowNode(
+              PrototypeBoxNode(testTag = "tagged", children = emptyList()),
+              PrototypeRowNode(
                 onTap = save,
-                children = listOf(OverlayTextNode(text = "Open")),
+                children = listOf(PrototypeTextNode(text = "Open")),
               ),
-              OverlayBoxNode(
+              PrototypeBoxNode(
                 contentDescription = "Banner",
-                children = listOf(OverlayTextNode(text = "Sale")),
+                children = listOf(PrototypeTextNode(text = "Sale")),
               ),
             ),
         ),
@@ -99,18 +101,22 @@ class OverlayContainerSemanticsTest {
       root.all().first {
         it.config.getOrNull(SemanticsProperties.ContentDescription) == listOf("Banner")
       }
-    assertEquals("box", banner.config[OverlayRole])
+    assertEquals("box", banner.config[PrototypeRole])
   }
 
   @Test
   fun `an authored content description replaces the derived label`() {
     val root =
       render(
-        OverlayColumnNode(
+        PrototypeColumnNode(
           children =
             listOf(
-              OverlayIconNode(testTag = "fav", name = "favorite", contentDescription = "Favourite"),
-              OverlayButtonNode(
+              PrototypeIconNode(
+                testTag = "fav",
+                name = "favorite",
+                contentDescription = "Favourite",
+              ),
+              PrototypeButtonNode(
                 testTag = "save",
                 label = "Save",
                 contentDescription = "Save {count} drafts",
@@ -118,7 +124,7 @@ class OverlayContainerSemanticsTest {
               ),
             ),
         ),
-        mapOf("count" to OverlayScalar.Numeric(3.0)),
+        mapOf("count" to PrototypeScalar.Numeric(3.0)),
       )
 
     assertEquals(
@@ -135,12 +141,12 @@ class OverlayContainerSemanticsTest {
   fun `a tab bar is labelled by its tabs, which report role and selected state`() {
     val root =
       render(
-        OverlayTabBarNode(
+        PrototypeTabBarNode(
           testTag = "tabs",
-          items = listOf(OverlayItem("Home"), OverlayItem("Search")),
+          items = listOf(PrototypeItem("Home"), PrototypeItem("Search")),
           stateKey = "tab",
         ),
-        mapOf("tab" to OverlayScalar.Numeric(1.0)),
+        mapOf("tab" to PrototypeScalar.Numeric(1.0)),
       )
 
     val tabs = root.tagged("tabs")

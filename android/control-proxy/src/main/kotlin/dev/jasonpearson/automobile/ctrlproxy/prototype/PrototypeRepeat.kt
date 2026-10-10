@@ -1,71 +1,71 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import dev.jasonpearson.automobile.protocol.OverlayAction
-import dev.jasonpearson.automobile.protocol.OverlayAppBarAction
-import dev.jasonpearson.automobile.protocol.OverlayBadgeNode
-import dev.jasonpearson.automobile.protocol.OverlayBottomNavNode
-import dev.jasonpearson.automobile.protocol.OverlayBottomSheetNode
-import dev.jasonpearson.automobile.protocol.OverlayBoxNode
-import dev.jasonpearson.automobile.protocol.OverlayButtonNode
-import dev.jasonpearson.automobile.protocol.OverlayCardNode
-import dev.jasonpearson.automobile.protocol.OverlayCheckboxNode
-import dev.jasonpearson.automobile.protocol.OverlayChipNode
-import dev.jasonpearson.automobile.protocol.OverlayColumnNode
-import dev.jasonpearson.automobile.protocol.OverlayCondition
-import dev.jasonpearson.automobile.protocol.OverlayDatePickerNode
-import dev.jasonpearson.automobile.protocol.OverlayDecrementAction
-import dev.jasonpearson.automobile.protocol.OverlayDialogButton
-import dev.jasonpearson.automobile.protocol.OverlayDialogNode
-import dev.jasonpearson.automobile.protocol.OverlayDividerNode
-import dev.jasonpearson.automobile.protocol.OverlayEmitAction
-import dev.jasonpearson.automobile.protocol.OverlayFabNode
-import dev.jasonpearson.automobile.protocol.OverlayIconButtonNode
-import dev.jasonpearson.automobile.protocol.OverlayIconNode
-import dev.jasonpearson.automobile.protocol.OverlayImageNode
-import dev.jasonpearson.automobile.protocol.OverlayIncrementAction
-import dev.jasonpearson.automobile.protocol.OverlayListItemCheckbox
-import dev.jasonpearson.automobile.protocol.OverlayListItemNode
-import dev.jasonpearson.automobile.protocol.OverlayListItemSwitch
-import dev.jasonpearson.automobile.protocol.OverlayListItemTrailing
-import dev.jasonpearson.automobile.protocol.OverlayNode
-import dev.jasonpearson.automobile.protocol.OverlayPagerNode
-import dev.jasonpearson.automobile.protocol.OverlayProgressNode
-import dev.jasonpearson.automobile.protocol.OverlayRadioGroupNode
-import dev.jasonpearson.automobile.protocol.OverlayRepeat
-import dev.jasonpearson.automobile.protocol.OverlayRepeatSegment
-import dev.jasonpearson.automobile.protocol.OverlayRepeatTemplate
-import dev.jasonpearson.automobile.protocol.OverlayRowNode
-import dev.jasonpearson.automobile.protocol.OverlayScalar
-import dev.jasonpearson.automobile.protocol.OverlayScrollNode
-import dev.jasonpearson.automobile.protocol.OverlaySegmentedButtonNode
-import dev.jasonpearson.automobile.protocol.OverlaySetStateAction
-import dev.jasonpearson.automobile.protocol.OverlaySliderNode
-import dev.jasonpearson.automobile.protocol.OverlaySnackbarNode
-import dev.jasonpearson.automobile.protocol.OverlaySpacerNode
-import dev.jasonpearson.automobile.protocol.OverlayStyleWhen
-import dev.jasonpearson.automobile.protocol.OverlaySwitchNode
-import dev.jasonpearson.automobile.protocol.OverlayTabBarNode
-import dev.jasonpearson.automobile.protocol.OverlayTextFieldNode
-import dev.jasonpearson.automobile.protocol.OverlayTextNode
-import dev.jasonpearson.automobile.protocol.OverlayTimePickerNode
-import dev.jasonpearson.automobile.protocol.OverlayToggleAction
-import dev.jasonpearson.automobile.protocol.OverlayTopAppBarNode
+import dev.jasonpearson.automobile.protocol.PrototypeAction
+import dev.jasonpearson.automobile.protocol.PrototypeAppBarAction
+import dev.jasonpearson.automobile.protocol.PrototypeBadgeNode
+import dev.jasonpearson.automobile.protocol.PrototypeBottomNavNode
+import dev.jasonpearson.automobile.protocol.PrototypeBottomSheetNode
+import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
+import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
+import dev.jasonpearson.automobile.protocol.PrototypeCardNode
+import dev.jasonpearson.automobile.protocol.PrototypeCheckboxNode
+import dev.jasonpearson.automobile.protocol.PrototypeChipNode
+import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
+import dev.jasonpearson.automobile.protocol.PrototypeCondition
+import dev.jasonpearson.automobile.protocol.PrototypeDatePickerNode
+import dev.jasonpearson.automobile.protocol.PrototypeDecrementAction
+import dev.jasonpearson.automobile.protocol.PrototypeDialogButton
+import dev.jasonpearson.automobile.protocol.PrototypeDialogNode
+import dev.jasonpearson.automobile.protocol.PrototypeDividerNode
+import dev.jasonpearson.automobile.protocol.PrototypeEmitAction
+import dev.jasonpearson.automobile.protocol.PrototypeFabNode
+import dev.jasonpearson.automobile.protocol.PrototypeIconButtonNode
+import dev.jasonpearson.automobile.protocol.PrototypeIconNode
+import dev.jasonpearson.automobile.protocol.PrototypeImageNode
+import dev.jasonpearson.automobile.protocol.PrototypeIncrementAction
+import dev.jasonpearson.automobile.protocol.PrototypeListItemCheckbox
+import dev.jasonpearson.automobile.protocol.PrototypeListItemNode
+import dev.jasonpearson.automobile.protocol.PrototypeListItemSwitch
+import dev.jasonpearson.automobile.protocol.PrototypeListItemTrailing
+import dev.jasonpearson.automobile.protocol.PrototypeNode
+import dev.jasonpearson.automobile.protocol.PrototypePagerNode
+import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
+import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
+import dev.jasonpearson.automobile.protocol.PrototypeRepeat
+import dev.jasonpearson.automobile.protocol.PrototypeRepeatSegment
+import dev.jasonpearson.automobile.protocol.PrototypeRepeatTemplate
+import dev.jasonpearson.automobile.protocol.PrototypeRowNode
+import dev.jasonpearson.automobile.protocol.PrototypeScalar
+import dev.jasonpearson.automobile.protocol.PrototypeScrollNode
+import dev.jasonpearson.automobile.protocol.PrototypeSegmentedButtonNode
+import dev.jasonpearson.automobile.protocol.PrototypeSetStateAction
+import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
+import dev.jasonpearson.automobile.protocol.PrototypeSnackbarNode
+import dev.jasonpearson.automobile.protocol.PrototypeSpacerNode
+import dev.jasonpearson.automobile.protocol.PrototypeStyleWhen
+import dev.jasonpearson.automobile.protocol.PrototypeSwitchNode
+import dev.jasonpearson.automobile.protocol.PrototypeTabBarNode
+import dev.jasonpearson.automobile.protocol.PrototypeTextFieldNode
+import dev.jasonpearson.automobile.protocol.PrototypeTextNode
+import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
+import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
+import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
 import java.math.BigDecimal
 
 /** A child to render and the path it is rendered under (also its stable Compose identity). */
-internal data class OverlayChildEntry(val node: OverlayNode, val path: String)
+internal data class PrototypeChildEntry(val node: PrototypeNode, val path: String)
 
 private data class RepeatInstance(
   val alias: String,
-  val item: Map<String, OverlayScalar>,
+  val item: Map<String, PrototypeScalar>,
   val index: Int,
 )
 
-private fun OverlayNode.repeatSpec(): OverlayRepeat? =
+private fun PrototypeNode.repeatSpec(): PrototypeRepeat? =
   when (this) {
-    is OverlayBoxNode -> repeat
-    is OverlayRowNode -> repeat
-    is OverlayColumnNode -> repeat
+    is PrototypeBoxNode -> repeat
+    is PrototypeRowNode -> repeat
+    is PrototypeColumnNode -> repeat
     else -> null
   }
 
@@ -76,24 +76,24 @@ private fun OverlayNode.repeatSpec(): OverlayRepeat? =
  * Compose key) for as long as it keeps its index. Without a `repeat` this is the plain child list.
  * Pass [bind] false to walk the shape only (limit guards) without copying any node.
  */
-internal fun overlayChildEntries(
-  node: OverlayNode,
+internal fun prototypeChildEntries(
+  node: PrototypeNode,
   path: String,
   bind: Boolean = true,
-): List<OverlayChildEntry> {
-  val children = overlayDescendants(node)
+): List<PrototypeChildEntry> {
+  val children = prototypeDescendants(node)
   val repeat = node.repeatSpec()
   if (repeat == null) {
     val single =
-      node is OverlayScrollNode || node is OverlayBottomSheetNode || node is OverlayDialogNode
+      node is PrototypeScrollNode || node is PrototypeBottomSheetNode || node is PrototypeDialogNode
     return children.mapIndexed { index, child ->
-      OverlayChildEntry(child, if (single) "$path.child" else "$path.children[$index]")
+      PrototypeChildEntry(child, if (single) "$path.child" else "$path.children[$index]")
     }
   }
   return repeat.items.flatMapIndexed { itemIndex, item ->
     val instance = RepeatInstance(repeat.`as`, item, itemIndex)
     children.mapIndexed { index, child ->
-      OverlayChildEntry(
+      PrototypeChildEntry(
         if (bind) child.bound(instance) else child,
         "$path.repeat[$itemIndex].children[$index]",
       )
@@ -101,62 +101,62 @@ internal fun overlayChildEntries(
   }
 }
 
-private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
+private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
   val onTap = onTap?.map { it.bound(instance) }
-  val styleWhen = styleWhen?.map { OverlayStyleWhen(it.`when`.bound(instance), it.style) }
+  val styleWhen = styleWhen?.map { PrototypeStyleWhen(it.`when`.bound(instance), it.style) }
   val visibleWhen = visibleWhen?.bound(instance)
-  fun List<OverlayNode>.bound() = map { it.bound(instance) }
+  fun List<PrototypeNode>.bound() = map { it.bound(instance) }
   return when (this) {
-    is OverlayBoxNode ->
+    is PrototypeBoxNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
-    is OverlayRowNode ->
+    is PrototypeRowNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
-    is OverlayColumnNode ->
+    is PrototypeColumnNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
-    is OverlayPagerNode ->
+    is PrototypePagerNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
-    is OverlayCardNode ->
+    is PrototypeCardNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
-    is OverlayTextNode ->
+    is PrototypeTextNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         text = instance.interpolate(text),
       )
-    is OverlayScrollNode ->
+    is PrototypeScrollNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         child = child.bound(instance),
       )
-    is OverlayBottomSheetNode ->
+    is PrototypeBottomSheetNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
@@ -164,80 +164,80 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
         openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
         child = child.bound(instance),
       )
-    is OverlayImageNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
-    is OverlayIconNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
-    is OverlaySpacerNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
-    is OverlayTextFieldNode ->
+    is PrototypeImageNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is PrototypeIconNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is PrototypeSpacerNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is PrototypeTextFieldNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
       )
-    is OverlayTabBarNode ->
+    is PrototypeTabBarNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
       )
-    is OverlayBottomNavNode ->
+    is PrototypeBottomNavNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
       )
-    is OverlaySwitchNode ->
+    is PrototypeSwitchNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
       )
-    is OverlayCheckboxNode ->
+    is PrototypeCheckboxNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
       )
-    is OverlayButtonNode ->
+    is PrototypeButtonNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         label = instance.interpolate(label),
       )
-    is OverlaySliderNode ->
+    is PrototypeSliderNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
       )
-    is OverlayChipNode ->
+    is PrototypeChipNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
       )
-    is OverlayRadioGroupNode ->
+    is PrototypeRadioGroupNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
       )
-    is OverlayListItemNode ->
+    is PrototypeListItemNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         trailing = trailing?.bound(instance),
       )
-    is OverlayDialogNode ->
+    is PrototypeDialogNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
@@ -249,16 +249,16 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
         dismiss = dismiss?.bound(instance),
         child = child?.bound(instance),
       )
-    is OverlayIconButtonNode ->
+    is PrototypeIconButtonNode ->
       copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
-    is OverlayFabNode ->
+    is PrototypeFabNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         label = label?.let(instance::interpolate),
       )
-    is OverlaySegmentedButtonNode ->
+    is PrototypeSegmentedButtonNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
@@ -266,7 +266,7 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
         options = options.map { it.copy(label = instance.interpolate(it.label)) },
         stateKey = instance.interpolate(stateKey),
       )
-    is OverlayTopAppBarNode ->
+    is PrototypeTopAppBarNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
@@ -275,16 +275,16 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
         navigationIcon = navigationIcon?.bound(instance),
         actions = actions?.map { it.bound(instance) },
       )
-    is OverlayDividerNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
-    is OverlayBadgeNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
-    is OverlayProgressNode ->
+    is PrototypeDividerNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is PrototypeBadgeNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is PrototypeProgressNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         stateKey = stateKey?.let(instance::interpolate),
       )
-    is OverlaySnackbarNode ->
+    is PrototypeSnackbarNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
@@ -293,7 +293,7 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
         text = instance.interpolate(text),
         action = action?.bound(instance),
       )
-    is OverlayTimePickerNode ->
+    is PrototypeTimePickerNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
@@ -301,7 +301,7 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
         hourKey = instance.interpolate(hourKey),
         minuteKey = instance.interpolate(minuteKey),
       )
-    is OverlayDatePickerNode ->
+    is PrototypeDatePickerNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,
@@ -311,31 +311,31 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
   }
 }
 
-private fun OverlayDialogButton.bound(instance: RepeatInstance) =
+private fun PrototypeDialogButton.bound(instance: RepeatInstance) =
   copy(label = instance.interpolate(label), onTap = onTap?.map { it.bound(instance) })
 
-private fun OverlayListItemTrailing.bound(instance: RepeatInstance): OverlayListItemTrailing =
+private fun PrototypeListItemTrailing.bound(instance: RepeatInstance): PrototypeListItemTrailing =
   when (this) {
-    is OverlayListItemSwitch -> copy(stateKey = instance.interpolate(stateKey))
-    is OverlayListItemCheckbox -> copy(stateKey = instance.interpolate(stateKey))
+    is PrototypeListItemSwitch -> copy(stateKey = instance.interpolate(stateKey))
+    is PrototypeListItemCheckbox -> copy(stateKey = instance.interpolate(stateKey))
     else -> this
   }
 
-private fun OverlayAppBarAction.bound(instance: RepeatInstance) =
+private fun PrototypeAppBarAction.bound(instance: RepeatInstance) =
   copy(label = instance.interpolate(label), onTap = onTap?.map { it.bound(instance) })
 
-private fun OverlayAction.bound(instance: RepeatInstance): OverlayAction =
+private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
   when (this) {
-    is OverlaySetStateAction ->
+    is PrototypeSetStateAction ->
       copy(key = instance.interpolate(key), value = instance.interpolateScalar(value))
-    is OverlayEmitAction -> copy(name = instance.interpolate(name))
-    is OverlayToggleAction -> copy(key = instance.interpolate(key))
-    is OverlayIncrementAction -> copy(key = instance.interpolate(key))
-    is OverlayDecrementAction -> copy(key = instance.interpolate(key))
+    is PrototypeEmitAction -> copy(name = instance.interpolate(name))
+    is PrototypeToggleAction -> copy(key = instance.interpolate(key))
+    is PrototypeIncrementAction -> copy(key = instance.interpolate(key))
+    is PrototypeDecrementAction -> copy(key = instance.interpolate(key))
     else -> this
   }
 
-private fun OverlayCondition.bound(instance: RepeatInstance): OverlayCondition =
+private fun PrototypeCondition.bound(instance: RepeatInstance): PrototypeCondition =
   copy(
     key = key?.let(instance::interpolate),
     equals = equals?.let(instance::interpolateScalar),
@@ -346,39 +346,40 @@ private fun OverlayCondition.bound(instance: RepeatInstance): OverlayCondition =
   )
 
 /** A string operand: text values are interpolated, numbers and booleans pass through. */
-private fun RepeatInstance.interpolateScalar(scalar: OverlayScalar): OverlayScalar =
-  if (scalar is OverlayScalar.Text) interpolateTyped(scalar.value) else scalar
+private fun RepeatInstance.interpolateScalar(scalar: PrototypeScalar): PrototypeScalar =
+  if (scalar is PrototypeScalar.Text) interpolateTyped(scalar.value) else scalar
 
 /**
  * A string that is exactly one placeholder keeps the item's own type (so `equals: "{item.id}"` can
  * match a numeric state value); anything else renders to text.
  */
-private fun RepeatInstance.interpolateTyped(text: String): OverlayScalar {
-  val only = OverlayRepeatTemplate.segments(text, alias).singleOrNull()
+private fun RepeatInstance.interpolateTyped(text: String): PrototypeScalar {
+  val only = PrototypeRepeatTemplate.segments(text, alias).singleOrNull()
   val typed =
     when (only) {
-      is OverlayRepeatSegment.Index -> OverlayScalar.Numeric(index.toDouble())
-      is OverlayRepeatSegment.Field -> item[only.name]
+      is PrototypeRepeatSegment.Index -> PrototypeScalar.Numeric(index.toDouble())
+      is PrototypeRepeatSegment.Field -> item[only.name]
       else -> null
     }
-  return typed ?: OverlayScalar.Text(interpolate(text))
+  return typed ?: PrototypeScalar.Text(interpolate(text))
 }
 
 /** Unknown fields cannot occur after validation; they are left as their literal placeholder. */
 private fun RepeatInstance.interpolate(text: String): String =
-  OverlayRepeatTemplate.segments(text, alias).joinToString("") { segment ->
+  PrototypeRepeatTemplate.segments(text, alias).joinToString("") { segment ->
     when (segment) {
-      is OverlayRepeatSegment.Literal -> segment.text
-      is OverlayRepeatSegment.Index -> index.toString()
-      is OverlayRepeatSegment.Field -> item[segment.name]?.rendered() ?: "{$alias.${segment.name}}"
+      is PrototypeRepeatSegment.Literal -> segment.text
+      is PrototypeRepeatSegment.Index -> index.toString()
+      is PrototypeRepeatSegment.Field ->
+        item[segment.name]?.rendered() ?: "{$alias.${segment.name}}"
     }
   }
 
-private fun OverlayScalar.rendered(): String =
+private fun PrototypeScalar.rendered(): String =
   when (this) {
-    is OverlayScalar.Text -> value
-    is OverlayScalar.BooleanValue -> value.toString()
-    is OverlayScalar.Numeric ->
+    is PrototypeScalar.Text -> value
+    is PrototypeScalar.BooleanValue -> value.toString()
+    is PrototypeScalar.Numeric ->
       // Integral values render without a decimal point or exponent at any magnitude.
       if (value.isFinite() && value == Math.floor(value)) {
         BigDecimal(value).toPlainString()

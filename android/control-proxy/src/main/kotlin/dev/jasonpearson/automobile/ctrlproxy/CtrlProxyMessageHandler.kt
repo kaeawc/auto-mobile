@@ -4,7 +4,7 @@ import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscription
 import dev.jasonpearson.automobile.protocol.AddHighlight
 import dev.jasonpearson.automobile.protocol.ClearPreferences
 import dev.jasonpearson.automobile.protocol.DiscoverKeystore
-import dev.jasonpearson.automobile.protocol.DismissOverlay
+import dev.jasonpearson.automobile.protocol.DismissPrototype
 import dev.jasonpearson.automobile.protocol.DragResult
 import dev.jasonpearson.automobile.protocol.GetCurrentFocus
 import dev.jasonpearson.automobile.protocol.GetDataStore
@@ -14,18 +14,18 @@ import dev.jasonpearson.automobile.protocol.GetPreference
 import dev.jasonpearson.automobile.protocol.GetPreferences
 import dev.jasonpearson.automobile.protocol.GetSdkCapabilities
 import dev.jasonpearson.automobile.protocol.GetTraversalOrder
-import dev.jasonpearson.automobile.protocol.InspectOverlays
+import dev.jasonpearson.automobile.protocol.InspectPrototypes
 import dev.jasonpearson.automobile.protocol.InstallCaCert
 import dev.jasonpearson.automobile.protocol.InstallCaCertFromPath
 import dev.jasonpearson.automobile.protocol.ListDataStores
 import dev.jasonpearson.automobile.protocol.ListPreferenceFiles
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
-import dev.jasonpearson.automobile.protocol.OverlayResult
 import dev.jasonpearson.automobile.protocol.PinchResult
-import dev.jasonpearson.automobile.protocol.PutOverlayAsset
+import dev.jasonpearson.automobile.protocol.PrototypeResult
+import dev.jasonpearson.automobile.protocol.PutPrototypeAsset
 import dev.jasonpearson.automobile.protocol.RemoveCaCert
-import dev.jasonpearson.automobile.protocol.RemoveOverlayAsset
 import dev.jasonpearson.automobile.protocol.RemovePreference
+import dev.jasonpearson.automobile.protocol.RemovePrototypeAsset
 import dev.jasonpearson.automobile.protocol.RequestAction
 import dev.jasonpearson.automobile.protocol.RequestActivateAccessibilityLink
 import dev.jasonpearson.automobile.protocol.RequestCancelImeCommit
@@ -65,7 +65,7 @@ import dev.jasonpearson.automobile.protocol.SetNetworkErrorSimulation
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRules
 import dev.jasonpearson.automobile.protocol.SetPreference
 import dev.jasonpearson.automobile.protocol.SetRecompositionTracking
-import dev.jasonpearson.automobile.protocol.ShowOverlay
+import dev.jasonpearson.automobile.protocol.ShowPrototype
 import dev.jasonpearson.automobile.protocol.StartRecording
 import dev.jasonpearson.automobile.protocol.StopRecording
 import dev.jasonpearson.automobile.protocol.SubscribeStorage
@@ -123,8 +123,8 @@ class CtrlProxyMessageHandler(
         actions.requestHierarchyIfStale(request.sinceTimestamp, request.requestId)
       is SetHierarchyInterval -> actions.setHierarchyInterval(request.intervalMs)
       is RequestScreenshot ->
-        if (request.hideOverlays)
-          actions.requestScreenshot(request.requestId, request.displayId, hideOverlays = true)
+        if (request.hidePrototypes)
+          actions.requestScreenshot(request.requestId, request.displayId, hidePrototypes = true)
         else actions.requestScreenshot(request.requestId, request.displayId)
       is RequestSwipe -> {
         if (request.displayId != null) {
@@ -480,33 +480,38 @@ class CtrlProxyMessageHandler(
       is AddHighlight ->
         actions.addHighlight(request.requestId, request.id, request.shape?.toModel())
 
-      is ShowOverlay -> {
+      is ShowPrototype -> {
         // Same display rules as the gestures; the controller then checks the display is connected.
         GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
-          return OverlayResult(
+          return PrototypeResult(
             timestamp = System.currentTimeMillis(),
             requestId = request.requestId,
             success = false,
             error = error,
           )
         }
-        actions.showOverlay(request.requestId, request.spec, request.displayId, request.reset)
+        actions.showPrototype(request.requestId, request.spec, request.displayId, request.reset)
       }
-      is DismissOverlay -> {
+      is DismissPrototype -> {
         if ((request.id == null) == (request.all == null) || request.all == false) {
-          return OverlayResult(
+          return PrototypeResult(
             timestamp = System.currentTimeMillis(),
             requestId = request.requestId,
             success = false,
-            error = "dismiss_overlay requires exactly one of id or all:true",
+            error = "dismiss_prototype requires exactly one of id or all:true",
           )
         }
-        actions.dismissOverlay(request.requestId, request.id, request.all)
+        actions.dismissPrototype(request.requestId, request.id, request.all)
       }
-      is InspectOverlays -> actions.inspectOverlays(request.requestId)
-      is PutOverlayAsset ->
-        actions.putOverlayAsset(request.requestId, request.id, request.mimeType, request.dataBase64)
-      is RemoveOverlayAsset -> actions.removeOverlayAsset(request.requestId, request.id)
+      is InspectPrototypes -> actions.inspectPrototypes(request.requestId)
+      is PutPrototypeAsset ->
+        actions.putPrototypeAsset(
+          request.requestId,
+          request.id,
+          request.mimeType,
+          request.dataBase64,
+        )
+      is RemovePrototypeAsset -> actions.removePrototypeAsset(request.requestId, request.id)
       is ListPreferenceFiles -> actions.listPreferenceFiles(request.requestId, request.packageName)
       is GetPreferences ->
         actions.getPreferences(request.requestId, request.packageName, request.fileName)

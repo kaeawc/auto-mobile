@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.graphics.PixelFormat
 import android.view.Gravity
@@ -15,19 +15,19 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayPlacementTest {
+class PrototypePlacementTest {
   companion object {
     @JvmStatic
     @BeforeClass
     fun warmRuntime() {
       // Warm the params builder before method bodies; application bootstrap remains runner-owned.
-      interactiveOverlayLayoutParams(OverlayPlacement.Fullscreen(Color.Black), false, 2.5f, 30)
+      prototypeLayoutParams(PrototypePlacement.Fullscreen(Color.Black), false, 2.5f, 30)
     }
   }
 
   @Test
   fun `fullscreen blocks entire display with optional scrim`() {
-    val params = build(OverlayPlacement.Fullscreen(Color.Black.copy(alpha = 0.4f)))
+    val params = build(PrototypePlacement.Fullscreen(Color.Black.copy(alpha = 0.4f)))
     assertEquals(LayoutParams.MATCH_PARENT, params.width)
     assertEquals(LayoutParams.MATCH_PARENT, params.height)
     assertEquals(Gravity.TOP or Gravity.START, params.gravity)
@@ -46,9 +46,9 @@ class OverlayPlacementTest {
   @Test
   fun `sheets anchor all edges and convert size with display density`() {
     val expectedGravity = listOf(Gravity.TOP, Gravity.BOTTOM, Gravity.START, Gravity.END)
-    OverlayPlacement.Edge.entries.forEachIndexed { index, edge ->
-      val params = build(OverlayPlacement.Sheet(edge, 10f))
-      val horizontal = edge == OverlayPlacement.Edge.TOP || edge == OverlayPlacement.Edge.BOTTOM
+    PrototypePlacement.Edge.entries.forEachIndexed { index, edge ->
+      val params = build(PrototypePlacement.Sheet(edge, 10f))
+      val horizontal = edge == PrototypePlacement.Edge.TOP || edge == PrototypePlacement.Edge.BOTTOM
       assertEquals(if (horizontal) LayoutParams.MATCH_PARENT else 25, params.width)
       assertEquals(if (horizontal) 25 else LayoutParams.MATCH_PARENT, params.height)
       assertEquals(expectedGravity[index], params.gravity)
@@ -58,7 +58,7 @@ class OverlayPlacementTest {
 
   @Test
   fun `floating wraps content and converts signed offsets and gravity`() {
-    val params = build(OverlayPlacement.Floating(Gravity.BOTTOM or Gravity.END, 3f, -4f))
+    val params = build(PrototypePlacement.Floating(Gravity.BOTTOM or Gravity.END, 3f, -4f))
     assertEquals(LayoutParams.WRAP_CONTENT, params.width)
     assertEquals(LayoutParams.WRAP_CONTENT, params.height)
     assertEquals(Gravity.BOTTOM or Gravity.END, params.gravity)
@@ -83,12 +83,10 @@ class OverlayPlacementTest {
   @Test
   fun `a non-focusable app-layer window stays below the keyboard until a text field needs focus`() {
     placements().forEach { placement ->
-      val idle =
-        interactiveOverlayLayoutParams(placement, false, 2.5f, 30, OverlayWindowLayer.APP).flags
+      val idle = prototypeLayoutParams(placement, false, 2.5f, 30, PrototypeWindowLayer.APP).flags
       assertTrue(idle and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
       assertTrue(idle and LayoutParams.FLAG_ALT_FOCUSABLE_IM != 0)
-      val typing =
-        interactiveOverlayLayoutParams(placement, true, 2.5f, 30, OverlayWindowLayer.APP).flags
+      val typing = prototypeLayoutParams(placement, true, 2.5f, 30, PrototypeWindowLayer.APP).flags
       assertFalse(typing and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
       assertFalse(typing and LayoutParams.FLAG_ALT_FOCUSABLE_IM != 0)
       // The system layer is untouched.
@@ -101,7 +99,7 @@ class OverlayPlacementTest {
     val expected = mapOf(27 to 0, 28 to 1, 29 to 1, 30 to 3, 36 to 3)
     expected.forEach { (sdk, cutout) ->
       placements().forEach { placement ->
-        val params = interactiveOverlayLayoutParams(placement, false, 2.5f, sdk)
+        val params = prototypeLayoutParams(placement, false, 2.5f, sdk)
         assertEquals(LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, params.type)
         assertFalse(params.type == LayoutParams.TYPE_APPLICATION_OVERLAY)
         assertEquals(cutout, params.layoutInDisplayCutoutMode)
@@ -111,23 +109,23 @@ class OverlayPlacementTest {
 
   @Test(expected = IllegalArgumentException::class)
   fun `density must be positive`() {
-    interactiveOverlayLayoutParams(OverlayPlacement.Fullscreen(), false, 0f, 30)
+    prototypeLayoutParams(PrototypePlacement.Fullscreen(), false, 0f, 30)
   }
 
   @Test(expected = IllegalArgumentException::class)
   fun `sheet must have a positive size`() {
-    OverlayPlacement.Sheet(OverlayPlacement.Edge.TOP, 0f)
+    PrototypePlacement.Sheet(PrototypePlacement.Edge.TOP, 0f)
   }
 
   @Test(expected = IllegalArgumentException::class)
   fun `floating offsets must be finite`() {
-    OverlayPlacement.Floating(offsetXDp = Float.NaN)
+    PrototypePlacement.Floating(offsetXDp = Float.NaN)
   }
 
-  private fun build(placement: OverlayPlacement, hasTextField: Boolean = false) =
-    interactiveOverlayLayoutParams(placement, hasTextField, 2.5f, 30)
+  private fun build(placement: PrototypePlacement, hasTextField: Boolean = false) =
+    prototypeLayoutParams(placement, hasTextField, 2.5f, 30)
 
-  private fun placements(): List<OverlayPlacement> =
-    listOf(OverlayPlacement.Fullscreen(), OverlayPlacement.Floating()) +
-      OverlayPlacement.Edge.entries.map { OverlayPlacement.Sheet(it, 20f) }
+  private fun placements(): List<PrototypePlacement> =
+    listOf(PrototypePlacement.Fullscreen(), PrototypePlacement.Floating()) +
+      PrototypePlacement.Edge.entries.map { PrototypePlacement.Sheet(it, 20f) }
 }

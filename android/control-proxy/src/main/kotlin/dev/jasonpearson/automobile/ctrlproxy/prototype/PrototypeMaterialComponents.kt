@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -61,18 +61,18 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
-import dev.jasonpearson.automobile.protocol.OverlayAppBarAction
-import dev.jasonpearson.automobile.protocol.OverlayDatePickerNode
-import dev.jasonpearson.automobile.protocol.OverlayDialogButton
-import dev.jasonpearson.automobile.protocol.OverlayDialogNode
-import dev.jasonpearson.automobile.protocol.OverlayDividerNode
-import dev.jasonpearson.automobile.protocol.OverlayFabNode
-import dev.jasonpearson.automobile.protocol.OverlayIconButtonNode
-import dev.jasonpearson.automobile.protocol.OverlayProgressNode
-import dev.jasonpearson.automobile.protocol.OverlaySegmentedButtonNode
-import dev.jasonpearson.automobile.protocol.OverlaySnackbarNode
-import dev.jasonpearson.automobile.protocol.OverlayTimePickerNode
-import dev.jasonpearson.automobile.protocol.OverlayTopAppBarNode
+import dev.jasonpearson.automobile.protocol.PrototypeAppBarAction
+import dev.jasonpearson.automobile.protocol.PrototypeDatePickerNode
+import dev.jasonpearson.automobile.protocol.PrototypeDialogButton
+import dev.jasonpearson.automobile.protocol.PrototypeDialogNode
+import dev.jasonpearson.automobile.protocol.PrototypeDividerNode
+import dev.jasonpearson.automobile.protocol.PrototypeFabNode
+import dev.jasonpearson.automobile.protocol.PrototypeIconButtonNode
+import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
+import dev.jasonpearson.automobile.protocol.PrototypeSegmentedButtonNode
+import dev.jasonpearson.automobile.protocol.PrototypeSnackbarNode
+import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
+import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
@@ -81,29 +81,31 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * Material 3 controls added by the last slice of #10439 that run their own taps or changes, so
- * [overlayNodeModifier] must not add a second click handler for these roles.
+ * [prototypeNodeModifier] must not add a second click handler for these roles.
  */
-internal val OVERLAY_MATERIAL_ROLES =
+internal val PROTOTYPE_MATERIAL_ROLES =
   setOf("iconButton", "fab", "segmentedButton", "timePicker", "datePicker")
 
 /** Controls whose only content is an icon, so the icon name labels them when nothing else does. */
-internal val OVERLAY_ICON_CONTROL_ROLES = setOf("iconButton", "fab")
+internal val PROTOTYPE_ICON_CONTROL_ROLES = setOf("iconButton", "fab")
 
 /** The `testTag` of a part of a composite node: the node's tag, a dot, then the part's name. */
-internal fun overlayPartTag(nodeTag: String?, part: String): String? = nodeTag?.let { "$it.$part" }
+internal fun prototypePartTag(nodeTag: String?, part: String): String? = nodeTag?.let {
+  "$it.$part"
+}
 
 /** An icon-only Material button: standard (default), filled, tonal or outlined. */
 @Composable
-internal fun RenderOverlayIconButton(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeIconButton(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlayIconButtonNode ?: return
+  val source = node.source as? PrototypeIconButtonNode ?: return
   val actions = source.onTap.orEmpty()
-  val onClick = { if (actions.isNotEmpty()) interact(OverlayInteraction.Tap(actions)) }
+  val onClick = { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) }
   val content: @Composable () -> Unit = {
-    overlayIcon(source.icon)?.let { Icon(it, contentDescription = null) }
+    prototypeIcon(source.icon)?.let { Icon(it, contentDescription = null) }
   }
   when (source.variant) {
     "filled" -> FilledIconButton(onClick, modifier, content = content)
@@ -115,16 +117,16 @@ internal fun RenderOverlayIconButton(
 
 /** A floating action button; with a `label` it is an extended FAB showing the icon and label. */
 @Composable
-internal fun RenderOverlayFab(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeFab(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlayFabNode ?: return
+  val source = node.source as? PrototypeFabNode ?: return
   val actions = source.onTap.orEmpty()
-  val onClick = { if (actions.isNotEmpty()) interact(OverlayInteraction.Tap(actions)) }
+  val onClick = { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) }
   val icon: @Composable () -> Unit = {
-    overlayIcon(source.icon)?.let { Icon(it, contentDescription = null) }
+    prototypeIcon(source.icon)?.let { Icon(it, contentDescription = null) }
   }
   if (source.label != null) {
     ExtendedFloatingActionButton(
@@ -148,23 +150,23 @@ internal fun RenderOverlayFab(
  * binds the key to that segment's value, emits `change` when it moved, then runs `onTap`.
  */
 @Composable
-internal fun RenderOverlaySegmentedButton(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeSegmentedButton(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlaySegmentedButtonNode ?: return
+  val source = node.source as? PrototypeSegmentedButtonNode ?: return
   val actions = source.onTap.orEmpty()
   SingleChoiceSegmentedButtonRow(modifier) {
     source.options.forEachIndexed { index, option ->
       SegmentedButton(
         selected = option.value == node.selectedValue,
-        onClick = { interact(OverlayInteraction.Choose(source.stateKey, option.value, actions)) },
+        onClick = { interact(PrototypeInteraction.Choose(source.stateKey, option.value, actions)) },
         shape = SegmentedButtonDefaults.itemShape(index, source.options.size),
         modifier =
           Modifier.semantics {
             contentDescription = option.label
-            overlayRadioOptionTag(node.testTag, option.value)?.let { testTag = it }
+            prototypeRadioOptionTag(node.testTag, option.value)?.let { testTag = it }
           },
         label = { Text(option.label, Modifier.clearAndSetSemantics {}) },
       )
@@ -179,21 +181,21 @@ internal fun RenderOverlaySegmentedButton(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun RenderOverlayTopAppBar(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeTopAppBar(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlayTopAppBarNode ?: return
+  val source = node.source as? PrototypeTopAppBarNode ?: return
   val title: @Composable () -> Unit = { Text(node.text, Modifier.clearAndSetSemantics {}) }
   val navigation: @Composable () -> Unit = {
     source.navigationIcon?.let {
-      OverlayAppBarButton(it, overlayPartTag(node.testTag, "navigation"), interact)
+      PrototypeAppBarButton(it, prototypePartTag(node.testTag, "navigation"), interact)
     }
   }
   val actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
     source.actions.orEmpty().forEachIndexed { index, action ->
-      OverlayAppBarButton(action, overlayPartTag(node.testTag, "actions.$index"), interact)
+      PrototypeAppBarButton(action, prototypePartTag(node.testTag, "actions.$index"), interact)
     }
   }
   val authoredFill = node.style.source.background != null || node.style.source.gradient != null
@@ -224,29 +226,29 @@ internal fun RenderOverlayTopAppBar(
 }
 
 @Composable
-private fun OverlayAppBarButton(
-  action: OverlayAppBarAction,
+private fun PrototypeAppBarButton(
+  action: PrototypeAppBarAction,
   tag: String?,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
   val actions = action.onTap.orEmpty()
   IconButton(
-    { if (actions.isNotEmpty()) interact(OverlayInteraction.Tap(actions)) },
+    { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) },
     Modifier.semantics {
       contentDescription = action.label
       tag?.let { testTag = it }
     },
   ) {
-    overlayIcon(action.icon)?.let { Icon(it, contentDescription = null) }
+    prototypeIcon(action.icon)?.let { Icon(it, contentDescription = null) }
   }
 }
 
 /** A Material divider, horizontal (default) or vertical; an authored `style.color` tints it. */
 @Composable
-internal fun RenderOverlayDivider(node: OverlayRenderNode, modifier: Modifier) {
-  val source = node.source as? OverlayDividerNode ?: return
+internal fun RenderPrototypeDivider(node: PrototypeRenderNode, modifier: Modifier) {
+  val source = node.source as? PrototypeDividerNode ?: return
   val color =
-    overlayThemedColor(node.style.color, node.style.source.color)
+    prototypeThemedColor(node.style.color, node.style.source.color)
       ?: MaterialTheme.colorScheme.outlineVariant
   if (source.orientation == "vertical") VerticalDivider(modifier, color = color)
   else HorizontalDivider(modifier, color = color)
@@ -254,7 +256,7 @@ internal fun RenderOverlayDivider(node: OverlayRenderNode, modifier: Modifier) {
 
 /** A Material badge: a small dot without `text`, else the text (typically a count). */
 @Composable
-internal fun RenderOverlayBadge(node: OverlayRenderNode, modifier: Modifier) {
+internal fun RenderPrototypeBadge(node: PrototypeRenderNode, modifier: Modifier) {
   if (node.text.isEmpty()) Badge(modifier)
   else Badge(modifier) { Text(node.text, Modifier.clearAndSetSemantics {}) }
 }
@@ -264,9 +266,9 @@ internal fun RenderOverlayBadge(node: OverlayRenderNode, modifier: Modifier) {
  * Material reports that fraction as progress range info; unbound it is indeterminate.
  */
 @Composable
-internal fun RenderOverlayProgress(node: OverlayRenderNode, modifier: Modifier) {
-  val source = node.source as? OverlayProgressNode ?: return
-  val fraction = overlayProgressFraction(node.sliderValue, source.max)
+internal fun RenderPrototypeProgress(node: PrototypeRenderNode, modifier: Modifier) {
+  val source = node.source as? PrototypeProgressNode ?: return
+  val fraction = prototypeProgressFraction(node.sliderValue, source.max)
   val circular = source.variant == "circular"
   when {
     source.stateKey == null && circular -> CircularProgressIndicator(modifier)
@@ -277,7 +279,7 @@ internal fun RenderOverlayProgress(node: OverlayRenderNode, modifier: Modifier) 
 }
 
 /** The drawn fraction of a determinate progress: the bound value over `max` (default 1). */
-internal fun overlayProgressFraction(value: Double, max: Double?): Float =
+internal fun prototypeProgressFraction(value: Double, max: Double?): Float =
   (value / (max ?: 1.0)).coerceIn(0.0, 1.0).toFloat()
 
 /**
@@ -288,20 +290,20 @@ internal fun overlayProgressFraction(value: Double, max: Double?): Float =
  * `<testTag>.confirm` and `<testTag>.dismiss`.
  */
 @Composable
-internal fun RenderOverlayDialog(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeDialog(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
   content: @Composable ColumnScope.() -> Unit,
 ) {
-  val source = node.source as? OverlayDialogNode ?: return
+  val source = node.source as? PrototypeDialogNode ?: return
   if (!node.sheetOpen) return
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
     Box(
       Modifier.fillMaxSize()
-        .background(overlayDialogScrimFallback(MaterialTheme.colorScheme))
+        .background(prototypeDialogScrimFallback(MaterialTheme.colorScheme))
         .clickable {
-          interact(OverlayInteraction.SheetDismiss(source.openWhen))
+          interact(PrototypeInteraction.SheetDismiss(source.openWhen))
         },
     )
     Surface(
@@ -311,14 +313,14 @@ internal fun RenderOverlayDialog(
         // Consume body taps so they never reach the scrim; the node's own onTap runs instead.
         .clickable(remember { MutableInteractionSource() }, indication = null) {
           if (!source.onTap.isNullOrEmpty())
-            interact(OverlayInteraction.Tap(source.onTap.orEmpty()))
+            interact(PrototypeInteraction.Tap(source.onTap.orEmpty()))
         },
       shape = AlertDialogDefaults.shape,
       color = AlertDialogDefaults.containerColor,
       tonalElevation = AlertDialogDefaults.TonalElevation,
     ) {
       Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        overlayIcon(source.icon)?.let {
+        prototypeIcon(source.icon)?.let {
           Icon(
             it,
             contentDescription = null,
@@ -346,12 +348,14 @@ internal fun RenderOverlayDialog(
           horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
         ) {
           source.dismiss?.let {
-            OverlayDialogTextButton(it, overlayPartTag(node.testTag, "dismiss")) {
-              interact(OverlayInteraction.CloseModal(source.openWhen, it.onTap.orEmpty()))
+            PrototypeDialogTextButton(it, prototypePartTag(node.testTag, "dismiss")) {
+              interact(PrototypeInteraction.CloseModal(source.openWhen, it.onTap.orEmpty()))
             }
           }
-          OverlayDialogTextButton(source.confirm, overlayPartTag(node.testTag, "confirm")) {
-            interact(OverlayInteraction.CloseModal(source.openWhen, source.confirm.onTap.orEmpty()))
+          PrototypeDialogTextButton(source.confirm, prototypePartTag(node.testTag, "confirm")) {
+            interact(
+              PrototypeInteraction.CloseModal(source.openWhen, source.confirm.onTap.orEmpty()),
+            )
           }
         }
       }
@@ -364,17 +368,17 @@ internal fun RenderOverlayDialog(
  * author tree. Its optional action button, tagged `<testTag>.action`, closes it and runs `onTap`.
  */
 @Composable
-internal fun RenderOverlaySnackbar(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeSnackbar(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlaySnackbarNode ?: return
+  val source = node.source as? PrototypeSnackbarNode ?: return
   if (!node.sheetOpen) return
   // Leaving composition (the snackbar closed by any route) cancels the pending timeout.
   LaunchedEffect(source.openWhen, source.durationMs) {
     awaitSnackbarTimeout(source.durationMs) {
-      interact(OverlayInteraction.CloseModal(source.openWhen))
+      interact(PrototypeInteraction.CloseModal(source.openWhen))
     }
   }
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
@@ -383,8 +387,8 @@ internal fun RenderOverlaySnackbar(
       action =
         source.action?.let { action ->
           {
-            OverlayDialogTextButton(action, overlayPartTag(node.testTag, "action")) {
-              interact(OverlayInteraction.CloseModal(source.openWhen, action.onTap.orEmpty()))
+            PrototypeDialogTextButton(action, prototypePartTag(node.testTag, "action")) {
+              interact(PrototypeInteraction.CloseModal(source.openWhen, action.onTap.orEmpty()))
             }
           }
         },
@@ -410,8 +414,8 @@ internal suspend fun awaitSnackbarTimeout(
 }
 
 @Composable
-private fun OverlayDialogTextButton(
-  button: OverlayDialogButton,
+private fun PrototypeDialogTextButton(
+  button: PrototypeDialogButton,
   tag: String?,
   onClick: () -> Unit,
 ) {
@@ -420,17 +424,17 @@ private fun OverlayDialogTextButton(
 
 /**
  * A Material time picker bound to integer hour and minute keys. The picker's own dial and inputs
- * edit a local state; each settled change sends both keys at once ([OverlayInteraction.SetTime]),
+ * edit a local state; each settled change sends both keys at once ([PrototypeInteraction.SetTime]),
  * and a new bound value (a re-show or a `setState`) moves the picker.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun RenderOverlayTimePicker(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeTimePicker(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlayTimePickerNode ?: return
+  val source = node.source as? PrototypeTimePickerNode ?: return
   val is24Hour =
     source.is24Hour ?: android.text.format.DateFormat.is24HourFormat(LocalContext.current)
   val state = rememberTimePickerState(node.hour, node.minute, is24Hour)
@@ -445,7 +449,7 @@ internal fun RenderOverlayTimePicker(
       .collect { (hour, minute) ->
         if (hour to minute != bound)
           interact(
-            OverlayInteraction.SetTime(
+            PrototypeInteraction.SetTime(
               source.hourKey,
               source.minuteKey,
               hour,
@@ -460,17 +464,17 @@ internal fun RenderOverlayTimePicker(
 
 /**
  * A Material date picker bound to a `YYYY-MM-DD` string key. Picking a day binds the key to that
- * date ([OverlayInteraction.Choose]); a new bound value moves the selection.
+ * date ([PrototypeInteraction.Choose]); a new bound value moves the selection.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun RenderOverlayDatePicker(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeDatePicker(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlayDatePickerNode ?: return
-  val millis = overlayDateMillis(node.selectedValue)
+  val source = node.source as? PrototypeDatePickerNode ?: return
+  val millis = prototypeDateMillis(node.selectedValue)
   val state = rememberDatePickerState(initialSelectedDateMillis = millis)
   val bound by rememberUpdatedState(node.selectedValue)
   LaunchedEffect(millis) {
@@ -483,9 +487,9 @@ internal fun RenderOverlayDatePicker(
     snapshotFlow { state.selectedDateMillis }
       .distinctUntilChanged()
       .collect { selected ->
-        val date = selected?.let(::overlayDateString)
+        val date = selected?.let(::prototypeDateString)
         if (date != null && date != bound)
-          interact(OverlayInteraction.Choose(source.stateKey, date, source.onTap.orEmpty()))
+          interact(PrototypeInteraction.Choose(source.stateKey, date, source.onTap.orEmpty()))
       }
   }
   DatePicker(state, modifier, showModeToggle = false)
@@ -494,7 +498,7 @@ internal fun RenderOverlayDatePicker(
 private val UTC: TimeZone = TimeZone.getTimeZone("UTC")
 
 /** UTC midnight of a validated `YYYY-MM-DD` date, as the Material date picker stores it. */
-internal fun overlayDateMillis(date: String?): Long? {
+internal fun prototypeDateMillis(date: String?): Long? {
   val parts = date?.split("-")?.map { it.toIntOrNull() ?: return null } ?: return null
   if (parts.size != 3) return null
   val (year, month, day) = parts
@@ -507,7 +511,7 @@ internal fun overlayDateMillis(date: String?): Long? {
 }
 
 /** The `YYYY-MM-DD` date of a UTC-midnight picker selection. */
-internal fun overlayDateString(millis: Long): String {
+internal fun prototypeDateString(millis: Long): String {
   val calendar = Calendar.getInstance(UTC).apply { timeInMillis = millis }
   return String.format(
     Locale.ROOT,

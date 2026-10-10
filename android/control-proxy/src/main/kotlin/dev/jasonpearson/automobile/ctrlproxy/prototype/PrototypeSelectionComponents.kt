@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,30 +28,30 @@ import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
-import dev.jasonpearson.automobile.protocol.OverlayListItemCheckbox
-import dev.jasonpearson.automobile.protocol.OverlayListItemIcon
-import dev.jasonpearson.automobile.protocol.OverlayListItemNode
-import dev.jasonpearson.automobile.protocol.OverlayListItemSwitch
-import dev.jasonpearson.automobile.protocol.OverlayListItemTrailing
-import dev.jasonpearson.automobile.protocol.OverlayNode
-import dev.jasonpearson.automobile.protocol.OverlayRadioGroupNode
+import dev.jasonpearson.automobile.protocol.PrototypeListItemCheckbox
+import dev.jasonpearson.automobile.protocol.PrototypeListItemIcon
+import dev.jasonpearson.automobile.protocol.PrototypeListItemNode
+import dev.jasonpearson.automobile.protocol.PrototypeListItemSwitch
+import dev.jasonpearson.automobile.protocol.PrototypeListItemTrailing
+import dev.jasonpearson.automobile.protocol.PrototypeNode
+import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
 
 /**
  * Selection component nodes (#10439, final slice): `radioGroup` and `listItem`. Both own their
- * taps, so [overlayNodeModifier] must not add a second click handler for these roles.
+ * taps, so [prototypeNodeModifier] must not add a second click handler for these roles.
  */
-internal val OVERLAY_SELECTION_ROLES = setOf("radioGroup", "listItem")
+internal val PROTOTYPE_SELECTION_ROLES = setOf("radioGroup", "listItem")
 
 /** The boolean state key of a `listItem`'s trailing switch or checkbox; null otherwise. */
-internal fun overlayListItemToggleKey(node: OverlayNode): String? =
-  when (val trailing = (node as? OverlayListItemNode)?.trailing) {
-    is OverlayListItemSwitch -> trailing.stateKey
-    is OverlayListItemCheckbox -> trailing.stateKey
+internal fun prototypeListItemToggleKey(node: PrototypeNode): String? =
+  when (val trailing = (node as? PrototypeListItemNode)?.trailing) {
+    is PrototypeListItemSwitch -> trailing.stateKey
+    is PrototypeListItemCheckbox -> trailing.stateKey
     else -> null
   }
 
 /** The `testTag` of one radio option: the group's tag, a dot, then the option value. */
-internal fun overlayRadioOptionTag(groupTag: String?, value: String): String? = groupTag?.let {
+internal fun prototypeRadioOptionTag(groupTag: String?, value: String): String? = groupTag?.let {
   "$it.$value"
 }
 
@@ -62,12 +62,12 @@ internal fun overlayRadioOptionTag(groupTag: String?, value: String): String? = 
  * is display-only (`onClick = null`).
  */
 @Composable
-internal fun RenderOverlayRadioGroup(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeRadioGroup(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlayRadioGroupNode ?: return
+  val source = node.source as? PrototypeRadioGroupNode ?: return
   val actions = source.onTap.orEmpty()
   Column(modifier.selectableGroup()) {
     for (option in source.options) {
@@ -76,18 +76,18 @@ internal fun RenderOverlayRadioGroup(
         Modifier.fillMaxWidth()
           .minimumInteractiveComponentSize()
           .selectable(selected, role = Role.RadioButton) {
-            interact(OverlayInteraction.Choose(source.stateKey, option.value, actions))
+            interact(PrototypeInteraction.Choose(source.stateKey, option.value, actions))
           }
           .semantics {
             text = AnnotatedString(option.label)
             contentDescription = option.label
-            overlayRadioOptionTag(node.testTag, option.value)?.let { testTag = it }
+            prototypeRadioOptionTag(node.testTag, option.value)?.let { testTag = it }
           },
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
         RadioButton(selected, onClick = null)
-        Text(option.label, Modifier.clearAndSetSemantics {}, color = overlayForeground(node))
+        Text(option.label, Modifier.clearAndSetSemantics {}, color = prototypeForeground(node))
       }
     }
   }
@@ -100,25 +100,25 @@ internal fun RenderOverlayRadioGroup(
  * running `onTap`; otherwise a row with `onTap` is a Button and one without is inert.
  */
 @Composable
-internal fun RenderOverlayListItem(
-  node: OverlayRenderNode,
+internal fun RenderPrototypeListItem(
+  node: PrototypeRenderNode,
   modifier: Modifier,
-  interact: (OverlayInteraction) -> Unit,
+  interact: (PrototypeInteraction) -> Unit,
 ) {
-  val source = node.source as? OverlayListItemNode ?: return
+  val source = node.source as? PrototypeListItemNode ?: return
   val actions = source.onTap.orEmpty()
-  val toggleKey = overlayListItemToggleKey(source)
+  val toggleKey = prototypeListItemToggleKey(source)
   val target =
     when {
       toggleKey != null ->
         Modifier.toggleable(
           node.checked,
-          role = if (source.trailing is OverlayListItemSwitch) Role.Switch else Role.Checkbox,
+          role = if (source.trailing is PrototypeListItemSwitch) Role.Switch else Role.Checkbox,
         ) {
-          interact(OverlayInteraction.Toggle(toggleKey, actions))
+          interact(PrototypeInteraction.Toggle(toggleKey, actions))
         }
       actions.isNotEmpty() ->
-        Modifier.clickable(role = Role.Button) { interact(OverlayInteraction.Tap(actions)) }
+        Modifier.clickable(role = Role.Button) { interact(PrototypeInteraction.Tap(actions)) }
       else -> Modifier
     }
   val foreground = if (node.style.source.color != null) node.style.color else Color.Unspecified
@@ -126,10 +126,10 @@ internal fun RenderOverlayListItem(
     headlineContent = { Text(source.headline, Modifier.clearAndSetSemantics {}) },
     modifier = target.then(modifier),
     supportingContent = source.supporting?.let { supporting -> { Text(supporting) } },
-    leadingContent = overlayIcon(source.leadingIcon)?.let { icon -> { Icon(icon, null) } },
+    leadingContent = prototypeIcon(source.leadingIcon)?.let { icon -> { Icon(icon, null) } },
     trailingContent =
       source.trailing?.let { trailing ->
-        { OverlayListItemTrailingContent(trailing, node.checked) }
+        { PrototypeListItemTrailingContent(trailing, node.checked) }
       },
     colors =
       ListItemDefaults.colors(
@@ -144,11 +144,14 @@ internal fun RenderOverlayListItem(
 }
 
 @Composable
-private fun OverlayListItemTrailingContent(trailing: OverlayListItemTrailing, checked: Boolean) {
+private fun PrototypeListItemTrailingContent(
+  trailing: PrototypeListItemTrailing,
+  checked: Boolean,
+) {
   when (trailing) {
-    is OverlayListItemSwitch -> Switch(checked, onCheckedChange = null)
-    is OverlayListItemCheckbox -> Checkbox(checked, onCheckedChange = null)
-    is OverlayListItemIcon ->
-      overlayIcon(trailing.name)?.let { Icon(it, contentDescription = null) }
+    is PrototypeListItemSwitch -> Switch(checked, onCheckedChange = null)
+    is PrototypeListItemCheckbox -> Checkbox(checked, onCheckedChange = null)
+    is PrototypeListItemIcon ->
+      prototypeIcon(trailing.name)?.let { Icon(it, contentDescription = null) }
   }
 }

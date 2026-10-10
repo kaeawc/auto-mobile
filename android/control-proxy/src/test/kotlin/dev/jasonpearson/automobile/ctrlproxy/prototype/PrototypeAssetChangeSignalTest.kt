@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ctrlproxy.overlay
+package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
@@ -18,16 +18,16 @@ import org.robolectric.annotation.Config
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
-class OverlayAssetChangeSignalTest {
-  private val files = FakeOverlayAssetFiles()
+class PrototypeAssetChangeSignalTest {
+  private val files = FakePrototypeAssetFiles()
   private val worker = QueuedExecutor()
   private var session = 1
-  private val limits = OverlayAssetLimits(maxAssetBytes = 100, maxCount = 2, maxTotalBytes = 150)
-  private val store = OverlayAssetStore(files, limits, session = { session }, fileWorker = worker)
+  private val limits = PrototypeAssetLimits(maxAssetBytes = 100, maxCount = 2, maxTotalBytes = 150)
+  private val store = PrototypeAssetStore(files, limits, session = { session }, fileWorker = worker)
   private val signals = mutableListOf<Set<String>?>()
 
   private fun put(id: String, size: Int = 20) =
-    store.put(id, "image/png", OverlayAssetBytes.png(size))
+    store.put(id, "image/png", PrototypeAssetBytes.png(size))
 
   private fun listen(block: (Set<String>?) -> Unit = {}) = store.setChangeListener { ids ->
     signals += ids?.toSet()
@@ -57,7 +57,7 @@ class OverlayAssetChangeSignalTest {
     put("a")
     put("b")
     signals.clear()
-    assertTrue(put("c") is OverlayAssetPutResult.Rejected)
+    assertTrue(put("c") is PrototypeAssetPutResult.Rejected)
     assertTrue(signals.isEmpty())
   }
 
@@ -82,18 +82,18 @@ class OverlayAssetChangeSignalTest {
   @Test
   fun `a session change reports every asset on the first touch, whichever call it is`() {
     val touches =
-      listOf<Pair<String, (OverlayAssetStore) -> Any?>>(
+      listOf<Pair<String, (PrototypeAssetStore) -> Any?>>(
         "lookup" to { it.lookup("a") },
         "read" to { it.read("a") },
         "count" to { it.count },
         "totalByteCount" to { it.totalByteCount },
         "ids" to { it.ids() },
         "remove" to { it.remove("a") },
-        "put" to { it.put("b", "image/png", OverlayAssetBytes.png()) },
+        "put" to { it.put("b", "image/png", PrototypeAssetBytes.png()) },
       )
     touches.forEach { (name, touch) ->
-      val fresh = OverlayAssetStore(files, limits, session = { session }, fileWorker = worker)
-      fresh.put("a", "image/png", OverlayAssetBytes.png())
+      val fresh = PrototypeAssetStore(files, limits, session = { session }, fileWorker = worker)
+      fresh.put("a", "image/png", PrototypeAssetBytes.png())
       val seen = mutableListOf<Set<String>?>()
       fresh.setChangeListener { seen += it?.toSet() }
       session++
@@ -108,8 +108,8 @@ class OverlayAssetChangeSignalTest {
     put("old")
     listen()
     files.onWrite = { session = 2 }
-    val result = put("late") as OverlayAssetPutResult.Rejected
-    assertEquals(OverlayAssetRejection.SESSION_ENDED, result.reason)
+    val result = put("late") as PrototypeAssetPutResult.Rejected
+    assertEquals(PrototypeAssetRejection.SESSION_ENDED, result.reason)
     assertEquals(listOf<Set<String>?>(null), signals)
     assertNull(store.lookup("old"))
     assertNull(store.lookup("late"))
@@ -155,11 +155,11 @@ class OverlayAssetChangeSignalTest {
 
   @Test
   fun `a listener that reads the store from another thread is not blocked by the notifying call`() {
-    val onOther = mutableListOf<OverlayAssetInfo?>()
+    val onOther = mutableListOf<PrototypeAssetInfo?>()
     listen { ids -> ids?.forEach { id -> onOther += otherThread { store.lookup(id) } } }
     put("hero")
     store.remove("hero")
-    assertEquals(listOf(OverlayAssetInfo("hero", "image/png", 20), null), onOther)
+    assertEquals(listOf(PrototypeAssetInfo("hero", "image/png", 20), null), onOther)
   }
 
   @Test

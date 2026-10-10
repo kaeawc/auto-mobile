@@ -14,6 +14,8 @@
  * and slots it is waiting on, so the caller can retry; a repeated reset resumes where it stopped.
  */
 
+import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
 import type {
   CompleteScopeInvalidationResult,
@@ -35,7 +37,12 @@ export const SLOT_SCOPE_RESET_POLL_MS = 250;
 
 export type SlotScopeResetRegistry = Pick<
   SlotRegistry,
-  "findScopes" | "beginScopeInvalidation" | "completeScopeInvalidation"
+  | "findScopes"
+  | "beginScopeInvalidation"
+  | "completeScopeInvalidation"
+  | "listAssignments"
+  | "listOpenSlotJournal"
+  | "advanceSlotJournal"
 >;
 
 export type SlotScopeResetScopeOutcome = "invalidated" | "already_invalidated" | "pending";
@@ -92,6 +99,12 @@ export interface SlotScopeResetResult {
 export interface SlotScopeResetRequest extends SlotScopeQuery {
   /** Bounded settle wait, clamped to {@link SLOT_SCOPE_RESET_MAX_WAIT_MS}. */
   waitMs?: number;
+  /**
+   * Operator override (#11336): a slot stuck `settling` after its released work outlived the
+   * settlement cap is returned to `ready` (its release journal entry committed) so the reset can
+   * proceed. It overrides "settling", never "in use": a slot with an execution owner still blocks.
+   */
+  force?: boolean;
 }
 
 export interface SlotScopeResetOptions {
@@ -129,7 +142,9 @@ export class SlotScopeReset {
     }
     const deadlineMs = startedAtMs + clampWaitMs(request.waitMs);
     const results = await Promise.all(
-      scopes.map((scope) => this.invalidate(registry, scope, "operator_reset", deadlineMs)),
+      scopes.map((scope) =>
+        this.invalidate(registry, scope, "operator_reset", deadlineMs, request.force === true),
+      ),
     );
     const pending = results.some((result) => result.outcome === "pending");
     return {
@@ -158,6 +173,7 @@ export class SlotScopeReset {
     scope: SlotScopeRecord,
     reason: SlotScopeInvalidationReason,
     deadlineMs: number,
+    force = false,
   ): Promise<SlotScopeResetScopeResult> {
     const base = {
       scopeKey: scope.scopeKey,
@@ -167,6 +183,9 @@ export class SlotScopeReset {
     };
     // Idempotent: blocks acquisitions now, and turns an abandoned (revivable) scope permanent.
     await registry.beginScopeInvalidation(scope.scopeKey, reason);
+    if (force) {
+      await this.abandonSettlement(registry, scope);
+    }
     for (;;) {
       const completed = await registry.completeScopeInvalidation(scope.scopeKey);
       if (completed.kind === "invalidated") {
@@ -195,6 +214,51 @@ export class SlotScopeReset {
         return { ...base, outcome: "pending", freedDevices: [], pending: waitingOn };
       }
       await this.options.timer.sleep(Math.min(this.pollMs, remainingMs));
+    }
+  }
+
+  /**
+   * Return each unowned `settling` slot of the scope to `ready`, committing its release journal
+   * entry in the same transaction (the existing journal API, never by hand). A slot with an
+   * execution owner, with no open release entry, or with other open journal work is left for the
+   * normal wait.
+   */
+  private async abandonSettlement(
+    registry: SlotScopeResetRegistry,
+    scope: SlotScopeRecord,
+  ): Promise<void> {
+    const slots = (await registry.listAssignments(scope.scopeKey)).filter(
+      (slot) => slot.state === "settling" && slot.execOwner === null,
+    );
+    for (const slot of slots) {
+      const key = { scopeKey: slot.scopeKey, slotIndex: slot.slotIndex };
+      try {
+        const open = await registry.listOpenSlotJournal(key);
+        if (open.some((entry) => entry.kind !== "release")) {
+          continue;
+        }
+        const release = open.find((entry) => entry.kind === "release");
+        if (!release) {
+          continue;
+        }
+        const result = await registry.advanceSlotJournal(release.id, {
+          owner: release.owner,
+          expectedPhase: release.phase,
+          phase: "committed",
+          assignment: { kind: "state", expected: release.binding, state: "ready" },
+        });
+        logger.warn(
+          result.kind === "advanced"
+            ? `[SlotScopeReset] --force abandoned the settlement of slot ${key.scopeKey}/${key.slotIndex}; ` +
+                "its released work may still be running (#11336)"
+            : `[SlotScopeReset] --force could not abandon slot ${key.scopeKey}/${key.slotIndex}: ${result.kind}`,
+        );
+      } catch (error) {
+        logger.warn(
+          `[SlotScopeReset] --force could not abandon slot ${key.scopeKey}/${key.slotIndex}: ${errorMessage(error)}`,
+          error,
+        );
+      }
     }
   }
 }

@@ -25,7 +25,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { getAbortSignal } from "../../utils/AbortContext";
-import { RequestManager } from "../../utils/RequestManager";
+import { RequestManager, type TimedOutRequest } from "../../utils/RequestManager";
 import { RetryExecutor, defaultRetryExecutor } from "../../utils/retry/RetryExecutor";
 import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectStatus";
 import { CtrlProxyForwardingLeaseConflictError } from "./shared/CtrlProxyForwardingLeaseConflictError";
@@ -247,6 +247,7 @@ export abstract class DeviceServiceClient {
   // Consecutive RequestManager timeouts observed since the last proof of
   // life. Reset by markLivenessSeen(); read by handleRequestTimeout().
   private consecutiveRequestTimeouts: number = 0;
+  private stallConfirmationTimeoutId: ReturnType<Timer["setTimeout"]> | null = null;
 
   // Injected dependencies
   protected readonly timer: Timer;
@@ -278,7 +279,9 @@ export abstract class DeviceServiceClient {
     this.timer = timer;
     this.webSocketFactory = webSocketFactory;
     this.config = { ...DEFAULT_CONNECTION_CONFIG, ...config };
-    this.requestManager = new RequestManager(timer, undefined, () => this.handleRequestTimeout());
+    this.requestManager = new RequestManager(timer, undefined, (request) =>
+      this.handleRequestTimeout(request),
+    );
     this.retryExecutor = retryExecutor;
   }
 
@@ -1197,6 +1200,10 @@ export abstract class DeviceServiceClient {
       this.timer.clearTimeout(this.livenessDeadlineTimeoutId);
       this.livenessDeadlineTimeoutId = null;
     }
+    if (this.stallConfirmationTimeoutId !== null) {
+      this.timer.clearTimeout(this.stallConfirmationTimeoutId);
+      this.stallConfirmationTimeoutId = null;
+    }
   }
 
   /**
@@ -1280,7 +1287,8 @@ export abstract class DeviceServiceClient {
    * ping-then-terminate probe immediately, instead of waiting out the rest of
    * the current health-check interval.
    */
-  private handleRequestTimeout(): void {
+  private handleRequestTimeout(request: TimedOutRequest): void {
+    this.confirmSilentRequestStall(request);
     this.consecutiveRequestTimeouts++;
     if (this.consecutiveRequestTimeouts < REQUEST_TIMEOUT_LIVENESS_THRESHOLD) {
       return;
@@ -1291,6 +1299,60 @@ export abstract class DeviceServiceClient {
       );
       this.startLivenessProbe(this.ws);
     }
+  }
+
+  /**
+   * How long to wait for proof of life after `request` timed out with no
+   * inbound frame since it was registered, or `undefined` when such a timeout
+   * is not stall evidence for this client. Disabled by default.
+   */
+  protected silentTimeoutConfirmationMs(_request: TimedOutRequest): number | undefined {
+    return undefined;
+  }
+
+  /** A silent request timeout whose confirmation ping also went unanswered. */
+  protected onConfirmedRequestStall(_request: TimedOutRequest): void {}
+
+  /**
+   * A command that times out while the peer sent nothing at all may be a
+   * stopped runner rather than a slow one. Ping it once on a short deadline:
+   * a peer that answers is merely busy; silence is reported to the subclass,
+   * which owns recovery (#11247). Unlike {@link startLivenessProbe} this never
+   * terminates the socket itself.
+   */
+  private confirmSilentRequestStall(request: TimedOutRequest): void {
+    const ws = this.ws;
+    if (
+      !ws ||
+      ws.readyState !== WebSocket.OPEN ||
+      this.stallConfirmationTimeoutId !== null ||
+      // Same-millisecond proof of life is ambiguous; treat it as life.
+      this.lastLivenessAt >= request.createdAt
+    ) {
+      return;
+    }
+    const confirmationMs = this.silentTimeoutConfirmationMs(request);
+    if (confirmationMs === undefined) {
+      return;
+    }
+    const startedAtSeq = this.livenessSeq;
+    try {
+      ws.ping();
+    } catch (error) {
+      // A failed send is itself stall evidence; the deadline below decides.
+      logger.debug(`[${this.logTag}] Failed to send stall-confirmation ping: ${error}`);
+    }
+    this.stallConfirmationTimeoutId = this.timer.setTimeout(() => {
+      this.stallConfirmationTimeoutId = null;
+      if (this.ws !== ws || ws.readyState !== WebSocket.OPEN || this.livenessSeq !== startedAtSeq) {
+        return;
+      }
+      logger.warn(
+        `[${this.logTag}] ${request.type} request timed out after ${request.timeoutMs}ms and a ` +
+          `ping went unanswered for ${confirmationMs}ms; treating the runner as stalled`,
+      );
+      this.onConfirmedRequestStall(request);
+    }, confirmationMs);
   }
 
   // ===========================================================================

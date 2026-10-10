@@ -538,6 +538,101 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     expect(fakeManager.forceRestartCount).toBe(1);
   });
 
+  test("a restart trigger is dropped when a newer connection is healthy before admission (#11247)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = createFakeManager(timer);
+    let reconnectWorks = false;
+    const failed = createInstantFailureWebSocketFactory(timer);
+    const succeeds = createSuccessWebSocketFactory(timer);
+    // Holds exactly one boot check: the one the failure-threshold trigger awaits.
+    let holdNextBootCheck = false;
+    let releaseBootCheck: (() => void) | undefined;
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => (reconnectWorks ? succeeds(url) : failed(url)),
+      timer,
+      () => manager,
+      () => {
+        if (!holdNextBootCheck) {
+          return Promise.resolve([testDevice]);
+        }
+        holdNextBootCheck = false;
+        return new Promise<BootedDevice[]>((resolve) => {
+          releaseBootCheck = () => resolve([testDevice]);
+        });
+      },
+    );
+    // Failed dials against the retired port queue a restart whose boot check
+    // is still pending...
+    await client.ensureConnected();
+    await client.ensureConnected();
+    holdNextBootCheck = true;
+    await client.ensureConnected();
+    expect(releaseBootCheck).toBeDefined();
+    // ...while an external recovery brings up a healthy replacement runner.
+    reconnectWorks = true;
+    timer.advanceTime(11_000); // past the dial cooldown
+    expect(await client.ensureConnected()).toBe(true);
+    releaseBootCheck!();
+    expect(await client.awaitRecovery(20_000)).toBe("recovered");
+    expect(manager.forceRestartCount).toBe(0);
+    expect(manager.getForcedRestartBudget().snapshot()).toMatchObject({
+      state: "idle",
+      attempts: 0,
+    });
+  });
+
+  test("an observed-failure trigger is dropped once a newer connection replaced the stalled one", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = createFakeManager(timer);
+    const sockets: FakeWebSocket[] = [];
+    const releases: Array<() => void> = [];
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => {
+        const socket = new FakeWebSocket(url, "none", 0, timer);
+        sockets.push(socket);
+        return socket;
+      },
+      timer,
+      () => manager,
+      () =>
+        new Promise<BootedDevice[]>((resolve) => {
+          releases.push(() => resolve([testDevice]));
+        }),
+    );
+    expect(await client.ensureConnected()).toBe(true);
+    client.ensureRecoveryStarted();
+    expect(releases).toHaveLength(1);
+    sockets[0]!.terminate();
+    expect(await client.ensureConnected()).toBe(true);
+    expect(sockets).toHaveLength(2);
+    releases[0]!();
+    expect(await client.awaitRecovery(20_000)).toBe("recovered");
+    expect(manager.forceRestartCount).toBe(0);
+  });
+
+  test("an observed-failure trigger on the still-current connection restarts the runner", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = createFakeManager(timer);
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      createSuccessWebSocketFactory(timer),
+      timer,
+      () => manager,
+    );
+    expect(await client.ensureConnected()).toBe(true);
+    client.ensureRecoveryStarted();
+    await client.awaitRecovery(20_000);
+    expect(manager.forceRestartCount).toBe(1);
+  });
+
   test("no restart triggered when failures below threshold", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();

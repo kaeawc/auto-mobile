@@ -689,15 +689,19 @@ async function queryAvailableDevices(args: string[], manager: DaemonManager): Pr
     if (daemonState.isInitialized()) {
       // Running inside daemon process
       const pool = daemonState.getDevicePool();
+      const { stats, deviceIds } = await pool.getRefreshedInventory();
       console.log(
         formatPoolStats(
-          await pool.getRefreshedStats(),
+          stats,
           pool.getRecoveryPolicy(),
-          pool.getAllDevices().map((device) => ({
-            deviceId: device.id,
-            platform: device.platform,
-            recoveryEligibility: pool.getRecoveryEligibility(device.id),
-          })),
+          pool
+            .getAllDevices()
+            .filter((device) => deviceIds.has(device.id))
+            .map((device) => ({
+              deviceId: device.id,
+              platform: device.platform,
+              recoveryEligibility: pool.getRecoveryEligibility(device.id),
+            })),
         ),
       );
       return;

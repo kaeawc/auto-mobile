@@ -166,4 +166,32 @@ describe("a pooled device that discovery no longer lists", () => {
 
     expect(await pool.getRefreshedStats()).toMatchObject({ total: 0, idle: 0, assigned: 0 });
   });
+
+  test("a failed source no pooled device depends on leaves the counts exact", async () => {
+    const sim: BootedDevice = { platform: "ios", name: "iPhone 17", deviceId: "SIM-LIVE" };
+    const { pool, manager } = await poolOf([android, sim]);
+    manager.setBootedDevices("ios", [sim]);
+    manager.failedSources.add("ios-physical");
+
+    expect(await pool.getRefreshedStats()).toMatchObject({ total: 2, idle: 2 });
+  });
+
+  test("daemon/availableDevices lists only the devices it counts", async () => {
+    const { pool, manager } = await poolOf([android]);
+    manager.setBootedDevices("android", []);
+    const sessionManager = sessions as SessionManager;
+    const state: DaemonStateAccess = {
+      isInitialized: () => true,
+      getSessionManager: () => sessionManager as never,
+      getDevicePool: () => pool,
+      getDeviceSessionRegistry: () => ({ list: () => [] }),
+    };
+
+    const response = await handleDaemonRequest(
+      { id: "r", type: "daemon_request", method: "daemon/availableDevices", params: {} },
+      state,
+    );
+
+    expect(response.result).toMatchObject({ totalDevices: 0, devices: [] });
+  });
 });

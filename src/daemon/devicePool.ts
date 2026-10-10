@@ -108,7 +108,6 @@ import {
 import {
   didSourceSucceedForDevice,
   discoverySourceFor,
-  sourcesForPlatform,
   type DiscoveryCompleteness,
 } from "../utils/discoverySource";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
@@ -5874,16 +5873,29 @@ export class DevicePool {
 
   /** {@link getStats} after {@link refreshInventoryOwnership}: what `availableDevices` surfaces report. */
   async getRefreshedStats(): Promise<ReturnType<DevicePool["getStats"]>> {
+    return (await this.getRefreshedInventory()).stats;
+  }
+
+  /**
+   * {@link getRefreshedStats} plus the live pooled device ids it counted, so a surface that also
+   * lists devices lists exactly the ones the counts cover.
+   */
+  async getRefreshedInventory(): Promise<{
+    stats: ReturnType<DevicePool["getStats"]>;
+    deviceIds: ReadonlySet<string>;
+  }> {
     await this.refreshInventoryOwnership();
-    return this.getStats(await this.readLiveInventoryDeviceIds());
+    const deviceIds = await this.readLiveInventoryDeviceIds();
+    return { stats: this.getStats(deviceIds), deviceIds };
   }
 
   /**
    * The pooled device ids the booted-devices resource and listDevices would list: what discovery
    * reports now plus held Android devices adb still lists offline. A pooled entry outside this set
    * is a phantom (shut down since the last refresh) and must not be counted (#11568). Only
-   * platforms with pooled entries are read, through the manager's own discovery cache, so a stats
-   * read adds no adb/simctl call beyond one cached listing per such platform. An incomplete
+   * platforms with pooled entries are read, through the manager's own discovery path (adb's
+   * device-list cache applies), so a stats read adds one listing per such platform and no
+   * unbounded per-device call. An incomplete
    * listing throws {@link BootedDeviceDiscoveryIncompleteError}: the count is unknown, never the
    * stale pool tally and never zero.
    */
@@ -5896,10 +5908,12 @@ export class DevicePool {
       const discovery = await this.deviceManager.getBootedDevicesDetailed(platform, {
         signal: getAbortSignal(),
       });
-      const complete = discovery.succeededSources
-        ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
-        : discovery.succeededPlatforms.has(platform);
-      if (!complete) {
+      // Only a pooled device whose own discovery source failed is unknown; a failure of a source
+      // none of them depends on (devicectl for a simulator-only pool) leaves the answer exact.
+      const unknown = this.getDevicesByPlatform(platform).some(
+        (pooled) => !didSourceSucceedForDevice(discovery, platform, pooled.id),
+      );
+      if (unknown) {
         throw new BootedDeviceDiscoveryIncompleteError(
           platform,
           discovery.discoveryErrors?.[platform],

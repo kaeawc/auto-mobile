@@ -6698,11 +6698,9 @@ describe("Daemon manager available-devices", () => {
       getDevicePool: () =>
         ({
           // The in-daemon path refreshes slot and foreign ownership before reading stats (#11317).
-          getRefreshedStats: async () => ({
-            idle: 1,
-            assigned: 2,
-            error: 1,
-            total: 4,
+          getRefreshedInventory: async () => ({
+            stats: { idle: 1, assigned: 2, error: 1, total: 4 },
+            deviceIds: new Set(["physical-ios-device"]),
           }),
           getRecoveryPolicy: () => ({ onLoss: false, maxAttempts: 2 }),
           getAllDevices: () => [

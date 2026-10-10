@@ -878,6 +878,7 @@ test/server/deviceSessionResultOwnership.test.ts
 test/server/deviceStateChangeNotifier.test.ts
 test/server/deviceTools.listDevicesCapacitySchema.test.ts
 test/server/deviceTools.listDevicesOwnership.test.ts
+test/server/deviceTools.runOperationWithinDeadline.test.ts
 test/server/deviceTools.screenSize.test.ts
 test/server/deviceToolsShutdown.offlineHold.test.ts
 test/server/downloadsFixtureContract.test.ts

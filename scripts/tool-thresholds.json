@@ -1,31 +1,32 @@
 {
-  "version": "1.2.0",
+  "version": "1.3.0",
   "metadata": {
     "generatedAt": "2026-10-10",
-    "description": "MCP tool call throughput thresholds with 20% regression tolerance",
+    "description": "MCP tool call throughput thresholds with 20% regression tolerance, floored at p50 1 ms / p95 5 ms / mean 1 ms",
     "baseline": {
       "description": "Baseline measurements from actual tool handler execution (MCP overhead without device I/O)",
       "sampleSize": 50,
       "generatedBy": "benchmark-mcp-tools.ts",
-      "note": "Measures tool registry lookup, schema validation, device resolution, and handler wrapper overhead. Updated after ViewHierarchy caching removal (commit 724ae74d). listDevices (#11332) is measured against fakes with a daemon-shaped DevicePool (see scripts/benchmark-listdevices-fixture.ts): local max over 5 runs of 50 samples p50 0.096 / p95 0.314 / mean 0.133 ms, thresholds = 3x that rounded up to 0.1 ms for slower CI runners (the 20% tolerance applies on top). observe, pressButton, tapOn, launchApp and installApp (#11375) are likewise measured against fakes (see scripts/benchmark-device-tools-fixture.ts; observe/tapOn serve the captured test/fixtures/observe/android-home.json, the other three return a canned success from the handler action seam): local max over 5 runs of 50 samples, thresholds = 3x that rounded up to 0.1 ms. getForegroundApp, inputText and swipe were removed: no tool is registered under those names."
+      "rule": "threshold = max(floor, 3x the local max over 10 runs of 50 samples, rounded up to 0.1 ms), floor = p50 1 / p95 5 / mean 1 ms (scripts/benchmark-thresholds.ts THRESHOLD_FLOOR_MS, which the comparison also enforces). The 20% tolerance applies on top. Each sample is the per-call mean over a batch of calls sized to ~5 ms (chooseBatchSize), so sub-millisecond fake-backed handlers are measured above timer and scheduler noise. The gate is for regressions of a handler gaining a process spawn or real I/O (tens of ms) or becoming several times slower, not for microsecond drift: do not lower a threshold below its floor.",
+      "note": "Measures tool registry lookup, schema validation, device resolution, and handler wrapper overhead. listDevices (#11332) is measured against fakes with a daemon-shaped DevicePool (see scripts/benchmark-listdevices-fixture.ts). observe, pressButton, tapOn, launchApp and installApp (#11375) are likewise measured against fakes (see scripts/benchmark-device-tools-fixture.ts; observe/tapOn serve the captured test/fixtures/observe/android-home.json, the other three return a canned success from the handler action seam). 2026-10-10 local maxima over 10 batched runs (p50/p95/mean ms): listDevices 0.044/0.445/0.254, pressButton 0.124/1.105/0.219, observe 0.123/0.217/0.151, launchApp 0.119/0.160/0.124, installApp 0.001/0.003/0.002 (all at the floor); tapOn 6.0/13.5/6.9 (kept at its prior 17.5/49.8/22.3, which is above 3x). getForegroundApp, inputText and swipe were removed: no tool is registered under those names."
     },
     "regressionTolerance": "20%"
   },
   "thresholds": {
     "listDevices": {
-      "p50": 0.3,
-      "p95": 1,
-      "mean": 0.4
+      "p50": 1,
+      "p95": 5,
+      "mean": 1
     },
     "pressButton": {
-      "p50": 0.4,
-      "p95": 0.7,
-      "mean": 0.5
+      "p50": 1,
+      "p95": 5,
+      "mean": 1
     },
     "observe": {
-      "p50": 0.5,
-      "p95": 0.6,
-      "mean": 0.5
+      "p50": 1,
+      "p95": 5,
+      "mean": 1
     },
     "tapOn": {
       "p50": 17.5,
@@ -33,14 +34,14 @@
       "mean": 22.3
     },
     "launchApp": {
-      "p50": 0.4,
-      "p95": 0.7,
-      "mean": 0.5
+      "p50": 1,
+      "p95": 5,
+      "mean": 1
     },
     "installApp": {
-      "p50": 0.1,
-      "p95": 0.1,
-      "mean": 0.1
+      "p50": 1,
+      "p95": 5,
+      "mean": 1
     }
   }
 }

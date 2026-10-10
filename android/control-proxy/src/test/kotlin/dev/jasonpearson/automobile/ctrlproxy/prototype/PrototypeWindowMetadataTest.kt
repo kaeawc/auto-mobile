@@ -76,6 +76,85 @@ class PrototypeWindowMetadataTest {
     )
   }
 
+  private fun styled(change: (PrototypeStyle) -> PrototypeStyle): PrototypeWindowMetadata {
+    val base = spec(PrototypeFullscreenPlacement())
+    val root = base.root as PrototypeBoxNode
+    return metadata(base.copy(root = root.copy(style = change(checkNotNull(root.style)))))
+  }
+
+  @Test
+  fun `a filling root that the renderer draws short of the window is not opaque`() {
+    val shortOfTheWindow =
+      mapOf<String, (PrototypeStyle) -> PrototypeStyle>(
+        "rounded corners" to { it.copy(cornerRadius = PrototypeCornerRadius.Dp(48.0)) },
+        "one rounded corner" to
+          {
+            it.copy(cornerRadius = PrototypeCornerRadius.Corners(topStart = 16.0))
+          },
+        "a shape token" to { it.copy(cornerRadius = PrototypeCornerRadius.Token("large")) },
+        "an offset" to { it.copy(offset = PrototypeOffset(120.0, 0.0)) },
+        "a width cap" to { it.copy(maxWidth = 200.0) },
+        "a height cap" to { it.copy(maxHeight = 200.0) },
+        "an aspect ratio" to { it.copy(aspectRatio = 1.0) },
+        "a press scale" to { it.copy(pressScale = 0.9) },
+      )
+    shortOfTheWindow.forEach { (name, change) ->
+      assertEquals(name, PrototypeWindowMetadata("fullscreen", false), styled(change))
+    }
+  }
+
+  @Test
+  fun `an anchored root is laid out at its anchor so it never counts as covering`() {
+    val placements =
+      listOf(
+        PrototypeFullscreenPlacement(),
+        PrototypeSheetPlacement(edge = "bottom", height = 200.0),
+        PrototypeFloatingPlacement(gravity = "topStart", offset = PrototypeOffset(0.0, 0.0)),
+      )
+    val anchors =
+      listOf(
+        PrototypeBoundsAnchor(PrototypeBounds(40.0, 40.0, 80.0, 80.0)),
+        PrototypeBoundsAnchor(PrototypeBounds(40.0, 40.0, 80.0, 80.0), "cover"),
+        PrototypeBoundsAnchor(PrototypeBounds(40.0, 40.0, 80.0, 80.0), "below"),
+      )
+    for (placement in placements) {
+      val base = spec(placement)
+      val root = base.root as PrototypeBoxNode
+      // Control: the same root without an anchor covers its window.
+      assertTrue(placement.toString(), metadata(base).opaque)
+      for (anchor in anchors) {
+        val anchored = metadata(base.copy(root = root.copy(anchor = anchor)))
+        assertFalse("$placement $anchor", anchored.opaque)
+      }
+    }
+  }
+
+  @Test
+  fun `square corners and a zero offset still cover the window`() {
+    val covering =
+      listOf<(PrototypeStyle) -> PrototypeStyle>(
+        { it.copy(cornerRadius = PrototypeCornerRadius.Dp(0.0)) },
+        { it.copy(cornerRadius = PrototypeCornerRadius.Token("none")) },
+        { it.copy(cornerRadius = PrototypeCornerRadius.Corners(topStart = 0.0)) },
+        { it.copy(offset = PrototypeOffset(0.0, 0.0)) },
+        { it.copy(minWidth = 10.0, minHeight = 10.0) },
+      )
+    covering.forEach {
+      assertEquals(PrototypeWindowMetadata("fullscreen", true), styled(it))
+    }
+  }
+
+  @Test
+  fun `an opaque fullscreen scrim still covers what a rounded root leaves open`() {
+    val base = spec(PrototypeFullscreenPlacement(scrim = "#FF000000"))
+    val root = base.root as PrototypeBoxNode
+    val rounded = checkNotNull(root.style).copy(cornerRadius = PrototypeCornerRadius.Dp(48.0))
+    assertEquals(
+      PrototypeWindowMetadata("fullscreen", true),
+      metadata(base.copy(root = root.copy(style = rounded))),
+    )
+  }
+
   @Test
   fun `a translucent root background is not opaque`() {
     assertEquals(

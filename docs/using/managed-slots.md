@@ -212,7 +212,10 @@ A managed-execution session uses the `managed-execution` liveness policy:
   heartbeats never extend the window. The effective window is reported as
   `idleTimeoutMs` in the acquisition result.
 - **Idle release is terminal.** As for every session, the session UUID ends with
-  the idle release (`session_ownership_lost`; session-not-found answers carry
+  the idle release. A call on the managed connection after it is answered with
+  `managed_execution_ended` (`nextAction: relaunch_execution`, the release reason,
+  `slotIndex` and `assignmentGeneration`; no recovery tools, reads still work);
+  a direct daemon client sees `session_ownership_lost` (session-not-found answers carry
   `idle: true`). The slot's device stays assigned. To continue, start a new
   execution proxy on the same scoped slot; it reuses the device with a new
   session.

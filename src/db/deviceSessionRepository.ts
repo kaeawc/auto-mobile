@@ -77,6 +77,20 @@ function holdsStrongerReleaseReason(
   ]);
 }
 
+/**
+ * SQL form of {@link isReissuableByNameReleaseReason}: the rows a call naming the UUID may claim
+ * and re-issue. Used by the claim, its hand-back and the claimed-row upsert fence, so all three
+ * accept the same set.
+ */
+function hasReissuableByNameReleaseReason(eb: ExpressionBuilder<Database, "device_sessions">) {
+  return eb.or([
+    eb("release_reason", "in", literalReleaseReasonsWhere("reissuableByName")),
+    ...releaseReasonFamiliesWhere("reissuableByName").map((family) =>
+      eb("release_reason", "like", `${family}_%`),
+    ),
+  ]);
+}
+
 function shouldRetainLivenessOwner(reason: string): boolean {
   return isRecoverableDaemonReleaseReason(reason);
 }
@@ -170,6 +184,12 @@ export interface MarkReleasedOptions {
    * after it selected the row.
    */
   onlyIfRecoverable?: boolean;
+  /**
+   * Apply the release only while the row's `expires_at_ms` is at or before this instant (single
+   * statement): the expiry sweep must not terminalize a row whose deadline was extended (restart-
+   * recovery activity, #11281) after it selected the row (#11448).
+   */
+  onlyIfExpiredAtMs?: number;
 }
 
 /** The row incarnation a recovery read, which its ownership claim must still match (#11200). */
@@ -448,20 +468,7 @@ export class DeviceSessionRepository {
                 ? eb("device_sessions.daemon_session_id", "is", null)
                 : eb("device_sessions.daemon_session_id", "=", claimedRow.daemonSessionId),
             )
-            .where((eb) =>
-              eb.or([
-                eb(
-                  "device_sessions.release_reason",
-                  "in",
-                  Array.from(RECOVERABLE_DAEMON_RELEASE_REASONS),
-                ),
-                eb(
-                  "device_sessions.release_reason",
-                  "like",
-                  `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`,
-                ),
-              ]),
-            );
+            .where((eb) => hasReissuableByNameReleaseReason(eb));
         })
         .returning("stable_identity_generation")
         .executeTakeFirst();
@@ -550,6 +557,8 @@ export class DeviceSessionRepository {
             ? eb("daemon_session_id", "is", null)
             : eb("daemon_session_id", "=", expected.daemonSessionId),
         )
+        // Only a row a call naming the UUID may issue again; any other row is left untouched.
+        .where((eb) => hasReissuableByNameReleaseReason(eb))
         .returning("stable_identity_generation")
         .executeTakeFirst();
       return claimed?.stable_identity_generation ?? undefined;
@@ -579,7 +588,7 @@ export class DeviceSessionRepository {
             ? eb("daemon_session_id", "is", null)
             : eb("daemon_session_id", "=", claimed.daemonSessionId),
         )
-        .where((eb) => hasRecoverableReleaseReason(eb))
+        .where((eb) => hasReissuableByNameReleaseReason(eb))
         .executeTakeFirst();
       return Number(released.numUpdatedRows) === 1;
     } catch (error) {
@@ -661,7 +670,7 @@ export class DeviceSessionRepository {
     reason: string,
     options: MarkReleasedOptions = {},
   ): Promise<void> {
-    const { expectedRowGeneration, onlyIfRecoverable } = options;
+    const { expectedRowGeneration, onlyIfRecoverable, onlyIfExpiredAtMs } = options;
     try {
       const db = await this.getDb();
       let update = db
@@ -689,6 +698,9 @@ export class DeviceSessionRepository {
       }
       if (onlyIfRecoverable) {
         update = update.where((eb) => hasRecoverableReleaseReason(eb));
+      }
+      if (onlyIfExpiredAtMs !== undefined) {
+        update = update.where("expires_at_ms", "<=", onlyIfExpiredAtMs);
       }
       const result = await update.executeTakeFirst();
       if (expectedRowGeneration !== undefined && Number(result.numUpdatedRows) === 0) {
@@ -785,6 +797,7 @@ export class DeviceSessionRepository {
         await this.markReleased(row.session_uuid, "expired", nowMs, "expired", {
           expectedRowGeneration: row.stable_identity_generation ?? 0,
           onlyIfRecoverable: true,
+          onlyIfExpiredAtMs: nowMs,
         });
       } catch (error) {
         logger.warn(

@@ -178,14 +178,23 @@ class PrototypeRepeatTest {
           "b" to PrototypeScalar.Numeric(1e15),
           "c" to PrototypeScalar.Numeric(1e21),
           "d" to PrototypeScalar.Numeric(-2.5),
+          "e" to PrototypeScalar.Numeric(-0.0),
+          "f" to PrototypeScalar.Numeric(0.00001),
         ),
       )
     val model =
       mapPrototypeSpec(
-        spec(list(PrototypeTextNode(text = "{item.a} {item.b} {item.c} {item.d}"), repeat = big)),
+        spec(
+          list(
+            PrototypeTextNode(
+              text = "{item.a} {item.b} {item.c} {item.d} {item.e} {item.f}",
+            ),
+            repeat = big,
+          ),
+        ),
       )
     assertEquals(
-      "999999999999999 1000000000000000 1000000000000000000000 -2.5",
+      "999999999999999 1000000000000000 1000000000000000000000 -2.5 0 0.00001",
       model.root.children.single().text,
     )
   }

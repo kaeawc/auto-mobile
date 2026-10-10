@@ -11,6 +11,11 @@
  * process boundary as wall epoch ms, the one frame every process shares: converted on the way out
  * with the writer's offset, and onto the reader's session clock on the way in.
  *
+ * A stamp this daemon wrote itself and finds unchanged on read is returned as the session-clock
+ * instant it was written from, not re-converted with the offset at read time, so a wall step
+ * between its own write and read moves nothing (#11358). Only stamps another process wrote, or a
+ * previous run of this one, go through the conversion.
+ *
  * Rows written before this conversion hold the writer's session-clock stamps. They are read as
  * wall ms. That is exact for rows from before the session clock existed (they were wall stamps),
  * and for everything since it is off only by the wall steps the writing daemon had lived through
@@ -43,44 +48,61 @@ export interface SessionClockFrame {
   toSessionClock(wallMs: number): number;
 }
 
+type StampField = "created" | "lastUsed" | "expires" | "released";
+
+/** The wall ms this daemon stored for a stamp and the session-clock instant it came from. */
+type WrittenStamp = { wallMs: number; sessionClockMs: number };
+
+/** Most sessions whose own writes are remembered; the oldest entry goes first. */
+const WRITTEN_STAMP_SESSION_LIMIT = 512;
+
+/**
+ * The stamps this daemon wrote, per session UUID (#11358). Converting a stamp back with the
+ * clock's offset at READ time shifts it by any wall step between this daemon's write and read, so
+ * a stamp still equal to what this daemon stored is returned as the session-clock instant it was
+ * written from. A stamp that differs (a peer or a later write by another process replaced it) was
+ * not written here and takes the ordinary conversion.
+ */
+class WrittenStamps {
+  private readonly bySession = new Map<string, Partial<Record<StampField, WrittenStamp>>>();
+
+  remember(sessionUuid: string, field: StampField, stamp: WrittenStamp): void {
+    const entry = this.bySession.get(sessionUuid) ?? {};
+    // Re-insert so the most recently written session is the last to be evicted.
+    this.bySession.delete(sessionUuid);
+    this.bySession.set(sessionUuid, { ...entry, [field]: stamp });
+    if (this.bySession.size > WRITTEN_STAMP_SESSION_LIMIT) {
+      const oldest = this.bySession.keys().next();
+      if (!oldest.done) {
+        this.bySession.delete(oldest.value);
+      }
+    }
+  }
+
+  recall(sessionUuid: string, field: StampField, wallMs: number): number | undefined {
+    const stamp = this.bySession.get(sessionUuid)?.[field];
+    return stamp?.wallMs === wallMs ? stamp.sessionClockMs : undefined;
+  }
+}
+
 /** A row read back with its instants on the session clock. */
 export function deviceSessionOnSessionClock(
   row: DeviceSession,
   frame: SessionClockFrame,
+  written?: WrittenStamps,
 ): DeviceSession {
+  const back = (field: StampField, wallMs: number) =>
+    written?.recall(row.session_uuid, field, wallMs) ?? frame.toSessionClock(wallMs);
   return {
     ...row,
-    created_at_ms: frame.toSessionClock(row.created_at_ms),
-    last_used_at_ms: frame.toSessionClock(row.last_used_at_ms),
-    expires_at_ms: frame.toSessionClock(row.expires_at_ms),
+    created_at_ms: back("created", row.created_at_ms),
+    last_used_at_ms: back("lastUsed", row.last_used_at_ms),
+    expires_at_ms: back("expires", row.expires_at_ms),
     // An unreleased row may carry null or, from a partial row, no value at all: keep either as is.
     released_at_ms:
       typeof row.released_at_ms === "number"
-        ? frame.toSessionClock(row.released_at_ms)
+        ? back("released", row.released_at_ms)
         : row.released_at_ms,
-  };
-}
-
-function recordOnWallClock(
-  record: DeviceSessionRecord,
-  frame: SessionClockFrame,
-): DeviceSessionRecord {
-  return {
-    ...record,
-    createdAtMs: frame.toWall(record.createdAtMs),
-    lastUsedAtMs: frame.toWall(record.lastUsedAtMs),
-    expiresAtMs: frame.toWall(record.expiresAtMs),
-  };
-}
-
-function activityOnWallClock(
-  update: DeviceSessionActivityUpdate,
-  frame: SessionClockFrame,
-): DeviceSessionActivityUpdate {
-  return {
-    ...update,
-    lastUsedAtMs: frame.toWall(update.lastUsedAtMs),
-    expiresAtMs: frame.toWall(update.expiresAtMs),
   };
 }
 
@@ -95,10 +117,19 @@ const toWallIfGiven = (frame: SessionClockFrame, ms: number | undefined) =>
  * their own beyond one conversion step on reads.
  */
 class SessionClockPersistence implements DeviceSessionPersistence {
+  private readonly written = new WrittenStamps();
+
   constructor(
     private readonly inner: DeviceSessionPersistence,
     private readonly frame: SessionClockFrame,
   ) {}
+
+  /** `sessionClockMs` as wall ms, remembered so this daemon reads its own stamp back exactly. */
+  private store(sessionUuid: string, field: StampField, sessionClockMs: number): number {
+    const wallMs = this.frame.toWall(sessionClockMs);
+    this.written.remember(sessionUuid, field, { wallMs, sessionClockMs });
+    return wallMs;
+  }
 
   upsertActiveSession(
     record: DeviceSessionRecord,
@@ -107,7 +138,12 @@ class SessionClockPersistence implements DeviceSessionPersistence {
   ): Promise<number | void> {
     // The claimed incarnation is a generation and a daemon id: frame-free.
     return this.inner.upsertActiveSession(
-      recordOnWallClock(record, this.frame),
+      {
+        ...record,
+        createdAtMs: this.store(record.sessionUuid, "created", record.createdAtMs),
+        lastUsedAtMs: this.store(record.sessionUuid, "lastUsed", record.lastUsedAtMs),
+        expiresAtMs: this.store(record.sessionUuid, "expires", record.expiresAtMs),
+      },
       toWallIfGiven(this.frame, nowMs),
       options,
     );
@@ -119,7 +155,9 @@ class SessionClockPersistence implements DeviceSessionPersistence {
     }
     const getSession = this.inner.getSession.bind(this.inner);
     return (sessionUuid) =>
-      getSession(sessionUuid).then((row) => row && deviceSessionOnSessionClock(row, this.frame));
+      getSession(sessionUuid).then(
+        (row) => row && deviceSessionOnSessionClock(row, this.frame, this.written),
+      );
   }
 
   get listRecoverableSessions(): DeviceSessionPersistence["listRecoverableSessions"] {
@@ -129,12 +167,16 @@ class SessionClockPersistence implements DeviceSessionPersistence {
     const listRecoverableSessions = this.inner.listRecoverableSessions.bind(this.inner);
     return (nowMs) =>
       listRecoverableSessions(toWallIfGiven(this.frame, nowMs)).then((rows) =>
-        rows.map((row) => deviceSessionOnSessionClock(row, this.frame)),
+        rows.map((row) => deviceSessionOnSessionClock(row, this.frame, this.written)),
       );
   }
 
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void> {
-    return this.inner.recordActivity(sessionUuid, activityOnWallClock(update, this.frame));
+    return this.inner.recordActivity(sessionUuid, {
+      ...update,
+      lastUsedAtMs: this.store(sessionUuid, "lastUsed", update.lastUsedAtMs),
+      expiresAtMs: this.store(sessionUuid, "expires", update.expiresAtMs),
+    });
   }
 
   get recordRestartRecoveryActivity(): DeviceSessionPersistence["recordRestartRecoveryActivity"] {
@@ -185,7 +227,7 @@ class SessionClockPersistence implements DeviceSessionPersistence {
     return this.inner.markReleased(
       sessionUuid,
       status,
-      this.frame.toWall(releasedAtMs),
+      this.store(sessionUuid, "released", releasedAtMs),
       reason,
       options,
     );

@@ -120,6 +120,14 @@
         "acquireNewSession": false
       }
     },
+    "managed_execution_ended": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_execution_ended",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "managed_slot_acquisition_failed.cancelled": {
       "expected": "fail",
       "fields": {
@@ -528,6 +536,30 @@
         "code": "session_terminal_release_in_progress",
         "retryable": false,
         "acquireNewSession": true
+      }
+    },
+    "daemon_queue_timeout": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_queue_timeout",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "session_recovery_pending": {
+      "expected": "retry",
+      "fields": {
+        "code": "session_recovery_pending",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "daemon_restart_pending": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_restart_pending",
+        "retryable": true,
+        "acquireNewSession": false
       }
     }
   }

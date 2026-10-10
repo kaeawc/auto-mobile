@@ -295,3 +295,6 @@ device (owner decision 2026-10-09, #11145):
 - [Environment variables](environment-variables.md#session-heartbeat-timeout):
   session release and idle windows.
 - [FAQ](../faq.md#what-if-i-have-more-than-one-device).
+
+For assignment-based ownership (scoped device slots that outlive a session), see
+[Managed device slots](managed-slots.md).

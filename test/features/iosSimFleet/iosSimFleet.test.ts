@@ -311,6 +311,17 @@ describe("capacity gate", () => {
     expect((await gate.evaluateBoot()).outcome).toBe("allow");
   });
 
+  test("describeCapacity reads without advancing the sustained-pressure streak (#11209)", async () => {
+    const { collector, timer } = setup([IOS27], { ...calm, memoryPressure: "warn" });
+    const gate = new IosSimCapacityGate(collector, timer, {
+      env: { [IOS_SIM_MAX_BOOTED_ENV]: "4" },
+    });
+    for (let reads = 0; reads < 5; reads++) {
+      await gate.describeCapacity();
+    }
+    expect((await gate.evaluateBoot()).outcome).toBe("allow");
+  });
+
   test("the first boot is never deferred by pressure", async () => {
     const { collector, timer } = setup([], { ...calm, memoryPressure: "critical" });
     const gate = new IosSimCapacityGate(collector, timer, { env, sustainedSamples: 1 });

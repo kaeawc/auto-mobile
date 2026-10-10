@@ -60,7 +60,7 @@ export interface SimulatorCapacityGate {
 export interface CapacityGateOptions {
   env?: NodeJS.ProcessEnv;
   retryAfterMs?: number;
-  /** Consecutive pressured samples before new boots are queued. */
+  /** Consecutive pressured samples before new boots are refused. */
   sustainedSamples?: number;
 }
 
@@ -87,12 +87,16 @@ export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityRe
   /** Collect a fresh report and fold it into the pressure history. Used by the monitor too. */
   async refresh(): Promise<FleetCostReport> {
     const report = await this.fleet.collect();
+    this.foldIntoPressureHistory(report);
+    return report;
+  }
+
+  private foldIntoPressureHistory(report: FleetCostReport): void {
     if (report !== this.latestReport) {
       // Single-flight collection can hand the same report to several callers; count it once.
       this.latestReport = report;
       this.pressuredStreak = isPressured(report.host) ? this.pressuredStreak + 1 : 0;
     }
-    return report;
   }
 
   async evaluateBoot(request: WarmDeviceRequest = {}): Promise<CapacityDecision> {
@@ -151,7 +155,8 @@ export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityRe
 
   /** Current limit, booted simulators (every Booted one, owned or not) and admitted boots in flight. */
   async describeCapacity(): Promise<BootCapacitySnapshot> {
-    const report = await this.refresh();
+    // A listing is not a boot decision: reading must not advance the sustained-pressure streak.
+    const report = await this.fleet.collect();
     return {
       limit: this.limitsFor(report).maxBooted,
       booted: report.totals.bootedCount,

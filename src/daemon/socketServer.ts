@@ -34,6 +34,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isDebugModeEnabled } from "../utils/debug";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
+  DAEMON_SESSION_SUSPECT_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
   BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
@@ -133,6 +134,7 @@ import {
 import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSelectionPolicy";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
+  admitInputOnHolderSession,
   assertInputNotOnForeignManagedSlotDevice,
   assertInputRequesterHoldsDevice,
   deviceAlreadyAssignedToAnotherSessionError,
@@ -355,12 +357,63 @@ function selfDescribedRefusalPayload(error: unknown): Record<string, unknown> | 
 }
 
 /**
+ * The frame fields of a control call refused at session admission (#11417): a suspect session is
+ * the retryable `daemon_session_suspect`, a terminal one `session_ownership_lost` with
+ * `acquire_new_session`, as in the MCP result for the same refusal. Matched on the error's name
+ * and fields so the wire layer does not import the daemon's session manager.
+ */
+function sessionAdmissionRefusalFields(error: unknown): RefusalFrameFields | undefined {
+  if (!(error instanceof Error)) {
+    return undefined;
+  }
+  const field = (key: string): unknown => Reflect.get(error, key);
+  const sessionUuid = field("sessionUuid");
+  if (typeof sessionUuid !== "string") {
+    return undefined;
+  }
+  const remainingMs = field("remainingMs");
+  if (error.name === "SessionSuspectError" && typeof remainingMs === "number") {
+    return {
+      code: DAEMON_SESSION_SUSPECT_CODE,
+      retryable: true,
+      details: { sessionUuid, remainingMs },
+    };
+  }
+  const release = field("release");
+  if (error.name !== "TerminalSessionError" || release === null || typeof release !== "object") {
+    return undefined;
+  }
+  const reason: unknown = Reflect.get(release, "releaseReason");
+  const ownerPid: unknown = Reflect.get(release, "ownerPid");
+  return {
+    code: SESSION_OWNERSHIP_LOST_CODE,
+    retryable: false,
+    nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
+    details: {
+      sessionUuid,
+      ...(typeof reason === "string" ? { reason } : {}),
+      ...(typeof ownerPid === "number" ? { ownerPid } : {}),
+    },
+  };
+}
+
+/** Whether a failure is a session refusal: the session is suspect, or gone for good. */
+function isSessionRefusal(error: unknown): boolean {
+  const { code } = refusalFrameFields(error);
+  return code === DAEMON_SESSION_SUSPECT_CODE || code === SESSION_OWNERSHIP_LOST_CODE;
+}
+
+/**
  * The typed fields a refusal puts on a failure frame: the same code, retry intent and evidence its
  * MCP result carries (#11244, #11391). A self-describing refusal's payload supplies the evidence
  * (`deviceId`, `boundSessionUuid`, ...) as `details`; a persisted session lost to recovery is the
  * terminal `session_ownership_lost`; any other typed refusal is read from the error's own fields.
  */
 function refusalFrameFields(error: unknown): RefusalFrameFields {
+  const sessionRefusal = sessionAdmissionRefusalFields(error);
+  if (sessionRefusal) {
+    return sessionRefusal;
+  }
   const lostToRecovery = recoveryIdentityLoss(error);
   if (lostToRecovery) {
     return {
@@ -5941,31 +5994,41 @@ export class UnixSocketServer {
       socketSessionId,
       method,
     );
-    const gestureResult = await this.runTrackedKeyedDeviceInput(
-      method,
+    const gestureResult = await this.liftingStrokeOnSessionRefusal(
+      kind,
+      socketSessionId,
       targetDevice,
-      async (signal) => {
-        assertSocketInputNotAborted(signal);
-        const queueWaitMs = this.timer.now() - queueEnterMs;
-        const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
-        if (remainingTimeoutMs <= 0) {
-          throw new McpTimeoutError({
-            toolName: method,
-            timeoutMs: totalTimeoutMs,
-            origin: "UnixSocketServer.handleInputGesture",
-            detail: `spent ${queueWaitMs}ms waiting in queue`,
-          });
-        }
-        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
-        return this.forwardGestureFrame(client, kind, args, remainingTimeoutMs);
-      },
-      this.inputDeviceGate(
-        method,
-        "UnixSocketServer.handleInputGesture",
-        totalTimeoutMs,
-        queueEnterMs,
-        input,
-      ),
+      args.gestureId,
+      () =>
+        this.runTrackedKeyedDeviceInput(
+          method,
+          targetDevice,
+          async (signal) => {
+            assertSocketInputNotAborted(signal);
+            const queueWaitMs = this.timer.now() - queueEnterMs;
+            const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
+            if (remainingTimeoutMs <= 0) {
+              throw new McpTimeoutError({
+                toolName: method,
+                timeoutMs: totalTimeoutMs,
+                origin: "UnixSocketServer.handleInputGesture",
+                detail: `spent ${queueWaitMs}ms waiting in queue`,
+              });
+            }
+            const client = AndroidCtrlProxyClient.getInstance(
+              targetDevice,
+              defaultAdbClientFactory,
+            );
+            return this.forwardGestureFrame(client, kind, args, remainingTimeoutMs);
+          },
+          this.inputDeviceGate(
+            method,
+            "UnixSocketServer.handleInputGesture",
+            totalTimeoutMs,
+            queueEnterMs,
+            input,
+          ),
+        ),
     );
 
     if (!gestureResult.success) {
@@ -5993,6 +6056,40 @@ export class UnixSocketServer {
       point: { x: args.x, y: args.y },
       ...(kind === "end" ? { cancel: args.cancel } : {}),
     };
+  }
+
+  /**
+   * Each gesture frame is its own control call, so a `gestureMove`/`gestureEnd` can be refused at
+   * session admission (suspect, or released) after its `gestureStart` was admitted (#11417). The
+   * runner parks a continued stroke with no ceiling, so the refused frame would leave the pointer
+   * down: the daemon lifts the stroke with a cancelling end (no drop is committed) and then
+   * answers the typed refusal. A refused `gestureStart` opened nothing.
+   */
+  private async liftingStrokeOnSessionRefusal<T>(
+    kind: "start" | "move" | "end",
+    socketSessionId: string | undefined,
+    targetDevice: BootedDevice,
+    gestureId: string,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      if (kind !== "start" && isSessionRefusal(error)) {
+        try {
+          await this.cancelGestureOnDevice(targetDevice, gestureId);
+        } catch (cancelError) {
+          logger.warn(
+            `Failed to lift gesture ${gestureId} on ${targetDevice.deviceId} after its session ` +
+              `refused a frame: ${errorMessage(cancelError)}`,
+          );
+        }
+        if (socketSessionId) {
+          this.ownedGestures.onEndAcked(socketSessionId, targetDevice.deviceId, gestureId);
+        }
+      }
+      throw error;
+    }
   }
 
   /**
@@ -7246,7 +7343,9 @@ export class UnixSocketServer {
     try {
       executionTracker.bindDeviceExecution(execution.id, targetDevice.deviceId);
       signal.throwIfAborted();
-      // The holder and readiness checks above passed: this input is use of the session (#10824).
+      await this.admitInputAsControlCall(execution, targetDevice.deviceId, sessionUuid);
+      // The holder, readiness and admission checks passed: this input is use of the session
+      // (#10824).
       executionTracker.markSessionAdmitted(execution.id);
       if (!sessionUuid) {
         // Admitted on a device no session holds: a session acquiring it while this input is parked
@@ -7270,6 +7369,31 @@ export class UnixSocketServer {
     } finally {
       executionTracker.endExecution(execution.id);
     }
+  }
+
+  /**
+   * Input on a held device is a control call on the holder's session: refused while the session is
+   * suspect, lapsed or past its idle deadline, exactly as an MCP control call is (#11417). Input
+   * on a device no session holds has no session to admit.
+   */
+  private async admitInputAsControlCall(
+    execution: ActiveExecution,
+    deviceId: string,
+    holderSessionUuid: string | undefined,
+  ): Promise<void> {
+    if (!holderSessionUuid) {
+      return;
+    }
+    await admitInputOnHolderSession({
+      deviceId,
+      holderSessionUuid,
+      sessionManager: this.daemonState.getSessionManager(),
+      execution: sessionExecutionMetadataOf(execution),
+    });
+    // A release that landed while admission was awaited answers its own typed refusal.
+    await this.answeringSessionRelease(execution, async () =>
+      execution.abortController.signal.throwIfAborted(),
+    );
   }
 
   /**

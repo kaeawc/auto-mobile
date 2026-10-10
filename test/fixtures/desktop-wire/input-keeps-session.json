@@ -612,7 +612,7 @@
           "cacheSize": 28,
           "lastToolActivityAt": 602000,
           "lastOwnerHeartbeatAt": 606000,
-          "idleReleaseAt": 726000,
+          "idleReleaseAt": 722000,
           "holderKind": "desktop",
           "activeExecutions": 0,
           "liveness": {

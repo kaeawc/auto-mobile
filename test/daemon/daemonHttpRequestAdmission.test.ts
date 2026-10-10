@@ -20,6 +20,8 @@ const port = 41321;
 
 interface DaemonHttpInternals {
   startHttpServer(): Promise<void>;
+  resolveStartupCompletion(): void;
+  rejectStartupCompletion(reason: unknown): void;
   sessionManager: SessionManager;
   observerSessionRegistry: ObserverSessionRegistry;
   transports: Map<string, FakeTransport>;
@@ -129,12 +131,13 @@ class FakeTransport {
 async function harness(
   sessionManager?: SessionManager,
   observers?: ObserverSessionRegistry,
-): Promise<{ server: FakeHttpServer; transport: FakeTransport }> {
+  { startupComplete = true, timer = new FakeTimer() } = {},
+): Promise<{ server: FakeHttpServer; transport: FakeTransport; internals: DaemonHttpInternals }> {
   const server = new FakeHttpServer();
   const daemon = new Daemon(
     { port, host: "127.0.0.1" },
     undefined,
-    new FakeTimer(),
+    timer,
     undefined,
     undefined,
     undefined,
@@ -156,7 +159,12 @@ async function harness(
   }
   internals.transports.set(transport.sessionId, transport);
   await internals.startHttpServer();
-  return { server, transport };
+  if (startupComplete) {
+    internals.resolveStartupCompletion();
+    // Let the daemon observe completion so admitted requests take the fast path.
+    await Promise.resolve();
+  }
+  return { server, transport, internals };
 }
 
 // harness() constructs a Daemon, which initializes the process-wide DaemonState.
@@ -222,6 +230,69 @@ describe("Daemon HTTP request admission", () => {
     const { server } = await harness();
     const response = await server.dispatch({ host: "evil.com:41321" }, "OPTIONS", "/heartbeat");
     expect(response.statusCode).toBe(403);
+  });
+});
+
+describe("Daemon HTTP MCP admission during startup (#11156)", () => {
+  const headers = { host: `127.0.0.1:${port}`, "mcp-session-id": "known-session" };
+
+  test("holds an MCP request until startup and rehydration complete", async () => {
+    const { server, transport, internals } = await harness(undefined, undefined, {
+      startupComplete: false,
+    });
+    let answered = false;
+    const response = server.dispatch(headers).then((result) => {
+      answered = true;
+      return result;
+    });
+    await Bun.sleep(0);
+    expect(answered).toBeFalse();
+    expect(transport.handled).toBe(0);
+
+    internals.resolveStartupCompletion();
+    expect((await response).statusCode).toBe(200);
+    expect(transport.handled).toBe(1);
+  });
+
+  test("answers 503 with Retry-After when startup outlives the admission bound", async () => {
+    const timer = new FakeTimer();
+    const warnings = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const { server, transport } = await harness(undefined, undefined, {
+        startupComplete: false,
+        timer,
+      });
+      const response = server.dispatch(headers);
+      for (let turn = 0; turn < 20 && timer.getPendingTimeoutCount() === 0; turn++) {
+        await Promise.resolve();
+      }
+      expect(timer.getPendingTimeoutCount()).toBeGreaterThan(0);
+      timer.advanceTime(30_000);
+      const result = await response;
+      expect(result.statusCode).toBe(503);
+      expect(result.headers.get("retry-after")).toBe("1");
+      expect(JSON.parse(result.body)).toEqual({ error: "Daemon is still starting" });
+      expect(transport.handled).toBe(0);
+    } finally {
+      warnings.mockRestore();
+    }
+  });
+
+  test("answers 503 when startup fails", async () => {
+    const warnings = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const { server, transport, internals } = await harness(undefined, undefined, {
+        startupComplete: false,
+      });
+      const response = server.dispatch(headers);
+      internals.rejectStartupCompletion(new Error("rehydration exploded"));
+      const result = await response;
+      expect(result.statusCode).toBe(503);
+      expect(JSON.parse(result.body)).toEqual({ error: "Daemon startup failed" });
+      expect(transport.handled).toBe(0);
+    } finally {
+      warnings.mockRestore();
+    }
   });
 });
 

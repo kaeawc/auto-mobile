@@ -155,7 +155,7 @@ export function registerBiometricTools() {
     "Discover biometric capabilities for a selected iOS Simulator device type and runtime.",
     getIosSimulatorCapabilitiesSchema,
     getIosSimulatorCapabilitiesHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, readOnly: true },
   );
 
   // Register the tool

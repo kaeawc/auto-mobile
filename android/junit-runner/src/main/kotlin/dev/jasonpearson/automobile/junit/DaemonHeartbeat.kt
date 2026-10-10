@@ -45,6 +45,8 @@ internal data class DaemonSessionLoss(
   val sessionId: String,
   val releaseReason: String?,
   val error: String,
+  /** False when no heartbeat for the id ever succeeded and the daemon named no reason. */
+  val confirmed: Boolean = true,
 ) {
   fun describe(): String =
     "the daemon released session $sessionId" +
@@ -125,7 +127,8 @@ internal object DaemonHeartbeat {
   }
 
   private fun sendHeartbeat(sessionId: String) {
-    val port = readDaemonPort() ?: return
+    // A missing port is a miss, not an acknowledgement: it must not confirm the session.
+    val port = readDaemonPort() ?: throw IOException("Daemon port unavailable")
     sendHeartbeat(URL("http://localhost:$port/heartbeat"), sessionId)
   }
 

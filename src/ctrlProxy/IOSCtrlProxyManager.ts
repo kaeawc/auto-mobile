@@ -585,6 +585,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
+  private supersededSinceRemoval(removalGeneration: number): boolean {
+    return (
+      this.removalGeneration !== removalGeneration ||
+      this.rearmedRemovalGeneration >= removalGeneration ||
+      this.sharedStart !== null
+    );
+  }
+
   /** Rearms after removal cleanup only once per removal generation, when suspended or exhausted. */
   public async rearmAfterDeviceReappearance(): Promise<void> {
     const state = this.forcedRestartBudget.snapshot().state;
@@ -688,6 +696,37 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return Promise.resolve();
       }),
     );
+  }
+
+  /**
+   * A device left discovery: stop its runner, and for a simulator also drop the
+   * manager and its `PortManager` reservation. A deleted or erased simulator never
+   * returns under the same UDID, so keeping its manager only burns one of the
+   * shared 100 ports per UDID until "No available ports" (#11122). Physical
+   * devices keep their manager so a reconnect resumes the same runner budget.
+   */
+  public static async evictAfterDeviceRemoval(
+    deviceId: string,
+    timer: Timer = defaultTimer,
+  ): Promise<void> {
+    const manager = IOSCtrlProxyManager.getExistingInstance(deviceId);
+    if (!manager) {
+      return;
+    }
+    const removal = manager.suspendForDeviceRemoval();
+    // suspendForDeviceRemoval bumps the generation synchronously, so this is ours.
+    const removalGeneration = manager.removalGeneration;
+    await removal;
+    // A simulator that came back (same UDID after erase or shutdown to boot) re-arms
+    // this manager, and a newer removal owns its own eviction; evicting here would
+    // force-stop the live runner and release its port (#11141).
+    if (
+      resolveIosDeviceKind({ deviceId }) === "simulator" &&
+      IOSCtrlProxyManager.instances.get(deviceId) === manager &&
+      !manager.supersededSinceRemoval(removalGeneration)
+    ) {
+      await IOSCtrlProxyManager.evict(deviceId, timer);
+    }
   }
 
   public static async evict(

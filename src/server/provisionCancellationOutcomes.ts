@@ -1,6 +1,9 @@
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import type { Timer } from "../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+
+/** How long an outcome published before its waiter registered stays claimable (#11092). */
+export const EARLY_OUTCOME_RETENTION_MS = 10_000;
 
 /**
  * Hands the `request_cancelled` result of a `provisionDevice` call whose caller aborted from the
@@ -14,21 +17,57 @@ import type { Timer } from "../utils/SystemTimer";
  */
 export class ProvisionCancellationOutcomes {
   private readonly waiters = new Map<string, Array<(outcome: unknown) => void>>();
+  private readonly early = new Map<string, { outcome: unknown; expiresAtMs: number }>();
+
+  constructor(private readonly clock: Pick<Timer, "now"> = defaultTimer) {}
 
   /** Called by the handler once it has built its cancellation result. */
   publish(requestKey: string, outcome: unknown): void {
     const waiting = this.waiters.get(requestKey);
     this.waiters.delete(requestKey);
-    waiting?.forEach((resolve) => resolve(outcome));
+    if (!waiting || waiting.length === 0) {
+      // The reply may not be waiting yet (a fast rollback): keep the outcome briefly.
+      this.pruneExpired();
+      this.early.set(requestKey, {
+        outcome,
+        expiresAtMs: this.clock.now() + EARLY_OUTCOME_RETENTION_MS,
+      });
+      return;
+    }
+    waiting.forEach((resolve) => resolve(outcome));
+  }
+
+  /** Drops unclaimed early outcomes past their retention, so a quiet daemon does not keep them. */
+  private pruneExpired(): void {
+    const now = this.clock.now();
+    this.early.forEach((held, key) => {
+      if (held.expiresAtMs <= now) {
+        this.early.delete(key);
+      }
+    });
+  }
+
+  /** Unclaimed early outcomes currently retained, expired or not; for tests. */
+  get retainedEarlyCount(): number {
+    return this.early.size;
   }
 
   /** Whether a reply is currently waiting for this call's outcome. */
   isAwaiting(requestKey: string): boolean {
+    this.pruneExpired();
     return this.waiters.has(requestKey);
   }
 
   /** Resolves with the published outcome, or undefined when none arrives within `timeoutMs`. */
   async await(requestKey: string, timeoutMs: number, timer: Timer): Promise<unknown> {
+    this.pruneExpired();
+    const held = this.early.get(requestKey);
+    if (held) {
+      this.early.delete(requestKey);
+      if (held.expiresAtMs > this.clock.now()) {
+        return held.outcome;
+      }
+    }
     let resolveOutcome: (outcome: unknown) => void = () => {};
     const outcome = new Promise<unknown>((resolve) => {
       resolveOutcome = resolve;

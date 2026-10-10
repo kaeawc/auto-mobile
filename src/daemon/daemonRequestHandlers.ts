@@ -36,7 +36,12 @@ import type {
   LivenessLeaseState,
   LivenessOwnerHold,
 } from "./livenessOwnerLease";
-import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
+import type {
+  DeviceRecoveryEligibility,
+  DeviceRecoveryPolicy,
+  PooledDevice,
+  RefusedOwnedSessionRestore,
+} from "./devicePool";
 import type { DeviceSessionRecord, RetiredDeviceSession } from "./deviceSessionRegistry";
 import type { BootedDevice } from "../models";
 import {
@@ -123,6 +128,8 @@ export interface DaemonStateAccess {
     recordSessionClientName?(sessionId: string, clientName: string): void;
     /** What bounds an in-flight call's idle-release veto, for `idleReleaseAt` (#10671). */
     getIdleReleaseExecutionVeto?(sessionId: string): { latestDeadlineMs?: number } | undefined;
+    /** Converts a session-clock instant to wall-clock epoch ms for reporting (#11105). */
+    sessionClockToWall?(sessionClockMs: number): number;
     getDeviceLabels(sessionId: string): DeviceLabelMap | undefined;
     releaseSession(sessionId: string): Promise<string | null>;
   };
@@ -135,13 +142,16 @@ export interface DaemonStateAccess {
     restoreOwnedDeviceSessionsForMcpSession?(
       sessionIds: readonly string[],
       mcpSessionId: string,
-    ): Promise<void>;
+      livenessOwnerToken?: string,
+    ): Promise<readonly RefusedOwnedSessionRestore[] | void>;
     releaseMcpSessionBindings?(mcpSessionId: string): void;
     refreshDevices(): Promise<number>;
     refreshDevicesWithOutcome?(): Promise<import("./devicePoolRefresh").DevicePoolRefreshResult>;
     getStats(): DevicePoolStats;
     releaseDevice(deviceId: string, expectedSessionId: string): Promise<void>;
     getAllDevices?(): PooledDevice[];
+    /** The pooled device, whose `sessionId` is set as soon as a session is assigned it. */
+    getDevice?(deviceId: string): PooledDevice | null;
     isPooledIdentityUnresolved?(deviceId: string): boolean;
     getRecoveryPolicy?(): DeviceRecoveryPolicy;
     getDeviceHealthMarker?(deviceId: string): DeviceHealthMarker | undefined;
@@ -392,8 +402,9 @@ export function handleTokenOwnedSessions(
         deviceId: session.assignedDevice,
         platform: session.platform,
         // The daemon's own idle clock, so the resuming proxy judges idleness from the last tool
-        // call rather than from the resume (#10656).
-        lastUsedAt: session.lastUsedAt,
+        // call rather than from the resume (#10656). Reported as wall-clock epoch ms: the proxy
+        // compares it with its own wall clock, not the daemon's session clock (#11117).
+        lastUsedAt: manager.sessionClockToWall?.(session.lastUsedAt) ?? session.lastUsedAt,
       })),
     },
   };
@@ -495,6 +506,9 @@ async function handleHeartbeat(
   if (keeperRefusal) {
     return keeperRefusal;
   }
+  if (isCliKeeperOnCliIdleSession(heartbeatParams?.livenessOwnerKind, session)) {
+    return cliKeeperNoopAck(sessionId);
+  }
   const livenessOwnerToken =
     typeof heartbeatParams?.livenessOwnerToken === "string" &&
     heartbeatParams.livenessOwnerToken.length > 0
@@ -524,7 +538,14 @@ async function handleHeartbeat(
       outcome,
     );
     if (rejection) {
-      return rejection;
+      // A concurrent `--cli` call can move the session onto the cli-idle policy (claiming it
+      // with its own token) while the keeper's claim was resolving; the keeper still no-ops.
+      const current = manager.getSession(sessionId);
+      return rejection.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE &&
+        current &&
+        isCliKeeperOnCliIdleSession(heartbeatParams?.livenessOwnerKind, current)
+        ? cliKeeperNoopAck(sessionId)
+        : rejection;
     }
     if (!claimsLivenessOwnership) {
       // A verified keeper proves only that its current owner is still
@@ -617,10 +638,10 @@ function heartbeatAck(
   const idle =
     report.idleRelease && session
       ? {
-          idleReleaseAt: vetoedIdleReleaseAt(
-            session,
-            manager.getIdleReleaseExecutionVeto?.(sessionId),
-          ),
+          idleReleaseAt:
+            manager.sessionClockToWall?.(
+              vetoedIdleReleaseAt(session, manager.getIdleReleaseExecutionVeto?.(sessionId)),
+            ) ?? vetoedIdleReleaseAt(session, manager.getIdleReleaseExecutionVeto?.(sessionId)),
         }
       : {};
   return { success: true, result: { sessionId, ...extra, ...idle, ...instance } };
@@ -650,6 +671,30 @@ export function refuseCliKeeperOnProxySession(
     success: false,
     code: DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
     error: `Session ${session.sessionId} is owned by an MCP proxy, which is the only liveness owner for its sessions, so this heartbeat was rejected and nothing changed. The external heartbeat keeper is for one-shot CLI sessions only. Let the harness's proxy keep the session alive and check its state with \`--daemon session-info ${session.sessionId}\`.`,
+  };
+}
+
+/**
+ * Owner decision 2026-10-09 (#11096): an external `--daemon heartbeat` keeper adds nothing to a
+ * `cli-idle` session — its idle window runs from tool calls, not heartbeats, and it never holds a
+ * live owner lease — while every one-shot `--cli` call re-claims its liveness, so a keeper that
+ * claimed it was displaced by the next call and failed its next tick. A keeper heartbeat on such
+ * a session is therefore a successful no-op: it neither claims liveness ownership nor touches the
+ * session. Sessions on the strict heartbeat contract keep the keeper's existing behaviour.
+ */
+function isCliKeeperOnCliIdleSession(
+  livenessOwnerKind: string | undefined,
+  session: Session,
+): boolean {
+  return (
+    livenessOwnerKind === CLI_KEEPER_LIVENESS_OWNER_KIND && session.livenessPolicy === "cli-idle"
+  );
+}
+
+function cliKeeperNoopAck(sessionId: string): DaemonMethodResult {
+  return {
+    success: true,
+    result: { sessionId, livenessPolicy: "cli-idle", livenessUnchanged: true },
   };
 }
 
@@ -833,6 +878,7 @@ export async function handleSessionInfo(
         session,
         executions.getActiveDeviceSessionExecutionCount(sessionId),
         manager.getIdleReleaseExecutionVeto?.(sessionId),
+        (ms) => manager.sessionClockToWall?.(ms) ?? ms,
       ),
       ...livenessInfo(manager.getSessionLeaseState?.(sessionId)),
       ...(isSessionReleasing(manager, sessionId, session) ? { releasing: true } : {}),
@@ -881,6 +927,7 @@ export async function handleActiveSessions(
                 session,
                 executions.getActiveDeviceSessionExecutionCount(session.sessionId),
                 manager.getIdleReleaseExecutionVeto?.(session.sessionId),
+                (ms) => manager.sessionClockToWall?.(ms) ?? ms,
               ),
               ...(isSessionReleasing(manager, session.sessionId, session)
                 ? { releasing: true }
@@ -897,7 +944,8 @@ async function handleReleaseSession(
   state: DaemonStateAccess,
   executions?: SessionExecutionCanceller,
 ): Promise<DaemonMethodResult> {
-  const sessionId = (request.params as { sessionId?: string } | undefined)?.sessionId;
+  const params = request.params as { sessionId?: string; requireKnown?: boolean } | undefined;
+  const sessionId = params?.sessionId;
   if (!sessionId) {
     return {
       success: false,
@@ -916,17 +964,38 @@ async function handleReleaseSession(
         },
       };
     }
-    // Session doesn't exist - treat as already released (idempotent)
-    // This happens when daemon auto-releases after executePlan completes
-    return {
-      success: true,
-      result: {
-        message: `Session ${sessionId} already released or never existed`,
-        alreadyReleased: true,
-      },
-    };
+    return await releaseUnknownSession(manager, sessionId, params?.requireKnown === true);
   }
   return releaseBoundSession(state, manager, sessionId, session, executions);
+}
+
+/**
+ * An unknown id stays idempotent for programmatic callers (the desktop releases sessions a
+ * restarted daemon forgot). A caller that sets `requireKnown` (the `--daemon release-session`
+ * CLI) is told when the daemon never issued the UUID, so a typo is not reported as success
+ * (#11148). A session this daemon issued and already released stays idempotent either way.
+ */
+async function releaseUnknownSession(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+  requireKnown: boolean,
+): Promise<DaemonMethodResult> {
+  if (requireKnown && (await lookupReleasedSessionReason(manager, sessionId)) === undefined) {
+    return {
+      success: false,
+      error:
+        `Session ${sessionId} is not a known session (never issued by this daemon, or its release ` +
+        "record has expired). Run --daemon active-sessions to list held sessions.",
+      code: DAEMON_SESSION_NOT_FOUND_CODE,
+    };
+  }
+  return {
+    success: true,
+    result: {
+      message: `Session ${sessionId} already released or never existed`,
+      alreadyReleased: true,
+    },
+  };
 }
 
 async function releaseBoundSession(
@@ -989,6 +1058,24 @@ async function handleListDeviceSessions(
 }
 
 /**
+ * The session that holds a device here, for a lease-status or relinquish answer. A device the pool
+ * assigned (and claimed) is in use even before its session is published to the session manager,
+ * which happens only after the session row persists (#11158): answering "no session" in that
+ * window would let a peer take over the allocation claim and assign the same device.
+ */
+function deviceLeaseActivitySourcesFor(state: DaemonStateAccess): DeviceLeaseActivitySources {
+  const override = state.getDeviceLeaseActivitySources?.();
+  if (override) {
+    return override;
+  }
+  const manager = state.getSessionManager();
+  const pool = state.getDevicePool();
+  return daemonDeviceLeaseActivitySources(
+    (id) => manager.getSessionForDevice?.(id) ?? pool.getDevice?.(id)?.sessionId ?? null,
+  );
+}
+
+/**
  * Report whether this daemon still uses a device, so another AutoMobile process
  * can decide whether to take over its CtrlProxy forwarding lease (#10497).
  */
@@ -1004,10 +1091,7 @@ async function handleDeviceLeaseStatus(
     };
   }
   const { deviceId } = parsed.data;
-  const manager = state.getSessionManager();
-  const sources =
-    state.getDeviceLeaseActivitySources?.() ??
-    daemonDeviceLeaseActivitySources((id) => manager.getSessionForDevice?.(id) ?? null);
+  const sources = deviceLeaseActivitySourcesFor(state);
   return {
     success: true,
     result: {
@@ -1037,10 +1121,7 @@ async function handleRelinquishDeviceLease(
     };
   }
   const { deviceId } = parsed.data;
-  const manager = state.getSessionManager();
-  const sources =
-    state.getDeviceLeaseActivitySources?.() ??
-    daemonDeviceLeaseActivitySources((id) => manager.getSessionForDevice?.(id) ?? null);
+  const sources = deviceLeaseActivitySourcesFor(state);
   const port = state.getDeviceLeaseRelinquishPort?.() ?? daemonDeviceLeaseRelinquishPort();
   const status = { pid: process.pid, deviceId, ...readDeviceLeaseActivity(sources, deviceId) };
   const decision = decideOwnerRelinquish(status, port.idleMs);

@@ -17,6 +17,8 @@ import {
   PLAN_APP_CLEANUP_CAP_MS,
   type PlanLifecycleInput,
 } from "../../src/server/toolRegistry";
+import { withReportedSessionHold } from "../../src/server/planTools";
+import type { ExecutePlanResult } from "../../src/models/ExecutePlanResult";
 import { logger } from "../../src/utils/logger";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { ClearAppData } from "../../src/features/action/ClearAppData";
@@ -89,6 +91,8 @@ describe("executePlan cleans every acquired device before release", () => {
   let log: FakeLogger;
   let timer: FakeTimer;
   let poolTimer: FakeTimer;
+  /** Sessions whose release rejects, before or after the session manager removes them. */
+  let releaseFaults: Map<string, "before-removal" | "after-removal">;
   const restores: Array<() => void> = [];
   const lifecycle = new DefaultPlanLifecycleManager();
 
@@ -122,10 +126,21 @@ describe("executePlan cleans every acquired device before release", () => {
     await pool.initializeWithDevices(devices);
     DaemonState.getInstance().initialize(sessionManager, pool);
     const releaseSession = sessionManager.releaseSession.bind(sessionManager);
-    const release = spyOn(sessionManager, "releaseSession").mockImplementation((id, reason) => {
-      events.push(`session-release:${id}`);
-      return releaseSession(id, reason);
-    });
+    releaseFaults = new Map();
+    const release = spyOn(sessionManager, "releaseSession").mockImplementation(
+      async (id, reason) => {
+        events.push(`session-release:${id}`);
+        const fault = releaseFaults.get(id);
+        if (fault === "before-removal") {
+          throw new Error(`injected release failure for ${id}`);
+        }
+        const result = await releaseSession(id, reason);
+        if (fault === "after-removal") {
+          throw new Error(`injected post-removal release failure for ${id}`);
+        }
+        return result;
+      },
+    );
     const free = spyOn(pool, "releaseDevice").mockImplementation(async (id) => {
       events.push(`release:${id}`);
     });
@@ -207,6 +222,7 @@ describe("executePlan cleans every acquired device before release", () => {
   });
 
   describe("holdSessionOnFailure (#10834)", () => {
+    const failedResult: ExecutePlanResult = { success: false, executedSteps: 1, totalSteps: 2 };
     const hold = (overrides: Partial<PlanLifecycleInput> = {}): PlanLifecycleInput =>
       input({ args: { holdSessionOnFailure: true }, ...overrides });
 
@@ -240,14 +256,158 @@ describe("executePlan cleans every acquired device before release", () => {
       expect(events).toEqual(["session-release:base", "release:device-A"]);
     });
 
-    test("a failed plan with device labels is always released", async () => {
+    test("a failed plan with derived label sessions is always released", async () => {
       await acquire(devices.slice(0, 2));
+      // The handler reports the decision before the lifecycle acts on it.
+      expect(
+        withReportedSessionHold(failedResult, { holdSessionOnFailure: true, sessionUuid: "base" })
+          .sessionHeld,
+      ).toBe(false);
 
       await lifecycle.afterExecution(hold({ succeeded: false }));
 
       for (const id of ["base", "base:B"]) {
         expect(sessionManager.getSession(id)).toBeNull();
       }
+    });
+
+    test("sessionHeld is false when the handler holds a derived label session as sessionUuid (#11111)", async () => {
+      await acquire(devices.slice(0, 2));
+
+      // The registry resolves `device: B` to the derived session before the handler runs.
+      expect(
+        withReportedSessionHold(failedResult, { holdSessionOnFailure: true, sessionUuid: "base:B" })
+          .sessionHeld,
+      ).toBe(false);
+    });
+
+    test("a failed single-label plan keeps its base session like an unlabeled plan (#11091)", async () => {
+      await acquire([devices[0]]);
+      expect(sessionManager.getDeviceLabels("base")).toEqual({ A: "base" });
+      pool.getDevice("device-A")!.sessionId = "base";
+      const session = sessionManager.getSession("base");
+
+      await lifecycle.afterExecution(hold({ succeeded: false }));
+
+      expect(sessionManager.getSession("base")).toBe(session);
+      expect(pool.getDevice("device-A")!.sessionId).toBe("base");
+      expect(events).toEqual([]);
+      expect(
+        withReportedSessionHold(failedResult, { holdSessionOnFailure: true, sessionUuid: "base" })
+          .sessionHeld,
+      ).toBe(true);
+    });
+
+    describe("app cleanup waits for the held session's release (#11139)", () => {
+      const holdWithCleanup = (overrides: Partial<PlanLifecycleInput> = {}): PlanLifecycleInput =>
+        input({
+          args: {
+            cleanupAppId: "com.example.chat",
+            cleanupClearAppData: true,
+            holdSessionOnFailure: true,
+          },
+          succeeded: false,
+          ...overrides,
+        });
+      const flush = async (): Promise<void> => {
+        for (let i = 0; i < 20; i++) {
+          await Promise.resolve();
+        }
+      };
+
+      test("a held failed plan keeps its app untouched for recovery", async () => {
+        await acquire([devices[0]], false);
+
+        await lifecycle.afterExecution(holdWithCleanup());
+
+        expect(cleanup.calls).toEqual([]);
+        expect(sessionManager.getSession("base")).not.toBeNull();
+        expect(events).toEqual([]);
+      });
+
+      test("the resumed plan's lifecycle cleans once, before it releases the session", async () => {
+        await acquire([devices[0]], false);
+        await lifecycle.afterExecution(holdWithCleanup());
+
+        await lifecycle.afterExecution(
+          input({ args: { cleanupAppId: "com.example.chat", cleanupClearAppData: true } }),
+        );
+        await flush();
+
+        expectCleanupBeforeRelease([devices[0]]);
+      });
+
+      test("a resumed plan without cleanupAppId still runs the deferred cleanup", async () => {
+        await acquire([devices[0]], false);
+        await lifecycle.afterExecution(holdWithCleanup());
+
+        await lifecycle.afterExecution(input({ args: {} }));
+        await flush();
+
+        expectCleanupBeforeRelease([devices[0]]);
+      });
+
+      test("releasing the held session after a failed recovery runs the cleanup", async () => {
+        await acquire([devices[0]], false);
+        await lifecycle.afterExecution(holdWithCleanup());
+
+        await sessionManager.releaseSession("base", "client-release");
+        await flush();
+
+        expect(cleanup.calls).toEqual([
+          { device: devices[0], config: { appId: "com.example.chat", clearAppData: true } },
+        ]);
+        expect(events).toEqual([
+          "session-release:base",
+          "cleanup-start:device-A",
+          "cleanup-end:device-A",
+        ]);
+        expect(sessionManager.hasDeviceCleanupInProgress("device-A")).toBe(false);
+      });
+    });
+
+    test("sessionHeld is reported only on a failed run that asked to hold", () => {
+      const succeeded = { ...failedResult, success: true };
+      expect(
+        withReportedSessionHold(succeeded, { holdSessionOnFailure: true, sessionUuid: "base" }),
+      ).not.toHaveProperty("sessionHeld");
+      expect(withReportedSessionHold(failedResult, { sessionUuid: "base" })).not.toHaveProperty(
+        "sessionHeld",
+      );
+    });
+  });
+
+  describe("auto-release frees every session independently (#11091)", () => {
+    test("a failed derived release does not keep the other sessions on their devices", async () => {
+      await acquire(devices.slice(0, 3));
+      releaseFaults.set("base:B", "before-removal");
+
+      await lifecycle.afterExecution(input({ args: {} }));
+
+      expect(sessionManager.getSession("base:B")).not.toBeNull();
+      for (const id of ["base", "base:C"]) {
+        expect(sessionManager.getSession(id)).toBeNull();
+      }
+      expect(events).toContain("release:device-A");
+      expect(events).toContain("release:device-C");
+      expect(events).not.toContain("release:device-B");
+      expect(
+        log
+          .at("warn")
+          .some((entry) => entry.message.includes("Failed to release label session base:B")),
+      ).toBe(true);
+    });
+
+    test("a base release rejecting after removal still frees its pool slot", async () => {
+      await acquire(devices.slice(0, 2));
+      releaseFaults.set("base", "after-removal");
+
+      await lifecycle.afterExecution(input({ args: {} }));
+
+      expect(sessionManager.getSession("base")).toBeNull();
+      expect(sessionManager.getSession("base:B")).toBeNull();
+      expect(events).toContain("release:device-A");
+      expect(events).toContain("release:device-B");
     });
   });
 

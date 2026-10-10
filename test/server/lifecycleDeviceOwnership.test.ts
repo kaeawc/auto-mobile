@@ -2,6 +2,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,
@@ -189,6 +190,50 @@ describe("killDevice device ownership (#10785)", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  // The entry check passes for an unheld device; a start that holds the lifecycle lease
+  // then binds another session while the kill waits. The kill must re-check once granted.
+  class BindDuringWaitCoordinator extends InMemoryVirtualDeviceLifecycleCoordinator {
+    constructor(private readonly onWait: () => Promise<void>) {
+      super(new FakeTimer());
+    }
+
+    override async reserve(
+      identity: Parameters<InMemoryVirtualDeviceLifecycleCoordinator["reserve"]>[0],
+      options: Parameters<InMemoryVirtualDeviceLifecycleCoordinator["reserve"]>[1],
+    ) {
+      await this.onWait();
+      return await super.reserve(identity, options);
+    }
+  }
+
+  test("a kill queued behind a start lease refuses a device another session bound meanwhile", async () => {
+    await sessionManager.releaseSession(other, "explicit-release");
+    setDeviceToolsDependencies({
+      lifecycleCoordinator: new BindDuringWaitCoordinator(async () => {
+        await sessionManager.createSession("starter-session", free.deviceId, "ios");
+      }),
+    });
+
+    const error = await outcome({ device: free }, "killer-session");
+
+    expect((error as InputDeviceOwnedError).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect(manager.killed).toEqual([]);
+    expect(sessionManager.getSessionForDevice(free.deviceId)).toBe("starter-session");
+  });
+
+  test("force still stops a device bound during the lease wait", async () => {
+    await sessionManager.releaseSession(other, "explicit-release");
+    setDeviceToolsDependencies({
+      lifecycleCoordinator: new BindDuringWaitCoordinator(async () => {
+        await sessionManager.createSession("starter-session", free.deviceId, "ios");
+      }),
+    });
+
+    await outcome({ device: free, force: true }, "killer-session");
+
+    expect(manager.killed).toEqual([free.deviceId]);
   });
 
   test("the refusal reaches the client with the typed code", async () => {

@@ -261,7 +261,50 @@ describe("criteria allocation rollback on thrown errors", () => {
         ["device-b", "plan:b"],
       ]);
       expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to roll back criteria allocation for plan:a on device-a"),
+        expect.stringContaining(
+          "Failed to roll back multi-device allocation for plan:a on device-a",
+        ),
+        rollbackError,
+      );
+    } finally {
+      create.mockRestore();
+      release.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test("a throwing rollback on the platform path still releases the next allocation (#11091)", async () => {
+    const originalError = new Error("third session rejected");
+    const rollbackError = new Error("first device release rejected");
+    const createSession = manager.createSession.bind(manager);
+    const create = spyOn(manager, "createSession").mockImplementation(async (...args) => {
+      if (args[0] === "plan:c") {
+        throw originalError;
+      }
+      return createSession(...args);
+    });
+    const releaseDevice = pool.releaseDevice.bind(pool);
+    const release = spyOn(pool, "releaseDevice").mockImplementation(async (deviceId, sessionId) => {
+      if (deviceId === "device-a") {
+        throw rollbackError;
+      }
+      await releaseDevice(deviceId, sessionId);
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await expect(
+        pool.assignMultipleDevices(["plan:a", "plan:b", "plan:c"], 10_000, "android"),
+      ).rejects.toBe(originalError);
+      expectReleased(["b", "c"]);
+      expect(manager.getSession("plan:a")).toBeNull();
+      expect(release.mock.calls).toEqual([
+        ["device-a", "plan:a"],
+        ["device-b", "plan:b"],
+      ]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Failed to roll back multi-device allocation for plan:a on device-a",
+        ),
         rollbackError,
       );
     } finally {

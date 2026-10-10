@@ -17,6 +17,7 @@ import {
 import {
   assertAndroidImageRunningStateKnown,
   MultiPlatformDeviceManager,
+  PHYSICAL_IOS_SCAN_BUDGET_MS,
   waitForDeviceReadyOrCancel,
 } from "./deviceUtils";
 import {
@@ -36,11 +37,16 @@ import type { Window } from "../features/observe/interfaces/Window";
 import { logger } from "../utils/logger";
 import { AndroidCtrlProxyManager, CtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../ctrlProxy/IOSCtrlProxyManager";
+import { AdbUnavailableError } from "../utils/android-cmdline-tools/AdbClient";
+import {
+  AndroidBootedDeviceDiscoveryIncompleteError,
+  BootedDeviceDiscoveryIncompleteError,
+} from "./deviceBootService";
 import { AndroidEmulatorClient } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { PlatformDeviceManager } from "../utils/interfaces/DeviceUtils";
 import { getDeviceCreationGate } from "./deviceCreationGate";
-import { createDefaultDeviceProvisioner } from "./deviceProvisioning";
+import { createDefaultDeviceProvisioner, type ProvisionedDevice } from "./deviceProvisioning";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import type { AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -67,6 +73,7 @@ import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../utils/runnerReadinessCon
 import { trackProcess, waitForExit } from "../utils/ChildProcessTracker";
 import {
   getVirtualDeviceLifecycleCoordinator,
+  selectorLifecycleIdentity,
   type StableVirtualDeviceIdentity,
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleIdentity,
@@ -119,7 +126,7 @@ function lifecycleIdentityForDevice(
 
   return isAndroidEmulatorSerial(device.deviceId) && !isUnresolvedAndroidEmulatorName(device)
     ? { platform: "android", stableId: device.name }
-    : { kind: "selector", platform: "android", selector: device.deviceId };
+    : selectorLifecycleIdentity("android", { deviceId: device.deviceId });
 }
 
 /**
@@ -412,8 +419,7 @@ export interface ConnectedPlatformScanOptions {
   platform?: SomePlatform;
 }
 
-/** Readiness budget for the shared devicectl sweep; a wedged CoreDevice must not stall callers (#11077). */
-export const PHYSICAL_IOS_SCAN_BUDGET_MS = 3_000;
+export { PHYSICAL_IOS_SCAN_BUDGET_MS };
 
 export interface DeviceSessionManagerOptions {
   /** Overrides {@link PHYSICAL_IOS_SCAN_BUDGET_MS}. */
@@ -602,14 +608,26 @@ export class DeviceSessionManager implements DeviceSessionManager {
     try {
       // Check for Android devices via ADB
       perf.startOperation("androidDeviceScan");
-      const androidDevices = await this.adb.getBootedAndroidDevices({ signal });
+      // A missing adb binary (or its cooldown) must not read as a complete,
+      // empty scan: that would let reconciliation clear a pinned Android device.
+      const androidDevices = this.mapAndroidReadinessRows(
+        await this.adb.getBootedAndroidDevices({
+          signal,
+          throwOnMissingAdb: true,
+        }),
+      );
       perf.endOperation("androidDeviceScan");
       devices.push(...androidDevices);
       scannedSources.android = true;
     } catch (error) {
       perf.endOperation("androidDeviceScan");
       signal?.throwIfAborted();
-      logger.warn(`Failed to detect Android devices: ${error}`);
+      if (error instanceof AdbUnavailableError) {
+        // Expected on hosts without the Android SDK; the scan stays non-authoritative.
+        logger.debug(`Android scan skipped: ${error.message}`);
+      } else {
+        logger.warn(`Failed to detect Android devices: ${error}`);
+      }
     }
 
     const [simulators, physical] = await Promise.all([
@@ -702,9 +720,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     logger.info(
       `[DeviceSessionManager] ensureDeviceReady called with platform=${platform}, providedDeviceId=${providedDeviceId}`,
     );
-    if (providedDeviceId) {
-      await throwIfProvisionedDeviceTransportRetired(providedDeviceId);
-    }
+    providedDeviceId = await this.resolveProvidedReadinessId(providedDeviceId);
 
     // Detect all connected devices
     const result = await this.getReadinessScan(platform, options);
@@ -1042,6 +1058,26 @@ export class DeviceSessionManager implements DeviceSessionManager {
    * rebuild the cached Window when another AVD takes over the serial (#7031).
    * Falls back to the raw entry when the runtime cannot be resolved.
    */
+  private async findLiveAndroidDevice(deviceId: string): Promise<BootedDevice | undefined> {
+    return (await this.deviceUtils.getBootedDevices("android")).find(
+      (candidate) => candidate.deviceId === deviceId,
+    );
+  }
+
+  /** AVD name currently attached to `deviceId`, or undefined when not resolvable. */
+  private async resolveCurrentAndroidIdentity(deviceId: string): Promise<string | undefined> {
+    try {
+      const live = await this.findLiveAndroidDevice(deviceId);
+      return live && !isUnresolvedAndroidEmulatorName(live) ? live.name : undefined;
+    } catch (error) {
+      logger.warn(
+        `[DeviceSessionManager] Could not resolve the live identity of ${deviceId} for the retired-transport check: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
+  }
+
   private async resolveAndroidReadinessIdentity(
     device: BootedDevice,
     signal?: AbortSignal,
@@ -1052,9 +1088,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     signal?.throwIfAborted();
     let enriched: BootedDevice | undefined;
     try {
-      enriched = (await this.deviceUtils.getBootedDevices("android")).find(
-        (candidate) => candidate.deviceId === device.deviceId,
-      );
+      enriched = await this.findLiveAndroidDevice(device.deviceId);
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn(
@@ -1076,11 +1110,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
     resolvedIdentity?: ResolvedDeviceIdentity,
   ): Promise<void> {
     options?.signal?.throwIfAborted();
+    deviceId = this.canonicalAndroidId(deviceId);
     // Gate before discovery or a cached Window can use its pre-quarantine executor.
     // Identity reconciliation/lifting uses discovery directly, never readiness.
     this.admissionGate.assertDeviceActionable(deviceId, "to verify Android device readiness");
     this.executionBinding.bindDeviceExecution(deviceId);
-    const allDevices = await this.adb.getBootedAndroidDevices();
+    const allDevices = this.mapAndroidReadinessRows(await this.adb.getBootedAndroidDevices());
     const device = allDevices.find((device) => device.deviceId === deviceId);
 
     if (!device) {
@@ -1467,6 +1502,35 @@ export class DeviceSessionManager implements DeviceSessionManager {
     );
   }
 
+  /**
+   * Raw adb rows name transports, while pooled sessions hold a canonical id. A
+   * USB+Wi-Fi phone keeps its USB serial after the cable is pulled, so map
+   * through the pool's alias groups before matching readiness ids (#11133).
+   */
+  /**
+   * Readiness rows are keyed by the pooled canonical id, so a caller naming a
+   * known transport alias (e.g. the Wi-Fi `ip:port`) must resolve to it (#11133).
+   */
+  private async resolveProvidedReadinessId(
+    providedDeviceId: string | undefined,
+  ): Promise<string | undefined> {
+    if (!providedDeviceId) {
+      return undefined;
+    }
+    await throwIfProvisionedDeviceTransportRetired(providedDeviceId, {
+      currentIdentity: () => this.resolveCurrentAndroidIdentity(providedDeviceId),
+    });
+    return this.canonicalAndroidId(providedDeviceId);
+  }
+
+  private canonicalAndroidId(deviceId: string): string {
+    return this.admissionGate.resolveAndroidCanonicalId?.(deviceId) ?? deviceId;
+  }
+
+  private mapAndroidReadinessRows(devices: BootedDevice[]): BootedDevice[] {
+    return this.admissionGate.mapAndroidReadinessDiscovery?.(devices) ?? devices;
+  }
+
   private normalizeReadinessScan(
     result: BootedDevice[] | ConnectedPlatformScan,
   ): ConnectedPlatformScan {
@@ -1667,8 +1731,14 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const perf = createGlobalPerformanceTracker();
 
     perf.startOperation("listBootedDevices");
-    const allDevices = await this.deviceUtils.getBootedDevices("android");
+    const discovery = await this.deviceUtils.getBootedDevicesDetailed("android");
     perf.endOperation("listBootedDevices");
+    // A failed/timed-out adb listing is not "no devices": refuse rather than
+    // cold-boot an AVD while an attached device may be present (#11103).
+    if (!discovery.succeededPlatforms.has("android")) {
+      throw new AndroidBootedDeviceDiscoveryIncompleteError(discovery.discoveryErrors?.android);
+    }
+    const allDevices = discovery.devices;
 
     if (allDevices.length > 0) {
       // Use the first available device
@@ -1762,6 +1832,48 @@ export class DeviceSessionManager implements DeviceSessionManager {
     );
   }
 
+  private async rollBackCreatedIosOnFailure<T>(
+    getCreated: () => ProvisionedDevice | undefined,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      const created = getCreated();
+      if (created) {
+        await this.rollBackCreatedIosSimulator(created, error);
+      }
+      throw error;
+    }
+  }
+
+  /** Deletes a simulator this request created and then failed to bind, boot or verify. */
+  private async rollBackCreatedIosSimulator(
+    created: { name: string; deviceId?: string },
+    failure: unknown,
+  ): Promise<void> {
+    if (!created.deviceId) {
+      logger.warn(
+        `[DeviceSessionManager] Cannot roll back created iOS simulator '${created.name}': no UDID.`,
+      );
+      return;
+    }
+    logger.warn(
+      `[DeviceSessionManager] Rolling back created iOS simulator '${created.name}' ` +
+        `(${created.deviceId}) after failure: ${errorMessage(failure)}`,
+    );
+    // Cancellation cleanup must not inherit an already-aborted request signal.
+    const cleanupSignal = new AbortController().signal;
+    await this.simctl!.deleteSimulator(created.deviceId, { signal: cleanupSignal }).catch(
+      (deleteError) => {
+        logger.warn(
+          `[DeviceSessionManager] Failed to roll back created iOS simulator ` +
+            `'${created.name}' (${created.deviceId}): ${errorMessage(deleteError)}`,
+        );
+      },
+    );
+  }
+
   /**
    * Find an available iOS device or start a simulator
    */
@@ -1788,6 +1900,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         );
         const deadlineMs = this.runnerReadinessTimer.now() + 300_000;
         let lifecycleLease: VirtualDeviceLifecycleLease | undefined;
+        let created: ProvisionedDevice | undefined;
         try {
           const provisioner = createDefaultDeviceProvisioner(() => this.simctl, {
             reserveBeforeCreate: async (identity) => {
@@ -1798,12 +1911,20 @@ export class DeviceSessionManager implements DeviceSessionManager {
               return lifecycleLease.signal;
             },
             bindAfterCreate: async (device) => {
+              created = device;
               await this.bindCreatedIosReadinessIdentity(lifecycleLease, device);
             },
           });
-          const provisioned = await provisioner.provision({ platform: "ios" }, options?.signal);
-          this.assertCreatedIosReservation(lifecycleLease, provisioned);
-          return await this.runWithLifecycleLease(lifecycleLease, options, async (signal) => {
+          // simctl may already have created it: a failed identity bind must not orphan it (#11100).
+          const { provisioned, lease } = await this.rollBackCreatedIosOnFailure(
+            () => created,
+            async () => {
+              const device = await provisioner.provision({ platform: "ios" }, options?.signal);
+              this.assertCreatedIosReservation(lifecycleLease, device);
+              return { provisioned: device, lease: lifecycleLease };
+            },
+          );
+          return await this.runWithLifecycleLease(lease, options, async (signal) => {
             perf.startOperation("bootSimulator");
             const createdDevice = await runWithAbortSignal(
               signal,
@@ -1823,20 +1944,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
             perf.endOperation("verifyDevice");
             return createdDevice;
           }).catch(async (error) => {
-            logger.warn(
-              `[DeviceSessionManager] Rolling back created iOS simulator '${provisioned.name}' ` +
-                `(${provisioned.deviceId}) after boot/verify failure: ${errorMessage(error)}`,
-            );
-            // Cancellation cleanup must not inherit an already-aborted request signal.
-            const cleanupSignal = new AbortController().signal;
-            await this.simctl!.deleteSimulator(provisioned.deviceId!, {
-              signal: cleanupSignal,
-            }).catch((deleteError) => {
-              logger.warn(
-                `[DeviceSessionManager] Failed to roll back created iOS simulator ` +
-                  `'${provisioned.name}' (${provisioned.deviceId}): ${errorMessage(deleteError)}`,
-              );
-            });
+            await this.rollBackCreatedIosSimulator(provisioned, error);
             throw toActionableError(
               error,
               `Failed to boot/verify created iOS simulator '${provisioned.name}' (${provisioned.deviceId})`,
@@ -1866,7 +1974,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
     // Check for already booted simulators first
     perf.startOperation("checkBooted");
-    const bootedDevices = await this.simctl.getBootedSimulators();
+    // The checked listing rethrows simctl failures: a timeout must refuse
+    // rather than boot availableDevices[0] beside an already-booted one (#11103).
+    const bootedDevices = await this.listBootedSimulatorsForSelection();
     perf.endOperation("checkBooted");
     bootedDevices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
 
@@ -1914,6 +2024,18 @@ export class DeviceSessionManager implements DeviceSessionManager {
         return bootedDevice;
       },
     );
+  }
+
+  private async listBootedSimulatorsForSelection(): Promise<BootedDevice[]> {
+    try {
+      return await this.simctl!.getBootedSimulatorsChecked();
+    } catch (error) {
+      throw new BootedDeviceDiscoveryIncompleteError("ios", {
+        code: "failed",
+        message: errorMessage(error),
+        retryable: true,
+      });
+    }
   }
 
   private async revalidateCreatedIosDevice(deviceId: string): Promise<StableVirtualDeviceIdentity> {

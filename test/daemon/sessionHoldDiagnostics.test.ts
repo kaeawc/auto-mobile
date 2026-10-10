@@ -4,7 +4,6 @@ import {
   handleDaemonRequest,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
-import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import {
   classifySessionHolderKind,
@@ -88,8 +87,8 @@ describe("classifySessionHolderKind", () => {
 });
 
 describe("idleReleaseAt", () => {
-  test("a heartbeating owner gets the suspect grace past expiresAt", () => {
-    expect(idleReleaseAt(snapshot())).toBe(121_000 + SUSPECT_GRACE_MS);
+  test("a heartbeating owner is released exactly at expiresAt: no suspect grace on idleness (#11107)", () => {
+    expect(idleReleaseAt(snapshot())).toBe(121_000);
   });
 
   test("a session no owner has heartbeated expires at expiresAt", () => {
@@ -106,7 +105,7 @@ describe("idleReleaseAt", () => {
     expect(sessionHoldDiagnostics(snapshot(), 2)).toEqual({
       lastToolActivityAt: 1_000,
       lastOwnerHeartbeatAt: null,
-      idleReleaseAt: 121_000 + SUSPECT_GRACE_MS,
+      idleReleaseAt: 121_000,
       holderKind: "unknown",
       activeExecutions: 2,
     });
@@ -114,7 +113,7 @@ describe("idleReleaseAt", () => {
 });
 
 describe("idleReleaseAt under an in-flight execution's veto (#10712, #10713)", () => {
-  const idleDeadline = 121_000 + SUSPECT_GRACE_MS;
+  const idleDeadline = 121_000;
 
   test("nothing in flight leaves the idle deadline", () => {
     expect(vetoedIdleReleaseAt(snapshot(), undefined)).toBe(idleDeadline);
@@ -176,12 +175,35 @@ describe("session hold diagnostics through the daemon surfaces", () => {
     expect(after).toMatchObject({
       lastToolActivityAt: before?.lastToolActivityAt,
       lastOwnerHeartbeatAt: session.lastOwnerHeartbeat,
-      idleReleaseAt: session.expiresAt + SUSPECT_GRACE_MS,
+      idleReleaseAt: session.expiresAt,
       holderKind: "stdio-proxy",
       activeExecutions: 0,
     });
     expect(after?.lastOwnerHeartbeatAt).toBeGreaterThan(Number(before?.lastToolActivityAt));
     expect(before?.lastOwnerHeartbeatAt).toBeNull();
+  });
+
+  test("reported instants stay wall-clock epoch ms across a wall-clock step (#11105)", async () => {
+    const session = await manager.createSession(SESSION, DEVICE, "android");
+    const state = stateFor(manager);
+    const remainingMs = session.expiresAt - timer.now();
+    timer.stepWallClock(-3_600_000);
+
+    const info = (
+      await handleDaemonRequest(request("daemon/sessionInfo", { sessionId: SESSION }), state)
+    ).result;
+    const heartbeat = (
+      await handleDaemonRequest(
+        request("daemon/heartbeat", { sessionId: SESSION, reportIdleRelease: true }),
+        state,
+      )
+    ).result;
+
+    // The idle window still has `remainingMs` to run, measured from the (stepped) wall clock.
+    expect(info?.idleReleaseAt).toBe(timer.now() + remainingMs);
+    // An owner heartbeat reports the same instant: the suspect grace never extends idleness (#11107).
+    expect(heartbeat?.idleReleaseAt).toBe(timer.now() + remainingMs);
+    expect(info?.lastToolActivityAt).toBe(session.lastUsedAt - 3_600_000);
   });
 
   test("registering a client name on an existing session names its holder", async () => {

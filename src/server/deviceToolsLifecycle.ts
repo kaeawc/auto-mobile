@@ -8,7 +8,10 @@ import {
   type DeviceTeardownService,
   type DeviceTeardownWorkflow,
 } from "../devices/deviceTeardownService";
-import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
+import {
+  selectorLifecycleIdentity,
+  type VirtualDeviceLifecycleLease,
+} from "../devices/virtualDeviceLifecycleCoordinator";
 import { logger } from "../utils/logger";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import type { ProgressCallback } from "./toolRegistry";
@@ -28,7 +31,6 @@ import {
   finalizeTeardownEviction,
   getDeviceTeardownService,
   getDeviceToolsDependencies,
-  isTeardownFailure,
   isProvisionDeviceCallerAbort,
   pooledAvdKillIdentity,
   pooledAvdNameRefusalMessage,
@@ -38,7 +40,6 @@ import {
   retireStoppedTeardownOwnership,
   stopSegmentedVideoRecordingsBeforeDestroy,
   teardownDeadlineDevice,
-  teardownOperationFingerprint,
   verifyTeardownAbsence,
 } from "./deviceTools";
 import {
@@ -184,6 +185,15 @@ function createDeleteDeviceWorkflow(
               capture: target.pooledAvdCapture,
               force: args.force ?? false,
             },
+            assertHolder: requester
+              ? () =>
+                  assertLifecycleCallerHoldsDevice({
+                    toolName: "deleteDevice",
+                    device: target.bootedDevice,
+                    requester,
+                    force: args.force ?? false,
+                  })
+              : undefined,
           },
         );
         stop = stopped.alreadyStoppedMessage ? "not_required" : "accepted";
@@ -198,12 +208,12 @@ function createDeleteDeviceWorkflow(
       }
       return stop;
     },
-    destroy: async (state, _requestAbortSignal, retainLeaseUntil, markDestructionStarted) => {
+    destroy: async (state, _requestAbortSignal, retainLeaseUntil) => {
       if (state.earlyResponse) {
         return;
       }
       const { context, target } = state;
-      await destroyTeardownTarget(context, target, retainLeaseUntil, markDestructionStarted, () => {
+      await destroyTeardownTarget(context, target, retainLeaseUntil, () => {
         void finalizeTeardownEviction(context, target, state.androidManager);
       });
       await finalizeTeardownEviction(context, target, state.androidManager);
@@ -216,13 +226,6 @@ function createDeleteDeviceWorkflow(
         state.lastVerificationFailure = failure;
       });
     },
-    conflict: () =>
-      createTeardownFailureResponse(
-        args,
-        "precondition",
-        "operation_id_conflict",
-        "The operation ID has already been used with different teardown arguments.",
-      ),
     failure: (phase: DeviceTeardownPhase, error, state) => {
       if (error instanceof DeviceTeardownDeadlineError) {
         const mapped = teardownDeadlineFailure(phase, state, args, timeoutMs);
@@ -242,7 +245,7 @@ function createDeleteDeviceWorkflow(
             )
           : error;
       logger.warn(
-        `[DeviceTools] teardown operation ${args.operationId} failed during ${phase} ` +
+        `[DeviceTools] teardown failed during ${phase} ` +
           `for ${args.target.platform}:${args.target.stableId}: ${effectiveError}`,
         effectiveError,
       );
@@ -254,12 +257,14 @@ function createDeleteDeviceWorkflow(
         // generic operation failure (#6863 review).
         effectiveError instanceof PooledAvdIdentityError
           ? "target_identity_unresolved"
-          : "operation_failed",
+          : effectiveError instanceof InputDeviceOwnedError
+            ? // Ownership was lost between the entry check and the shutdown reservation.
+              effectiveError.code
+            : "operation_failed",
         String(effectiveError instanceof Error ? effectiveError.message : effectiveError),
         state?.target.device,
       );
     },
-    isFailure: isTeardownFailure,
   };
 }
 
@@ -303,7 +308,7 @@ export function createLifecycleHandlers() {
           coordinator: deps.lifecycleCoordinator,
         })
       : await deps.lifecycleCoordinator.reserve(
-          { kind: "selector", platform: args.device.platform, selector: args.device.deviceId },
+          selectorLifecycleIdentity(args.device.platform, { deviceId: args.device.deviceId }),
           { operation: "shutdown", deadlineMs, signal: requestAbortSignal },
         );
     const signals = [requestAbortSignal, lifecycleLease.signal].filter(
@@ -333,6 +338,14 @@ export function createLifecycleHandlers() {
           timeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
           retainLifecycleUntil,
           pooledAvdIdentity: pooledAvdKillIdentity(pooledAvdCapture, args.force ?? false),
+          // The entry check predates the lease wait; re-check under the assignment mutex.
+          assertHolder: () =>
+            assertLifecycleCallerHoldsDevice({
+              toolName: "killDevice",
+              device: args.device,
+              requester: lifecycleRequester(args),
+              force: args.force ?? false,
+            }),
         },
       );
       return createKillDeviceResponse(args, result.timing, result.alreadyStoppedMessage);
@@ -361,8 +374,6 @@ export function createLifecycleHandlers() {
         TeardownToolResponse
       >(
         {
-          operationId: args.operationId,
-          fingerprint: teardownOperationFingerprint(args),
           identity: args.target,
           deadlineMs,
           callerSignal,
@@ -376,11 +387,14 @@ export function createLifecycleHandlers() {
       if (isProvisionDeviceCallerAbort(error, callerSignal)) {
         // Caller cancellation ends only this wait; the accepted teardown continues independently.
         logger.debug(
-          `[DeviceTools] teardown caller stopped waiting for ${args.operationId}: ${message}`,
+          `[DeviceTools] teardown caller stopped waiting for ${args.target.platform}:${args.target.stableId}: ${message}`,
         );
         return createTeardownFailureResponse(args, "precondition", "operation_cancelled", message);
       }
-      logger.warn(`[DeviceTools] teardown operation ${args.operationId} failed: ${message}`, error);
+      logger.warn(
+        `[DeviceTools] teardown failed for ${args.target.platform}:${args.target.stableId}: ${message}`,
+        error,
+      );
       return createTeardownFailureResponse(args, "precondition", "operation_failed", message);
     }
   }

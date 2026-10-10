@@ -258,6 +258,41 @@ describe("capacity gate", () => {
     ).toMatchObject({ outcome: "queue" });
   });
 
+  // #11100: the boot path boots the requested UDID regardless, so a warm device
+  // must not admit it past maxBooted.
+  test("waitForCapacity still queues at capacity when a compatible warm device exists", async () => {
+    const { collector, timer, history } = setup([IOS27, IOS18]);
+    timer.enableAutoAdvance();
+    history.record({ udid: IOS18, profileId: "lean-v1", durationMs: 30_000, recordedAtMs: 0 });
+    const gate = new IosSimCapacityGate(collector, timer, { env });
+
+    const result = await gate.waitForCapacity(
+      { profileId: "lean-v1", excludeUdids: ["NEW-UDID"] },
+      { deadlineMs: timer.now() + 7_000, bootUdid: "NEW-UDID" },
+    );
+
+    expect(result).toMatchObject({
+      timedOut: true,
+      decision: { outcome: "queue", reason: "at-capacity" },
+    });
+    expect(result.releaseAdmission).toBeUndefined();
+  });
+
+  test("waitForCapacity reports a warm device as a hint when a boot fits", async () => {
+    const { collector, timer, history } = setup([IOS27]);
+    history.record({ udid: IOS27, profileId: "lean-v1", durationMs: 30_000, recordedAtMs: 0 });
+    const gate = new IosSimCapacityGate(collector, timer, { env });
+
+    const result = await gate.waitForCapacity(
+      { profileId: "lean-v1", excludeUdids: ["NEW-UDID"] },
+      { deadlineMs: timer.now() + 7_000, bootUdid: "NEW-UDID" },
+    );
+
+    expect(result.decision).toEqual({ outcome: "reuse-warm", udid: IOS27 });
+    expect(result.releaseAdmission).toBeDefined();
+    result.releaseAdmission?.();
+  });
+
   test("queues only after sustained pressure, not on one sample", async () => {
     const { collector, timer, source } = setup([IOS27], { ...calm, memoryPressure: "warn" });
     const gate = new IosSimCapacityGate(collector, timer, {

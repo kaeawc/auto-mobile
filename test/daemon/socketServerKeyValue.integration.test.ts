@@ -78,13 +78,22 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
   let iosSetPreference: ReturnType<typeof mock>;
   let iosRemovePreference: ReturnType<typeof mock>;
   let iosClearPreferenceStore: ReturnType<typeof mock>;
+  let simctlSweepFails = false;
 
   beforeEach(async () => {
+    simctlSweepFails = false;
     socketPath = join(tmpdir(), `kv-routing-${randomUUID()}.sock`);
 
     // Only the two platform-specific booted devices exist; discovery is scoped
     // by the platform the handler asks for.
     PlatformDeviceManagerFactory.setInstance({
+      getBootedDevicesDetailed: async () => ({
+        devices: simctlSweepFails ? [] : [iosDevice],
+        succeededPlatforms: new Set(simctlSweepFails ? [] : ["ios"]),
+        discoveryErrors: simctlSweepFails
+          ? { ios: { code: "failed", message: "simctl exploded" } }
+          : {},
+      }),
       getBootedDevices: async (platform: "android" | "ios" | "either") =>
         platform === "ios"
           ? [iosDevice]
@@ -175,6 +184,24 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     expect(remove.result).toEqual({ success: true, resolvedStore: "custom-suite" });
     expect(clear.success).toBe(true);
     expect(clear.result).toEqual({ success: true, resolvedStore: "custom-suite" });
+  });
+
+  test("ide/setKeyValue on iOS reports incomplete discovery, not 'Device not found', when simctl fails (#11122)", async () => {
+    simctlSweepFails = true;
+    const response = await sendRequest(socketPath, "ide/setKeyValue", {
+      platform: "ios",
+      deviceId: iosDevice.deviceId,
+      appId: "com.example.app",
+      fileName: "prefs",
+      key: "theme",
+      value: "dark",
+      type: "STRING",
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain("discovery_incomplete");
+    expect(response.error).not.toContain("Device not found");
+    expect(iosSetPreference).not.toHaveBeenCalled();
   });
 
   test("ide/setKeyValue with platform 'ios' targets the iOS device via IOSCtrlProxyClient", async () => {

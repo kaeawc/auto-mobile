@@ -35,11 +35,13 @@ import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import {
+  DeviceSessionNotActiveError,
   DeviceSessionRepository,
   isDeviceRestartReleaseReason,
   isRecoverableDeviceSession,
   type DeviceSessionActivityUpdate,
   type DeviceSessionPersistence,
+  type MarkReleasedOptions,
 } from "../db/deviceSessionRepository";
 import type { DeviceSession } from "../db/types";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
@@ -68,8 +70,8 @@ import {
   ownerLeaseLiveAt,
   livenessLeaseState,
   livenessOwnerHold,
-  sessionLeaseSnapshot,
   sessionOwnerLeaseSnapshot,
+  sessionJudgedLeaseSnapshot,
   suspectGraceMsFor,
   type LivenessLeaseState,
   type LivenessOwnerHold,
@@ -540,6 +542,8 @@ export interface SessionReleaseSnapshot {
   releaseReason: string;
   releasedAtMs: number;
   terminal: boolean;
+  /** PID of the other daemon that claimed the device, when the terminal reason names one (#11098). */
+  ownerPid?: number;
   heartbeat: {
     lastHeartbeatMs: number;
     hasReceivedHeartbeat: boolean;
@@ -886,7 +890,8 @@ function recoveryFailureDetail(
 type SessionRecoveryIdentityLoss = Pick<
   SessionRecoveryIdentityLossError,
   "sessionUuid" | "target" | "reason" | "terminalReleaseReason"
->;
+> &
+  Partial<Pick<SessionRecoveryIdentityLossError, "ownerPid">>;
 
 function isSessionRecoveryFailureReason(reason: unknown): reason is SessionRecoveryFailureReason {
   return (
@@ -1047,6 +1052,13 @@ export const DEFAULT_TERMINAL_RELEASE_RETRY_BACKOFF: BackoffPolicy = exponential
 });
 const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 export const SESSION_REHYDRATION_DEADLINE_MS = 15_000;
+/** Persisted rows recovered at once during startup rehydration (#11114). */
+export const SESSION_REHYDRATION_CONCURRENCY = 4;
+
+type RehydrationRowOutcome =
+  | { kind: "rehydrated" }
+  | { kind: "terminalized"; reason: string }
+  | { kind: "skipped"; reason: string };
 const EXPIRY_RELEASE_REASONS = new Set([
   "lazy-expiry",
   "cleanup-expired",
@@ -1181,10 +1193,15 @@ export class SessionManager {
   private sessionDeviceMap: Map<string, string> = new Map(); // sessionId -> deviceId
   private deviceSessionMap: Map<string, string> = new Map(); // deviceId -> sessionId (reverse lookup)
   private cleanupTimer: NodeJS.Timeout | null = null;
+  /** Pending follow-up sweep of rows the startup rehydration deadline skipped (#11114). */
+  private rehydrationFollowUpTimer: NodeJS.Timeout | null = null;
   private timer: Timer;
   /** The clock every session timestamp is stamped and judged with (#11080); see {@link sessionNow}. */
   private readonly sessionClock: SteadyWallClock;
   private releaseCallbacks: SessionReleaseCallback[] = [];
+  // Base session → its derived `${base}:${label}` sessions (#11091), outside the base's cache so
+  // it survives the base's removal. Consumed by takeDerivedLabelSessions.
+  private readonly derivedLabelSessionsByBase = new Map<string, Set<string>>();
   private createdCallbacks: SessionCreatedCallback[] = [];
   private deviceUnboundCallbacks: SessionDeviceUnboundCallback[] = [];
   private readonly deviceOwnershipCallbacks = new Set<
@@ -1206,6 +1223,11 @@ export class SessionManager {
   /** Crash-safe sidecar of terminal releases whose row write has not landed (#10959). */
   private terminalReleaseJournal: TerminalReleaseJournal = new NoopTerminalReleaseJournal();
   /**
+   * The owning daemon's id, stamped on every persisted active row so a peer daemon sharing the
+   * database can tell this daemon's live rows from a dead predecessor's (#11114).
+   */
+  private daemonSessionId: string | undefined;
+  /**
    * Terminal releases a previous daemon recorded but never persisted. Until its row write lands, a
    * listed UUID reads as terminally released, so nothing can revive it.
    */
@@ -1220,6 +1242,13 @@ export class SessionManager {
    * do no DB work and a peer daemon holding the write lock cannot stall them.
    */
   private readonly issuedActivityWrites = new WeakMap<Session, IssuedActivityWrite>();
+  /**
+   * The row generation each session incarnation's latest upsert produced (#11129). A non-terminal
+   * release captures it so its write cannot land on a row a later incarnation re-upserted.
+   */
+  private readonly persistedRowGenerations = new WeakMap<Session, number>();
+  /** The row generation a non-terminal release snapshot may overwrite (#11129). */
+  private readonly releaseRowGenerations = new WeakMap<SessionReleaseSnapshot, number>();
   /** Latest finalized incarnation, weakly retained until a same-UUID replacement publishes. */
   private readonly latestFinalizedSessionIdentities: Map<string, WeakRef<Session>> = new Map();
   private readonly finalizedSessionIdentityRegistry = new FinalizationRegistry<{
@@ -1360,6 +1389,16 @@ export class SessionManager {
   /** Retry delays for terminal release writes that failed after their deadline (#10959). */
   setTerminalReleaseRetryBackoff(backoff: BackoffPolicy): void {
     this.terminalReleaseRetryBackoff = backoff;
+  }
+
+  /** Attach the owning daemon's id; every later active-row write is stamped with it (#11114). */
+  attachDaemonSessionId(daemonSessionId: string): void {
+    this.daemonSessionId = daemonSessionId;
+  }
+
+  /** A recovered row's dead owner is replaced by this daemon (#11114). */
+  private recoveredRowOwner(): string | null {
+    return this.daemonSessionId ?? null;
   }
 
   /**
@@ -1770,6 +1809,14 @@ export class SessionManager {
    */
   sessionNow(): number {
     return this.sessionClock.now();
+  }
+
+  /**
+   * An instant on the session clock as wall-clock epoch ms, for reporting to other processes
+   * (#11105): wall now + (instant - session now). Differs from the stamp only after a wall step.
+   */
+  sessionClockToWall(sessionClockMs: number): number {
+    return this.timer.now() + (sessionClockMs - this.sessionNow());
   }
 
   /**
@@ -2258,7 +2305,7 @@ export class SessionManager {
     }
     this.assertCreationNotAbandoned(session, creation);
     await this.rejectCreationAfterShutdownFence(session);
-    await this.persistSession(session);
+    await this.persistSession(session, session);
     await this.retireCreationIfAbandoned(session, creation);
     await this.rejectCreationAfterShutdownFence(session);
     this.assertTerminalReleaseAdmission(session.sessionId, session);
@@ -2316,22 +2363,21 @@ export class SessionManager {
 
   private async retireAbandonedCreation(session: Session): Promise<never> {
     const releasedAtMs = this.sessionNow();
-    await this.persistSessionRelease(
-      {
-        sessionId: session.sessionId,
-        deviceId: session.assignedDevice,
-        releaseReason: SESSION_CREATION_TIMEOUT_REASON,
-        releasedAtMs,
-        terminal: false,
-        heartbeat: {
-          lastHeartbeatMs: session.lastHeartbeat,
-          hasReceivedHeartbeat: session.hasReceivedHeartbeat,
-          timeoutMs: session.heartbeatTimeoutMs,
-          ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
-        },
+    const snapshot: SessionReleaseSnapshot = {
+      sessionId: session.sessionId,
+      deviceId: session.assignedDevice,
+      releaseReason: SESSION_CREATION_TIMEOUT_REASON,
+      releasedAtMs,
+      terminal: false,
+      heartbeat: {
+        lastHeartbeatMs: session.lastHeartbeat,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        timeoutMs: session.heartbeatTimeoutMs,
+        ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
       },
-      true,
-    ).catch((error: unknown) => {
+    };
+    this.captureReleaseRowGeneration(snapshot, this.persistedRowGenerations.get(session));
+    await this.persistSessionRelease(snapshot, true).catch((error: unknown) => {
       logger.warn(
         `[SessionManager] Failed to release abandoned creation of ${session.sessionId}: ` +
           errorMessage(error),
@@ -2460,11 +2506,15 @@ export class SessionManager {
       (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason))
     ) {
       this.restartRecoveryActivityAt.delete(persisted.session_uuid);
+      // Only the row judged expired: a peer may re-upsert the UUID after this read (#11129).
       await this.deviceSessionRepository.markReleased(
         persisted.session_uuid,
         "expired",
         this.sessionNow(),
         "expired",
+        persisted.stable_identity_generation === undefined
+          ? {}
+          : { expectedRowGeneration: persisted.stable_identity_generation },
       );
     }
   }
@@ -2511,7 +2561,7 @@ export class SessionManager {
     releaseReason: string,
   ): SessionReleaseSnapshot {
     const releasedAtMs = persisted.released_at_ms ?? persisted.last_used_at_ms;
-    return {
+    const snapshot: SessionReleaseSnapshot = {
       sessionId,
       deviceId: persisted.device_id,
       releaseReason,
@@ -2529,6 +2579,8 @@ export class SessionManager {
         ageMs: Math.max(0, releasedAtMs - persisted.last_used_at_ms),
       },
     };
+    this.captureReleaseRowGeneration(snapshot, persisted.stable_identity_generation);
+    return snapshot;
   }
 
   /**
@@ -3123,9 +3175,10 @@ export class SessionManager {
 
   async rehydratePersistedSessions(
     devicePool: SessionDeviceAssigner,
-    options: { deadlineMs?: number } = {},
+    options: { deadlineMs?: number; concurrency?: number } = {},
   ): Promise<RehydrationSummary> {
     const deadlineMs = options.deadlineMs ?? SESSION_REHYDRATION_DEADLINE_MS;
+    const concurrency = Math.max(1, options.concurrency ?? SESSION_REHYDRATION_CONCURRENCY);
     const deadlineAt = this.sessionNow() + deadlineMs;
     const summary: RehydrationSummary = {
       rehydrated: [],
@@ -3138,86 +3191,162 @@ export class SessionManager {
     const persistedSessions = (
       await this.listRecoverableSessionsBeforeDeadline(deadlineAt, summary)
     ).map((persisted) => this.withRecoveredTerminalRelease(persisted));
-    const markDeadline = (startIndex: number): void => {
-      for (const remaining of persistedSessions.slice(startIndex)) {
-        const sessionId = remaining.session_uuid;
-        if (!this.isRecoverablePersistedSession(remaining)) {
-          summary.skipped.push({ sessionUuid: sessionId, reason: "not-recoverable" });
-        } else if (this.sessions.has(sessionId)) {
-          summary.skipped.push({ sessionUuid: sessionId, reason: "already-live" });
+    // Rows recover concurrently, so one slow row (an unresolved emulator waiting out its restart
+    // grace) no longer holds every later row past the deadline (#11114).
+    const outcomes: Array<RehydrationRowOutcome | undefined> = [];
+    let nextIndex = 0;
+    let deadlineReached = false;
+    const worker = async (): Promise<void> => {
+      while (!deadlineReached && nextIndex < persistedSessions.length) {
+        const index = nextIndex++;
+        const outcome = await this.rehydratePersistedRow(persistedSessions[index], devicePool);
+        if (deadlineReached) {
+          this.logLateRehydrationOutcome(persistedSessions[index].session_uuid, outcome);
         } else {
-          summary.skipped.push({ sessionUuid: sessionId, reason: "startup-deadline" });
+          outcomes[index] = outcome;
         }
-      }
-      if (!summary.timedOut) {
-        summary.timedOut = true;
-        const skippedCount = summary.skipped.filter(
-          ({ reason }) => reason === "startup-deadline",
-        ).length;
-        logger.warn(
-          `[SessionManager] Startup rehydration deadline reached; skipped ${skippedCount} rows due to startup-deadline`,
-        );
       }
     };
-    const recoveryDeadlineWon = Symbol("startup-deadline");
-    for (const [index, persisted] of persistedSessions.entries()) {
-      const sessionId = persisted.session_uuid;
-      if (!this.isRecoverablePersistedSession(persisted)) {
-        summary.skipped.push({ sessionUuid: sessionId, reason: "not-recoverable" });
-        continue;
-      }
-      const skipReason = this.rehydrationSkipReason(sessionId);
-      if (skipReason) {
-        summary.skipped.push({ sessionUuid: sessionId, reason: skipReason });
-        continue;
-      }
-      if (this.sessionNow() >= deadlineAt) {
-        markDeadline(index);
-        break;
-      }
-      try {
-        const recoveryPromise = this.registerRehydrationRecovery(sessionId, devicePool, persisted);
-        const remaining = Math.max(0, deadlineAt - this.sessionNow());
-        const recoveryResult = await raceWithDeadline(recoveryPromise, {
-          timer: this.timer,
-          timeoutMs: remaining,
-          label: "Session rehydration",
-          timeoutError: () => recoveryDeadlineWon,
-        }).catch((error: unknown) => {
-          if (error !== recoveryDeadlineWon) {
-            throw error;
-          }
-          return recoveryDeadlineWon;
-        });
-        if (recoveryResult === recoveryDeadlineWon) {
-          void recoveryPromise.catch((error) =>
-            logger.warn(
-              `[SessionManager] Rehydration continued after startup deadline for ${sessionId}: ${errorMessage(error)}`,
-            ),
-          );
-          markDeadline(index);
-          break;
+    if (this.sessionNow() < deadlineAt && persistedSessions.length > 0) {
+      const deadlineWon = Symbol("startup-deadline");
+      const workers = Promise.all(
+        Array.from({ length: Math.min(concurrency, persistedSessions.length) }, worker),
+      );
+      const result = await raceWithDeadline(workers, {
+        timer: this.timer,
+        timeoutMs: Math.max(0, deadlineAt - this.sessionNow()),
+        label: "Session rehydration",
+        timeoutError: () => deadlineWon,
+      }).catch((error: unknown) => {
+        if (error !== deadlineWon) {
+          throw error;
         }
-        summary.rehydrated.push(sessionId);
-      } catch (error) {
-        const terminalRelease = this.getTerminalReleaseSnapshot(sessionId);
-        if (terminalRelease) {
-          summary.terminalized.push({
-            sessionUuid: sessionId,
-            reason: terminalRelease.releaseReason,
-          });
-        } else {
-          const reason = errorMessage(error);
-          logger.warn(`[SessionManager] Failed to rehydrate session ${sessionId}: ${reason}`);
-          summary.skipped.push({ sessionUuid: sessionId, reason });
-        }
-      }
+        return deadlineWon;
+      });
+      deadlineReached = result === deadlineWon;
+    } else {
+      deadlineReached = persistedSessions.length > 0;
     }
+    // Rows the deadline kept from starting are recovered by a follow-up sweep, not abandoned.
+    const unstarted = persistedSessions.slice(nextIndex);
+    nextIndex = persistedSessions.length;
+    for (const [index, persisted] of persistedSessions.entries()) {
+      this.recordRehydrationOutcome(summary, persisted, outcomes[index]);
+    }
+    if (deadlineReached && !summary.timedOut) {
+      summary.timedOut = true;
+      const skippedCount = summary.skipped.filter(
+        ({ reason }) => reason === "startup-deadline",
+      ).length;
+      logger.warn(
+        `[SessionManager] Startup rehydration deadline reached; skipped ${skippedCount} rows due to startup-deadline`,
+      );
+    }
+    this.scheduleRehydrationFollowUp(unstarted, devicePool, concurrency);
     logger.info(
       `[SessionManager] Rehydration: ${summary.rehydrated.length} rehydrated, ` +
         `${summary.terminalized.length} terminalized, ${summary.skipped.length} skipped`,
     );
     return summary;
+  }
+
+  private recordRehydrationOutcome(
+    summary: RehydrationSummary,
+    persisted: DeviceSession,
+    outcome: RehydrationRowOutcome | undefined,
+  ): void {
+    const sessionUuid = persisted.session_uuid;
+    if (outcome?.kind === "rehydrated") {
+      summary.rehydrated.push(sessionUuid);
+    } else if (outcome?.kind === "terminalized") {
+      summary.terminalized.push({ sessionUuid, reason: outcome.reason });
+    } else if (outcome) {
+      summary.skipped.push({ sessionUuid, reason: outcome.reason });
+    } else if (!this.isRecoverablePersistedSession(persisted)) {
+      summary.skipped.push({ sessionUuid, reason: "not-recoverable" });
+    } else if (this.sessions.has(sessionUuid)) {
+      summary.skipped.push({ sessionUuid, reason: "already-live" });
+    } else {
+      // Still recovering, or left to the follow-up sweep.
+      summary.skipped.push({ sessionUuid, reason: "startup-deadline" });
+    }
+  }
+
+  private async rehydratePersistedRow(
+    persisted: DeviceSession,
+    devicePool: SessionDeviceAssigner,
+  ): Promise<RehydrationRowOutcome> {
+    const sessionId = persisted.session_uuid;
+    if (!this.isRecoverablePersistedSession(persisted)) {
+      return { kind: "skipped", reason: "not-recoverable" };
+    }
+    const skipReason = this.rehydrationSkipReason(sessionId);
+    if (skipReason) {
+      return { kind: "skipped", reason: skipReason };
+    }
+    try {
+      await this.registerRehydrationRecovery(sessionId, devicePool, persisted);
+      return { kind: "rehydrated" };
+    } catch (error) {
+      const terminalRelease = this.getTerminalReleaseSnapshot(sessionId);
+      if (terminalRelease) {
+        return { kind: "terminalized", reason: terminalRelease.releaseReason };
+      }
+      const reason = errorMessage(error);
+      logger.warn(`[SessionManager] Failed to rehydrate session ${sessionId}: ${reason}`);
+      return { kind: "skipped", reason };
+    }
+  }
+
+  private logLateRehydrationOutcome(sessionId: string, outcome: RehydrationRowOutcome): void {
+    logger.info(
+      `[SessionManager] Rehydration of ${sessionId} finished after the startup deadline: ` +
+        `${outcome.kind}${outcome.kind === "rehydrated" ? "" : ` (${outcome.reason})`}`,
+    );
+  }
+
+  /**
+   * Recover the rows the startup deadline kept from starting (#11114). A row its owner already
+   * recovered on reconnect is skipped as already live or pending.
+   */
+  private scheduleRehydrationFollowUp(
+    rows: DeviceSession[],
+    devicePool: SessionDeviceAssigner,
+    concurrency: number,
+  ): void {
+    const pending = rows.filter(
+      (persisted) =>
+        this.isRecoverablePersistedSession(persisted) && !this.sessions.has(persisted.session_uuid),
+    );
+    if (pending.length === 0) {
+      return;
+    }
+    if (this.rehydrationFollowUpTimer) {
+      this.timer.clearTimeout(this.rehydrationFollowUpTimer);
+    }
+    this.rehydrationFollowUpTimer = this.timer.setTimeout(() => {
+      this.rehydrationFollowUpTimer = null;
+      void this.runRehydrationFollowUp(pending, devicePool, concurrency);
+    }, 0);
+  }
+
+  private async runRehydrationFollowUp(
+    rows: DeviceSession[],
+    devicePool: SessionDeviceAssigner,
+    concurrency: number,
+  ): Promise<void> {
+    logger.info(`[SessionManager] Follow-up rehydration of ${rows.length} deadline-skipped rows`);
+    let nextIndex = 0;
+    const worker = async (): Promise<void> => {
+      while (nextIndex < rows.length) {
+        const persisted = rows[nextIndex++];
+        this.logLateRehydrationOutcome(
+          persisted.session_uuid,
+          await this.rehydratePersistedRow(persisted, devicePool),
+        );
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, rows.length) }, worker));
   }
 
   private recoverySessionFields(
@@ -3234,7 +3363,8 @@ export class SessionManager {
         source: persisted.source,
         autolockEnabled: persisted.autolock_enabled === 1,
         mcpSessionId: persisted.mcp_session_id,
-        daemonSessionId: persisted.daemon_session_id,
+        // The persisted owner is the dead daemon; this daemon now owns the row (#11114).
+        daemonSessionId: this.recoveredRowOwner(),
       },
       ...(persisted.liveness_owner_token
         ? {
@@ -3252,7 +3382,8 @@ export class SessionManager {
   ): Promise<DeviceSession[]> {
     const deadlineWon = Symbol("startup-deadline");
     const recoverableSessions =
-      this.deviceSessionRepository.listRecoverableSessions?.() ?? Promise.resolve([]);
+      this.deviceSessionRepository.listRecoverableSessions?.(this.sessionNow()) ??
+      Promise.resolve([]);
     let result: typeof deadlineWon | DeviceSession[];
     try {
       result = await raceWithDeadline(recoverableSessions, {
@@ -3308,7 +3439,8 @@ export class SessionManager {
   private async terminalizePersistedRecoveryFailure(
     sessionId: string,
     persisted: DeviceSession,
-    error: Pick<SessionRecoveryIdentityLossError, "terminalReleaseReason">,
+    error: Pick<SessionRecoveryIdentityLossError, "terminalReleaseReason"> &
+      Partial<Pick<SessionRecoveryIdentityLossError, "ownerPid">>,
   ): Promise<void> {
     const releasedAtMs = this.sessionNow();
     await this.persistTerminalReleaseIfNeeded({
@@ -3317,6 +3449,7 @@ export class SessionManager {
       releaseReason: error.terminalReleaseReason,
       releasedAtMs,
       terminal: true,
+      ...(error.ownerPid === undefined ? {} : { ownerPid: error.ownerPid }),
       heartbeat: {
         lastHeartbeatMs: persisted.last_used_at_ms,
         hasReceivedHeartbeat: persisted.has_received_heartbeat === 1,
@@ -3415,6 +3548,7 @@ export class SessionManager {
     await this.livenessOwnershipClaimMutexFor(existing).runExclusive(async () => {
       await this.persistSession(
         this.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
+        existing,
       );
     });
     const pendingKeepScreenAwakeRestoration = (
@@ -4133,6 +4267,7 @@ export class SessionManager {
           ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
         },
       };
+      this.captureReleaseRowGeneration(releaseSnapshot, this.persistedRowGenerations.get(session));
 
       // A non-terminal release must not yield after freezing its reason: a
       // concurrent terminal release can only upgrade the shared reason while
@@ -4550,7 +4685,7 @@ export class SessionManager {
     releaseReason: string,
     session: Session,
   ): SessionReleaseSnapshot {
-    return {
+    const upgraded: SessionReleaseSnapshot = {
       ...snapshot,
       releaseReason,
       terminal: isTerminalReleaseReason(releaseReason),
@@ -4559,6 +4694,29 @@ export class SessionManager {
         timeoutMs: this.releaseHeartbeatTimeoutMs(releaseReason, session),
       },
     };
+    this.captureReleaseRowGeneration(upgraded, this.releaseRowGenerations.get(snapshot));
+    return upgraded;
+  }
+
+  private captureReleaseRowGeneration(
+    snapshot: SessionReleaseSnapshot,
+    rowGeneration: number | undefined,
+  ): void {
+    if (rowGeneration !== undefined) {
+      this.releaseRowGenerations.set(snapshot, rowGeneration);
+    }
+  }
+
+  /**
+   * The precondition a release write carries (#11129). A terminal release is a fence that must win
+   * over any row state, so it is unconditional; a non-terminal one applies only to the incarnation
+   * it released, so a delayed or retried write cannot release a re-acquired row.
+   */
+  private releaseWritePrecondition(snapshot: SessionReleaseSnapshot): MarkReleasedOptions {
+    const expectedRowGeneration = snapshot.terminal
+      ? undefined
+      : this.releaseRowGenerations.get(snapshot);
+    return expectedRowGeneration === undefined ? {} : { expectedRowGeneration };
   }
 
   private async completeReleasePersistence(
@@ -4710,6 +4868,7 @@ export class SessionManager {
         terminalStatus,
         snapshot.releasedAtMs,
         snapshot.releaseReason,
+        this.releaseWritePrecondition(snapshot),
       );
       await raceWithDeadline(write, {
         timer: this.timer,
@@ -6948,7 +7107,39 @@ export class SessionManager {
    * and read on the `device:`-label routing hot path (`resolveDeviceLabelSession`).
    */
   setDeviceLabels(sessionId: string, labels: DeviceLabelMap): void {
+    if (this.getSession(sessionId)) {
+      const derived = Object.values(labels).filter((labelSession) => labelSession !== sessionId);
+      if (derived.length > 0) {
+        const indexed = this.derivedLabelSessionsByBase.get(sessionId) ?? [];
+        this.derivedLabelSessionsByBase.set(sessionId, new Set([...indexed, ...derived]));
+      }
+    }
     this.updateSessionCache(sessionId, { deviceLabels: labels });
+  }
+
+  /**
+   * The base session a derived `${base}:${label}` session was published under, or undefined when
+   * `sessionId` is not a known derived label session (#11111).
+   */
+  getBaseSessionOfDerivedLabel(sessionId: string): string | undefined {
+    for (const [base, derived] of this.derivedLabelSessionsByBase) {
+      if (derived.has(sessionId)) {
+        return base;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Remove and return every derived `${base}:${label}` session ever published for `baseSessionId`
+   * (#11091). Unlike the base's `deviceLabels` cache slot, this index survives the base's removal,
+   * so a release of the base can still cascade to its derived sessions. Entries may name sessions
+   * that are already gone; the caller checks each one.
+   */
+  takeDerivedLabelSessions(baseSessionId: string): string[] {
+    const derived = this.derivedLabelSessionsByBase.get(baseSessionId);
+    this.derivedLabelSessionsByBase.delete(baseSessionId);
+    return derived ? [...derived] : [];
   }
 
   /**
@@ -7206,21 +7397,23 @@ export class SessionManager {
     if (!session || session.livenessPolicy === "cli-idle") {
       return undefined;
     }
-    return livenessLeaseState(sessionLeaseSnapshot(session, this.sessionNow()));
+    return livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow()));
   }
 
   /** Whether the session is inside its suspect window (lease expired, grace running). */
   private isSessionSuspect(session: Session): boolean {
     return (
       session.livenessPolicy === "heartbeat" &&
-      livenessLeaseState(sessionLeaseSnapshot(session, this.sessionNow())).phase === "suspect"
+      livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow())).phase === "suspect"
     );
   }
 
   /** Reject a tool call against a suspect session; only its owner's heartbeat restores it. */
   private assertSessionNotSuspect(session: Session): void {
     if (this.isSessionSuspect(session)) {
-      const { remainingMs } = livenessLeaseState(sessionLeaseSnapshot(session, this.sessionNow()));
+      const { remainingMs } = livenessLeaseState(
+        sessionJudgedLeaseSnapshot(session, this.sessionNow()),
+      );
       throw new SessionSuspectError(session.sessionId, remainingMs);
     }
   }
@@ -7539,11 +7732,9 @@ export class SessionManager {
     if (session.livenessPolicy === "cli-idle") {
       return false;
     }
-    // A session whose owner has been heartbeating is held a further suspect
-    // window past its deadline (#10051), so an owner that missed a beat can
-    // still restore it.
-    const idleDeadline = session.expiresAt + suspectGraceMsFor(session);
-    if (this.sessionNow() <= idleDeadline) {
+    // The idle deadline is exactly the idle window after the last control call: the suspect
+    // grace (#10051) belongs to the heartbeat lease only, never to idleness (#11107).
+    if (this.sessionNow() <= session.expiresAt) {
       return false;
     }
     return !isReleaseVetoedByExecutions({
@@ -7565,7 +7756,7 @@ export class SessionManager {
     latestDeadlineMs: number | undefined;
   } {
     return {
-      vetoedSince: session.expiresAt + suspectGraceMsFor(session),
+      vetoedSince: session.expiresAt,
       latestDeadlineMs: this.sessionExecutionDeadlineLookup(session.sessionId),
     };
   }
@@ -7611,7 +7802,7 @@ export class SessionManager {
   ): string {
     if (
       suspectGraceMsFor(session) > 0 &&
-      livenessLeaseState(sessionLeaseSnapshot(session, this.sessionNow())).phase === "lapsed"
+      livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow())).phase === "lapsed"
     ) {
       return "heartbeat-timeout";
     }
@@ -7629,7 +7820,7 @@ export class SessionManager {
     if (execution === undefined) {
       return this.isSessionExpired(session);
     }
-    if (this.sessionNow() <= session.expiresAt + suspectGraceMsFor(session)) {
+    if (this.sessionNow() <= session.expiresAt) {
       return false;
     }
     return execution.startTime > session.expiresAt;
@@ -7766,6 +7957,10 @@ export class SessionManager {
       this.timer.clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
     }
+    if (this.rehydrationFollowUpTimer) {
+      this.timer.clearTimeout(this.rehydrationFollowUpTimer);
+      this.rehydrationFollowUpTimer = null;
+    }
     for (const entry of this.pendingTerminalReleaseRetries.values()) {
       if (entry.handle !== undefined) {
         this.timer.clearTimeout(entry.handle);
@@ -7787,32 +7982,44 @@ export class SessionManager {
   // (issue #2885) only drains fire-and-forget writers at graceful shutdown; an
   // awaited write is already sequenced by its caller and must not be wrapped in
   // `track()`. Do not "fix" this by adding a barrier — that would be a non-bug fix.
-  private async persistSession(session: Session): Promise<void> {
-    await this.deviceSessionRepository.upsertActiveSession({
-      sessionUuid: session.sessionId,
-      deviceId: session.assignedDevice,
-      stableDeviceId: session.stableDeviceId,
-      platform: session.platform,
-      source: session.persistenceMetadata?.source ?? "session-manager",
-      autolockEnabled: session.persistenceMetadata?.autolockEnabled,
-      mcpSessionId: session.persistenceMetadata?.mcpSessionId,
-      daemonSessionId: session.persistenceMetadata?.daemonSessionId,
-      createdAtMs: session.createdAt,
-      lastUsedAtMs: session.lastUsedAt,
-      expiresAtMs: session.expiresAt,
-      sessionTimeoutMs: session.sessionTimeoutMs,
-      heartbeatTimeoutMs: session.heartbeatTimeoutMs,
-      heartbeatTimeoutSource: session.heartbeatTimeoutSource,
-      hasReceivedHeartbeat: session.hasReceivedHeartbeat,
-      livenessPolicy: session.livenessPolicy,
-      preCliHeartbeatTimeoutMs: session.preCliLiveness?.heartbeatTimeoutMs,
-      preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
-      preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
-    });
+  private async persistSession(session: Session, incarnation: Session): Promise<void> {
+    const rowGeneration = await this.deviceSessionRepository.upsertActiveSession(
+      {
+        sessionUuid: session.sessionId,
+        deviceId: session.assignedDevice,
+        stableDeviceId: session.stableDeviceId,
+        platform: session.platform,
+        source: session.persistenceMetadata?.source ?? "session-manager",
+        autolockEnabled: session.persistenceMetadata?.autolockEnabled,
+        mcpSessionId: session.persistenceMetadata?.mcpSessionId,
+        daemonSessionId: this.daemonSessionId ?? session.persistenceMetadata?.daemonSessionId,
+        createdAtMs: session.createdAt,
+        lastUsedAtMs: session.lastUsedAt,
+        expiresAtMs: session.expiresAt,
+        sessionTimeoutMs: session.sessionTimeoutMs,
+        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+        heartbeatTimeoutSource: session.heartbeatTimeoutSource,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+        livenessPolicy: session.livenessPolicy,
+        preCliHeartbeatTimeoutMs: session.preCliLiveness?.heartbeatTimeoutMs,
+        preCliHeartbeatTimeoutSource: session.preCliLiveness?.heartbeatTimeoutSource,
+        preCliSessionTimeoutMs: session.preCliLiveness?.sessionTimeoutMs,
+      },
+      // The retention prune compares session-clock release stamps (#11129).
+      this.sessionNow(),
+    );
+    // Recorded before the ownership write, which can fail after the row already advanced.
+    this.recordPersistedRowGeneration(incarnation, rowGeneration);
     await this.deviceSessionRepository.replaceLivenessOwnership?.(
       session.sessionId,
       session.livenessOwnerToken ?? null,
     );
+  }
+
+  private recordPersistedRowGeneration(incarnation: Session, rowGeneration: number | void): void {
+    if (typeof rowGeneration === "number") {
+      this.persistedRowGenerations.set(incarnation, rowGeneration);
+    }
   }
 
   private async recoveryTargetFromPersisted(
@@ -7861,7 +8068,7 @@ export class SessionManager {
         source: persisted.source,
         autolockEnabled: persisted.autolock_enabled === 1,
         mcpSessionId: persisted.mcp_session_id,
-        daemonSessionId: persisted.daemon_session_id,
+        daemonSessionId: this.recoveredRowOwner(),
       },
       ...(persisted.platform === "android"
         ? { androidEmulator: isAndroidEmulatorSerial(persisted.device_id) }
@@ -7947,7 +8154,7 @@ export class SessionManager {
     const issued: IssuedActivityWrite = { key: activityUpdateKey(update) };
     this.issuedActivityWrites.set(session, issued);
     try {
-      await this.deviceSessionRepository.recordActivity(session.sessionId, update);
+      await this.persistSessionActivity(session, update);
     } catch (error) {
       // Forget a failed write only while it is still the newest one, so a later write that
       // carries the same row is not undone; a stale entry only costs one redundant write.
@@ -7956,6 +8163,42 @@ export class SessionManager {
       }
       throw new SessionActivityPersistenceError(session.sessionId, error);
     }
+  }
+
+  /**
+   * Write an activity row. When no active row matched (#11129) while this daemon still holds the
+   * session — a peer expired it — re-upsert the whole row so the live session stays recoverable; a
+   * terminal row stays a failure, so the dedupe forgets the write. A session this daemon already
+   * released has no row to keep.
+   */
+  private async persistSessionActivity(
+    session: Session,
+    update: DeviceSessionActivityUpdate,
+  ): Promise<void> {
+    try {
+      await this.deviceSessionRepository.recordActivity(session.sessionId, update);
+      return;
+    } catch (error) {
+      if (!(error instanceof DeviceSessionNotActiveError)) {
+        throw error;
+      }
+    }
+    if (!this.isAdmittedForAutomation(session)) {
+      // Expected: this daemon's own release retired the row while the write was in flight; the
+      // released incarnation has nothing left to persist, and callers detect the release.
+      logger.debug(`[SessionManager] Activity for released session ${session.sessionId} skipped`);
+      return;
+    }
+    // A terminal row is final, whoever wrote it: never revive it.
+    const terminal = await this.getPersistedTerminalRelease(session.sessionId);
+    if (terminal || !this.isAdmittedForAutomation(session)) {
+      throw new DeviceSessionNotActiveError(session.sessionId);
+    }
+    logger.warn(
+      `[SessionManager] Session ${session.sessionId} is live but its row is not active; ` +
+        "re-persisting it",
+    );
+    await this.persistSession(session, session);
   }
 
   /** Whether the session's persisted activity fields differ from the newest issued write. */

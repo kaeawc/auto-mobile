@@ -75,6 +75,145 @@ class DaemonHeartbeatTest {
   }
 
   @Test
+  fun `a bare 404 before any successful heartbeat keeps heartbeating`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { sessionId ->
+      if (fake.sentSessions.size <= 3) {
+        throw DaemonSessionReleasedException(sessionId, null, "Session not found")
+      }
+    }
+    fake.maxSleeps = 5
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("new")
+    fake.onSleep = { if (fake.sleepIntervals.size == 5) handle.close() }
+
+    fake.runnables.single().run()
+
+    assertEquals(5, fake.sentSessions.size)
+    assertNull(fake.manager.sessionLoss("new"))
+  }
+
+  @Test
+  fun `a bare 404 after a successful heartbeat is a confirmed loss`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { sessionId ->
+      if (fake.sentSessions.size > 1) {
+        throw DaemonSessionReleasedException(sessionId, null, "Session not found")
+      }
+    }
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("s1")
+    fake.onSleep = { if (fake.sleepIntervals.size == 3) handle.close() }
+
+    fake.runnables.single().run()
+
+    assertEquals(2, fake.sentSessions.size)
+    assertEquals(true, fake.manager.sessionLoss("s1")?.confirmed)
+  }
+
+  @Test
+  fun `a never-acknowledged id gives up after a bounded number of 404s as unconfirmed`() {
+    val fake = HeartbeatFake()
+    fake.onSend = { throw DaemonSessionReleasedException(it, null, "Session not found") }
+    fake.maxSleeps = 40
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("ghost")
+    fake.onSleep = { if (fake.sleepIntervals.size == 40) handle.close() }
+
+    fake.runnables.single().run()
+
+    assertEquals(30, fake.sentSessions.size)
+    assertEquals(false, fake.manager.sessionLoss("ghost")?.confirmed)
+  }
+
+  @Test
+  fun `removeSession prunes acknowledgement and miss state but keeps the loss marker`() {
+    val fake = HeartbeatFake()
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("s1")
+    fake.manager.addSession("ghost")
+    fake.onSend = { if (it == "ghost") throw DaemonSessionReleasedException(it, null, "nf") }
+    fake.onSleep = { handle.close() }
+    fake.runnables.single().run()
+    assertTrue(fake.manager.hasProgressState("s1"))
+    assertTrue(fake.manager.hasProgressState("ghost"))
+
+    fake.manager.removeSession("s1")
+    fake.manager.removeSession("ghost")
+
+    assertFalse(fake.manager.hasProgressState("s1"))
+    assertFalse(fake.manager.hasProgressState("ghost"))
+  }
+
+  @Test
+  fun `an in-flight 404 without a release reason does not re-create pruned miss state`() {
+    val fake = HeartbeatFake()
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("s1")
+    fake.onSend = {
+      // removeSession lands while this heartbeat is still in flight, then the call fails.
+      fake.manager.removeSession(it)
+      throw DaemonSessionReleasedException(it, null, "nf")
+    }
+    fake.onSleep = { handle.close() }
+
+    fake.runnables.single().run()
+
+    assertFalse(fake.manager.hasProgressState("s1"))
+    assertNull(fake.manager.sessionLoss("s1"))
+  }
+
+  @Test
+  fun `an in-flight release with a reason does not write a loss for a removed session`() {
+    val fake = HeartbeatFake()
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("s1")
+    fake.onSend = {
+      fake.manager.removeSession(it)
+      throw DaemonSessionReleasedException(it, "idle", "released")
+    }
+    fake.onSleep = { handle.close() }
+
+    fake.runnables.single().run()
+
+    assertNull(fake.manager.sessionLoss("s1"))
+    assertFalse(fake.manager.hasProgressState("s1"))
+  }
+
+  @Test
+  fun `a successful in-flight heartbeat does not re-confirm a removed session`() {
+    val fake = HeartbeatFake()
+    val handle = fake.manager.start(10L)
+    fake.manager.addSession("s1")
+    fake.onSend = { fake.manager.removeSession(it) }
+    fake.onSleep = { handle.close() }
+
+    fake.runnables.single().run()
+
+    assertFalse(fake.manager.hasProgressState("s1"))
+  }
+
+  @Test
+  fun `a stopped loop finishing its iteration does not charge misses alongside the new loop`() {
+    val fake = HeartbeatFake()
+    val first = fake.manager.start(10L)
+    fake.manager.addSession("ghost")
+    fake.onSend = {
+      // The old loop is mid-send when its holder closes and a new holder starts a second loop.
+      first.close()
+      fake.manager.start(10L)
+      throw DaemonSessionReleasedException(it, null, "nf")
+    }
+    fake.onSleep = {}
+
+    fake.runnables.first().run()
+
+    assertEquals(2, fake.runnables.size)
+    assertFalse(fake.manager.hasProgressState("ghost"))
+    assertNull(fake.manager.sessionLoss("ghost"))
+  }
+
+  @Test
   fun `a transient heartbeat failure keeps the session heartbeating`() {
     val fake = HeartbeatFake()
     fake.onSend = { throw java.io.IOException("connection refused") }
@@ -341,6 +480,7 @@ class DaemonHeartbeatTest {
     val sleepIntervals = mutableListOf<Long>()
     val threadNames = mutableListOf<String>()
     val runnables = mutableListOf<Runnable>()
+    var maxSleeps = 3
     var onSleep: () -> Unit = { throw AssertionError("Unexpected sleep") }
     val manager =
       BackgroundHeartbeatManager(
@@ -350,7 +490,7 @@ class DaemonHeartbeatTest {
         },
         sleeper = {
           sleepIntervals.add(it)
-          assertTrue("Loop must stop deterministically", sleepIntervals.size <= 3)
+          assertTrue("Loop must stop deterministically", sleepIntervals.size <= maxSleeps)
           onSleep()
         },
         threadFactory = { name, runnable ->

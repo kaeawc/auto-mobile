@@ -1255,9 +1255,9 @@ describe("proxy liveness stalls (#10053)", () => {
     test("F4: after a long proxy stall, a daemon that is slow to answer still restores the session", async () => {
       const proxy = createProxy(2_000);
       await acquire(proxy, "getAndroid");
-      timer.stall(55_000);
+      timer.stall(48_000);
       // The daemon woke with the proxy and needs a few seconds before it answers heartbeats,
-      // still inside its 60 s idle window plus the suspect grace.
+      // still inside its 60 s idle window (the suspect grace never extends idleness, #11107).
       hangUntil = timer.now() + 2_000 + 3_000;
 
       await baseTimer.advanceTimeAsync(2_000);

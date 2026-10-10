@@ -365,6 +365,15 @@ internal object AutoMobilePlanExecutor {
     // device (#10834) so no other session can take the device between the attempt and recovery.
     // Every path that does not go on to recovery releases the held session itself.
     val holdForRecovery = recoveryMayFollow(options, recoveryAlreadyAttempted)
+    // A resumed run takes over the session the daemon held for recovery. Until this run's
+    // executePlan reaches the daemon, whose plan lifecycle then releases it, the runner still owns
+    // that session: it releases it before switching to a fresh one or giving up, or the held
+    // session blocks the device until its lease lapses (#11139).
+    var takenOverSession: String? = sessionUuidOverride.takeIf { !holdForRecovery }
+    val releaseTakenOverSession = {
+      takenOverSession?.let { releaseHeldSession(it) }
+      takenOverSession = null
+    }
 
     var response: DaemonResponse
     var outputPayload: String
@@ -438,6 +447,7 @@ internal object AutoMobilePlanExecutor {
           )
         }
 
+        takenOverSession = null
         DaemonHeartbeat.registerSession(sessionUuid)
         response =
           try {
@@ -487,6 +497,7 @@ internal object AutoMobilePlanExecutor {
             "(wait ${deviceOwnedWaits + 1}): $errorMessage",
         )
         if (holdForRecovery) releaseHeldSession(sessionUuid)
+        releaseTakenOverSession()
         deviceOwnedSleeper(delayMs)
         deviceOwnedWaits++
         deviceOwnedWaitMs += delayMs
@@ -495,16 +506,33 @@ internal object AutoMobilePlanExecutor {
         attemptSessionUuid = UUID.randomUUID().toString()
         continue
       }
-      if (attempt > maxRetries || !(parsed.retryable || isTransientError(errorMessage))) {
+      if (
+        attempt > maxRetries ||
+          !(parsed.retryable || parsed.acquireNewSession || isTransientError(errorMessage))
+      ) {
         break
       }
 
       // The retry is a fresh session; the held one would otherwise keep the device from it.
       if (holdForRecovery) releaseHeldSession(sessionUuid)
+      releaseTakenOverSession()
       println("Retrying plan execution after transient error (attempt $attempt): $errorMessage")
       Thread.sleep(retryBackoffMs)
     }
 
+    // The daemon reports whether it actually kept the failed attempt's session (#11091): a plan
+    // with derived device-label sessions is always released, so recovery would drive a device
+    // this runner no longer holds. Fail now, with nothing to release.
+    if (holdForRecovery && parsed.sessionHeld == false) {
+      return sessionNotHeldFailure(
+        sessionUuid = attemptSessionUuid,
+        output = outputPayload,
+        errorOutput = response.error ?: parsed.errorMessage,
+        toolResults = toolResults,
+      )
+    }
+
+    releaseTakenOverSession()
     // Non-transient failure or retries exhausted — attempt recovery if allowed
     val failedStepContext =
       buildFailedStepContext(response, json, planContent, options.device, secretValues)
@@ -558,6 +586,34 @@ internal object AutoMobilePlanExecutor {
   // ── Failure handling & recovery ───────────────────────────────────────────
 
   /**
+   * The failure to report when the daemon answered a failed executePlan that asked to hold its
+   * session with `sessionHeld: false` (#11091): it released the session and device, so AI recovery
+   * is skipped rather than run on a device another session may already own.
+   */
+  private fun sessionNotHeldFailure(
+    sessionUuid: String,
+    output: String,
+    errorOutput: String,
+    toolResults: List<ToolResultEntry>,
+  ): InternalExecutionResult {
+    val reason =
+      "AI recovery skipped: the daemon released session $sessionUuid after the failed plan " +
+        "(sessionHeld: false; plans with derived device-label sessions are always released)"
+    val errorMessage =
+      "AutoMobile plan execution failed with exit code 1" +
+        (if (errorOutput.isNotEmpty()) "\nErrors: $errorOutput" else "") +
+        "\n$reason"
+    System.err.println(errorMessage)
+    return InternalExecutionResult(
+      success = false,
+      exitCode = 1,
+      output = output,
+      errorMessage = errorMessage,
+      toolResults = toolResults,
+    )
+  }
+
+  /**
    * The failure to report when the daemon released [sessionUuid] while the runner heartbeated it
    * (#11072), or null while the session is still held. The daemon already freed the session, so
    * there is nothing to release.
@@ -568,8 +624,11 @@ internal object AutoMobilePlanExecutor {
     errorMessage: String,
     toolResults: List<ToolResultEntry>,
     recoveryAttempted: Boolean,
+    releaseHeld: () -> Unit = {},
   ): InternalExecutionResult? {
     val loss = sessionUuid?.let { DaemonHeartbeat.sessionLoss(it) } ?: return null
+    // An unconfirmed loss may be a session the daemon still holds: release it rather than leak it.
+    if (!loss.confirmed) releaseHeld()
     val reason = "AI recovery cannot continue: ${loss.describe()}"
     System.err.println(reason)
     return InternalExecutionResult(
@@ -647,6 +706,7 @@ internal object AutoMobilePlanExecutor {
         errorMessage,
         toolResults,
         recoveryAttempted = false,
+        releaseHeld = releaseHeld,
       )
       ?.let {
         return it
@@ -663,7 +723,14 @@ internal object AutoMobilePlanExecutor {
       }
 
     // Released while recovery ran: never resume on it, whatever recovery reported.
-    sessionLossFailure(recoverySession, result, errorMessage, toolResults, recoveryAttempted = true)
+    sessionLossFailure(
+        recoverySession,
+        result,
+        errorMessage,
+        toolResults,
+        recoveryAttempted = true,
+        releaseHeld = releaseHeld,
+      )
       ?.let {
         return it
       }
@@ -854,6 +921,12 @@ internal object AutoMobilePlanExecutor {
     val retryable =
       errorObject?.get("retryable") == JsonPrimitive(true) ||
         parsed["retryable"] == JsonPrimitive(true)
+    // A terminal-session refusal says `retryable: false` for its UUID and `nextAction:
+    // acquire_new_session` (#11098); a retry here always runs under a fresh session UUID.
+    val acquireNewSession =
+      ((errorObject?.get("nextAction") ?: parsed["nextAction"]) as? JsonPrimitive)
+        ?.takeIf { it.isString }
+        ?.content == ACQUIRE_NEW_SESSION_NEXT_ACTION
     if (isError || parsed.containsKey("error") || !success) {
       // The typed `code` (never the message) is what clients match on.
       val code =
@@ -867,6 +940,13 @@ internal object AutoMobilePlanExecutor {
         retryable,
         code,
         daemonMessage,
+        sessionHeld =
+          when (parsed["sessionHeld"]) {
+            JsonPrimitive(true) -> true
+            JsonPrimitive(false) -> false
+            else -> null
+          },
+        acquireNewSession = acquireNewSession,
       )
     }
     return ParsedToolResult(true, "")
@@ -1158,6 +1238,12 @@ internal object AutoMobilePlanExecutor {
       )
     }
 
+  /**
+   * `nextAction` of a terminal-session refusal: acquire a new session, never retry the UUID
+   * (#11098).
+   */
+  internal const val ACQUIRE_NEW_SESSION_NEXT_ACTION = "acquire_new_session"
+
   /** Typed code for a device-mutating call refused because another session holds it (#10783). */
   internal const val DEVICE_OWNED_BY_OTHER_SESSION_CODE = "device_owned_by_other_session"
 
@@ -1169,12 +1255,16 @@ internal object AutoMobilePlanExecutor {
   /** Typed code for a bind refused because another AutoMobile daemon claims the device (#10980). */
   internal const val DEVICE_OWNED_BY_OTHER_DAEMON_CODE = "device_owned_by_other_daemon"
 
+  /** Typed code for a bind refused while the device is under a kill reservation (#11088). */
+  internal const val DEVICE_SHUTTING_DOWN_CODE = "device_shutting_down"
+
   /** Refusals the runner waits out with the bounded held-device wait. */
   private val DEVICE_WAIT_CODES =
     setOf(
       DEVICE_OWNED_BY_OTHER_SESSION_CODE,
       DEVICE_CLEANUP_IN_PROGRESS_CODE,
       DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+      DEVICE_SHUTTING_DOWN_CODE,
     )
 
   private const val DEVICE_OWNED_INITIAL_DELAY_MS = 500L
@@ -1207,6 +1297,7 @@ internal object AutoMobilePlanExecutor {
         "Device is still finishing its previous session's cleanup ($DEVICE_CLEANUP_IN_PROGRESS_CODE)"
       DEVICE_OWNED_BY_OTHER_DAEMON_CODE ->
         "Device is claimed by another AutoMobile daemon ($DEVICE_OWNED_BY_OTHER_DAEMON_CODE)"
+      DEVICE_SHUTTING_DOWN_CODE -> "Device is shutting down ($DEVICE_SHUTTING_DOWN_CODE)"
       else -> "Device is held by another session ($DEVICE_OWNED_BY_OTHER_SESSION_CODE)"
     }) +
       (parsed.daemonMessage?.let { ": $it" } ?: "") +
@@ -1242,5 +1333,12 @@ internal object AutoMobilePlanExecutor {
     val code: String? = null,
     /** The daemon's human-readable `error` string, when it sent one. */
     val daemonMessage: String? = null,
+    /**
+     * Whether the daemon kept the session after a failed run that asked to hold it (#11091); null
+     * when it did not say.
+     */
+    val sessionHeld: Boolean? = null,
+    /** The refusal named a terminal session UUID and told the client to acquire a new one. */
+    val acquireNewSession: Boolean = false,
   )
 }

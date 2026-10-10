@@ -311,7 +311,8 @@ async function runToolViaDaemon(
   params: Record<string, any>,
   daemonOptions?: DaemonOptions,
 ): Promise<any> {
-  const proxy = daemonProxyFactory({ daemonOptions });
+  // One-shot: the daemon treats this connection's acquisitions as anonymous (#11096).
+  const proxy = daemonProxyFactory({ daemonOptions, oneShotCli: true });
 
   try {
     await ensureCliToolEnabled(proxy, toolName);
@@ -482,6 +483,22 @@ function writeCliToolOutput(result: unknown, toolName: string): void {
   );
 }
 
+/**
+ * Render a payload's `error` for stderr. Structured errors (`session_ownership_lost`,
+ * `session_suspect`, recovery-assignment refusals) print as their message plus `nextAction`
+ * rather than a truncated object inspect dump (#11148).
+ */
+function formatCliToolError(error: unknown): unknown {
+  if (!error || typeof error !== "object") {
+    return error;
+  }
+  const { message, nextAction } = error as { message?: unknown; nextAction?: unknown };
+  if (typeof message !== "string") {
+    return error;
+  }
+  return typeof nextAction === "string" ? `${message}\nNext: ${nextAction}` : message;
+}
+
 function handleToolResult(result: any, toolName: string): void {
   writeCliToolOutput(result, toolName);
 
@@ -494,7 +511,7 @@ function handleToolResult(result: any, toolName: string): void {
     // envelope's text payload may parse to `null`/a primitive (the CLI accepts
     // the daemon result as `any`), so only dereference `.error` on an object.
     if (actualResult && typeof actualResult === "object" && actualResult.error) {
-      console.error(actualResult.error);
+      console.error(formatCliToolError(actualResult.error));
     } else if (
       result?.isError === true &&
       Array.isArray(result.content) &&

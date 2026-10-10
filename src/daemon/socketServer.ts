@@ -23,6 +23,7 @@ import {
 import { dropMcpRecording } from "../server/mcpRecordingManager";
 import { isToolUnavailableWireError } from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
+import type { RefusedOwnedSessionRestore } from "./devicePool";
 import { GestureOwnershipRegistry } from "./gestureOwnership";
 import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
 import { McpOverloadError, McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
@@ -56,7 +57,10 @@ import {
   DAEMON_RELEASED_SESSION_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  DAEMON_ONE_SHOT_CLI_PARAM,
+  INTERNAL_ONE_SHOT_CLI_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
   DAEMON_VERSION,
@@ -129,6 +133,7 @@ import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSe
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   assertInputRequesterHoldsDevice,
+  deviceAlreadyAssignedToAnotherSessionError,
   InputDeviceOwnedError,
   parseInputRequesterSessionUuid,
 } from "./inputDeviceOwnership";
@@ -159,6 +164,7 @@ import {
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
+import { BootedDeviceDiscoveryIncompleteError } from "../devices/deviceBootService";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { PressButton } from "../features/action/PressButton";
@@ -2110,9 +2116,7 @@ export class UnixSocketServer {
           ownerSocket,
           signal: activeRequestSignal,
         });
-        return (
-          (await this.provisionCancellationReply(request, failure, activeRequestSignal)) ?? failure
-        );
+        return failure;
       }
     };
     // Admit through the socket's queue: same-lane requests keep arrival order, while an
@@ -2137,10 +2141,19 @@ export class UnixSocketServer {
           }
           // A cancelled provisionDevice is answered by its handler (after a bounded wait for the
           // typed cancellation result), not by this race, which would reply at once (#11074).
-          return this.runCancellableQueuedHandler(
-            handler,
-            this.isProvisionDeviceCall(request) ? undefined : cancellation.signal,
-          );
+          // provisionDevice is a barrier, so a cancel must release it at once: its typed
+          // cancellation reply is awaited outside the barrier below (#11092).
+          return this.isProvisionDeviceCall(request)
+            ? this.runProvisionBarrier(handler, cancellation.signal, () =>
+                this.mcpForwardFailureResponse({
+                  error: cancellation.signal.reason,
+                  request,
+                  sessionId,
+                  ownerSocket,
+                  signal: cancellation.signal,
+                }),
+              )
+            : this.runCancellableQueuedHandler(handler, cancellation.signal);
         },
         {
           timer: this.timer,
@@ -2161,7 +2174,46 @@ export class UnixSocketServer {
             }),
         },
       )
+      .then(async (response) =>
+        response && !response.success
+          ? ((await this.provisionCancellationReply(
+              request,
+              response,
+              cancellation.signal.aborted ? cancellation.signal : activeRequestSignal,
+            )) ?? response)
+          : response,
+      )
       .finally(cancellation.dispose);
+  }
+
+  /**
+   * Runs the provisionDevice handler inside the admission barrier but gives the barrier back as
+   * soon as the caller cancels, answering with [cancelledReply]. The handler keeps rolling back in
+   * the background; its typed outcome is awaited by the caller of the barrier, not inside it.
+   */
+  private runProvisionBarrier(
+    handler: () => Promise<DaemonResponse | undefined>,
+    cancelSignal: AbortSignal,
+    cancelledReply: () => DaemonResponse | undefined,
+  ): Promise<DaemonResponse | undefined> {
+    const operation = handler();
+    this.trackRequestHandler(
+      operation.then(
+        () => {},
+        () => {},
+      ),
+    );
+    return new Promise((resolve, reject) => {
+      const onAbort = () => resolve(cancelledReply());
+      if (cancelSignal.aborted) {
+        onAbort();
+      } else {
+        cancelSignal.addEventListener("abort", onAbort, { once: true });
+      }
+      operation
+        .then(resolve, reject)
+        .finally(() => cancelSignal.removeEventListener("abort", onAbort));
+    });
   }
 
   /** Retryable refusal for a request that has not started work (no `requestMayHaveDispatched`). */
@@ -2840,12 +2892,46 @@ export class UnixSocketServer {
     // Restoration attaches only live sessions. It restores both explicit
     // acquisition ownership and autolock routing without reallocating a
     // released UUID.
-    await pool.restoreOwnedDeviceSessionsForMcpSession?.(ids, socketSessionId);
+    const refused =
+      (await pool.restoreOwnedDeviceSessionsForMcpSession?.(
+        ids,
+        socketSessionId,
+        this.ownedSessionsOwnerToken(args),
+      )) ?? [];
     if (this.releaseBindingsIfSocketDisconnected(socketSessionId, ownerSocket, pool)) {
       return;
     }
     await pool.restoreAutolockSessionsForMcpSession?.(ids, socketSessionId);
     this.releaseBindingsIfSocketDisconnected(socketSessionId, ownerSocket, pool);
+    this.failIfCallTargetsRefusedRestore(args, refused);
+  }
+
+  /**
+   * A refused owned-session restore skips that session rather than failing an unrelated call
+   * (#11107): the call fails only when it targets the refused session or its device.
+   */
+  private failIfCallTargetsRefusedRestore(
+    args: unknown,
+    refused: readonly RefusedOwnedSessionRestore[],
+  ): void {
+    const record =
+      args && typeof args === "object" && !Array.isArray(args)
+        ? (args as Record<string, unknown>)
+        : {};
+    for (const { sessionId, deviceId, reason } of refused) {
+      logger.warn(
+        `[McpForward] skipped restoring owned session ${sessionId} on ${deviceId}: ${reason}`,
+      );
+      if (record.sessionUuid === sessionId || record.deviceId === deviceId) {
+        throw deviceAlreadyAssignedToAnotherSessionError(deviceId);
+      }
+    }
+  }
+
+  /** The restoring proxy's liveness owner token, when it sent one with its owned sessions. */
+  private ownedSessionsOwnerToken(args: unknown): string | undefined {
+    const token = (args as Record<string, unknown>)[DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM];
+    return typeof token === "string" && token.trim() !== "" ? token : undefined;
   }
 
   private selectorSessionIds(args: unknown): string[] | undefined {
@@ -5003,8 +5089,9 @@ export class UnixSocketServer {
         }
 
         // Find the booted device
-        const bootedDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices(
+        const bootedDevices = await this.listBootedDevicesForIdeAction(
           args.platform,
+          args.deviceId,
         );
         // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
         await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/updateService");
@@ -5221,6 +5308,31 @@ export class UnixSocketServer {
   }
 
   /**
+   * Booted devices for an `ide/*` action on one serial. iOS discovery has two
+   * sources, and the legacy listing turns a failed simctl sweep into `[]`, which
+   * surfaced as a misleading "Device not found". When the serial is absent from an
+   * incomplete iOS sweep the absence proves nothing, so refuse with the retryable
+   * discovery error instead (#11122, cf. #11103).
+   */
+  private async listBootedDevicesForIdeAction(
+    platform: "android" | "ios",
+    serial: string,
+  ): Promise<BootedDevice[]> {
+    const manager = PlatformDeviceManagerFactory.getInstance();
+    if (platform !== "ios") {
+      return manager.getBootedDevices(platform);
+    }
+    const discovery = await manager.getBootedDevicesDetailed("ios");
+    if (
+      !discovery.succeededPlatforms.has("ios") &&
+      !discovery.devices.map((device) => device.deviceId).includes(serial)
+    ) {
+      throw new BootedDeviceDiscoveryIncompleteError("ios", discovery.discoveryErrors?.ios);
+    }
+    return discovery.devices;
+  }
+
+  /**
    * Resolve the platform-appropriate storage-mutation client for a key-value
    * `ide/*` request. iOS Storage-facet edits carry `platform: "ios"` so the pane
    * targets the iOS simulator + IOSCtrlProxyClient; a missing platform defaults
@@ -5240,8 +5352,7 @@ export class UnixSocketServer {
     if (platform !== "android" && platform !== "ios") {
       throw new Error(`Invalid platform: ${platform}. Must be 'android' or 'ios'.`);
     }
-    const bootedDevices =
-      await PlatformDeviceManagerFactory.getInstance().getBootedDevices(platform);
+    const bootedDevices = await this.listBootedDevicesForIdeAction(platform, deviceId);
     // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
     await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/keyValueMutation");
     this.assertDeviceActionable(deviceId, "to mutate stored values");
@@ -7268,6 +7379,7 @@ export class UnixSocketServer {
     if (args === null || args === undefined) {
       return {
         __mcpSessionId: socketSessionId,
+        ...this.oneShotCliMarker(socketSessionId),
         [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
         [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: deadlineMs,
       };
@@ -7280,6 +7392,10 @@ export class UnixSocketServer {
     const forwardedArgs = { ...args } as Record<string, unknown>;
     delete forwardedArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
     delete forwardedArgs[DAEMON_OWNED_SESSIONS_PARAM];
+    delete forwardedArgs[DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM];
+    this.recordOneShotCliConnection(socketSessionId, forwardedArgs);
+    // Only the daemon asserts the loopback marker, from the connection's own declaration.
+    delete forwardedArgs[INTERNAL_ONE_SHOT_CLI_PARAM];
     const boundSessionUuid = this.getSessionUuid(forwardedArgs);
     const usesBoundSession = forwardedArgs[DAEMON_BOUND_SESSION_PARAM] === boundSessionUuid;
     delete forwardedArgs[DAEMON_BOUND_SESSION_PARAM];
@@ -7293,9 +7409,32 @@ export class UnixSocketServer {
     return {
       ...forwardedArgs,
       __mcpSessionId: socketSessionId,
+      ...this.oneShotCliMarker(socketSessionId),
       [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
       [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: deadlineMs,
     };
+  }
+
+  /**
+   * Consume a one-shot `--cli` connection's declaration (#11096) and remember it for the
+   * connection: every later call on the socket is forwarded with the loopback marker.
+   */
+  private recordOneShotCliConnection(
+    socketSessionId: string,
+    forwardedArgs: Record<string, unknown>,
+  ): void {
+    const declared = forwardedArgs[DAEMON_ONE_SHOT_CLI_PARAM] === true;
+    delete forwardedArgs[DAEMON_ONE_SHOT_CLI_PARAM];
+    const session = this.sessions.get(socketSessionId);
+    if (declared && session) {
+      session.oneShotCli = true;
+    }
+  }
+
+  private oneShotCliMarker(socketSessionId: string): Record<string, true> {
+    return this.sessions.get(socketSessionId)?.oneShotCli
+      ? { [INTERNAL_ONE_SHOT_CLI_PARAM]: true }
+      : {};
   }
 
   /**

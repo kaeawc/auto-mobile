@@ -230,7 +230,7 @@ owner's (#10964); a read on a held device is connect-only, on its own lane (#109
 A recording stops and finalizes on its session's release, capped near 120 s (#10957),
 and an owner-less one stops on acquisition (#10961). Acquisition refusals that can
 clear on their own are typed and retryable: `device_cleanup_in_progress` (#10960)
-and `device_owned_by_other_daemon`. See `docs/using/device-ownership.md`.
+`device_owned_by_other_daemon`, and `device_shutting_down` (#11088). See `docs/using/device-ownership.md`.
 
 Open owner question: is non-persistence acceptable? Clients must register again
 after daemon restart. (Resolved question: watching is allowed on any device and
@@ -249,3 +249,11 @@ enforcement nor desktop composition.
 Lifecycle ownership requires positive evidence for the configured namespace: a live PID with matching generation in its PID record, an argv socket marker, or the daemon answering on that socket. Unmarked processes from the machine-wide process table are never presumed to belong to this namespace. Revalidate both ownership and generation before every signal, including SIGKILL; a live PID missing from the scan is inconclusive, and must be authenticated through the namespace socket or rejected without signalling. Never signal a PID not verified as this namespace's.
 
 Tests must stub process discovery through the `DaemonProcessFinder` constructor seam, never by spying on `findAllDaemonProcesses`/`findLiveDaemonProcesses`; lifecycle discovery does not route through those methods.
+
+## Session lifetime summary
+
+User-facing statement of the release model (lease and grace, exact idle release,
+`idleReleaseAt` wall clock, one-shot CLI anonymity, terminal-session refusals,
+offline budget, restart recovery): `docs/using/device-ownership.md`. Change it in
+the same PR as any constant in `src/daemon/sessionLivenessWindows.ts` or
+`OFFLINE_DEVICE_DISCONNECT_BUDGET_MS`.

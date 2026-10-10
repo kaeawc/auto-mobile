@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { DEVICE_OWNED_BY_OTHER_DAEMON_CODE } from "../../src/daemon/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
+import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession } from "../../src/db/types";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
@@ -152,6 +153,26 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
       code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
       deviceId: DEVICE_ID,
       retryable: false,
+    });
+
+    // The resuming client's next call hits the terminal session: it must be told to acquire a new
+    // session (not retry the UUID), naming the terminal reason and the owning daemon (#11098).
+    const terminal = await resume(a);
+    expect(terminal).toBeInstanceOf(TerminalSessionError);
+    const { release } = terminal as TerminalSessionError;
+    expect(
+      sessionOwnershipLostPayload({
+        message: (terminal as Error).message,
+        sessionUuid: SESSION,
+        reason: release.releaseReason,
+        release,
+      }).error,
+    ).toMatchObject({
+      code: "session_ownership_lost",
+      reason: "identity-recovery-owned-by-other-daemon",
+      retryable: false,
+      nextAction: "acquire_new_session",
+      ownerPid: DAEMON_B_PID,
     });
   });
 

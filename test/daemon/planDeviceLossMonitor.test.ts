@@ -101,6 +101,7 @@ function harness() {
     deferredSessionRecoverySweeps: new Set(),
     devicePool: {
       mapAndroidDiscovery: transportAliases.mapDiscovery.bind(transportAliases),
+      getAndroidTransportAliases: transportAliases.aliases.bind(transportAliases),
       reconcileDiscoveryObservation: async () => {
         throw new Error("Plan discovery must remain presence-only");
       },
@@ -263,6 +264,46 @@ describe("confirmed plan device loss", () => {
     );
     expect(plan.abortController.signal.aborted).toBe(true);
     expect(await h.incidents.list()).toHaveLength(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a USB-canonical phone whose Wi-Fi alias is offline keeps the plan alive (#11133)", async () => {
+    const h = harness();
+    const usb = "R58N12ABCDE";
+    const wifi = "192.168.1.42:41234";
+    h.devices.delete(h.device.id);
+    h.device.id = usb;
+    h.device.avdName = undefined;
+    h.devices.set(h.device.id, h.device);
+    h.adb.setCommandResponse("getprop ro.serialno", createExecResult(usb, ""));
+    h.adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("0", ""));
+    h.adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
+    const rows = [
+      { deviceId: usb, name: usb, platform: "android" as const },
+      { deviceId: wifi, name: wifi, platform: "android" as const },
+    ];
+    h.transportAliases.fold(
+      rows,
+      await h.transportAliases.prepare(rows),
+      new Set(h.devices.keys()),
+    );
+    // `adb devices -l` after the USB unplug lists only the Wi-Fi transport, offline.
+    h.manager.getAndroidOfflineDeviceIds = async (ids: Iterable<string>) =>
+      new Set([...ids].filter((id) => id === wifi));
+    const plan = h.start("executePlan");
+    const check = h.daemon["createPlanDeviceLossCheck"](h.manager, () =>
+      h.manager.getBootedDevicesDetailed("android", { bypassAndroidDeviceListCache: true }),
+    );
+    await check(
+      {
+        disconnected: [],
+        missed: [{ deviceId: usb, misses: 1 }],
+        skippedAllDiscoveryFailed: false,
+      },
+      new Set([h.peer.id]),
+    );
+    expect(plan.abortController.signal.aborted).toBe(false);
+    expect(await h.incidents.list()).toEqual([]);
     expect(h.timer.getSleepHistory()).toEqual([]);
   });
 

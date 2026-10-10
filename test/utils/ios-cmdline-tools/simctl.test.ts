@@ -1403,6 +1403,35 @@ describe("Simctl", function () {
       expect(fallbackDevices).toEqual([]);
     });
 
+    test("a failed simctl create still invalidates the device-list cache (#11100)", async function () {
+      let listCalls = 0;
+      const payload = bootedListPayload("test-ios-device-id");
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          listCalls++;
+          return createExecResult(payload, "");
+        }
+        if (file === "xcrun" && args[1] === "create") {
+          // The command may have created the simulator before it was cancelled.
+          throw new Error("simctl create was cancelled");
+        }
+        return createExecResult("", "");
+      };
+      simctl = new Simctl(null, mockExecAsync, new FakeTimer());
+
+      await simctl.listSimulatorImages();
+      await expect(
+        simctl.createSimulator(
+          "AutoMobile-iPhone-17",
+          "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+          "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+        ),
+      ).rejects.toThrow("simctl create was cancelled");
+      await simctl.listSimulatorImages();
+
+      expect(listCalls).toBe(2);
+    });
+
     test("an in-flight listing started before an invalidation must not repopulate the cache", async function () {
       let listCalls = 0;
       let resolveList!: (payload: string) => void;

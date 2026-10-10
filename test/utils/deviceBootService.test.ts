@@ -775,6 +775,69 @@ describe("DeviceBootService", () => {
     teardownLease.release();
   });
 
+  it("rolls back a created simulator whose lifecycle identity cannot be bound (#11100)", async () => {
+    const timer = new FakeTimer();
+    const rolledBack: { name: string; failure: string }[] = [];
+    const created = {
+      platform: "ios" as const,
+      name: "AutoMobile-iPhone-17-created",
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+      runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+    };
+    const boot = new DeviceBootService({
+      deviceManager: new FakeDeviceUtils(),
+      deviceMatcher: new FakeDeviceMatcher(),
+      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async (_criteria, _signal, identityHooks) => {
+          await identityHooks?.reserveBeforeCreate(created);
+          // simctl created it, but no UDID reached the bind hook.
+          await identityHooks?.bindAfterCreate(created);
+          return created;
+        },
+      },
+      matchingStrategy: "LATEST",
+      timer,
+      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+      rollbackCreatedDevice: async (device, failure) => {
+        rolledBack.push({ name: device.name, failure: String(failure) });
+      },
+    });
+
+    await expect(boot.boot({ platform: "ios", createIfMissing: true })).rejects.toThrow(
+      /has no lifecycle identity/,
+    );
+    expect(rolledBack).toEqual([
+      { name: created.name, failure: expect.stringContaining("has no lifecycle identity") },
+    ]);
+  });
+
+  it("does not roll back when provisioning failed before creating a device (#11100)", async () => {
+    const timer = new FakeTimer();
+    let rollbacks = 0;
+    const boot = new DeviceBootService({
+      deviceManager: new FakeDeviceUtils(),
+      deviceMatcher: new FakeDeviceMatcher(),
+      deviceCreationGate: { isCreationAllowed: () => true, describeSource: () => "test" },
+      deviceProvisioner: {
+        provision: async () => {
+          throw new Error("avdmanager create failed");
+        },
+      },
+      matchingStrategy: "LATEST",
+      timer,
+      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+      rollbackCreatedDevice: async () => {
+        rollbacks++;
+      },
+    });
+
+    await expect(boot.boot({ platform: "android", createIfMissing: true })).rejects.toThrow(
+      /avdmanager create failed/,
+    );
+    expect(rollbacks).toBe(0);
+  });
+
   it("passes only the remaining total budget to readiness after device start", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();

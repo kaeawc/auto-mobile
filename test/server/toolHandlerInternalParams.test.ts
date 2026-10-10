@@ -223,7 +223,7 @@ describe("handler internal metadata regression guard", () => {
     expect(args).toMatchObject(metadata);
   });
 
-  test("provisionDevice argument seam strips full metadata and preserves session/deadline", () => {
+  test("provisionDevice argument seam strips full metadata and preserves session/CLI marker/deadline", () => {
     const args = Object.freeze({
       device: {
         platform: "ios" as const,
@@ -240,6 +240,8 @@ describe("handler internal metadata regression guard", () => {
       boot: true,
       readiness: "automation",
       __mcpSessionId: "session",
+      // The one-shot CLI marker is preserved like the connection identity (#11096).
+      __oneShotCli: true,
       __mcpRequestDeadlineMs: 90_000,
     });
     expect(args).toMatchObject(metadata);

@@ -3,16 +3,16 @@ import { ActionableError, toActionableError } from "../models";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
-import { deleteInternalToolParams } from "../daemon/constants";
+import { deleteInternalToolParams, INTERNAL_ONE_SHOT_CLI_PARAM } from "../daemon/constants";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import type { DeviceBootResult } from "../devices/deviceBootService";
-import type {
-  VirtualDeviceLifecycleCoordinator,
-  VirtualDeviceLifecycleLease,
+import {
+  selectorLifecycleIdentity,
+  type VirtualDeviceLifecycleCoordinator,
+  type VirtualDeviceLifecycleLease,
 } from "../devices/virtualDeviceLifecycleCoordinator";
-import { stableStringify } from "../utils/stableStringify";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
@@ -302,20 +302,14 @@ async function reserveStartSelectorDeviceLifecycle(
   deps: DeviceToolsDependencies,
   signal: AbortSignal | undefined,
 ): Promise<VirtualDeviceLifecycleLease> {
-  const selector = stableStringify({
-    deviceId: args.deviceId,
-    name: args.name,
-    minOsVersion: args.minOsVersion,
-    maxOsVersion: args.maxOsVersion,
-    formFactor: args.formFactor,
-    requires: args.requires,
-    screenSize: args.screenSize,
-  });
+  const identity = selectorLifecycleIdentity(args.platform, args);
+  const selector = identity.kind === "selector" ? identity.selector : "";
   try {
-    return await deps.lifecycleCoordinator.reserve(
-      { kind: "selector", platform: args.platform, selector },
-      { operation: "start", deadlineMs: budgets.automationDeadlineMs, signal },
-    );
+    return await deps.lifecycleCoordinator.reserve(identity, {
+      operation: "start",
+      deadlineMs: budgets.automationDeadlineMs,
+      signal,
+    });
   } catch (error) {
     // Same acquisition-phase labeling as the stable-identity path above; the
     // selector fallback had no deadline attribution at all.
@@ -571,6 +565,11 @@ async function prepareDevice(
   }
 }
 
+/** Carry the daemon-forwarded one-shot `--cli` marker into the acquisition target (#11096). */
+function oneShotCliMarker(rawArgs: Record<string, unknown>): { __oneShotCli?: true } {
+  return rawArgs[INTERNAL_ONE_SHOT_CLI_PARAM] === true ? { __oneShotCli: true } : {};
+}
+
 // Compatibility implementation. New callers use getAndroid/getApple so their
 // platform identity and readiness budgets are explicit.
 function stripInternalAcquisitionParams(rawArgs: object) {
@@ -585,6 +584,7 @@ async function getAndroidHandler(
   signal?: AbortSignal,
 ) {
   const { __mcpSessionId } = rawArgs;
+  const oneShotCli = oneShotCliMarker(rawArgs);
   const presentationOrder = acceptancePresentationOrder(rawArgs);
   const externalArgs = stripInternalAcquisitionParams(rawArgs);
   const args = getAndroidSchema.parse(externalArgs);
@@ -610,6 +610,7 @@ async function getAndroidHandler(
         preferRunning: true,
         createIfMissing: false,
         __mcpSessionId: mcpSessionId,
+        ...oneShotCli,
       }
     : {
         platform: "android",
@@ -618,6 +619,7 @@ async function getAndroidHandler(
         preferRunning: true,
         createIfMissing: false,
         __mcpSessionId: mcpSessionId,
+        ...oneShotCli,
       };
   return await runWithAcquisitionDeadline(
     rawArgs,
@@ -684,6 +686,7 @@ async function getAppleHandler(
           ...(presentationOrder !== undefined ? { presentationOrder } : {}),
           createIfMissing: false,
           __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
+          ...oneShotCliMarker(rawArgs),
         },
         {
           bootTimeoutMs,

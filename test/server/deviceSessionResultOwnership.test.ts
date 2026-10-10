@@ -5,6 +5,7 @@ import { TerminalSessionError, type SessionReleaseSnapshot } from "../../src/dae
 import {
   sessionOwnershipLostPayload,
   declaresDeviceSessionInvalid,
+  terminalSessionRefusalFields,
 } from "../../src/server/deviceSessionResult";
 
 describe("sessionOwnershipLostPayload", () => {
@@ -49,7 +50,8 @@ describe("sessionOwnershipLostPayload", () => {
             " No heartbeat for 21001 ms (limit 20000 ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).",
           sessionUuid: "session-123",
           reason: releaseReason,
-          retryable: true,
+          retryable: false,
+          nextAction: "acquire_new_session",
           recovery: {
             action: "acquire_replacement_session",
             tools: ["getAndroid", "getApple"],
@@ -88,7 +90,8 @@ describe("sessionOwnershipLostPayload", () => {
         message: "Ownership lost.",
         sessionUuid: "session-123",
         reason: "heartbeat-timeout",
-        retryable: true,
+        retryable: false,
+        nextAction: "acquire_new_session",
         recovery: {
           action: "acquire_replacement_session",
           tools: ["getAndroid", "getApple"],
@@ -124,4 +127,56 @@ test("pending recovery stays valid for current and future lost-code consumers", 
       }),
     ).toBe(true);
   }
+});
+
+describe("terminal-session refusals name the next action, not a retry (#11098)", () => {
+  test("terminalSessionRefusalFields is non-retryable and says acquire_new_session", () => {
+    expect(terminalSessionRefusalFields()).toEqual({
+      retryable: false,
+      nextAction: "acquire_new_session",
+      recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
+    });
+  });
+
+  test.each(["target-absent", "target-busy", "identity-continuity-lost", "owned-by-other-daemon"])(
+    "identity-recovery-%s carries the terminal reason and, when known, ownerPid",
+    (reason) => {
+      const releaseReason = `identity-recovery-${reason}`;
+      const error = sessionOwnershipLostPayload({
+        message: "Terminal.",
+        sessionUuid: "session-123",
+        reason: releaseReason,
+        release: {
+          sessionId: "session-123",
+          deviceId: "emulator-5554",
+          releaseReason,
+          releasedAtMs: 2,
+          terminal: true,
+          ownerPid: 4242,
+          heartbeat: {
+            lastHeartbeatMs: 1,
+            hasReceivedHeartbeat: true,
+            timeoutMs: 20_000,
+            ageMs: 1,
+          },
+        },
+      }).error;
+      expect(error).toMatchObject({
+        code: "session_ownership_lost",
+        reason: releaseReason,
+        retryable: false,
+        nextAction: "acquire_new_session",
+        ownerPid: 4242,
+      });
+    },
+  );
+
+  test("ownerPid is omitted when unknown", () => {
+    const { error } = sessionOwnershipLostPayload({
+      message: "Terminal.",
+      sessionUuid: "session-123",
+      reason: "explicit-release",
+    });
+    expect("ownerPid" in error).toBe(false);
+  });
 });

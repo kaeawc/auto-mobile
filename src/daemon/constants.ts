@@ -407,6 +407,28 @@ export const DAEMON_BOUND_SESSION_PARAM = "__autoMobileBoundSessionUuid";
 /** Retained session capabilities restored on selector calls after a socket reconnect. */
 export const DAEMON_OWNED_SESSIONS_PARAM = "__autoMobileOwnedSessionUuids";
 
+/**
+ * Socket RPC field a one-shot `--cli` proxy sets on every tool call (#11096). The socket server
+ * consumes it, marks the connection one-shot CLI, and forwards
+ * {@link INTERNAL_ONE_SHOT_CLI_PARAM} instead, so acquisitions from that connection are anonymous
+ * (they reuse only sessions another anonymous acquisition created, #2421/#11071) even though the
+ * connection, like every socket connection, carries its own `__mcpSessionId`.
+ */
+export const DAEMON_ONE_SHOT_CLI_PARAM = "__autoMobileOneShotCli";
+
+/**
+ * Loopback-only marker the daemon forwards for a call from a one-shot `--cli` connection (see
+ * {@link DAEMON_ONE_SHOT_CLI_PARAM}). Trusted only on the daemon's internal transport.
+ */
+export const INTERNAL_ONE_SHOT_CLI_PARAM = "__oneShotCli";
+
+/**
+ * The restoring proxy's liveness owner token, sent with {@link DAEMON_OWNED_SESSIONS_PARAM}: a
+ * restore moves ownership off another live connection only when it matches the session's owner
+ * token (#11107).
+ */
+export const DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM = "__autoMobileOwnedSessionsOwnerToken";
+
 /** Socket RPC field identifying a released session used only for inactive resource reads. */
 export const DAEMON_RELEASED_SESSION_PARAM = "__autoMobileReleasedSessionUuid";
 
@@ -432,6 +454,7 @@ export const DAEMON_RELEASED_SESSION_PARAM = "__autoMobileReleasedSessionUuid";
  */
 export const INTERNAL_TOOL_PARAM_NAMES = [
   INTERNAL_MCP_SESSION_PARAM,
+  INTERNAL_ONE_SHOT_CLI_PARAM,
   INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,

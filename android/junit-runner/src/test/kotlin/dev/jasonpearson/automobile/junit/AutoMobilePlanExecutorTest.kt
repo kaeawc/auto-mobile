@@ -99,6 +99,22 @@ class AutoMobilePlanExecutorTest {
   }
 
   @Test
+  fun `a device that is shutting down is waited on like a held device`() {
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    fakeDaemonClient.queueExecutePlanResponse(
+      buildDaemonResponse(shuttingDownDevicePayload(), isError = true),
+    )
+    fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+
+    assertEquals(true, result.success)
+    assertEquals(listOf(500L), waits)
+    assertEquals(2, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
   fun `a held device that never frees fails with a clear error after the wait budget`() {
     val waits = mutableListOf<Long>()
     AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
@@ -211,6 +227,39 @@ class AutoMobilePlanExecutorTest {
     assertEquals(false, result.success)
     assertTrue(result.errorMessage.contains("daemon_shutting_down"))
     assertEquals(3, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `terminal session refusal is retried under a new session not the same uuid`() {
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(otherDaemonTerminalSessionPayload(), isError = true),
+    )
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(2, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `terminal session refusal without nextAction is not retried`() {
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(
+        payload(
+          """{"error":{"code":"session_ownership_lost","message":"gone","retryable":false}}""",
+        ),
+        isError = true,
+      ),
+    )
+    AutoMobilePlanExecutor.retryBackoffMs = 0L
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 2, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(1, fakeDaemonClient.executePlanCalls)
   }
 
   @Test
@@ -612,8 +661,23 @@ class AutoMobilePlanExecutorTest {
   private fun sessionOwnershipLostPayload(): JsonObject =
     payload(
       """{"error":{"code":"session_ownership_lost","message":"Session released",
-      "sessionUuid":"test-session","reason":"explicit","retryable":true,
+      "sessionUuid":"test-session","reason":"explicit","retryable":false,
+      "nextAction":"acquire_new_session",
       "recovery":{"action":"acquire_replacement_session","tools":["getAndroid","getApple"]}}}""",
+    )
+
+  // Captured from sessionOwnershipLostPayload for a session terminalized by
+  // identity-recovery-owned-by-other-daemon (#11098).
+  private fun otherDaemonTerminalSessionPayload(): JsonObject =
+    payload(
+      """{"error":{"code":"session_ownership_lost","message":"Session terminal",
+      "sessionUuid":"test-session","reason":"identity-recovery-owned-by-other-daemon",
+      "retryable":false,"nextAction":"acquire_new_session","ownerPid":4242,
+      "recovery":{"action":"acquire_replacement_session","tools":["getAndroid","getApple"]},
+      "release":{"sessionId":"test-session","deviceId":"emulator-5554",
+      "releaseReason":"identity-recovery-owned-by-other-daemon","releasedAtMs":2,"terminal":true,
+      "ownerPid":4242,"heartbeat":{"lastHeartbeatMs":1,"hasReceivedHeartbeat":true,
+      "timeoutMs":20000,"ageMs":1}}}}""",
     )
 
   // Shape of shapeToolCallError for an InputDeviceOwnedError
@@ -633,6 +697,12 @@ class AutoMobilePlanExecutorTest {
   private fun otherDaemonPayload(): JsonObject =
     payload(
       """{"success":false,"error":"Device 'emulator-5554' is claimed by another AutoMobile daemon (PID 4242)","code":"device_owned_by_other_daemon","deviceId":"emulator-5554","retryable":true,"retryAfterMs":2000}""",
+    )
+
+  // Shape of shapeToolCallError for a DeviceShuttingDownError (#11088).
+  private fun shuttingDownDevicePayload(): JsonObject =
+    payload(
+      """{"success":false,"error":"Device 'emulator-5554' is shutting down (code device_shutting_down)","code":"device_shutting_down","deviceId":"emulator-5554","retryable":true,"retryAfterMs":2000}""",
     )
 
   private fun deviceLostPayload(): JsonObject =

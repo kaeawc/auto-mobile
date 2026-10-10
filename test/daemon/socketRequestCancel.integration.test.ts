@@ -461,6 +461,92 @@ describe("UnixSocketServer provisionDevice cancel reply (issue #11074)", () => {
     expect(response.result.content[0].text).toContain("request_cancelled");
   });
 
+  test("a call queued behind a cancelled provisionDevice is not held by the barrier", async () => {
+    const socket = new Socket();
+    await new Promise<void>((resolve) => socket.connect(socketPath, resolve));
+    const send = (request: DaemonRequest) => socket.write(JSON.stringify(request) + "\n");
+    const responded = new Condition();
+    let received = "";
+    let provisionKey = "";
+    socket.on("data", (data) => {
+      received += data.toString();
+      responded.notify();
+    });
+    try {
+      send({
+        id: "prov-q",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: "provisionDevice", arguments: {} },
+      });
+      await callsChanged.until(() => calls.length === 1, "the provision forward to start");
+      provisionKey = String(calls[0].arguments?.__mcpLiveDeadlineKey);
+      send({
+        id: "next",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: "observe", arguments: {} },
+      });
+      send({
+        id: "cancel-q",
+        type: "daemon_request",
+        method: DAEMON_CANCEL_REQUEST_METHOD,
+        params: { requestId: "prov-q" },
+      });
+      // No outcome is ever published and the fake clock never advances: the queued call must
+      // still be admitted because the cancelled provision released the barrier.
+      await callsChanged.until(() => calls.length === 2, "the queued call to be admitted");
+      expect(calls[1].name).toBe("observe");
+    } finally {
+      // Let the pending work finish so the server can close.
+      calls[1]?.settle({ content: [] });
+      provisionCancellationOutcomes.publish(provisionKey, { isError: true, content: [] });
+      await responded.until(
+        () => received.includes('"id":"prov-q"') && received.includes('"id":"next"'),
+        "both replies to flush",
+      );
+      socket.destroy();
+    }
+  });
+
+  test("an outcome published before the reply starts waiting is still delivered", async () => {
+    const socket = new Socket();
+    const responded = new Condition();
+    let received = "";
+    socket.on("data", (data) => {
+      received += data.toString();
+      responded.notify();
+    });
+    await new Promise<void>((resolve) => socket.connect(socketPath, resolve));
+    try {
+      socket.write(
+        JSON.stringify({
+          id: "prov-e",
+          type: "mcp_request",
+          method: "tools/call",
+          params: { name: "provisionDevice", arguments: {} },
+        } satisfies DaemonRequest) + "\n",
+      );
+      await callsChanged.until(() => calls.length === 1, "the provision forward to start");
+      // The handler's rollback beats the reply: publish before anything waits.
+      provisionCancellationOutcomes.publish(String(calls[0].arguments?.__mcpLiveDeadlineKey), {
+        isError: true,
+        content: [{ type: "text", text: '{"error":{"code":"request_cancelled"}}' }],
+      });
+      socket.write(
+        JSON.stringify({
+          id: "cancel-e",
+          type: "daemon_request",
+          method: DAEMON_CANCEL_REQUEST_METHOD,
+          params: { requestId: "prov-e" },
+        } satisfies DaemonRequest) + "\n",
+      );
+      await responded.until(() => received.includes("request_cancelled"), "the early outcome");
+    } finally {
+      socket.destroy();
+    }
+  });
+
   test("without a handler result the reply stays the generic abandonment error", async () => {
     const socket = new Socket();
     await new Promise<void>((resolve) => socket.connect(socketPath, resolve));

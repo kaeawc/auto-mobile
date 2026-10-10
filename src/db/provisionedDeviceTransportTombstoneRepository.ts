@@ -47,6 +47,13 @@ export class ProvisionedDeviceTransportTombstoneRepository implements Provisione
       : undefined;
   }
 
+  async clear(deviceId: string): Promise<void> {
+    await this.getDb()
+      .deleteFrom("provisioned_device_transport_tombstones")
+      .where("device_id", "=", deviceId)
+      .execute();
+  }
+
   private getDb(): Kysely<Database> {
     return this.database ?? getDatabase();
   }

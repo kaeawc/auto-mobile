@@ -94,6 +94,10 @@ export type ProvisionDeviceFailureCode =
   | "creation_not_allowed"
   | "device_lost"
   | "device_owned_by_other_session"
+  | "device_owned_by_other_daemon"
+  | "device_cleanup_in_progress"
+  | "session_creation_timeout"
+  | "device_shutting_down"
   | "device_offline"
   | "discovery_incomplete"
   | "identity_conflict"
@@ -111,6 +115,14 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   device_lost: true,
   // Transient: the holder can release the device, after which the same operation can succeed.
   device_owned_by_other_session: true,
+  // Transient: the other daemon's claim lapses once its session ends.
+  device_owned_by_other_daemon: true,
+  // Transient: the previous session's release cleanup finishes by itself.
+  device_cleanup_in_progress: true,
+  // The bind was rolled back; retrying is safe.
+  session_creation_timeout: true,
+  // Transient: the kill reservation clears once the shutdown finishes.
+  device_shutting_down: true,
   device_offline: true,
   discovery_incomplete: true,
   identity_conflict: false,
@@ -128,6 +140,10 @@ interface ProvisionDeviceErrorDiagnostics {
   attempt?: number;
   incidentId?: string;
   deviceId?: string;
+  /** PID of the other daemon holding the device (`device_owned_by_other_daemon`). */
+  ownerPid?: number;
+  /** Wait hint carried by a typed retryable acquisition refusal. */
+  retryAfterMs?: number;
   /** Requested resources that could not be proven applied (iOS Simulator profiles). */
   resourceDrift?: DeviceResourceDrift[];
   /** Proven iOS model/runtime mismatch: requested pair, known bounds, installed alternatives. */
@@ -154,6 +170,19 @@ export class ProvisionDeviceError extends ActionableError {
   ) {
     super(message);
     this.name = "ProvisionDeviceError";
+  }
+}
+
+/**
+ * The platform tool reported that it did not create the device (e.g. avdmanager
+ * exited non-zero because the name already exists). Nothing this request owns
+ * exists, so rollback must not target the requested name: it may belong to a
+ * racing external create or a device a stale listing missed (#11100).
+ */
+export class ProvisionDeviceCreateRejectedError extends ProvisionDeviceError {
+  constructor(message: string) {
+    super("platform_command_failed", message);
+    this.name = "ProvisionDeviceCreateRejectedError";
   }
 }
 
@@ -701,8 +730,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       { signal: request.signal },
     );
     if (!created.success) {
-      throw new ProvisionDeviceError(
-        "platform_command_failed",
+      throw new ProvisionDeviceCreateRejectedError(
         `Failed to create Android AVD '${request.name}': ${created.message}`,
       );
     }

@@ -518,9 +518,11 @@ function toBootedDeviceInfo(
   device: BootedDevice,
   poolContext?: PoolDeviceContext,
   configured?: StableConfiguredDeviceImage,
+  adbOfflineState?: string,
 ): BootedDeviceInfo {
   const description = describeDevice({
     kind: "booted",
+    adbOfflineState,
     device,
     pooled: poolContext?.pooled,
     unhealthy: poolContext?.poolInfo.unhealthy,
@@ -581,6 +583,71 @@ function inFlightAndroidColdBootDescriptions(
     .map((avdName) =>
       describeInFlightAndroidColdBoot(avdName, configuredImages.get(`android:${avdName}`)),
     );
+}
+
+interface AdbOfflineHeldInput {
+  platform: Platform;
+  discovered: readonly BootedDevice[];
+  devicePool: DevicePool | null;
+  sessionInfoByDeviceId: Map<string, Session> | null;
+  resolveDeviceSessionUuid: (deviceId: string) => string | null;
+  deviceManager: PlatformDeviceManager;
+  configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
+}
+
+/**
+ * Held Android devices that `adb devices` still lists in a non-`device` state. The online-only
+ * discovery drops them, so without this a client polling listDevices during the disconnect
+ * monitor's offline budget sees the device as unheld (#11118). Best effort: a failed state probe
+ * leaves the listing as discovery produced it.
+ */
+async function adbOfflineHeldDeviceDescriptions(
+  input: AdbOfflineHeldInput,
+): Promise<BootedDeviceInfo[]> {
+  const { platform, devicePool, deviceManager } = input;
+  if (platform !== "android" || !devicePool || !deviceManager.getAndroidListedDeviceStates) {
+    return [];
+  }
+  const discoveredIds = new Set(input.discovered.map((device) => device.deviceId));
+  const held = devicePool
+    .getAssignedDevices()
+    .filter((pooled) => pooled.platform === "android" && !discoveredIds.has(pooled.id));
+  if (held.length === 0) {
+    return [];
+  }
+  let states: Map<string, string>;
+  try {
+    states = await deviceManager.getAndroidListedDeviceStates(
+      held.map((pooled) => pooled.id),
+      { signal: getAbortSignal() },
+    );
+  } catch (error) {
+    logger.warn(
+      `[BootedDeviceResources] Offline held-device probe failed: ${errorMessage(error)}`,
+      error,
+    );
+    return [];
+  }
+  return held.flatMap((pooled) => {
+    const adbState = states.get(pooled.id);
+    if (!adbState) {
+      return [];
+    }
+    const device: BootedDevice = { deviceId: pooled.id, name: pooled.name, platform: "android" };
+    return [
+      toBootedDeviceInfo(
+        device,
+        resolvePoolDeviceContext(
+          devicePool,
+          device,
+          input.sessionInfoByDeviceId,
+          input.resolveDeviceSessionUuid,
+        ),
+        input.configuredImages.get(`android:${pooled.avdName ?? pooled.name}`),
+        adbState,
+      ),
+    ];
+  });
 }
 
 export async function configuredImagesForBootedPlatform(
@@ -882,8 +949,24 @@ async function discoverBootedDevicesForPlatform(
         devicePool,
       ),
     );
+    const offlineHeld = await adbOfflineHeldDeviceDescriptions({
+      platform,
+      discovered: discovery.devices,
+      devicePool,
+      sessionInfoByDeviceId,
+      resolveDeviceSessionUuid,
+      deviceManager,
+      configuredImages,
+    });
+    // A held AVD re-cold-booting while adb still lists its old serial offline would otherwise
+    // appear twice under one stableId (#11132). The held row carries the session and pool status
+    // the serial-less cold-boot row lacks, so the cold-boot row is the one dropped.
+    const heldStableIds = new Set(offlineHeld.map((device) => device.identity.stableId));
     devices.push(
-      ...inFlightAndroidColdBootDescriptions(platform, discovery.devices, configuredImages),
+      ...inFlightAndroidColdBootDescriptions(platform, discovery.devices, configuredImages).filter(
+        (device) => !heldStableIds.has(device.identity.stableId),
+      ),
+      ...offlineHeld,
     );
     return {
       devices,
@@ -1010,7 +1093,12 @@ function withIdentityQuarantineMarker(
  * explains ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
  */
 function isProbeableDevice(device: BootedDeviceInfo): boolean {
-  return device.runtime.deviceId !== null && device.identityUnresolved !== true;
+  return (
+    device.runtime.deviceId !== null &&
+    device.identityUnresolved !== true &&
+    // adb lists it offline (#11118): every probe would just time out against it.
+    device.runtime.connection === undefined
+  );
 }
 
 const SERVICE_STATUS_TIMEOUT_MS = 5000;

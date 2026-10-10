@@ -22,9 +22,11 @@ import {
   DAEMON_VERSION,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  DAEMON_ONE_SHOT_CLI_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
@@ -815,6 +817,13 @@ export interface DaemonMcpProxyConfig {
     order: "forward" | "reverse";
     capability: string;
   };
+  /**
+   * Set only by the one-shot `--cli` runner (#11096): every tool call carries
+   * {@link DAEMON_ONE_SHOT_CLI_PARAM}, so the daemon treats this connection's acquisitions as
+   * anonymous and repeated `--cli` acquisitions of one device stay idempotent (#2421).
+   * Long-lived MCP proxies leave it unset and stay identified by their connection.
+   */
+  oneShotCli?: boolean;
 }
 
 /**
@@ -1198,7 +1207,8 @@ export class DaemonMcpProxy {
   private readonly livenessAcks = new Map<string, number>();
   /**
    * When the daemon said each held session would be idle-released: the heartbeat ack's
-   * `idleReleaseAt`, an epoch-ms instant both processes read from the same wall clock (#10823). The daemon's window comes
+   * `idleReleaseAt`, an epoch-ms instant on the wall clock both processes read; the daemon converts it from its steady
+   * session clock when reporting (#10823, #11105). The daemon's window comes
    * from its own environment, so this - not `boundSessionReplayTtlMs` - decides while the daemon
    * answers. Absent for a daemon that reports nothing.
    */
@@ -1739,68 +1749,84 @@ export class DaemonMcpProxy {
 
     // Create and connect client
     this.throwIfClosing();
+    // A previous attempt may have left a client behind; close it before it is
+    // overwritten so the daemon socket is not leaked (#11117).
+    const previousClient = this.client;
     this.client = this.clientFactory();
     const client = this.client;
-    // Wire daemon-pushed list-changed forwarding (issue #3223) when the client
-    // supports it. The handler is registered BEFORE connect so no early frame
-    // is dropped; the opt-in subscription request goes out after connect.
-    const supportsNotifications = [client.onNotification, client.subscribeToNotifications].every(
-      (method) => typeof method === "function",
-    );
-    if (supportsNotifications) {
-      this.notificationUnsubscribe?.();
-      this.notificationUnsubscribe = client.onNotification!((notification) =>
-        this.handleDaemonNotification(notification, client),
+    this.closePreviousClient(previousClient, client);
+    try {
+      // Wire daemon-pushed list-changed forwarding (issue #3223) when the client
+      // supports it. The handler is registered BEFORE connect so no early frame
+      // is dropped; the opt-in subscription request goes out after connect.
+      const supportsNotifications = [client.onNotification, client.subscribeToNotifications].every(
+        (method) => typeof method === "function",
       );
-    }
-    this.subscribeToClientConnectionClosed(client);
-    await runPreflightTransport(() => client.connect());
-    if (this.closing) {
-      await client.close();
-      throw new DaemonUnavailableError("MCP proxy is closing");
-    }
-    logger.info("[DaemonMcpProxy] Connected to daemon");
+      if (supportsNotifications) {
+        this.notificationUnsubscribe?.();
+        this.notificationUnsubscribe = client.onNotification!((notification) =>
+          this.handleDaemonNotification(notification, client),
+        );
+      }
+      this.subscribeToClientConnectionClosed(client);
+      await runPreflightTransport(() => client.connect());
+      if (this.closing) {
+        await client.close();
+        throw new DaemonUnavailableError("MCP proxy is closing");
+      }
+      logger.info("[DaemonMcpProxy] Connected to daemon");
 
-    // Start notification opt-in BEFORE awaiting the ownership heartbeat so a
-    // shutdown that releases the initial binding during that round trip cannot
-    // publish to an unsubscribed socket (#6336). Do not await the subscription
-    // yet: it is a best-effort daemon RPC that can stall up to the connection
-    // timeout, while the time-critical first heartbeat must still be dispatched
-    // immediately to beat the pre-first-heartbeat reclaim grace (#5637).
-    const notificationSubscription = supportsNotifications
-      ? client.subscribeToNotifications!().catch((error) => {
-          logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
-        })
-      : Promise.resolve();
-    const [firstConnectionStep, secondConnectionStep] =
-      this.connectionOwnershipAndPresentationSteps(client);
-    await firstConnectionStep();
-    await secondConnectionStep();
-    // Re-check closing before the deferred flip: the establishment heartbeat awaits a
-    // real daemon round-trip, and a close() landing during it already set
-    // connected=false and nulled the client. Without this guard doConnect would
-    // resume and set connected=true again — leaving a stale connected flag over a
-    // closed transport (the old pre-await placement flipped before this await, so
-    // close() ran last). Mirrors the closing rechecks above.
-    this.throwIfClosing();
-    // Fence the flip to the transport this attempt established (#6389): a socket
-    // close during the establishment heartbeat already ran resetConnection() and
-    // nulled the client, and the best-effort heartbeat swallowed the rejection.
-    // Publishing connected=true now would pair the flag with a null client. No
-    // request was dispatched on the lost transport, so surface it as a preflight
-    // failure that withRecoverableReconnect reconnects from.
-    this.assertConnectedClient(client);
-    this.connected = true;
-    this.cancelBackgroundConnectRetry();
+      // Start notification opt-in BEFORE awaiting the ownership heartbeat so a
+      // shutdown that releases the initial binding during that round trip cannot
+      // publish to an unsubscribed socket (#6336). Do not await the subscription
+      // yet: it is a best-effort daemon RPC that can stall up to the connection
+      // timeout, while the time-critical first heartbeat must still be dispatched
+      // immediately to beat the pre-first-heartbeat reclaim grace (#5637).
+      const notificationSubscription = supportsNotifications
+        ? client.subscribeToNotifications!().catch((error) => {
+            logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
+          })
+        : Promise.resolve();
+      const [firstConnectionStep, secondConnectionStep] =
+        this.connectionOwnershipAndPresentationSteps(client);
+      await firstConnectionStep();
+      await secondConnectionStep();
+      // Re-check closing before the deferred flip: the establishment heartbeat awaits a
+      // real daemon round-trip, and a close() landing during it already set
+      // connected=false and nulled the client. Without this guard doConnect would
+      // resume and set connected=true again — leaving a stale connected flag over a
+      // closed transport (the old pre-await placement flipped before this await, so
+      // close() ran last). Mirrors the closing rechecks above.
+      this.throwIfClosing();
+      // Fence the flip to the transport this attempt established (#6389): a socket
+      // close during the establishment heartbeat already ran resetConnection() and
+      // nulled the client, and the best-effort heartbeat swallowed the rejection.
+      // Publishing connected=true now would pair the flag with a null client. No
+      // request was dispatched on the lost transport, so surface it as a preflight
+      // failure that withRecoverableReconnect reconnects from.
+      this.assertConnectedClient(client);
+      this.connected = true;
+      this.cancelBackgroundConnectRetry();
 
-    // Connection establishment still waits for the already-running subscription
-    // so callers do not race later requests ahead of notification opt-in. Failure
-    // was converted to a warning above and preserves the prior best-effort policy.
-    await notificationSubscription;
-    if (this.resourceSubscriptions.size > 0) {
-      await this.replayResourceSubscriptions(client);
+      // Connection establishment still waits for the already-running subscription
+      // so callers do not race later requests ahead of notification opt-in. Failure
+      // was converted to a warning above and preserves the prior best-effort policy.
+      await notificationSubscription;
+      if (this.resourceSubscriptions.size > 0) {
+        await this.replayResourceSubscriptions(client);
+      }
+
+      this.notifyStaticListsServedBeforeConnect();
+    } catch (error) {
+      // A failed partial connect (e.g. presentation profile rejected) must not
+      // leave a live socket or subscriptions behind: the next attempt would
+      // overwrite this.client and orphan it (#11117).
+      await this.abandonFailedClient(client);
+      throw error;
     }
+  }
 
+  private notifyStaticListsServedBeforeConnect(): void {
     // If a client `tools/list` was served statically before this connection
     // existed (issue #5879), prompt it to re-fetch now that the daemon can
     // return the accurate (session-scoped) list. A no-op in the common case
@@ -1814,6 +1840,28 @@ export class DaemonMcpProxy {
       this.servedStaticResourceList = false;
       this.notifyListChanged("resources");
     }
+  }
+
+  /**
+   * Not awaited: an extra turn in doConnect reorders reconnect timing that quiescence handling
+   * (#6336) depends on; a close failure is only logged.
+   */
+  private closePreviousClient(previous: DaemonClientLike | null, current: DaemonClientLike): void {
+    if (previous && previous !== current) {
+      void previous.close().catch((closeError) => {
+        logger.warn(`[DaemonMcpProxy] Failed to close previous daemon client: ${closeError}`);
+      });
+    }
+  }
+
+  private async abandonFailedClient(client: DaemonClientLike): Promise<void> {
+    if (this.client === client) {
+      await this.resetConnection();
+      return;
+    }
+    await client.close().catch((closeError) => {
+      logger.warn(`[DaemonMcpProxy] Failed to close abandoned daemon client: ${closeError}`);
+    });
   }
 
   private connectionOwnershipAndPresentationSteps(
@@ -3634,8 +3682,10 @@ export class DaemonMcpProxy {
     const callerArgs = { ...args };
     delete callerArgs[DAEMON_BOUND_SESSION_PARAM];
     delete callerArgs[DAEMON_OWNED_SESSIONS_PARAM];
+    delete callerArgs[DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM];
     delete callerArgs[DAEMON_RELEASED_SESSION_PARAM];
     delete callerArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
+    delete callerArgs[DAEMON_ONE_SHOT_CLI_PARAM];
     delete callerArgs[INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM];
     delete callerArgs[INTERNAL_ACTIONS_COMPACT_METADATA_PARAM];
     // The acceptance controls are configuration of the dedicated harness proxy,
@@ -3664,7 +3714,7 @@ export class DaemonMcpProxy {
       callerArgs,
       isSessionAcquisition,
     );
-    const forwardedArgs = this.withAcceptanceConfiguration(routedArgs);
+    const forwardedArgs = this.withOneShotCliMarker(this.withAcceptanceConfiguration(routedArgs));
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
     // Snapshot the release epoch at forward time. If a session-released signal for
@@ -3797,6 +3847,10 @@ export class DaemonMcpProxy {
     }
   }
 
+  private withOneShotCliMarker(args: Record<string, unknown>): Record<string, unknown> {
+    return this.config.oneShotCli ? { ...args, [DAEMON_ONE_SHOT_CLI_PARAM]: true } : args;
+  }
+
   private withAcceptanceConfiguration(args: Record<string, unknown>): Record<string, unknown> {
     const acceptanceDiscovery = this.config.acceptanceDiscovery;
     if (!acceptanceDiscovery) {
@@ -3897,7 +3951,15 @@ export class DaemonMcpProxy {
       // default, so the current binding must precede older owned sessions.
       retained.unshift(this.boundSessionUuid);
     }
-    return retained.length ? { ...args, [DAEMON_OWNED_SESSIONS_PARAM]: retained } : args;
+    // The owner token lets the daemon move ownership to this connection even while a stale
+    // connection of this proxy still holds it; a bare UUID only restores an unowned session (#11107).
+    return retained.length
+      ? {
+          ...args,
+          [DAEMON_OWNED_SESSIONS_PARAM]: retained,
+          [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: this.livenessOwnerToken,
+        }
+      : args;
   }
 
   private rememberActiveDeviceSession(name: string, result: unknown, releaseEpoch: number): void {
@@ -4169,11 +4231,14 @@ export class DaemonMcpProxy {
 
   /**
    * Count a forwarded call against the sessions it uses; returns the UUIDs to pass to
-   * {@link endSessionCall}. Inventory observation never uses the session it names, so it neither
-   * holds nor refreshes it.
+   * {@link endSessionCall}. Inventory observation and every other plain (non-device) read never
+   * use the session they name, so they neither hold nor refresh it (#11107).
    */
   private beginSessionCall(name: string, sessionUuids: readonly string[]): readonly string[] {
-    if (isDeviceInventoryTool(name)) {
+    if (
+      isDeviceInventoryTool(name) ||
+      (this.isDeviceReadOnlyTool(name) && !this.toolTargetsDevice(name))
+    ) {
       return [];
     }
     for (const sessionUuid of sessionUuids) {

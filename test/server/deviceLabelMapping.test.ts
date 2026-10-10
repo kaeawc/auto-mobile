@@ -75,7 +75,7 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
   });
 
   test.each(["removed", "present", "pool-failure"])(
-    "label release propagates the error immediately with session %s",
+    "label release logs a failed session and still releases the rest (session %s, #11091)",
     async (scenario) => {
       await sessionManager.createSession("base", androidA.deviceId, "android");
       await sessionManager.createSession("base:B", "device-B", "android");
@@ -104,15 +104,27 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       const info = spyOn(logger, "info").mockImplementation(() => {});
       try {
-        await expect(releaseDeviceLabelSessions("base")).rejects.toBe(failure);
-        expect(release.mock.calls).toEqual([["base:B", PLAN_AUTO_RELEASE_REASON]]);
+        // A session removed before the rejection is gone, so it counts as released.
+        await expect(releaseDeviceLabelSessions("base")).resolves.toEqual(
+          scenario === "present" ? ["base:C"] : ["base:B", "base:C"],
+        );
+        expect(release.mock.calls).toEqual([
+          ["base:B", PLAN_AUTO_RELEASE_REASON],
+          ["base:C", PLAN_AUTO_RELEASE_REASON],
+        ]);
         expect(poolRelease.mock.calls).toEqual(
-          scenario === "present" ? [] : [["device-B", "base:B"]],
+          scenario === "present"
+            ? [["device-C", "base:C"]]
+            : [
+                ["device-B", "base:B"],
+                ["device-C", "base:C"],
+              ],
         );
         expect(sessionManager.hasSession("base:B")).toBe(scenario === "present");
-        expect(sessionManager.hasSession("base:C")).toBe(true);
-        expect(info).not.toHaveBeenCalledWith(
-          expect.stringContaining("[DeviceLabelMap] Released label sessions"),
+        expect(sessionManager.hasSession("base:C")).toBe(false);
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining("Failed to release label session base:B"),
+          failure,
         );
         if (scenario === "pool-failure") {
           expect(warn).toHaveBeenCalledWith(expect.stringContaining("base:B"), poolFailure);

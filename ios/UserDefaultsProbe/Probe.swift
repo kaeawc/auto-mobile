@@ -32,25 +32,37 @@ final class ProbeSceneDelegate: UIResponder, UIWindowSceneDelegate {
             guard let custom = UserDefaults(suiteName: "automobile.probe.custom") else {
                 throw CocoaError(.coderInvalidValue)
             }
-            var snapshot: [String: Any] = [:]
-            for (name, defaults) in [("standard", UserDefaults.standard), ("custom", custom)] {
-                if defaults.object(forKey: "sentinel") == nil {
-                    defaults.set("preserve this unrelated value", forKey: "sentinel")
-                    // Persist only the initial fixture seed. Cold-launch reads
-                    // must work without an explicit preferences synchronization.
-                    defaults.synchronize()
-                }
-                snapshot[name] = ["host", "flag", "count", "ratio", "sentinel"]
-                    .reduce(into: [String: Any]()) { values, key in
-                        values[key] = defaults.object(forKey: key)
-                    }
-            }
             let documents = try FileManager.default.url(
                 for: .documentDirectory,
                 in: .userDomainMask,
                 appropriateFor: nil,
                 create: true
             )
+            let stores = [("standard", UserDefaults.standard), ("custom", custom)]
+            let sentinelMarker = documents.appendingPathComponent("sentinel-initialized")
+            if !FileManager.default.fileExists(atPath: sentinelMarker.path) {
+                for (_, defaults) in stores {
+                    defaults.set("preserve this unrelated value", forKey: "sentinel")
+                    // Persist only the initial fixture seed. Cold-launch reads
+                    // must work without an explicit preferences synchronization.
+                    defaults.synchronize()
+                }
+                try Data().write(to: sentinelMarker, options: [.atomic])
+            }
+            if ProcessInfo.processInfo.arguments.contains("--remove-sentinel") {
+                // This argument exists only for the smoke test's negative control.
+                for (_, defaults) in stores {
+                    defaults.removeObject(forKey: "sentinel")
+                    defaults.synchronize()
+                }
+            }
+            var snapshot: [String: Any] = [:]
+            for (name, defaults) in stores {
+                snapshot[name] = ["host", "flag", "count", "ratio", "sentinel"]
+                    .reduce(into: [String: Any]()) { values, key in
+                        values[key] = defaults.object(forKey: key)
+                    }
+            }
             try JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys])
                 .write(to: documents.appendingPathComponent("observed.json"), options: [.atomic])
         } catch {

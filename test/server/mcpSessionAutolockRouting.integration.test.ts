@@ -13,6 +13,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { INTERNAL_ONE_SHOT_CLI_PARAM } from "../../src/daemon/constants";
 
 const captureSchema = z
   .object({
@@ -374,6 +375,39 @@ describe("MCP session autolock routing", () => {
 
     expect(capturedArgs.value).toBe("ok");
     expect(capturedArgs).not.toHaveProperty("__mcpSessionId");
+  });
+
+  // #11096: the daemon's one-shot CLI marker reaches handlers only over its internal transport.
+  test("passes the daemon's one-shot CLI marker to handlers", async () => {
+    fixture = new McpTestFixture({
+      daemonMode: true,
+      sessionContext: { sessionId: "shared-loopback-session" },
+    });
+    await fixture.setup();
+
+    const capturedArgs = await callCaptureTool(fixture, {
+      value: "ok",
+      __mcpSessionId: "unix-socket-session",
+      [INTERNAL_ONE_SHOT_CLI_PARAM]: true,
+    });
+
+    expect(capturedArgs.value).toBe("ok");
+    expect(capturedArgs[INTERNAL_ONE_SHOT_CLI_PARAM]).toBe(true);
+  });
+
+  test("ignores a direct caller's forged one-shot CLI marker", async () => {
+    fixture = new McpTestFixture({
+      sessionContext: { sessionId: "direct-mcp-session" },
+    });
+    await fixture.setup();
+
+    const capturedArgs = await callCaptureTool(fixture, {
+      value: "ok",
+      [INTERNAL_ONE_SHOT_CLI_PARAM]: true,
+    });
+
+    expect(capturedArgs).not.toHaveProperty(INTERNAL_ONE_SHOT_CLI_PARAM);
+    expect(capturedArgs.__mcpSessionId).toBe("direct-mcp-session");
   });
 
   test("keeps direct MCP sessions available as implicit autolock keys", async () => {

@@ -166,9 +166,8 @@ unknown keys, and profile names are rejected. Ordinary provisioning without
 Pass this map to `setDeviceResources` with the usual session/device targeting,
 or add it alongside `device` in `provisionDevice`. Provisioning requires
 `boot: true` when resources are supplied and applies settings before automation
-readiness. Resource settings participate in the provisioning operation ID's
-fingerprint; retries re-read and reconcile resource state, including after a
-completed operation.
+readiness. Every provision call runs its own lifecycle, so a retry re-reads and
+reconciles resource state.
 
 `setDeviceResources.timeoutMs` defaults to 300,000 milliseconds for requests
 that configure many services. Provisioning uses its existing shared deadline

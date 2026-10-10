@@ -46,8 +46,11 @@ import {
   PLAN_AUTO_RELEASE_REASON,
   UnissuedSessionError,
   type Session,
+  type SessionManager,
 } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
+import type { DevicePool } from "../daemon/devicePool";
+import { releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
 import { assertInputRequesterHoldsDevice, TOOL_CALL_REMEDY } from "../daemon/inputDeviceOwnership";
 import {
   defaultDeviceObservationAccess,
@@ -63,7 +66,12 @@ import {
   DefaultAppCleanupService,
 } from "./AppCleanupService";
 import { ToolCallRepository } from "../db/toolCallRepository";
-import { getDeviceLabelMap, releaseDeviceLabelSessions } from "./deviceLabelMapping";
+import {
+  failedPlanSessionHoldable,
+  getDeviceLabelMap,
+  releaseDeviceLabelSessions,
+} from "./deviceLabelMapping";
+import { deferHeldPlanAppCleanup, takeHeldPlanAppCleanup } from "./heldPlanAppCleanup";
 import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import type { Environment } from "../daemon/poolConfig";
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
@@ -371,6 +379,17 @@ interface ToolRegistrationOptions {
   appUiResourceUri?: string;
 }
 
+/** Options for a plain (non-device) tool. */
+interface PlainToolOptions extends ToolRegistrationOptions {
+  /**
+   * The plain tool's read/control classification (#11107): true for a read, a per-args classifier
+   * for a mixed tool, absent for control. A read naming a session is admitted read-only: it never
+   * counts as session activity (owner decision 2026-10-09). Enumerated by
+   * `test/lint/toolReadControlClassification.test.ts`.
+   */
+  readOnly?: boolean | ((args: any) => boolean);
+}
+
 /** Resolves a device for a read without acquiring, readying or changing a device session. */
 interface SessionlessDeviceRead {
   resolve(deviceId: string, signal?: AbortSignal): Promise<BootedDevice>;
@@ -437,8 +456,8 @@ export interface RegisteredTool {
   outputSchema?: any;
   appUiResourceUri?: string;
   /**
-   * A device-aware tool's read/control classification (#10965): true for a read, a per-args
-   * classifier for a mixed tool, absent for control. Enumerated by
+   * The tool's read/control classification (#10965; plain tools' `readOnly`, #11107): true for a
+   * read, a per-args classifier for a mixed tool, absent for control. Enumerated by
    * `test/lint/toolReadControlClassification.test.ts`. Only `true` (a read for every call) is
    * advertised as `_meta["automobile/deviceReadOnly"]`, so a proxy can forward such reads without
    * a session (#10971); a per-args tool (sqlQuery, keyboard, clipboard, ...) is not marked.
@@ -715,9 +734,14 @@ async function resolveSessionlessDeviceRead(
 }
 
 function isDeviceReadOnlyCall(options: DeviceAwareToolOptions, args: unknown): boolean {
-  return typeof options.deviceReadOnly === "function"
-    ? options.deviceReadOnly(args)
-    : options.deviceReadOnly === true;
+  return isReadOnlyCall(options.deviceReadOnly, args);
+}
+
+function isReadOnlyCall(
+  classification: boolean | ((args: any) => boolean) | undefined,
+  args: unknown,
+): boolean {
+  return typeof classification === "function" ? classification(args) : classification === true;
 }
 
 /** Reads never require a session (#10970): an ambiguous read is asked for its deviceId. */
@@ -2031,7 +2055,8 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
    * session and its device, so the caller's recovery and the resumed plan run on a device no other
    * session can take in between (#10834). The caller owns the session from here: the resumed plan
    * releases it, or the caller releases it (or stops heartbeating) when it gives up. A plan with
-   * device labels is released as before: its derived label sessions have no caller-side owner.
+   * derived label sessions is released as before: they have no caller-side owner. A single-label
+   * plan's only session is the base, so it is held like an unlabeled plan (#11091).
    */
   private holdsFailedPlanSessionForRecovery(
     input: PlanLifecycleInput,
@@ -2040,10 +2065,10 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
     if (input.args?.holdSessionOnFailure !== true || input.succeeded !== false) {
       return false;
     }
-    if (Object.keys(getDeviceLabelMap(releaseSessionUuid) ?? {}).length > 0) {
+    if (!failedPlanSessionHoldable(releaseSessionUuid)) {
       logger.info(
         `[PlanLifecycle] holdSessionOnFailure ignored for ${releaseSessionUuid}: a plan with ` +
-          "device labels is always released",
+          "derived label sessions is always released (reported as sessionHeld: false)",
       );
       return false;
     }
@@ -2070,67 +2095,128 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       sessionBindingReleaseHandler,
       sessionToolSelectionService,
     } = input;
+    const lifecycleSessionUuid = baseSessionUuid ?? sessionUuid;
+    const ownsPoolSession =
+      shouldResolveDevice &&
+      sessionUuid !== undefined &&
+      lifecycleSessionUuid !== undefined &&
+      name === "executePlan" &&
+      DaemonState.getInstance().isInitialized();
+    const heldForRecovery =
+      ownsPoolSession && this.holdsFailedPlanSessionForRecovery(input, lifecycleSessionUuid);
+    // A cleanup deferred by an earlier failed run on this session (#11139) is superseded once
+    // this run's own lifecycle cleans and releases it.
+    const deferredCleanup =
+      ownsPoolSession && !heldForRecovery
+        ? takeHeldPlanAppCleanup(
+            DaemonState.getInstance().getSessionManager(),
+            lifecycleSessionUuid,
+          )
+        : undefined;
+
     if (device && name === "executePlan" && args?.cleanupAppId) {
       // Resolved under the request signal: a device-loss abort names the lost device
       // to skip. A deadline or client cancel aborts it too but names no device, so
       // those plans still clean every device they own (#10022).
-      const devices = this.getCleanupDevices(device, baseSessionUuid ?? sessionUuid);
+      const devices = this.getCleanupDevices(device, lifecycleSessionUuid);
       const cleanupConfig = { appId: args.cleanupAppId, clearAppData: args.cleanupClearAppData };
-      const outcome = await this.cleanupDevicesShielded(devices, cleanupService, cleanupConfig);
-      this.reportIncompleteCleanup(outcome, args.cleanupAppId, baseSessionUuid ?? sessionUuid);
-      this.markIncompleteCleanupDevices(outcome, devices, cleanupService, cleanupConfig);
+      const runCleanup = async (): Promise<void> => {
+        const outcome = await this.cleanupDevicesShielded(devices, cleanupService, cleanupConfig);
+        this.reportIncompleteCleanup(outcome, cleanupConfig.appId, lifecycleSessionUuid);
+        this.markIncompleteCleanupDevices(outcome, devices, cleanupService, cleanupConfig);
+      };
+      if (heldForRecovery) {
+        // The caller's recovery and resumed plan need the app as the failure left it (#11139):
+        // clean up only once the held session is finally released.
+        logger.info(
+          `[PlanLifecycle] Deferring app cleanup for ${cleanupConfig.appId} until held session ` +
+            `${lifecycleSessionUuid} is released`,
+        );
+        deferHeldPlanAppCleanup(
+          DaemonState.getInstance().getSessionManager(),
+          lifecycleSessionUuid,
+          runCleanup,
+          PLAN_APP_CLEANUP_CAP_MS,
+        );
+      } else {
+        await runCleanup();
+      }
+    } else if (deferredCleanup) {
+      await deferredCleanup();
     }
 
-    if (
-      shouldResolveDevice &&
-      sessionUuid &&
-      name === "executePlan" &&
-      DaemonState.getInstance().isInitialized() &&
-      !this.holdsFailedPlanSessionForRecovery(input, baseSessionUuid ?? sessionUuid)
-    ) {
-      try {
-        const sessionManager = DaemonState.getInstance().getSessionManager();
-        const devicePool = DaemonState.getInstance().getDevicePool();
-        const releaseSessionUuid = baseSessionUuid ?? sessionUuid;
-        // Track exactly which sessions this release actually frees so the
-        // server-side transport binding is torn down for each (issue #4611 Gap
-        // D) — coupled to the REAL release, never cleared optimistically.
-        const releasedSessionUuids: string[] = [];
-        if (releaseSessionUuid) {
-          releasedSessionUuids.push(...(await releaseDeviceLabelSessions(releaseSessionUuid)));
-        }
+    if (ownsPoolSession && !heldForRecovery) {
+      const sessionManager = DaemonState.getInstance().getSessionManager();
+      const devicePool = DaemonState.getInstance().getDevicePool();
+      const releaseSessionUuid = lifecycleSessionUuid;
+      // Track exactly which sessions this release actually frees so the
+      // server-side transport binding is torn down for each (issue #4611 Gap
+      // D) — coupled to the REAL release, never cleared optimistically. Each
+      // derived session and the base are released independently, so one failed
+      // release cannot leave the others holding their devices (#11091).
+      const releasedSessionUuids = await releaseDeviceLabelSessions(releaseSessionUuid);
+      if (await this.releasePlanBaseSession(sessionManager, devicePool, releaseSessionUuid)) {
+        releasedSessionUuids.push(releaseSessionUuid);
+      }
 
-        const session = releaseSessionUuid ? sessionManager.getSession(releaseSessionUuid) : null;
-        if (session) {
-          const deviceId = session.assignedDevice;
-          // Await the release so its onSessionRelease callbacks (CtrlProxy binding +
-          // detector cleanup) complete — and any rejection is caught by this try —
-          // before the device is freed (#4984).
-          await sessionManager.releaseSession(session.sessionId, PLAN_AUTO_RELEASE_REASON);
-          await devicePool.releaseDevice(deviceId, session.sessionId);
-          NavigationGraphManager.releaseSession(releaseSessionUuid);
-          // CtrlProxy client binding + detector cleanup for the released session is
-          // handled centrally in the daemon's onSessionRelease hook (#4984), which
-          // covers every release path and each derived label session on its device.
-          RealObserveScreen.clearCache(deviceId);
-          releasedSessionUuids.push(releaseSessionUuid);
-          logger.info(
-            `Auto-released session ${session.sessionId} and freed device ${deviceId} after executePlan`,
-          );
-        }
-
-        // Clear the per-transport SessionToolBinding for every freed session so a
-        // later sessionless tools/list or tools/call stops enforcing a released
-        // profile (issue #4611 Gap D). Best-effort: the handler swallows its own
-        // failures, but the release itself has already succeeded regardless.
-        for (const releasedUuid of releasedSessionUuids) {
+      // Clear the per-transport SessionToolBinding for every freed session so a
+      // later sessionless tools/list or tools/call stops enforcing a released
+      // profile (issue #4611 Gap D). Best-effort: the handler swallows its own
+      // failures, but the release itself has already succeeded regardless.
+      for (const releasedUuid of releasedSessionUuids) {
+        try {
           sessionBindingReleaseHandler?.onSessionReleased(releasedUuid);
           await sessionToolSelectionService?.deleteSession?.(releasedUuid);
+        } catch (bindingError) {
+          logger.warn(
+            `[PlanLifecycle] Failed to clear the tool binding of released session ${releasedUuid}`,
+            bindingError,
+          );
         }
-      } catch (releaseError) {
-        logger.warn(`Failed to auto-release session ${sessionUuid}: ${releaseError}`);
       }
     }
+  }
+
+  /**
+   * Release a finished plan's base session and free its device. `releaseSessionAndDevice` returns
+   * the pool slot even when the session release rejects after the session was removed, so a gone
+   * session never leaves its device assigned (#11091). Returns whether the session is gone.
+   */
+  private async releasePlanBaseSession(
+    sessionManager: SessionManager,
+    devicePool: DevicePool,
+    releaseSessionUuid: string,
+  ): Promise<boolean> {
+    const session = sessionManager.getSession(releaseSessionUuid);
+    if (!session) {
+      return false;
+    }
+    const deviceId = session.assignedDevice;
+    try {
+      // Await the release so its onSessionRelease callbacks (CtrlProxy binding +
+      // detector cleanup) complete before the device is freed (#4984).
+      await releaseSessionAndDevice(
+        sessionManager,
+        devicePool,
+        deviceId,
+        session.sessionId,
+        PLAN_AUTO_RELEASE_REASON,
+      );
+      logger.info(
+        `Auto-released session ${session.sessionId} and freed device ${deviceId} after executePlan`,
+      );
+    } catch (releaseError) {
+      logger.warn(`Failed to auto-release session ${releaseSessionUuid}: ${releaseError}`);
+      if (sessionManager.hasSession(releaseSessionUuid)) {
+        return false;
+      }
+    }
+    NavigationGraphManager.releaseSession(releaseSessionUuid);
+    // CtrlProxy client binding + detector cleanup for the released session is
+    // handled centrally in the daemon's onSessionRelease hook (#4984), which
+    // covers every release path and each derived label session on its device.
+    RealObserveScreen.clearCache(deviceId);
+    return true;
   }
 }
 
@@ -2467,7 +2553,7 @@ export class ToolRegistryClass {
     description: string,
     schema: any,
     handler: ToolHandler,
-    options: ToolRegistrationOptions = {},
+    options: PlainToolOptions = {},
   ): void {
     this.invalidateToolDefinitionSchemaCache();
     if (this === ToolRegistry) {
@@ -2483,6 +2569,8 @@ export class ToolRegistryClass {
       supportsProgress: options.supportsProgress ?? false,
       transportRecovery: options.transportRecovery,
       requiresDevice: false,
+      isDeviceReadOnlyCall: (args) => isReadOnlyCall(options.readOnly, args),
+      deviceReadOnly: options.readOnly,
       debugOnly: options.debugOnly ?? false,
       hidden: options.hidden ?? false,
       embeddedSdkOnly: false,

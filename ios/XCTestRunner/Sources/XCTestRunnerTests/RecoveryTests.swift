@@ -17,7 +17,7 @@ final class RecoveryExecutorTests: XCTestCase {
       - tool: inputText
     """
 
-    func testRecoverySucceedsAndResumesFromNextStep() async throws {
+    func testRecoverySucceedsAndResumesByReRunningTheFailedStep() async throws {
         let client = RecoveryMCPClient()
         client.queueExecutePlan(planJSON(
             success: false, executedSteps: 2, totalSteps: 4,
@@ -46,7 +46,8 @@ final class RecoveryExecutorTests: XCTestCase {
         let executePlanCalls = client.executePlanCalls
         XCTAssertEqual(executePlanCalls.count, 2)
         XCTAssertEqual(executePlanCalls[0].arguments["startStep"] as? Int, 0)
-        XCTAssertEqual(executePlanCalls[1].arguments["startStep"] as? Int, 3)
+        // The failed step itself is re-run (parity with Android #4394); recovery only cleared its blocker.
+        XCTAssertEqual(executePlanCalls[1].arguments["startStep"] as? Int, 2)
         XCTAssertEqual(executePlanCalls[1].arguments["deviceId"] as? String, "sim-1")
     }
 
@@ -131,7 +132,7 @@ final class RecoveryExecutorTests: XCTestCase {
         await assertAsyncThrowsError { try await executor.execute(testMetadata: nil) }
         XCTAssertEqual(handler.receivedContexts.count, 1, "recovery is allowed at most once per test")
         XCTAssertEqual(client.executePlanCalls.count, 2, "initial attempt + one resume")
-        XCTAssertEqual(client.executePlanCalls[1].arguments["startStep"] as? Int, 2)
+        XCTAssertEqual(client.executePlanCalls[1].arguments["startStep"] as? Int, 1)
     }
 
     // MARK: - Held session for recovery (#10834 / #11072)
@@ -166,6 +167,53 @@ final class RecoveryExecutorTests: XCTestCase {
         )
     }
 
+    // MARK: - A resume that never reaches executePlan frees the held session (#11139)
+
+    func testResumeFailingBeforeExecutePlanReleasesTheHeldSession() async throws {
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: ["stepIndex": 1, "tool": "tapOn", "error": "boom"]
+        ))
+        client.setToolEnabledFailures[1] = MCPClientError.invalidResponse("enable refused")
+        let heldSessions = RecordingHeldSessionController()
+        let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
+        let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true, heldSessions: heldSessions)
+
+        await assertAsyncThrowsError { try await executor.execute(testMetadata: nil, sessionUuid: "held-session") }
+
+        XCTAssertEqual(client.executePlanCalls.count, 1, "the resume never sent executePlan")
+        XCTAssertEqual(heldSessions.releasedSessions, ["held-session"])
+    }
+
+    func testResumeRetriedUnderAFreshSessionReleasesTheHeldOneFirst() async throws {
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: ["stepIndex": 1, "tool": "tapOn", "error": "boom"]
+        ))
+        client.queueExecutePlan(planJSON(success: true, executedSteps: 3, totalSteps: 3))
+        client.setToolEnabledFailures[1] = MCPClientError.requestFailed("transient")
+        let heldSessions = RecordingHeldSessionController()
+        var releasedAtEachEnable: [[String]] = []
+        client.onSetToolEnabled = { releasedAtEachEnable.append(heldSessions.releasedSessions) }
+        let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
+        let executor = makeExecutor(
+            client: client, handler: handler, recoveryEnabled: true, heldSessions: heldSessions, retryCount: 1
+        )
+
+        let result = try await executor.execute(testMetadata: nil, sessionUuid: "held-session")
+
+        XCTAssertTrue(result.success)
+        let retrySession = try XCTUnwrap(client.executePlanCalls.last?.arguments["sessionUuid"] as? String)
+        XCTAssertNotEqual(retrySession, "held-session")
+        XCTAssertEqual(
+            releasedAtEachEnable,
+            [[], [], ["held-session"]],
+            "the held session is released before the retry under a fresh session starts"
+        )
+    }
+
     func testFailedRecoveryReleasesTheHeldSession() async throws {
         let client = RecoveryMCPClient()
         client.queueExecutePlan(planJSON(
@@ -180,6 +228,29 @@ final class RecoveryExecutorTests: XCTestCase {
 
         XCTAssertEqual(heldSessions.releasedSessions, ["held-session"])
         XCTAssertEqual(heldSessions.liveHeartbeats, [], "the heartbeat stops with recovery")
+    }
+
+    func testSessionLostDuringRecoveryFailsFastWithoutResumingOrReleasing() async throws {
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: ["stepIndex": 1, "tool": "tapOn", "error": "boom"]
+        ))
+        client.queueExecutePlan(planJSON(success: true, executedSteps: 3, totalSteps: 3))
+        let heldSessions = RecordingHeldSessionController()
+        heldSessions.lossReason = "the daemon released session held-session (idle)"
+        let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
+        let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true, heldSessions: heldSessions)
+
+        do {
+            _ = try await executor.execute(testMetadata: nil, sessionUuid: "held-session")
+            XCTFail("a lost held session must not resume the plan")
+        } catch {
+            XCTAssertTrue("\(error)".contains("the daemon released session held-session (idle)"), "\(error)")
+        }
+
+        XCTAssertEqual(client.executePlanCalls.count, 1, "no resume on a session the daemon released")
+        XCTAssertEqual(heldSessions.releasedSessions, [], "nothing left to release")
     }
 
     func testFailureRecoveryCannotHandleReleasesTheHeldSession() async throws {
@@ -219,6 +290,47 @@ final class RecoveryExecutorTests: XCTestCase {
             XCTAssertNil(client.executePlanCalls[0].arguments["holdSessionOnFailure"])
             XCTAssertEqual(heldSessions.events, [], "nothing held, nothing to heartbeat or release")
         }
+    }
+
+    func testDaemonReportingTheSessionWasNotHeldSkipsRecoveryAndReleasesNothing() async throws {
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 1, totalSteps: 3,
+            failedStep: ["stepIndex": 1, "tool": "tapOn", "error": "boom"],
+            sessionHeld: false
+        ))
+        let heldSessions = RecordingHeldSessionController()
+        let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
+        let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true, heldSessions: heldSessions)
+
+        do {
+            _ = try await executor.execute(testMetadata: nil, sessionUuid: "released-session")
+            XCTFail("expected the failed plan to throw")
+        } catch {
+            XCTAssertTrue(String(describing: error).contains("sessionHeld: false"), "\(error)")
+        }
+
+        XCTAssertEqual(client.executePlanCalls.count, 1, "no resume on a released session")
+        XCTAssertTrue(handler.receivedContexts.isEmpty, "recovery never ran on a released device")
+        XCTAssertEqual(heldSessions.events, [], "the daemon already released it; nothing to heartbeat or release")
+    }
+
+    func testDaemonReportingTheSessionWasHeldGoesOnToRecovery() async throws {
+        let client = RecoveryMCPClient()
+        client.queueExecutePlan(planJSON(
+            success: false, executedSteps: 2, totalSteps: 4,
+            failedStep: ["stepIndex": 2, "tool": "tapOn", "error": "no element", "device": "sim-1"],
+            sessionHeld: true
+        ))
+        client.queueExecutePlan(planJSON(success: true, executedSteps: 4, totalSteps: 4))
+        let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
+        let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true)
+
+        let result = try await executor.execute(testMetadata: nil, sessionUuid: "held-session")
+
+        XCTAssertTrue(result.success)
+        XCTAssertTrue(result.aiRecoveryAttempted)
+        XCTAssertEqual(handler.receivedContexts.count, 1)
     }
 
     func testTransientRetryRunsUnderAFreshSessionAfterReleasingTheHeldOne() async throws {
@@ -382,6 +494,19 @@ final class TachikomaPlanRecoveryHandlerTests: XCTestCase {
             deviceId: "dev-1",
             failureObservation: nil
         )
+    }
+
+    /// The executor re-runs the failed step after recovery (#11139, parity with Android #4394), so the
+    /// prompt must ask only to clear its blocker and must not point the agent at the step after it.
+    func testRecoveryPromptSaysTheFailedStepIsReRun() {
+        let prompt = TachikomaPlanRecoveryHandler.buildRecoveryPrompt(context: makeContext(), maxToolCalls: 5)
+
+        XCTAssertTrue(prompt.contains("re-running the failed step 3"), prompt)
+        XCTAssertFalse(prompt.contains("resume from step 4"), prompt)
+        XCTAssertFalse(prompt.contains("NEXT"), prompt)
+        let system = TachikomaPlanRecoveryHandler.systemInstructions
+        XCTAssertTrue(system.contains("re-runs the failed step itself"), system)
+        XCTAssertFalse(system.contains("next step"), system)
     }
 
     func testHandlerRunsToolLoopThenVerifiesWithObserve() async {
@@ -1832,6 +1957,11 @@ private final class RecoveryMCPClient: AutoMobileMCPClient, @unchecked Sendable 
     var observeText = "{\"elements\":{}}"
 
     var executePlanCalls: [Call] { calls.filter { $0.name == "executePlan" } }
+    /// Error to throw from the Nth (0-based) `setToolEnabled` call instead of enabling.
+    var setToolEnabledFailures: [Int: Error] = [:]
+    /// Runs at each `setToolEnabled` call, before it answers.
+    var onSetToolEnabled: (() -> Void)?
+    private var setToolEnabledCount = 0
 
     func queueExecutePlan(_ text: String) {
         executePlanResponses.append(MCPToolResponse(text: text))
@@ -1848,6 +1978,11 @@ private final class RecoveryMCPClient: AutoMobileMCPClient, @unchecked Sendable 
     {
         calls.append(Call(name: name, arguments: arguments))
         if name == "setToolEnabled" {
+            onSetToolEnabled?()
+            defer { setToolEnabledCount += 1 }
+            if let failure = setToolEnabledFailures[setToolEnabledCount] {
+                throw failure
+            }
             return MCPToolResponse(text: "{\"enabled\":true}")
         }
         if name == "executePlan" {
@@ -1932,7 +2067,8 @@ private func planJSON(
     success: Bool,
     executedSteps: Int,
     totalSteps: Int,
-    failedStep: [String: Any]? = nil
+    failedStep: [String: Any]? = nil,
+    sessionHeld: Bool? = nil
 )
     -> String
 {
@@ -1941,6 +2077,9 @@ private func planJSON(
         "executedSteps": executedSteps,
         "totalSteps": totalSteps,
     ]
+    if let sessionHeld = sessionHeld {
+        payload["sessionHeld"] = sessionHeld
+    }
     if let failedStep = failedStep {
         payload["failedStep"] = failedStep
         if let error = failedStep["error"] {

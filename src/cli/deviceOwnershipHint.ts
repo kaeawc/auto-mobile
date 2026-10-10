@@ -1,7 +1,9 @@
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../daemon/inputDeviceOwnership";
+import { isDeviceSessionAcquisitionTool } from "../server/deviceSessionResult";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+  DEVICE_SHUTTING_DOWN_CODE,
 } from "../daemon/deviceAcquisitionRefusals";
 
 /** Tools that stop a device and therefore accept `force` to override a held-device refusal. */
@@ -14,9 +16,15 @@ function refusalCode(payload: unknown): unknown {
   const record = payload as Record<string, unknown>;
   // Tool-call refusals carry `code`; a deleteDevice precondition failure nests it in `failure`.
   const failure = record.failure;
-  return failure && typeof failure === "object"
-    ? (failure as Record<string, unknown>).code
-    : record.code;
+  if (failure && typeof failure === "object") {
+    return (failure as Record<string, unknown>).code;
+  }
+  // Ownership-loss payloads (session_ownership_lost, ...) nest the code under `error`.
+  const error = record.error;
+  return (
+    record.code ??
+    (error && typeof error === "object" ? (error as Record<string, unknown>).code : undefined)
+  );
 }
 
 /**
@@ -33,6 +41,12 @@ export function cliDeviceOwnershipHint(payload: unknown, toolName: string): stri
       "after the retryAfterMs in the error has passed; nothing else needs to change."
     );
   }
+  if (code === DEVICE_SHUTTING_DOWN_CODE) {
+    return (
+      "Hint: the device is being shut down. Re-run the command after the retryAfterMs in the " +
+      "error has passed, once the shutdown has finished."
+    );
+  }
   if (code === DEVICE_OWNED_BY_OTHER_DAEMON_CODE) {
     return (
       "Hint: another AutoMobile daemon on this host is using the device. Re-run after it " +
@@ -41,6 +55,18 @@ export function cliDeviceOwnershipHint(payload: unknown, toolName: string): stri
   }
   if (code !== DEVICE_OWNED_BY_OTHER_SESSION_CODE) {
     return undefined;
+  }
+  if (isDeviceSessionAcquisitionTool(toolName)) {
+    // The CLI drops --session-uuid for acquisition tools (they mint their own session), so
+    // "re-run with --session-uuid" would be discarded (#11096).
+    return (
+      `Hint: another session holds the device, and ${toolName} cannot join it: acquisition ` +
+      "tools mint their own session and the CLI ignores --session-uuid for them. If that " +
+      "session is yours, skip re-acquiring and pass --session-uuid <uuid> to your follow-up " +
+      "calls; to see who holds the device, run --daemon active-sessions (releasing a session " +
+      "that is not yours can break another agent's work); otherwise wait for the holder to " +
+      "release it."
+    );
   }
   const forceHint = FORCE_OVERRIDE_TOOLS.has(toolName)
     ? ` To stop it anyway, pass --force true.`

@@ -138,6 +138,12 @@ acquisitions as anonymous (#11096):
   `nextAction: "acquire_new_session"` (`ACQUIRE_NEW_SESSION_NEXT_ACTION` in
   `src/models/deviceSessionRecovery.ts`, #11098). Acquire a new session with
   `getAndroid` or `getApple`; retrying the same UUID cannot succeed.
+- A managed connection (a proxy launched with `--managed-slot-config`) never
+  acquires devices, so after its execution's session is released it answers
+  `managed_execution_ended` instead: `retryable: false`,
+  `nextAction: "relaunch_execution"`, the release `reason`, and the slot's
+  `slotIndex`, `role` and `assignmentGeneration`. It names no recovery tools; the
+  runner decides whether to relaunch the execution (#11341).
 - Booted-device discovery that did not complete (adb or simctl failed, or a
   running emulator's AVD identity has not resolved) is refused with the retryable
   code `discovery_incomplete` instead of booting or adopting a device blind. Retry

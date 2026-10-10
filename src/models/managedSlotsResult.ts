@@ -100,6 +100,16 @@ export interface ManagedSlotsResult {
   failure?: ManagedSlotsFailure;
 }
 
+/** The slot of a ready result that holds `sessionUuid` (null when the result has no such slot). */
+export function managedSlotForSession(
+  result: ManagedSlotsResult | undefined,
+  sessionUuid: string,
+): ManagedSlotResultEntry | null {
+  return result?.outcome === "ready"
+    ? (result.slots.find((slot) => slot.sessionUuid === sessionUuid) ?? null)
+    : null;
+}
+
 /** The sessions a ready result asks the proxy to hold. */
 export function managedSlotSessions(result: ManagedSlotsResult): string[] {
   return result.outcome === "ready"

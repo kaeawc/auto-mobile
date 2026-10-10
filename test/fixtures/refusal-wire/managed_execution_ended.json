@@ -1,0 +1,13 @@
+{
+  "code": "managed_execution_ended",
+  "builder": "managedEndedPayload",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"managed_execution_ended\",\"message\":\"This managed execution has ended: its device session 11111111-2222-4333-8444-555555555555 was released (heartbeat_timeout) and cannot be reused. This connection never acquires devices, so device calls are refused until the runner relaunches the execution; reads still work.\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"reason\":\"heartbeat_timeout\",\"retryable\":false,\"nextAction\":\"relaunch_execution\",\"slotIndex\":1,\"role\":\"primary\",\"assignmentGeneration\":3}}"
+      }
+    ]
+  }
+}

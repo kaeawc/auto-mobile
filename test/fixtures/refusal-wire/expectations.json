@@ -120,6 +120,14 @@
         "acquireNewSession": false
       }
     },
+    "managed_execution_ended": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_execution_ended",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "managed_slot_acquisition_failed.cancelled": {
       "expected": "fail",
       "fields": {

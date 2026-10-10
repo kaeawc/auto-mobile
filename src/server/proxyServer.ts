@@ -36,6 +36,8 @@ import {
 } from "../daemon/deviceControlTransportFailure";
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
+  managedExecutionEndedPayload,
+  readTerminalSessionRefusal,
   sessionOwnershipLostPayload,
   terminalSessionRefusalFields,
 } from "./deviceSessionResult";
@@ -46,7 +48,11 @@ import { installToolCallDispatcher } from "./toolCallDispatch";
 import { shapeToolCallError } from "./shapeToolCallError";
 import { livenessHandoverPayload, type LivenessHandover } from "../daemon/proxyLivenessRecovery";
 import { MANAGED_SLOTS_EXPERIMENTAL_CAPABILITY } from "../models/managedSlotConfig";
-import { MANAGED_SLOTS_RESOURCE_URI, type ManagedSlotsResult } from "../models/managedSlotsResult";
+import {
+  MANAGED_SLOTS_RESOURCE_URI,
+  managedSlotForSession,
+  type ManagedSlotsResult,
+} from "../models/managedSlotsResult";
 
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
 const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
@@ -82,11 +88,54 @@ export interface ProxyMcpServerOptions {
   sessionContext?: { sessionId?: string };
 }
 
-function boundSessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError) {
+/**
+ * The `managed_execution_ended` payload (#11341) when this is a managed connection and the released
+ * session is one of its slot sessions (or, without a session, any session of a ready managed
+ * connection). A session the connection does not hold keeps its ordinary refusal.
+ */
+export function managedEndedPayload(
+  managedSlots: ManagedSlotsResult | undefined,
+  sessionUuid: string | undefined,
+  reason: string,
+) {
+  if (managedSlots?.outcome !== "ready") {
+    return undefined;
+  }
+  const slot = sessionUuid === undefined ? null : managedSlotForSession(managedSlots, sessionUuid);
+  return sessionUuid !== undefined && !slot
+    ? undefined
+    : managedExecutionEndedPayload({ sessionUuid, reason, slot });
+}
+
+/**
+ * Rewrite a relayed daemon terminal-session refusal (`session_ownership_lost`, ...) into
+ * `managed_execution_ended` on a managed connection (#11341): the daemon's advice to acquire a new
+ * session cannot work there. Any other result passes through.
+ */
+function managedEndedRelayedResult<T>(
+  result: T,
+  managedSlots: ManagedSlotsResult | undefined,
+): T | CallToolResult {
+  const refusal = readTerminalSessionRefusal(result);
+  const payload =
+    refusal && managedEndedPayload(managedSlots, refusal.sessionUuid, refusal.reason ?? "unknown");
+  return payload
+    ? { content: [{ type: "text", text: JSON.stringify(payload) }], isError: true }
+    : result;
+}
+
+function boundSessionOwnershipLostPayload(
+  error: DaemonBoundSessionExpiredError,
+  managedSlots?: ManagedSlotsResult,
+) {
   if (error instanceof DaemonSessionStalledError) {
     // `daemon_stalled` / `proxy_stalled` (#10053): the harness is told which sessions and devices
     // are affected and what to do, rather than the generic "acquire a replacement session".
     return error.toPayload();
+  }
+  const ended = managedEndedPayload(managedSlots, error.sessionUuid, error.reason);
+  if (ended) {
+    return ended;
   }
   return sessionOwnershipLostPayload({
     message:
@@ -98,28 +147,44 @@ function boundSessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError)
   });
 }
 
-function sessionOwnershipLostMessage(error: DaemonBoundSessionExpiredError): string {
-  return JSON.stringify(boundSessionOwnershipLostPayload(error));
+function sessionOwnershipLostMessage(
+  error: DaemonBoundSessionExpiredError,
+  managedSlots?: ManagedSlotsResult,
+): string {
+  return JSON.stringify(boundSessionOwnershipLostPayload(error, managedSlots));
 }
 
-function sessionOwnershipLostResult(error: DaemonBoundSessionExpiredError): CallToolResult {
+function sessionOwnershipLostResult(
+  error: DaemonBoundSessionExpiredError,
+  managedSlots?: ManagedSlotsResult,
+): CallToolResult {
   return {
     content: [
       {
         type: "text",
-        text: sessionOwnershipLostMessage(error),
+        text: sessionOwnershipLostMessage(error, managedSlots),
       },
     ],
     isError: true,
   };
 }
 
-function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): McpError {
-  const payload = boundSessionOwnershipLostPayload(error);
-  return new McpError(-32603, sessionOwnershipLostMessage(error), payload);
+function sessionOwnershipLostError(
+  error: DaemonBoundSessionExpiredError,
+  managedSlots?: ManagedSlotsResult,
+): McpError {
+  const payload = boundSessionOwnershipLostPayload(error, managedSlots);
+  return new McpError(-32603, sessionOwnershipLostMessage(error, managedSlots), payload);
 }
 
-function noActiveDeviceSessionPayload(error: DaemonConnectionSessionReleasedError) {
+function noActiveDeviceSessionPayload(
+  error: DaemonConnectionSessionReleasedError,
+  managedSlots?: ManagedSlotsResult,
+) {
+  const ended = managedEndedPayload(managedSlots, undefined, error.reason);
+  if (ended) {
+    return ended;
+  }
   return {
     error: {
       code: "no_active_device_session",
@@ -130,24 +195,31 @@ function noActiveDeviceSessionPayload(error: DaemonConnectionSessionReleasedErro
   };
 }
 
-function noActiveDeviceSessionMessage(error: DaemonConnectionSessionReleasedError): string {
-  return JSON.stringify(noActiveDeviceSessionPayload(error));
+function noActiveDeviceSessionMessage(
+  error: DaemonConnectionSessionReleasedError,
+  managedSlots?: ManagedSlotsResult,
+): string {
+  return JSON.stringify(noActiveDeviceSessionPayload(error, managedSlots));
 }
 
 export function noActiveDeviceSessionResult(
   error: DaemonConnectionSessionReleasedError,
+  managedSlots?: ManagedSlotsResult,
 ): CallToolResult {
   return {
-    content: [{ type: "text", text: noActiveDeviceSessionMessage(error) }],
+    content: [{ type: "text", text: noActiveDeviceSessionMessage(error, managedSlots) }],
     isError: true,
   };
 }
 
-function noActiveDeviceSessionError(error: DaemonConnectionSessionReleasedError): McpError {
+function noActiveDeviceSessionError(
+  error: DaemonConnectionSessionReleasedError,
+  managedSlots?: ManagedSlotsResult,
+): McpError {
   return new McpError(
     -32603,
-    noActiveDeviceSessionMessage(error),
-    noActiveDeviceSessionPayload(error),
+    noActiveDeviceSessionMessage(error, managedSlots),
+    noActiveDeviceSessionPayload(error, managedSlots),
   );
 }
 
@@ -327,14 +399,15 @@ function resolveCallToolErrorResult(
   error: unknown,
   name: string,
   hasOutputSchema: boolean,
+  managedSlots?: ManagedSlotsResult,
 ): CallToolResult {
   if (error instanceof DaemonBoundSessionExpiredError) {
     logger.warn(`[ProxyServer] Session ownership lost for ${error.sessionUuid}: ${error.reason}`);
-    return sessionOwnershipLostResult(error);
+    return sessionOwnershipLostResult(error, managedSlots);
   }
   if (error instanceof DaemonConnectionSessionReleasedError) {
     logger.warn(`[ProxyServer] No active device session (released: ${error.reason})`);
-    return noActiveDeviceSessionResult(error);
+    return noActiveDeviceSessionResult(error, managedSlots);
   }
   if (error instanceof DaemonShuttingDownError) {
     return daemonShuttingDownResult(hasOutputSchema, error.requestMayHaveDispatched);
@@ -425,10 +498,10 @@ function registerProxyResourceHandlers(
       return { resources: managedSlots ? [MANAGED_SLOTS_RESOURCE, ...resources] : resources };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error);
+        throw sessionOwnershipLostError(error, managedSlots);
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error);
+        throw noActiveDeviceSessionError(error, managedSlots);
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);
@@ -449,10 +522,10 @@ function registerProxyResourceHandlers(
       return { resourceTemplates };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error);
+        throw sessionOwnershipLostError(error, managedSlots);
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error);
+        throw noActiveDeviceSessionError(error, managedSlots);
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);
@@ -484,10 +557,10 @@ function registerProxyResourceHandlers(
     } catch (error) {
       extra.signal.throwIfAborted();
       if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error);
+        throw sessionOwnershipLostError(error, managedSlots);
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error);
+        throw noActiveDeviceSessionError(error, managedSlots);
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);
@@ -671,10 +744,10 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       return { tools };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error);
+        throw sessionOwnershipLostError(error, options.managedSlots);
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error);
+        throw noActiveDeviceSessionError(error, options.managedSlots);
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);
@@ -709,12 +782,12 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
 
       try {
         const result = await proxy.callTool(name, args, progressToken, onProgress, extra.signal);
-        return result;
+        return managedEndedRelayedResult(result, options.managedSlots);
       } catch (error) {
         // The SDK suppresses responses for aborted requests. Do not turn a
         // cancellation into a tool error result while that request unwinds.
         extra.signal.throwIfAborted();
-        return resolveCallToolErrorResult(error, name, hasOutputSchema);
+        return resolveCallToolErrorResult(error, name, hasOutputSchema, options.managedSlots);
       }
     },
   });

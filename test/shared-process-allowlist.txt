@@ -745,6 +745,7 @@ test/scripts/androidVideoBaselineGate.test.ts
 test/scripts/batsInstallHoist.test.ts
 test/scripts/batsSerialTags.test.ts
 test/scripts/benchmark-context-thresholds.test.ts
+test/scripts/benchmarkListDevicesFixture.test.ts
 test/scripts/benchmarkSettledScreenshot.test.ts
 test/scripts/benchmarkSettledScreenshotIsolation.test.ts
 test/scripts/benchmarkSettledScreenshotReliability.test.ts

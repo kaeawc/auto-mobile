@@ -18,6 +18,8 @@
  *   --config    Path to threshold configuration file (default: scripts/tool-thresholds.json)
  *   --output    Path to write JSON report file (optional)
  *   --compare   Path to baseline file for regression comparison (optional)
+ *   --tools     Comma-separated tool names to run (default: all registered benchmark tools)
+ *   --samples   Iterations per tool (default: 50)
  *
  * Exit codes:
  *   0 - All benchmarks passed
@@ -38,6 +40,8 @@ import { registerDeepLinkTools } from "../src/server/deepLinkTools";
 import { registerNavigationTools } from "../src/server/navigationTools";
 import { registerPlanTools } from "../src/server/planTools";
 import { registerDoctorTools } from "../src/server/doctorTools";
+
+import { installListDevicesFixture } from "./benchmark-listdevices-fixture";
 
 import fs from "node:fs";
 import path from "node:path";
@@ -66,6 +70,17 @@ const TOOL_CATEGORIES: ToolCategory[] = [
     tools: ["launchApp", "installApp"],
   },
 ];
+
+/**
+ * Tools whose real dependencies spawn host processes (adb, simctl, ps) get a fixture that injects
+ * fakes for the duration of their run, so the gate measures the handler and not the host (#11332).
+ * `listDevices` is gated on the daemon-shaped scenario: the `DevicePool` ownership refresh is the
+ * work that grows with the handler's contract. Tools without an entry still run against real
+ * tooling; see the NOTES of #11332 for which ones.
+ */
+const TOOL_FIXTURES: Record<string, () => Promise<{ dispose(): void }>> = {
+  listDevices: () => installListDevicesFixture("daemon"),
+};
 
 // Benchmark configuration
 interface ThresholdConfig {
@@ -216,40 +231,51 @@ async function benchmarkTool(
     return baseArgs;
   };
 
-  // Warm-up run (not counted)
+  const fixture = await TOOL_FIXTURES[toolName]?.();
   try {
-    const args = getMockArgs();
-    if (tool.deviceAwareHandler) {
-      await tool.deviceAwareHandler(mockDevice, args);
-    } else {
-      await tool.handler(args);
-    }
-  } catch (error) {
-    // Ignore warm-up errors - device operations will fail, but we measure up to that point
-  }
-
-  // Actual benchmark runs - measure real tool handlers including MCP overhead
-  for (let i = 0; i < sampleSize; i++) {
-    const startTime = performance.now();
-
+    // Warm-up run (not counted)
     try {
       const args = getMockArgs();
-      // Call the actual tool handler to measure real MCP plumbing overhead
       if (tool.deviceAwareHandler) {
         await tool.deviceAwareHandler(mockDevice, args);
       } else {
         await tool.handler(args);
       }
-      successes++;
     } catch (error) {
-      // Expected: device operations will fail without real device
-      // But we've measured the MCP overhead (registry, validation, wrapper logic)
-      // Still count as success for throughput measurement
-      successes++;
+      // Ignore warm-up errors - device operations will fail, but we measure up to that point
+      if (fixture) {
+        throw error;
+      }
     }
 
-    const endTime = performance.now();
-    measurements.push(endTime - startTime);
+    // Actual benchmark runs - measure real tool handlers including MCP overhead
+    for (let i = 0; i < sampleSize; i++) {
+      const startTime = performance.now();
+
+      try {
+        const args = getMockArgs();
+        // Call the actual tool handler to measure real MCP plumbing overhead
+        if (tool.deviceAwareHandler) {
+          await tool.deviceAwareHandler(mockDevice, args);
+        } else {
+          await tool.handler(args);
+        }
+        successes++;
+      } catch (error) {
+        // Expected: device operations will fail without real device
+        // But we've measured the MCP overhead (registry, validation, wrapper logic)
+        // Still count as success for throughput measurement
+        if (fixture) {
+          throw error;
+        } // A faked tool must succeed; a throw means the fixture is broken.
+        successes++;
+      }
+
+      const endTime = performance.now();
+      measurements.push(endTime - startTime);
+    }
+  } finally {
+    fixture?.dispose();
   }
 
   return calculateMetrics(toolName, measurements, successes);
@@ -353,6 +379,7 @@ function compareAgainstThreshold(
 async function runBenchmarks(
   sampleSize: number,
   config: ThresholdConfig | null,
+  toolFilter: string[] | null = null,
 ): Promise<BenchmarkReport> {
   console.log("Initializing MCP server components...");
 
@@ -360,7 +387,9 @@ async function runBenchmarks(
   registerAllTools();
 
   const mockDevice = createMockDevice();
-  const toolsToBenchmark = getToolsToBenchmark();
+  const toolsToBenchmark = getToolsToBenchmark().filter(
+    (tool) => toolFilter === null || toolFilter.includes(tool),
+  );
 
   console.log(
     `\nBenchmarking ${toolsToBenchmark.length} tools with ${sampleSize} samples each...\n`,
@@ -523,6 +552,7 @@ async function main() {
   let configPath = path.join(__dirname, "tool-thresholds.json");
   let outputPath: string | null = null;
   let baselinePath: string | null = null;
+  let toolFilter: string[] | null = null;
   let sampleSize = 50; // Default to 50 iterations to reduce percentile noise
 
   // Parse command line arguments
@@ -535,6 +565,9 @@ async function main() {
       i++;
     } else if (args[i] === "--compare" && i + 1 < args.length) {
       baselinePath = args[i + 1];
+      i++;
+    } else if (args[i] === "--tools" && i + 1 < args.length) {
+      toolFilter = args[i + 1].split(",");
       i++;
     } else if (args[i] === "--samples" && i + 1 < args.length) {
       sampleSize = parseInt(args[i + 1], 10);
@@ -560,7 +593,7 @@ async function main() {
   }
 
   // Run benchmarks
-  const report = await runBenchmarks(sampleSize, config);
+  const report = await runBenchmarks(sampleSize, config, toolFilter);
 
   // Print report to console
   printReport(report);

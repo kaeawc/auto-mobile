@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeAll, beforeEach, afterEach } from "bun:test";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
@@ -26,6 +26,19 @@ const GREEN_PNG = Buffer.from(
 describe("ScreenshotCache", function () {
   let tempDir: string;
   let fakeTimer: FakeTimer;
+
+  // The first read pays one-time filesystem and module cost; pay it outside the timed tests.
+  beforeAll(async function () {
+    const warmDir = await fs.mkdtemp(path.join(os.tmpdir(), "screenshot-cache-warm-"));
+    try {
+      const warmPath = path.join(warmDir, "warm.png");
+      await fs.writeFile(warmPath, RED_PNG);
+      await ScreenshotCache.getCachedScreenshot(warmPath, new FakeTimer());
+    } finally {
+      ScreenshotCache.clearCache();
+      await fs.rm(warmDir, { recursive: true, force: true });
+    }
+  });
 
   beforeEach(async function () {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "screenshot-cache-"));

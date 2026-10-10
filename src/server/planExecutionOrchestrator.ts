@@ -34,7 +34,10 @@ import {
 import { importPlanFromYaml, executePlan } from "../utils/planUtils";
 import { DaemonState } from "../daemon/daemonState";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
-import { managedConnectionPlanLabelRefusal } from "../daemon/managedSlots/managedConnectionScope";
+import {
+  managedConnectionPlanLabelRefusal,
+  slotDeviceFailsLabelCriteria,
+} from "../daemon/managedSlots/managedConnectionScope";
 import { DeviceOutsideManagedSlotsError } from "../daemon/managedSlots/managedSlotRefusal";
 import type { DevicePool } from "../daemon/devicePool";
 import type { SessionManager } from "../daemon/sessionManager";
@@ -61,6 +64,7 @@ import type { Plan } from "../models/Plan";
 import { isDeviceLostError } from "./deviceLossOutcome";
 import { errorMessage } from "../utils/describeUnknownError";
 import { typedRefusalFields } from "../models/typedRefusalFields";
+import { isTypedToolRefusal, shapeToolCallError } from "./shapeToolCallError";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
@@ -241,11 +245,40 @@ function planToolResultsTruncatedField(truncated: PlanToolResultsTruncation | un
 /**
  * The typed refusal fields of an error that failed the plan, so a typed retryable refusal (e.g.
  * `capacity_exhausted` from device allocation) is not flattened into the `error` string (#11236).
+ * A refusal with its own wire payload also keeps that evidence (`deviceLabel`, `reason`,
+ * `scopeKey`, ...), so a client can branch on fields instead of parsing the message (#11421).
  */
 export function planRefusalFields(
   error: unknown,
-): Pick<ExecutePlanResult, "code" | "retryable" | "retryAfterMs" | "nextAction" | "details"> {
-  return typedRefusalFields(error) ?? {};
+): Pick<ExecutePlanResult, "code" | "retryable" | "retryAfterMs" | "nextAction" | "details"> &
+  Record<string, unknown> {
+  const fields = typedRefusalFields(error);
+  return fields ? { ...refusalPayloadEvidence(error, fields.details ?? {}), ...fields } : {};
+}
+
+/**
+ * The evidence a thrown `tools/call` gives the same refusal, read from `shapeToolCallError`'s
+ * payload so the two surfaces cannot drift. `success` and `error` are the plan result's own, and
+ * fields `details` already carries are not repeated beside it.
+ */
+function refusalPayloadEvidence(
+  error: unknown,
+  details: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!isTypedToolRefusal(error)) {
+    return {};
+  }
+  const wire: unknown = JSON.parse(
+    shapeToolCallError(error, { toolName: "executePlan", source: "MCP" }).content[0].text,
+  );
+  if (typeof wire !== "object" || wire === null || typeof Reflect.get(wire, "code") !== "string") {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(wire).filter(
+      ([key]) => key !== "success" && key !== "error" && !(key in details),
+    ),
+  );
 }
 
 /** The deviceFailures response field, omitted when no device failures were reported. */
@@ -738,13 +771,20 @@ export class PlanExecutionOrchestrator {
     if (refusal) {
       throw refusal;
     }
+    const devicePool = DaemonState.getInstance().getDevicePool();
     const slotDevices = new Map<string, string>();
     for (const [label, slotSessionUuid] of Object.entries(labelToSessionMap)) {
       const slotSession = sessionManager.getSession(slotSessionUuid);
-      const platform = normalized.definitions.find(
-        (definition) => definition.label === label,
-      )?.platform;
-      if (!slotSession?.assignedDevice || (platform && slotSession.platform !== platform)) {
+      // The slot serves the label with its own device or not at all: a declared criterion that
+      // device demonstrably fails is refused instead of silently ignored (#11421).
+      if (
+        !slotSession?.assignedDevice ||
+        slotDeviceFailsLabelCriteria({
+          declared: normalized.definitions.find((definition) => definition.label === label),
+          slotPlatform: slotSession.platform,
+          device: devicePool.getDevice(slotSession.assignedDevice),
+        })
+      ) {
         throw new DeviceOutsideManagedSlotsError("executePlan", "tool", binding.scopeKey, {
           deviceLabel: label,
         });

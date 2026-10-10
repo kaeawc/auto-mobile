@@ -2223,7 +2223,21 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       // derived session and the base are released independently, so one failed
       // release cannot leave the others holding their devices (#11091).
       const releasedSessionUuids = await releaseDeviceLabelSessions(releaseSessionUuid);
-      if (await this.releasePlanBaseSession(sessionManager, devicePool, releaseSessionUuid)) {
+      // A plan run owns the derived label sessions it created and its base session, with one
+      // exception: a managed connection's slot session belongs to the connection for its
+      // lifetime (#11421). Its slot set is fixed and a `plan-auto-release` UUID is not reusable,
+      // so releasing it would strand the connection. A generic connection's base session is
+      // released whether or not it existed before the plan (docs: `holdSessionOnFailure`).
+      if (
+        DaemonState.getInstance().getManagedConnectionScopes().forSlotSession(releaseSessionUuid)
+      ) {
+        logger.info(
+          `[PlanLifecycle] Keeping managed slot session ${releaseSessionUuid} and its device ` +
+            "after executePlan: it belongs to its connection",
+        );
+      } else if (
+        await this.releasePlanBaseSession(sessionManager, devicePool, releaseSessionUuid)
+      ) {
         releasedSessionUuids.push(releaseSessionUuid);
       }
 

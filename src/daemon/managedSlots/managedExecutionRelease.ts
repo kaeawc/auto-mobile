@@ -36,6 +36,7 @@ import {
   type SessionReleasePool,
 } from "../releaseSessionAndDevice";
 import { currentSlotOwnerProcess } from "./slotOwnerLiveness";
+import type { SlotJournalInFlight } from "./slotJournal";
 import type {
   SlotAssignmentRecord,
   SlotAssignmentState,
@@ -98,7 +99,19 @@ export type ManagedExecutionSlotRegistry = Pick<
   | "updateSlotState"
   | "getAssignment"
   | "recoverSettledSlots"
+  | "openSlotJournal"
+  | "advanceSlotJournal"
 >;
+
+/**
+ * Journal the drain's `settling` marks (#11179): each mark opens a `release` entry owned by this
+ * daemon (the settler) in the same transaction, closed when the slot returns to `ready`. A daemon
+ * that dies before its work settles leaves the entry for a later daemon's redrive.
+ */
+export interface ManagedExecutionReleaseJournal {
+  /** Entries this drain is still guarding; a redrive in this process leaves them alone. */
+  inFlight: SlotJournalInFlight;
+}
 
 /** The execution-tracker slice the drain needs (cancel, bounded wait, and a settled probe). */
 export interface ManagedExecutionWork {
@@ -158,12 +171,15 @@ export interface ManagedExecutionReleaseOptions {
   settlementCapMs?: number;
   /** This daemon, recorded as the settler of slots it marks `settling`. Default: this process. */
   settler?: SlotProcessIdentity;
+  journal?: ManagedExecutionReleaseJournal;
 }
 
 interface MarkedSlot {
   key: SlotKey;
   generation: number;
   stableDeviceId: string | null;
+  /** The release journal entry recording the mark, when journaling is on. */
+  journalEntryId?: number;
 }
 
 export class ManagedExecutionRelease {
@@ -429,6 +445,10 @@ export class ManagedExecutionRelease {
           generation: assignment.generation,
           stableDeviceId: assignment.stableDeviceId,
         };
+        const journaled = await this.markJournaled(registry, assignment, failures);
+        if (journaled !== "unjournaled") {
+          return journaled;
+        }
         const updated = await registry.updateSlotState(key, binding, "settling", {
           settler: this.settlerIdentity(),
         });
@@ -451,6 +471,59 @@ export class ManagedExecutionRelease {
       }
       return result.value ? [result.value] : [];
     });
+  }
+
+  /**
+   * Mark one slot `settling` through a release journal entry, in one transaction. Returns
+   * `unjournaled` when journaling is off or the slot already has an open entry (which governs it),
+   * so the caller marks the slot directly.
+   */
+  private async markJournaled(
+    registry: ManagedExecutionSlotRegistry,
+    assignment: SlotAssignmentRecord,
+    failures: ManagedExecutionSlotFailure[],
+  ): Promise<MarkedSlot | null | "unjournaled"> {
+    const journal = this.options.journal;
+    if (!journal) {
+      return "unjournaled";
+    }
+    const key = slotKeyOf(assignment);
+    const settler = this.settlerIdentity();
+    const opened = await registry.openSlotJournal(key, {
+      kind: "release",
+      phase: "intent",
+      owner: settler,
+      target: {
+        oldStableId: assignment.stableDeviceId,
+        oldName: assignment.deviceName,
+        newName: null,
+        newStableId: null,
+        requestedSpec: assignment.requestedSpec,
+        resolvedSpec: assignment.resolvedSpec,
+        specFingerprint: assignment.specFingerprint,
+      },
+      assignment: {
+        kind: "state",
+        expected: { generation: assignment.generation, stableDeviceId: assignment.stableDeviceId },
+        state: "settling",
+        options: { settler },
+      },
+    });
+    if (opened.kind === "opened") {
+      journal.inFlight.add(opened.entry.id);
+      // Entering the fence bumped the generation; the watcher restores under the new one.
+      return {
+        key,
+        generation: opened.assignment.generation,
+        stableDeviceId: opened.assignment.stableDeviceId,
+        journalEntryId: opened.entry.id,
+      };
+    }
+    if (opened.kind === "journal_open") {
+      return "unjournaled";
+    }
+    failures.push({ ...key, error: `could not mark settling: ${opened.kind}` });
+    return null;
   }
 
   /** Clear this session's execution ownership of every held slot; one failure never stops the rest. */
@@ -496,6 +569,8 @@ export class ManagedExecutionRelease {
             `${this.settlementCapMs}ms; its slots stay settling until this daemon's exit makes ` +
             "them recoverable",
         );
+        // Their release journal entries stay in flight here: the work may still be running in this
+        // process, so only a later daemon (once this one is gone) redrives them.
         return;
       }
       await timer.sleep(this.settlementPollMs);
@@ -516,14 +591,11 @@ export class ManagedExecutionRelease {
         current.stableDeviceId !== slot.stableDeviceId ||
         current.execOwner !== null
       ) {
+        await this.closeSupersededEntry(registry, slot, current);
         return;
       }
-      const updated = await registry.updateSlotState(
-        slot.key,
-        { generation: slot.generation, stableDeviceId: slot.stableDeviceId },
-        "ready",
-      );
-      if (updated.kind !== "updated") {
+      const updated = await this.restoreSlotState(registry, slot);
+      if (updated.kind !== "updated" && updated.kind !== "advanced") {
         logger.warn(
           `[ManagedExecutionRelease] Slot ${slot.key.scopeKey}/${slot.key.slotIndex} settled but ` +
             `could not return to ready: ${updated.kind}`,
@@ -535,6 +607,54 @@ export class ManagedExecutionRelease {
           `ready failed; it stays settling: ${errorMessage(error)}`,
         error,
       );
+    }
+  }
+
+  /** Return a settled slot to `ready`, closing its release journal entry in the same transaction. */
+  private async restoreSlotState(registry: ManagedExecutionSlotRegistry, slot: MarkedSlot) {
+    const binding = { generation: slot.generation, stableDeviceId: slot.stableDeviceId };
+    const journal = this.options.journal;
+    if (!journal || slot.journalEntryId === undefined) {
+      return registry.updateSlotState(slot.key, binding, "ready");
+    }
+    try {
+      return await registry.advanceSlotJournal(slot.journalEntryId, {
+        owner: this.settlerIdentity(),
+        expectedPhase: "intent",
+        phase: "committed",
+        assignment: { kind: "state", expected: binding, state: "ready" },
+      });
+    } finally {
+      journal.inFlight.delete(slot.journalEntryId);
+    }
+  }
+
+  /**
+   * The slot moved on before settlement: close its release entry (rolled back when the binding
+   * changed, committed when something else already restored it). A slot that gained an execution
+   * owner meanwhile keeps its entry open for redrive.
+   */
+  private async closeSupersededEntry(
+    registry: ManagedExecutionSlotRegistry,
+    slot: MarkedSlot,
+    current: SlotAssignmentRecord | null,
+  ): Promise<void> {
+    const journal = this.options.journal;
+    if (!journal || slot.journalEntryId === undefined || current?.execOwner) {
+      return;
+    }
+    const rebound =
+      !current ||
+      current.generation !== slot.generation ||
+      current.stableDeviceId !== slot.stableDeviceId;
+    try {
+      await registry.advanceSlotJournal(slot.journalEntryId, {
+        owner: this.settlerIdentity(),
+        expectedPhase: "intent",
+        phase: rebound ? "rolled_back" : "committed",
+      });
+    } finally {
+      journal.inFlight.delete(slot.journalEntryId);
     }
   }
 

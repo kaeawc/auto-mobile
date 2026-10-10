@@ -3,29 +3,13 @@ import {
   DefaultManagedSpecMatcher,
   DefaultManagedSpecResolver,
   ManagedSlotReconciler,
-  deviceStableId,
   encodeManagedSpecFingerprint,
   managedSlotDeviceName,
-  type ManagedSlotBootCapacity,
-  type ManagedSlotCapacityCheck,
-  type ManagedSlotDeletionResult,
-  type ManagedSlotDeletionTarget,
-  type ManagedSlotDeviceClaim,
-  type ManagedSlotDeviceClaims,
-  type ManagedSlotDeviceDeleter,
-  type ManagedSlotDeviceProvisioner,
-  type ManagedSlotInventory,
-  type ManagedSlotInventorySnapshot,
-  type ManagedSlotProvisionRequest,
-  type ManagedSlotProvisionedDevice,
   type ManagedSlotReconcileRequest,
   type ManagedSlotReconcileResult,
-  type ManagedSpecMatch,
-  type ManagedSpecMatcher,
-  type ManagedSlotRequestedSpec,
   chooseIosDeviceType,
 } from "../../../src/daemon/managedSlots/reconciler";
-import type { SlotKey, SlotPlatform } from "../../../src/daemon/managedSlots/slotRegistry";
+import type { SlotKey } from "../../../src/daemon/managedSlots/slotRegistry";
 import {
   ProvisionDeviceError,
   type ExactDeviceSpecification,
@@ -38,6 +22,14 @@ import { parseAndroidSystemImageRuntime } from "../../../src/utils/android-cmdli
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import {
+  FakeCapacity,
+  FakeClaims,
+  FakeDeleter,
+  FakeInventory,
+  FakeMatcher,
+  FakeProvisioner,
+} from "./fixtures/reconcilerFakes";
 
 const IOS_18 = "com.apple.CoreSimulator.SimRuntime.iOS-18-0";
 const IOS_17 = "com.apple.CoreSimulator.SimRuntime.iOS-17-5";
@@ -83,133 +75,6 @@ const ANY_MODEL_CATALOG: ExactIosRuntimeCatalog = {
     deviceType(IPAD, "iPad", "17.0", "65535.255.255"),
   ],
 };
-
-class FakeInventory implements ManagedSlotInventory {
-  complete = true;
-  devices: DeviceInfo[] = [];
-  async list(platform: SlotPlatform): Promise<ManagedSlotInventorySnapshot> {
-    return {
-      complete: this.complete,
-      devices: this.devices.filter((device) => device.platform === platform),
-    };
-  }
-  has(stableId: string): boolean {
-    return this.devices.some((device) => deviceStableId(device) === stableId);
-  }
-  remove(stableId: string): void {
-    this.devices = this.devices.filter((device) => deviceStableId(device) !== stableId);
-  }
-}
-
-/** iOS-style matching on listed runtime/device type; overrides force a verdict per stable id. */
-class FakeMatcher implements ManagedSpecMatcher {
-  readonly overrides = new Map<string, ManagedSpecMatch>();
-  async matches(device: DeviceInfo, spec: ManagedSlotRequestedSpec): Promise<ManagedSpecMatch> {
-    const override = this.overrides.get(deviceStableId(device) ?? "");
-    if (override) {
-      return override;
-    }
-    return device.runtime === spec.runtime &&
-      (spec.deviceType === undefined || device.deviceType === spec.deviceType)
-      ? "match"
-      : "mismatch";
-  }
-}
-
-class FakeProvisioner implements ManagedSlotDeviceProvisioner {
-  readonly calls: ManagedSlotProvisionRequest[] = [];
-  readonly released: string[] = [];
-  failWith: ((request: ManagedSlotProvisionRequest) => unknown) | undefined;
-  /** Runs after the device exists but before the result returns (race injection). */
-  beforeReturn: ((request: ManagedSlotProvisionRequest) => Promise<void>) | undefined;
-  readinessStatus = "automation_ready";
-  private nextUdid = 1;
-  private nextSession = 1;
-
-  constructor(private readonly inventory: FakeInventory) {}
-
-  async provision(request: ManagedSlotProvisionRequest): Promise<ManagedSlotProvisionedDevice> {
-    this.calls.push(request);
-    const failure = this.failWith?.(request);
-    if (failure) {
-      throw failure;
-    }
-    let device: DeviceInfo | undefined;
-    if (request.mode === "adopt") {
-      device = this.inventory.devices.find((entry) =>
-        request.deviceId ? entry.deviceId === request.deviceId : entry.name === request.name,
-      );
-      if (!device) {
-        throw new ProvisionDeviceError("identity_conflict", `no device ${request.name}`);
-      }
-    } else {
-      device = {
-        name: request.name,
-        platform: request.platform,
-        isRunning: true,
-        runtime: request.spec.runtime,
-        deviceType: request.spec.deviceType,
-        ...(request.platform === "ios" ? { deviceId: `UDID-${this.nextUdid++}` } : {}),
-      };
-      this.inventory.devices.push(device);
-    }
-    device.isRunning = true;
-    await this.beforeReturn?.(request);
-    const stableId = deviceStableId(device)!;
-    return {
-      device: {
-        stableId,
-        transportId: device.deviceId ?? `emulator-${stableId}`,
-        name: device.name,
-      },
-      created: request.mode === "create",
-      sessionUuid: `session-${this.nextSession++}`,
-      readiness: { mode: "automation", status: this.readinessStatus },
-    };
-  }
-
-  async releaseSession(sessionUuid: string): Promise<void> {
-    this.released.push(sessionUuid);
-  }
-
-  created(): ManagedSlotProvisionRequest[] {
-    return this.calls.filter((call) => call.mode === "create");
-  }
-}
-
-class FakeDeleter implements ManagedSlotDeviceDeleter {
-  readonly calls: ManagedSlotDeletionTarget[] = [];
-  failWith: string | undefined;
-  constructor(private readonly inventory: FakeInventory) {}
-  async deleteAndVerifyAbsence(
-    target: ManagedSlotDeletionTarget,
-  ): Promise<ManagedSlotDeletionResult> {
-    this.calls.push(target);
-    if (this.failWith) {
-      return { kind: "failed", message: this.failWith };
-    }
-    this.inventory.remove(target.stableId);
-    return { kind: "absent", evidence: { verified: true } };
-  }
-}
-
-class FakeClaims implements ManagedSlotDeviceClaims {
-  readonly claims = new Map<string, ManagedSlotDeviceClaim>();
-  beforeDescribe: (() => Promise<void>) | undefined;
-  async describe(device: DeviceInfo): Promise<ManagedSlotDeviceClaim> {
-    await this.beforeDescribe?.();
-    return this.claims.get(deviceStableId(device) ?? "") ?? { kind: "free" };
-  }
-}
-
-class FakeCapacity implements ManagedSlotBootCapacity {
-  result: ManagedSlotCapacityCheck = { kind: "available" };
-  checks = 0;
-  async check(): Promise<ManagedSlotCapacityCheck> {
-    this.checks += 1;
-    return this.result;
-  }
-}
 
 const SCOPE = { managedHostScope: "host-a", runnerNamespace: "ns", runnerIncarnation: "inc-1" };
 
@@ -612,10 +477,18 @@ describe("ManagedSlotReconciler", () => {
       });
       expect(provisioner.calls).toHaveLength(0);
 
+      // The accepted deletion is journaled: an immediate retry waits out the backoff without
+      // repeating it, and the next due retry finishes it and converges (#11179).
       deleter.failWith = undefined;
       const retry = expectFailed(await reconciler.reconcile(request(SPEC_18)));
       expect(retry.failure.code).toBe("cleanup_pending");
       expect(deleter.calls).toHaveLength(1);
+
+      timer.advanceTime(1_000);
+      const converged = expectReady(await reconciler.reconcile(request(SPEC_18)));
+      expect(deleter.calls.map((call) => call.stableId)).toEqual([oldId, oldId]);
+      expect(converged.device.stableId).not.toBe(oldId);
+      expect(inventory.has(oldId)).toBe(false);
     });
 
     test("a thrown deletion is unverified and also leaves cleanup_pending", async () => {
@@ -780,14 +653,18 @@ describe("ManagedSlotReconciler", () => {
       expect(running.disposition).toBe("replaced");
     });
 
-    test("an interrupted replacement is left for journal redrive, never guessed at", async () => {
+    test("a slot left replacing without a journal entry is redriven: delete finished, slot refilled", async () => {
       const oldId = await seedAssigned(SPEC_17);
       await registry.updateSlotState(key, { generation: 1, stableDeviceId: oldId }, "replacing");
 
-      const result = expectFailed(await reconciler.reconcile(request(SPEC_18)));
+      const result = expectReady(await reconciler.reconcile(request(SPEC_18)));
 
-      expect(result.failure.code).toBe("reconcile_in_progress");
-      expect(deleter.calls).toHaveLength(0);
+      expect(deleter.calls.map((call) => call.stableId)).toEqual([oldId]);
+      expect(result.evidence.redriven).toEqual([
+        expect.objectContaining({ kind: "replace", outcome: "settled" }),
+      ]);
+      expect(result.device.stableId).not.toBe(oldId);
+      expect(await registry.listOpenSlotJournal(key)).toEqual([]);
     });
   });
 

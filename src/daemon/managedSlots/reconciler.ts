@@ -25,6 +25,15 @@ import { parseAndroidSystemImageRuntime } from "../../utils/android-cmdline-tool
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
+import type { BackoffInput } from "../../utils/Backoff";
+import { currentDaemonProcessGenerationToken } from "../processGeneration";
+import { deviceStableId } from "./slotDeviceIdentity";
+import {
+  ManagedSlotJournal,
+  type SlotJournalInFlight,
+  type SlotJournalOwnerLiveness,
+  type SlotJournalRedriveRecord,
+} from "./slotJournal";
 import { logger } from "../../utils/logger";
 import { stableStringify } from "../../utils/stableStringify";
 import type { Timer } from "../../utils/SystemTimer";
@@ -35,6 +44,8 @@ import {
   type SlotCasFailure,
   type SlotExecOwner,
   type SlotExecOwnerLiveness,
+  type SlotJournalEntry,
+  type SlotJournalOwner,
   type SlotKey,
   type SlotPlatform,
   type SlotRegistry,
@@ -64,6 +75,9 @@ import {
  *   a creation that fails after a verified deletion leaves the slot empty (`provisioning`).
  * - Boot capacity fails immediately with retryable `capacity_exhausted` (owner decision): the
  *   reconciler never waits for capacity and never creates a device it could not boot.
+ * - Every create and replace is journaled (`slot_journal`, #11179) with its exact devices, and each
+ *   acquisition first redrives the slot's unfinished work of a dead owner (see `slotJournal.ts`),
+ *   so a retry after an interruption converges instead of repeating destructive work.
  *
  * Not yet wired into the acquire RPC (step 5 of the epic); callers inject the ports below.
  */
@@ -241,6 +255,27 @@ export interface ManagedSlotReconcilerDependencies {
   timer: Pick<Timer, "now">;
   /** Execution-reservation ids (default: random UUIDs). */
   idGenerator?: IdGenerator;
+  /** Journal ownership and redrive policy (#11179). */
+  journal?: ManagedSlotReconcilerJournalOptions;
+}
+
+export interface ManagedSlotReconcilerJournalOptions {
+  /** This process as a journal owner; default: this PID and its process-generation token. */
+  owner?: SlotJournalOwner;
+  /** Whether another journal owner is alive; default: PID plus process generation. */
+  isOwnerLive?: SlotJournalOwnerLiveness;
+  /** Shared with the drain and the redrive pass so one process never drives an entry twice. */
+  inFlight?: SlotJournalInFlight;
+  backoff?: BackoffInput;
+}
+
+/** The default journal owner: this process, by PID and process-generation token. */
+export function processJournalOwner(): SlotJournalOwner {
+  return {
+    daemonId: `pid-${process.pid}`,
+    pid: process.pid,
+    processGenerationToken: currentDaemonProcessGenerationToken() ?? null,
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -345,6 +380,10 @@ export interface ManagedSlotReconcileEvidence {
   deletion?: unknown;
   /** Device created by this attempt that could not be committed, and what happened to it. */
   uncommittedCleanup?: { stableId: string; removed: boolean; message?: string };
+  /** Unfinished journaled work of an earlier attempt this acquisition redrove first (#11179). */
+  redriven?: SlotJournalRedriveRecord[];
+  /** The journal entry this attempt opened, and the phase it reached. */
+  journal?: { entryId: number; kind: SlotJournalEntry["kind"]; phase: SlotJournalEntry["phase"] };
 }
 
 export type ManagedSlotReconcileResult =
@@ -411,10 +450,7 @@ export function encodeManagedSpecFingerprint(fingerprint: ManagedSlotSpecFingerp
   return `v${fingerprint.version}:${fingerprint.hash}`;
 }
 
-/** The stable resource id: AVD name on Android, UDID on iOS. */
-export function deviceStableId(device: DeviceInfo): string | undefined {
-  return device.platform === "android" ? device.name : device.deviceId;
-}
+export { deviceStableId };
 
 /** Matches with the shared exact-provisioning matchers (#11100) — one definition of "matches". */
 export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
@@ -759,9 +795,24 @@ export class ManagedSlotReconciler {
   private readonly isExecOwnerLive: SlotExecOwnerLiveness;
   private readonly idGenerator: IdGenerator;
 
+  readonly journal: ManagedSlotJournal;
+
   constructor(private readonly deps: ManagedSlotReconcilerDependencies) {
     this.isExecOwnerLive = deps.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
     this.idGenerator = deps.idGenerator ?? defaultIdGenerator;
+    this.journal = new ManagedSlotJournal({
+      registry: deps.registry,
+      inventory: deps.inventory,
+      matcher: deps.matcher,
+      deleter: deps.deleter,
+      claims: deps.claims,
+      timer: deps.timer,
+      owner: deps.journal?.owner ?? processJournalOwner(),
+      isExecOwnerLive: this.isExecOwnerLive,
+      ...(deps.journal?.isOwnerLive ? { isOwnerLive: deps.journal.isOwnerLive } : {}),
+      ...(deps.journal?.inFlight ? { inFlight: deps.journal.inFlight } : {}),
+      ...(deps.journal?.backoff !== undefined ? { backoff: deps.journal.backoff } : {}),
+    });
   }
 
   async reconcile(request: ManagedSlotReconcileRequest): Promise<ManagedSlotReconcileResult> {
@@ -831,7 +882,8 @@ export class ManagedSlotReconciler {
     if (init.kind === "scope_not_valid") {
       throw new ReconcileAbort(failure("scope_not_valid", "Slot scope is not valid."));
     }
-    const assignment = await this.recoverIfSettled(request, init.assignment);
+    const redriven = await this.redriveUnfinished(request, init.assignment, evidence);
+    const assignment = await this.recoverIfSettled(request, redriven);
     evidence.initial = {
       generation: assignment.generation,
       stableDeviceId: assignment.stableDeviceId,
@@ -878,6 +930,32 @@ export class ManagedSlotReconciler {
       return await this.reuseAssigned(context, assignment, assigned);
     }
     return await this.replaceAssigned(context, assignment, assigned, inventory.complete);
+  }
+
+  /**
+   * Converge an earlier attempt's unfinished journaled work on this slot (a crash mid-replace,
+   * mid-create or mid-release) before deciding anything, then re-read the slot.
+   */
+  private async redriveUnfinished(
+    request: ManagedSlotReconcileRequest,
+    assignment: SlotAssignmentRecord,
+    evidence: ManagedSlotReconcileEvidence,
+  ): Promise<SlotAssignmentRecord> {
+    const redrive = await this.journal.redriveSlot(request.key);
+    if (redrive.redriven.length > 0) {
+      evidence.redriven = redrive.redriven;
+    }
+    if (redrive.kind === "blocked") {
+      throw new ReconcileAbort(failure(redrive.reason, redrive.message));
+    }
+    if (redrive.redriven.length === 0) {
+      return assignment;
+    }
+    const current = await this.deps.registry.getAssignment(request.key);
+    if (!current) {
+      throw new ReconcileAbort(failure("scope_not_valid", "Slot disappeared during redrive."));
+    }
+    return current;
   }
 
   /**
@@ -934,7 +1012,8 @@ export class ManagedSlotReconciler {
       );
     }
     if (assignment.state === "replacing") {
-      // Redrive of an interrupted replacement belongs to the journal (#11179); never guess here.
+      // The journal redrive above already converged any dead owner's replacement (#11179); one
+      // still replacing here is being driven by a live owner, so never guess.
       throw new ReconcileAbort(
         failure(
           "reconcile_in_progress",
@@ -1141,10 +1220,17 @@ export class ManagedSlotReconciler {
     return await this.claimAndReady(context, "adopted", ready.assignment, provisioned, undefined);
   }
 
+  /**
+   * Create a device under the slot's next generated name and commit it, journaled so an
+   * interruption at any boundary converges: `creating` (provision issued) → `created` (device
+   * exists) → `committed` together with the binding. `replacing` continues a replacement entry that
+   * already verified the old device's absence.
+   */
   private async createAndCommit(
     context: ReconcileContext,
     assignment: SlotAssignmentRecord,
     disposition: "created" | "replaced",
+    replacing?: SlotJournalEntry,
   ): Promise<ReadyResult> {
     const { request } = context;
     this.checkBudget(request);
@@ -1155,68 +1241,177 @@ export class ManagedSlotReconciler {
       this.idGenerator.next(),
     );
     context.evidence.createdName = name;
-    let provisioned: ManagedSlotProvisionedDevice;
+    let entry = replacing
+      ? await this.advanceToCreating(context, replacing, name)
+      : await this.openCreateEntry(context, assignment, name);
+    this.journal.inFlight.add(entry.id);
     try {
-      provisioned = await this.deps.provisioner.provision({
-        platform: request.platform,
-        name,
-        // "Any model" creates the model the resolver chose (and recorded).
-        spec: { ...request.requestedSpec, deviceType: context.resolvedSpec.deviceType },
-        mode: "create",
-        deadlineMs: request.deadlineMs,
-        signal: request.signal,
+      let provisioned: ManagedSlotProvisionedDevice;
+      try {
+        provisioned = await this.deps.provisioner.provision({
+          platform: request.platform,
+          name,
+          // "Any model" creates the model the resolver chose (and recorded).
+          spec: { ...request.requestedSpec, deviceType: context.resolvedSpec.deviceType },
+          mode: "create",
+          deadlineMs: request.deadlineMs,
+          signal: request.signal,
+        });
+      } catch (error) {
+        // The provision path rolls back its own partial creation; settle the entry on proof of
+        // absence, or leave it open for redrive when a leftover may exist.
+        await this.settleFailedCreate(context, entry);
+        throw new ReconcileAbort(provisionFailure(error));
+      }
+      entry = await this.recordCreated(context, entry, provisioned);
+      if (!this.isAutomationReady(provisioned)) {
+        await this.discardUncommitted(context, provisioned, entry);
+        throw new ReconcileAbort(
+          failure("readiness_incomplete", `Device '${name}' did not reach automation readiness.`),
+        );
+      }
+      const committed = await this.journal.advance(entry, {
+        expectedPhase: "created",
+        phase: "committed",
+        assignment: {
+          kind: "commit",
+          expected: entry.binding,
+          next: {
+            stableDeviceId: provisioned.device.stableId,
+            deviceName: provisioned.device.name,
+            requestedSpec: request.requestedSpec,
+            resolvedSpec: context.resolvedSpec,
+            specFingerprint: encodeManagedSpecFingerprint(context.fingerprint),
+            state: "ready",
+          },
+        },
       });
-    } catch (error) {
-      // The provision path rolled back its own partial creation; the slot is unchanged.
-      throw new ReconcileAbort(provisionFailure(error));
+      if (committed.kind === "journal_conflict") {
+        // Another driver took the entry over; it owns the device's fate now.
+        await this.releaseSession(provisioned.sessionUuid);
+        throw new ReconcileAbort(
+          failure("concurrent_modification", "The slot's journal entry was taken over."),
+        );
+      }
+      if (committed.kind !== "advanced") {
+        await this.discardUncommitted(context, provisioned, entry);
+        throw new ReconcileAbort(claimFailure(committed, "create commit"));
+      }
+      this.noteJournal(context, committed.entry);
+      return await this.claimAndReady(
+        context,
+        disposition,
+        committed.assignment!,
+        provisioned,
+        undefined,
+      );
+    } finally {
+      this.journal.inFlight.delete(entry.id);
     }
-    if (!this.isAutomationReady(provisioned)) {
-      await this.discardUncommitted(context, provisioned);
+  }
+
+  private async openCreateEntry(
+    context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
+    name: string,
+  ): Promise<SlotJournalEntry> {
+    const { request } = context;
+    const opened = await this.deps.registry.openSlotJournal(request.key, {
+      kind: "create",
+      phase: "creating",
+      owner: this.journal.owner,
+      target: this.journalTarget(context, assignment, name),
+      assignment: { kind: "state", expected: expectationOf(assignment), state: "provisioning" },
+    });
+    if (opened.kind === "journal_open") {
       throw new ReconcileAbort(
-        failure("readiness_incomplete", `Device '${name}' did not reach automation readiness.`),
+        failure("reconcile_in_progress", `Slot ${request.key.slotIndex} has unfinished work.`),
       );
     }
-    const committed = await this.deps.registry.commitBinding(
-      request.key,
-      expectationOf(assignment),
-      {
-        stableDeviceId: provisioned.device.stableId,
-        deviceName: provisioned.device.name,
-        requestedSpec: request.requestedSpec,
-        resolvedSpec: context.resolvedSpec,
-        specFingerprint: encodeManagedSpecFingerprint(context.fingerprint),
-        state: "ready",
-      },
-    );
-    if (committed.kind !== "committed") {
-      await this.discardUncommitted(context, provisioned);
-      throw new ReconcileAbort(casFailure(committed, "create commit"));
+    if (opened.kind !== "opened") {
+      throw new ReconcileAbort(claimFailure(opened, "create"));
     }
-    return await this.claimAndReady(
-      context,
-      disposition,
-      committed.assignment,
-      provisioned,
-      undefined,
-    );
+    this.noteJournal(context, opened.entry);
+    return opened.entry;
+  }
+
+  private async advanceToCreating(
+    context: ReconcileContext,
+    entry: SlotJournalEntry,
+    name: string,
+  ): Promise<SlotJournalEntry> {
+    const advanced = await this.journal.advance(entry, {
+      expectedPhase: "deleted",
+      phase: "creating",
+      target: { newName: name },
+    });
+    if (advanced.kind !== "advanced") {
+      throw new ReconcileAbort(
+        failure("concurrent_modification", `Replacement journal changed: ${advanced.kind}.`),
+      );
+    }
+    this.noteJournal(context, advanced.entry);
+    return advanced.entry;
+  }
+
+  private async recordCreated(
+    context: ReconcileContext,
+    entry: SlotJournalEntry,
+    provisioned: ManagedSlotProvisionedDevice,
+  ): Promise<SlotJournalEntry> {
+    const recorded = await this.journal.advance(entry, {
+      expectedPhase: "creating",
+      phase: "created",
+      target: { newStableId: provisioned.device.stableId, newName: provisioned.device.name },
+    });
+    if (recorded.kind !== "advanced") {
+      // Another driver took the entry over and will settle the device by its recorded name.
+      await this.releaseSession(provisioned.sessionUuid);
+      throw new ReconcileAbort(
+        failure("concurrent_modification", "The slot's journal entry was taken over."),
+      );
+    }
+    this.noteJournal(context, recorded.entry);
+    return recorded.entry;
+  }
+
+  /** After a failed provision: roll the entry back on proven absence, else leave it for redrive. */
+  private async settleFailedCreate(
+    context: ReconcileContext,
+    entry: SlotJournalEntry,
+  ): Promise<void> {
+    try {
+      const settled = await this.journal.settleCreation(entry, {
+        adopt: false,
+        deadlineMs: context.request.deadlineMs,
+      });
+      this.noteJournal(context, settled.entry);
+    } catch (error) {
+      logger.warn(
+        `[ManagedSlots] settling failed creation entry ${entry.id} failed; redrive will retry: ` +
+          errorMessage(error),
+        error,
+      );
+    }
   }
 
   /**
-   * A device this attempt created but could not publish: release its session and delete it, unless
-   * the registry says a slot (any scope) or the free pool now holds that stable id. Losing a
-   * compare-and-set never licenses deleting the device the winner committed.
+   * A device this attempt created but could not publish: release its session and remove it, unless
+   * the registry says a slot (any scope) or the free pool now holds that stable id.
    */
   private async discardUncommitted(
     context: ReconcileContext,
     provisioned: ManagedSlotProvisionedDevice,
+    entry: SlotJournalEntry,
   ): Promise<void> {
     await this.releaseSession(provisioned.sessionUuid);
     if (!provisioned.created) {
+      this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
       return;
     }
-    const { request } = context;
+    // Losing a compare-and-set never licenses deleting the device the winner committed.
     const holder = await this.deps.registry.findDeviceHolder(
-      request.platform,
+      context.request.platform,
       provisioned.device.stableId,
     );
     if (holder) {
@@ -1232,24 +1427,25 @@ export class ManagedSlotReconciler {
       logger.warn(
         `[ManagedSlots] not discarding '${provisioned.device.stableId}': it is held by ${heldBy}`,
       );
+      this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
       return;
     }
-    const result = await this.deleteDevice({
-      platform: request.platform,
-      stableId: provisioned.device.stableId,
-      name: provisioned.device.name,
-      deadlineMs: request.deadlineMs,
-      signal: request.signal,
+    const settled = await this.journal.settleCreation(entry, {
+      adopt: false,
+      deadlineMs: context.request.deadlineMs,
     });
+    this.noteJournal(context, settled.entry);
+    const removed = settled.kind === "settled";
     context.evidence.uncommittedCleanup = {
       stableId: provisioned.device.stableId,
-      removed: result.kind === "absent",
-      ...(result.kind === "failed" ? { message: result.message } : {}),
+      removed,
+      ...(settled.kind === "blocked" ? { message: settled.message } : {}),
     };
-    if (result.kind === "failed") {
-      // The leftover carries this slot's name prefix, so a later attempt can adopt it.
+    if (!removed) {
+      // The entry stays open with the device's exact identity, so a redrive removes it later.
       logger.warn(
-        `[ManagedSlots] uncommitted device '${provisioned.device.stableId}' was not removed: ${result.message}`,
+        `[ManagedSlots] uncommitted device '${provisioned.device.stableId}' was not removed: ` +
+          (settled.kind === "blocked" ? settled.message : "unknown"),
       );
     }
   }
@@ -1263,57 +1459,74 @@ export class ManagedSlotReconciler {
     inventoryComplete: boolean,
   ): Promise<ReadyResult> {
     const { request, evidence } = context;
-    const { registry } = this.deps;
     const oldId = assignment.stableDeviceId!;
     await this.assertReplaceable(request, assignment, device, inventoryComplete);
-    const marked = await registry.updateSlotState(
-      request.key,
-      expectationOf(assignment),
-      "replacing",
-    );
-    if (marked.kind !== "updated") {
-      // A live execution (or another attempt's reservation) claimed the device after our checks.
-      throw new ReconcileAbort(claimFailure(marked, "replace"));
-    }
-    const deletion = await this.deleteDevice({
-      platform: request.platform,
-      stableId: oldId,
-      name: assignment.deviceName,
-      deadlineMs: request.deadlineMs,
-      signal: request.signal,
+    // Journal the accepted deletion together with `replacing`: from here on, an interruption is
+    // redriven against this exact device and binding.
+    const opened = await this.deps.registry.openSlotJournal(request.key, {
+      kind: "replace",
+      phase: "deleting",
+      owner: this.journal.owner,
+      target: this.journalTarget(context, assignment, null),
+      assignment: { kind: "state", expected: expectationOf(assignment), state: "replacing" },
     });
-    evidence.deletion = deletion.evidence;
-    if (deletion.kind === "failed") {
-      // The old device may still exist: keep it bound and protected until cleanup succeeds.
-      const pending = await registry.updateSlotState(
-        request.key,
-        expectationOf(marked.assignment),
-        "cleanup_pending",
+    if (opened.kind === "journal_open") {
+      throw new ReconcileAbort(
+        failure("reconcile_in_progress", `Slot ${request.key.slotIndex} has unfinished work.`),
       );
-      if (pending.kind !== "updated") {
-        logger.warn(
-          `[ManagedSlots] could not mark slot ${request.key.slotIndex} cleanup_pending: ${pending.kind}`,
+    }
+    if (opened.kind !== "opened") {
+      // A live execution (or another attempt's reservation) claimed the device after our checks.
+      throw new ReconcileAbort(claimFailure(opened, "replace"));
+    }
+    this.noteJournal(context, opened.entry);
+    this.journal.inFlight.add(opened.entry.id);
+    let deletedEntry: SlotJournalEntry;
+    let emptied: SlotAssignmentRecord;
+    try {
+      const deletion = await this.journal.driveDeletion(opened.entry, {
+        device,
+        deadlineMs: request.deadlineMs,
+        signal: request.signal,
+      });
+      this.noteJournal(context, deletion.entry);
+      if (deletion.kind !== "deleted") {
+        if (deletion.kind === "blocked") {
+          evidence.deletion = deletion.evidence;
+          throw new ReconcileAbort(failure(deletion.reason, deletion.message));
+        }
+        throw new ReconcileAbort(
+          failure("concurrent_modification", `Device '${oldId}' is no longer this slot's device.`),
         );
       }
-      throw new ReconcileAbort(
-        failure("cleanup_pending", `Deleting device '${oldId}' failed: ${deletion.message}`),
-      );
+      evidence.deletion = deletion.evidence;
+      evidence.deletedStableId = oldId;
+      deletedEntry = deletion.entry;
+      emptied = deletion.assignment;
+    } finally {
+      this.journal.inFlight.delete(opened.entry.id);
     }
-    evidence.deletedStableId = oldId;
-    // Record the verified absence before creating: a later failure or crash leaves an empty slot
-    // whose next attempt creates, and the old incarnation can never be deleted again.
-    const emptied = await registry.commitBinding(request.key, expectationOf(marked.assignment), {
-      stableDeviceId: null,
-      deviceName: null,
-      requestedSpec: request.requestedSpec,
-      resolvedSpec: null,
-      specFingerprint: null,
-      state: "provisioning",
-    });
-    if (emptied.kind !== "committed") {
-      throw new ReconcileAbort(casFailure(emptied, "replace"));
-    }
-    return await this.createAndCommit(context, emptied.assignment, "replaced");
+    return await this.createAndCommit(context, emptied, "replaced", deletedEntry);
+  }
+
+  private journalTarget(
+    context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
+    newName: string | null,
+  ) {
+    return {
+      oldStableId: assignment.stableDeviceId,
+      oldName: assignment.deviceName,
+      newName,
+      newStableId: null,
+      requestedSpec: context.request.requestedSpec,
+      resolvedSpec: context.resolvedSpec,
+      specFingerprint: encodeManagedSpecFingerprint(context.fingerprint),
+    };
+  }
+
+  private noteJournal(context: ReconcileContext, entry: SlotJournalEntry): void {
+    context.evidence.journal = { entryId: entry.id, kind: entry.kind, phase: entry.phase };
   }
 
   /**

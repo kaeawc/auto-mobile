@@ -64,7 +64,8 @@ import {
 } from "./managedSlots/managedExecutionRelease";
 import { currentSlotOwnerProcess } from "./managedSlots/slotOwnerLiveness";
 import { openSqliteSlotRegistry } from "./managedSlots/sqliteSlotRegistry";
-import type { SlotRegistry } from "./managedSlots/slotRegistry";
+import type { SlotJournalOwner, SlotRegistry } from "./managedSlots/slotRegistry";
+import { SlotJournalInFlight } from "./managedSlots/slotJournal";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import {
   DEFAULT_DAEMON_PORT,
@@ -605,6 +606,8 @@ export class Daemon {
   private timer: Timer;
   private managedExecutionRelease: ManagedExecutionRelease | undefined;
   private managedSlotRegistry: Promise<SlotRegistry> | undefined;
+  /** Journal entries this daemon is driving; shared by the drain and the slot reconciler. */
+  private readonly managedSlotJournalInFlight = new SlotJournalInFlight();
   private readonly generationStartedAt: number;
   private readonly processStartedAt: number;
   private readonly processGenerationToken: string | undefined;
@@ -795,21 +798,30 @@ export class Daemon {
   private installManagedExecutionRelease(): void {
     const release = new ManagedExecutionRelease({
       registry: () => this.openManagedSlotRegistry(),
+      journal: { inFlight: this.managedSlotJournalInFlight },
       work: executionTracker,
       sessions: managedExecutionSessionsFrom(this.sessionManager, {
         releaseDevice: (deviceId, sessionId) => this.devicePool.releaseDevice(deviceId, sessionId),
       }),
       timer: this.timer,
-      settler: {
-        daemonId: this.daemonSessionId,
-        ...currentSlotOwnerProcess(() => this.processGenerationToken),
-      },
+      settler: this.managedSlotJournalOwner(),
     });
     this.managedExecutionRelease = release;
     this.sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot, options) =>
       release.onSessionReleased(snapshot, options),
     );
     DaemonState.getInstance().setManagedExecutionRelease(release);
+  }
+
+  /**
+   * This daemon as a managed-slot settler and journal owner (#11179): PID plus process-generation
+   * token, so entries it opens are redriven by a later daemon once this process is gone.
+   */
+  private managedSlotJournalOwner(): SlotJournalOwner {
+    return {
+      daemonId: this.daemonSessionId,
+      ...currentSlotOwnerProcess(() => this.processGenerationToken),
+    };
   }
 
   private openManagedSlotRegistry(): Promise<SlotRegistry> {

@@ -258,6 +258,8 @@ export type CompleteScopeInvalidationResult =
       /** Slots whose released work is still settling under a live settler. */
       settling: SlotAssignmentRecord[];
       cleanupPending: SlotAssignmentRecord[];
+      /** Unfinished journaled work (#11179); accepted cleanup is never abandoned. */
+      openJournal: SlotJournalEntry[];
     }
   | { kind: "not_invalidating"; scope: SlotScopeRecord }
   | { kind: "not_found" };
@@ -281,6 +283,137 @@ export interface AbandonmentQuery {
  * release) and no live owner for one hour is abandoned, and its devices may be deleted.
  */
 export const MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS = 60 * 60 * 1000;
+
+// ---------------------------------------------------------------------------------------------
+// Slot journal (#11179)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * What a journal entry records: a device creation, a replacement (delete + verify absence, then
+ * create), or the end of an execution whose work had not settled (`release`).
+ */
+export type SlotJournalKind = "create" | "replace" | "release";
+
+/**
+ * Phase of a journal entry. `intent`, `deleting`, `deleted`, `creating` and `created` are open: the
+ * accepted work is unfinished and a redrive must converge it. `committed` and `rolled_back` are
+ * terminal. An entry's phase changes in the same transaction as any assignment change it implies.
+ */
+export type SlotJournalPhase =
+  | "intent"
+  | "deleting"
+  | "deleted"
+  | "creating"
+  | "created"
+  | "committed"
+  | "rolled_back";
+
+export const SLOT_JOURNAL_TERMINAL_PHASES: readonly SlotJournalPhase[] = [
+  "committed",
+  "rolled_back",
+];
+
+export function isSlotJournalPhaseOpen(phase: SlotJournalPhase): boolean {
+  return !SLOT_JOURNAL_TERMINAL_PHASES.includes(phase);
+}
+
+/** The exact devices an entry acts on, so recovery never confuses an old device with its successor. */
+export interface SlotJournalTarget {
+  /** The device the entry deletes (replace) or settles (release). */
+  oldStableId: string | null;
+  oldName: string | null;
+  /** The generated name of the device the entry creates. */
+  newName: string | null;
+  /** The created device's stable id, once creation returned it (iOS UDID / AVD name). */
+  newStableId: string | null;
+  requestedSpec: unknown;
+  resolvedSpec: unknown;
+  specFingerprint: string | null;
+}
+
+/**
+ * The process driving an entry (PID plus process-generation token). A redrive adopts entries whose
+ * owner is no longer live by the same liveness rule as execution owners.
+ */
+export type SlotJournalOwner = SlotProcessIdentity;
+
+export interface SlotJournalEntry extends SlotKey {
+  id: number;
+  kind: SlotJournalKind;
+  phase: SlotJournalPhase;
+  platform: SlotPlatform;
+  /** Slot generation when the entry was opened. */
+  fromGeneration: number;
+  /** Slot generation after the entry's latest binding commit (null before any). */
+  toGeneration: number | null;
+  /** The binding the entry expects the slot to hold now; every redrive step CASes on it. */
+  binding: SlotBindingExpectation;
+  target: SlotJournalTarget;
+  owner: SlotJournalOwner;
+  /** Failed attempts so far; never a reason to abandon the entry. */
+  attempts: number;
+  lastError: string | null;
+  /** Earliest time a redrive retries the entry (fair backoff between attempts). */
+  nextAttemptAtMs: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+/** The assignment change an entry transition applies atomically with the phase change. */
+export type SlotJournalAssignmentChange =
+  | { kind: "commit"; expected: SlotBindingExpectation; next: SlotBindingCommit }
+  | {
+      kind: "state";
+      expected: SlotBindingExpectation;
+      state: SlotAssignmentState;
+      /** Required when entering `settling` (the settling daemon). */
+      options?: UpdateSlotStateOptions;
+    };
+
+/** Why a journaled assignment change was refused; nothing was written. */
+export type SlotJournalChangeFailure =
+  | SlotCasFailure
+  | Extract<UpdateSlotStateResult, { kind: "slot_in_use" }>;
+
+export interface OpenSlotJournalInput {
+  kind: SlotJournalKind;
+  /** The entry's first (open) phase. */
+  phase: SlotJournalPhase;
+  target: SlotJournalTarget;
+  owner: SlotJournalOwner;
+  /** Anchors the entry to the slot's current binding; applied in the same transaction. */
+  assignment: SlotJournalAssignmentChange;
+}
+
+export type OpenSlotJournalResult =
+  | { kind: "opened"; entry: SlotJournalEntry; assignment: SlotAssignmentRecord }
+  /** The slot already has unfinished journaled work; only one open entry per slot. */
+  | { kind: "journal_open"; entry: SlotJournalEntry }
+  | SlotJournalChangeFailure;
+
+export interface AdvanceSlotJournalInput {
+  /** Must equal the entry's recorded owner: a superseded driver can never advance it. */
+  owner: SlotJournalOwner;
+  expectedPhase: SlotJournalPhase;
+  phase: SlotJournalPhase;
+  target?: Partial<SlotJournalTarget>;
+  assignment?: SlotJournalAssignmentChange;
+  /** Record a failed attempt: `attempts + 1`, the error and the next retry time. */
+  attempt?: { error: string; nextAttemptAtMs: number };
+}
+
+export type AdvanceSlotJournalResult =
+  | { kind: "advanced"; entry: SlotJournalEntry; assignment: SlotAssignmentRecord | null }
+  /** The entry is missing, terminal, at another phase, or owned by another driver. */
+  | { kind: "journal_conflict"; entry: SlotJournalEntry | null }
+  | SlotJournalChangeFailure;
+
+export type ClaimSlotJournalResult =
+  | { kind: "claimed"; entry: SlotJournalEntry }
+  | { kind: "journal_conflict"; entry: SlotJournalEntry | null };
+
+/** Terminal journal entries are kept this long as recovery evidence, then pruned. */
+export const SLOT_JOURNAL_TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Decides whether a recorded execution owner (or settler) is still alive. The default
@@ -372,8 +505,8 @@ export interface SlotRegistry {
     reason: SlotScopeInvalidationReason,
   ): Promise<BeginScopeInvalidationResult>;
   /**
-   * invalidating → invalidated once no live owner, no `cleanup_pending` slot and no slot settling
-   * under a live settler remains (a dead settler's slot is settled and does not block): bound
+   * invalidating → invalidated once no live owner, no `cleanup_pending` slot, no open journal entry
+   * and no slot settling under a live settler remains (a dead settler's slot is settled and does not block): bound
    * devices move to the free pool and the scope's slots are removed. Idempotent.
    *
    * A scope invalidated only by abandonment is still revivable, so its slots are KEPT (their
@@ -394,6 +527,23 @@ export interface SlotRegistry {
   markScopeAbandoned(scopeKey: string, query?: AbandonmentQuery): Promise<MarkScopeAbandonedResult>;
   /** Free-pool devices that have sat unadopted for at least the threshold. */
   findReclaimableFreeDevices(query?: AbandonmentQuery): Promise<FreeSlotDeviceRecord[]>;
+
+  /**
+   * Open a journal entry for a slot together with its anchoring assignment change. Refused while
+   * the slot has another open entry or the binding moved.
+   */
+  openSlotJournal(key: SlotKey, input: OpenSlotJournalInput): Promise<OpenSlotJournalResult>;
+  /** Move an open entry to its next phase (and apply its assignment change) in one transaction. */
+  advanceSlotJournal(id: number, input: AdvanceSlotJournalInput): Promise<AdvanceSlotJournalResult>;
+  /** Take over an open entry from `expected` (a dead owner); refused if the owner changed. */
+  claimSlotJournal(
+    id: number,
+    expected: SlotJournalOwner,
+    next: SlotJournalOwner,
+  ): Promise<ClaimSlotJournalResult>;
+  getSlotJournal(id: number): Promise<SlotJournalEntry | null>;
+  /** Open entries (all slots, or one slot), earliest retry first. */
+  listOpenSlotJournal(key?: SlotKey): Promise<SlotJournalEntry[]>;
 
   close(): Promise<void>;
 }
@@ -476,4 +626,64 @@ export function bindingMatches(
     assignment.generation === expected.generation &&
     assignment.stableDeviceId === expected.stableDeviceId
   );
+}
+
+export function journalOwnersEqual(a: SlotJournalOwner, b: SlotJournalOwner): boolean {
+  return (
+    a.daemonId === b.daemonId &&
+    a.pid === b.pid &&
+    (a.processGenerationToken ?? null) === (b.processGenerationToken ?? null)
+  );
+}
+
+export function sameBinding(a: SlotBindingExpectation, b: SlotBindingExpectation): boolean {
+  return a.generation === b.generation && a.stableDeviceId === b.stableDeviceId;
+}
+
+/**
+ * The stable id an open journal entry's new device has, or will have: the recorded id once creation
+ * returned it, else (Android) the generated AVD name, which is the stable id.
+ */
+export function journalNewStableId(entry: SlotJournalEntry): string | null {
+  return entry.target.newStableId ?? (entry.platform === "android" ? entry.target.newName : null);
+}
+
+/**
+ * Devices open journal entries are creating but have not bound yet. Generic allocation must skip
+ * them too, so a device mid-creation is never handed to another client before the slot commits it.
+ */
+export function journalTargetEntries(
+  open: readonly SlotJournalEntry[],
+  known: readonly ManagedDeviceEntry[],
+): ManagedDeviceEntry[] {
+  const seen = new Set(
+    known.map((entry) => JSON.stringify([entry.platform, entry.stableDeviceId])),
+  );
+  return open.flatMap((entry): ManagedDeviceEntry[] => {
+    const stableDeviceId = journalNewStableId(entry);
+    if (stableDeviceId === null || seen.has(JSON.stringify([entry.platform, stableDeviceId]))) {
+      return [];
+    }
+    seen.add(JSON.stringify([entry.platform, stableDeviceId]));
+    return [
+      {
+        platform: entry.platform,
+        stableDeviceId,
+        holder: "slot",
+        scopeKey: entry.scopeKey,
+        slotIndex: entry.slotIndex,
+        scopeState: null,
+        // No execution owns a device before its slot commits it.
+        execSessionUuid: null,
+      },
+    ];
+  });
+}
+
+/**
+ * Slot mutations need a `valid` scope. Journaled settlement may also run while the scope is
+ * `invalidating`: completing the invalidation waits for exactly that work.
+ */
+export function scopeAcceptsSlotChange(scope: SlotScopeRecord | null, journaled: boolean): boolean {
+  return scope?.state === "valid" || (journaled && scope?.state === "invalidating");
 }

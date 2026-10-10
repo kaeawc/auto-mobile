@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS,
+  SLOT_JOURNAL_TERMINAL_RETENTION_MS,
   computeSlotScopeKey,
   type SlotExecOwner,
   type SlotExecOwnerLiveness,
@@ -843,6 +844,353 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(
         await registry.findReclaimableFreeDevices({ thresholdMs: 2 * 60 * 60 * 1000 }),
       ).toEqual([]);
+    });
+
+    describe("slot journal (#11179)", () => {
+      const OWNER_1 = { daemonId: "daemon-1", pid: 101, processGenerationToken: "tok-1" };
+      const OWNER_2 = { daemonId: "daemon-2", pid: 202, processGenerationToken: null };
+      const TARGET = {
+        oldStableId: "avd-1",
+        oldName: "amslot-avd-1-g1",
+        newName: null,
+        newStableId: null,
+        requestedSpec: { apiLevel: 36 },
+        resolvedSpec: null,
+        specFingerprint: "fp-new",
+      };
+      const BOUND = { generation: 1, stableDeviceId: "avd-1" };
+      // Entering `replacing` is a fence: it bumps the generation (#11242).
+      const FENCED = { generation: 2, stableDeviceId: "avd-1" };
+
+      async function openReplace(key: SlotKey) {
+        const opened = await registry.openSlotJournal(key, {
+          kind: "replace",
+          phase: "deleting",
+          owner: OWNER_1,
+          target: TARGET,
+          assignment: { kind: "state", expected: BOUND, state: "replacing" },
+        });
+        if (opened.kind !== "opened") {
+          throw new Error(`journal not opened: ${opened.kind}`);
+        }
+        return opened.entry;
+      }
+
+      test("opening records the exact target and binding with the assignment change, one per slot", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        const entry = await openReplace(key);
+
+        expect(entry).toMatchObject({
+          kind: "replace",
+          phase: "deleting",
+          platform: "android",
+          fromGeneration: 1,
+          toGeneration: 2,
+          binding: FENCED,
+          target: TARGET,
+          owner: OWNER_1,
+          attempts: 0,
+          nextAttemptAtMs: 1_000_000,
+        });
+        expect((await registry.getAssignment(key))?.state).toBe("replacing");
+        expect(await registry.listOpenSlotJournal(key)).toEqual([entry]);
+        const second = await registry.openSlotJournal(key, {
+          kind: "release",
+          phase: "intent",
+          owner: OWNER_2,
+          target: TARGET,
+          assignment: { kind: "state", expected: BOUND, state: "cleanup_pending" },
+        });
+        expect(second).toMatchObject({ kind: "journal_open", entry: { id: entry.id } });
+        expect((await registry.getAssignment(key))?.state).toBe("replacing");
+      });
+
+      test("a stale binding refuses to open and writes nothing", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        const refused = await registry.openSlotJournal(key, {
+          kind: "replace",
+          phase: "deleting",
+          owner: OWNER_1,
+          target: TARGET,
+          assignment: {
+            kind: "state",
+            expected: { generation: 0, stableDeviceId: null },
+            state: "replacing",
+          },
+        });
+        expect(refused.kind).toBe("stale_binding");
+        expect(await registry.listOpenSlotJournal()).toEqual([]);
+        expect((await registry.getAssignment(key))?.state).toBe("ready");
+      });
+
+      test("advancing commits the binding and the phase together and tracks the new binding", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        const entry = await openReplace(key);
+        const deleted = await registry.advanceSlotJournal(entry.id, {
+          owner: OWNER_1,
+          expectedPhase: "deleting",
+          phase: "deleted",
+          assignment: {
+            kind: "commit",
+            expected: FENCED,
+            next: {
+              stableDeviceId: null,
+              deviceName: null,
+              resolvedSpec: null,
+              specFingerprint: null,
+              state: "provisioning",
+            },
+          },
+        });
+        expect(deleted).toMatchObject({
+          kind: "advanced",
+          entry: {
+            phase: "deleted",
+            toGeneration: 3,
+            binding: { generation: 3, stableDeviceId: null },
+          },
+          assignment: { generation: 3, stableDeviceId: null, state: "provisioning" },
+        });
+
+        const creating = await registry.advanceSlotJournal(entry.id, {
+          owner: OWNER_1,
+          expectedPhase: "deleted",
+          phase: "creating",
+          target: { newName: "amslot-new-g3" },
+        });
+        expect(creating).toMatchObject({
+          kind: "advanced",
+          entry: { phase: "creating", target: { ...TARGET, newName: "amslot-new-g3" } },
+          assignment: null,
+        });
+      });
+
+      test("a failed assignment CAS leaves the entry unchanged; wrong phase, owner or binding conflict", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        const entry = await openReplace(key);
+        // Someone else rebinds the slot underneath the entry.
+        await registry.commitBinding(key, FENCED, readyBinding("avd-9", 3));
+
+        const stale = await registry.advanceSlotJournal(entry.id, {
+          owner: OWNER_1,
+          expectedPhase: "deleting",
+          phase: "deleting",
+          assignment: { kind: "state", expected: FENCED, state: "cleanup_pending" },
+        });
+        expect(stale.kind).toBe("stale_binding");
+        expect(await registry.getSlotJournal(entry.id)).toEqual(entry);
+
+        const wrongBinding = await registry.advanceSlotJournal(entry.id, {
+          owner: OWNER_1,
+          expectedPhase: "deleting",
+          phase: "deleted",
+          assignment: {
+            kind: "state",
+            expected: { generation: 2, stableDeviceId: "avd-9" },
+            state: "ready",
+          },
+        });
+        expect(wrongBinding.kind).toBe("journal_conflict");
+        expect(
+          (
+            await registry.advanceSlotJournal(entry.id, {
+              owner: OWNER_2,
+              expectedPhase: "deleting",
+              phase: "rolled_back",
+            })
+          ).kind,
+        ).toBe("journal_conflict");
+        expect(
+          (
+            await registry.advanceSlotJournal(entry.id, {
+              owner: OWNER_1,
+              expectedPhase: "creating",
+              phase: "rolled_back",
+            })
+          ).kind,
+        ).toBe("journal_conflict");
+      });
+
+      test("attempts record backoff; terminal entries free the slot for a new entry", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        const entry = await openReplace(key);
+        const failed = await registry.advanceSlotJournal(entry.id, {
+          owner: OWNER_1,
+          expectedPhase: "deleting",
+          phase: "deleting",
+          assignment: { kind: "state", expected: FENCED, state: "cleanup_pending" },
+          attempt: { error: "delete failed", nextAttemptAtMs: 1_002_000 },
+        });
+        // replacing → cleanup_pending is another fence: the generation moves again.
+        expect(failed).toMatchObject({
+          kind: "advanced",
+          entry: {
+            attempts: 1,
+            lastError: "delete failed",
+            nextAttemptAtMs: 1_002_000,
+            binding: { generation: 3, stableDeviceId: "avd-1" },
+          },
+          assignment: { state: "cleanup_pending", generation: 3 },
+        });
+        await registry.advanceSlotJournal(entry.id, {
+          owner: OWNER_1,
+          expectedPhase: "deleting",
+          phase: "rolled_back",
+        });
+        expect(await registry.listOpenSlotJournal()).toEqual([]);
+        expect(
+          (
+            await registry.advanceSlotJournal(entry.id, {
+              owner: OWNER_1,
+              expectedPhase: "rolled_back",
+              phase: "committed",
+            })
+          ).kind,
+        ).toBe("journal_conflict");
+        const reopened = await registry.openSlotJournal(key, {
+          kind: "replace",
+          phase: "deleting",
+          owner: OWNER_1,
+          target: TARGET,
+          assignment: {
+            kind: "state",
+            expected: { generation: 3, stableDeviceId: "avd-1" },
+            state: "cleanup_pending",
+          },
+        });
+        expect(reopened.kind).toBe("opened");
+      });
+
+      test("claiming moves ownership only from the expected owner", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        const entry = await openReplace(key);
+        expect(await registry.claimSlotJournal(entry.id, OWNER_2, OWNER_2)).toMatchObject({
+          kind: "journal_conflict",
+        });
+        expect(await registry.claimSlotJournal(entry.id, OWNER_1, OWNER_2)).toMatchObject({
+          kind: "claimed",
+          entry: { owner: OWNER_2 },
+        });
+        expect(await registry.claimSlotJournal(entry.id, OWNER_1, OWNER_1)).toMatchObject({
+          kind: "journal_conflict",
+        });
+        expect(
+          (
+            await registry.advanceSlotJournal(entry.id, {
+              owner: OWNER_1,
+              expectedPhase: "deleting",
+              phase: "rolled_back",
+            })
+          ).kind,
+        ).toBe("journal_conflict");
+      });
+
+      test("open work blocks scope invalidation but may settle while the scope is invalidating", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        const entry = await openReplace(key);
+        await registry.beginScopeInvalidation(key.scopeKey, "incarnation_reset");
+        const pending = await registry.completeScopeInvalidation(key.scopeKey);
+        expect(pending).toMatchObject({ kind: "pending", openJournal: [{ id: entry.id }] });
+
+        const settled = await registry.advanceSlotJournal(entry.id, {
+          owner: OWNER_1,
+          expectedPhase: "deleting",
+          phase: "deleted",
+          assignment: {
+            kind: "commit",
+            expected: FENCED,
+            next: {
+              stableDeviceId: null,
+              deviceName: null,
+              resolvedSpec: null,
+              specFingerprint: null,
+              state: "provisioning",
+            },
+          },
+        });
+        expect(settled.kind).toBe("advanced");
+        await registry.advanceSlotJournal(entry.id, {
+          owner: OWNER_1,
+          expectedPhase: "deleted",
+          phase: "committed",
+        });
+        expect((await registry.completeScopeInvalidation(key.scopeKey)).kind).toBe("invalidated");
+        // Non-journaled mutations still need a valid scope.
+        expect(
+          (await registry.updateSlotState(key, { generation: 3, stableDeviceId: null }, "ready"))
+            .kind,
+        ).toBe("scope_not_valid");
+      });
+
+      test("a device an open entry is creating is excluded from generic allocation", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await registry.initSlot(key, INIT);
+        const opened = await registry.openSlotJournal(key, {
+          kind: "create",
+          phase: "creating",
+          owner: OWNER_1,
+          target: { ...TARGET, oldStableId: null, oldName: null, newName: "amslot-new-g1" },
+          assignment: {
+            kind: "state",
+            expected: { generation: 0, stableDeviceId: null },
+            state: "provisioning",
+          },
+        });
+        expect(opened.kind).toBe("opened");
+        expect(await registry.snapshotManagedDevices()).toEqual([
+          {
+            platform: "android",
+            stableDeviceId: "amslot-new-g1",
+            holder: "slot",
+            scopeKey: key.scopeKey,
+            slotIndex: 0,
+            scopeState: null,
+            execSessionUuid: null,
+          },
+        ]);
+      });
+
+      test("terminal entries are pruned after the retention window; open ones never are", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        const other = { scopeKey: key.scopeKey, slotIndex: 1 };
+        await boundSlot(key, "avd-1");
+        await boundSlot(other, "avd-2");
+        const entry = await openReplace(key);
+        await registry.advanceSlotJournal(entry.id, {
+          owner: OWNER_1,
+          expectedPhase: "deleting",
+          phase: "rolled_back",
+        });
+        const open = await registry.openSlotJournal(other, {
+          kind: "release",
+          phase: "intent",
+          owner: OWNER_1,
+          target: TARGET,
+          assignment: {
+            kind: "state",
+            expected: { generation: 1, stableDeviceId: "avd-2" },
+            state: "cleanup_pending",
+          },
+        });
+        expect(open.kind).toBe("opened");
+        timer.advanceTime(SLOT_JOURNAL_TERMINAL_RETENTION_MS + 1);
+        await registry.openSlotJournal(key, {
+          kind: "release",
+          phase: "intent",
+          owner: OWNER_1,
+          target: TARGET,
+          assignment: { kind: "state", expected: BOUND, state: "cleanup_pending" },
+        });
+        expect(await registry.getSlotJournal(entry.id)).toBeNull();
+        expect(await registry.listOpenSlotJournal(other)).toHaveLength(1);
+      });
     });
 
     test("malformed slot keys and thresholds are rejected before storage", async () => {

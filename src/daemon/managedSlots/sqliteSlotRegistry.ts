@@ -1,5 +1,5 @@
 import { dirname, join } from "node:path";
-import { Kysely, type Selectable, type Transaction } from "kysely";
+import { Kysely, type Generated, type Selectable, type Transaction } from "kysely";
 import { BunSqliteDialect } from "../../db/bunSqliteDialect";
 import { SQLITE_BUSY_TIMEOUT_MS } from "../../db/database";
 import { isInMemoryDatabasePath } from "../../db/migrationLock";
@@ -9,6 +9,25 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
 import { migrateSlotRegistry } from "./slotRegistryMigrations";
 import {
+  isSlotJournalPhaseOpen,
+  journalOwnersEqual,
+  journalTargetEntries,
+  sameBinding,
+  scopeAcceptsSlotChange,
+  SLOT_JOURNAL_TERMINAL_PHASES,
+  SLOT_JOURNAL_TERMINAL_RETENTION_MS,
+  type AdvanceSlotJournalInput,
+  type AdvanceSlotJournalResult,
+  type ClaimSlotJournalResult,
+  type OpenSlotJournalInput,
+  type OpenSlotJournalResult,
+  type SlotJournalAssignmentChange,
+  type SlotJournalChangeFailure,
+  type SlotJournalEntry,
+  type SlotJournalKind,
+  type SlotJournalOwner,
+  type SlotJournalPhase,
+  type SlotJournalTarget,
   assertSettlerForState,
   assertValidSlotKey,
   bindingMatches,
@@ -126,16 +145,40 @@ interface SlotFreeDevicesTable {
   freed_at_ms: number;
 }
 
+interface SlotJournalTable {
+  id: Generated<number>;
+  scope_key: string;
+  slot_index: number;
+  kind: SlotJournalKind;
+  phase: SlotJournalPhase;
+  platform: SlotPlatform;
+  from_generation: number;
+  to_generation: number | null;
+  binding_generation: number;
+  binding_stable_device_id: string | null;
+  target_json: string;
+  owner_daemon_id: string;
+  owner_pid: number;
+  owner_process_token: string | null;
+  attempts: number;
+  last_error: string | null;
+  next_attempt_at_ms: number;
+  created_at_ms: number;
+  updated_at_ms: number;
+}
+
 export interface SlotRegistryDatabase {
   slot_scopes: SlotScopesTable;
   slot_assignments: SlotAssignmentsTable;
   slot_free_devices: SlotFreeDevicesTable;
+  slot_journal: SlotJournalTable;
 }
 
 type Executor = Kysely<SlotRegistryDatabase> | Transaction<SlotRegistryDatabase>;
 type ScopeRow = Selectable<SlotScopesTable>;
 type AssignmentRow = Selectable<SlotAssignmentsTable>;
 type FreeDeviceRow = Selectable<SlotFreeDevicesTable>;
+type JournalRow = Selectable<SlotJournalTable>;
 
 function toScope(row: ScopeRow): SlotScopeRecord {
   return {
@@ -225,12 +268,102 @@ function toFreeDevice(row: FreeDeviceRow): FreeSlotDeviceRecord {
   };
 }
 
+function nullableString(record: Record<string, unknown>, field: string): string | null {
+  const value = record[field];
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new ActionableError(`Managed slot journal target field '${field}' is not a string`);
+  }
+  return value;
+}
+
+function parseJournalTarget(json: string): SlotJournalTarget {
+  const parsed: unknown = JSON.parse(json);
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new ActionableError("Managed slot journal target is not an object");
+  }
+  const record = parsed as Record<string, unknown>;
+  return {
+    oldStableId: nullableString(record, "oldStableId"),
+    oldName: nullableString(record, "oldName"),
+    newName: nullableString(record, "newName"),
+    newStableId: nullableString(record, "newStableId"),
+    requestedSpec: record.requestedSpec ?? null,
+    resolvedSpec: record.resolvedSpec ?? null,
+    specFingerprint: nullableString(record, "specFingerprint"),
+  };
+}
+
+function toJournalEntry(row: JournalRow): SlotJournalEntry {
+  return {
+    id: row.id,
+    scopeKey: row.scope_key,
+    slotIndex: row.slot_index,
+    kind: row.kind,
+    phase: row.phase,
+    platform: row.platform,
+    fromGeneration: row.from_generation,
+    toGeneration: row.to_generation,
+    binding: { generation: row.binding_generation, stableDeviceId: row.binding_stable_device_id },
+    target: parseJournalTarget(row.target_json),
+    owner: {
+      daemonId: row.owner_daemon_id,
+      pid: row.owner_pid,
+      processGenerationToken: row.owner_process_token,
+    },
+    attempts: row.attempts,
+    lastError: row.last_error,
+    nextAttemptAtMs: row.next_attempt_at_ms,
+    createdAtMs: row.created_at_ms,
+    updatedAtMs: row.updated_at_ms,
+  };
+}
+
 function serializeSpec(spec: unknown): string {
   const json = JSON.stringify(spec ?? null);
   if (json === undefined) {
     throw new ActionableError("Managed slot spec must be JSON-serializable");
   }
   return json;
+}
+
+/** The journal columns one advance writes: phase, merged target, binding and attempt bookkeeping. */
+function journalAdvanceColumns(
+  entry: SlotJournalEntry,
+  input: AdvanceSlotJournalInput,
+  assignment: SlotAssignmentRecord | null,
+  nowMs: number,
+) {
+  return {
+    phase: input.phase,
+    target_json: serializeSpec({ ...entry.target, ...input.target }),
+    to_generation:
+      assignment && assignment.generation !== entry.binding.generation
+        ? assignment.generation
+        : entry.toGeneration,
+    ...(assignment
+      ? {
+          binding_generation: assignment.generation,
+          binding_stable_device_id: assignment.stableDeviceId,
+        }
+      : {}),
+    ...(input.attempt
+      ? {
+          attempts: entry.attempts + 1,
+          last_error: input.attempt.error,
+          next_attempt_at_ms: input.attempt.nextAttemptAtMs,
+        }
+      : {}),
+    updated_at_ms: nowMs,
+  };
+}
+
+function assertOpenPhase(phase: SlotJournalPhase): void {
+  if (!isSlotJournalPhaseOpen(phase)) {
+    throw new ActionableError(`A managed slot journal entry cannot open at phase '${phase}'`);
+  }
 }
 
 export interface SqliteSlotRegistryOptions {
@@ -432,68 +565,76 @@ export class SqliteSlotRegistry implements SlotRegistry {
     next: SlotBindingCommit,
   ): Promise<CommitBindingResult> {
     assertValidSlotKey(key);
+    return this.db.transaction().execute((trx) => this.commitBindingIn(trx, key, expected, next));
+  }
+
+  private async commitBindingIn(
+    trx: Executor,
+    key: SlotKey,
+    expected: SlotBindingExpectation,
+    next: SlotBindingCommit,
+    journaled = false,
+  ): Promise<CommitBindingResult> {
     const resolvedSpecJson =
       next.resolvedSpec === null || next.resolvedSpec === undefined
         ? null
         : serializeSpec(next.resolvedSpec);
     const requestedSpecJson =
       next.requestedSpec === undefined ? undefined : serializeSpec(next.requestedSpec);
-    return this.db.transaction().execute(async (trx): Promise<CommitBindingResult> => {
-      const checked = await this.checkBinding(trx, key, expected);
-      if ("kind" in checked) {
-        return checked;
+    const checked = await this.checkBinding(trx, key, expected, journaled);
+    if ("kind" in checked) {
+      return checked;
+    }
+    let adoptedFreeDevice: FreeSlotDeviceRecord | null = null;
+    if (next.stableDeviceId !== null) {
+      const holder = await trx
+        .selectFrom("slot_assignments")
+        .selectAll()
+        .where("platform", "=", checked.platform)
+        .where("stable_device_id", "=", next.stableDeviceId)
+        .where((eb) =>
+          eb.or([eb("scope_key", "<>", key.scopeKey), eb("slot_index", "<>", key.slotIndex)]),
+        )
+        .executeTakeFirst();
+      if (holder) {
+        return { kind: "device_assigned_elsewhere", holder: toAssignment(holder) };
       }
-      let adoptedFreeDevice: FreeSlotDeviceRecord | null = null;
-      if (next.stableDeviceId !== null) {
-        const holder = await trx
-          .selectFrom("slot_assignments")
-          .selectAll()
-          .where("platform", "=", checked.platform)
-          .where("stable_device_id", "=", next.stableDeviceId)
-          .where((eb) =>
-            eb.or([eb("scope_key", "<>", key.scopeKey), eb("slot_index", "<>", key.slotIndex)]),
-          )
-          .executeTakeFirst();
-        if (holder) {
-          return { kind: "device_assigned_elsewhere", holder: toAssignment(holder) };
-        }
-        const free = await trx
-          .deleteFrom("slot_free_devices")
-          .where("platform", "=", checked.platform)
-          .where("stable_device_id", "=", next.stableDeviceId)
-          .returningAll()
-          .executeTakeFirst();
-        adoptedFreeDevice = free ? toFreeDevice(free) : null;
-      }
-      const deviceChanged = next.stableDeviceId !== checked.stableDeviceId;
-      const updated = await trx
-        .updateTable("slot_assignments")
-        .set({
-          generation: checked.generation + 1,
-          stable_device_id: next.stableDeviceId,
-          device_name: next.deviceName,
-          resolved_spec_json: resolvedSpecJson,
-          spec_fingerprint: next.specFingerprint,
-          state: next.state,
-          ...settlerColumns(null),
-          ...(requestedSpecJson === undefined ? {} : { requested_spec_json: requestedSpecJson }),
-          // A different device cannot inherit the previous device's execution owner.
-          ...(deviceChanged
-            ? {
-                exec_owner_daemon_id: null,
-                exec_owner_pid: null,
-                exec_owner_process_token: null,
-                exec_session_uuid: null,
-              }
-            : {}),
-          updated_at_ms: this.timer.now(),
-        })
-        .where("scope_key", "=", key.scopeKey)
-        .where("slot_index", "=", key.slotIndex)
+      const free = await trx
+        .deleteFrom("slot_free_devices")
+        .where("platform", "=", checked.platform)
+        .where("stable_device_id", "=", next.stableDeviceId)
         .returningAll()
-        .executeTakeFirstOrThrow();
-      return { kind: "committed", assignment: toAssignment(updated), adoptedFreeDevice };
-    });
+        .executeTakeFirst();
+      adoptedFreeDevice = free ? toFreeDevice(free) : null;
+    }
+    const deviceChanged = next.stableDeviceId !== checked.stableDeviceId;
+    const updated = await trx
+      .updateTable("slot_assignments")
+      .set({
+        generation: checked.generation + 1,
+        stable_device_id: next.stableDeviceId,
+        device_name: next.deviceName,
+        resolved_spec_json: resolvedSpecJson,
+        spec_fingerprint: next.specFingerprint,
+        state: next.state,
+        ...settlerColumns(null),
+        ...(requestedSpecJson === undefined ? {} : { requested_spec_json: requestedSpecJson }),
+        // A different device cannot inherit the previous device's execution owner.
+        ...(deviceChanged
+          ? {
+              exec_owner_daemon_id: null,
+              exec_owner_pid: null,
+              exec_owner_process_token: null,
+              exec_session_uuid: null,
+            }
+          : {}),
+        updated_at_ms: this.timer.now(),
+      })
+      .where("scope_key", "=", key.scopeKey)
+      .where("slot_index", "=", key.slotIndex)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    return { kind: "committed", assignment: toAssignment(updated), adoptedFreeDevice };
   }
 
   async updateSlotState(
@@ -504,27 +645,38 @@ export class SqliteSlotRegistry implements SlotRegistry {
   ): Promise<UpdateSlotStateResult> {
     assertValidSlotKey(key);
     const settler = assertSettlerForState(state, options);
-    return this.db.transaction().execute(async (trx): Promise<UpdateSlotStateResult> => {
-      const checked = await this.checkBinding(trx, key, expected);
-      if ("kind" in checked) {
-        return checked;
-      }
-      const owner = checked.execOwner;
-      if (state === "replacing" && owner && this.isExecOwnerLive(owner)) {
-        return { kind: "slot_in_use", owner, assignment: checked };
-      }
-      const generation = entersFencingState(checked.state, state)
-        ? checked.generation + 1
-        : checked.generation;
-      const updated = await trx
-        .updateTable("slot_assignments")
-        .set({ state, generation, ...settlerColumns(settler), updated_at_ms: this.timer.now() })
-        .where("scope_key", "=", key.scopeKey)
-        .where("slot_index", "=", key.slotIndex)
-        .returningAll()
-        .executeTakeFirstOrThrow();
-      return { kind: "updated" as const, assignment: toAssignment(updated) };
-    });
+    return this.db
+      .transaction()
+      .execute((trx) => this.updateSlotStateIn(trx, key, expected, state, settler));
+  }
+
+  private async updateSlotStateIn(
+    trx: Executor,
+    key: SlotKey,
+    expected: SlotBindingExpectation,
+    state: SlotAssignmentState,
+    settler: SlotProcessIdentity | null,
+    journaled = false,
+  ): Promise<UpdateSlotStateResult> {
+    const checked = await this.checkBinding(trx, key, expected, journaled);
+    if ("kind" in checked) {
+      return checked;
+    }
+    const owner = checked.execOwner;
+    if (state === "replacing" && owner && this.isExecOwnerLive(owner)) {
+      return { kind: "slot_in_use", owner, assignment: checked };
+    }
+    const generation = entersFencingState(checked.state, state)
+      ? checked.generation + 1
+      : checked.generation;
+    const updated = await trx
+      .updateTable("slot_assignments")
+      .set({ state, generation, ...settlerColumns(settler), updated_at_ms: this.timer.now() })
+      .where("scope_key", "=", key.scopeKey)
+      .where("slot_index", "=", key.slotIndex)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    return { kind: "updated", assignment: toAssignment(updated) };
   }
 
   async claimExecution(
@@ -712,7 +864,8 @@ export class SqliteSlotRegistry implements SlotRegistry {
       )
       .execute();
     const free = await this.db.selectFrom("slot_free_devices").selectAll().execute();
-    return [
+    const pending = await this.listOpenSlotJournal();
+    const entries: ManagedDeviceEntry[] = [
       ...assigned.flatMap((row): ManagedDeviceEntry[] =>
         row.stable_device_id === null
           ? []
@@ -738,6 +891,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
         execSessionUuid: null,
       })),
     ];
+    return [...entries, ...journalTargetEntries(pending, entries)];
   }
 
   async listFreeDevices(): Promise<FreeSlotDeviceRecord[]> {
@@ -796,8 +950,22 @@ export class SqliteSlotRegistry implements SlotRegistry {
       const cleanupPending = assignments.filter(
         (assignment) => assignment.state === "cleanup_pending",
       );
-      if (liveOwners.length > 0 || settling.length > 0 || cleanupPending.length > 0) {
-        return { kind: "pending", scope, liveOwners, settling, cleanupPending };
+      const openJournal = (
+        await trx
+          .selectFrom("slot_journal")
+          .selectAll()
+          .where("scope_key", "=", scopeKey)
+          .where("phase", "not in", [...SLOT_JOURNAL_TERMINAL_PHASES])
+          .orderBy("id")
+          .execute()
+      ).map(toJournalEntry);
+      if (
+        liveOwners.length > 0 ||
+        settling.length > 0 ||
+        cleanupPending.length > 0 ||
+        openJournal.length > 0
+      ) {
+        return { kind: "pending", scope, liveOwners, settling, cleanupPending, openJournal };
       }
       const nowMs = this.timer.now();
       // An abandoned scope stays revivable: keep its slots until the invalidation is permanent.
@@ -871,8 +1039,184 @@ export class SqliteSlotRegistry implements SlotRegistry {
     return rows.map(toFreeDevice);
   }
 
+  async openSlotJournal(key: SlotKey, input: OpenSlotJournalInput): Promise<OpenSlotJournalResult> {
+    assertValidSlotKey(key);
+    assertOpenPhase(input.phase);
+    const targetJson = serializeSpec(input.target);
+    return this.db.transaction().execute(async (trx): Promise<OpenSlotJournalResult> => {
+      const nowMs = this.timer.now();
+      await trx
+        .deleteFrom("slot_journal")
+        .where("phase", "in", [...SLOT_JOURNAL_TERMINAL_PHASES])
+        .where("updated_at_ms", "<", nowMs - SLOT_JOURNAL_TERMINAL_RETENTION_MS)
+        .execute();
+      const open = await this.readOpenJournal(trx, key);
+      if (open) {
+        return { kind: "journal_open", entry: open };
+      }
+      const applied = await this.applyJournalAssignmentChange(trx, key, input.assignment);
+      if ("kind" in applied) {
+        return applied;
+      }
+      const row = await trx
+        .insertInto("slot_journal")
+        .values({
+          scope_key: key.scopeKey,
+          slot_index: key.slotIndex,
+          kind: input.kind,
+          phase: input.phase,
+          platform: applied.platform,
+          from_generation: input.assignment.expected.generation,
+          to_generation:
+            applied.generation === input.assignment.expected.generation ? null : applied.generation,
+          binding_generation: applied.generation,
+          binding_stable_device_id: applied.stableDeviceId,
+          target_json: targetJson,
+          owner_daemon_id: input.owner.daemonId,
+          owner_pid: input.owner.pid,
+          owner_process_token: input.owner.processGenerationToken ?? null,
+          attempts: 0,
+          last_error: null,
+          next_attempt_at_ms: nowMs,
+          created_at_ms: nowMs,
+          updated_at_ms: nowMs,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      return { kind: "opened", entry: toJournalEntry(row), assignment: applied };
+    });
+  }
+
+  async advanceSlotJournal(
+    id: number,
+    input: AdvanceSlotJournalInput,
+  ): Promise<AdvanceSlotJournalResult> {
+    return this.db.transaction().execute(async (trx): Promise<AdvanceSlotJournalResult> => {
+      const row = await trx
+        .selectFrom("slot_journal")
+        .selectAll()
+        .where("id", "=", id)
+        .executeTakeFirst();
+      const entry = row ? toJournalEntry(row) : null;
+      if (
+        !entry ||
+        !isSlotJournalPhaseOpen(entry.phase) ||
+        entry.phase !== input.expectedPhase ||
+        !journalOwnersEqual(entry.owner, input.owner)
+      ) {
+        return { kind: "journal_conflict", entry };
+      }
+      let assignment: SlotAssignmentRecord | null = null;
+      if (input.assignment) {
+        if (!sameBinding(entry.binding, input.assignment.expected)) {
+          return { kind: "journal_conflict", entry };
+        }
+        const applied = await this.applyJournalAssignmentChange(trx, entry, input.assignment);
+        if ("kind" in applied) {
+          return applied;
+        }
+        assignment = applied;
+      }
+      const updated = await trx
+        .updateTable("slot_journal")
+        .set(journalAdvanceColumns(entry, input, assignment, this.timer.now()))
+        .where("id", "=", id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      return { kind: "advanced", entry: toJournalEntry(updated), assignment };
+    });
+  }
+
+  async claimSlotJournal(
+    id: number,
+    expected: SlotJournalOwner,
+    next: SlotJournalOwner,
+  ): Promise<ClaimSlotJournalResult> {
+    return this.db.transaction().execute(async (trx): Promise<ClaimSlotJournalResult> => {
+      const row = await trx
+        .selectFrom("slot_journal")
+        .selectAll()
+        .where("id", "=", id)
+        .executeTakeFirst();
+      const entry = row ? toJournalEntry(row) : null;
+      if (
+        !entry ||
+        !isSlotJournalPhaseOpen(entry.phase) ||
+        !journalOwnersEqual(entry.owner, expected)
+      ) {
+        return { kind: "journal_conflict", entry };
+      }
+      const updated = await trx
+        .updateTable("slot_journal")
+        .set({
+          owner_daemon_id: next.daemonId,
+          owner_pid: next.pid,
+          owner_process_token: next.processGenerationToken ?? null,
+          updated_at_ms: this.timer.now(),
+        })
+        .where("id", "=", id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      return { kind: "claimed", entry: toJournalEntry(updated) };
+    });
+  }
+
+  async getSlotJournal(id: number): Promise<SlotJournalEntry | null> {
+    const row = await this.db
+      .selectFrom("slot_journal")
+      .selectAll()
+      .where("id", "=", id)
+      .executeTakeFirst();
+    return row ? toJournalEntry(row) : null;
+  }
+
+  async listOpenSlotJournal(key?: SlotKey): Promise<SlotJournalEntry[]> {
+    let query = this.db
+      .selectFrom("slot_journal")
+      .selectAll()
+      .where("phase", "not in", [...SLOT_JOURNAL_TERMINAL_PHASES]);
+    if (key) {
+      query = query.where("scope_key", "=", key.scopeKey).where("slot_index", "=", key.slotIndex);
+    }
+    const rows = await query.orderBy("next_attempt_at_ms").orderBy("id").execute();
+    return rows.map(toJournalEntry);
+  }
+
   async close(): Promise<void> {
     await this.db.destroy();
+  }
+
+  private async readOpenJournal(
+    executor: Executor,
+    key: SlotKey,
+  ): Promise<SlotJournalEntry | null> {
+    const row = await executor
+      .selectFrom("slot_journal")
+      .selectAll()
+      .where("scope_key", "=", key.scopeKey)
+      .where("slot_index", "=", key.slotIndex)
+      .where("phase", "not in", [...SLOT_JOURNAL_TERMINAL_PHASES])
+      .executeTakeFirst();
+    return row ? toJournalEntry(row) : null;
+  }
+
+  private async applyJournalAssignmentChange(
+    trx: Executor,
+    key: SlotKey,
+    change: SlotJournalAssignmentChange,
+  ): Promise<SlotAssignmentRecord | SlotJournalChangeFailure> {
+    const result =
+      change.kind === "commit"
+        ? await this.commitBindingIn(trx, key, change.expected, change.next, true)
+        : await this.updateSlotStateIn(
+            trx,
+            key,
+            change.expected,
+            change.state,
+            assertSettlerForState(change.state, change.options),
+            true,
+          );
+    return result.kind === "committed" || result.kind === "updated" ? result.assignment : result;
   }
 
   private async readScope(executor: Executor, scopeKey: string): Promise<SlotScopeRecord | null> {
@@ -897,14 +1241,18 @@ export class SqliteSlotRegistry implements SlotRegistry {
     return row ? toAssignment(row) : null;
   }
 
-  /** The shared CAS precondition: valid scope, existing slot, unchanged binding. */
+  /**
+   * The shared CAS precondition: valid scope, existing slot, unchanged binding. Journaled work may
+   * also settle in an `invalidating` scope, whose invalidation waits for exactly that work.
+   */
   private async checkBinding(
     trx: Executor,
     key: SlotKey,
     expected: SlotBindingExpectation,
+    journaled = false,
   ): Promise<SlotAssignmentRecord | SlotCasFailure> {
     const scope = await this.readScope(trx, key.scopeKey);
-    if (scope?.state !== "valid") {
+    if (!scopeAcceptsSlotChange(scope, journaled)) {
       return { kind: "scope_not_valid", scope };
     }
     const current = await this.readAssignment(trx, key);

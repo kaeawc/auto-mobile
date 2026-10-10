@@ -37,7 +37,8 @@ idle window. Only control calls do, including a holder's calls that name only
 ## When a session is released
 
 A session is released by an explicit release, a lost owner heartbeat, or the idle
-window. Values below are the defaults; the constants live in
+window, among the other reasons in [Release reasons](#release-reasons). Values
+below are the defaults; the constants live in
 `src/daemon/sessionLivenessWindows.ts` and are tuned with the variables in
 [Environment variables](environment-variables.md#session-heartbeat-timeout).
 
@@ -47,8 +48,9 @@ window. Values below are the defaults; the constants live in
   10 s after its owner's last heartbeat. The lease is judged on the owner's own
   heartbeats only: tool calls from other callers do not keep a dead owner alive.
 - **Idle.** `DEFAULT_SESSION_IDLE_TIMEOUT_MS` (2 min) after the last control tool
-  call ends. The grace does not stretch it: a heartbeating session is released at
-  the idle deadline. Heartbeats and reads (`observe`, `listDevices`, `doctor`,
+  call ends. An idle release is terminal: the session UUID ends with it. The
+  grace does not stretch it: a heartbeating session is released at the idle
+  deadline. Heartbeats and reads (`observe`, `listDevices`, `doctor`,
   `recordSteps` status and the other reads listed above) never extend it. A call
   still in flight holds the release, up to a bounded ceiling.
 - **`idleReleaseAt`** is the idle deadline as wall-clock epoch milliseconds. The
@@ -61,6 +63,39 @@ window. Values below are the defaults; the constants live in
   owns), or that no other connected client owns it; otherwise the call is refused
   with `device_owned_by_other_session`. A successful restore moves ownership, so
   the previous connection no longer owns the session.
+
+### Release reasons
+
+Every release records one reason. The daemon classifies them in one table,
+`src/daemon/releaseReasons.ts` (#11258). A terminal release ends the session
+UUID for good: it is recorded in the crash-safe journal before its database row,
+it is never rehydrated after a restart, and a later call naming the UUID is
+refused with `session_ownership_lost`, `retryable: false` and `nextAction:
+"acquire_new_session"`. Every idle release is terminal, whatever the session's
+liveness policy (heartbeat, one-shot CLI or managed execution; owner decision
+2026-10-09).
+
+| Reason                                                                                                  | Terminal?  | What the client sees                                                                                                           |
+| ------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `explicit-release`                                                                                      | Yes        | `session_ownership_lost`; acquire a new session.                                                                               |
+| `lazy-expiry`, `cleanup-expired`                                                                        | Yes (idle) | `session_ownership_lost`; session-not-found answers (heartbeat, `daemon/sessionInfo`) add `idle: true`. Acquire a new session. |
+| `cli-idle-timeout`                                                                                      | Yes (idle) | Same as the other idle reasons, for a one-shot CLI session.                                                                    |
+| `heartbeat-timeout`, `missing-first-heartbeat`                                                          | Yes        | `session_ownership_lost`, with the heartbeat age and limit in the message.                                                     |
+| `rehydration-owner-timeout`                                                                             | Yes        | `session_ownership_lost`: a rehydrated session's owner never reclaimed it.                                                     |
+| `owner-disconnected`                                                                                    | Yes        | `session_ownership_lost`: the owning connection closed and no other client owns the session.                                   |
+| `device-killed`                                                                                         | Yes        | `session_terminal_release_in_progress` while the kill runs, then `session_ownership_lost`.                                     |
+| `device-disconnected:<device>`                                                                          | Yes        | `session_ownership_lost`: the device was lost.                                                                                 |
+| `identity-recovery-<reason>`                                                                            | Yes        | `session_ownership_lost`: restart recovery could not prove the device's identity.                                              |
+| `session-creation-cancelled`                                                                            | Yes        | `session_ownership_lost`: the creation was cancelled before the session was handed out.                                        |
+| `daemon-shutdown`, `daemon-restart`, `device-restart:<device>`                                          | No         | The restarted daemon rehydrates the session; its owner reclaims it under the same UUID.                                        |
+| `superseded`                                                                                            | No         | Nothing: a newer incarnation of the same UUID holds the device.                                                                |
+| `plan-auto-release`                                                                                     | No         | The plan freed the device; its base and label UUIDs may be issued again.                                                       |
+| `session-creation-timeout`, `allocation-rollback`, `device-disconnected-during-session-create:<device>` | No         | The session was never handed out; the UUID may be created again.                                                               |
+| `expired`                                                                                               | No         | A stored row found past its deadline; it cannot be recovered, and a call naming it is refused as not active.                   |
+
+When two releases of one session race, a terminal reason replaces a
+non-terminal one, and any other terminal reason replaces an idle one, so the
+recorded reason is the most specific.
 
 ## One-shot CLI sessions
 

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   SESSION_RELEASE_REASON_FAMILY_TRAITS,
   SESSION_RELEASE_REASON_TRAITS,
@@ -117,5 +119,14 @@ describe("session release-reason table (#11258)", () => {
     expect(outranksReleaseReason("cleanup-expired", "lazy-expiry")).toBe(false);
     expect(outranksReleaseReason("explicit-release", "heartbeat-timeout")).toBe(false);
     expect(outranksReleaseReason("daemon-shutdown", "plan-auto-release")).toBe(false);
+  });
+
+  test("the user doc's release table names every reason", () => {
+    const doc = readFileSync(join(import.meta.dir, "../../docs/using/device-ownership.md"), "utf8");
+    const missing = [
+      ...Object.keys(SESSION_RELEASE_REASON_TRAITS),
+      ...Object.keys(SESSION_RELEASE_REASON_FAMILY_TRAITS),
+    ].filter((reason) => !doc.includes(`\`${reason}`));
+    expect(missing).toEqual([]);
   });
 });

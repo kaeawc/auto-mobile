@@ -170,7 +170,7 @@ interface ReleaseRecord {
  * pending timeouts and intervals stop firing and its sleeps never return, as a killed process's
  * would; the clock itself keeps running for the next process.
  */
-function processTimer(shared: FakeTimer, isDead: () => boolean): FakeTimer {
+export function processTimer(shared: FakeTimer, isDead: () => boolean): FakeTimer {
   const never = new Promise<void>(() => undefined);
   return new Proxy(shared, {
     get(target, property, receiver) {
@@ -248,7 +248,7 @@ export interface RunResult {
  * (device taken, session terminal, device gone). Anything else surfacing from an operation is a
  * finding in its own right.
  */
-function isExpectedRefusal(error: unknown): boolean {
+export function isExpectedRefusal(error: unknown): boolean {
   return error instanceof ActionableError || error instanceof TerminalSessionError;
 }
 

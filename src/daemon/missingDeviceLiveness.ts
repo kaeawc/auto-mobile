@@ -49,6 +49,8 @@ export interface MissingDeviceEvictionOptions {
 
 /** The pool's mutable state is read when used, including after every await. */
 export interface MissingDeviceLivenessPoolPort {
+  /** Tell resource subscribers a status or holder write committed (#11413). */
+  noteDeviceStateChanged?(device: Pick<PooledDevice, "id" | "platform">): void;
   needsAndroidTransportNormalization?(devices: readonly BootedDevice[]): boolean;
   mapAndroidDiscovery?(devices: readonly BootedDevice[]): BootedDevice[];
   isTransportEmulator?(deviceId: string): boolean;
@@ -113,6 +115,10 @@ export interface MissingDeviceLivenessPoolPort {
 /** Owns missing-device discovery decisions and eviction ordering. */
 export class MissingDeviceLiveness {
   constructor(private readonly pool: MissingDeviceLivenessPoolPort) {}
+
+  private noteStateChanged(device: PooledDevice): void {
+    this.pool.noteDeviceStateChanged?.(device);
+  }
 
   private async removeDevicesMissingFrom(
     bootedDeviceIds: Set<string>,
@@ -296,6 +302,8 @@ export class MissingDeviceLiveness {
       if (!claimed) {
         return true;
       }
+      // Notify after the mutex section, never inside it.
+      this.noteStateChanged(device);
       const deferEviction = this.pool.shouldRebootDisconnectedAndroidDevice(device);
       const eviction = this.evictMissingPooledDevice(device, "not present in adb devices", {
         attemptDeviceLossRecovery: true,
@@ -410,6 +418,7 @@ export class MissingDeviceLiveness {
     });
     if (this.pool.getDevices().get(device.id) === device) {
       device.status = "error";
+      this.noteStateChanged(device);
     }
     void eviction.catch((error) => {
       logger.warn(`[DevicePool] Deferred eviction failed for ${device.id}: ${error}`, error);
@@ -563,6 +572,7 @@ export class MissingDeviceLiveness {
     // assignmentMutex; keep it unavailable until its guarded removal completes.
     if (!lockPoolRemoval) {
       device.status = "idle";
+      this.noteStateChanged(device);
     }
   }
 

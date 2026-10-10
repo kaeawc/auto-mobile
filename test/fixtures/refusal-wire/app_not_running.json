@@ -1,0 +1,13 @@
+{
+  "code": "app_not_running",
+  "builder": "AppNotRunningError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"com.example.app is not running on device 'emulator-5554', which is held by another session. Reading its data through the SDK would start its process, so the read was refused. Wait for the holder to launch the app or release the device.\",\"code\":\"app_not_running\",\"deviceId\":\"emulator-5554\",\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

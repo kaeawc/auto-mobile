@@ -1,4 +1,5 @@
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
+import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -71,7 +72,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     const match = ResourceRegistry.matchTemplate(
       "automobile:devices/ios-1/databases?appId=com.example.nondebug",
     );
-    const body = JSON.parse((await match!.template.handler(match!.params)).text!);
+    const body = JSON.parse((await invokeResourceTemplate(match!)).text!);
     expect(body.errorCode).toBe("PROVIDER_UNAVAILABLE");
     expect(body.errorReason).toBe("sdk_provider_absent");
   });
@@ -95,7 +96,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
 
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     const payload = JSON.parse(content.text!);
 
     expect(payload.limit).toBe(expectedLimit);
@@ -127,7 +128,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     registerDatabaseResources();
     const match = ResourceRegistry.matchTemplate(`${base}?appId=com.example.app`);
 
-    const payload = JSON.parse((await match!.template.handler(match!.params)).text!);
+    const payload = JSON.parse((await invokeResourceTemplate(match!)).text!);
 
     expect(payload.rows).toEqual([["9007199254740993", 1]]);
     expect(payload.bigIntegerColumns).toEqual([0]);
@@ -138,7 +139,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     registerDatabaseResources();
     const match = ResourceRegistry.matchTemplate(`${base}?appId=com.example.app`);
 
-    const payload = JSON.parse((await match!.template.handler(match!.params)).text!);
+    const payload = JSON.parse((await invokeResourceTemplate(match!)).text!);
 
     expect("bigIntegerColumns" in payload).toBe(false);
   });
@@ -152,7 +153,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
 
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     const payload = JSON.parse(content.text!);
 
     expect(payload.error).toContain("Invalid limit");
@@ -168,7 +169,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
 
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     const payload = JSON.parse(content.text!);
 
     expect(payload.error).toContain("Invalid offset");
@@ -184,7 +185,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
 
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     const payload = JSON.parse(content.text!);
 
     expect(payload.error).toContain("Invalid limit");
@@ -205,7 +206,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
 
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     const payload = JSON.parse(content.text!);
 
     expect(payload.error).toContain("Missing required appId");
@@ -226,7 +227,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     expect(match).toBeDefined();
     expect(match!.params.limt).toBe("10");
 
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     const payload = JSON.parse(content.text!);
 
     expect(payload.error).toContain("Unknown query parameters");
@@ -251,7 +252,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
       const match = ResourceRegistry.matchTemplate(uri);
       expect(match).toBeDefined();
 
-      const content = await match!.template.handler(match!.params);
+      const content = await invokeResourceTemplate(match!);
       const payload = JSON.parse(content.text!);
 
       expect(payload.error).toContain(`Invalid ${paramName}`);
@@ -276,7 +277,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     expect(match).toBeDefined();
     expect(match!.params.deviceId).toBe("ios-1");
 
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     const payload = JSON.parse(content.text!);
 
     expect(payload.deviceId).toBe("ios-1");
@@ -307,7 +308,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     const uri = `${base}?appId=com.example.app&limit=10&offset=5`;
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     const canonicalUri = `${base}?appId=com.example.app`;
     expect(content.uri).toBe(canonicalUri);
 

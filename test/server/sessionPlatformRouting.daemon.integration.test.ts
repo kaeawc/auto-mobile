@@ -244,6 +244,27 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         },
         { deviceReadiness: "booted" },
       );
+      ToolRegistry.registerDeviceAware(
+        "readRoutingProbe",
+        "readRoutingProbe",
+        z.object({
+          platform: z.enum(["android", "ios"]).optional(),
+          deviceId: z.string().optional(),
+          sessionUuid: z.string().optional(),
+        }),
+        async (device) => {
+          received.push(`read:${device.deviceId}`);
+          return { content: [{ type: "text" as const, text: device.deviceId }] };
+        },
+        {
+          deviceReadiness: "booted",
+          deviceReadOnly: true,
+          sessionlessDeviceRead: {
+            resolve: async (deviceId) => devices.find((device) => device.deviceId === deviceId)!,
+            assertAuthorized: () => {},
+          },
+        },
+      );
     }
     const forwarded = (socket as any).withSocketSessionAutolockKey(args, socketSessionId, 10000);
     const result = await fixture.client.callTool({ name, arguments: forwarded });
@@ -261,6 +282,7 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     staticToolDefinitionsProvider: () => [
       ...getStaticToolDefinitions(),
       { name: "routingProbe", inputSchema: { properties: { device: {}, sessionUuid: {} } } },
+      { name: "readRoutingProbe", inputSchema: { properties: { sessionUuid: {} } } },
     ],
   });
   try {
@@ -363,7 +385,28 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
           platform: "android",
         }),
       ).rejects.toThrow("not one of its slot");
+      // Reads stay open everywhere (owner decision Q6, #11271): a read naming a device other than
+      // the bound session's watches it sessionless instead of failing on the binding, and control
+      // there gets the typed refusal rather than the routing error.
+      await pinned.callTool("readRoutingProbe", {
+        platform: "android",
+        deviceId: devices[0].deviceId,
+      });
+      expect(received.at(-1)).toBe(`read:${devices[0].deviceId}`);
+      const receivedBeforeControl = received.length;
+      const refusedControl = await pinned.callTool("routingProbe", {
+        platform: "android",
+        deviceId: devices[0].deviceId,
+        keepScreenAwake: false,
+      });
+      expect(refusedControl.isError).toBe(true);
+      expect(JSON.stringify(refusedControl.content)).toContain("device_outside_managed_slots");
+      expect(received.length).toBe(receivedBeforeControl);
       DaemonState.getInstance().getManagedConnectionScopes().unbind(socketSessionId);
+      // A generic pinned connection reads the other device too.
+      await pinned.callTool("readRoutingProbe", { deviceId: devices[0].deviceId });
+      expect(received.pop()).toBe(`read:${devices[0].deviceId}`);
+      received.pop();
     } finally {
       await pinned.close();
     }

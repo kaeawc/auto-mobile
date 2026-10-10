@@ -60,12 +60,19 @@ export class SessionToolBinding {
     return explicitSessionUuid ?? boundSessionUuid;
   }
 
-  /** Resolve selectors only within sessions admitted on this connection. */
+  /**
+   * Resolve selectors only within sessions admitted on this connection. `deferForeignDevice`: when
+   * the bound session's device is not the explicitly requested `deviceId`, return the bound session
+   * instead of failing on the binding, so the tool registry decides — a read watches the named
+   * device sessionless (reads stay open everywhere, owner decision Q6), and a managed connection's
+   * control call gets its typed `device_outside_managed_slots` refusal (#11271).
+   */
   resolveDeviceSessionUuid(
     mcpSessionId: string | undefined,
     params: Record<string, unknown>,
     lookup: (sessionUuid: string) => { deviceId: string; platform: string } | undefined,
     selectingActiveDevice = false,
+    deferForeignDevice = false,
   ): string | undefined {
     const fallback = this.effectiveSessionUuid(mcpSessionId, params);
     const platform =
@@ -80,12 +87,13 @@ export class SessionToolBinding {
       return fallback;
     }
     if (this.initialSessionUuid) {
-      const device = lookup(this.initialSessionUuid);
-      if (device && !matches(device)) {
-        throw new Error(
-          `Bound device session ${fallback} does not match the requested platform/deviceId. Pass an explicit sessionUuid.`,
-        );
-      }
+      // A named foreign device may be deferred to the registry; a platform alone cannot.
+      assertBoundSessionMatches(
+        lookup(this.initialSessionUuid),
+        matches,
+        fallback,
+        deferForeignDevice && deviceId !== undefined,
+      );
       return fallback;
     }
     return this.resolveAcquiredDeviceSession(
@@ -301,4 +309,18 @@ export class SessionToolBinding {
     }
     return removed;
   }
+}
+
+function assertBoundSessionMatches(
+  device: { deviceId: string; platform: string } | undefined,
+  matches: (device: { deviceId: string; platform: string }) => boolean,
+  sessionUuid: string | undefined,
+  deferForeignDevice: boolean,
+): void {
+  if (!device || matches(device) || deferForeignDevice) {
+    return;
+  }
+  throw new Error(
+    `Bound device session ${sessionUuid} does not match the requested platform/deviceId. Pass an explicit sessionUuid.`,
+  );
 }

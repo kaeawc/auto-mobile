@@ -651,6 +651,16 @@ in order with the state at that point, a list that nets no change emits nothing,
 and a switch or checkbox tap keeps its own `{key, value}` change before its
 `onTap` runs. Wire patches from the host stay silent.
 
+An action list is atomic on Android (#11408). The runtime re-validates the state every
+write would leave (binding types, numeric ranges, the size cap) before the first action
+runs; if any write is rejected, nothing in the list is applied and nothing is emitted,
+so device state and the host's event-fed copy never drift apart. Actions after a
+`dismiss` never run and are not checked. A control's own change (a switch flip, a
+dialog close) is applied and reported before its `onTap` list is checked. The iOS
+agent does not re-validate at runtime, so the same list applies there in full with
+one `change`; the list the validators should refuse at `show` (a `setState` whose
+value type does not fit a control bound to the key) is the gap between the two.
+
 ### Conditional style: styleWhen
 
 Any node may declare `styleWhen`: one to 8 entries of `{when: condition, style: style}`

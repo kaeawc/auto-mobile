@@ -473,4 +473,75 @@ class PrototypeRuntimeTest {
     assertEquals(PrototypeScalar.Numeric(1.5), runtime.current.state["count"])
     assertEquals(1, events.size)
   }
+
+  private fun fieldSpec() =
+    spec(
+      PrototypeColumnNode(
+        children =
+          listOf(
+            PrototypePagerNode("pager", children = List(2) { PrototypeTextNode(text = "page") }),
+            PrototypeTextFieldNode(stateKey = "query"),
+          ),
+      ),
+      mapOf("flag" to PrototypeScalar.BooleanValue(false), "query" to PrototypeScalar.Text("")),
+    )
+
+  // The spec validator accepts a numeric setState on a textField's key; only the runtime's
+  // re-validation of the resulting state rejects it (#11408).
+  private val breaksBinding = PrototypeSetStateAction("query", PrototypeScalar.Numeric(1.0))
+
+  private suspend fun assertRejected(runtime: PrototypeRuntime, interaction: PrototypeInteraction) {
+    try {
+      runtime.handle(interaction)
+      fail("The action list must be rejected")
+    } catch (expected: IllegalArgumentException) {
+      assertNotNull(expected.message)
+    }
+  }
+
+  @Test
+  fun `a tap holding a rejected write applies nothing and emits nothing`() = runTest {
+    val runtime = runtime(fieldSpec())
+    val before = runtime.current
+    assertRejected(
+      runtime,
+      tap(
+        PrototypeEmitAction("before"),
+        PrototypeSetStateAction("flag", PrototypeScalar.BooleanValue(true)),
+        PrototypeSetPageAction("pager", PrototypePageTarget.Next),
+        breaksBinding,
+        PrototypeEmitAction("after"),
+      ),
+    )
+    // Device state and the host's event-fed mirror stay equal: no write, no page, no sequence used.
+    assertSame(before, runtime.current)
+    assertTrue(events.isEmpty())
+    assertEquals(0L, sequence)
+    runtime.handle(tap(PrototypeSetStateAction("flag", PrototypeScalar.BooleanValue(true))))
+    assertEquals(listOf(1L), events.map { it.sequence })
+    assertEquals(PrototypeScalar.BooleanValue(true), events.single().state["flag"])
+  }
+
+  @Test
+  fun `a write that never runs because the list dismissed first is not validated`() = runTest {
+    val runtime = runtime(fieldSpec())
+    runtime.handle(
+      tap(
+        PrototypeSetStateAction("flag", PrototypeScalar.BooleanValue(true)),
+        PrototypeDismissAction,
+        breaksBinding,
+      ),
+    )
+    assertEquals(listOf(PrototypeEventKind.DISMISSED), events.map { it.kind })
+    assertEquals(PrototypeScalar.BooleanValue(true), events.single().state["flag"])
+    assertEquals(PrototypeScalar.Text(""), runtime.current.state["query"])
+  }
+
+  @Test
+  fun `a control keeps its own reported change when its action list is rejected`() = runTest {
+    val runtime = runtime(fieldSpec())
+    assertRejected(runtime, PrototypeInteraction.Toggle("flag", listOf(breaksBinding)))
+    assertEquals(PrototypeScalar.BooleanValue(true), runtime.current.state["flag"])
+    assertEquals(runtime.current.state, events.single().state)
+  }
 }

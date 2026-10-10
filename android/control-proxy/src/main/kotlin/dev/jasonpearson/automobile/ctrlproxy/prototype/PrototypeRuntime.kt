@@ -175,33 +175,20 @@ class PrototypeRuntime(
    * Runs an action list in order. If any `setState`/`toggle`/`increment` changed state, exactly one
    * `change` event carrying the final state follows the last action (#10622); `emit` actions fire
    * in order with the state as it was at that point. A list that nets no change emits nothing.
+   *
+   * The list is atomic (#11408): every state write is validated by [plannedWrites] before the first
+   * action runs, so a list holding a write the validator rejects throws with nothing applied and
+   * nothing emitted. The host mirrors device state through events and is never left behind by a
+   * half-applied tap.
    */
   private suspend fun tap(actions: List<PrototypeAction>) {
+    val writes = plannedWrites(actions)
     val baseline = current.state
     val touched = LinkedHashSet<String>()
-    for (action in actions) {
+    for ((index, action) in actions.withIndex()) {
       if (!current.active) break
       when (action) {
         is PrototypeEmitAction -> emit(PrototypeEventKind.EMIT, action.name, action.payload)
-        is PrototypeSetStateAction -> {
-          setState(action.key, action.value)
-          touched += action.key
-        }
-        is PrototypeToggleAction ->
-          action.nextValue(current.state)?.let {
-            setState(action.key, it)
-            touched += action.key
-          }
-        is PrototypeIncrementAction ->
-          action.nextValue(current.state)?.let {
-            setState(action.key, it)
-            touched += action.key
-          }
-        is PrototypeDecrementAction ->
-          action.nextValue(current.state)?.let {
-            setState(action.key, it)
-            touched += action.key
-          }
         is PrototypeSetPageAction -> {
           val page = current.pages[action.pager] ?: continue
           setPage(
@@ -214,9 +201,32 @@ class PrototypeRuntime(
           )
         }
         PrototypeDismissAction -> dismiss()
+        else ->
+          writes[index]?.let { (key, spec) ->
+            mutableSnapshot.value = current.copy(spec = spec)
+            touched += key
+          }
       }
     }
     if (current.active) emitStateChange(touched.filter { baseline[it] != current.state[it] })
+  }
+
+  /**
+   * The validated spec each state action of [actions] leaves behind, by action index, with the key
+   * it writes. Nothing is applied here. Actions after a `dismiss` never run, so they are not
+   * planned; a toggle or step that is a no-op has no entry. Throws [IllegalArgumentException] for
+   * the first write the validator rejects.
+   */
+  private fun plannedWrites(actions: List<PrototypeAction>): Map<Int, Pair<String, PrototypeSpec>> {
+    var spec = current.spec
+    val writes = HashMap<Int, Pair<String, PrototypeSpec>>()
+    for ((index, action) in actions.withIndex()) {
+      if (action == PrototypeDismissAction) break
+      val (key, value) = action.stateWrite(spec.state.orEmpty()) ?: continue
+      spec = validated(spec, mapOf(key to value))
+      writes[index] = key to spec
+    }
+    return writes
   }
 
   private suspend fun close(condition: PrototypeSheetCondition) {
@@ -273,14 +283,19 @@ class PrototypeRuntime(
   private fun setState(key: String, value: PrototypeScalar) = setStates(mapOf(key to value))
 
   private fun setStates(values: Map<String, PrototypeScalar>) {
-    val spec = current.spec.copy(state = current.state + values)
+    mutableSnapshot.value = current.copy(spec = validated(current.spec, values))
+  }
+
+  /** [from] with [values] written, or [IllegalArgumentException] when the result is not valid. */
+  private fun validated(from: PrototypeSpec, values: Map<String, PrototypeScalar>): PrototypeSpec {
+    val spec = from.copy(state = from.state.orEmpty() + values)
     // Reuse the structured protocol validator to enforce keys, numeric ranges and binding types.
     val validation =
       PrototypeSpecValidator.validate(runtimeJson.encodeToString(PrototypeSpec.serializer(), spec))
     require(validation is PrototypeSpecValidation.Success) {
       (validation as? PrototypeSpecValidation.Failure)?.error.toString()
     }
-    mutableSnapshot.value = current.copy(spec = spec)
+    return spec
   }
 
   /**

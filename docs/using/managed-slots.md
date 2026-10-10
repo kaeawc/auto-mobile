@@ -253,6 +253,11 @@ Matching is declarative, per slot, and the result reports a `disposition` of
   emulator may be replaced with an iOS simulator). If deletion fails, the old
   assignment is kept and marked cleanup pending (`cleanup_pending`); replacement
   never starts from a partial inventory (`discovery_incomplete`).
+  Boot capacity is checked before the old device is deleted, so a replacement
+  refused at the limit (`capacity_exhausted`), or with an unknown booted count
+  (`discovery_incomplete`), leaves the old device in place (#11433). Reuse and
+  adopt are not pre-checked: nothing is deleted first, and provisioning's own
+  exemption for the slot's own device applies.
 - Generic `provisionDevice` keeps its existing `identity_conflict` behavior;
   destructive mismatch replacement exists only for managed slots.
 
@@ -356,9 +361,18 @@ slot. Only control and lifecycle calls on another slot's device are refused.
   even on the connection's own slot device: it could not boot the device again,
   so a stop would strand the execution. End the execution instead; the next
   acquisition on the slot boots and reuses the device.
+- A managed connection's multi-device plan labels are served only by its own slot
+  sessions. Any other label, or one whose declared platform the slot device does
+  not match, is refused with `device_outside_managed_slots` before anything is
+  allocated or booted. Plan steps cannot acquire, boot, kill or delete devices
+  outside the slot set (#11425). Reads of non-slot devices inside a plan still
+  work.
 - The generic device pool skips assigned and free-pool devices as capacity, idle
   or not. If the registry has never been readable, allocation refuses with
-  retryable `discovery_incomplete` rather than treat unknown as free.
+  retryable `discovery_incomplete` rather than treat unknown as free (#11410). A
+  host with no registry at all has no managed slots, and devices are free. A
+  registry that was read successfully once and then fails keeps its last good
+  snapshot.
 
 ## Boot capacity
 
@@ -366,7 +380,11 @@ When a platform already runs as many booted devices as its limit allows, a cold
 boot is refused at once with the retryable `capacity_exhausted` code instead of
 waiting in an internal queue. The error carries `retryAfterMs`, the `limit`, the
 `booted` count and `platform`, plus `externalDevices` when counted devices were
-not started by AutoMobile. Capacity frees when another device shuts down.
+not started by AutoMobile. Capacity frees when another device shuts down. A slot
+failure refused at the limit carries these as `capacity { limit, booted,
+retryAfterMs, externalDevices }` on the initialize outcome, the
+`automobile:managed-slots` resource, the daemon socket JSON and a refused tool
+call's `acquisitionFailure` (#11402).
 `capacity_exhausted` applies to all boots, including a slot that must create or
 boot its device.
 

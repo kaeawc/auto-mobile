@@ -332,12 +332,7 @@ describe("setDeviceResources", () => {
       resources: args.resources,
       deadlineMs: 4_000,
     });
-    expect(Object.keys(args)).toEqual([
-      "resources",
-      "timeoutMs",
-      ...INTERNAL_TOOL_PARAM_NAMES,
-      INTERNAL_NO_DIFF_PARAM,
-    ]);
+    expect(Object.keys(args)).toEqual(["resources", "timeoutMs", ...INTERNAL_TOOL_PARAM_NAMES]);
   });
 
   test("unsupported and unverified results are tool errors with structured evidence", async () => {

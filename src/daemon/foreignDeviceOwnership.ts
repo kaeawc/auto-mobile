@@ -1,11 +1,11 @@
+import { closeSync, linkSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   readExclusiveLockContent,
   releaseExclusiveLock,
+  formatLockContent,
+  parseLockContent,
   takeOverExclusiveLock,
-  tryAcquireExclusiveLock,
-  unreadableLockAgeMs,
-  UNREADABLE_LOCK_GRACE_MS,
   type LockContent,
 } from "../utils/fileLock";
 import { defaultIdGenerator } from "../utils/IdGenerator";
@@ -48,6 +48,12 @@ export interface ForeignDeviceOwnership {
    */
   foreignOwnerPid(deviceId: string): number | undefined;
   /**
+   * Whether a claim file for `deviceId` exists but names no readable PID at the latest refresh.
+   * Such a device is NOT free: whoever wrote it is unknown, so it is refused (retryably) with no
+   * owner PID rather than treated as unclaimed yet unclaimable.
+   */
+  foreignClaimUnreadable?(deviceId: string): boolean;
+  /**
    * Publish this daemon's allocation claim on a device it just assigned, so other daemons see it
    * before any CtrlProxy forward exists. False when another live daemon's claim on the device is
    * still in use: the caller must give the device back.
@@ -78,11 +84,8 @@ export interface DeviceOwnershipFileSource {
    */
   legacyClaimPath(deviceId: string): string | undefined;
   read(path: string): LockContent | undefined;
-  /**
-   * Age in ms of the lock at `path` when it exists but is empty or names no readable PID (a
-   * writer mid-create, or a torn write), else undefined. Absent: such files read as unclaimed.
-   */
-  unreadableAgeMs?(path: string): number | undefined;
+  /** Whether a lock file exists at `path` but is empty or names no readable PID. */
+  isUnreadable?(path: string): boolean;
   isProcessRunning(pid: number): boolean;
   tryAcquire(path: string, owner: { pid: number; ownerToken: string; metadata?: string }): boolean;
   takeOver(
@@ -102,13 +105,6 @@ export interface DeviceOwnershipFileSource {
  * A crashed owner's PID is normally dead, which lapses its claim regardless of this window.
  */
 export const DEVICE_CLAIM_OWNER_STARTUP_GRACE_MS = 60_000;
-
-/**
- * Stand-in "owner PID" for a claim file that is empty or unreadable but younger than
- * {@link UNREADABLE_LOCK_GRACE_MS}: its writer may still be between create and write, so the
- * device is not free, yet no real PID exists. Never a valid process id; the refusal error omits it.
- */
-export const UNREADABLE_CLAIM_OWNER_PID = -1;
 
 /** Directory of device allocation claims, one lock per device, under each ADB server's scope. */
 export const DEVICE_ALLOCATION_CLAIM_SUBDIR = "device-allocations";
@@ -170,6 +166,63 @@ export function deviceAllocationClaimPath(
   );
 }
 
+/** Whether the lock file at `path` exists but is empty or names no readable PID. */
+export function lockFileIsUnreadable(path: string): boolean {
+  let content: string;
+  try {
+    content = readFileSync(path, "utf-8").trim();
+  } catch (error) {
+    // Missing (no claim) or unreadable for another reason; neither is a torn claim we can name.
+    logger.debug(`claim file ${path} not readable: ${errorMessage(error)}`);
+    return false;
+  }
+  return content.length === 0 || Number.isNaN(parseLockContent(content).pid);
+}
+
+let claimTempCounter = 0;
+
+/**
+ * Create the claim file at `path` already complete, or fail because it exists.
+ *
+ * The body is written to a private temp file in the same directory and `link()`ed into place.
+ * `link` is atomic and fails with EEXIST when `path` exists, so the claim path is only ever
+ * absent or complete: a writer that is suspended or crashes mid-write leaves a temp file, never a
+ * torn claim. That removes the need to reclaim unreadable claims by age, which cannot be made
+ * safe (a writer stalled between create and write would lose its lock without knowing, and a
+ * reclaimer's "restore" is not atomic). At most one `link` to a given path can succeed, so at
+ * most one claimant sees `true` per claim generation. A stale (dead-owner) claim is still taken
+ * over by `takeOver`, the existing rename-then-verify protocol.
+ */
+export function createCompleteLockFile(
+  path: string,
+  owner: { pid: number; ownerToken: string; metadata?: string },
+): boolean {
+  const temp = `${path}.${owner.pid}.${++claimTempCounter}.tmp`;
+  const fd = openSync(temp, "wx", 0o600);
+  try {
+    writeSync(fd, formatLockContent(owner.pid, owner.ownerToken, owner.metadata));
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    linkSync(temp, path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      // Expected contention: another claimant (or a stale claim) holds the path.
+      return false;
+    }
+    throw error;
+  } finally {
+    try {
+      unlinkSync(temp);
+    } catch (error) {
+      // The temp name is private to this call; a failed cleanup only leaves an unreferenced file.
+      logger.debug(`claim temp ${temp} cleanup failed: ${errorMessage(error)}`);
+    }
+  }
+}
+
 const defaultDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
   // Read-only: resolving a path does not create the shared directory.
   leasePath: (deviceId) =>
@@ -184,11 +237,11 @@ const defaultDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
       ctrlProxyForwardLeaseFileName(deviceId),
     ),
   read: (path) => readExclusiveLockContent(path),
-  unreadableAgeMs: (path) => unreadableLockAgeMs(path),
+  isUnreadable: (path) => lockFileIsUnreadable(path),
   isProcessRunning: (pid) => isProcessRunning(pid),
   tryAcquire: (path, owner) => {
     ensureSecureDirectorySync(dirname(path));
-    return tryAcquireExclusiveLock(path, owner);
+    return createCompleteLockFile(path, owner);
   },
   takeOver: (path, observed, owner) => takeOverExclusiveLock(path, observed, owner),
   release: (path, owner) => releaseExclusiveLock(path, owner.pid, owner.ownerToken),
@@ -248,6 +301,7 @@ export const iosDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
  */
 export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnership {
   private readonly owners = new Map<string, number>();
+  private readonly unreadable = new Set<string>();
   private readonly ownerToken = defaultIdGenerator.next();
 
   constructor(
@@ -270,7 +324,26 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       } else {
         this.owners.set(deviceId, pid);
       }
+      // Not free while a claim file exists that names nobody (a known live PID is better).
+      if (pid === undefined && this.hasUnreadableClaim(deviceId)) {
+        this.unreadable.add(deviceId);
+      } else {
+        this.unreadable.delete(deviceId);
+      }
     }
+  }
+
+  foreignClaimUnreadable(deviceId: string): boolean {
+    return this.unreadable.has(deviceId);
+  }
+
+  /** A claim file (ours or a 0.0.84 daemon's) exists but names no PID: its writer is unknown. */
+  private hasUnreadableClaim(deviceId: string): boolean {
+    const paths = [
+      this.resolvePath(() => this.source.claimPath(deviceId), deviceId),
+      this.resolvePath(() => this.source.legacyClaimPath(deviceId), deviceId),
+    ];
+    return paths.some((path) => path !== undefined && this.source.isUnreadable?.(path) === true);
   }
 
   foreignOwnerPid(deviceId: string): number | undefined {
@@ -304,9 +377,8 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     }
     const observed = this.source.read(path);
     if (!observed || Number.isNaN(observed.pid) || observed.pid === this.selfPid) {
-      // Ours already, or unreadable. An unreadable file is refused while young (a racing
-      // claimant mid-write, which refresh reports as owned) and was already reclaimed by
-      // tryAcquire once torn, so false here always agrees with refresh.
+      // Ours already. Anything else (a claim being taken over, or an unreadable claim file) is
+      // refused here, and refresh reports the same device as not free, so the two agree.
       return observed?.pid === this.selfPid;
     }
     if ((await this.evaluateOwner(path, deviceId, "claim")) !== undefined) {
@@ -374,15 +446,6 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     }
   }
 
-  /** Whether the lock at `path` names no PID but is younger than the torn-write grace. */
-  private isYoungUnreadable(path: string, pid: number | undefined): boolean {
-    if (pid !== undefined && !Number.isNaN(pid)) {
-      return false;
-    }
-    const age = this.source.unreadableAgeMs?.(path);
-    return age !== undefined && age < UNREADABLE_LOCK_GRACE_MS;
-  }
-
   /** The PID of a live foreign owner of the lock at `path` that still uses `deviceId`. */
   private async evaluateOwner(
     path: string,
@@ -391,10 +454,6 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   ): Promise<number | undefined> {
     const content = this.source.read(path);
     const pid = content?.pid;
-    if (kind === "claim" && this.isYoungUnreadable(path, pid)) {
-      // Not free: the writer may be mid-write, and an unclaimable "free" device is a dead end.
-      return UNREADABLE_CLAIM_OWNER_PID;
-    }
     if (
       pid === undefined ||
       Number.isNaN(pid) ||

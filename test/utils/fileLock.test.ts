@@ -11,8 +11,6 @@ import {
   releaseExclusiveLock,
   takeOverExclusiveLock,
   tryAcquireExclusiveLock,
-  unreadableLockAgeMs,
-  UNREADABLE_LOCK_GRACE_MS,
 } from "../../src/utils/fileLock";
 import { logger } from "../../src/utils/logger";
 
@@ -27,50 +25,6 @@ describe("fileLock primitive", () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
-  });
-
-  describe("a torn (empty or unparsable) lock file", () => {
-    const writtenAt = 1_000;
-    const clockAt = (nowMs: number) => ({ nowMs: () => nowMs, mtimeMs: () => writtenAt });
-
-    test.each([
-      ["empty", ""],
-      ["unparsable", "garbage\n"],
-    ])(
-      "an %s lock is held while younger than the grace and reclaimed once older",
-      (_name, body) => {
-        writeFileSync(lockPath, body);
-        const young = clockAt(writtenAt + UNREADABLE_LOCK_GRACE_MS - 1);
-        expect(unreadableLockAgeMs(lockPath, young)).toBe(UNREADABLE_LOCK_GRACE_MS - 1);
-        expect(tryAcquireExclusiveLock(lockPath, { pid: 7, ...young })).toBe(false);
-        expect(readFileSync(lockPath, "utf-8")).toBe(body);
-
-        const old = clockAt(writtenAt + UNREADABLE_LOCK_GRACE_MS);
-        expect(tryAcquireExclusiveLock(lockPath, { pid: 7, ...old })).toBe(true);
-        expect(readExclusiveLockContent(lockPath)?.pid).toBe(7);
-        expect(readdirSync(dir)).toEqual(["thing.lock"]);
-      },
-    );
-
-    test("a readable lock or a missing file has no unreadable age", () => {
-      expect(unreadableLockAgeMs(lockPath, clockAt(9_999_999))).toBeUndefined();
-      writeFileSync(lockPath, formatLockContent(5));
-      expect(unreadableLockAgeMs(lockPath, clockAt(9_999_999))).toBeUndefined();
-    });
-
-    test("a fresh unreadable file displaced by the reclaim rename is restored", () => {
-      writeFileSync(lockPath, "");
-      // The first age check sees a stale file; by the marker check a peer's fresh empty file
-      // has replaced it, so the rename moved the peer's file and it must be put back.
-      const mtimes = [0, writtenAt + UNREADABLE_LOCK_GRACE_MS];
-      const racing = {
-        nowMs: () => writtenAt + UNREADABLE_LOCK_GRACE_MS,
-        mtimeMs: () => mtimes.shift(),
-      };
-      expect(tryAcquireExclusiveLock(lockPath, { pid: 7, ...racing })).toBe(false);
-      expect(readdirSync(dir)).toEqual(["thing.lock"]);
-      expect(readFileSync(lockPath, "utf-8")).toBe("");
-    });
   });
 
   test("takes over a live owner's lock only while it still holds the observed instance (#10497)", () => {

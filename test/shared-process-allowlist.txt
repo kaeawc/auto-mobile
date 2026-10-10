@@ -1177,6 +1177,7 @@ test/utils/plan/summarizeFailureObservation.test.ts
 test/utils/plan/waitForTimeout.test.ts
 test/utils/predictionUtils.property.test.ts
 test/utils/predictionUtils.test.ts
+test/utils/processLivenessGuard.test.ts
 test/utils/qr/QrEncoder.test.ts
 test/utils/qr/QrPngRenderer.test.ts
 test/utils/qr/QrPosterWriter.test.ts

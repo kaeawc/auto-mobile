@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  createCompleteLockFile,
   ForwardLeaseForeignDeviceOwnership,
-  UNREADABLE_CLAIM_OWNER_PID,
+  lockFileIsUnreadable,
   type DeviceOwnershipFileSource,
 } from "../../src/daemon/foreignDeviceOwnership";
 import type {
@@ -15,9 +16,6 @@ import {
   readExclusiveLockContent,
   releaseExclusiveLock,
   takeOverExclusiveLock,
-  tryAcquireExclusiveLock,
-  unreadableLockAgeMs,
-  UNREADABLE_LOCK_GRACE_MS,
 } from "../../src/utils/fileLock";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -30,7 +28,7 @@ class UnreachableProbe implements ForwardLeaseOwnerProbe {
   }
 }
 
-describe("cross-daemon claim store with an unreadable claim file", () => {
+describe("cross-daemon claim store: torn claims cannot exist and unreadable ones are not free", () => {
   const roots: string[] = [];
   afterEach(() => {
     for (const root of roots.splice(0)) {
@@ -38,58 +36,86 @@ describe("cross-daemon claim store with an unreadable claim file", () => {
     }
   });
 
-  /** The real fileLock primitives over a temp directory, as the production source uses them. */
-  function ownershipOver(claimsDir: string, timer: FakeTimer) {
-    // The file was written at fake time 0; the lock and the source read the same fake clock.
-    const clock = { nowMs: () => timer.now(), mtimeMs: () => 0 };
+  function tempRoot(): string {
+    const root = mkdtempSync(join(tmpdir(), "cross-daemon-corrupt-claim-"));
+    roots.push(root);
+    return root;
+  }
+
+  /** The production claim primitives over a temp directory. */
+  function ownershipOver(claimsDir: string, selfPid = SELF_PID) {
     const source: DeviceOwnershipFileSource = {
       leasePath: () => undefined,
       claimPath: (id) => join(claimsDir, `${id}.lock`),
       legacyClaimPath: () => undefined,
       read: (path) => readExclusiveLockContent(path),
-      unreadableAgeMs: (path) => unreadableLockAgeMs(path, clock),
-      isProcessRunning: (pid) => pid === SELF_PID,
-      tryAcquire: (path, owner) =>
-        tryAcquireExclusiveLock(path, {
-          ...owner,
-          ...clock,
-          isProcessRunning: (pid) => pid === SELF_PID,
-        }),
+      isUnreadable: (path) => lockFileIsUnreadable(path),
+      isProcessRunning: (pid) => pid === selfPid,
+      tryAcquire: (path, owner) => createCompleteLockFile(path, owner),
       takeOver: (path, observed, owner) => takeOverExclusiveLock(path, observed, owner),
       release: (path, owner) => releaseExclusiveLock(path, owner.pid, owner.ownerToken),
     };
     return new ForwardLeaseForeignDeviceOwnership(
-      SELF_PID,
+      selfPid,
       source,
       new UnreachableProbe(),
-      () => "/sockets/self.sock",
-      timer,
+      () => undefined,
+      new FakeTimer(),
     );
   }
 
   test.each([
-    ["a torn write that left garbage", "not-a-pid\n"],
-    ["a crash between create and write that left an empty file", ""],
-  ])("%s is refused while young, then reclaimed once torn", async (_name, body) => {
-    const root = mkdtempSync(join(tmpdir(), "cross-daemon-corrupt-claim-"));
-    roots.push(root);
-    mkdirSync(root, { recursive: true });
+    ["garbage left by an older writer", "not-a-pid\n"],
+    ["an empty file left by an older writer", ""],
+  ])("%s is not free: refresh and claim agree, with no owner pid", async (_name, body) => {
+    const root = tempRoot();
     writeFileSync(join(root, `${DEVICE}.lock`), body);
-    const timer = new FakeTimer();
-    const ownership = ownershipOver(root, timer);
+    const ownership = ownershipOver(root);
 
-    // Within the grace the writer may still be mid-write: the device is not free, and claim
-    // agrees with refresh (never "free but unclaimable").
-    timer.advanceTime(UNREADABLE_LOCK_GRACE_MS - 1);
     await ownership.refresh([DEVICE]);
-    expect(ownership.foreignOwnerPid(DEVICE)).toBe(UNREADABLE_CLAIM_OWNER_PID);
-    expect(await ownership.claim(DEVICE)).toBe(false);
 
-    // Past the grace the leftover is reclaimed: the device is free and claimable.
-    timer.advanceTime(1);
-    await ownership.refresh([DEVICE]);
     expect(ownership.foreignOwnerPid(DEVICE)).toBeUndefined();
+    expect(ownership.foreignClaimUnreadable(DEVICE)).toBe(true);
+    expect(await ownership.claim(DEVICE)).toBe(false);
+    expect(readdirSync(root)).toEqual([`${DEVICE}.lock`]);
+  });
+
+  test("a missing claim and a published claim are not unreadable", async () => {
+    const root = tempRoot();
+    const ownership = ownershipOver(root);
+    await ownership.refresh([DEVICE]);
+    expect(ownership.foreignClaimUnreadable(DEVICE)).toBe(false);
     expect(await ownership.claim(DEVICE)).toBe(true);
-    expect(readExclusiveLockContent(join(root, `${DEVICE}.lock`))?.pid).toBe(SELF_PID);
+    await ownership.refresh([DEVICE]);
+    expect(ownership.foreignClaimUnreadable(DEVICE)).toBe(false);
+  });
+
+  test("a writer stalled before publishing leaves no claim; a later claimant wins alone", () => {
+    const root = tempRoot();
+    const path = join(root, `${DEVICE}.lock`);
+    // Writer W was suspended after preparing its private temp file but before linking it.
+    writeFileSync(`${path}.100.1.tmp`, "");
+    expect(existsSync(path)).toBe(false);
+    expect(lockFileIsUnreadable(path)).toBe(false);
+
+    // Reclaimer R finds the path absent and publishes a complete claim.
+    expect(createCompleteLockFile(path, { pid: 200, ownerToken: "r" })).toBe(true);
+    // W resumes and tries to publish: the path exists, so W did not acquire.
+    expect(createCompleteLockFile(path, { pid: 100, ownerToken: "w" })).toBe(false);
+    expect(readExclusiveLockContent(path)?.pid).toBe(200);
+  });
+
+  test("three claimants racing for one path: exactly one acquires and the lock stays valid", () => {
+    const root = tempRoot();
+    const path = join(root, `${DEVICE}.lock`);
+    const results = [100, 200, 300].map((pid) =>
+      createCompleteLockFile(path, { pid, ownerToken: `t${pid}` }),
+    );
+
+    expect(results.filter(Boolean)).toHaveLength(1);
+    const winner = [100, 200, 300][results.indexOf(true)];
+    expect(readExclusiveLockContent(path)).toMatchObject({ pid: winner, token: `t${winner}` });
+    // No temp files remain: every loser cleaned up and none ever touched the published claim.
+    expect(readdirSync(root)).toEqual([`${DEVICE}.lock`]);
   });
 });

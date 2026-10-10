@@ -3778,11 +3778,11 @@ export class DevicePool {
     }
     await this.foreignDeviceOwnership.refresh([deviceId]);
     const ownerPid = this.foreignDeviceOwnership.foreignOwnerPid(deviceId);
-    if (ownerPid === undefined) {
+    if (ownerPid === undefined && !this.foreignDeviceOwnership.foreignClaimUnreadable?.(deviceId)) {
       return false;
     }
     logger.warn(
-      `[DevicePool] AVD '${device.name}' (${deviceId}) is driven by another AutoMobile process (PID ${ownerPid}); not adopting it for allocation`,
+      `[DevicePool] AVD '${device.name}' (${deviceId}) is driven by another AutoMobile process${ownerPid === undefined ? "" : ` (PID ${ownerPid})`}; not adopting it for allocation`,
     );
     return true;
   }
@@ -5739,7 +5739,7 @@ export class DevicePool {
     }
     await ownership.refresh([deviceId]);
     const ownerPid = ownership.foreignOwnerPid(deviceId);
-    if (ownerPid !== undefined) {
+    if (ownerPid !== undefined || ownership.foreignClaimUnreadable?.(deviceId)) {
       throw new DeviceOwnedByOtherDaemonError(deviceId, ownerPid, remedy);
     }
   }
@@ -8811,10 +8811,12 @@ export class DevicePool {
     if (device.sessionId !== null) {
       return false;
     }
-    const ownerPid = this.foreignOwnershipFor(device.platform)?.foreignOwnerPid(device.id);
+    const ownership = this.foreignOwnershipFor(device.platform);
+    const ownerPid = ownership?.foreignOwnerPid(device.id);
     if (ownerPid === undefined) {
       this.loggedForeignDeviceOwners.delete(device.id);
-      return false;
+      // An unreadable claim names no owner but is not free either.
+      return ownership?.foreignClaimUnreadable?.(device.id) === true;
     }
     if (this.loggedForeignDeviceOwners.get(device.id) !== ownerPid) {
       this.loggedForeignDeviceOwners.set(device.id, ownerPid);

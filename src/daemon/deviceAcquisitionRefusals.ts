@@ -139,16 +139,12 @@ export class SessionCreationTimeoutError extends RetryableDeviceAcquisitionError
 export const DEVICE_OWNED_BY_OTHER_DAEMON_RETRY_AFTER_MS = 2_000;
 
 export class DeviceOwnedByOtherDaemonError extends RetryableDeviceAcquisitionError {
-  readonly ownerPid: number | undefined;
-
   /** @param remedy what the caller can do instead; defaults to the acquisition remedy */
   constructor(
     deviceId: string,
-    ownerPid: number | undefined,
+    readonly ownerPid: number | undefined,
     remedy = "Retry after that daemon releases it, or pick another device.",
   ) {
-    // A non-positive pid is the pool's "claimed, owner unreadable" marker, not a process.
-    ownerPid = ownerPid !== undefined && ownerPid > 0 ? ownerPid : undefined;
     super(
       DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
       deviceId,
@@ -158,7 +154,6 @@ export class DeviceOwnedByOtherDaemonError extends RetryableDeviceAcquisitionErr
         ` (code ${DEVICE_OWNED_BY_OTHER_DAEMON_CODE}); two daemons must never drive the same ` +
         `device. ${remedy}`,
     );
-    this.ownerPid = ownerPid;
     this.name = "DeviceOwnedByOtherDaemonError";
   }
 }

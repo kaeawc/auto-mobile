@@ -12,14 +12,20 @@ package dev.jasonpearson.automobile.junit
  * wait), never an exception that skips the bound. Once any call succeeds the device is ours and
  * calls pass straight through.
  *
- * A `session_ownership_lost` answer means the daemon released the held session and will not reuse
- * its UUID for ordinary calls; it is reported as a clear failure rather than retried.
+ * Whether a refusal is waited on is decided by [AutoMobilePlanExecutor.classifyRefusalText], the
+ * same typed-field rule the `executePlan` loop uses, and its `retryAfterMs` lengthens the step
+ * within the same budget.
+ *
+ * A terminal session refusal (`session_ownership_lost`, `nextAction: acquire_new_session`) means
+ * the daemon released the held session and will not reuse its UUID for ordinary calls; it is
+ * reported as a clear failure rather than retried.
  */
 internal class HeldDeviceWaitingMCPClient(
   private val delegate: AutoMobileAgent.MCPClient,
-  private val backoffDelayMs: (waitsSoFar: Int, waitedMs: Long) -> Long? = { waits, waited ->
-    AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(waits, waited)
-  },
+  private val backoffDelayMs: (waitsSoFar: Int, waitedMs: Long, retryAfterMs: Long?) -> Long? =
+    { waits, waited, retryAfterMs ->
+      AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(waits, waited, retryAfterMs)
+    },
   private val sleeper: (Long) -> Unit = { AutoMobilePlanExecutor.deviceOwnedSleeper(it) },
 ) : AutoMobileAgent.MCPClient {
   @Volatile private var deviceConfirmed = false
@@ -45,17 +51,18 @@ internal class HeldDeviceWaitingMCPClient(
         return result
       } catch (error: RuntimeException) {
         val message = error.message.orEmpty()
-        if (BUSY_CODES.none(message::contains)) {
-          if (OWNERSHIP_LOST_CODE in message) {
+        val verdict = AutoMobilePlanExecutor.classifyRefusalText(message) ?: throw error
+        when (verdict.disposition) {
+          AutoMobilePlanExecutor.RefusalDisposition.WAIT -> Unit
+          AutoMobilePlanExecutor.RefusalDisposition.ACQUIRE_NEW_SESSION ->
             throw RuntimeException(
               "The device session held for AI recovery was released by the daemon's idle window " +
                 "before recovery's first call ($message)",
               error,
             )
-          }
-          throw error
+          else -> throw error
         }
-        val delayMs = backoffDelayMs(waits, waitedMs) ?: throw error
+        val delayMs = backoffDelayMs(waits, waitedMs, verdict.retryAfterMs) ?: throw error
         println(
           "Device is busy for AI recovery; waiting ${delayMs}ms before retrying " +
             "(wait ${waits + 1}): $message",
@@ -65,14 +72,5 @@ internal class HeldDeviceWaitingMCPClient(
         waitedMs += delayMs
       }
     }
-  }
-
-  private companion object {
-    const val OWNERSHIP_LOST_CODE = "session_ownership_lost"
-    val BUSY_CODES =
-      listOf(
-        AutoMobilePlanExecutor.DEVICE_OWNED_BY_OTHER_SESSION_CODE,
-        "device_cleanup_in_progress",
-      )
   }
 }

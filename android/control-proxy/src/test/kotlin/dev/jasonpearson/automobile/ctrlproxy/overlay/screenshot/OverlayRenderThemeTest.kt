@@ -9,8 +9,9 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * [renderOverlay] must pass the spec's own theme to the renderer (#11217): a `mode: dark` spec draws
- * light-on-dark ink on a light device. Compares luminance, not baselines, so it runs on any OS.
+ * [renderOverlay] must pass the spec's own theme to the renderer (#11217): a `mode: dark` spec
+ * draws light-on-dark ink on a light device. Compares luminance, not baselines, so it runs on any
+ * OS.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -25,7 +26,8 @@ class OverlayRenderThemeTest {
 
   @Test
   fun lightSpecThemeDrawsDarkInkOnLightDevice() {
-    val image = renderOverlay("theme-typography-shapes", validOverlayFixture("theme-typography-shapes"))
+    val image =
+      renderOverlay("theme-typography-shapes", validOverlayFixture("theme-typography-shapes"))
     assertTrue("expected dark ink, got ${luminance(image)}", luminance(image) < 0.3)
   }
 

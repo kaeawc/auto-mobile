@@ -202,10 +202,12 @@ class PrototypeWindowMetadataTest {
     assertNull(controller.windowMetadata())
 
     controller.show("r1", spec(PrototypeFullscreenPlacement()))
-    assertEquals(PrototypeWindowMetadata("fullscreen", false), controller.windowMetadata())
+    // The appearance the show resolved to rides along; PrototypeAppearanceTest covers it.
+    fun placementAndOpacity() = controller.windowMetadata()?.copy(appearance = null)
+    assertEquals(PrototypeWindowMetadata("fullscreen", false), placementAndOpacity())
 
     controller.show("r2", spec(PrototypeSheetPlacement("bottom", 120.0), opacity = 50))
-    assertEquals(PrototypeWindowMetadata("sheet", false), controller.windowMetadata())
+    assertEquals(PrototypeWindowMetadata("sheet", false), placementAndOpacity())
 
     controller.dismiss("r3", "panel", null)
     assertNull(controller.windowMetadata())

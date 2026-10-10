@@ -449,6 +449,12 @@ data class AddHighlight(
  * A show whose `spec.id` is the prototype already on screen replaces it in place: it keeps the
  * display it is on (ignoring [displayId]) and each pager's page. [reset] true starts it fresh
  * instead. Hosts send `reset` only when true; an older device ignores it and always starts fresh.
+ *
+ * [appearance] pins what "the system setting" means for this show (`prototype_appearance_v1`), so a
+ * spec with `theme.mode: "system"` or no mode can be previewed in either mode without flipping the
+ * device. Absent means [PrototypeAppearanceOverride.DEVICE]. Every show states it afresh: a same-id
+ * show without it goes back to following the device. Hosts only send it to a device advertising the
+ * flag, because an older device would ignore the field and follow the device silently.
  */
 @Serializable
 @SerialName("show_prototype")
@@ -457,7 +463,16 @@ data class ShowPrototype(
   val spec: PrototypeSpec,
   val displayId: Int? = null,
   val reset: Boolean = false,
+  val appearance: PrototypeAppearanceOverride? = null,
 ) : WebSocketRequest()
+
+/** What a show takes as the system appearance: the device's own setting, or a fixed mode. */
+@Serializable
+enum class PrototypeAppearanceOverride {
+  @SerialName("device") DEVICE,
+  @SerialName("light") LIGHT,
+  @SerialName("dark") DARK,
+}
 
 @Serializable
 @SerialName("dismiss_prototype")

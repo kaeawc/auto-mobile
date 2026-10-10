@@ -122,11 +122,11 @@ theme from authored backgrounds (it would be circular); set `theme.mode` or
 
 ### Light and dark values
 
-A prototype resolves to exactly one mode, light or dark, each time it is composed: an explicit
-`theme.mode` (`system` reads the device setting), else the luminance of a flat `colors.background`
-(else `colors.surface`) override, else the first opaque hex background on the root's leading
-chain, else the device setting. Every per-mode form below reads that one resolved mode. A device
-needs `prototype_theme_modes_v1` for them; the host refuses such a spec for an older CtrlProxy.
+A shown prototype has exactly one resolved mode, light or dark: an explicit `theme.mode`
+(`system` reads the system setting), else the luminance of a flat `colors.background` (else
+`colors.surface`) override, else the first opaque hex background on the root's leading chain, else
+the system setting. Every per-mode form below reads that one resolved mode. A device needs
+`prototype_theme_modes_v1` for them; the host refuses such a spec for an older CtrlProxy.
 
 - **Colour pairs.** Every colour slot (`style.background`, `style.color`, `style.shadowColor`,
   `style.border.color`, gradient stops, `window.placement.scrim` and the `bottomSheet` `scrim`,
@@ -161,14 +161,39 @@ needs `prototype_theme_modes_v1` for them; the host refuses such a spec for an o
   both ids are checked at `show` and reported in `missingAssets`, and both stay retained with the
   prototype.
 - **Window metadata.** `prototypeOpaque` follows what is drawn. The root background and the window
-  scrim are resolved for every mode the prototype can reach (one mode when `theme.mode` is
-  `light` or `dark` or the backgrounds fix it, both otherwise) and count as solid only when the
-  result is fully opaque in each. An opaque role counts; the `scrim` role in a scrim slot never
-  does.
+  scrim are resolved in the mode the show resolved to and count as solid only when the result is
+  fully opaque. An opaque role counts; the `scrim` role in a scrim slot never does.
 
-The mode is resolved when the prototype composes. Re-theming a prototype that is already showing
-when the device setting changes, a per-show appearance override, and reporting the resolved mode
-to the host are tracked in #11221.
+### Live appearance (#11221, `prototype_appearance_v1`)
+
+The controller resolves the mode once per show and keeps it current. That one value drives the
+host chrome (dismiss bar, Close control), the window scrim, every colour and image pair in the
+content and the window metadata, so they cannot draw in different modes. No window reads its own
+Compose configuration for it, which is why a window created from a display or app-layer window
+context follows the same value as one on the service context.
+
+- **Override.** `show_prototype` takes a top-level `appearance`: `"device"` (the default when
+  absent), `"light"` or `"dark"`. It stands in for the system setting only: it decides a spec with
+  `theme.mode: "system"` and a spec whose mode would otherwise fall through to the device. It does
+  not beat an explicit `light`/`dark` mode, a flat `background`/`surface` override or an authored
+  opaque background. It belongs to the show: a later show of the same id without the field follows
+  the device again. An unknown value fails the request and leaves what is showing untouched.
+- **Re-theme.** The mode is resolved again after each interaction (a pager page or a `styleWhen`
+  state can change the background it is inferred from) and on every configuration change (the
+  device's night mode; on API 31+ the Material You palette, so a `colors.source: "device"` scheme
+  is read again after a wallpaper change). The window, the runtime, authored state, pager pages
+  and text-field contents are kept; only colours change. A prototype hidden by the lock screen or
+  because its app left the foreground is resolved too, and returns in the current mode.
+- **Event.** When the resolved mode changes, the device sends one `prototype_event` with
+  `kind: "appearance_changed"`, `name: null` and `payload: {mode, source}`, on the normal
+  sequence, buffering and replay path. Nothing is sent when the mode stays the same (a repeated
+  configuration change, a device flip under an explicit mode or an override, a palette change), nor
+  for the show itself, whose result carries the mode.
+- **Report.** A successful `show_prototype` result and each `inspect_prototypes` entry carry
+  `appearance: {mode, source, deviceDark}`. `mode` is `light` or `dark`. `source` names the step
+  that decided it: `explicit`, `override`, `roleLuminance`, `authoredBackground` or `system`
+  (`theme.mode: "system"` reports `system`, or `override` when the show pinned it). `deviceDark` is
+  the device's own setting whatever decided the mode.
 
 ## Windows
 

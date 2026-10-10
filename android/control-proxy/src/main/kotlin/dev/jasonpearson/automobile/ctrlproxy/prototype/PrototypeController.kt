@@ -2,11 +2,14 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.util.Log
 import android.view.Display
+import dev.jasonpearson.automobile.protocol.PrototypeAppearance
+import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
@@ -29,6 +32,18 @@ fun interface PrototypeResultSink {
     error: String?,
     missingAssets: List<String>,
   ) = send(requestId, success, error)
+
+  /**
+   * A successful `show_prototype`, with the mode it resolved to (`prototype_appearance_v1`). Sinks
+   * that predate it drop the appearance.
+   */
+  suspend fun sendShown(
+    requestId: String?,
+    missingAssets: List<String>,
+    appearance: PrototypeAppearance,
+  ) =
+    if (missingAssets.isEmpty()) send(requestId, true, null)
+    else sendWithMissingAssets(requestId, true, null, missingAssets)
 
   /** The reply to `inspect_prototypes`. Sinks that predate it answer a bare success. */
   suspend fun sendPrototypeStatus(
@@ -81,6 +96,8 @@ class PrototypeController(
    * the lock-screen block and from any capture-time hide.
    */
   private val foreground: PrototypeForegroundScope = NoPrototypeForegroundScope,
+  /** The device's light or dark setting and dynamic-colour palette, read at every resolve. */
+  private val deviceAppearance: PrototypeDeviceAppearance = NoPrototypeDeviceAppearance,
 ) {
   val isShowing: Boolean
     get() = host.isShowing
@@ -102,7 +119,13 @@ class PrototypeController(
     if (!host.isShowing) return null
     return try {
       val current = runtime.current
-      prototypeWindowMetadata(mapPrototypeSpec(current.spec, current.pages))
+      // Opacity follows the mode the window is drawn in, not every mode the spec could reach.
+      val shown = activeTheme?.value
+      prototypeWindowMetadata(
+        mapPrototypeSpec(current.spec, current.pages),
+        palettes = shown?.let { listOf(prototypeShownPalette(it)) },
+        appearance = shown?.appearance,
+      )
     } catch (error: Exception) {
       Log.w("PrototypeController", "Prototype window metadata unavailable", error)
       null
@@ -136,6 +159,10 @@ class PrototypeController(
   // A disconnect dismissal whose window removal failed; retried on the next lifecycle signal.
   private var disconnectPending = false
   @Volatile private var activeRequest: PrototypeRequest? = null
+  // The one theme of the active show: the host's chrome and content collect it, the controller
+  // re-resolves it. Its override is what the show asked the system setting to be.
+  @Volatile private var activeTheme: MutableStateFlow<PrototypeShownTheme>? = null
+  private var activeOverride: PrototypeAppearanceOverride? = null
   // Match WebSocketServer.protocolJson; default-valued optional fields are omitted, not null.
   private val json = Json {
     prettyPrint = false
@@ -150,12 +177,16 @@ class PrototypeController(
    * new page count. The new spec's state is authoritative; values the user changed are not carried
    * over. Otherwise (another id, nothing shown, or [reset]) it is a fresh show on [displayId],
    * where null means the default display, exactly as before display targeting.
+   *
+   * [appearance] stands in for the device's light or dark setting for this show; null follows the
+   * device. It belongs to the show, so an in-place show without it follows the device again.
    */
   suspend fun show(
     requestId: String?,
     spec: PrototypeSpec,
     displayId: Int? = null,
     reset: Boolean = false,
+    appearance: PrototypeAppearanceOverride? = null,
   ) =
     execute(requestId) {
       val inPlace = !reset && activeRuntime?.current?.spec?.id == spec.id
@@ -164,8 +195,9 @@ class PrototypeController(
         replace = activeRuntime != null,
         preservePages = inPlace,
         displayId = if (inPlace) shownDisplayId() else displayId ?: Display.DEFAULT_DISPLAY,
+        appearance = appearance,
       )
-      missingAssets()
+      Outcome(missingAssets(), activeTheme?.value?.appearance)
     }
 
   suspend fun dismiss(requestId: String?, id: String?, all: Boolean?) =
@@ -180,8 +212,14 @@ class PrototypeController(
         notifyDetached()
         releaseAssets()
       }
-      emptyList()
+      Outcome()
     }
+
+  /** What a request reports beyond success: asset ids the device lacks, and a show's appearance. */
+  private data class Outcome(
+    val missingAssets: List<String> = emptyList(),
+    val appearance: PrototypeAppearance? = null,
+  )
 
   /** Referenced assets the store lacks, for the active spec. Never fails the request. */
   private fun missingAssets(): List<String> {
@@ -212,6 +250,7 @@ class PrototypeController(
     replace: Boolean,
     preservePages: Boolean = false,
     displayId: Int = Display.DEFAULT_DISPLAY,
+    appearance: PrototypeAppearanceOverride? = null,
   ) {
     val validated = validate(spec)
     val request = render(validated).copy(displayId = displayId)
@@ -233,12 +272,11 @@ class PrototypeController(
         previousPages = if (preservePages) previous?.current?.pages.orEmpty() else emptyMap(),
       )
     val mappedSpec = mapPrototypeSpec(validated, runtime.current.pages)
+    val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
     val interactive =
       request.copy(
         hasTextField = mappedSpec.hasTextField,
-        darkTheme = prototypeHostDark(mappedSpec),
-        themeRoot = mappedSpec.root,
-        specTheme = validated.theme,
+        theme = theme,
         onHostDismiss = { interact(runtime, PrototypeInteraction.HostDismiss) },
         content = {
           PrototypeRuntimeContent(runtime, images, fonts) { interaction ->
@@ -266,6 +304,8 @@ class PrototypeController(
     previous?.close()
     activeRuntime = runtime
     activeRequest = interactive
+    activeTheme = theme
+    activeOverride = appearance
     activeObserverSession = observerSession
     disconnectPending = false
     armIdle(runtime)
@@ -276,6 +316,34 @@ class PrototypeController(
 
   private val PrototypeRuntime.persistent: Boolean
     get() = isDevicePersistent(current.spec)
+
+  private fun shownTheme(
+    model: PrototypeRenderModel,
+    override: PrototypeAppearanceOverride?,
+  ): PrototypeShownTheme =
+    PrototypeShownTheme(
+      model.root,
+      model.theme,
+      prototypeResolveAppearance(model.root, model.theme, deviceAppearance.dark, override),
+      deviceAppearance.paletteKey,
+    )
+
+  /**
+   * Resolves the active show's theme again from [model], the live tree: after an interaction (a
+   * pager page or a `styleWhen` state can change the background the mode is inferred from) and
+   * after a configuration change (the device setting or its palette). The one flow feeds host
+   * chrome and content, so both re-theme together, with authored state, pager pages and text fields
+   * untouched. A changed mode sends exactly one `appearance_changed` event; an unchanged one sends
+   * nothing. Runs under [mutex].
+   */
+  private suspend fun syncAppearance(runtime: PrototypeRuntime, model: PrototypeRenderModel) {
+    val theme = activeTheme ?: return
+    val previous = theme.value
+    val next = shownTheme(model, activeOverride)
+    if (next == previous) return
+    theme.value = next
+    if (next.appearance.mode != previous.appearance.mode) runtime.appearanceChanged(next.appearance)
+  }
 
   /**
    * A device-persistent prototype keeps emitting with no host attached. Those events wait in
@@ -325,6 +393,7 @@ class PrototypeController(
     if (!host.dismiss()) return false
     activeRuntime = null
     activeRequest = null
+    activeTheme = null
     foreground.release()
     lifecycle.cancel()
     notifyDetached()
@@ -363,7 +432,11 @@ class PrototypeController(
         )
           armIdle(runtime)
         runtime.handle(interaction)
-        if (runtime === activeRuntime && runtime.current.active) syncTextFieldFocus(runtime)
+        if (runtime === activeRuntime && runtime.current.active) {
+          val model = mapPrototypeSpec(runtime.current.spec, runtime.current.pages)
+          syncAppearance(runtime, model)
+          syncTextFieldFocus(model)
+        }
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
@@ -371,24 +444,26 @@ class PrototypeController(
       }
     }
 
-  /** [action] returns the referenced asset ids the device lacks, reported as a warning. */
-  private suspend fun execute(requestId: String?, action: suspend () -> List<String>) =
-    mutex.withLock {
-      var missing = emptyList<String>()
-      val error =
-        try {
-          check(!destroyed) { "Prototype host destroyed" }
-          missing = action()
-          null
-        } catch (error: CancellationException) {
-          throw error
-        } catch (error: Exception) {
-          Log.w("PrototypeController", "Prototype request failed", error)
-          error.message ?: "Prototype request failed (${error.javaClass.simpleName})"
-        }
-      if (missing.isEmpty()) sink.send(requestId, error == null, error)
-      else sink.sendWithMissingAssets(requestId, error == null, error, missing)
-    }
+  /** [action]'s missing asset ids are reported as a warning, never as a failure. */
+  private suspend fun execute(requestId: String?, action: suspend () -> Outcome) = mutex.withLock {
+    var outcome = Outcome()
+    val error =
+      try {
+        check(!destroyed) { "Prototype host destroyed" }
+        outcome = action()
+        null
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Exception) {
+        Log.w("PrototypeController", "Prototype request failed", error)
+        error.message ?: "Prototype request failed (${error.javaClass.simpleName})"
+      }
+    val missing = outcome.missingAssets
+    val appearance = outcome.appearance
+    if (error == null && appearance != null) sink.sendShown(requestId, missing, appearance)
+    else if (missing.isEmpty()) sink.send(requestId, error == null, error)
+    else sink.sendWithMissingAssets(requestId, error == null, error, missing)
+  }
 
   private fun armIdle(
     runtime: PrototypeRuntime,
@@ -463,6 +538,7 @@ class PrototypeController(
       pages = runtime.current.pages.toMap(),
       lastSequence = sequences[id] ?: 0L,
       suspended = foreground.suspended,
+      appearance = activeTheme?.value?.appearance,
     )
   }
 
@@ -496,11 +572,24 @@ class PrototypeController(
 
   /**
    * Rotation/density changes keep the same runtime and Compose tree; hiding retains authored state.
-   * The prototype's own display going away dismisses it even when the caller does not know that.
+   * The prototype's own display going away dismisses it even when the caller does not know that. A
+   * night-mode or palette change re-themes the same tree, hidden or not (#11221).
    */
   suspend fun onConfigurationChanged(displayAvailable: Boolean = true) = signal {
     val runtime = activeRuntime ?: return@signal
+    resyncAppearance(runtime)
     applyWindowDecision(runtime, displayAvailable && ownDisplayAvailable())
+  }
+
+  /** A failed re-theme keeps the mode already drawn and must not skip the window decision. */
+  private suspend fun resyncAppearance(runtime: PrototypeRuntime) {
+    try {
+      syncAppearance(runtime, mapPrototypeSpec(runtime.current.spec, runtime.current.pages))
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("PrototypeController", "Prototype appearance update failed", error)
+    }
   }
 
   /**
@@ -570,9 +659,9 @@ class PrototypeController(
    * behind would be swallowed. A failed flip keeps the old request and is retried on the next
    * change.
    */
-  private suspend fun syncTextFieldFocus(runtime: PrototypeRuntime) {
+  private suspend fun syncTextFieldFocus(model: PrototypeRenderModel) {
     val request = activeRequest ?: return
-    val visible = mapPrototypeSpec(runtime.current.spec, runtime.current.pages).hasTextField
+    val visible = model.hasTextField
     if (visible == request.hasTextField) return
     // A window cleared as detached is restored from activeRequest, so record the change for it.
     if (host.setTextFieldVisible(visible) || !host.isShowing)
@@ -584,6 +673,7 @@ class PrototypeController(
   private suspend fun abandon(runtime: PrototypeRuntime) {
     activeRuntime = null
     activeRequest = null
+    activeTheme = null
     foreground.release()
     lifecycle.cancel()
     notifyDetached()
@@ -634,6 +724,7 @@ class PrototypeController(
       val runtime = activeRuntime
       activeRuntime = null
       activeRequest = null
+      activeTheme = null
       foreground.release()
       releaseAssets()
       // Allocate the terminal sequence even when the last socket or service sink is gone.

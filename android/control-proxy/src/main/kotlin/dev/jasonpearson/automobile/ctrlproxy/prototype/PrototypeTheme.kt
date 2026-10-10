@@ -61,6 +61,18 @@ internal data class PrototypePalette(val scheme: ColorScheme, val dark: Boolean)
 internal val LocalPrototypeDark = staticCompositionLocalOf { false }
 
 /**
+ * The appearance the controller resolved for the show this composition belongs to, provided by
+ * [PrototypeHostTheme]. Every [PrototypeTheme] under it takes its mode from here instead of
+ * resolving its own, so host chrome and content cannot disagree. Null outside a controller show
+ * (previews and tests that compose the spec content directly).
+ */
+internal val LocalPrototypeShownAppearance =
+  staticCompositionLocalOf<PrototypeShownAppearance?> { null }
+
+/** The resolved mode of a show and the device palette it was resolved with. */
+internal data class PrototypeShownAppearance(val dark: Boolean, val paletteKey: Int)
+
+/**
  * The first opaque background on the tree's leading chain (root, then its first visible child, and
  * so on; hidden nodes paint nothing and are skipped) is what the author painted the screen with;
  * whichever of light or dark content reads better on it decides light or dark. A spec with no such
@@ -74,13 +86,20 @@ internal fun prototypeThemeSpec(
   root: PrototypeRenderNode,
   systemDark: Boolean,
   explicit: PrototypeSpecTheme? = null,
+): PrototypeThemeSpec =
+  prototypeThemeSpecFor(
+    root,
+    explicit,
+    prototypeResolveAppearance(root, explicit, systemDark).dark,
+  )
+
+/** The theme for a mode that is already resolved ([prototypeResolveAppearance]). */
+internal fun prototypeThemeSpecFor(
+  root: PrototypeRenderNode,
+  explicit: PrototypeSpecTheme?,
+  dark: Boolean,
 ): PrototypeThemeSpec {
   val authored = prototypeAuthoredTheme(root)
-  val dark =
-    prototypeExplicitDark(explicit?.mode, systemDark)
-      ?: prototypeRoleSurfaceDark(explicit?.colors)
-      ?: authored?.dark
-      ?: systemDark
   val seed = explicit?.colors?.seed?.let(::prototypeColor)
   val dynamic = explicit?.colors?.source == DEVICE_COLOR_SOURCE
   // Authored surfaces only match a scheme of the same polarity, and never override explicit
@@ -93,18 +112,9 @@ internal fun prototypeThemeSpec(
  * With no `mode`, an explicit `background` (else `surface`) role override is the screen colour the
  * author chose, so its luminance decides light or dark the way an authored background does.
  */
-private fun prototypeRoleSurfaceDark(colors: PrototypeSpecThemeColors?): Boolean? =
+internal fun prototypeRoleSurfaceDark(colors: PrototypeSpecThemeColors?): Boolean? =
   (colors?.background ?: colors?.surface)?.let {
     prototypeColor(it).luminance() < DARK_LUMINANCE_CEILING
-  }
-
-/** `light`/`dark` decide outright, `system` follows the device, and null means "not specified". */
-private fun prototypeExplicitDark(mode: String?, systemDark: Boolean): Boolean? =
-  when (mode) {
-    "light" -> false
-    "dark" -> true
-    "system" -> systemDark
-    else -> null
   }
 
 /** The theme the author painted, or null when the spec paints no opaque background. */
@@ -120,20 +130,6 @@ internal fun prototypeAuthoredTheme(root: PrototypeRenderNode): PrototypeThemeSp
   }
   return null
 }
-
-/**
- * Whether the host chrome (the dismiss control) should draw dark, or null to follow the device. An
- * explicit mode wins over the authored background: `light`/`dark` decide outright and `system`
- * follows the device, as the content scheme does. Only an absent mode infers from the background.
- */
-internal fun prototypeHostDark(model: PrototypeRenderModel): Boolean? =
-  when (model.theme?.mode) {
-    "light" -> false
-    "dark" -> true
-    "system" -> null
-    else ->
-      prototypeRoleSurfaceDark(model.theme?.colors) ?: prototypeAuthoredTheme(model.root)?.dark
-  }
 
 /**
  * [dynamicScheme] is the device's Material You scheme, supplied only on API 31+. It is used when
@@ -406,18 +402,20 @@ internal fun prototypePlaceholderColor(scheme: ColorScheme): Color = scheme.surf
 internal fun prototypePlaceholderContentColor(scheme: ColorScheme): Color = scheme.onSurfaceVariant
 
 /**
- * Host chrome sits outside the spec content, so it needs the spec's theme itself: the resolved
- * [PrototypeTheme] when the request carries the spec, else the baseline scheme for [dark].
+ * Host chrome sits outside the spec content, so it needs the spec's theme itself: the
+ * [PrototypeTheme] of the controller's [shown] theme, whose resolved mode every theme below it (the
+ * content's) then shares. A request with no shown theme draws the baseline scheme for the device
+ * setting.
  */
 @Composable
-internal fun PrototypeHostTheme(
-  root: PrototypeRenderNode?,
-  theme: PrototypeSpecTheme?,
-  dark: Boolean,
-  content: @Composable () -> Unit,
-) {
-  if (root != null) PrototypeTheme(root, theme, content)
-  else
+internal fun PrototypeHostTheme(shown: PrototypeShownTheme?, content: @Composable () -> Unit) {
+  if (shown != null) {
+    val appearance = PrototypeShownAppearance(shown.appearance.dark, shown.paletteKey)
+    CompositionLocalProvider(LocalPrototypeShownAppearance provides appearance) {
+      PrototypeTheme(shown.root, shown.specTheme, content)
+    }
+  } else {
+    val dark = isSystemInDarkTheme()
     MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) {
       CompositionLocalProvider(
         LocalContentColor provides MaterialTheme.colorScheme.onSurface,
@@ -425,6 +423,7 @@ internal fun PrototypeHostTheme(
         content = content,
       )
     }
+  }
 }
 
 @Composable
@@ -433,11 +432,16 @@ internal fun PrototypeTheme(
   explicit: PrototypeSpecTheme? = null,
   content: @Composable () -> Unit,
 ) {
-  val systemDark = isSystemInDarkTheme()
+  // A controller show resolved the mode already; only a standalone composition asks the device.
+  val shown = LocalPrototypeShownAppearance.current
+  val systemDark = if (shown == null) isSystemInDarkTheme() else shown.dark
   val context = LocalContext.current
   val palette =
-    remember(root, explicit, systemDark) {
-      val theme = prototypeThemeSpec(root, systemDark, explicit)
+    // The shown palette key is part of the key, so a wallpaper change reads device colour again.
+    remember(root, explicit, shown, systemDark) {
+      val theme =
+        if (shown != null) prototypeThemeSpecFor(root, explicit, shown.dark)
+        else prototypeThemeSpec(root, systemDark, explicit)
       PrototypePalette(
         prototypeColorScheme(theme, prototypeDynamicScheme(context, theme)),
         theme.dark,

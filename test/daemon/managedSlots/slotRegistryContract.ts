@@ -272,6 +272,37 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(await registry.isDeviceAssignedToValidSlot("android", "avd-1")).toBe(true);
     });
 
+    test("findExecutionAssignments resolves the slots a session holds, and none once released", async () => {
+      const scopeKey = await readyScope();
+      const first = { scopeKey, slotIndex: 0 };
+      const second = { scopeKey, slotIndex: 1 };
+      await boundSlot(first, "avd-1");
+      await boundSlot(second, "avd-2");
+      livePids.add(100);
+      await registry.claimExecution(
+        first,
+        { generation: 1, stableDeviceId: "avd-1" },
+        ownerFor(100, "s1"),
+      );
+      await registry.claimExecution(
+        second,
+        { generation: 1, stableDeviceId: "avd-2" },
+        ownerFor(100, "s1"),
+      );
+
+      const held = await registry.findExecutionAssignments("s1");
+      expect(held.map((assignment) => assignment.slotIndex)).toEqual([0, 1]);
+      expect(await registry.findExecutionAssignments("s2")).toEqual([]);
+
+      await registry.releaseExecution(first, "s1");
+      expect((await registry.findExecutionAssignments("s1")).map((a) => a.slotIndex)).toEqual([1]);
+      // The binding survives the release.
+      expect(await registry.getAssignment(first)).toMatchObject({
+        stableDeviceId: "avd-1",
+        execOwner: null,
+      });
+    });
+
     test("an execution cannot claim a slot that is not ready", async () => {
       const key = { scopeKey: await readyScope(), slotIndex: 0 };
       await registry.initSlot(key, INIT);

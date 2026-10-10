@@ -233,6 +233,15 @@ export class FakeSlotRegistry implements SlotRegistry {
       .map(copy);
   }
 
+  async findExecutionAssignments(sessionUuid: string): Promise<SlotAssignmentRecord[]> {
+    return [...this.assignments.values()]
+      .filter((assignment) => assignment.execOwner?.sessionUuid === sessionUuid)
+      .sort((a, b) =>
+        a.scopeKey === b.scopeKey ? a.slotIndex - b.slotIndex : a.scopeKey < b.scopeKey ? -1 : 1,
+      )
+      .map(copy);
+  }
+
   async findDeviceHolder(
     platform: SlotPlatform,
     stableDeviceId: string,

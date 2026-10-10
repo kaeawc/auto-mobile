@@ -50,6 +50,7 @@ import {
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_RELEASE_SESSION_METHOD,
+  DAEMON_RELEASE_EXECUTION_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
@@ -69,6 +70,7 @@ import {
   holdsOwnerHeartbeatLease,
 } from "./managedExecutionLiveness";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
+import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
 import {
   daemonDeviceLeaseActivitySources,
   daemonDeviceLeaseRelinquishPort,
@@ -104,6 +106,8 @@ export interface DaemonStateAccess {
   /** Overrides the production lease-relinquish policy and release (tests). */
   getDeviceLeaseRelinquishPort?(): DeviceLeaseRelinquishPort;
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
+  /** The managed-slot execution drain behind `daemon/releaseExecution` (#11177). */
+  getManagedExecutionRelease?(): Pick<ManagedExecutionRelease, "releaseExecution"> | undefined;
   getSessionManager(): {
     hasSession(sessionId: string): boolean;
     getSession(sessionId: string): Session | null;
@@ -325,6 +329,7 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
       DAEMON_RELEASE_SESSION_METHOD,
       (request, state, executions) => handleReleaseSession(request, state, executions),
     ],
+    [DAEMON_RELEASE_EXECUTION_METHOD, handleReleaseExecution],
     [DAEMON_LIST_DEVICE_SESSIONS_METHOD, handleListDeviceSessions],
     [DAEMON_DEVICE_LEASE_STATUS_METHOD, handleDeviceLeaseStatus],
     [DAEMON_RELINQUISH_DEVICE_LEASE_METHOD, handleRelinquishDeviceLease],
@@ -993,6 +998,28 @@ async function handleReleaseSession(
     return await releaseUnknownSession(manager, sessionId, params?.requireKnown === true);
   }
   return releaseBoundSession(state, manager, sessionId, session, executions);
+}
+
+const releaseExecutionParams = z.object({ sessionId: z.string().trim().min(1) });
+
+/**
+ * End a managed slot execution (#11177): drain its work, release its live control, keep its slot's
+ * device assignment. Idempotent: a repeated or late call reports the current settlement.
+ */
+async function handleReleaseExecution(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  const parsed = releaseExecutionParams.safeParse(request.params);
+  if (!parsed.success) {
+    return { success: false, error: "sessionId parameter required" };
+  }
+  const drain = state.getManagedExecutionRelease?.();
+  if (!drain) {
+    return { success: false, error: "Managed execution release is not available in this daemon" };
+  }
+  const result = await drain.releaseExecution(parsed.data.sessionId);
+  return { success: true, result: { ...result } };
 }
 
 /**

@@ -760,10 +760,8 @@ export class ExecutionTracker {
     });
   }
 
-  private hasActiveDeviceSessionExecutions(
-    sessionUuid: string,
-    query?: ActiveExecutionQuery,
-  ): boolean {
+  /** Explicit or implicit (autolock) work still running for a device session (#11177 drain). */
+  hasActiveDeviceSessionExecutions(sessionUuid: string, query?: ActiveExecutionQuery): boolean {
     return (
       this.hasActiveSessionUuidExecutions(sessionUuid, query) ||
       this.hasActiveAutolockSessionExecutions(sessionUuid, query)

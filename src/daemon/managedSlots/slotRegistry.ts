@@ -246,6 +246,12 @@ export interface SlotRegistry {
 
   getAssignment(key: SlotKey): Promise<SlotAssignmentRecord | null>;
   listAssignments(scopeKey: string): Promise<SlotAssignmentRecord[]>;
+  /**
+   * Every slot whose recorded execution owner is `sessionUuid`, in any scope, ordered by scope and
+   * slot index. The drain on session release (#11177) resolves its slots from this, since the
+   * releasing session — not the caller — is what identifies the execution.
+   */
+  findExecutionAssignments(sessionUuid: string): Promise<SlotAssignmentRecord[]>;
   /** Who holds a device: a slot (any scope state) or the free pool. */
   findDeviceHolder(platform: SlotPlatform, stableDeviceId: string): Promise<DeviceHolder | null>;
   /** True only when the device is bound to a slot whose scope is `valid`. */

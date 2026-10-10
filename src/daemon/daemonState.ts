@@ -1,5 +1,6 @@
 import { setDeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
+import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
 import { SessionManager } from "./sessionManager";
 import { DevicePool } from "./devicePool";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
@@ -29,6 +30,7 @@ export class DaemonState implements DaemonStateLike {
   private devicePool: DevicePool | null = null;
   private deviceSessionRegistry: DeviceSessionRegistry | null = null;
   private unregisterSessionReadinessListener: (() => void) | null = null;
+  private managedExecutionRelease: ManagedExecutionRelease | null = null;
 
   private constructor() {}
 
@@ -95,6 +97,15 @@ export class DaemonState implements DaemonStateLike {
     });
   }
 
+  /** Publish the managed-slot execution drain behind `daemon/releaseExecution` (#11177). */
+  setManagedExecutionRelease(release: ManagedExecutionRelease | null): void {
+    this.managedExecutionRelease = release;
+  }
+
+  getManagedExecutionRelease(): ManagedExecutionRelease | undefined {
+    return this.managedExecutionRelease ?? undefined;
+  }
+
   getObserverSessionRegistry(): ObserverSessionStore | undefined {
     return this.observerSessionRegistry ?? undefined;
   }
@@ -146,6 +157,7 @@ export class DaemonState implements DaemonStateLike {
   reset(): void {
     this.observerSessionRegistry?.dispose();
     this.observerSessionRegistry = null;
+    this.managedExecutionRelease = null;
     this.sessionManager = null;
     this.devicePool = null;
     setDeviceAdmissionGate(undefined);

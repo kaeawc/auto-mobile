@@ -115,27 +115,19 @@ describe("expandOverlayComponents", () => {
   });
 
   test("a component used many times stops at the node limit instead of growing", () => {
-    // Each level doubles: 2^20 nodes if expanded naively.
-    const components = Object.fromEntries(
-      Array.from({ length: 8 }, (_, index) => [
-        `l${index}`,
-        {
-          root: {
-            type: "row",
-            children:
-              index === 7
-                ? [{ type: "spacer" }]
-                : [
-                    { type: "use", component: `l${index + 1}` },
-                    { type: "use", component: `l${index + 1}` },
-                    { type: "use", component: `l${index + 1}` },
-                    { type: "use", component: `l${index + 1}` },
-                  ],
-          },
-        },
-      ]),
-    );
-    const expansion = expandOverlayComponents(spec({ type: "use", component: "l0" }, components));
+    // 50 uses of a 50-node block is 2500 nodes if expanded naively, past the 2000-node limit.
+    // Few `use` expansions with wide roots keep this inside the unit-test budget: locating the
+    // authored path of every `use` scans all earlier ones, so many tiny uses are quadratic.
+    const components = {
+      block: {
+        root: { type: "row", children: Array.from({ length: 49 }, () => ({ type: "spacer" })) },
+      },
+    };
+    const root = {
+      type: "column",
+      children: Array.from({ length: 50 }, () => ({ type: "use", component: "block" })),
+    };
+    const expansion = expandOverlayComponents(spec(root, components));
     expect(expansion.success ? undefined : expansion.error.message).toBe(
       "Expanded node limit exceeded",
     );

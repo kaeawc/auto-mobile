@@ -35,7 +35,7 @@ export interface PooledObservationDeps<TDevice extends ObservationRequestDevice>
   /** The read path for a requester that only watches a held device (#10967). */
   viewerRead?: {
     /** The device is held by a session other than the requester's; checked as its step starts. */
-    applies: (device: TDevice) => boolean;
+    applies: (device: TDevice) => boolean | Promise<boolean>;
     /**
      * The connect-only read the `observe` tool's deviceId read uses: no service rebind, CtrlProxy
      * setup or recovery on the holder's device.
@@ -63,7 +63,7 @@ export function createPooledObservationExecutor<
   deps: PooledObservationDeps<TDevice>,
 ): (device: TDevice, signal: AbortSignal) => Promise<ObserveResult> {
   return async (device, signal) => {
-    if (deps.viewerRead?.applies(device)) {
+    if (deps.viewerRead && (await deps.viewerRead.applies(device))) {
       return deps.viewerRead.observe(device, signal);
     }
     const minTimestamp =

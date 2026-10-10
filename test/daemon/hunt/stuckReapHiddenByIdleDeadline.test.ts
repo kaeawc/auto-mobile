@@ -51,6 +51,7 @@ afterEach(() => {
 async function forcedAfterStuckDeadline(
   idleWindowMs: number,
   idleBeforeOwnerLossMs: number,
+  options: { ownerKeepsHeartbeating?: boolean } = {},
 ): Promise<{ forced: string[]; reapedAt: number | undefined; heldDevice: string | null }> {
   const timer = new FakeTimer();
   timer.setCurrentTime(0);
@@ -92,6 +93,10 @@ async function forcedAfterStuckDeadline(
   const until =
     idleBeforeOwnerLossMs + NO_HEARTBEAT_RELEASE_BUDGET_MS + STUCK_REAP_WARN_MS + 2 * SCAN_MS;
   while (timer.now() < until) {
+    if (options.ownerKeepsHeartbeating) {
+      // A no-op once the session is releasing, exactly as the daemon's heartbeat handler is.
+      manager.recordHeartbeat("s");
+    }
     await timer.advanceTimeAsync(SCAN_MS, () => drainMicrotasks(20));
   }
   return { forced, reapedAt, heldDevice: manager.getSessionForDevice(DEVICE) };
@@ -119,6 +124,26 @@ describe("a stuck heartbeat release is forced whatever the session's idle deadli
       expect(result.reapedAt).toBeLessThanOrEqual(90_000 + NO_HEARTBEAT_RELEASE_BUDGET_MS);
       expect(result.forced).toEqual(["s"]);
       expect(result.heldDevice).toBeNull();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("an idle release that is stuck is forced too", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      // The owner keeps heartbeating and makes no tool call, so the idle sweep (which the monitor
+      // runs on every scan) releases the session at its 2-minute deadline. That release wedges
+      // the same way, but it is not one of the monitor's own reaps, so nothing ever forces it.
+      const result = await forcedAfterStuckDeadline(
+        DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+        DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+        { ownerKeepsHeartbeating: true },
+      );
+      expect(result.reapedAt).toBeUndefined();
+      // 44 s after the idle release started, the device is still held by the wedged release.
+      expect(result.heldDevice).toBeNull();
+      expect(result.forced).toEqual(["s"]);
     } finally {
       warn.mockRestore();
     }

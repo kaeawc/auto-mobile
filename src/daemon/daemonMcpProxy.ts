@@ -3259,6 +3259,7 @@ export class DaemonMcpProxy {
       }
       this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
       this.throwIfBoundSessionLost(error);
+      this.throwIfSessionEndedAnswer(error, attemptedSessionUuid, fenceSessionNotFoundOnRetry);
       if (!this.isRecoverableDaemonSessionError(error, established)) {
         throw error;
       }
@@ -3296,6 +3297,11 @@ export class DaemonMcpProxy {
           attemptedSessionUuid,
           fenceSessionNotFoundOnRetry,
         );
+        this.throwIfSessionEndedAnswer(
+          retryError,
+          attemptedSessionUuid,
+          fenceSessionNotFoundOnRetry,
+        );
         if (sessionNotFoundFenceTarget) {
           this.fenceBoundSessionUuid(sessionNotFoundFenceTarget, "session-not-found");
           throw this.boundSessionExpiredError();
@@ -3327,6 +3333,60 @@ export class DaemonMcpProxy {
     }
     await this.resetConnection();
     throw new DaemonToolOutcomeUnknownError(refusedToolName, retryError);
+  }
+
+  /**
+   * A not-found answer that names a release which ends the session (#11520): every reason but a
+   * recoverable handoff of a session this proxy owns, classified by {@link releaseKeepsBinding}
+   * like the release notification. The daemon answered about that session on a working
+   * connection, so nothing is stale: resetting the one shared socket would cut the connection
+   * attempt this request may be part of, and every sibling call in flight, to ask a question
+   * already answered. An answer with no reason, or with a recoverable one, says nothing final and
+   * keeps the reconnect-and-retry.
+   */
+  private sessionEndedAnswerReason(
+    error: unknown,
+    attemptedSessionUuid: string | undefined,
+  ): string | undefined {
+    if (!this.isDaemonSessionNotFoundError(error)) {
+      return undefined;
+    }
+    const releaseReason = releaseReasonFromError(error);
+    if (releaseReason === undefined) {
+      return undefined;
+    }
+    const keepsBinding =
+      attemptedSessionUuid === undefined
+        ? isRecoverableDaemonReleaseReason(releaseReason)
+        : this.releaseKeepsBinding(attemptedSessionUuid, releaseReason);
+    return keepsBinding ? undefined : releaseReason;
+  }
+
+  /**
+   * Rethrow a not-found answer that ends the session ({@link sessionEndedAnswerReason}) without
+   * touching the connection. A caller that fences on not-found gets the binding fenced under the
+   * daemon's reason and the terminal refusal; a heartbeat gets the answer itself and classifies
+   * it ({@link heartbeatSessionNotFound}).
+   */
+  private throwIfSessionEndedAnswer(
+    error: unknown,
+    attemptedSessionUuid: string | undefined,
+    fenceSessionNotFound: boolean,
+  ): void {
+    const releaseReason = this.sessionEndedAnswerReason(error, attemptedSessionUuid);
+    if (releaseReason === undefined) {
+      return;
+    }
+    const fenceTarget = this.sessionNotFoundFenceTarget(
+      error,
+      attemptedSessionUuid,
+      fenceSessionNotFound,
+    );
+    if (fenceTarget) {
+      this.fenceBoundSessionUuid(fenceTarget, releaseReason);
+      throw this.boundSessionExpiredError();
+    }
+    throw error;
   }
 
   private sessionNotFoundFenceTarget(

@@ -1,4 +1,6 @@
+import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
+import type { Socket } from "node:net";
 import { join } from "node:path";
 import { spyOn } from "bun:test";
 import { DaemonClient, daemonResponseError } from "../../src/daemon/client";
@@ -20,6 +22,11 @@ import {
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
+import { AppearanceSocketServer } from "../../src/daemon/appearanceSocketServer";
+import type { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
+import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { UnixSocketServer } from "../../src/daemon/socketServer";
+import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import type { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
@@ -44,6 +51,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -236,6 +244,20 @@ export class LivenessScenario {
       sessionId === undefined ? [] : [{ sessionId, deviceId }],
     );
   }
+  /**
+   * While true, a released session's recording stop never settles (a wedged finalize): only the
+   * finalize cap frees the device, and the recording `recording-of-<session>` is marked
+   * incomplete.
+   */
+  recordingStopHangs = false;
+  /** Recordings force-stopped at the finalize cap and marked incomplete, in order. */
+  readonly incompleteRecordings: string[] = [];
+  /**
+   * The daemon stops answering heartbeats (a wedged event loop on the wire): each frame hangs
+   * until the end of the scenario, except that the first is accepted `lateAckDelayMs` after it
+   * was sent when that is set (#10973, a late ack). Clear it to answer again.
+   */
+  daemonStall: { lateAckDelayMs?: number; lateAckTaken?: boolean } | undefined;
   /** While true, the transport silently loses every heartbeat frame (the proxy sees an ack). */
   dropHeartbeats = false;
   daemon!: DaemonSide;
@@ -245,6 +267,7 @@ export class LivenessScenario {
   private readonly terminalReleaseJournal: boolean;
   private readonly discovery = new FakeDeviceUtils();
   private tools!: RealToolCallPath;
+  private socketServer: UnixSocketServer | undefined;
   private readonly spies: Array<ReturnType<typeof spyOn>> = [];
   private readonly savedEnv = new Map<string, string | undefined>();
   private readonly gates = new Map<string, Promise<void>>();
@@ -324,8 +347,18 @@ export class LivenessScenario {
     const deps = defaultRecordingSessionCleanupDeps;
     const original = { ...deps };
     deps.hasRecordingsToStop = () => true;
+    // The finalize cap (#10957) runs on the scenario clock, so a hung stop is cut by advancing it.
+    deps.timer = this.timer;
     deps.stopSegmentedRecordings = async (sessionId, deviceId) => {
       this.recordingStops.push({ sessionId, deviceId });
+      if (this.recordingStopHangs && sessionId !== undefined) {
+        await new Promise<void>(() => {});
+      }
+    };
+    deps.activeRecordingIdsForOwner = (sessionId) =>
+      this.recordingStopHangs && sessionId !== undefined ? [`recording-of-${sessionId}`] : [];
+    deps.markVideoRecordingIncomplete = async (recordingId) => {
+      this.incompleteRecordings.push(recordingId);
     };
     deps.listActiveVideoRecordings = async () => [];
     deps.isTestRecordingOwnedBy = () => false;
@@ -446,6 +479,16 @@ export class LivenessScenario {
         }
         if (this.dropHeartbeats) {
           return;
+        }
+        if (this.daemonStall) {
+          const stall = this.daemonStall;
+          if (stall.lateAckDelayMs === undefined || stall.lateAckTaken) {
+            await new Promise<void>(() => {});
+          }
+          stall.lateAckTaken = true;
+          await new Promise<void>((resolve) =>
+            this.timer.setTimeout(resolve, stall.lateAckDelayMs),
+          );
         }
         const response = await this.daemonMethod(method, params);
         if (typeof params.livenessOwnerToken === "string") {
@@ -614,6 +657,125 @@ export class LivenessScenario {
     connection = SOCKET_CLIENT_CONNECTION,
   ): Promise<unknown> {
     return await this.runDeviceTool(tool, args, connection);
+  }
+
+  /**
+   * One frame over a socket connection to the scenario's real daemon state (the desktop/IDE path:
+   * `ide/*`, `input/*`, `appearance/*`), answered by the real {@link UnixSocketServer} handlers.
+   * The server is in-process: frames are handed to its connection handler without a real socket.
+   */
+  async socketFrame(
+    method: string,
+    params: Record<string, unknown>,
+    type: DaemonRequest["type"] = "mcp_request",
+  ): Promise<DaemonResponse> {
+    if (!this.socketServer) {
+      this.socketServer = new UnixSocketServer(
+        "unused",
+        "http://localhost:0/mcp",
+        this.daemon.state as never,
+        this.timer,
+        null,
+        {
+          sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} },
+        },
+      );
+      Reflect.set(this.socketServer, "acceptingRequests", true);
+    }
+    const server = this.socketServer as unknown as {
+      handleConnection(socket: Socket): void;
+      activeRequestHandlers: Set<Promise<void>>;
+    };
+    const responses: DaemonResponse[] = [];
+    const socket = Object.assign(new EventEmitter(), {
+      destroyed: false,
+      writableLength: 0,
+      setTimeout: () => socket,
+      write(data: string, callback?: (error?: Error | null) => void): boolean {
+        responses.push(JSON.parse(data) as DaemonResponse);
+        callback?.();
+        return true;
+      },
+      end: () => socket.destroy(),
+      destroy: () => {
+        if (!socket.destroyed) {
+          socket.destroyed = true;
+          socket.emit("close", false);
+        }
+        return socket;
+      },
+    });
+    server.handleConnection(socket as unknown as Socket);
+    socket.emit("data", Buffer.from(`${JSON.stringify({ id: "frame", type, method, params })}\n`));
+    for (let turn = 0; turn < 4; turn++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    await Promise.all([...server.activeRequestHandlers]);
+    socket.destroy();
+    const response = responses.find((frame) => frame.id === "frame");
+    if (!response) {
+      throw new Error(`socketFrame ${method}: no response`);
+    }
+    return response;
+  }
+
+  /**
+   * `set_appearance` on the appearance socket as `sessionUuid` (none: a caller with no session),
+   * answered by the real {@link AppearanceSocketServer} over this daemon's session ownership.
+   * Resolves with the response and the devices the mode was applied to.
+   */
+  async appearanceSet(
+    sessionUuid: string | undefined,
+    mode: "light" | "dark",
+  ): Promise<{ response: AppearanceSocketResponse; applied: string[] }> {
+    const applied: string[] = [];
+    let config = { syncWithHost: false, defaultMode: "light", applyOnConnect: true };
+    const manager = this.daemon.manager;
+    const server = new AppearanceSocketServer(
+      "unused",
+      this.timer,
+      new SessionScopedStreamAuthenticator(() => manager, "appearance"),
+      {
+        getPooledDevices: () => this.deviceIds.map((id) => this.device(id) as never),
+        getCurrentDevice: () => undefined,
+        getSessionForDevice: (deviceId) => manager.getSessionForDevice(deviceId) ?? null,
+      },
+      {
+        getConfig: async () => config as never,
+        updateConfig: async (update) => {
+          config = { ...config, ...update } as typeof config;
+          return config as never;
+        },
+        resolveMode: async () => "light",
+        applyToDevice: async (device, appliedMode) => {
+          applied.push(`${device.deviceId}:${appliedMode}`);
+        },
+        triggerSync: async () => {},
+        isSyncEnabled: () => false,
+      },
+    );
+    const socket = new FakeSocket();
+    const internals = server as unknown as {
+      processLine(socket: unknown, line: string): Promise<void>;
+      pendingBySocket: Map<unknown, Promise<void>>;
+    };
+    await internals.processLine(
+      socket,
+      JSON.stringify({
+        id: "appearance",
+        command: "set_appearance",
+        sessionUuid,
+        params: { mode },
+      }),
+    );
+    await internals.pendingBySocket.get(socket);
+    const response = socket.getWrittenMessages<AppearanceSocketResponse>()[0]!;
+    return { response, applied };
+  }
+
+  /** Writes the device's CtrlProxy received from a socket `ide/*` frame. */
+  get ctrlProxyWrites(): readonly string[] {
+    return this.tools.ctrlProxyWrites;
   }
 
   /** The stdio proxy's own daemon connection, for calls that bypass the proxy's argument rewrite. */

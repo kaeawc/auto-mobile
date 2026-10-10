@@ -50,6 +50,8 @@ export interface ManagedSlotsFailure {
   retryable: boolean;
   message: string;
   nextAction: string;
+  /** Boot-capacity details of a `capacity_exhausted` slot failure (#11390). */
+  capacity?: { limit: number; booted: number; retryAfterMs: number; externalDevices?: string[] };
 }
 
 export interface ManagedSlotDeviceEvidence {

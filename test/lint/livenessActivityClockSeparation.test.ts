@@ -268,6 +268,12 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "Stall compensation (shift by the lost interval), listed in KNOWN_LIVENESS_WRITES " +
       "(#10662, #10835).",
   },
+  "src/daemon/sessionManager.ts SessionManager.startRehydratedOwnerWindows": {
+    writes: 2,
+    reason:
+      "Startup (#11388): a rehydrated session's idle window starts when the daemon can hear " +
+      "owners, like its owner window; both stamps were set at rehydration time.",
+  },
 
   // --- Proxy replay lease (DaemonMcpProxy) ---------------------------------
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.bindStartupSession": {

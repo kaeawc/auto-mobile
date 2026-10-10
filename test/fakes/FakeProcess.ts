@@ -9,6 +9,7 @@ export class FakeProcess implements ProcessLifecycleProcess {
   readonly listeners: ListenerMap = {
     SIGINT: [],
     SIGTERM: [],
+    SIGHUP: [],
     uncaughtException: [],
     unhandledRejection: [],
   };

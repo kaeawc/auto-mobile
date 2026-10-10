@@ -276,7 +276,9 @@ import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService"
 import { serverConfig } from "../utils/ServerConfig";
 import { setDebugPerfEnabled } from "../utils/PerformanceTracker";
 import {
+  installHangupShutdownHandler,
   installProcessLifecycleHandlers,
+  PROCESS_SHUTDOWN_TIMEOUT_MS,
   setFatalProcessHandler,
   setProcessShutdownHandler,
 } from "../processLifecycle";
@@ -306,6 +308,12 @@ import {
 const HTTP_BODY_TIMEOUT_MS = 60_000;
 const HTTP_BODY_MAX_BYTES = 256 * 1024 * 1024;
 const HTTP_SESSION_IDLE_TIMEOUT_MS = 30 * 60_000;
+// The HTTP listener binds before device discovery (<=5 s) and session rehydration
+// (<=15 s). A direct HTTP MCP request waits this long for startup to finish so it
+// cannot take a device whose persisted session is about to be rehydrated (#11156);
+// past it the client gets 503 with Retry-After instead of an unbounded hang.
+const HTTP_STARTUP_ADMISSION_TIMEOUT_MS = 30_000;
+const HTTP_STARTUP_RETRY_AFTER_SECONDS = 1;
 
 type HttpBodyResult = { ok: true; body: string } | { ok: false; status: number; error: string };
 
@@ -523,6 +531,8 @@ export class Daemon {
   /** HTTP requests ever received. */
   private httpRequestsSeen = 0;
   private acceptingHttpSessions = false;
+  /** Set once start() finished, so admitted HTTP requests skip the startup wait. */
+  private startupCompleted = false;
   private port: number;
   private host: string;
   private readonly strictPort: boolean;
@@ -635,9 +645,14 @@ export class Daemon {
       this.rejectStartupCompletion = reject;
     });
     // Startup can fail before the socket server exists or any request awaits it.
-    void this.startupCompletion.catch((error: unknown) => {
-      logger.debug(`Daemon startup completion rejected: ${errorMessage(error)}`);
-    });
+    void this.startupCompletion.then(
+      () => {
+        this.startupCompleted = true;
+      },
+      (error: unknown) => {
+        logger.debug(`Daemon startup completion rejected: ${errorMessage(error)}`);
+      },
+    );
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
     // Prefer IPv4 loopback: Bun's fetch and Node's listen can disagree on "localhost" (::1 vs 127.0.0.1),
@@ -1079,6 +1094,45 @@ export class Daemon {
   }
 
   private async startUntilReady(): Promise<void> {
+    await this.startThroughSocketBind();
+    try {
+      await this.startAfterSocketBind();
+    } catch (error) {
+      // Past the bind this process owns rehydrated sessions, forward leases and
+      // children; exiting straight from main().catch would skip their release and
+      // the daemon-shutdown broadcast (#11156). Tear down (bounded) first.
+      logger.error(`Daemon startup failed after the socket bind; stopping: ${errorMessage(error)}`);
+      await this.stopAfterFailedStartup();
+      throw error;
+    }
+  }
+
+  private async stopAfterFailedStartup(): Promise<void> {
+    if (this.shutdownInProgress) {
+      // A signal-driven stop already owns teardown.
+      return;
+    }
+    const timedOut = Symbol("post-bind startup failure stop timeout");
+    try {
+      await raceWithDeadline(() => this.stop(), {
+        timer: this.timer,
+        timeoutMs: PROCESS_SHUTDOWN_TIMEOUT_MS,
+        label: "Post-bind startup failure stop",
+        timeoutError: () => timedOut,
+      });
+    } catch (stopError) {
+      // The startup failure is the actionable error the caller rethrows; a stop
+      // failure or overrun here is diagnostic only.
+      logger.warn(
+        stopError === timedOut
+          ? `Stopping after a failed startup exceeded ${PROCESS_SHUTDOWN_TIMEOUT_MS}ms`
+          : `Stopping after a failed startup failed: ${errorMessage(stopError)}`,
+        stopError,
+      );
+    }
+  }
+
+  private async startThroughSocketBind(): Promise<void> {
     // Mirror structured daemon logs to stdout/stderr capture as well. The
     // primary stable log is `<configured log dir>/daemon.log` (defaulting to
     // `<auto-mobile data dir>/logs/daemon.log`); the daemon manager also
@@ -1232,20 +1286,14 @@ export class Daemon {
       // interval above (issue #6232). Guarded on the committed flag so a throw
       // after the bind is committed never rewrites the file this process now owns.
       if (!this.socketBindCommitted) {
-        try {
-          this.incumbentOwnerGuard.restoreIncumbentAfterRefusal();
-        } catch (restoreError) {
-          // Repairing a displaced PID record is best effort. The startup
-          // failure remains the actionable diagnostic for the operator.
-          logger.warn(
-            `Failed to restore the incumbent daemon owner record after a refused start: ${restoreError}`,
-          );
-        }
+        this.restoreIncumbentOwnerRecord();
       }
       throw error;
     }
     logger.info("Unix socket server started");
+  }
 
+  private async startAfterSocketBind(): Promise<void> {
     startupBenchmark.startPhase("auxiliarySocketServerStart");
     await this.startAuxiliarySocket("video-recording", startVideoRecordingSocketServer);
     await this.startAuxiliarySocket("test-recording", startTestRecordingSocketServer);
@@ -1576,14 +1624,55 @@ export class Daemon {
     return sessionContext;
   }
 
+  /**
+   * Refuse a direct HTTP MCP request during shutdown, and hold it until startup
+   * (device discovery and session rehydration) completes, as the Unix socket
+   * path already does (#11156). Returns false after answering 503 when shutting
+   * down, or when startup is still running past the admission bound or failed.
+   */
+  private async admitHttpMcpRequest(res: ServerResponse): Promise<boolean> {
+    if (!this.acceptingHttpSessions) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Daemon is shutting down" }));
+      return false;
+    }
+    if (this.startupCompleted) {
+      return true;
+    }
+    const timedOut = Symbol("HTTP startup admission timeout");
+    try {
+      await raceWithDeadline(this.startupCompletion, {
+        timer: this.timer,
+        timeoutMs: HTTP_STARTUP_ADMISSION_TIMEOUT_MS,
+        label: "HTTP MCP startup admission",
+        timeoutError: () => timedOut,
+      });
+      return true;
+    } catch (error) {
+      if (error === timedOut) {
+        logger.warn(
+          `HTTP MCP request refused: daemon still starting after ${HTTP_STARTUP_ADMISSION_TIMEOUT_MS}ms`,
+        );
+        res.writeHead(503, {
+          "Content-Type": "application/json",
+          "Retry-After": String(HTTP_STARTUP_RETRY_AFTER_SECONDS),
+        });
+        res.end(JSON.stringify({ error: "Daemon is still starting" }));
+        return false;
+      }
+      logger.warn(`HTTP MCP request refused: daemon startup failed: ${errorMessage(error)}`);
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Daemon startup failed" }));
+      return false;
+    }
+  }
+
   private async handleMcpHttpRequest(
     req: IncomingMessage,
     res: ServerResponse,
     allowedHosts: string[],
   ): Promise<void> {
-    if (!this.acceptingHttpSessions) {
-      res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Daemon is shutting down" }));
+    if (!(await this.admitHttpMcpRequest(res))) {
       return;
     }
 
@@ -4245,6 +4334,8 @@ export class Daemon {
     }
     this.shutdownHandlersRegistered = true;
     installProcessLifecycleHandlers();
+    // A terminal-attached daemon must clean up on hangup like on SIGTERM (#11156).
+    installHangupShutdownHandler();
 
     const shutdown = async (signal: string) => {
       if (this.shutdownInProgress) {
@@ -4366,6 +4457,22 @@ export class Daemon {
         },
         { name: "active device sessions", run: () => this.releaseActiveSessionsForShutdown() },
         {
+          // Session release broadcasts must be written while subscribed proxy
+          // sockets are still connected; closing first degrades the exact
+          // daemon-shutdown reason into session-not-found after reconnect.
+          // Runs right after session release, before the device-cleanup and
+          // forward-release drains, so a wedged stage behind it cannot push the
+          // daemon-shutdown notification past the 9 s process limit (#11156).
+          name: "Unix socket server",
+          run: async () => {
+            if (this.socketServer) {
+              this.publishMissingShutdownReleaseNotifications();
+              await this.socketServer.drainSessionReleaseNotifications();
+              await this.socketServer.close();
+            }
+          },
+        },
+        {
           name: "pending device cleanups",
           run: async () => {
             await this.sessionManager.drainPendingDeviceCleanups(
@@ -4377,19 +4484,6 @@ export class Daemon {
         {
           name: "device allocation claims",
           run: () => this.devicePool.releaseDeviceClaimsForShutdown(),
-        },
-        {
-          // Session release broadcasts must be written while subscribed proxy
-          // sockets are still connected; closing first degrades the exact
-          // daemon-shutdown reason into session-not-found after reconnect.
-          name: "Unix socket server",
-          run: async () => {
-            if (this.socketServer) {
-              this.publishMissingShutdownReleaseNotifications();
-              await this.socketServer.drainSessionReleaseNotifications();
-              await this.socketServer.close();
-            }
-          },
         },
         { name: "managed ADB server", run: this.stopManagedAdbServer },
         {
@@ -4427,10 +4521,33 @@ export class Daemon {
         // this one is still alive and still writing, and unlinks a launch log out
         // from under it (issue #6194). The unconditional `process.once("exit", ...)`
         // cleanup remains as a safety net for shutdown paths that never reach here.
-        { name: "daemon files", run: () => cleanupDaemonFiles(this.getDaemonFileCleanupOptions()) },
+        { name: "daemon files", run: () => this.cleanupDaemonFilesForShutdown() },
       ],
       (message, error) => logger.warn(message, error),
     );
+  }
+
+  private async cleanupDaemonFilesForShutdown(): Promise<void> {
+    // A signal during a contended start stops us before the socket bind: exit
+    // cleanup is suppressed then, so put the live incumbent's record back here or
+    // the PID file keeps naming this exiting contender (#11156).
+    if (!this.socketBindCommitted) {
+      this.restoreIncumbentOwnerRecord();
+    }
+    await cleanupDaemonFiles(this.getDaemonFileCleanupOptions());
+  }
+
+  /** Put a displaced live incumbent's PID record back after this contender gave up (#6232). */
+  private restoreIncumbentOwnerRecord(): void {
+    try {
+      this.incumbentOwnerGuard.restoreIncumbentAfterRefusal();
+    } catch (restoreError) {
+      // Repairing a displaced PID record is best effort. The startup failure or
+      // shutdown remains the actionable diagnostic for the operator.
+      logger.warn(
+        `Failed to restore the incumbent daemon owner record after a refused start: ${restoreError}`,
+      );
+    }
   }
 
   private unsubscribeAdbMissing(): void {

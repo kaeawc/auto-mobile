@@ -59,6 +59,35 @@ describe("process lifecycle handlers", () => {
     expect(fakeProcess.listenerCount("unhandledRejection")).toBe(1);
   });
 
+  test("leaves SIGHUP to the default disposition unless hangup shutdown is installed", () => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess);
+
+    lifecycle.install();
+
+    expect(fakeProcess.listenerCount("SIGHUP")).toBe(0);
+  });
+
+  test("runs the shutdown handler on SIGHUP once hangup shutdown is installed (#11156)", async () => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess);
+    const signals: string[] = [];
+
+    lifecycle.install();
+    lifecycle.installHangupShutdownHandler();
+    lifecycle.installHangupShutdownHandler();
+    lifecycle.setShutdownHandler(async (signal) => {
+      signals.push(signal);
+    });
+    expect(fakeProcess.listenerCount("SIGHUP")).toBe(1);
+
+    fakeProcess.emit("SIGHUP");
+    await flushUntilExit(fakeProcess);
+
+    expect(signals).toEqual(["SIGHUP"]);
+    expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
   test("exits cleanly when a startup signal arrives before cleanup is bound", async () => {
     const fakeProcess = new FakeProcess();
     const lifecycle = new ProcessLifecycleHandlers(fakeProcess);

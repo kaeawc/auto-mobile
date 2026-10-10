@@ -554,6 +554,9 @@ export class DaemonCommandRefusal extends ActionableError {
   readonly retryable?: boolean;
   readonly retryAfterMs?: number;
   readonly releaseReason?: string;
+  /** True when the daemon released the session at its idle window (#10832). */
+  readonly idle?: true;
+  readonly details?: Record<string, unknown>;
   readonly detail: string;
 
   constructor(context: string, error: unknown) {
@@ -566,12 +569,16 @@ export class DaemonCommandRefusal extends ActionableError {
     const retryable = field("retryable");
     const retryAfterMs = field("retryAfterMs");
     const releaseReason = releaseReasonFromError(error);
+    const idle = field("idle") === true;
+    const details = field("details");
     const detail = errorMessage(error);
+    const releaseLabel = [releaseReason, idle ? "idle" : undefined].filter(Boolean).join(", ");
+    const releaseSuffix = releaseLabel ? ` (released: ${releaseLabel})` : "";
     const typedCode =
       typeof code === "string" || typeof code === "number" ? String(code) : undefined;
     const typedNextAction = typeof nextAction === "string" ? nextAction : undefined;
     super(
-      `${context}: ${detail}${releaseReason ? ` (released: ${releaseReason})` : ""}` +
+      `${context}: ${detail}${releaseSuffix}` +
         `${typedCode ? ` [${typedCode}]` : ""}${typedNextAction ? ` Next: ${typedNextAction}` : ""}`,
       { cause: error },
     );
@@ -581,6 +588,11 @@ export class DaemonCommandRefusal extends ActionableError {
     this.retryable = typeof retryable === "boolean" ? retryable : undefined;
     this.retryAfterMs = typeof retryAfterMs === "number" ? retryAfterMs : undefined;
     this.releaseReason = releaseReason;
+    this.idle = idle ? true : undefined;
+    this.details =
+      details !== null && typeof details === "object" && !Array.isArray(details)
+        ? (details as Record<string, unknown>)
+        : undefined;
   }
 }
 
@@ -595,6 +607,8 @@ function daemonQueryFailureJson(error: unknown): Record<string, unknown> {
     retryable: error.retryable,
     retryAfterMs: error.retryAfterMs,
     releaseReason: error.releaseReason,
+    idle: error.idle,
+    details: error.details,
   };
   return {
     ok: false,

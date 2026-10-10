@@ -65,8 +65,6 @@ import {
 } from "./managedSlots/managedExecutionRelease";
 import { currentSlotOwnerProcess } from "./managedSlots/slotOwnerLiveness";
 import { openSqliteSlotRegistry, slotRegistryFileExists } from "./managedSlots/sqliteSlotRegistry";
-import type { SlotJournalOwner, SlotRegistry } from "./managedSlots/slotRegistry";
-import { SlotJournalInFlight } from "./managedSlots/slotJournal";
 import { SlotScopeReset } from "./managedSlots/slotScopeReset";
 import {
   createDefaultAbandonedScopeReclaimer,
@@ -77,6 +75,12 @@ import type {
   AbandonedScopeReclaimJournal,
   AbandonedScopeReclaimRegistry,
 } from "./managedSlots/abandonedScopeReclaimer";
+import {
+  createDaemonManagedSlotAcquisition,
+  type DaemonManagedSlotAcquisitionHandle,
+} from "./managedSlots/daemonManagedSlotAcquisition";
+import type { SlotJournalOwner, SlotRegistry } from "./managedSlots/slotRegistry";
+import { SlotJournalInFlight, type SlotJournalRedriveLoop } from "./managedSlots/slotJournal";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import {
   DEFAULT_DAEMON_PORT,
@@ -620,6 +624,8 @@ export class Daemon {
   /** Journal entries this daemon is driving; shared by the drain and the slot reconciler. */
   private readonly managedSlotJournalInFlight = new SlotJournalInFlight();
   private managedSlotReclaimer: ManagedSlotReclaimerHandle | undefined;
+  private managedSlotAcquisition: DaemonManagedSlotAcquisitionHandle | undefined;
+  private managedSlotRedrive: SlotJournalRedriveLoop | undefined;
   private readonly generationStartedAt: number;
   private readonly processStartedAt: number;
   private readonly processGenerationToken: string | undefined;
@@ -805,6 +811,7 @@ export class Daemon {
       this.observerSessionRegistry,
     );
     this.installManagedExecutionRelease();
+    this.installManagedSlotAcquisition();
 
     this.applyRuntimeOptions(options);
     this.applyAccessibilityOptions(options);
@@ -847,10 +854,24 @@ export class Daemon {
     this.managedSlotReclaimer ??= this.managedSlotReclaimerFactory({
       registry: () => this.openManagedSlotRegistry(),
       registryExists: () => this.managedSlotRegistryExists(),
-      journal: this.managedSlotJournalFactory,
+      journal: this.managedSlotJournalFactory ?? this.defaultManagedSlotJournalFactory(),
       timer: this.timer,
     });
     this.managedSlotReclaimer?.start();
+  }
+
+  /**
+   * The journal the abandoned-scope sweep deletes through when none was injected: the acquisition
+   * reconciler's own journal (#11173), with this daemon's journal owner, the in-flight set shared
+   * with the drain, real inventory/claims and the verified delete workflow.
+   */
+  private defaultManagedSlotJournalFactory():
+    | ((registry: AbandonedScopeReclaimRegistry) => AbandonedScopeReclaimJournal)
+    | undefined {
+    const acquisition = this.managedSlotAcquisition;
+    // The sweep hands back the registry this daemon opened (`openManagedSlotRegistry`), so the
+    // narrowed view is the full registry the journal needs.
+    return acquisition ? (registry) => acquisition.journalFor(registry as SlotRegistry) : undefined;
   }
 
   /** A host that never served a managed slot has no registry; maintenance must not create one. */
@@ -867,6 +888,55 @@ export class Daemon {
       daemonId: this.daemonSessionId,
       ...currentSlotOwnerProcess(() => this.processGenerationToken),
     };
+  }
+
+  /**
+   * Wire `daemon/acquireManagedSlots` (#11173): a managed slot proxy's acquisition before it serves
+   * `initialize`. Shares the drain's lazily opened registry; the slot sessions are released through
+   * the same session-and-device path the drain uses.
+   */
+  private installManagedSlotAcquisition(): void {
+    const sessions = managedExecutionSessionsFrom(this.sessionManager, {
+      releaseDevice: (deviceId, sessionId) => this.devicePool.releaseDevice(deviceId, sessionId),
+    });
+    const acquisition = createDaemonManagedSlotAcquisition({
+      registry: () => this.openManagedSlotRegistry(),
+      sessions: {
+        claimLivenessOwnership: (sessionId, ownerToken) =>
+          this.sessionManager.claimLivenessOwnership(sessionId, ownerToken),
+        adoptManagedExecutionLivenessPolicy: (sessionId, options) =>
+          this.sessionManager.adoptManagedExecutionLivenessPolicy(sessionId, options),
+        releaseSession: async (sessionId) => {
+          await sessions.releaseSession(sessionId);
+        },
+      },
+      pool: this.devicePool,
+      owner: () => this.managedSlotJournalOwner(),
+      timer: this.timer,
+      journal: {
+        owner: this.managedSlotJournalOwner(),
+        inFlight: this.managedSlotJournalInFlight,
+      },
+    });
+    this.managedSlotAcquisition = acquisition;
+    DaemonState.getInstance().setManagedSlotAcquisition(acquisition.acquisition);
+    // Interrupted journaled work (#11179) is redriven in the background, but only on a host that
+    // has a slot registry: a daemon that never served a managed slot never creates one.
+    if (process.env.NODE_ENV !== "test" && slotRegistryFileExists()) {
+      void this.openManagedSlotRegistry().then(
+        (registry) => {
+          if (this.managedSlotAcquisition === acquisition && !this.managedSlotRedrive) {
+            this.managedSlotRedrive = acquisition.startJournalRedrive(registry);
+          }
+        },
+        (error: unknown) => {
+          logger.warn(
+            `[Daemon] Managed slot journal redrive not started: ${errorMessage(error)}`,
+            error,
+          );
+        },
+      );
+    }
   }
 
   private openManagedSlotRegistry(): Promise<SlotRegistry> {
@@ -898,6 +968,11 @@ export class Daemon {
     this.managedExecutionRelease?.close();
     this.managedSlotReclaimer?.stop();
     this.managedSlotReclaimer = undefined;
+    // Signalled, not awaited: the loop may be in its inter-pass sleep, and shutdown must not wait
+    // it out. A pass still running when the registry closes fails, logs, and the loop exits.
+    void this.managedSlotRedrive?.stop();
+    this.managedSlotRedrive = undefined;
+    this.managedSlotAcquisition = undefined;
     const registry = this.managedSlotRegistry;
     this.managedSlotRegistry = undefined;
     try {

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
@@ -5,7 +6,7 @@ import {
   DeviceAssignedToManagedSlotError,
   ManagedSlotDiscoveryIncompleteError,
 } from "./managedSlotRefusal";
-import type { ManagedDeviceEntry, SlotPlatform, SlotRegistry } from "./slotRegistry";
+import type { ManagedDeviceEntry, SlotKey, SlotPlatform, SlotRegistry } from "./slotRegistry";
 import { openSqliteSlotRegistry, slotRegistryFileExists } from "./sqliteSlotRegistry";
 
 /**
@@ -39,6 +40,41 @@ export interface ManagedSlotExclusion {
 }
 
 /**
+ * The slot whose reconciler is running in the current async context (#11173). Set only by the
+ * daemon's managed slot acquisition, never from tool arguments, so no MCP caller can enter it.
+ */
+const reconcilingSlot = new AsyncLocalStorage<SlotKey>();
+
+/**
+ * Run the reconciler of one slot. Inside it, the generic-exclusion guard lets the provision and
+ * delete paths act on THAT slot's device (and on the managed free pool, which only managed slots
+ * may adopt): the reconciler holds no execution session yet, so the session check alone would
+ * refuse it. Every other slot's device stays refused.
+ */
+export function runAsManagedSlotReconciler<T>(
+  key: SlotKey,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return reconcilingSlot.run({ scopeKey: key.scopeKey, slotIndex: key.slotIndex }, operation);
+}
+
+/** The slot being reconciled in this async context, if any. */
+export function currentManagedSlotReconciler(): SlotKey | undefined {
+  return reconcilingSlot.getStore();
+}
+
+function reconcilerMayAct(entry: ManagedDeviceEntry): boolean {
+  const slot = reconcilingSlot.getStore();
+  if (!slot) {
+    return false;
+  }
+  return (
+    entry.holder === "free" ||
+    (entry.scopeKey === slot.scopeKey && entry.slotIndex === slot.slotIndex)
+  );
+}
+
+/**
  * The refusal for a caller that is not the slot's own live execution, or undefined when it may
  * proceed. Only the session recorded as the slot's execution owner may control its device; no
  * force flag or idle state overrides that.
@@ -62,6 +98,9 @@ export function managedSlotRefusal(
     entry.execSessionUuid !== null &&
     input.requesterSessionUuid === entry.execSessionUuid
   ) {
+    return undefined;
+  }
+  if (reconcilerMayAct(entry)) {
     return undefined;
   }
   return new DeviceAssignedToManagedSlotError(input.action, input.deviceId, entry);

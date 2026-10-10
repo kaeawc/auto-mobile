@@ -24,11 +24,12 @@ export const MANAGED_SLOT_SUPPORTED_CONTRACT_VERSIONS: readonly number[] = [1];
 export const MANAGED_SLOTS_V1_CAPABILITY = "managed-slots/v1";
 
 /**
- * True once the proxy consumes a parsed managed slot config (acquisition wiring, #11173). While
- * false the daemon must not advertise {@link MANAGED_SLOTS_V1_CAPABILITY} and the proxy refuses a
- * supplied config, so a launcher never gets a silently unmanaged proxy.
+ * True once the proxy consumes a parsed managed slot config (acquisition wiring, #11173 part b):
+ * the daemon advertises {@link MANAGED_SLOTS_V1_CAPABILITY} and serves `daemon/acquireManagedSlots`,
+ * and the proxy acquires before serving `initialize`. A build where it is false refuses a supplied
+ * config, so a launcher never gets a silently unmanaged proxy.
  */
-export const MANAGED_SLOTS_PROXY_WIRED = false;
+export const MANAGED_SLOTS_PROXY_WIRED: boolean = true;
 
 /** Key under `InitializeResult.capabilities.experimental` that carries the contract. */
 export const MANAGED_SLOTS_EXPERIMENTAL_CAPABILITY = "automobile/managedSlots";

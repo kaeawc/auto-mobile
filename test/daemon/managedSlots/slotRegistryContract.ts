@@ -206,6 +206,43 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(result.kind).toBe("committed");
     });
 
+    test("a slot moves to another platform only through an empty binding (#11232)", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "Pixel_8");
+      await expect(
+        registry.commitBinding(
+          key,
+          { generation: 1, stableDeviceId: "Pixel_8" },
+          { ...readyBinding("UDID-1", 2), platform: "ios" },
+        ),
+      ).rejects.toThrow(/only with an empty binding/);
+
+      const emptied = await registry.commitBinding(
+        key,
+        { generation: 1, stableDeviceId: "Pixel_8" },
+        {
+          platform: "ios",
+          stableDeviceId: null,
+          deviceName: null,
+          resolvedSpec: null,
+          specFingerprint: null,
+          state: "provisioning",
+        },
+      );
+      expect(emptied).toMatchObject({
+        kind: "committed",
+        assignment: { platform: "ios", generation: 2, stableDeviceId: null },
+      });
+      const bound = await registry.commitBinding(
+        key,
+        { generation: 2, stableDeviceId: null },
+        readyBinding("UDID-1", 3),
+      );
+      expect(bound).toMatchObject({ kind: "committed", assignment: { platform: "ios" } });
+      expect(await registry.findDeviceHolder("ios", "UDID-1")).toMatchObject({ kind: "slot" });
+      expect(await registry.findDeviceHolder("android", "Pixel_8")).toBeNull();
+    });
+
     test("updateSlotState CASes on the binding; a non-fencing change keeps the generation", async () => {
       const key = { scopeKey: await readyScope(), slotIndex: 0 };
       await boundSlot(key, "avd-1");

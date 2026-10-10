@@ -1,6 +1,7 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
+  CallToolRequestSchema,
   ListToolsRequestSchema,
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
@@ -44,6 +45,8 @@ import { ToolRegistry } from "./toolRegistry";
 import { installToolCallDispatcher } from "./toolCallDispatch";
 import { shapeToolCallError } from "./shapeToolCallError";
 import { livenessHandoverPayload, type LivenessHandover } from "../daemon/proxyLivenessRecovery";
+import { MANAGED_SLOTS_EXPERIMENTAL_CAPABILITY } from "../models/managedSlotConfig";
+import { MANAGED_SLOTS_RESOURCE_URI, type ManagedSlotsResult } from "../models/managedSlotsResult";
 
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
 const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
@@ -67,6 +70,14 @@ function acceptanceDiscoveryConfiguration():
 export interface ProxyMcpServerOptions {
   /** Configuration for the daemon proxy */
   proxyConfig?: DaemonMcpProxyConfig;
+  /** An already-created proxy (managed slots acquire on it before the server exists). */
+  proxy?: DaemonMcpProxy;
+  /**
+   * The managed slot acquisition result (#11173): advertised in
+   * `capabilities.experimental["automobile/managedSlots"]` and as `automobile:managed-slots`. A
+   * failed one advertises no tools and refuses every tool call.
+   */
+  managedSlots?: ManagedSlotsResult;
   /** Session context for tracking */
   sessionContext?: { sessionId?: string };
 }
@@ -343,7 +354,67 @@ function resolveCallToolErrorResult(
   return shapeToolCallError(error, { toolName: name, source: "ProxyServer" });
 }
 
-function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy): void {
+/** `capabilities.experimental["automobile/managedSlots"]`: the acquisition result (#11173). */
+function managedSlotsCapability(managedSlots: ManagedSlotsResult | undefined) {
+  return managedSlots
+    ? { experimental: { [MANAGED_SLOTS_EXPERIMENTAL_CAPABILITY]: { ...managedSlots } } }
+    : {};
+}
+
+/** The proxy-local `automobile:managed-slots` resource entry (#11173). */
+const MANAGED_SLOTS_RESOURCE = {
+  uri: MANAGED_SLOTS_RESOURCE_URI,
+  name: "Managed device slots",
+  description:
+    "This execution's managed slot acquisition: scope, outcome, and per slot the device, fresh session, requested/resolved spec, disposition, readiness and lifecycle evidence, or the typed failure.",
+  mimeType: "application/json",
+};
+
+function managedSlotsResourceContents(result: ManagedSlotsResult) {
+  return {
+    contents: [
+      {
+        uri: MANAGED_SLOTS_RESOURCE_URI,
+        mimeType: "application/json",
+        text: JSON.stringify(result, null, 2),
+      },
+    ],
+  };
+}
+
+/**
+ * A failed managed slot acquisition serves MCP with no tools (owner decision Q5): every tool call
+ * is refused with the acquisition's typed failure, which also rides in `initialize` and the
+ * `automobile:managed-slots` resource.
+ */
+function managedSlotsFailedToolResult(result: ManagedSlotsResult, name: string) {
+  const failure = result.failure ?? result.slots.find((slot) => slot.failure)?.failure;
+  const payload = {
+    success: false,
+    error: {
+      code: "managed_slot_acquisition_failed",
+      message: `Tool ${name} is unavailable: this execution's managed slot acquisition failed${
+        failure ? ` (${failure.code}: ${failure.message})` : ""
+      }. Read ${MANAGED_SLOTS_RESOURCE_URI} for the evidence.`,
+      acquisitionFailure: failure ?? null,
+    },
+  };
+  return { isError: true, content: [{ type: "text" as const, text: JSON.stringify(payload) }] };
+}
+
+/** Replace the tool handlers of a proxy whose managed slot acquisition failed: no tools. */
+function refuseToolsAfterFailedAcquisition(server: McpServer, result: ManagedSlotsResult): void {
+  server.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
+  server.server.setRequestHandler(CallToolRequestSchema, async (request) =>
+    managedSlotsFailedToolResult(result, request.params.name),
+  );
+}
+
+function registerProxyResourceHandlers(
+  server: McpServer,
+  proxy: DaemonMcpProxy,
+  managedSlots: ManagedSlotsResult | undefined,
+): void {
   // Register resources/list handler. Serves a cold (empty/cached) roster without
   // connecting when no connection exists yet, deferring the daemon connect to the
   // first tool call (issue #5879) so a host that enumerates resources on init
@@ -351,7 +422,7 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
   server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
     try {
       const resources = await proxy.listAdvertisedResources();
-      return { resources };
+      return { resources: managedSlots ? [MANAGED_SLOTS_RESOURCE, ...resources] : resources };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
         throw sessionOwnershipLostError(error);
@@ -401,6 +472,9 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
     if (!uri) {
       throw new ActionableError("Resource URI is missing in the request");
     }
+    if (managedSlots && uri === MANAGED_SLOTS_RESOURCE_URI) {
+      return managedSlotsResourceContents(managedSlots);
+    }
 
     logger.info(`[ProxyServer] Forwarding resource read: ${uri}`);
 
@@ -446,15 +520,22 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
  * - Device state is managed centrally by daemon
  * - Less process churn (daemon stays running)
  */
+/** The daemon proxy {@link createProxyMcpServer} serves through. */
+export function createDaemonMcpProxy(proxyConfig?: DaemonMcpProxyConfig): DaemonMcpProxy {
+  const acceptanceDiscovery = acceptanceDiscoveryConfiguration();
+  return new DaemonMcpProxy({
+    ...proxyConfig,
+    ...(acceptanceDiscovery ? { acceptanceDiscovery } : {}),
+  });
+}
+
 export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   server: McpServer;
   proxy: DaemonMcpProxy;
 } {
-  const acceptanceDiscovery = acceptanceDiscoveryConfiguration();
-  const proxy = new DaemonMcpProxy({
-    ...options.proxyConfig,
-    ...(acceptanceDiscovery ? { acceptanceDiscovery } : {}),
-  });
+  const proxy = options.proxy ?? createDaemonMcpProxy(options.proxyConfig);
+  const failedManagedSlots =
+    options.managedSlots?.outcome === "failed" ? options.managedSlots : undefined;
   const advertisedToolOutputSchemas = new Map<string, boolean>();
   let toolListEpoch = 0;
 
@@ -477,6 +558,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         // Declared so the proxy can tell an idle harness its sessions were lost (#10053).
         logging: {},
         prompts: {},
+        ...managedSlotsCapability(options.managedSlots),
       },
     },
   );
@@ -637,7 +719,10 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     },
   });
 
-  registerProxyResourceHandlers(server, proxy);
+  registerProxyResourceHandlers(server, proxy, options.managedSlots);
+  if (failedManagedSlots) {
+    refuseToolsAfterFailedAcquisition(server, failedManagedSlots);
+  }
 
   return { server, proxy };
 }

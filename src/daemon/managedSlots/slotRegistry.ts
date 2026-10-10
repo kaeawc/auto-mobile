@@ -127,6 +127,12 @@ export interface SlotInit {
 }
 
 export interface SlotBindingCommit {
+  /**
+   * Moves the slot to another platform (owner decision 2026-10-09, #11232: a platform change is a
+   * replacement). Only allowed together with an empty binding (`stableDeviceId: null`), so the old
+   * platform's device is always deleted and verified absent first.
+   */
+  platform?: SlotPlatform;
   stableDeviceId: string | null;
   deviceName: string | null;
   /** Replaces the stored requested spec when present. */
@@ -326,6 +332,12 @@ export function isSlotJournalPhaseOpen(phase: SlotJournalPhase): boolean {
 
 /** The exact devices an entry acts on, so recovery never confuses an old device with its successor. */
 export interface SlotJournalTarget {
+  /**
+   * The platform the entry creates on, when it differs from the entry's (the slot's platform when
+   * the entry was opened, which the old device lives on): a cross-platform replacement (#11232).
+   * Absent means the same platform.
+   */
+  newPlatform?: SlotPlatform;
   /** The device the entry deletes (replace) or settles (release). */
   oldStableId: string | null;
   oldName: string | null;
@@ -659,7 +671,10 @@ export function sameBinding(a: SlotBindingExpectation, b: SlotBindingExpectation
  * returned it, else (Android) the generated AVD name, which is the stable id.
  */
 export function journalNewStableId(entry: SlotJournalEntry): string | null {
-  return entry.target.newStableId ?? (entry.platform === "android" ? entry.target.newName : null);
+  return (
+    entry.target.newStableId ??
+    (journalCreationPlatform(entry) === "android" ? entry.target.newName : null)
+  );
 }
 
 /**
@@ -675,13 +690,14 @@ export function journalTargetEntries(
   );
   return open.flatMap((entry): ManagedDeviceEntry[] => {
     const stableDeviceId = journalNewStableId(entry);
-    if (stableDeviceId === null || seen.has(JSON.stringify([entry.platform, stableDeviceId]))) {
+    const platform = journalCreationPlatform(entry);
+    if (stableDeviceId === null || seen.has(JSON.stringify([platform, stableDeviceId]))) {
       return [];
     }
-    seen.add(JSON.stringify([entry.platform, stableDeviceId]));
+    seen.add(JSON.stringify([platform, stableDeviceId]));
     return [
       {
-        platform: entry.platform,
+        platform,
         stableDeviceId,
         holder: "slot",
         scopeKey: entry.scopeKey,
@@ -700,4 +716,27 @@ export function journalTargetEntries(
  */
 export function scopeAcceptsSlotChange(scope: SlotScopeRecord | null, journaled: boolean): boolean {
   return scope?.state === "valid" || (journaled && scope?.state === "invalidating");
+}
+
+/**
+ * The platform a binding commit leaves the slot on. A platform change is a replacement (#11232),
+ * so it is refused unless the commit empties the slot: a device of the new platform is only ever
+ * bound after the old platform's device was deleted and verified absent.
+ */
+export function assertPlatformChangeAllowed(
+  current: Pick<SlotAssignmentRecord, "platform">,
+  next: Pick<SlotBindingCommit, "platform" | "stableDeviceId">,
+): SlotPlatform {
+  const platform = next.platform ?? current.platform;
+  if (platform !== current.platform && next.stableDeviceId !== null) {
+    throw new ActionableError(
+      `A managed slot moves from ${current.platform} to ${platform} only with an empty binding`,
+    );
+  }
+  return platform;
+}
+
+/** The platform a journal entry creates its device on (#11232). */
+export function journalCreationPlatform(entry: Pick<SlotJournalEntry, "platform" | "target">) {
+  return entry.target.newPlatform ?? entry.platform;
 }

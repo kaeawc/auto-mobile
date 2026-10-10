@@ -500,6 +500,10 @@ describe("managed execution release wiring", () => {
     expect(await request({})).toMatchObject({ success: false });
     expect(await request({ sessionId: S1 })).toMatchObject({
       success: false,
+      error: expect.stringContaining("livenessOwnerToken"),
+    });
+    expect(await request({ sessionId: S1, livenessOwnerToken: "token" })).toMatchObject({
+      success: false,
       error: expect.stringContaining("not available"),
     });
     manager.stopCleanupTimer();

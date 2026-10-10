@@ -962,8 +962,43 @@ describe("ManagedSlotReconciler", () => {
       expect(result.failure.code).toBe("scope_not_valid");
     });
 
-    test("a slot keeps its platform", async () => {
-      await seedAssigned();
+    test("a platform change replaces the device across platforms, journaled (#11232)", async () => {
+      const oldId = await seedAssigned();
+
+      const result = expectReady(
+        await reconciler.reconcile(
+          request(
+            { runtime: "system-images;android-35;google_apis;arm64-v8a", deviceType: "pixel_8" },
+            { platform: "android" },
+          ),
+        ),
+      );
+
+      expect(result.disposition).toBe("replaced");
+      expect(deleter.calls.map((call) => [call.platform, call.stableId])).toEqual([["ios", oldId]]);
+      expect(provisioner.created().map((call) => call.platform)).toEqual(["android"]);
+      expect(result.assignment).toMatchObject({
+        platform: "android",
+        stableDeviceId: result.device.stableId,
+        state: "ready",
+      });
+      expect(await registry.findDeviceHolder("ios", oldId)).toBeNull();
+      expect(result.evidence).toMatchObject({
+        assignedMatch: "mismatch",
+        deletedStableId: oldId,
+        journal: { kind: "replace", phase: "committed" },
+      });
+      const entry = await registry.getSlotJournal(result.evidence.journal!.entryId);
+      expect(entry).toMatchObject({
+        kind: "replace",
+        platform: "ios",
+        target: { oldStableId: oldId, newPlatform: "android", newStableId: result.device.stableId },
+      });
+    });
+
+    test("a platform change keeps the old device when its deletion fails", async () => {
+      const oldId = await seedAssigned();
+      deleter.failWith = "simctl delete failed";
 
       const result = expectFailed(
         await reconciler.reconcile(
@@ -974,7 +1009,48 @@ describe("ManagedSlotReconciler", () => {
         ),
       );
 
-      expect(result.failure.code).toBe("slot_platform_conflict");
+      expect(result.failure.code).toBe("cleanup_pending");
+      expect(result.assignment).toMatchObject({
+        platform: "ios",
+        stableDeviceId: oldId,
+        state: "cleanup_pending",
+      });
+      expect(provisioner.created()).toEqual([]);
+    });
+
+    test("a platform change of an out-of-band-removed device creates on the new platform", async () => {
+      const oldId = await seedAssigned();
+      inventory.remove(oldId);
+
+      const result = expectReady(
+        await reconciler.reconcile(
+          request(
+            { runtime: "system-images;android-35;google_apis;arm64-v8a", deviceType: "pixel_8" },
+            { platform: "android" },
+          ),
+        ),
+      );
+
+      expect(result.disposition).toBe("created");
+      expect(deleter.calls).toEqual([]);
+      expect(result.assignment.platform).toBe("android");
+    });
+
+    test("a platform change never deletes on incomplete discovery", async () => {
+      await seedAssigned();
+      inventory.complete = false;
+
+      const result = expectFailed(
+        await reconciler.reconcile(
+          request(
+            { runtime: "system-images;android-35;google_apis;arm64-v8a", deviceType: "pixel_8" },
+            { platform: "android" },
+          ),
+        ),
+      );
+
+      expect(result.failure.code).toBe("discovery_incomplete");
+      expect(deleter.calls).toEqual([]);
     });
 
     test("an expired deadline does nothing", async () => {

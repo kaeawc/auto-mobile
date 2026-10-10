@@ -2016,7 +2016,13 @@ export class UnixSocketServer {
     const handler = async (): Promise<DaemonResponse | undefined> => {
       try {
         if (request.method.startsWith("daemon/")) {
-          const daemonResponse = await handleDaemonRequest(request, this.daemonState);
+          // The socket's cancellation reaches long daemon methods (managed slot acquisition).
+          const daemonResponse = await handleDaemonRequest(
+            request,
+            this.daemonState,
+            undefined,
+            cancellation.signal,
+          );
           return {
             id: request.id,
             type: "mcp_response",

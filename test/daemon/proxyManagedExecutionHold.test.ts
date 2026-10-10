@@ -205,7 +205,7 @@ describe("proxy managed-execution session hold", () => {
     const release = clients[0]!.callDaemonMethodCalls.find(
       (call) => call.method === DAEMON_RELEASE_EXECUTION_METHOD,
     );
-    expect(release?.params).toEqual({ sessionId: SESSION });
+    expect(release?.params).toEqual({ sessionId: SESSION, livenessOwnerToken: TOKEN });
     expect(proxy.getManagedExecutionSessions()).toEqual([]);
   });
 
@@ -229,6 +229,24 @@ describe("proxy managed-execution session hold", () => {
       execOwner: null,
     });
     expect(await registry.isDeviceAssignedToValidSlot("android", "Pixel_8_API_35")).toBe(true);
+  });
+
+  test("an orphaned predecessor cannot release its successor's execution (#11232)", async () => {
+    const clients: FakeDaemonClient[] = [];
+    const proxy = proxyWith(clients);
+    await proxy.holdManagedExecutionSession(SESSION);
+    // A successor proxy took the session over with its own owner token.
+    const session = sessionManager.getSession(SESSION)!;
+    session.livenessOwnerToken = "successor-token";
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await proxy.close();
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(sessionManager.hasSession(SESSION)).toBe(true);
+    expect((await registry.getAssignment(slotKey))?.execOwner?.sessionUuid).toBe(SESSION);
   });
 
   test("a failed release still closes the proxy and leaves the no-heartbeat release", async () => {

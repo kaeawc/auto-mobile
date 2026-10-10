@@ -1,3 +1,4 @@
+import { toActionableError } from "../models/ActionableError";
 import type { ManagedSlotInputGate } from "./inputDeviceOwnership";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { logger } from "../utils/logger";
@@ -53,6 +54,7 @@ import {
   DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_RELEASE_EXECUTION_METHOD,
   DAEMON_RESET_SLOT_SCOPE_METHOD,
+  DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
@@ -64,6 +66,9 @@ import {
 import {
   MANAGED_SLOTS_PROXY_WIRED,
   MANAGED_SLOTS_V1_CAPABILITY,
+  ManagedSlotConfigError,
+  parseManagedSlotConfig,
+  type ManagedSlotConfigErrorCode,
 } from "../models/managedSlotConfig";
 import { executionTracker } from "../server/executionTracker";
 import { sessionHoldDiagnostics, vetoedIdleReleaseAt } from "./sessionHoldDiagnostics";
@@ -75,6 +80,7 @@ import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./devi
 import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
 import type { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
 import { SLOT_SCOPE_RESET_MAX_WAIT_MS, type SlotScopeReset } from "./managedSlots/slotScopeReset";
+import type { ManagedSlotAcquisition } from "./managedSlots/managedSlotAcquisition";
 import {
   daemonDeviceLeaseActivitySources,
   daemonDeviceLeaseRelinquishPort,
@@ -116,6 +122,8 @@ export interface DaemonStateAccess {
   getSlotScopeReset?(): Pick<SlotScopeReset, "reset"> | undefined;
   /** Socket sessions bound to managed slots (#11178). */
   getManagedConnectionScopes?(): Pick<ManagedConnectionScopes, "get" | "unbind">;
+  /** The managed-slot acquisition behind `daemon/acquireManagedSlots` (#11173). */
+  getManagedSlotAcquisition?(): Pick<ManagedSlotAcquisition, "acquire"> | undefined;
   getSessionManager(): {
     hasSession(sessionId: string): boolean;
     getSession(sessionId: string): Session | null;
@@ -224,7 +232,9 @@ export type DaemonMethodResult = {
     | typeof DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE
     | typeof DAEMON_LIVENESS_OWNER_CONFLICT_CODE
     | typeof DAEMON_LIVENESS_OWNER_IS_PROXY_CODE
-    | typeof DAEMON_INSTANCE_CHANGED_CODE;
+    | typeof DAEMON_INSTANCE_CHANGED_CODE
+    /** `daemon/acquireManagedSlots` refusals before any mutation (#11173). */
+    | ManagedSlotConfigErrorCode;
 };
 
 /** Device-session listing entry; a quarantined UUID cannot be subscribed to until identity resolves. */
@@ -293,6 +303,8 @@ export async function handleDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
   executions?: SessionExecutionCanceller,
+  /** Aborts when the requesting socket closes or cancels this request. */
+  signal?: AbortSignal,
 ): Promise<DaemonMethodResult> {
   if (!request.method.startsWith("daemon/")) {
     return {
@@ -324,13 +336,14 @@ export async function handleDaemonRequest(
     };
   }
 
-  return handleInitializedDaemonRequest(request, state, executions);
+  return handleInitializedDaemonRequest(request, state, executions, signal);
 }
 
 type InitializedDaemonMethodHandler = (
   request: DaemonRequest,
   state: DaemonStateAccess,
   executions?: SessionExecutionCanceller,
+  signal?: AbortSignal,
 ) => DaemonMethodResult | Promise<DaemonMethodResult>;
 
 /** Socket daemon methods served once the daemon is initialized, by method name. */
@@ -350,6 +363,10 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
     ],
     [DAEMON_RELEASE_EXECUTION_METHOD, handleReleaseExecution],
     [DAEMON_RESET_SLOT_SCOPE_METHOD, handleResetSlotScope],
+    [
+      DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
+      (request, state, _executions, signal) => handleAcquireManagedSlots(request, state, signal),
+    ],
     [DAEMON_LIST_DEVICE_SESSIONS_METHOD, handleListDeviceSessions],
     [DAEMON_DEVICE_LEASE_STATUS_METHOD, handleDeviceLeaseStatus],
     [DAEMON_RELINQUISH_DEVICE_LEASE_METHOD, handleRelinquishDeviceLease],
@@ -359,6 +376,7 @@ async function handleInitializedDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
   executions?: SessionExecutionCanceller,
+  signal?: AbortSignal,
 ): Promise<DaemonMethodResult> {
   const handler = INITIALIZED_DAEMON_METHOD_HANDLERS.get(request.method);
   if (!handler) {
@@ -367,7 +385,7 @@ async function handleInitializedDaemonRequest(
       error: `Unsupported daemon method: ${request.method}`,
     };
   }
-  return await handler(request, state, executions);
+  return await handler(request, state, executions, signal);
 }
 
 async function handleReleaseLivenessOwnership(
@@ -1021,11 +1039,19 @@ async function handleReleaseSession(
   return releaseBoundSession(state, manager, sessionId, session, executions);
 }
 
-const releaseExecutionParams = z.object({ sessionId: z.string().trim().min(1) });
+const releaseExecutionParams = z.object({
+  sessionId: z.string().trim().min(1),
+  livenessOwnerToken: z.string().trim().min(1),
+});
 
 /**
  * End a managed slot execution (#11177): drain its work, release its live control, keep its slot's
  * device assignment. Idempotent: a repeated or late call reports the current settlement.
+ *
+ * Only the session's current liveness owner may end it (#11232): a proxy that lost its session to a
+ * successor (same UUID, a different owner token) and is shutting down must not release the
+ * successor's execution. A session with no recorded owner, or one no longer live, is released or
+ * reported as before.
  */
 async function handleReleaseExecution(
   request: DaemonRequest,
@@ -1033,13 +1059,24 @@ async function handleReleaseExecution(
 ): Promise<DaemonMethodResult> {
   const parsed = releaseExecutionParams.safeParse(request.params);
   if (!parsed.success) {
-    return { success: false, error: "sessionId parameter required" };
+    return { success: false, error: "sessionId and livenessOwnerToken parameters required" };
   }
   const drain = state.getManagedExecutionRelease?.();
   if (!drain) {
     return { success: false, error: "Managed execution release is not available in this daemon" };
   }
-  const result = await drain.releaseExecution(parsed.data.sessionId);
+  const { sessionId, livenessOwnerToken } = parsed.data;
+  const owner = state.getSessionManager().getSession(sessionId)?.livenessOwnerToken;
+  if (owner && owner !== livenessOwnerToken) {
+    return {
+      success: false,
+      code: DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
+      error:
+        `Session ${sessionId}'s managed execution can only be released by its current liveness ` +
+        "owner; nothing changed.",
+    };
+  }
+  const result = await drain.releaseExecution(sessionId);
   return { success: true, result: { ...result } };
 }
 
@@ -1073,6 +1110,51 @@ async function handleResetSlotScope(
     return { success: false, error: "Managed slot scope reset is not available in this daemon" };
   }
   const result = await reset.reset(parsed.data);
+  return { success: true, result: { ...result } };
+}
+
+const acquireManagedSlotsParams = z.object({
+  config: z.unknown(),
+  livenessOwnerToken: z.string().trim().min(1),
+});
+
+/**
+ * Acquire a stdio proxy's managed slots before it serves `initialize` (#11173). The config is
+ * re-validated here (it crossed a socket); an invalid one fails with its typed config code before
+ * any registry or device mutation. Every other outcome, ready or failed, is a typed
+ * `ManagedSlotsResult` the proxy exposes verbatim.
+ */
+async function handleAcquireManagedSlots(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+  signal?: AbortSignal,
+): Promise<DaemonMethodResult> {
+  const parsed = acquireManagedSlotsParams.safeParse(request.params);
+  if (!parsed.success) {
+    return { success: false, error: "config and livenessOwnerToken parameters required" };
+  }
+  const acquisition = state.getManagedSlotAcquisition?.();
+  if (!acquisition) {
+    return {
+      success: false,
+      code: "managed_slots_unsupported",
+      error: "Managed slot acquisition is not available in this daemon",
+    };
+  }
+  let config;
+  try {
+    config = parseManagedSlotConfig(parsed.data.config);
+  } catch (error) {
+    if (error instanceof ManagedSlotConfigError) {
+      logger.warn(`[ManagedSlots] Refusing an invalid managed slot config: ${error.message}`);
+      return { success: false, code: error.code, error: error.message };
+    }
+    throw toActionableError(error, "Managed slot config could not be validated");
+  }
+  const result = await acquisition.acquire(config, {
+    livenessOwnerToken: parsed.data.livenessOwnerToken,
+    signal,
+  });
   return { success: true, result: { ...result } };
 }
 

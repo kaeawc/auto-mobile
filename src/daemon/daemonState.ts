@@ -3,6 +3,7 @@ import type { ObserverSessionStore } from "./observerSessionRegistry";
 import type { ManagedExecutionRelease } from "./managedSlots/managedExecutionRelease";
 import { ManagedConnectionScopes } from "./managedSlots/managedConnectionScope";
 import type { SlotScopeReset } from "./managedSlots/slotScopeReset";
+import type { ManagedSlotAcquisition } from "./managedSlots/managedSlotAcquisition";
 import { SessionManager } from "./sessionManager";
 import { DevicePool } from "./devicePool";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
@@ -35,6 +36,7 @@ export class DaemonState implements DaemonStateLike {
   private managedExecutionRelease: ManagedExecutionRelease | null = null;
   private slotScopeReset: SlotScopeReset | null = null;
   private readonly managedConnectionScopes = new ManagedConnectionScopes();
+  private managedSlotAcquisition: ManagedSlotAcquisition | null = null;
 
   private constructor() {}
 
@@ -124,6 +126,15 @@ export class DaemonState implements DaemonStateLike {
     return this.managedConnectionScopes;
   }
 
+  /** Publish the managed-slot acquisition behind `daemon/acquireManagedSlots` (#11173). */
+  setManagedSlotAcquisition(acquisition: ManagedSlotAcquisition | null): void {
+    this.managedSlotAcquisition = acquisition;
+  }
+
+  getManagedSlotAcquisition(): ManagedSlotAcquisition | undefined {
+    return this.managedSlotAcquisition ?? undefined;
+  }
+
   getObserverSessionRegistry(): ObserverSessionStore | undefined {
     return this.observerSessionRegistry ?? undefined;
   }
@@ -178,6 +189,7 @@ export class DaemonState implements DaemonStateLike {
     this.managedExecutionRelease = null;
     this.slotScopeReset = null;
     this.managedConnectionScopes.clear();
+    this.managedSlotAcquisition = null;
     this.sessionManager = null;
     this.devicePool = null;
     setDeviceAdmissionGate(undefined);

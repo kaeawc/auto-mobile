@@ -691,8 +691,10 @@ iOS. `device` sends nothing and works on every device.
 A device advertising `prototype_appearance_v1` reports
 `appearance: { mode, source, deviceDark }`. `mode` is `light` or `dark`. `source` names the step
 that decided it: `explicit`, `roleLuminance`, `authoredBackground`, `override` or `system`.
-`deviceDark` is the device's own setting whatever decided the mode. A successful `show` returns
-it in `lastResult`, and `status` and `inspect` return it on each prototype. The field is absent
+`deviceDark` is the device's own setting whatever decided the mode, and is present only when the
+device reported it (a `show` result, an `inspect` entry or an iOS status): the host never infers
+it. A successful `show` returns the object in `lastResult`, and `status` and `inspect` return it
+on each prototype. The field is absent
 when the device lacks the flag, on `dismiss` and on a failed show; a failed same-id show keeps
 the value of the prototype still on screen.
 
@@ -702,8 +704,9 @@ sends one `prototype_event` with `kind: "appearance_changed"`, `name: null` and
 `payload: { mode, source }`. Nothing is sent when the mode stays the same, nor for the show
 itself. Wait for it with `awaitEvent` and `kind: "appearance_changed"` (its `name` is null, so
 `eventName` does not match it). The event also refreshes the `appearance` that `status` reports:
-a `system` source sets `deviceDark` from the new mode, and any other source keeps the last
-reported `deviceDark`, which `inspect` refreshes.
+`mode` and `source` come from the event and `deviceDark` is omitted, because the event does not
+carry it and a pinned mode sends no event when the device flips. The next `show` result or
+`inspect` supplies `deviceDark` again.
 
 In a scrim slot (`window.placement.scrim`, a bottomSheet `scrim`) only the `scrim` role is drawn
 translucent, at 0.4 alpha; any other role is drawn unchanged. The per-mode forms

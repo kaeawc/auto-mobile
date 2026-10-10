@@ -1,11 +1,11 @@
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
-import type {
-  PrototypeAppearance,
-  PrototypeEvent,
-  PrototypeResult,
-} from "../observe/android/ctrlProxyProtocol";
-import { prototypeAppearanceAfterChange, shownAppearance } from "./prototypeAppearance";
+import type { PrototypeEvent, PrototypeResult } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeAppearanceAfterChange,
+  shownAppearance,
+  type ShownPrototypeAppearance,
+} from "./prototypeAppearance";
 
 export type PrototypeMutation = "show" | "dismiss";
 export interface PrototypeLastResult {
@@ -28,10 +28,11 @@ export interface PrototypeLastResult {
   displayId?: number;
   /**
    * The light or dark mode the prototype is drawn in, as last reported by the device: a show
-   * result, an `inspect`, or an `appearance_changed` event since. Absent on a dismiss, a failed
-   * show, and whenever the device lacks `prototype_appearance_v1`.
+   * result, an `inspect`, or an `appearance_changed` event since (which updates `mode` and `source`
+   * and drops `deviceDark` until the next device result). Absent on a dismiss, a failed show, and
+   * whenever the device lacks `prototype_appearance_v1`.
    */
-  appearance?: PrototypeAppearance;
+  appearance?: ShownPrototypeAppearance;
   success: boolean;
   error?: string;
   totalTimeMs?: number;
@@ -46,7 +47,7 @@ export interface AdoptedPrototype {
   id: string;
   persistent?: boolean;
   suspended?: boolean;
-  appearance?: PrototypeAppearance;
+  appearance?: ShownPrototypeAppearance;
   pages: PrototypeEvent["pages"];
   state: PrototypeEvent["state"];
 }

@@ -182,7 +182,8 @@ What the device reports (\`prototype_appearance_v1\`; absent on a device without
 
 - A successful show returns \`lastResult.appearance: {mode, source, deviceDark}\`; \`status\` and
   \`inspect\` carry the same object on each prototype. \`deviceDark\` is the device's own setting
-  whatever decided \`mode\`.
+  whatever decided \`mode\`; it is present only when the device reported it (a show result or
+  \`inspect\`) and is omitted after an \`appearance_changed\` event until the next one.
 - While a prototype is shown it follows the device live. Any change of the resolved mode (the
   device flipping, or prototype state changing a background the mode is inferred from) sends one
   \`appearance_changed\` event with a null \`name\` and the payload \`{mode, source}\`, and refreshes

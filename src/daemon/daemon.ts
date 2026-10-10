@@ -720,6 +720,10 @@ export class Daemon {
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     this.sessionManager.attachDaemonSessionId(this.daemonSessionId);
+    // Read when a recovery claims its row, so a peer that started after this daemon is seen.
+    this.sessionManager.attachLiveDaemonSessionIds(() =>
+      this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
+    );
     this.observerSessionRegistry = new ObserverSessionRegistry(
       this.timer,
       undefined,

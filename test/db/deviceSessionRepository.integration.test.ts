@@ -591,6 +591,97 @@ describe("DeviceSessionRepository", () => {
     expect(currentRow!.liveness_owner_token).toBe("current-owner");
   });
 
+  describe("taking a recoverable row for recovery (#11200)", () => {
+    const releaseRecoverable = async (sessionUuid: string, daemonSessionId: string) => {
+      await repo.upsertActiveSession({
+        sessionUuid,
+        deviceId: "emulator-5554",
+        platform: "android",
+        daemonSessionId,
+        createdAtMs: 1000,
+        lastUsedAtMs: 1000,
+        expiresAtMs: 10_000_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+        hasReceivedHeartbeat: true,
+      });
+      await repo.markReleased(sessionUuid, "released", 2000, "daemon-shutdown");
+      return (await repo.getSession(sessionUuid))!;
+    };
+
+    test("only one of two daemons that read the same incarnation takes it", async () => {
+      const listed = await releaseRecoverable("s1", "dead-daemon");
+      const expected = {
+        rowGeneration: listed.stable_identity_generation!,
+        daemonSessionId: "dead-daemon",
+      };
+
+      const first = await repo.claimRecoverableSession("s1", expected, "daemon-a");
+      const second = await repo.claimRecoverableSession("s1", expected, "daemon-b");
+
+      expect(first).toBe(listed.stable_identity_generation! + 1);
+      expect(second).toBeUndefined();
+      // Still recoverable: the claim only records who recovers it.
+      expect(await repo.getSession("s1")).toMatchObject({
+        status: "released",
+        release_reason: "daemon-shutdown",
+        daemon_session_id: "daemon-a",
+        stable_identity_generation: first,
+      });
+    });
+
+    test("an active row is never taken", async () => {
+      await releaseRecoverable("s2", "dead-daemon");
+      await repo.upsertActiveSession({
+        sessionUuid: "s2",
+        deviceId: "emulator-5554",
+        platform: "android",
+        daemonSessionId: "winner",
+        createdAtMs: 1000,
+        lastUsedAtMs: 3000,
+        expiresAtMs: 10_000_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+        hasReceivedHeartbeat: true,
+      });
+      const row = (await repo.getSession("s2"))!;
+
+      expect(
+        await repo.claimRecoverableSession(
+          "s2",
+          { rowGeneration: row.stable_identity_generation!, daemonSessionId: "winner" },
+          "loser",
+        ),
+      ).toBeUndefined();
+      expect(await repo.getSession("s2")).toMatchObject({
+        status: "active",
+        daemon_session_id: "winner",
+      });
+    });
+
+    test("a SessionManager leaves a recoverable row a live peer took, writing nothing", async () => {
+      await releaseRecoverable("s3", "dead-daemon");
+      const row = (await repo.getSession("s3"))!;
+      await repo.claimRecoverableSession(
+        "s3",
+        { rowGeneration: row.stable_identity_generation!, daemonSessionId: "dead-daemon" },
+        "live-peer",
+      );
+      const taken = (await repo.getSession("s3"))!;
+      const manager = new SessionManager(timer, repo);
+      manager.stopCleanupTimer();
+      manager.attachDaemonSessionId("this-daemon");
+      manager.attachLiveDaemonSessionIds(() => new Set(["this-daemon", "live-peer"]));
+
+      const summary = await manager.rehydratePersistedSessions({} as never);
+
+      expect(summary.skipped).toEqual([{ sessionUuid: "s3", reason: "owned-by-other-daemon" }]);
+      expect(summary.rehydrated).toEqual([]);
+      expect(manager.getSession("s3")).toBeNull();
+      expect(await repo.getSession("s3")).toEqual(taken);
+    });
+  });
+
   test("leaves a live peer daemon's active session untouched", async () => {
     await repo.upsertActiveSession({
       sessionUuid: "live-peer-session",

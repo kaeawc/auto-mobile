@@ -145,6 +145,14 @@ class SessionClockPersistence implements DeviceSessionPersistence {
     return this.inner.recordLivenessOwnership.bind(this.inner);
   }
 
+  get claimRecoverableSession(): DeviceSessionPersistence["claimRecoverableSession"] {
+    if (!this.inner.claimRecoverableSession) {
+      return undefined;
+    }
+    // Generations and daemon ids are frame-free.
+    return this.inner.claimRecoverableSession.bind(this.inner);
+  }
+
   get replaceLivenessOwnership(): DeviceSessionPersistence["replaceLivenessOwnership"] {
     if (!this.inner.replaceLivenessOwnership) {
       return undefined;

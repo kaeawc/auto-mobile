@@ -41,7 +41,7 @@ describe("cross-daemon ownership regressions", () => {
   // claimRecoveredDevice finds the winner's fresh claim, then rolls back and terminalizes the row as
   // identity-recovery-owned-by-other-daemon. The winner keeps the session live on a row that is
   // released and owned by the other daemon. Seed 306 of the `restarts` profile, shrunk. #11200
-  test.todo("concurrent startups never revive or terminalize the session the peer rehydrated", async () => {
+  test("concurrent startups never revive or terminalize the session the peer rehydrated", async () => {
     const result = await runTwoDaemonSteps([
       step("crash", { daemon: 1, turns: 13 }),
       step("acquireAny", { client: 0, daemon: 0 }),

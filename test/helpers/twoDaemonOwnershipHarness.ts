@@ -411,7 +411,11 @@ class TwoDaemonWorld {
               });
             });
           }
-          return run().then((result) => (owner.dead ? never() : result));
+          // A process that died meanwhile never sees the outcome, success or failure.
+          return run().then(
+            (result) => (owner.dead ? never() : result),
+            (error: unknown) => (owner.dead ? never() : Promise.reject(error)),
+          );
         };
       },
     });
@@ -512,6 +516,10 @@ class TwoDaemonWorld {
     const manager = new SessionManager(timer, persistence);
     const daemonSessionId = `daemon-${name}-${generation}`;
     manager.attachDaemonSessionId(daemonSessionId);
+    // Like the daemon's pid-file listing: an incarnation is listed from its start until it dies.
+    manager.attachLiveDaemonSessionIds(
+      () => new Set(this.daemons.filter((p) => p && !p.dead).map((p) => p!.daemonSessionId)),
+    );
     const pid = ++this.nextPid;
     const socketPath = `/sockets/${name}.sock`;
     const ownership = new ForwardLeaseForeignDeviceOwnership(

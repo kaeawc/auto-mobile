@@ -428,3 +428,77 @@ describe("a crash while a terminal release write is parked does not revive the U
     expect(await restarted.getReleasedSessionReason("never-issued")).toBeUndefined();
   });
 });
+
+describe("a superseded device-loss release leaves the live session's row active (#11206)", () => {
+  /** A new daemon process on the same database rehydrates the session the client still holds. */
+  async function expectRehydratedAfterRestart(h: Harness): Promise<void> {
+    // The next daemon's startup sweep retires only rows still active, as daemon-restart.
+    if ((await h.persistence.getSession!("old"))?.status === "active") {
+      await h.persistence.markReleased("old", "expired", h.timer.now(), "daemon-restart");
+    }
+    const restarted = new SessionManager(h.timer, h.persistence, () => new FakeDbWriteBarrier());
+    managers.push(restarted);
+    const summary = await restarted.rehydratePersistedSessions({
+      assignDeviceToSession: async (sessionId) => {
+        await restarted.createSession(sessionId, device.deviceId, "android");
+        return device.deviceId;
+      },
+    });
+    expect(summary.rehydrated).toEqual(["old"]);
+  }
+
+  test("a slow terminal write overtaken by a newer identity confirmation is rewritten live", async () => {
+    const h = await harness();
+    let releaseWrite!: () => void;
+    h.persistence.park = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let superseded = false;
+    const release = h.manager.releaseSessionUnlessSuperseded(
+      "old",
+      `device-disconnected:${device.deviceId}`,
+      () => !superseded,
+    );
+    await flush();
+    // The serial is re-observed with a newer identity while the terminal write is in flight.
+    superseded = true;
+    releaseWrite();
+    await expect(release).resolves.toEqual({ superseded: true });
+    expect(h.manager.getSession("old")).not.toBeNull();
+
+    const row = await h.persistence.getSession!("old");
+    expect(row?.status).toBe("active");
+    expect(row?.release_reason).toBeNull();
+    await expectRehydratedAfterRestart(h);
+  });
+
+  test("a terminal write that lands after the deadline is rewritten live once it lands", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await harness();
+      let releaseWrite!: () => void;
+      h.persistence.park = new Promise<void>((resolve) => {
+        releaseWrite = resolve;
+      });
+      let superseded = false;
+      const release = h.manager.releaseSessionUnlessSuperseded(
+        "old",
+        `device-disconnected:${device.deviceId}`,
+        () => !superseded,
+      );
+      await flush();
+      superseded = true;
+      await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      await expect(release).resolves.toEqual({ superseded: true });
+
+      releaseWrite();
+      await flush();
+      const row = await h.persistence.getSession!("old");
+      expect(row?.status).toBe("active");
+      expect(row?.release_reason).toBeNull();
+      await expectRehydratedAfterRestart(h);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});

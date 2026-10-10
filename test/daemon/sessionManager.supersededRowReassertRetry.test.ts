@@ -20,6 +20,7 @@ const DEVICE = "emulator-5554";
 const DEVICE_LOSS = `device-disconnected:${DEVICE}`;
 const IDLE_WINDOW_MS = 60_000;
 const RETRY_DELAY_MS = 500;
+const TERMINAL_RETRY_DELAY_MS = 700;
 
 /**
  * A store whose release write can be parked past the release deadline, and whose plain upserts
@@ -34,6 +35,8 @@ class BusyRewritePersistence extends FakeDeviceSessionPersistence {
   duringPlainUpsert: (() => Promise<void>) | undefined;
   /** Runs once, right after the next plain upsert has landed. */
   afterPlainUpsert: (() => Promise<void>) | undefined;
+  /** Release writes still to fail, counted from the next one issued. */
+  failReleaseWrites = 0;
 
   override async markReleased(
     sessionUuid: string,
@@ -43,6 +46,10 @@ class BusyRewritePersistence extends FakeDeviceSessionPersistence {
     options?: MarkReleasedOptions,
   ): Promise<void> {
     await this.park;
+    if (this.failReleaseWrites > 0) {
+      this.failReleaseWrites--;
+      throw new Error("SQLITE_BUSY: database is locked");
+    }
     await super.markReleased(sessionUuid, status, releasedAtMs, reason, options);
   }
 
@@ -90,6 +97,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
     manager.stopCleanupTimer();
     manager.setSupersededRowReassertBackoff(fixedBackoff(RETRY_DELAY_MS));
+    manager.setTerminalReleaseRetryBackoff(fixedBackoff(TERMINAL_RETRY_DELAY_MS));
     releases = [];
     manager.onSessionRelease((_sessionId, _deviceId, reason) => releases.push(reason));
   });
@@ -310,6 +318,111 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     });
     expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(releases).toEqual([]);
+  });
+
+  /** A device-loss release is superseded while its terminal write is parked past the deadline. */
+  async function supersededReleaseWithParkedWrite(): Promise<() => void> {
+    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    let landReleaseWrite!: () => void;
+    store.park = new Promise<void>((resolve) => {
+      landReleaseWrite = resolve;
+    });
+    let superseded = false;
+    const release = manager.releaseSessionUnlessSuperseded(SESSION, DEVICE_LOSS, () => !superseded);
+    await settleMicrotasks(100);
+    superseded = true;
+    await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+    expect(await release).toEqual({ superseded: true });
+    store.park = undefined;
+    store.plainUpserts = 0;
+    return landReleaseWrite;
+  }
+
+  test("a non-terminal release that completes while the rewrite is in flight does not leave an active row", async () => {
+    const landReleaseWrite = await supersededReleaseWithParkedWrite();
+    let released: Promise<unknown> | undefined;
+    store.duringPlainUpsert = async () => {
+      released = manager.releaseSession(SESSION, "plan-auto-release");
+      await settleMicrotasks(100);
+    };
+
+    landReleaseWrite();
+    await settleMicrotasks();
+    await released;
+    await settleMicrotasks();
+
+    // The scenario was driven: the session ended while the one rewrite was in flight.
+    expect(store.plainUpserts).toBe(1);
+    expect(store.duringPlainUpsert).toBeUndefined();
+    expect(manager.getSession(SESSION)).toBeNull();
+    expect(releases).toEqual(["plan-auto-release"]);
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      status: "released",
+      release_reason: "plan-auto-release",
+    });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a non-terminal release whose write is still in flight when the rewrite lands does not leave an active row", async () => {
+    const landReleaseWrite = await supersededReleaseWithParkedWrite();
+    let released: Promise<unknown> | undefined;
+    let landPlanRelease!: () => void;
+    store.duringPlainUpsert = async () => {
+      // The release captures the row's generation and issues its write, which stays in flight.
+      store.park = new Promise<void>((resolve) => {
+        landPlanRelease = resolve;
+      });
+      released = manager.releaseSession(SESSION, "plan-auto-release");
+      await settleMicrotasks(100);
+    };
+
+    landReleaseWrite();
+    await settleMicrotasks();
+    expect(manager.getSession(SESSION)).toBeNull();
+    expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+    landPlanRelease();
+    await released;
+    await settleMicrotasks();
+
+    expect(store.plainUpserts).toBe(1);
+    expect(releases).toEqual(["plan-auto-release"]);
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      status: "released",
+      release_reason: "plan-auto-release",
+    });
+  });
+
+  test("a terminal row whose re-write after the rewrite fails is retried with the terminal release backoff", async () => {
+    await supersededReleaseWithFailingRewrite(1);
+    let released: Promise<unknown> | undefined;
+    store.duringPlainUpsert = async () => {
+      released = manager.releaseSession(SESSION, "explicit-release");
+      await settleMicrotasks(100);
+      // The release's own terminal write has landed; the re-write over the rewrite fails once.
+      store.failReleaseWrites = 1;
+    };
+
+    await timer.advanceTimeAsync(RETRY_DELAY_MS);
+    await settleMicrotasks();
+    await released;
+    await settleMicrotasks();
+
+    // The scenario was driven: the rewrite landed over the terminal row and the re-write failed.
+    expect(store.plainUpserts).toBe(2);
+    expect(store.failReleaseWrites).toBe(0);
+    expect(manager.getSession(SESSION)).toBeNull();
+    expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
+    expect(timer.getPendingTimeouts()).toEqual([TERMINAL_RETRY_DELAY_MS]);
+
+    await timer.advanceTimeAsync(TERMINAL_RETRY_DELAY_MS);
+    await settleMicrotasks();
+
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      status: "released",
+      release_reason: "explicit-release",
+    });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(releases).toEqual(["explicit-release"]);
   });
 
   test("stopping the manager cancels a pending retry", async () => {

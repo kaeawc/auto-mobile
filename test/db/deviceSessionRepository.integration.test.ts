@@ -1144,13 +1144,15 @@ describe("DeviceSessionRepository", () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
       await repo.markReleased("session-1", "released", 500, "explicit-release");
       timer.advanceTime(1000);
+      // The row's terminal release ends the live session with the typed refusal (#11498).
       await expect(sessionManager.getOrCreateSession("session-1")).rejects.toThrow(
-        "Failed to persist liveness activity",
+        "Session session-1 was released and cannot be reused",
       );
 
       const row = await repo.getSession("session-1");
       expect(row!.status).toBe("released");
       expect(row!.release_reason).toBe("explicit-release");
+      expect(sessionManager.getSession("session-1")).toBeNull();
     } finally {
       sessionManager.stopCleanupTimer();
     }

@@ -12,6 +12,7 @@ import {
   getCliSessionIdleTimeoutMs,
 } from "../../src/daemon/constants";
 import { Daemon } from "../../src/daemon/daemon";
+import type { AppearanceSyncTarget } from "../../src/daemon/AppearanceSyncScheduler";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { defaultRecordingSessionCleanupDeps } from "../../src/server/recordingSessionCleanup";
@@ -943,6 +944,16 @@ export class LivenessScenario {
   /** Devices the read-only watcher path resolved, and captured, without a session (#10830). */
   get watched(): { resolutions: number; reads: readonly string[] } {
     return { resolutions: this.tools.watcherResolutions, reads: this.tools.watcherReads };
+  }
+
+  /**
+   * The devices the running daemon lets host appearance sync touch: the scope `Daemon.start()`
+   * hands the scheduler (`startAppearanceSyncScheduler({ getTargets })`).
+   */
+  appearanceSyncTargets(): AppearanceSyncTarget[] {
+    return (
+      this.daemon.daemon as unknown as { getAppearanceSyncTargets(): AppearanceSyncTarget[] }
+    ).getAppearanceSyncTargets();
   }
 
   /** Tool bodies that reached the device boundary (what actually drove a device). */

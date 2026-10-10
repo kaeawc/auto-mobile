@@ -254,4 +254,82 @@ describe("SlotScopeReset", () => {
       manager.stopCleanupTimer();
     }
   });
+
+  test("daemon/resetSlotScope forwards --force and rejects a non-boolean one (#11336)", async () => {
+    const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
+    const seen: unknown[] = [];
+    const state: DaemonStateAccess = {
+      isInitialized: () => true,
+      getSessionManager: () => manager,
+      getDevicePool: () => ({
+        refreshDevices: async () => 0,
+        getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
+        releaseDevice: async () => {},
+      }),
+      getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
+      getSlotScopeReset: () => ({
+        reset: async (request) => {
+          seen.push(request);
+          return { outcome: "not_found", retryable: false, scopes: [], waitedMs: 0 };
+        },
+      }),
+    };
+    const call = (params: Record<string, unknown>) =>
+      handleDaemonRequest(
+        { id: "r", type: "daemon_request", method: DAEMON_RESET_SLOT_SCOPE_METHOD, params },
+        state,
+      );
+    try {
+      expect(await call({ ...RESET, force: "yes" })).toMatchObject({ success: false });
+      expect(await call({ ...RESET, force: true })).toMatchObject({ success: true });
+      expect(seen).toEqual([{ ...RESET, force: true }]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("--force returns a journaled stuck settling slot to ready and commits its entry", async () => {
+    const key = await assignManagedSlotDevice(registry, "android", "avd-a", "runner-a");
+    livePids.add(7);
+    const settler = { daemonId: "d", pid: 7, processGenerationToken: "t" };
+    const opened = await registry.openSlotJournal(key, {
+      kind: "release",
+      phase: "intent",
+      owner: settler,
+      target: {
+        oldStableId: "avd-a",
+        oldName: "avd-a",
+        newName: null,
+        newStableId: null,
+        requestedSpec: {},
+        resolvedSpec: {},
+        specFingerprint: "fp",
+      },
+      assignment: {
+        kind: "state",
+        expected: { generation: 1, stableDeviceId: "avd-a" },
+        state: "settling",
+        options: { settler },
+      },
+    });
+    expect(opened.kind).toBe("opened");
+    expect((await reset.reset({ ...RESET, waitMs: 0 })).outcome).toBe("pending");
+
+    const forced = await reset.reset({ ...RESET, waitMs: 0, force: true });
+
+    expect(forced.outcome).toBe("invalidated");
+    expect(await registry.listOpenSlotJournal()).toEqual([]);
+    expect((await registry.listFreeDevices()).map((d) => d.stableDeviceId)).toEqual(["avd-a"]);
+  });
+
+  test("--force never overrides a slot in use by a live execution owner", async () => {
+    await assignManagedSlotDevice(registry, "android", "avd-a", "runner-a", "s1");
+    livePids.add(1);
+
+    const result = await reset.reset({ ...RESET, waitMs: 0, force: true });
+
+    expect(result.outcome).toBe("pending");
+    expect(result.scopes[0]?.pending?.liveOwners).toHaveLength(1);
+    expect(await registry.listFreeDevices()).toEqual([]);
+  });
 });

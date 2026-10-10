@@ -993,6 +993,8 @@ run_all_scenarios() {
   done
   if ((${#failed[@]} > 0)); then
     log "FAILED scenarios: ${failed[*]}"
+    # The nightly alert step reads this to name the scenarios (#11368).
+    printf '%s\n' "${failed[@]}" > "${evidence_dir}/failed-scenarios.txt"
     exit 1
   fi
 }

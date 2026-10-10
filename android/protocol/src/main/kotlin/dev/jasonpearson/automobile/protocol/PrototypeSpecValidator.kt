@@ -182,7 +182,13 @@ object PrototypeSpecValidator {
     }
 
   /** A node or action; [item] is the repeat item its state keys were bound to, if any. */
-  private data class Located(val value: JsonObject, val path: String, val item: Int? = null)
+  private data class Located(
+    val value: JsonObject,
+    val path: String,
+    val item: Int? = null,
+    /** An action whose `value` holds a repeat placeholder: its type is not known statically. */
+    val operandTemplated: Boolean = false,
+  )
 
   private fun PrototypeSpecError.forItem(item: Int?): PrototypeSpecError =
     if (item == null) this else copy(message = "$message (repeat item $item)")
@@ -195,9 +201,10 @@ object PrototypeSpecValidator {
     val data = value as? JsonObject ?: JsonObject(emptyMap())
     val scopes = PrototypeRepeatValidator.scopes(value)
     fun List<Located>.instances() = flatMap { located ->
+      val templated = PrototypeRepeatValidator.operandTemplated(scopes, located.value, located.path)
       PrototypeRepeatValidator.keyInstances(scopes, located.value, located.path).map { (bound, item)
         ->
-        Located(bound, located.path, item)
+        Located(bound, located.path, item, templated)
       }
     }
     val checked = Context()
@@ -560,15 +567,25 @@ object PrototypeSpecValidator {
   }
 
   /** A list item's trailing switch or checkbox binds a boolean, like the standalone controls. */
+  private fun trailingErrors(
+    value: JsonObject,
+    path: String,
+    state: JsonObject,
+  ): PrototypeSpecError? {
+    if (value.text("type") != "listItem") return null
+    val key = (value["trailing"] as? JsonObject)?.text("stateKey") ?: return null
+    val stored = state[key] as? JsonPrimitive
+    return if (stored == null || stored.isString || stored.booleanOrNull == null)
+      fail("$path.trailing.stateKey", "Toggle control requires a boolean state key")
+    else null
+  }
+
   private fun listItemBindingErrors(context: Context, data: JsonObject): PrototypeSpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
     for ((value, path, item) in context.nodes) {
-      if (value.text("type") != "listItem") continue
-      val key = (value["trailing"] as? JsonObject)?.text("stateKey") ?: continue
-      val stored = state[key] as? JsonPrimitive
-      if (stored == null || stored.isString || stored.booleanOrNull == null)
-        return fail("$path.trailing.stateKey", "Toggle control requires a boolean state key")
-          .forItem(item)
+      trailingErrors(value, path, state)?.let {
+        return it.forItem(item)
+      }
     }
     return null
   }
@@ -676,31 +693,43 @@ object PrototypeSpecValidator {
     }
   }
 
+  /**
+   * First binding rule one node breaks against [state]: the same rules for declared and written.
+   */
+  private fun nodeBindingErrors(
+    value: JsonObject,
+    path: String,
+    state: JsonObject,
+  ): PrototypeSpecError? {
+    componentBindingErrors(value, path, state)?.let {
+      return it
+    }
+    val key = value.text("stateKey") ?: return null
+    val stored = state[key] as? JsonPrimitive
+    if (value.text("type") == "textField" && stored?.isString != true)
+      return fail("$path.stateKey", "Text field requires a string state key")
+    if (
+      value.text("type") in setOf("switch", "checkbox") &&
+        (stored == null || stored.isString || stored.booleanOrNull == null)
+    )
+      return fail("$path.stateKey", "Toggle control requires a boolean state key")
+    if (value.text("type") in setOf("radioGroup", "segmentedButton")) {
+      radioGroupErrors(value, path, stored)?.let {
+        return it
+      }
+    }
+    if (value.text("type") !in setOf("tabBar", "bottomNav")) return null
+    val number = stored?.takeIf { !it.isString }?.doubleOrNull
+    return if (number == null || !number.isFinite() || number < 0 || number % 1.0 != 0.0)
+      fail("$path.stateKey", "Selection requires a nonnegative integer state key")
+    else null
+  }
+
   private fun bindingErrors(context: Context, data: JsonObject): PrototypeSpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
     for ((value, path, item) in context.nodes) {
-      componentBindingErrors(value, path, state)?.let {
+      nodeBindingErrors(value, path, state)?.let {
         return it.forItem(item)
-      }
-      val key = value.text("stateKey") ?: continue
-      val stored = state[key] as? JsonPrimitive
-      if (value.text("type") == "textField" && stored?.isString != true)
-        return fail("$path.stateKey", "Text field requires a string state key").forItem(item)
-      if (
-        value.text("type") in setOf("switch", "checkbox") &&
-          (stored == null || stored.isString || stored.booleanOrNull == null)
-      )
-        return fail("$path.stateKey", "Toggle control requires a boolean state key").forItem(item)
-      if (value.text("type") in setOf("radioGroup", "segmentedButton")) {
-        radioGroupErrors(value, path, stored)?.let {
-          return it.forItem(item)
-        }
-      }
-      if (value.text("type") !in setOf("tabBar", "bottomNav")) continue
-      val number = stored?.takeIf { !it.isString }?.doubleOrNull
-      if (number == null || !number.isFinite() || number < 0 || number % 1.0 != 0.0) {
-        return fail("$path.stateKey", "Selection requires a nonnegative integer state key")
-          .forItem(item)
       }
     }
     return null
@@ -710,26 +739,88 @@ object PrototypeSpecValidator {
   private val modalNames =
     mapOf("bottomSheet" to "Sheet", "dialog" to "Dialog", "snackbar" to "Snackbar")
 
+  private fun openWhenErrors(
+    value: JsonObject,
+    path: String,
+    state: JsonObject,
+  ): PrototypeSpecError? {
+    val name = modalNames[value.text("type")] ?: return null
+    val key = (value["openWhen"] as? JsonObject)?.text("key") ?: return null
+    val stored = state[key] as? JsonPrimitive
+    return if (
+      state.containsKey(key) && (stored == null || stored.isString || stored.booleanOrNull == null)
+    )
+      fail("$path.openWhen.key", "$name requires a boolean state key")
+    else null
+  }
+
   private fun sheetBindingErrors(context: Context, data: JsonObject): PrototypeSpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
     for ((value, path, item) in context.nodes) {
-      val name = modalNames[value.text("type")] ?: continue
-      val condition = value["openWhen"] as? JsonObject ?: continue
-      val key = condition.text("key") ?: continue
-      val stored = state[key] as? JsonPrimitive
-      if (
-        state.containsKey(key) &&
-          (stored == null || stored.isString || stored.booleanOrNull == null)
-      ) {
-        return fail("$path.openWhen.key", "$name requires a boolean state key").forItem(item)
+      openWhenErrors(value, path, state)?.let {
+        return it.forItem(item)
       }
+    }
+    return null
+  }
+
+  /** First binding rule the node breaks; the same rules that check the declared state. */
+  private fun controlErrors(
+    value: JsonObject,
+    path: String,
+    state: JsonObject,
+  ): PrototypeSpecError? =
+    nodeBindingErrors(value, path, state)
+      ?: trailingErrors(value, path, state)
+      ?: openWhenErrors(value, path, state)
+
+  /** Every state key a node binds: `stateKey`, time picker keys, a trailing control, `openWhen`. */
+  private fun boundKeys(value: JsonObject): List<String> =
+    listOfNotNull(
+      value.text("stateKey"),
+      value.text("hourKey"),
+      value.text("minuteKey"),
+      (value["trailing"] as? JsonObject)?.text("stateKey"),
+      if (value.text("type") in modalNames) (value["openWhen"] as? JsonObject)?.text("key")
+      else null,
+    )
+
+  /**
+   * A `setState` must leave every control bound to its key valid, so the key is checked as if the
+   * value were the declared state (#11452). A key no control binds, a key bound by controls of
+   * different types, and a repeat-templated value are not checked.
+   */
+  private fun setStateBindingErrors(
+    action: Located,
+    context: Context,
+    state: JsonObject,
+  ): PrototypeSpecError? {
+    val key = action.value.text("key") ?: return null
+    val written = action.value["value"] as? JsonPrimitive
+    if (written == null || action.operandTemplated) return null
+    val controls = context.nodes.filter { key in boundKeys(it.value) }
+    if (controls.map { it.value.text("type") }.toSet().size != 1) return null
+    val after = JsonObject(state + (key to written))
+    for (control in controls) {
+      val error = controlErrors(control.value, control.path, after) ?: continue
+      return fail(
+        "${action.path}.value",
+        "setState value does not fit the control bound to \"$key\": ${error.message}",
+      )
     }
     return null
   }
 
   private fun stateActionErrors(context: Context, data: JsonObject): PrototypeSpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
-    for ((value, path, item) in context.actions) {
+    for (action in context.actions) {
+      val (value, path, item) = action
+      if (value.text("type") == "setState") {
+        setStateBindingErrors(action, context, state)?.let {
+          return it.forItem(item)
+        }
+        continue
+      }
       val stored = state[value.text("key") ?: continue] as? JsonPrimitive
       val message =
         when (value.text("type")) {

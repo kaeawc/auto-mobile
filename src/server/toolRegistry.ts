@@ -43,12 +43,7 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { logger, type Logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import {
-  PLAN_AUTO_RELEASE_REASON,
-  UnissuedSessionError,
-  type Session,
-  type SessionManager,
-} from "../daemon/sessionManager";
+import { UnissuedSessionError, type Session, type SessionManager } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
 import {
   managedConnectionControlRefusal,
@@ -58,7 +53,7 @@ import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate"
 import { MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS } from "../daemon/inputDeviceOwnership";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import type { DevicePool } from "../daemon/devicePool";
-import { releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
+import { releasePlanSessionAndDevice } from "../daemon/releaseSessionAndDevice";
 import {
   assertControlNotOnForeignDaemonDevice,
   assertInputRequesterHoldsDevice,
@@ -2336,13 +2331,13 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
     try {
       // Await the release so its onSessionRelease callbacks (CtrlProxy binding +
       // detector cleanup) complete before the device is freed (#4984).
-      await releaseSessionAndDevice(
-        sessionManager,
-        devicePool,
+      // Any other call still running under the session is cut before the device is freed; the
+      // plan's own call, which is running under the session it releases, is spared (#11490).
+      await releasePlanSessionAndDevice(sessionManager, devicePool, {
+        sessionId: session.sessionId,
         deviceId,
-        session.sessionId,
-        PLAN_AUTO_RELEASE_REASON,
-      );
+        excludeExecutionId: getToolSelectionContext()?.execution?.executionId,
+      });
       logger.info(
         `Auto-released session ${session.sessionId} and freed device ${deviceId} after executePlan`,
       );

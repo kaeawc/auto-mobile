@@ -5123,12 +5123,15 @@ describe("DaemonMcpProxy", () => {
         daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
       });
       const recoveredClient = new FakeDaemonClient({
-        onCallTool: () => {
-          throw new DaemonBoundSessionLostError({
-            code: "bound_session_lost",
-            sessionUuid: "session-a",
-            reason: "session-not-found",
-          });
+        onCallTool: (_name, params) => {
+          // The daemon lost the session: only a call routed to it is refused.
+          if (params.sessionUuid === "session-a") {
+            throw new DaemonBoundSessionLostError({
+              code: "bound_session_lost",
+              sessionUuid: "session-a",
+              reason: "session-not-found",
+            });
+          }
         },
       });
       const clients = [staleClient, recoveredClient];
@@ -5155,11 +5158,21 @@ describe("DaemonMcpProxy", () => {
         expect(recoveredClient.callToolCalls).toHaveLength(1);
         const connectCallsAfterFirst = recoveredConnectSpy.mock.calls.length;
 
-        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toBeInstanceOf(
+        // The fence stays for control calls and nothing reconnects or replays the lost UUID.
+        await expect(proxy.callTool("tapOn", { text: "OK" })).rejects.toBeInstanceOf(
           DaemonBoundSessionExpiredError,
         );
         expect(recoveredConnectSpy.mock.calls.length).toBe(connectCallsAfterFirst);
         expect(recoveredClient.callToolCalls).toHaveLength(1);
+
+        // The fence raised under the first call told the caller, so a read is forwarded without
+        // a session from then on (#11483), never under the lost UUID.
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).resolves.toBeDefined();
+        expect(recoveredConnectSpy.mock.calls.length).toBe(connectCallsAfterFirst);
+        expect(recoveredClient.callToolCalls.at(-1)).toEqual({
+          toolName: "observe",
+          params: { deviceId: "device-a" },
+        });
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();
@@ -5501,14 +5514,18 @@ describe("DaemonMcpProxy", () => {
         await expect(proxy.callTool("tapOn", {})).rejects.toThrow(
           /session-a.*(?:expired|released)/i,
         );
-        // The admitted-failure refresh must not resurrect the released UUID's lease.
-        await expect(proxy.callTool("observe", {})).rejects.toThrow(
+        // The admitted-failure refresh must not resurrect the released UUID's lease: a control
+        // call stays refused, and a read is forwarded without a session because the fence raised
+        // under the cut call already told the caller (#11483).
+        await expect(proxy.callTool("tapOn", {})).rejects.toThrow(
           /session-a.*(?:expired|released)/i,
         );
+        await proxy.callTool("observe", {});
 
         expect(fakeClient.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a" } },
           { toolName: "tapOn", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: {} },
         ]);
       } finally {
         isAvailableSpy.mockRestore();

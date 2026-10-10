@@ -871,6 +871,23 @@ interface DeviceControlTransportRecoveryContext extends McpForwardRecoveryContex
 const isNonBlankSessionUuid = (value: unknown): value is string =>
   typeof value === "string" && value.trim().length > 0;
 
+/** The `ide/*` routes that write to a device or restart its service: control calls (#11486). */
+const IDE_DEVICE_MUTATION_METHODS: ReadonlySet<string> = new Set([
+  "ide/updateService",
+  "ide/setKeyValue",
+  "ide/removeKeyValue",
+  "ide/clearKeyValueFile",
+]);
+
+/** One device-mutating `ide/*` route in flight; its ownership gate hands it the execution. */
+interface IdeMutationCall {
+  /**
+   * Keep `execution` in flight until the route settles. The holder's own call (`asHolder`) is also
+   * cut by a release of its session; a forced call acts for no session and runs to its end.
+   */
+  track(execution: ActiveExecution, asHolder: boolean): void;
+}
+
 function assertSocketInputNotAborted(signal?: AbortSignal): void {
   signal?.throwIfAborted();
 }
@@ -5144,7 +5161,31 @@ export class UnixSocketServer {
     if (request.method === "input/gestureEnd") {
       return await this.handleInputGesture(request, "end", socketSessionId, input);
     }
+    return await this.dispatchIdeSocketRequest(request, socketSessionId);
+  }
 
+  /** A route that mutates a device runs as one tracked control call (#11486); the rest run bare. */
+  private async dispatchIdeSocketRequest(
+    request: DaemonRequest,
+    socketSessionId?: string,
+  ): Promise<any | undefined> {
+    if (!IDE_DEVICE_MUTATION_METHODS.has(request.method)) {
+      return await this.handleIdeSocketRequest(request, socketSessionId);
+    }
+    return await this.runTrackedIdeMutation((call) =>
+      this.handleIdeSocketRequest(request, socketSessionId, call),
+    );
+  }
+
+  /**
+   * The `ide/*` and acceptance routes. `ideMutation` is set for the routes that mutate a device
+   * ({@link IDE_DEVICE_MUTATION_METHODS}): their ownership gate tracks the call under it.
+   */
+  private async handleIdeSocketRequest(
+    request: DaemonRequest,
+    socketSessionId?: string,
+    ideMutation?: IdeMutationCall,
+  ): Promise<any | undefined> {
     switch (request.method) {
       case "ide/listFeatureFlags": {
         const flags = await this.requireFeatureFlagService().listFlags();
@@ -5299,6 +5340,7 @@ export class UnixSocketServer {
           targetDevice,
           "ide/updateService",
           (request.params as { force?: unknown }).force === true,
+          ideMutation,
         );
 
         if (args.platform === "android") {
@@ -5343,6 +5385,7 @@ export class UnixSocketServer {
           args.deviceId,
           request,
           "ide/setKeyValue",
+          ideMutation,
         );
         const appId = args.appId;
         const fileName = args.fileName;
@@ -5405,6 +5448,7 @@ export class UnixSocketServer {
           args.deviceId,
           request,
           "ide/removeKeyValue",
+          ideMutation,
         );
         const appId = args.appId;
         const fileName = args.fileName;
@@ -5443,6 +5487,7 @@ export class UnixSocketServer {
           args.deviceId,
           request,
           "ide/clearKeyValueFile",
+          ideMutation,
         );
         const appId = args.appId;
         const fileName = args.fileName;
@@ -5475,12 +5520,22 @@ export class UnixSocketServer {
    * is allowed and set. Reads stay open to watchers. Unheld devices stay open to any client,
    * except a device a managed slot holds, which only that slot's execution may mutate, `force`
    * or not (#11178).
+   *
+   * The holder's own mutation is a control call on its session, so it also passes the session
+   * admission `input/*` passes (#11486): a suspect, lapsed or idle-expired holder is refused with
+   * the typed code before anything is written. `force` overrides the local holder, so a forced
+   * call is not judged against the holder's session.
+   *
+   * Passing the gate starts the mutation's tracked execution on `ideMutation`, under the holder's
+   * session: from here to the end of the route it is control in flight on that session, forced or
+   * not, so the session is never released under it (#11486).
    */
   private async assertIdeMutationOwnership(
     request: DaemonRequest,
     device: BootedDevice,
     action: string,
     force = false,
+    ideMutation?: IdeMutationCall,
   ): Promise<void> {
     const deviceId = device.deviceId;
     const requesterSessionUuid = parseInputRequesterSessionUuid(request.method, request.params);
@@ -5502,18 +5557,91 @@ export class UnixSocketServer {
       platform: device.platform,
       gate: this.daemonState.getDevicePool(),
     });
-    if (force) {
-      return;
+    const holderSessionUuid = sessionManager.getSessionForDevice?.(deviceId) ?? undefined;
+    if (!force) {
+      assertInputRequesterHoldsDevice({
+        action,
+        deviceId,
+        ownerSessionUuid: holderSessionUuid,
+        requesterSessionUuid,
+        sessionManager,
+        remedy:
+          "pass the holding session's sessionUuid, or wait for the holder to release the device.",
+      });
     }
-    assertInputRequesterHoldsDevice({
-      action,
-      deviceId,
-      ownerSessionUuid: sessionManager.getSessionForDevice?.(deviceId) ?? undefined,
-      requesterSessionUuid,
-      sessionManager,
-      remedy:
-        "pass the holding session's sessionUuid, or wait for the holder to release the device.",
-    });
+    if (holderSessionUuid) {
+      await this.admitIdeMutationOnHolderSession(
+        executionTracker.startExecution(action, undefined, holderSessionUuid),
+        { deviceId, holderSessionUuid, force },
+        ideMutation,
+      );
+    }
+  }
+
+  /**
+   * Judge a mutating `ide/*` frame against the session holding its device, under the execution
+   * that tracks the mutation, so the admission does not mistake it for earlier work in flight.
+   * With a route to track it (`ideMutation`) the execution outlives the gate and the route ends
+   * it; otherwise it ends here.
+   */
+  private async admitIdeMutationOnHolderSession(
+    execution: ActiveExecution,
+    target: { deviceId: string; holderSessionUuid: string; force: boolean },
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<void> {
+    ideMutation?.track(execution, !target.force);
+    try {
+      executionTracker.bindDeviceExecution(execution.id, target.deviceId);
+      if (target.force) {
+        return;
+      }
+      await this.admitInputAsControlCall(execution, target.deviceId, target.holderSessionUuid);
+      // The holder's own admitted mutation is use of its session, like its input (#10824).
+      executionTracker.markSessionAdmitted(execution.id);
+    } finally {
+      if (!ideMutation) {
+        executionTracker.endExecution(execution.id);
+      }
+    }
+  }
+
+  /**
+   * Run a device-mutating `ide/*` route as one tracked control call. The route's ownership gate
+   * starts the execution once the device and its holder are known; it stays in flight until the
+   * route settles, so the heartbeat and idle monitors see control in flight on the holder's
+   * session. A release that still lands (owner disconnect, forced release) cancels the execution:
+   * the holder's own route runs its device work under that signal, and the frame answers the
+   * release's typed refusal whatever the interrupted work threw. A forced route is not the
+   * holder's call, so the release neither cuts it nor names the holder's session to its caller.
+   */
+  private async runTrackedIdeMutation<T>(run: (call: IdeMutationCall) => Promise<T>): Promise<T> {
+    const abort = new AbortController();
+    let tracked: ActiveExecution | undefined;
+    let cutByRelease: ActiveExecution | undefined;
+    const call: IdeMutationCall = {
+      track: (execution, asHolder) => {
+        tracked = execution;
+        if (!asHolder) {
+          return;
+        }
+        cutByRelease = execution;
+        const signal = execution.abortController.signal;
+        if (signal.aborted) {
+          abort.abort(signal.reason);
+          return;
+        }
+        signal.addEventListener("abort", () => abort.abort(signal.reason), { once: true });
+      },
+    };
+    try {
+      return await runWithAbortSignal(abort.signal, () => run(call));
+    } catch (error) {
+      throw sessionReleaseThatCancelledCall(cutByRelease?.cancelReason) ?? error;
+    } finally {
+      if (tracked) {
+        executionTracker.endExecution(tracked.id);
+      }
+    }
   }
 
   /**
@@ -5552,6 +5680,7 @@ export class UnixSocketServer {
     deviceId: string,
     request: DaemonRequest,
     action: string,
+    ideMutation?: IdeMutationCall,
   ): Promise<{
     platform: "android" | "ios";
     client: KeyValueMutationClient;
@@ -5569,7 +5698,7 @@ export class UnixSocketServer {
     if (!targetDevice) {
       throw new Error(`Device not found: ${deviceId}`);
     }
-    await this.assertIdeMutationOwnership(request, targetDevice, action);
+    await this.assertIdeMutationOwnership(request, targetDevice, action, false, ideMutation);
     const client =
       platform === "ios"
         ? IOSCtrlProxyClient.getInstance(targetDevice)

@@ -10,7 +10,10 @@ import {
   chooseIosDeviceType,
 } from "../../../src/daemon/managedSlots/reconciler";
 import { InFlightSlotReservations } from "../../../src/daemon/managedSlots/slotOwnerLiveness";
-import type { SlotKey } from "../../../src/daemon/managedSlots/slotRegistry";
+import {
+  MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS,
+  type SlotKey,
+} from "../../../src/daemon/managedSlots/slotRegistry";
 import {
   ProvisionDeviceError,
   type ExactDeviceSpecification,
@@ -246,6 +249,90 @@ describe("ManagedSlotReconciler", () => {
       expect(result.assignment).toMatchObject({ stableDeviceId: "UDID-FREE", state: "ready" });
       expect(await registry.listFreeDevices()).toEqual([]);
       expect(provisioner.created()).toHaveLength(0);
+    });
+
+    async function freeStoppableIosDevice(): Promise<void> {
+      inventory.devices.push({
+        name: "old",
+        platform: "ios",
+        deviceId: "UDID-FREE",
+        isRunning: false,
+        runtime: IOS_18,
+        deviceType: IPHONE_16,
+      });
+      const old = await registry.ensureScope({ ...SCOPE, runnerNamespace: "other" });
+      if (old.kind !== "ready") {
+        throw new Error("setup");
+      }
+      const oldKey = { scopeKey: old.scope.scopeKey, slotIndex: 0 };
+      await registry.initSlot(oldKey, { role: "app", platform: "ios", requestedSpec: SPEC_18 });
+      await registry.commitBinding(
+        oldKey,
+        { generation: 0, stableDeviceId: null },
+        {
+          stableDeviceId: "UDID-FREE",
+          deviceName: "old",
+          resolvedSpec: null,
+          specFingerprint: null,
+          state: "ready",
+        },
+      );
+      await registry.beginScopeInvalidation(old.scope.scopeKey, "operator_reset");
+      await registry.completeScopeInvalidation(old.scope.scopeKey);
+      timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS);
+    }
+
+    test("adopts a stopped free-pool device and boots it through the adopt provision path (#11337)", async () => {
+      await freeStoppableIosDevice();
+      const [free] = await registry.listFreeDevices();
+      const claim = { ...free!, claimedBy: "daemon-1" };
+      await registry.beginFreeDeviceStop(claim);
+      await registry.completeFreeDeviceStop(claim);
+
+      const result = expectReady(await reconciler.reconcile(request()));
+
+      expect(result.disposition).toBe("adopted");
+      expect(result.evidence.adoptedFrom).toBe("free_pool");
+      expect(provisioner.calls.map((call) => call.mode)).toEqual(["adopt"]);
+      expect(await registry.listFreeDevices()).toEqual([]);
+    });
+
+    test("adopting a stopped device at the boot limit fails typed capacity_exhausted without queueing (#11337)", async () => {
+      await freeStoppableIosDevice();
+      const [free] = await registry.listFreeDevices();
+      const claim = { ...free!, claimedBy: "daemon-1" };
+      await registry.beginFreeDeviceStop(claim);
+      await registry.completeFreeDeviceStop(claim);
+      provisioner.failWith = () =>
+        new BootCapacityExhaustedError(
+          { platform: "ios", limit: 1, booted: 1, retryAfterMs: 1_000 },
+          "full",
+        );
+
+      const result = expectFailed(await reconciler.reconcile(request()));
+
+      expect(result.failure).toMatchObject({ code: "capacity_exhausted", retryable: true });
+      // One refused boot attempt, no wait. The device is still offline and now reserved by the
+      // slot (adoption commits first), so the caller's retry reuses it once capacity frees up.
+      expect(provisioner.calls).toHaveLength(1);
+      expect(result.assignment).toMatchObject({
+        stableDeviceId: "UDID-FREE",
+        state: "provisioning",
+      });
+      expect(inventory.devices.find((device) => device.deviceId === "UDID-FREE")?.isRunning).toBe(
+        false,
+      );
+    });
+
+    test("does not adopt a free-pool device that is mid-shutdown (#11337)", async () => {
+      await freeStoppableIosDevice();
+      const [free] = await registry.listFreeDevices();
+      await registry.beginFreeDeviceStop({ ...free!, claimedBy: "daemon-1" });
+
+      const result = expectReady(await reconciler.reconcile(request()));
+
+      expect(result.disposition).toBe("created");
+      expect(await registry.listFreeDevices()).toMatchObject([{ state: "stopping" }]);
     });
 
     test("adopts this slot's own uncommitted leftover, but never a matching unmanaged device", async () => {

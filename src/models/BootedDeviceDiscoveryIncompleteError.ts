@@ -17,18 +17,21 @@ export class BootedDeviceDiscoveryIncompleteError extends ActionableError {
   constructor(
     readonly platform: Platform,
     readonly discoveryError: DeviceDiscoveryError | undefined,
+    /** Overrides the default text when a caller already has user-facing wording for the cause. */
+    message?: string,
   ) {
     super(
-      `discovery_incomplete: ${platform === "android" ? "Android" : "iOS"} booted-device ` +
-        "discovery was incomplete and is retryable" +
-        (discoveryError ? `: ${discoveryError.message}` : "."),
+      message ??
+        `discovery_incomplete: ${platform === "android" ? "Android" : "iOS"} booted-device ` +
+          "discovery was incomplete and is retryable" +
+          (discoveryError ? `: ${discoveryError.message}` : "."),
     );
   }
 }
 
 /** Android flavour of {@link BootedDeviceDiscoveryIncompleteError}. */
 export class AndroidBootedDeviceDiscoveryIncompleteError extends BootedDeviceDiscoveryIncompleteError {
-  constructor(discoveryError: DeviceDiscoveryError | undefined) {
-    super("android", discoveryError);
+  constructor(discoveryError: DeviceDiscoveryError | undefined, message?: string) {
+    super("android", discoveryError, message);
   }
 }

@@ -1962,6 +1962,60 @@ describe("CtrlProxyManager", function () {
       ).toBe(120_000);
     });
 
+    describe.each([
+      ["INSTALL_FAILED_VERSION_DOWNGRADE", "INSTALL_FAILED_VERSION_DOWNGRADE", true],
+      [
+        "the Failure [...] code, not an earlier INSTALL_ token (#11153)",
+        "Performing Streamed Install INSTALL_STREAM\nFailure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]",
+        true,
+      ],
+      ["INSTALL_FAILED_INVALID_APK stays installed", "Failure [INSTALL_FAILED_INVALID_APK]", false],
+    ])("in-place upgrade failure: %s", (_name, upgradeMessage, expectsReinstall) => {
+      test("falls back to uninstall + reinstall only when expected", async function () {
+        AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-prefetch-source-"));
+        const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
+        await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
+        Reflect.set(AndroidCtrlProxyManager, "prefetchedApkPath", prefetchedApkPath);
+
+        const localFakeAdb = new FakeAdbExecutor();
+        localFakeAdb.setCommandResponseSequence(
+          `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+          [
+            createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+            createExecResult("", ""),
+          ],
+        );
+        localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          stderr: "",
+        });
+        localFakeAdb.setCommandResponse("shell sha256sum", {
+          stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          stderr: "",
+        });
+        localFakeAdb.setCommandError("install -r -d", new Error(upgradeMessage));
+        localFakeAdb.setCommandResponse(
+          `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
+          createExecResult("Success", ""),
+        );
+        localFakeAdb.setCommandError('install "', new Error("INSTALL_FAILED_ABORTED"));
+
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          localFakeAdb,
+          new FakeTimer(),
+          { download: async () => Promise.reject(new Error("no download")) },
+        );
+
+        await manager.ensureCompatibleVersion().catch(() => undefined);
+
+        expect(
+          localFakeAdb.wasCommandExecuted(`shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`),
+        ).toBe(expectsReinstall);
+      });
+    });
+
     test("fails closed on a pinned mismatch when completed prefetch install fails and old APK remains (#2815)", async function () {
       const prevVersion = process.env.AUTOMOBILE_VERSION;
       process.env.AUTOMOBILE_VERSION = "0.0.18";

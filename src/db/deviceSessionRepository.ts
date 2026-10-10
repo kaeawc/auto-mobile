@@ -72,7 +72,7 @@ export interface DeviceSessionRecord {
   heartbeatTimeoutMs: number;
   heartbeatTimeoutSource?: "default" | "custom";
   hasReceivedHeartbeat: boolean;
-  livenessPolicy?: "heartbeat" | "cli-idle";
+  livenessPolicy?: "heartbeat" | "cli-idle" | "managed-execution";
   preCliHeartbeatTimeoutMs?: number;
   preCliHeartbeatTimeoutSource?: "default" | "custom";
   preCliSessionTimeoutMs?: number;
@@ -85,7 +85,7 @@ export interface DeviceSessionActivityUpdate {
   heartbeatTimeoutMs: number;
   hasReceivedHeartbeat: boolean;
   heartbeatTimeoutSource?: "default" | "custom";
-  livenessPolicy?: "heartbeat" | "cli-idle";
+  livenessPolicy?: "heartbeat" | "cli-idle" | "managed-execution";
   preCliHeartbeatTimeoutMs?: number;
   preCliHeartbeatTimeoutSource?: "default" | "custom";
   preCliSessionTimeoutMs?: number;

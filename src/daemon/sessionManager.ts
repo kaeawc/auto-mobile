@@ -46,6 +46,12 @@ import {
 import type { DeviceSession } from "../db/types";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { ActionableError, toActionableError } from "../models/ActionableError";
+import {
+  MANAGED_EXECUTION_LIVENESS_POLICY,
+  clampManagedExecutionIdleTimeoutMs,
+  holdsOwnerHeartbeatLease,
+  resolveManagedExecutionIdleTimeoutMs,
+} from "./managedExecutionLiveness";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
 import {
@@ -456,8 +462,16 @@ export interface PreCliLivenessSnapshot {
  *   invocation connects, runs one tool and exits, so between calls nobody is
  *   heartbeating; the session is instead reaped only after a wall-clock idle
  *   period measured in minutes, and never for a missing first heartbeat.
+ * - `managed-execution` (#11176): a session a managed slot execution holds through its stdio
+ *   proxy. Judged exactly like `heartbeat` (owner lease plus suspect grace, idle measured from the
+ *   end of the last tool call, reads never count), but its idle window is the launcher-trusted
+ *   override bounded to 2–60 minutes (default 2), and a one-shot `--cli` declaration never moves
+ *   it onto `cli-idle`. See `./managedExecutionLiveness`.
  */
-export type SessionLivenessPolicy = "heartbeat" | "cli-idle";
+export type SessionLivenessPolicy =
+  | "heartbeat"
+  | "cli-idle"
+  | typeof MANAGED_EXECUTION_LIVENESS_POLICY;
 
 /** Result of an explicit owner-authorized liveness release. */
 export type LivenessReleaseOutcome = "released" | "already-unowned" | "not-owner" | "not-found";
@@ -477,7 +491,10 @@ function persistedHeartbeatTimeoutSource(value: string | null | undefined): "def
 }
 
 function persistedLivenessPolicy(value: string | null | undefined): SessionLivenessPolicy {
-  return value === "cli-idle" ? "cli-idle" : "heartbeat";
+  if (value === "cli-idle" || value === MANAGED_EXECUTION_LIVENESS_POLICY) {
+    return value;
+  }
+  return "heartbeat";
 }
 
 function persistedPreCliLiveness(persisted: DeviceSession): PreCliLivenessSnapshot | undefined {
@@ -7556,7 +7573,7 @@ export class SessionManager {
   /** Whether the session is inside its suspect window (lease expired, grace running). */
   private isSessionSuspect(session: Session): boolean {
     return (
-      session.livenessPolicy === "heartbeat" &&
+      holdsOwnerHeartbeatLease(session.livenessPolicy) &&
       livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow())).phase === "suspect"
     );
   }
@@ -7725,6 +7742,14 @@ export class SessionManager {
       logger.warn(`Cannot adopt CLI liveness policy for session ${sessionId}: not found`);
       return false;
     }
+    if (session.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY) {
+      // A managed execution's proxy owns this session for the execution's lifetime (#11176); a
+      // one-shot CLI declaration must not widen it onto a heartbeat-free idle policy.
+      logger.warn(
+        `Refusing the CLI liveness policy for managed-execution session ${sessionId}; it stays on its owner lease`,
+      );
+      return false;
+    }
     // A `--cli` invocation reuses whatever daemon is already running, so the
     // daemon process environment cannot be the only source of the idle timeout:
     // the invocation sends its own resolved (and here re-validated, bounded)
@@ -7762,6 +7787,58 @@ export class SessionManager {
       `Session ${sessionId} adopted the CLI liveness policy (idle timeout ${session.heartbeatTimeoutMs}ms)`,
     );
     return true;
+  }
+
+  /**
+   * Put a session on the `managed-execution` liveness policy (#11176) with its idle window: the
+   * launcher-trusted `idleTimeoutMs` (bounded 2–60 minutes) or the 2-minute default. Called by the
+   * managed slot acquisition once it holds the session (epic #11172 step 5); a re-adoption updates
+   * the window. The owner lease is unchanged, and the idle deadline is re-derived from the last
+   * tool activity, never from now, so adopting the policy is not device use (#10656).
+   *
+   * Throws `ManagedSlotConfigError` for an out-of-bounds window and `ActionableError` for an
+   * unknown session or a `cli-idle` one (a one-shot CLI session is not an execution's session).
+   * A failed durable write rolls the in-memory change back and throws.
+   */
+  async adoptManagedExecutionLivenessPolicy(
+    sessionId: string,
+    options: { idleTimeoutMs?: number } = {},
+  ): Promise<Session> {
+    const idleTimeoutMs = resolveManagedExecutionIdleTimeoutMs(options.idleTimeoutMs);
+    const session = this.getSession(sessionId);
+    if (!session) {
+      throw new ActionableError(
+        `Cannot hold session ${sessionId} for a managed execution: the session is not active.`,
+      );
+    }
+    if (session.livenessPolicy === "cli-idle") {
+      throw new ActionableError(
+        `Cannot hold session ${sessionId} for a managed execution: it is owned by a one-shot CLI.`,
+      );
+    }
+    const previous = {
+      livenessPolicy: session.livenessPolicy,
+      sessionTimeoutMs: session.sessionTimeoutMs,
+      expiresAt: session.expiresAt,
+    };
+    session.livenessPolicy = MANAGED_EXECUTION_LIVENESS_POLICY;
+    session.sessionTimeoutMs = idleTimeoutMs;
+    rebaseIdleDeadlineOnLastActivity(session);
+    session.activityGeneration++;
+    const capturedGeneration = session.activityGeneration;
+    try {
+      await this.recordSessionActivity(session);
+    } catch (error) {
+      // Only the latest change may roll back, so an older failure cannot clobber newer state.
+      if (session.activityGeneration === capturedGeneration) {
+        Object.assign(session, previous);
+      }
+      throw error;
+    }
+    logger.info(
+      `Session ${sessionId} is held for a managed execution (idle window ${idleTimeoutMs}ms)`,
+    );
+    return session;
   }
 
   /**
@@ -8250,6 +8327,20 @@ export class SessionManager {
       ),
       sessionTimeoutMs: this.currentDefaultIdleWindow(persistedPreCli.sessionTimeoutMs),
     };
+    if (livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY) {
+      // The declared window is the execution's own, not a default to follow: 30 minutes (the
+      // legacy default `currentDefaultIdleWindow` rewrites) is a valid managed window (#11176).
+      return {
+        sessionTimeoutMs: clampManagedExecutionIdleTimeoutMs(persisted.session_timeout_ms),
+        heartbeatTimeoutMs: this.currentDefaultLease(
+          persisted.heartbeat_timeout_ms,
+          heartbeatTimeoutSource,
+        ),
+        heartbeatTimeoutSource,
+        hasReceivedHeartbeat: persisted.has_received_heartbeat === 1,
+        livenessPolicy,
+      };
+    }
     const sessionTimeoutMs = this.currentDefaultIdleWindow(persisted.session_timeout_ms);
     if (livenessPolicy === "cli-idle") {
       // A CLI session's heartbeat timeout is its idle timeout, whatever the stored source says.

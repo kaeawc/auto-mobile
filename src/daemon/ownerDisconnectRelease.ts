@@ -20,6 +20,7 @@ import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { ownerLeaseHeartbeat, SUSPECT_GRACE_MS } from "./livenessOwnerLease";
+import { holdsOwnerHeartbeatLease } from "./managedExecutionLiveness";
 import {
   UNSETTLED_EXECUTION_VETO_CEILING_MS,
   UnsettledExecutionVeto,
@@ -93,7 +94,7 @@ export function ownerDisconnectReleaseBlocker(
   session: OwnerSession,
   closedAt: number,
 ): string | undefined {
-  if (session.livenessPolicy !== "heartbeat") {
+  if (!holdsOwnerHeartbeatLease(session.livenessPolicy)) {
     return "cli-idle policy";
   }
   if (session.ownership === "awaiting-owner") {

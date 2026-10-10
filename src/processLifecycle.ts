@@ -2,7 +2,11 @@ import { defaultTimer, type Timer } from "./utils/SystemTimer";
 import { writeEmergencyLog } from "./utils/loggingConfig";
 import { raceWithDeadline } from "./utils/raceWithDeadline";
 
-export type ShutdownSignal = "SIGINT" | "SIGTERM" | "SIGHUP" | "stdin";
+/**
+ * What started a shutdown. `execution-owner-lost` is a managed slot proxy whose execution owner
+ * exited or which was re-parented (#11176).
+ */
+export type ShutdownSignal = "SIGINT" | "SIGTERM" | "SIGHUP" | "stdin" | "execution-owner-lost";
 
 // A clean recording finalization alone requires one second. Leave enough time
 // for every child owner to receive a bounded stop or force-stop attempt, while
@@ -146,6 +150,11 @@ export class ProcessLifecycleHandlers {
     stdin.on("close", shutdownOnStdinClose);
   }
 
+  /** Start the same shutdown a signal would, for an in-process reason (#11176). */
+  requestShutdown(signal: ShutdownSignal): Promise<void> {
+    return this.shutdown(signal);
+  }
+
   private async shutdown(signal: ShutdownSignal): Promise<void> {
     if (this.shutdownInProgress) {
       return;
@@ -251,6 +260,11 @@ export function installHangupShutdownHandler(): void {
 
 export function installStdinShutdownHandlers(stdin: StdinShutdownSource = process.stdin): void {
   processLifecycleHandlers.installStdinShutdownHandlers(stdin);
+}
+
+/** Shut the process down through the registered handler, as a signal would (#11176). */
+export function requestProcessShutdown(signal: ShutdownSignal): Promise<void> {
+  return processLifecycleHandlers.requestShutdown(signal);
 }
 
 export function setProcessShutdownHandler(

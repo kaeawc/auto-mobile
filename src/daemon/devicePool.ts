@@ -139,10 +139,12 @@ import {
 } from "./sessionPreservingRecovery";
 import { DeviceAutolockManager, type AutolockClient } from "./deviceAutolockManager";
 import {
+  currentManagedSlotReconciler,
   managedSlotRefusal,
   type ManagedDeviceRef,
   type ManagedSlotExclusion,
 } from "./managedSlots/managedSlotExclusion";
+import { DeviceAssignedToManagedSlotError } from "./managedSlots/managedSlotRefusal";
 import {
   AdbServerResetQuarantine,
   type AdbServerResetQuarantinePoolPort,
@@ -1566,6 +1568,7 @@ export class DevicePool {
 
   private createMissingDevicePort(): MissingDeviceLivenessPoolPort {
     return {
+      noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
       getDevices: () => this.devices,
       getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
       getAssignmentMutex: () => this.assignmentMutex,
@@ -1679,6 +1682,7 @@ export class DevicePool {
       {
         getSessionManager: () => this.sessionManager,
         getDaemonSessionId: () => this.daemonSessionId,
+        noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
         getDevice: (id) => this.devices.get(id),
         withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
         withTargetDeviceDiscovery: (options) => this.withTargetDeviceDiscovery(options),
@@ -1686,6 +1690,8 @@ export class DevicePool {
           this.runtimeIdentity.assertRuntimeIdentity(device, identity),
         assertNotReservedForShutdown: (device, message) =>
           this.assertNotReservedForShutdown(device, message),
+        assertNotReservedForOtherRehydration: (device) =>
+          this.assertNotReservedForOtherRehydration(device, undefined),
         recordSourceAndroidAvd: (id, image) => this.recordSourceAndroidAvd(id, image),
         notifyTargetDeviceReady: (options) => this.notifyTargetDeviceReady(options),
         trackStartedDeviceProcess: (device, process) =>
@@ -1779,6 +1785,7 @@ export class DevicePool {
   private createSessionPreservingRecovery(): SessionPreservingRecoveryRunner {
     return new SessionPreservingRecoveryRunner({
       getRecoveringSessionLoss: (id) => this.recoveringSessionLosses.get(id),
+      noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
       startAndroidRecoveryRecord: (id, details, reservations, replace) =>
         this.startAndroidRecoveryRecord(id, details, reservations, replace),
       isAndroidEmulatorActiveRelaunchEligible: (device): device is AndroidEmulatorRecoveryDevice =>
@@ -1965,6 +1972,7 @@ export class DevicePool {
   ): AdbServerResetQuarantine {
     return createAdbServerResetQuarantine(
       {
+        noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
         getAssignmentMutex: () => this.assignmentMutex,
         getDevices: () => this.devices,
         getSessionManager: () => this.sessionManager,
@@ -4199,6 +4207,7 @@ export class DevicePool {
     }
     this.discardReleasedCapture(sessionId, device.id);
     device.sessionId = null;
+    this.notifyDeviceStateChanged(device);
     return true;
   }
 
@@ -4838,6 +4847,7 @@ export class DevicePool {
     // proven. removeDevice requires an unassigned pool entry.
     device.sessionId = null;
     device.status = "idle";
+    this.notifyDeviceStateChanged(device);
     return true;
   }
 
@@ -7591,7 +7601,10 @@ export class DevicePool {
   }
 
   /** Restart recovery is about to put another session back on `device` (#11294). */
-  private assertNotReservedForOtherRehydration(device: PooledDevice, sessionId: string): void {
+  private assertNotReservedForOtherRehydration(
+    device: PooledDevice,
+    sessionId: string | undefined,
+  ): void {
     const holder = this.rehydrationReservationHolder(device);
     if (holder !== undefined && holder !== sessionId) {
       throw deviceAssignedToOtherSessionError(device.id, holder, sessionId);
@@ -7765,6 +7778,7 @@ export class DevicePool {
           this.assertDeviceCleanupComplete(deviceId);
           device.sessionId = null;
           device.status = "idle";
+          this.notifyDeviceStateChanged(device);
         }
 
         await this.assignDeviceToBoundSession(device, sessionId, platform, caller, options);
@@ -8584,11 +8598,20 @@ export class DevicePool {
   }
 
   /**
-   * Whether `sessionId` is a live autolock session that a still-connected MCP client other than
-   * `mcpSessionId` owns or routes to by autolock.
+   * Whether a still-connected MCP client other than `mcpSessionId` owns the live session
+   * `sessionId` (#11344): it acquired or restored it, or routes to it by autolock. The general
+   * rule {@link mayRestoreMcpSessionOwnership} applies, with autolock on or off.
    */
-  isAutolockSessionOwnedByOtherConnection(sessionId: string, mcpSessionId?: string): boolean {
-    if (!this.autolockManager.hasMcpSessionOwner(sessionId, mcpSessionId)) {
+  isSessionOwnedByOtherConnection(sessionId: string, mcpSessionId?: string): boolean {
+    if (mcpSessionId !== undefined) {
+      return (
+        this.hasConnectedMcpSessionOwner(sessionId, mcpSessionId) &&
+        this.sessionManager.getSession(sessionId) !== null
+      );
+    }
+    // A caller with no connection identity cannot be told apart from the owner of an ordinary
+    // session, so only a live autolock, which is owned by connection, is foreign to it (#11235).
+    if (!this.autolockManager.hasMcpSessionOwner(sessionId)) {
       return false;
     }
     const session = this.sessionManager.getSession(sessionId);
@@ -8970,11 +8993,16 @@ export class DevicePool {
     if (exclusion.holderOf(this.managedRefFor(device.id, device.platform))) {
       return true;
     }
+    return this.isUnresolvedEmulatorWhileAndroidManaged(device);
+  }
+
+  /** An Android emulator whose AVD name is unread while any Android device is managed. */
+  private isUnresolvedEmulatorWhileAndroidManaged(device: PooledDevice): boolean {
     return (
       device.platform === "android" &&
       this.isPooledAndroidEmulator(device.id) &&
       this.stableDeviceIdFor(device) === undefined &&
-      exclusion.stableIdsFor("android").size > 0
+      (this.managedSlotExclusion?.stableIdsFor("android").size ?? 0) > 0
     );
   }
 
@@ -8991,12 +9019,61 @@ export class DevicePool {
     stableIds?: ReadonlyArray<string | undefined>;
     requesterSessionUuid?: string;
   }): Error | undefined {
-    return managedSlotRefusal(this.managedSlotExclusion, {
+    const refusal = managedSlotRefusal(this.managedSlotExclusion, {
       action: input.action,
       deviceId: input.deviceId,
       device: this.managedRefFor(input.deviceId, input.platform, input.stableIds),
       requesterSessionUuid: input.requesterSessionUuid,
     });
+    if (refusal) {
+      return refusal;
+    }
+    // The same unresolved-identity rule as isManagedSlotDevice: an idle emulator whose AVD name is
+    // unread cannot be proven free, so a generic caller may not drive it (#11457). Only the
+    // session that already holds it in the pool, or a slot reconciler, passes.
+    const device = this.devices.get(input.deviceId);
+    if (
+      device &&
+      this.isUnresolvedEmulatorWhileAndroidManaged(device) &&
+      // A caller-supplied identity (the verified AVD name on acquire) was already judged above.
+      !input.stableIds?.some((id) => id !== undefined && id !== "") &&
+      !(input.requesterSessionUuid && device.sessionId === input.requesterSessionUuid) &&
+      currentManagedSlotReconciler() === undefined
+    ) {
+      return new DeviceAssignedToManagedSlotError(input.action, input.deviceId, {
+        platform: device.platform,
+        stableDeviceId: input.deviceId,
+        holder: "free",
+        scopeKey: "",
+        slotIndex: null,
+        scopeState: null,
+        execSessionUuid: null,
+      });
+    }
+    return undefined;
+  }
+
+  /** Last forced re-read per device and session, so a hammering caller costs one read per window. */
+  private readonly managedRereadAtMs = new Map<string, number>();
+
+  private mayForceManagedReread(input: {
+    deviceId: string;
+    requesterSessionUuid?: string;
+    maxAgeMs?: number;
+  }): boolean {
+    const windowMs = input.maxAgeMs ?? 0;
+    const now = this.timer.now();
+    for (const [key, at] of this.managedRereadAtMs) {
+      if (now - at >= windowMs) {
+        this.managedRereadAtMs.delete(key);
+      }
+    }
+    const key = JSON.stringify([input.deviceId, input.requesterSessionUuid]);
+    if (this.managedRereadAtMs.has(key)) {
+      return false;
+    }
+    this.managedRereadAtMs.set(key, now);
+    return true;
   }
 
   /**
@@ -9017,7 +9094,19 @@ export class DevicePool {
       return;
     }
     await this.managedSlotExclusion.refresh({ maxAgeMs: input.maxAgeMs });
-    const refusal = this.managedSlotRefusalFor(input);
+    let refusal = this.managedSlotRefusalFor(input);
+    if (
+      refusal &&
+      input.maxAgeMs &&
+      input.requesterSessionUuid &&
+      this.mayForceManagedReread(input)
+    ) {
+      // A cached snapshot can predate the requester's own claim of this slot (#11457). Re-read
+      // with a load that starts after this call before refusing a session, so a fresh execution
+      // is never refused its own device.
+      await this.managedSlotExclusion.refresh({ fresh: true });
+      refusal = this.managedSlotRefusalFor(input);
+    }
     if (refusal) {
       throw refusal;
     }

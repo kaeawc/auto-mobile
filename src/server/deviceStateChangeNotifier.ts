@@ -14,6 +14,12 @@ export interface DeviceStateChangeNotifierOptions {
   debounceMs?: number;
 }
 
+export interface DeviceStateChangeNotifier {
+  (deviceId: string): void;
+  /** Cancels the pending notification and ignores later changes (daemon shutdown). */
+  dispose(): void;
+}
+
 /**
  * Turns DevicePool state-change events into one debounced resource notification (#11413).
  * It only invalidates caches and notifies subscribers: it never touches a session, so it
@@ -21,12 +27,13 @@ export interface DeviceStateChangeNotifierOptions {
  */
 export function createDeviceStateChangeNotifier(
   options: DeviceStateChangeNotifierOptions,
-): (deviceId: string) => void {
+): DeviceStateChangeNotifier {
   const { timer, invalidate, notify, debounceMs = DEVICE_STATE_NOTIFY_DEBOUNCE_MS } = options;
   let pending: NodeJS.Timeout | undefined;
-  return (_deviceId: string) => {
+  let disposed = false;
+  const onChange = (_deviceId: string) => {
     invalidate();
-    if (pending) {
+    if (pending || disposed) {
       return;
     }
     pending = timer.setTimeout(() => {
@@ -38,4 +45,13 @@ export function createDeviceStateChangeNotifier(
       });
     }, debounceMs);
   };
+  return Object.assign(onChange, {
+    dispose: () => {
+      disposed = true;
+      if (pending) {
+        timer.clearTimeout(pending);
+        pending = undefined;
+      }
+    },
+  });
 }

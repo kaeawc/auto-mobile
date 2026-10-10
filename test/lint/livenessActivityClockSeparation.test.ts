@@ -146,6 +146,10 @@ const SESSION_CLOCK_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     // #11290: a new call's start is judged against `expiresAt` on the session clock.
     "SessionManager.isSessionExpiredForNewExecution",
     "SessionManager.isLateExecutionWhileEarlierWorkIsActive",
+    // #11359: the wall-clock request deadline is converted onto the session clock before it is
+    // compared with the session-clock restart deadline.
+    "SessionManager.waitForAbortedAssignment",
+    "SessionManager.waitForSharedAssignment",
   ],
   // #11162: the release's deferral is a session-clock instant from the execution veto.
   "src/daemon/ownerDisconnectRelease.ts": [
@@ -1189,11 +1193,18 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
   });
 
   test("session-stamp judgements read the session clock, never the raw wall clock (#11105)", () => {
-    const reads = Object.entries(SESSION_CLOCK_JUDGEMENTS).flatMap(([path, roots]) =>
-      roots.flatMap((root) =>
-        forbiddenReads(models.get(path)!, root, new Set(["timer.now"]), wallTimerReadOf),
-      ),
-    );
+    // The frame conversions are the one place that pairs a wall read with a session-clock read.
+    const conversions = [
+      "SessionManager.wallToSessionClock:",
+      "SessionManager.sessionClockToWall:",
+    ];
+    const reads = Object.entries(SESSION_CLOCK_JUDGEMENTS)
+      .flatMap(([path, roots]) =>
+        roots.flatMap((root) =>
+          forbiddenReads(models.get(path)!, root, new Set(["timer.now"]), wallTimerReadOf),
+        ),
+      )
+      .filter((read) => !conversions.some((conversion) => read.includes(` ${conversion}`)));
     expect(reads).toEqual([]);
   });
 

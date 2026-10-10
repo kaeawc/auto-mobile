@@ -304,11 +304,19 @@ function managedConnectionRegistrationRefusal(
   if (!managedSlots) {
     return undefined;
   }
-  const refuse = (reason: string): DaemonMethodResult => ({
-    success: false,
-    code: DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE,
-    error: `Managed slot registration refused: ${reason}`,
-  });
+  const refuse = (reason: string): DaemonMethodResult => {
+    // The connection declared itself managed, so a refusal must not leave it generic: the slot
+    // set is fixed for its lifetime. Bind an unbound socket fail-closed with zero sessions, so
+    // device acquisition and lifecycle stay refused while reads remain open (#11399).
+    if (scopes && socketSessionId !== undefined && !binding) {
+      scopes.bind(socketSessionId, { scopeKey: managedSlots.scopeKey, sessionUuids: [] });
+    }
+    return {
+      success: false,
+      code: DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE,
+      error: `Managed slot registration refused: ${reason}`,
+    };
+  };
   if (!scopes || socketSessionId === undefined) {
     return refuse("this daemon cannot bind managed connections.");
   }

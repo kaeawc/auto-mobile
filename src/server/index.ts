@@ -1091,6 +1091,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             return device ? { deviceId: device.id, platform: device.platform } : undefined;
           },
           name === "setActiveDevice",
+          name !== "setActiveDevice" &&
+            (tool.isDeviceReadOnlyCall?.(toolParams) === true ||
+              (daemonMode &&
+                daemonState.isInitialized() &&
+                daemonState.getManagedConnectionScopes().get(requestMcpSessionId) !== undefined)),
         );
       }
     }

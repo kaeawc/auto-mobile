@@ -33,6 +33,7 @@ import {
 
 const IOS_18 = "com.apple.CoreSimulator.SimRuntime.iOS-18-0";
 const IOS_17 = "com.apple.CoreSimulator.SimRuntime.iOS-17-5";
+const IOS_9 = "com.apple.CoreSimulator.SimRuntime.iOS-9-0";
 const IPHONE_16 = "com.apple.CoreSimulator.SimDeviceType.iPhone-16";
 const SPEC_18: ExactDeviceSpecification = { runtime: IOS_18, deviceType: IPHONE_16 };
 const SPEC_17: ExactDeviceSpecification = { runtime: IOS_17, deviceType: IPHONE_16 };
@@ -1269,12 +1270,46 @@ describe("DefaultManagedSpecResolver any model", () => {
     expect(
       await new DefaultManagedSpecResolver(unreadable).resolve("ios", { runtime: IOS_18 }, {}),
     ).toMatchObject({ kind: "unresolved" });
+    // The runtime is installed but no listed iPhone supports it: a model/runtime incompatibility.
     expect(
-      await new DefaultManagedSpecResolver(ANY_MODEL_CATALOG).resolve(
-        "ios",
-        { runtime: "com.apple.CoreSimulator.SimRuntime.iOS-9-0" },
-        {},
-      ),
+      await new DefaultManagedSpecResolver({
+        getRuntimesChecked: async () => [runtime(IOS_9, "9.0")],
+        getDeviceTypesChecked: ANY_MODEL_CATALOG.getDeviceTypesChecked,
+      }).resolve("ios", { runtime: IOS_9 }, {}),
+    ).toMatchObject({ kind: "unsupported", code: "runtime_incompatible" });
+  });
+
+  test("malformed or uninstalled iOS runtimes are spec_unsupported, as on Android (#11271)", async () => {
+    const resolver = new DefaultManagedSpecResolver(ANY_MODEL_CATALOG);
+    // Malformed: not a CoreSimulator runtime identifier (Android's malformed image id is the same).
+    for (const spec of [
+      { runtime: "android-36" },
+      { runtime: "android-36", deviceType: IPHONE_16 },
+    ]) {
+      const malformed = await resolver.resolve("ios", spec, {});
+      expect(malformed).toMatchObject({ kind: "unsupported", code: "spec_unsupported" });
+      expect((malformed as { message: string }).message).toContain("android-36");
+    }
+    expect(
+      await new DefaultManagedSpecResolver().resolve("ios", { runtime: "android-36" }, {}),
+    ).toMatchObject({ kind: "unsupported", code: "spec_unsupported" });
+    // Well formed but not installed, with or without a model (Android's uninstalled image too).
+    for (const spec of [{ runtime: IOS_9 }, { runtime: IOS_9, deviceType: IPHONE_16 }]) {
+      const missing = await resolver.resolve("ios", spec, {});
+      expect(missing).toMatchObject({ kind: "unsupported", code: "spec_unsupported" });
+      expect((missing as { message: string }).message).toContain(IOS_18);
+    }
+    // Installed but unavailable, or out of the model's range: runtime_incompatible.
+    const unavailable = new DefaultManagedSpecResolver({
+      getRuntimesChecked: async () => [runtime(IOS_18, "18.0", false)],
+      getDeviceTypesChecked: ANY_MODEL_CATALOG.getDeviceTypesChecked,
+    });
+    expect(await unavailable.resolve("ios", SPEC_18, {})).toMatchObject({
+      kind: "unsupported",
+      code: "runtime_incompatible",
+    });
+    expect(
+      await resolver.resolve("ios", { runtime: IOS_18, deviceType: IPHONE_OLD }, {}),
     ).toMatchObject({ kind: "unsupported", code: "runtime_incompatible" });
   });
 
@@ -1303,6 +1338,26 @@ describe("DefaultManagedSpecResolver any model", () => {
     expect(await unreadable.resolve("android", { runtime: installed }, {})).toMatchObject({
       kind: "resolved",
     });
+  });
+
+  test("an iOS device type the simulator catalog does not list is a typed spec_unsupported (#11271)", async () => {
+    const resolver = new DefaultManagedSpecResolver(ANY_MODEL_CATALOG);
+    const nonexistent = "com.apple.CoreSimulator.SimDeviceType.iPhone-99-Nonexistent";
+    const missing = await resolver.resolve("ios", { runtime: IOS_18, deviceType: nonexistent }, {});
+    expect(missing).toMatchObject({ kind: "unsupported", code: "spec_unsupported" });
+    expect((missing as { message: string }).message).toContain(nonexistent);
+    expect((missing as { message: string }).message).toContain(IPHONE_16);
+    expect(await resolver.resolve("ios", SPEC_18, {})).toMatchObject({ kind: "resolved" });
+    // An unreadable catalog is not proof the type is missing; simctl stays the authority.
+    const unreadable = new DefaultManagedSpecResolver({
+      getRuntimesChecked: ANY_MODEL_CATALOG.getRuntimesChecked,
+      getDeviceTypesChecked: async () => {
+        throw new Error("simctl timed out");
+      },
+    });
+    expect(
+      await unreadable.resolve("ios", { runtime: IOS_18, deviceType: nonexistent }, {}),
+    ).toMatchObject({ kind: "resolved" });
   });
 
   test("a cutout preference needs an explicit model; 'any' does not", async () => {

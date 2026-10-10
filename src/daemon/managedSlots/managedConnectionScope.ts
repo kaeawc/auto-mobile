@@ -9,8 +9,8 @@ import { DeviceOutsideManagedSlotsError } from "./managedSlotRefusal";
  * {@link ManagedConnectionScopes.bind}; the binding ends with the socket.
  *
  * For a bound connection, control and lifecycle are confined to the slot devices: a control call on
- * any other device, a call naming any other session, and the tools that acquire, start, provision or
- * delete devices are refused with `device_outside_managed_slots`. Reads stay open everywhere (owner
+ * any other device, a call naming any other session, and the tools that acquire, start, stop,
+ * provision or delete devices are refused with `device_outside_managed_slots`. Reads stay open everywhere (owner
  * decision Q6). Unbound (generic) connections are unaffected; their protection against slot devices
  * is the generic `device_assigned_to_managed_slot` exclusion.
  */
@@ -46,14 +46,18 @@ export class ManagedConnectionScopes {
 }
 
 /**
- * Tools a managed connection may not call at all: they acquire, boot, provision or delete devices,
- * which for a managed execution only slot acquisition does (design section 5).
+ * Tools a managed connection may not call at all: they acquire, boot, stop, provision or delete
+ * devices, which for a managed execution only slot acquisition and release do (design section 5).
+ * `killDevice` is refused even on the connection's own slot device (#11271): the connection cannot
+ * boot it again (`getAndroid`/`getApple`/`startDevice` are refused), so a stop would strand the
+ * execution; the next acquisition on the slot boots and reuses the device.
  */
 export const MANAGED_CONNECTION_REFUSED_TOOLS: ReadonlySet<string> = new Set([
   "getAndroid",
   "getApple",
   "startDevice",
   "provisionDevice",
+  "killDevice",
   "deleteDevice",
 ]);
 
@@ -94,7 +98,7 @@ export function managedConnectionControlRefusal(input: {
 
 /**
  * The refusal for a plain (not device-aware) tool from a bound managed connection: the slot
- * lifecycle tools always, `setActiveDevice` and `killDevice` off-slot. Other plain tools (reads,
+ * lifecycle tools always, `setActiveDevice` off-slot. Other plain tools (reads,
  * settings of the connection itself) pass.
  */
 export function managedConnectionPlainToolRefusal(input: {
@@ -116,21 +120,6 @@ export function managedConnectionPlainToolRefusal(input: {
       binding,
       action: toolName,
       deviceId: stringArg(args.deviceId),
-      requesterSessionUuid: input.requesterSessionUuid,
-      slotDeviceOf: input.slotDeviceOf,
-    });
-  }
-  if (toolName === "killDevice") {
-    const device = args.device;
-    const deviceId =
-      device && typeof device === "object"
-        ? stringArg((device as Record<string, unknown>).deviceId)
-        : undefined;
-    return managedConnectionControlRefusal({
-      binding,
-      action: toolName,
-      // A kill names its target; one that names none cannot be proven to be a slot device.
-      deviceId: deviceId ?? "",
       requesterSessionUuid: input.requesterSessionUuid,
       slotDeviceOf: input.slotDeviceOf,
     });

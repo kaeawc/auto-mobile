@@ -4,6 +4,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { assertInputNotOnForeignManagedSlotDevice } from "../../src/daemon/inputDeviceOwnership";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
 import {
   DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE,
@@ -54,6 +55,7 @@ describe("managed-slot lifecycle and input exclusion", () => {
   let sessionManager: SessionManager;
   let registry: FakeSlotRegistry;
   let slot: SlotKey;
+  let lifecycleCoordinator: InMemoryVirtualDeviceLifecycleCoordinator;
 
   const tool = (name: string) => ToolRegistry.getTool(name)!.handler;
 
@@ -87,7 +89,9 @@ describe("managed-slot lifecycle and input exclusion", () => {
       now: () => new Date(0),
     });
     manager.setBootedDevices("ios", [slotDevice, freeDevice]);
+    lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
     setDeviceToolsDependencies({
+      lifecycleCoordinator,
       deviceManagerFactory: () => manager,
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
@@ -174,6 +178,36 @@ describe("managed-slot lifecycle and input exclusion", () => {
     }
     expect(manager.killed).toEqual([]);
     expect(manager.wasMethodCalled("destroyDevice")).toBe(false);
+  });
+
+  test("a refused deleteDevice does not preempt the slot acquisition preparing the device (#11271)", async () => {
+    // The managed acquisition booting the slot device holds its lifecycle lease.
+    const acquisition = await lifecycleCoordinator.reserve(
+      { kind: "stable", platform: "ios", stableId: slotDevice.deviceId },
+      { operation: "start", deadlineMs: 60_000 },
+    );
+
+    const pending = tool("deleteDevice")(deleteArgs()) as Promise<{
+      content: Array<{ text: string }>;
+    }>;
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    for (let i = 0; i < 20 && !settled; i++) {
+      await Promise.resolve();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    // Refused before reserving the teardown lease: the acquisition keeps running.
+    expect(acquisition.signal.aborted).toBe(false);
+    acquisition.release();
+    const body = JSON.parse((await pending).content[0].text) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      success: false,
+      failure: { code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE, phase: "precondition" },
+    });
+    expect(settled).toBe(true);
   });
 
   test("getApple of a stopped slot simulator is refused before any boot or bind", async () => {

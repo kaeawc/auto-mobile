@@ -243,6 +243,13 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
         guard response["success"] as? Bool ?? false else {
             let message = response["error"] as? String ?? "Daemon returned error"
             PerfTimer.log("sendRequest ERROR: \(message)")
+            // A typed failed frame (code/retryable at the top level) keeps its verdict: a terminal
+            // code is not retried, a retryable one is (#11544). An untyped one stays a server error.
+            if let refusal = AutoMobilePlanExecutor.DaemonRefusal.parse(response),
+               refusal.code != nil || refusal.retryable
+            {
+                throw MCPClientError.refused(refusal)
+            }
             throw MCPClientError.serverError(message)
         }
         guard let result = response["result"] as? [String: Any] else {

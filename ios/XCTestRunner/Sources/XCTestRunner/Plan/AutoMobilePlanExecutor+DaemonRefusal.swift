@@ -97,7 +97,7 @@ extension AutoMobilePlanExecutor {
                 message: message,
                 retryable: (field("retryable") as? Bool) == true,
                 nextAction: field("nextAction") as? String,
-                retryAfterMs: (field("retryAfterMs") as? NSNumber)?.intValue
+                retryAfterMs: DeviceWaitBackoff.usableHintMs(wire: field("retryAfterMs"))
             )
         }
     }
@@ -119,19 +119,37 @@ extension AutoMobilePlanExecutor {
         static let finalizeWaitCodes: Set<String> = ["device_cleanup_in_progress", "device_shutting_down"]
 
         let budgetMs: Int
-        private(set) var waits = 0
-        private(set) var waitedMs = 0
+        private(set) var waits: Int
+        private(set) var waitedMs: Int
 
-        init(budgetMs: Int = DeviceWaitBackoff.defaultBudgetMs) {
+        init(budgetMs: Int = DeviceWaitBackoff.defaultBudgetMs, waits: Int = 0, waitedMs: Int = 0) {
             self.budgetMs = budgetMs
+            self.waits = waits
+            self.waitedMs = waitedMs
+        }
+
+        /// A wire `retryAfterMs` as the runners use it: nil when absent, not a whole number, zero or
+        /// negative; otherwise clamped to `finalizeWaitCapMs` so adding it to a waited time cannot
+        /// overflow (#11544). Android's `positiveRetryAfterMs`.
+        static func usableHintMs(wire: Any?) -> Int? {
+            guard let number = wire as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+            let value = number.doubleValue
+            guard value.isFinite, value > 0, value == value.rounded() else { return nil }
+            return Int(min(value, Double(finalizeWaitCapMs)))
+        }
+
+        static func usableHintMs(_ hint: Int?) -> Int? {
+            guard let hint, hint > 0 else { return nil }
+            return min(hint, finalizeWaitCapMs)
         }
 
         /// Total wait budget for this refusal: `budgetMs`, stretched for the finalize codes to the
         /// time already waited plus the daemon's remaining-finalize `retryAfterMs`, clamped to
         /// `finalizeWaitCapMs` (#11360, #11538). Android's `deviceOwnedBudgetMs`.
         private func effectiveBudgetMs(retryAfterMs: Int?, code: String?) -> Int {
-            guard let code, Self.finalizeWaitCodes.contains(code), let retryAfterMs else { return budgetMs }
-            return max(budgetMs, min(waitedMs + retryAfterMs, Self.finalizeWaitCapMs))
+            guard let code, Self.finalizeWaitCodes.contains(code), let hintMs = Self.usableHintMs(retryAfterMs)
+            else { return budgetMs }
+            return max(budgetMs, min(waitedMs + hintMs, Self.finalizeWaitCapMs))
         }
 
         /// The next delay, recorded as waited, or nil once the budget is spent.
@@ -141,7 +159,7 @@ extension AutoMobilePlanExecutor {
             let doubled = Self.initialDelayMs << min(waits, 8)
             let backoff = min(doubled, Self.maxDelayMs)
             let isFinalize = code.map(Self.finalizeWaitCodes.contains) ?? false
-            let hint = isFinalize ? 0 : (retryAfterMs ?? 0)
+            let hint = isFinalize ? 0 : (Self.usableHintMs(retryAfterMs) ?? 0)
             let delay = min(max(backoff, hint), remaining)
             waits += 1
             waitedMs += delay

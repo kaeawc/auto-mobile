@@ -148,9 +148,15 @@ export class FakeInstalledAppsRepository implements InstalledAppsStore {
     this.rows = this.rows.filter((row) => row.device_id !== deviceId);
   }
 
-  async clearOldDaemonSessions(currentDaemonSessionId: string): Promise<void> {
+  async clearOldDaemonSessions(
+    currentDaemonSessionId: string,
+    liveDaemonSessionIds: ReadonlySet<string> = new Set(),
+  ): Promise<void> {
     this.rows = this.rows.filter(
-      (row) => row.daemon_session_id === null || row.daemon_session_id === currentDaemonSessionId,
+      (row) =>
+        row.daemon_session_id === null ||
+        row.daemon_session_id === currentDaemonSessionId ||
+        liveDaemonSessionIds.has(row.daemon_session_id),
     );
   }
 

@@ -337,6 +337,21 @@ describe("InstalledAppsRepository", () => {
     expect(device2Apps).toHaveLength(0);
   });
 
+  test("clearOldDaemonSessions keeps rows owned by a live peer daemon (#11158)", async () => {
+    await seed("device-1", 0, "com.app1", false, 1000);
+    await seed("device-2", 0, "com.app2", false, 1000);
+    await seed("device-3", 0, "com.app3", false, 1000);
+    await repo.setSessionTracking("session-A", "device-1", 1000);
+    await repo.setSessionTracking("live-peer", "device-2", 2000);
+    await repo.setSessionTracking("dead-daemon", "device-3", 3000);
+
+    await repo.clearOldDaemonSessions("session-A", new Set(["live-peer"]));
+
+    expect(await repo.listInstalledApps("device-1")).toHaveLength(1);
+    expect(await repo.listInstalledApps("device-2")).toHaveLength(1);
+    expect(await repo.listInstalledApps("device-3")).toHaveLength(0);
+  });
+
   test("setSessionTracking claims only unowned rows and never rebinds another daemon's rows", async () => {
     // Row already owned by daemon-A, and a second unowned row on the same device.
     await db

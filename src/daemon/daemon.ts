@@ -4187,8 +4187,6 @@ export class Daemon {
       // the registry empty (the pre-#6225 behavior) rather than blocking the
       // FATAL database bring-up this method guards.
       await this.toolSelectionProfileProvenanceLoader.load();
-      // Clear installed apps cache from previous daemon sessions
-      await this.installedAppsRepository.clearOldDaemonSessions(this.daemonSessionId);
       // A discovery failure is intentionally startup-fatal through this method's
       // catch: treating it as an empty live set would let this daemon steal a
       // live peer's sessions, which is less safe than refusing startup.
@@ -4200,6 +4198,12 @@ export class Daemon {
       if (incumbentDaemonSessionId !== undefined) {
         liveDaemonSessionIds.add(incumbentDaemonSessionId);
       }
+      // Clear installed apps cache from previous daemon sessions, keeping a live
+      // peer's rows (issue #11158) — hence after the live set is computed.
+      await this.installedAppsRepository.clearOldDaemonSessions(
+        this.daemonSessionId,
+        liveDaemonSessionIds,
+      );
       await this.deviceSessionRepository.markStaleActiveSessionsExpired(
         this.daemonSessionId,
         // released_at_ms is judged against the session clock everywhere else (#11129).

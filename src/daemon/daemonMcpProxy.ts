@@ -4576,9 +4576,7 @@ export class DaemonMcpProxy {
     this.clearBoundSessionUuid();
     // Other held sessions keep depending on this keeper after the latest binding
     // is fenced, so it only stops once nothing is left to heartbeat (#9335).
-    if (this.otherHeldSessions.size === 0) {
-      void this.stopBoundSessionHeartbeat();
-    }
+    this.syncHeartbeatKeeper();
     // A result-minted binding scoped the tool list the client last fetched; the
     // connection is now unbound, so prompt a re-list (binding does the same).
     // A declared binding's discovery keeps failing, so there is nothing to refresh.
@@ -4679,6 +4677,63 @@ export class DaemonMcpProxy {
     return this.client;
   }
 
+  /**
+   * Heartbeat state machine (#11411, #11400). The proxy tracks the LATEST binding
+   * (`boundSessionUuid`), the sessions it HOLDS besides it (`otherHeldSessions`) and one terminal
+   * FENCE (`terminalBoundSession`); the keeper is one interval for all of them.
+   *
+   * | state of a session                                   | keeper     | heartbeated | its next call             |
+   * | ---------------------------------------------------- | ---------- | ----------- | ------------------------- |
+   * | latest, claimable (minted here or startup-declared)  | runs       | every tick  | forwarded                 |
+   * | latest, only named in a call's args (#10664)         | for others | never       | forwarded                 |
+   * | latest, heartbeat answered not-found with no release | for others | not until a | forwarded: the daemon     |
+   * |   reason or a recoverable one (a restarted daemon,   |            | call reaches| restores it or refuses,   |
+   * |   `device-restart:<id>`)                             |            | it again    | and success re-arms it    |
+   * | held                                                 | runs       | every tick  | forwarded                 |
+   * | held, heartbeat answered not-found                   | for others | never       | forwarded, daemon decides |
+   * | fenced (terminal release reason, expired replay      | for others | never       | refused locally           |
+   * |   lease, exhausted liveness recovery)                |            |             |                           |
+   *
+   * "for others" means the session itself asks for no keeper: the keeper runs exactly when some
+   * session in a "runs" row exists ({@link hasHeartbeatTargets}), whatever became of its siblings.
+   * A fence never coexists with a latest binding. A not-found heartbeat fences only with a terminal
+   * release reason ({@link heartbeatSessionNotFound}). {@link syncHeartbeatKeeper} is the one place
+   * that starts or stops the keeper to match.
+   */
+  private hasHeartbeatTargets(): boolean {
+    return this.otherHeldSessions.size > 0 || this.latestBindingHeartbeatable();
+  }
+
+  /** The latest binding is claimable and the daemon has not answered not-found for it. */
+  private latestBindingHeartbeatable(): boolean {
+    return this.latestBindingClaimable() && this.latestBindingNotFound !== this.boundSessionUuid;
+  }
+
+  /**
+   * Make the keeper match the table above: stopped once nothing is left to heartbeat, running
+   * while anything is. Called wherever the latest binding, the held set or the fence changes. A
+   * keeper that lost its transport keeps running: its tick drives the reconnect.
+   */
+  private syncHeartbeatKeeper(): void {
+    if (!this.hasHeartbeatTargets()) {
+      if (this.heartbeatKeeperStarted) {
+        // Cleared now, not once the tick in flight settles: a session held again meanwhile
+        // must find the keeper stopped and restart it.
+        this.heartbeatKeeperStarted = false;
+        this.tickLateness.reset();
+        void this.heartbeatKeeper.stop();
+      }
+      return;
+    }
+    if (this.heartbeatKeeperStarted || this.closing || !this.transportLive) {
+      return;
+    }
+    // A fresh cadence, seeded so even its first tick can be recognised as late (#10053).
+    this.tickLateness.note(this.timer.now());
+    this.heartbeatKeeper.start();
+    this.heartbeatKeeperStarted = true;
+  }
+
   private startBoundSessionHeartbeat(): void {
     if (
       this.boundSessionUuid &&
@@ -4715,6 +4770,7 @@ export class DaemonMcpProxy {
     if (
       !(this.boundSessionUuid && !this.terminalBoundSession && this.transportLive && !this.closing)
     ) {
+      this.syncHeartbeatKeeper();
       return;
     }
     if (this.heartbeatKeeperStarted) {
@@ -4734,27 +4790,19 @@ export class DaemonMcpProxy {
       this.startBoundSessionHeartbeat();
       return;
     }
-    if (!this.latestBindingClaimable()) {
-      // Only named in a tool call's args: never claimed or heartbeated (#10664).
+    if (!this.latestBindingHeartbeatable()) {
+      // Only named in a tool call's args: never claimed or heartbeated (#10664). Or the daemon
+      // answered not-found for it: a tool call restores it, not another heartbeat (#10702).
+      this.syncHeartbeatKeeper();
       return;
     }
     await this.sendFirstBoundSessionHeartbeat();
-    // Re-validate after the awaited round-trip: a session-released notification or
-    // close() landing mid-send may have terminally fenced this binding and stopped
-    // the keeper. Restarting it here would leak a no-op interval and desync
-    // heartbeatKeeperStarted from the fenced state. Mirrors startBoundSessionHeartbeat's guard.
-    if (
-      !(this.boundSessionUuid && !this.terminalBoundSession && this.transportLive && !this.closing)
-    ) {
-      return;
-    }
-    // The keeper owns every subsequent tick, its reconnect, and terminal fencing.
-    // No immediate run() here: the direct send above already delivered the first
-    // heartbeat, and a second would duplicate it.
-    // Seed the cadence so even the first keeper tick can be recognised as late (#10053).
-    this.tickLateness.note(this.timer.now());
-    this.heartbeatKeeper.start();
-    this.heartbeatKeeperStarted = true;
+    // Re-validate after the awaited round-trip: a session-released notification or close()
+    // landing mid-send may have fenced this binding. The keeper then runs only for the sessions
+    // still held besides it (#11411), never as a no-op interval for a fenced binding. Otherwise it
+    // owns every subsequent tick, its reconnect, and terminal fencing. No immediate run(): the
+    // direct send above already delivered the first heartbeat, and a second would duplicate it.
+    this.syncHeartbeatKeeper();
   }
 
   /**
@@ -4795,16 +4843,7 @@ export class DaemonMcpProxy {
         .join(", ")}`,
     );
     await Promise.all(resumed.map((session) => this.sendResumeClaim(client, session.sessionId)));
-    if (
-      !this.heartbeatKeeperStarted &&
-      this.otherHeldSessions.size > 0 &&
-      this.transportLive &&
-      !this.closing
-    ) {
-      this.tickLateness.note(this.timer.now());
-      this.heartbeatKeeper.start();
-      this.heartbeatKeeperStarted = true;
-    }
+    this.syncHeartbeatKeeper();
   }
 
   /**
@@ -5497,20 +5536,8 @@ export class DaemonMcpProxy {
 
   /** Restart the keeper for resumed sessions when the handover idled it (#10989). */
   private resumeHeartbeatKeeper(): void {
-    if (
-      this.closing ||
-      !this.transportLive ||
-      (!this.latestBindingClaimable() && this.otherHeldSessions.size === 0)
-    ) {
-      return;
-    }
-    if (!this.heartbeatKeeperStarted) {
-      // A later start is a fresh cadence, not a late tick.
-      this.tickLateness.note(this.timer.now());
-    }
     // Idempotent while the keeper runs; restarts it when the handover's stop already cleared it.
-    this.heartbeatKeeper.start();
-    this.heartbeatKeeperStarted = true;
+    this.syncHeartbeatKeeper();
   }
 
   /**
@@ -5948,9 +5975,7 @@ export class DaemonMcpProxy {
       return;
     }
     this.forgetSessionLivenessState(sessionUuid, keepHandover);
-    if (this.otherHeldSessions.size === 0 && !this.latestBindingClaimable()) {
-      void this.stopBoundSessionHeartbeat();
-    }
+    this.syncHeartbeatKeeper();
   }
 
   /** The latest binding moves on: its session stays held and keeps its claim state. */
@@ -6360,7 +6385,16 @@ export class DaemonMcpProxy {
     }
     // Stopping the previous binding's keeper may yield. Recheck before publishing
     // the new binding so a release delivered during that await cannot be missed.
-    this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
+    const releasedWhileStopping = this.sessionReleaseReasonSince(
+      mintedSessionUuid,
+      acquisitionReleaseEpoch,
+    );
+    if (releasedWhileStopping) {
+      // The keeper was stopped for a binding that is never published: the sessions this proxy
+      // still holds keep their heartbeats (#11411).
+      this.syncHeartbeatKeeper();
+      throw new DaemonBoundSessionExpiredError(mintedSessionUuid, releasedWhileStopping);
+    }
     this.terminalBoundSession = undefined;
     this.holdPreviousBinding(mintedSessionUuid);
     this.boundSessionUuid = mintedSessionUuid;

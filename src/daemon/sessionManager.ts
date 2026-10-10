@@ -3020,6 +3020,22 @@ export class SessionManager {
     );
   }
 
+  /**
+   * A control call that waited on a device restart and failed is still the client using the
+   * session, so the recovery's idle window restarts where the call's admission failed (#11281).
+   * It is credited here rather than at the call's end: a call that fails admission ends
+   * unadmitted, exactly like a read, and a read must never extend the window.
+   */
+  private creditControlCallFailedOnRestartRecovery(sessionId: string, access: SessionAccess): void {
+    if (
+      access === "acquire" &&
+      !this.sessions.has(sessionId) &&
+      this.restartRecoveryActivityAt.has(sessionId)
+    ) {
+      this.recordRestartRecoveryActivity(sessionId);
+    }
+  }
+
   /** Preserve the existing access-string API while admitting request-local options. */
   private resolveSessionAcquisitionOptions(options: SessionAccess | SessionAcquisitionOptions): {
     access: SessionAccess;
@@ -3036,6 +3052,29 @@ export class SessionManager {
    * method's branch count under the complexity ceiling.
    */
   private async startOrJoinUnseenAssignment(
+    sessionId: string,
+    devicePool: SessionDeviceAssigner | undefined,
+    platform: Platform | undefined,
+    requireIssuedSession: boolean,
+    access: SessionAccess,
+    requestDeadlineMs?: number,
+  ): Promise<Session> {
+    try {
+      return await this.joinOrStartUnseenAssignment(
+        sessionId,
+        devicePool,
+        platform,
+        requireIssuedSession,
+        access,
+        requestDeadlineMs,
+      );
+    } catch (error) {
+      this.creditControlCallFailedOnRestartRecovery(sessionId, access);
+      throw error;
+    }
+  }
+
+  private async joinOrStartUnseenAssignment(
     sessionId: string,
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
@@ -7796,8 +7835,10 @@ export class SessionManager {
     }
     const session = this.sessions.get(sessionId);
     if (!session && this.restartRecoveryActivityAt.has(sessionId)) {
-      // A control call that waited on, or failed because of, a device restart is still the client
-      // using the session: restart its idle window so recovery is only lost after real quiet.
+      // An admitted control call that waited on, or failed because of, a device restart is still
+      // the client using the session: restart its idle window so recovery is only lost after real
+      // quiet. One that failed at admission was credited there
+      // ({@link creditControlCallFailedOnRestartRecovery}).
       this.recordRestartRecoveryActivity(sessionId);
       return;
     }

@@ -18,6 +18,9 @@ final class PrototypeModeValueTests: XCTestCase {
 
     private func hex(_ value: String) throws -> PrototypeRGBA { try XCTUnwrap(PrototypeRGBA(hex: value)) }
 
+    /// The baseline `scrim` role (black) at the scrim-role opacity.
+    private let dim = PrototypeRGBA(red: 0, green: 0, blue: 0, alpha: 0.4)
+
     private func palette(_ spec: PrototypeSpec, dark: Bool) -> PrototypePalette {
         let palette = PrototypePalette.make(theme: spec.theme, systemDark: dark)
         XCTAssertEqual(palette.dark, dark)
@@ -81,7 +84,7 @@ final class PrototypeModeValueTests: XCTestCase {
         try XCTAssertEqual(palette.resolve(style.shadowColor), hex("#40000000"))
         try XCTAssertEqual(palette.resolve(children[0].style?.color), hex("#0B57D0"))
         try XCTAssertEqual(palette.scrim(children[1].scrim), hex("#52000000"))
-        try XCTAssertEqual(palette.scrim(children[2].scrim), hex("#000000"), "the scrim role as it is: opaque")
+        XCTAssertEqual(palette.scrim(children[2].scrim), dim, "the scrim role is dimmed, in a sheet scrim")
         let whenOpen = try XCTUnwrap(spec.root.resolvedStyle(state: ["open": .bool(true)]))
         try XCTAssertEqual(palette.resolve(whenOpen.background), hex("#FFFBFE"), "surface from theme.colors.light")
         // Stops: a role (the flat primary override), a pair's hex side, a hex literal.
@@ -99,13 +102,13 @@ final class PrototypeModeValueTests: XCTestCase {
         let palette = palette(spec, dark: true)
         let style = try XCTUnwrap(spec.root.style)
         let children = try XCTUnwrap(spec.root.children)
-        try XCTAssertEqual(palette.scrim(spec.window.placement.scrim), hex("#000000"), "the scrim role")
+        XCTAssertEqual(palette.scrim(spec.window.placement.scrim), dim, "a pair side naming the scrim role")
         try XCTAssertEqual(palette.resolve(style.background), hex("#101014"))
         try XCTAssertEqual(palette.resolve(style.border?.color), hex("#44FFFFFF"))
-        try XCTAssertEqual(palette.resolve(style.shadowColor), hex("#000000"), "the scrim role")
+        try XCTAssertEqual(palette.resolve(style.shadowColor), hex("#000000"), "outside a scrim the role is opaque")
         try XCTAssertEqual(palette.resolve(children[0].style?.color), hex("#A8C7FA"))
         try XCTAssertEqual(palette.scrim(children[1].scrim), hex("#99000000"))
-        try XCTAssertEqual(palette.scrim(children[2].scrim), hex("#000000"))
+        XCTAssertEqual(palette.scrim(children[2].scrim), dim)
         let whenOpen = try XCTUnwrap(spec.root.resolvedStyle(state: ["open": .bool(true)]))
         XCTAssertEqual(palette.resolve(whenOpen.background), PrototypePalette.baselineDark["surfaceDim"])
         // Stops: the role now comes from theme.colors.dark, and the pair's dark side is a role.

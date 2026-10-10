@@ -328,11 +328,20 @@ struct PrototypePalette: Equatable {
         resolve(spec?.value(dark: dark))
     }
 
+    /// The opacity the `scrim` role is drawn at when it is used as a scrim: Android's
+    /// `PROTOTYPE_SHEET_SCRIM_ALPHA`, its default for a sheet with no authored scrim.
+    static let scrimRoleAlpha = 0.4
+
     /// A scrim slot (`window.placement.scrim`, a bottomSheet `scrim`), the one place both scrims
-    /// resolve. A role is used unchanged, as on Android, so `"scrim": "scrim"` is opaque black; if
-    /// role scrims are given a default alpha (open with the owner, #11215), it is applied here.
+    /// resolve (owner decision 2026-10-10, #11215). Only the `scrim` role gets an alpha: named
+    /// directly or as the resolved side of a pair, it is the scheme's scrim colour at
+    /// `scrimRoleAlpha`, since the role itself is opaque. Any other role is its colour unchanged,
+    /// and a hex value keeps exactly the authored alpha.
     func scrim(_ spec: PrototypeModeValue?) -> PrototypeRGBA? {
-        resolve(spec)
+        let value = spec?.value(dark: dark)
+        guard value == "scrim", var color = colors["scrim"] else { return resolve(value) }
+        color.alpha = Self.scrimRoleAlpha
+        return color
     }
 
     /// The asset id an image slot names in this palette's mode.

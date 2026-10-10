@@ -299,8 +299,55 @@ final class PrototypeThemeModesTests: XCTestCase {
         """))
         let sheet = try XCTUnwrap(session.spec?.root.children?.first)
         try XCTAssertEqual(light.scrim(sheet.scrim), hex("#52000000"))
-        try XCTAssertEqual(dark.scrim(sheet.scrim), hex("#000000"))
+        XCTAssertEqual(dark.scrim(sheet.scrim), PrototypeRGBA(red: 0, green: 0, blue: 0, alpha: 0.4))
         XCTAssertEqual(session.closeModal(sheet).map(\.name), ["change"])
         XCTAssertEqual(session.state["open"], .bool(false))
+    }
+
+    // MARK: Scrim resolution
+
+    /// Owner decision 2026-10-10: only the `scrim` role is given an alpha when it is a scrim.
+    func testOnlyTheScrimRoleIsDimmedInBothScrimPositionsAndBothModes() throws {
+        XCTAssertEqual(PrototypePalette.scrimRoleAlpha, 0.4)
+        let spec = try spec("""
+        {"id":"s","window":{"placement":{"type":"fullscreen","scrim":"scrim"}},"state":{"open":true},
+         "theme":{"colors":{"light":{"scrim":"#112233"},"dark":{"scrim":"#80445566"}}},
+         "root":{"type":"bottomSheet","openWhen":{"key":"open","equals":true},"detents":["half"],
+                 "scrim":"scrim","child":{"type":"spacer"}}}
+        """)
+        var lightScrim = try hex("#112233")
+        lightScrim.alpha = 0.4
+        var darkScrim = try hex("#445566")
+        darkScrim.alpha = 0.4
+        for (systemDark, expected) in [(false, lightScrim), (true, darkScrim)] {
+            let palette = PrototypePalette.make(theme: spec.theme, systemDark: systemDark)
+            XCTAssertEqual(palette.scrim(spec.window.placement.scrim), expected, "placement, dark \(systemDark)")
+            XCTAssertEqual(palette.scrim(spec.root.scrim), expected, "sheet, dark \(systemDark)")
+        }
+        // Themeless: the baseline scrim role is black in both schemes.
+        let dim = PrototypeRGBA(red: 0, green: 0, blue: 0, alpha: 0.4)
+        XCTAssertEqual(light.scrim("scrim"), dim)
+        XCTAssertEqual(dark.scrim("scrim"), dim)
+        XCTAssertNil(light.scrim(nil))
+    }
+
+    func testAnotherRoleAHexAndAMixedPairKeepTheirOwnAlphaAsAScrim() throws {
+        XCTAssertEqual(light.scrim("surface"), PrototypePalette.baselineLight["surface"])
+        XCTAssertEqual(dark.scrim("surface"), PrototypePalette.baselineDark["surface"])
+        XCTAssertEqual(light.scrim("surface")?.alpha, 1)
+        for palette in [light, dark] {
+            try XCTAssertEqual(palette.scrim("#52000000"), hex("#52000000"))
+            try XCTAssertEqual(palette.scrim("#000000"), hex("#000000"), "an opaque hex stays opaque")
+            try XCTAssertEqual(palette.scrim("#00000000"), hex("#00000000"))
+        }
+        let dim = PrototypeRGBA(red: 0, green: 0, blue: 0, alpha: 0.4)
+        let roleInDark = PrototypeModeValue.modes(light: "#99102030", dark: "scrim")
+        try XCTAssertEqual(light.scrim(roleInDark), hex("#99102030"))
+        XCTAssertEqual(dark.scrim(roleInDark), dim)
+        let roleInLight = PrototypeModeValue.modes(light: "scrim", dark: "inverseSurface")
+        XCTAssertEqual(light.scrim(roleInLight), dim)
+        XCTAssertEqual(dark.scrim(roleInLight), PrototypePalette.baselineDark["inverseSurface"])
+        // The alpha belongs to the scrim slots only: the same role elsewhere is the plain colour.
+        try XCTAssertEqual(dark.resolve("scrim"), hex("#000000"))
     }
 }

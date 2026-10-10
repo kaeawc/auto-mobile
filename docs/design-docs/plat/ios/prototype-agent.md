@@ -238,15 +238,26 @@ clockwise from left to right (0 runs left to right, 90 top to bottom) and its li
 the centre, long enough that the corners take the first and last stop colours; a radial gradient
 starts at the centre and reaches the corners. Positions apply only when every stop has one, and
 are made non-decreasing; otherwise the stops are spread evenly. A `card` and a `topAppBar` drop
-their default container when the node has a gradient, as they do for a background. A `button`
-keeps its system fill, which covers a gradient behind it (Android draws the gradient).
+their default container when the node has a gradient, as they do for a background.
 
-**Scrims.** `window.placement.scrim` resolves roles and pairs. A bottomSheet's `scrim` is drawn
-when it is authored: it fills the sheet node's own frame behind the sheet surface, takes the
-touches there, and a tap on it closes the sheet by writing `!equals` to its `openWhen` key, as on
-Android. Without a `scrim` nothing is drawn behind the sheet (Android draws a 40% scrim). A role
-is used as it is: `"scrim": "scrim"` is opaque black, so author a hex value with alpha for a
-translucent one.
+**Scrims.** `window.placement.scrim` and a bottomSheet's `scrim` resolve through one function,
+`PrototypePalette.scrim` (owner decision 2026-10-10). Only the `scrim` role gets an alpha: named
+directly or as the resolved side of a pair, it draws the scheme's scrim colour at 40% opacity
+(`PrototypePalette.scrimRoleAlpha`, the same number as Android's `PROTOTYPE_SHEET_SCRIM_ALPHA`),
+because the role itself is opaque black. Any other role used as a scrim draws its colour
+unchanged, and a hex value keeps exactly the authored alpha. Outside a scrim slot the `scrim`
+role is the plain colour. A bottomSheet's authored `scrim` takes the touches it covers, and a tap
+on it closes the sheet by writing `!equals` to its `openWhen` key, as on Android.
+
+**Known differences from Android.**
+
+- A bottomSheet without a `scrim` draws nothing behind the sheet. Android draws its default
+  scrim (the `scrim` role at 40%).
+- A bottomSheet's scrim covers the sheet node's own frame, behind the sheet surface, not the
+  whole prototype window: the iOS renderer draws a sheet in place instead of hoisting it above the
+  tree.
+- A `button` keeps its system fill, which covers a `style.gradient` behind it. Android makes the
+  button's container transparent so the gradient shows.
 
 **Images.** `image.asset` and a `tabBar` / `bottomNav` item `image` take an asset id or
 `{light, dark}` ids; the id for the resolved mode is drawn. A nav item draws its image at 24 pt

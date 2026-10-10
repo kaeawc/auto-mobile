@@ -1,10 +1,12 @@
 import {
   isReissuableByNameReleaseReason,
+  isTerminalReleaseReason,
   releaseReasonMayReplace,
 } from "../../src/daemon/releaseReasons";
 import {
   DeviceSessionNotActiveError,
   DeviceSessionRowChangedError,
+  DeviceSessionTerminallyReleasedError,
   isDeviceRestartReleaseReason,
   isRecoverableDaemonReleaseReason,
   type DeviceSessionActivityUpdate,
@@ -75,6 +77,15 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
     const existing = this.rows.get(record.sessionUuid);
     if (options.claimedRow && !this.matchesIncarnation(existing, options.claimedRow)) {
       throw new DeviceSessionRowChangedError(record.sessionUuid);
+    }
+    // Like the repository's conflict guard: a terminally released row is never made active again.
+    if (
+      options.unlessTerminal &&
+      !options.claimedRow &&
+      existing?.release_reason &&
+      isTerminalReleaseReason(existing.release_reason)
+    ) {
+      throw new DeviceSessionTerminallyReleasedError(record.sessionUuid);
     }
     this.rows.set(record.sessionUuid, {
       session_uuid: record.sessionUuid,
@@ -182,7 +193,11 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       // A terminal reason is never replaced by a weaker one.
       !releaseReasonMayReplace(reason, row.release_reason) ||
       (options.onlyIfRecoverable &&
-        !(row.release_reason && isRecoverableDaemonReleaseReason(row.release_reason)))
+        !(row.release_reason && isRecoverableDaemonReleaseReason(row.release_reason))) ||
+      // Like the repository's statement: a deadline extended past the instant is not released.
+      (options.onlyIfExpiredAtMs !== undefined && row.expires_at_ms > options.onlyIfExpiredAtMs) ||
+      (options.onlyIfOwnedByDaemon !== undefined &&
+        row.daemon_session_id !== options.onlyIfOwnedByDaemon)
     ) {
       return;
     }

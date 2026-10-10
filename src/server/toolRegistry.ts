@@ -1086,24 +1086,6 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         );
       }
     }
-    // A sessionless read-only call that would land on a held device watches it through the
-    // read-only path: no readiness, pin or settings work on the holder's device (#10830).
-    const watchedDeviceId = await this.heldDeviceToWatch({
-      readOnly,
-      shouldResolveDevice,
-      sessionUuid,
-      providedDeviceId,
-      platform,
-      deviceSessionManager,
-      getConnectedPlatforms,
-    });
-    if (watchedDeviceId) {
-      return resolveSessionlessDeviceRead(
-        input,
-        options.sessionlessDeviceRead ?? this.defaultDeviceRead,
-        watchedDeviceId,
-      );
-    }
     // A read naming another device than its own session's watches that device (#10970): it is
     // not this session's work, so it runs sessionless on the read-only device path.
     const foreignReadDeviceId =
@@ -1279,8 +1261,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
             getConnectedPlatforms,
           );
         }
-        // A sessionless read whose target a session acquired since the watch check above watches
-        // it instead: readiness would pin and configure the holder's device (#10970).
+        // A sessionless read that would land on a held device (its explicit deviceId, or the device
+        // readiness would select) watches it through the read-only path: no readiness, pin or
+        // settings work on the holder's device (#10830, #10970). This is the only such check; the
+        // holder checks before it exempt reads.
         if (readOnly && !sessionUuid && readinessTarget && isDeviceHeldInDaemon(readinessTarget)) {
           return resolveSessionlessDeviceRead(
             input,
@@ -1363,38 +1347,6 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       sessionUuid,
       shouldResolveDevice,
     };
-  }
-
-  /**
-   * The held device a sessionless read-only call would land on: its explicit deviceId, or the
-   * device readiness would select. Undefined when the call has a session, is not read-only, or its
-   * target is not held; that call takes the normal path.
-   */
-  private async heldDeviceToWatch(input: {
-    readOnly: boolean;
-    shouldResolveDevice: boolean;
-    sessionUuid: string | undefined;
-    providedDeviceId: string | undefined;
-    platform: SomePlatform;
-    deviceSessionManager: DeviceSessionManager;
-    getConnectedPlatforms: () => Promise<ConnectedPlatformScan>;
-  }): Promise<string | undefined> {
-    if (
-      !input.readOnly ||
-      !input.shouldResolveDevice ||
-      input.sessionUuid ||
-      !DaemonState.getInstance().isInitialized()
-    ) {
-      return undefined;
-    }
-    const target =
-      input.providedDeviceId ??
-      (await predictReadinessTarget(
-        input.platform,
-        input.deviceSessionManager,
-        input.getConnectedPlatforms,
-      ));
-    return target && isDeviceHeld(target) ? target : undefined;
   }
 
   private async enforceSessionUuidForMultipleDevices(input: {

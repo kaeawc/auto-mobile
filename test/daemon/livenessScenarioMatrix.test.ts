@@ -10,16 +10,15 @@ import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamS
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { routedSessionUuidFromResult } from "../../src/server/routedSessionMeta";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import {
-  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
-  TerminalSessionError,
-} from "../../src/daemon/sessionManager";
+import { SESSION_RELEASE_PERSIST_TIMEOUT_MS } from "../../src/daemon/sessionManager";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { decideOwnershipChange } from "../../src/daemon/streamSubscriptionPolicy";
 import { LIVE_OWNER_HANDOFF_ALLOWANCE_MS } from "../../src/daemon/proxyLivenessRecovery";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { UNSETTLED_EXECUTION_VETO_CEILING_MS } from "../../src/daemon/unsettledExecutionVeto";
 import { OWNER_DISCONNECT_GRACE_MS } from "../../src/daemon/ownerDisconnectRelease";
+import { AppearanceSyncScheduler } from "../../src/daemon/AppearanceSyncScheduler";
+import type { AppearanceConfig } from "../../src/models";
 import {
   AUTOLOCK_WINDOW_MS,
   IDLE_WINDOW_MS,
@@ -30,7 +29,6 @@ import {
   PEER_DAEMON_PID,
   RELEASE_SLACK_MS,
   SCENARIO_DAEMON_PID,
-  TERMINAL_RELEASE_JOURNAL_PATH,
   SCAN_MS,
 } from "../helpers/livenessScenarioHarness";
 
@@ -151,11 +149,14 @@ describe("live stdio proxy", () => {
   test("a long-running call in flight past the window keeps the session; it is freed one window after the call settles", async () => {
     scenario = await LivenessScenario.start();
     const session = await scenario.acquire();
+    await scenario.idle(IDLE_WINDOW_MS / 2);
     const call = scenario.startLongCall(session);
 
-    // Held side: three windows with the call open, heartbeating or not.
-    expect(await scenario.idleWhileHeld(session, 3 * IDLE_WINDOW_MS, 60_000)).toBe(undefined);
+    // Held side: the window that began at acquisition ends with the call open. The call runs
+    // 110 s, inside its own 120 s request deadline.
+    expect(await scenario.idleWhileHeld(session, IDLE_WINDOW_MS + 50_000, 10_000)).toBe(undefined);
     expectHeld(session);
+    expect(call.failure()).toBeUndefined();
 
     await call.settle();
     const settledAt = scenario.timer.now();
@@ -208,6 +209,59 @@ describe("the daemon's idle instant outranks the proxy's own idle clock (#10823)
     await scenario.idle(1_000);
     expectFreed();
   });
+
+  // #10972 part 1 (#11442 h2): the keeper evicts a held session before the tick's heartbeats, so
+  // at the reported instant it still reads the ack from one interval earlier. A call the daemon
+  // admitted in between (inside its grace) moved the instant: the passed instant is not evidence,
+  // only a heartbeat answered at or after it is.
+  for (const beforeInstantMs of [KEEPER_INTERVAL_MS - 100, 500]) {
+    test(`a held session used ${beforeInstantMs} ms before its reported idle instant is not dropped on the stale report: it stays heartbeated and is freed as idle one window after that call`, async () => {
+      scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
+      const a = await scenario.acquire(DEVICE_A);
+      await scenario.idle(30_000);
+      // B becomes the latest binding; A is now held behind it.
+      const b = await scenario.acquire(DEVICE_B);
+      const reportedInstant = (
+        (await scenario.daemonMethod("daemon/sessionInfo", { sessionId: a })) as {
+          result: { idleReleaseAt: number };
+        }
+      ).result.idleReleaseAt;
+
+      // The agent keeps driving B; A is used once, inside the last keeper interval before its
+      // instant, by a call the proxy never saw: no ack before the instant can report the restart.
+      await scenario.idle(60_000);
+      await scenario.toolCall(b);
+      await scenario.idle(reportedInstant - beforeInstantMs - scenario.timer.now());
+      await scenario.daemonToolCallWith({ sessionUuid: a }, "homeScreen", scenario.proxyConnection);
+      const usedAt = scenario.timer.now();
+      expect(reportedInstant - usedAt).toBeLessThan(KEEPER_INTERVAL_MS);
+      const beatsBeforeInstant = scenario.heartbeatsBySession.get(a) ?? 0;
+
+      // Held side: the proxy heartbeats A through the stale instant and the whole new window, so
+      // the daemon never sees a silent owner.
+      const heldUntil = usedAt + IDLE_WINDOW_MS - 15_000;
+      for (let at = usedAt + 30_000; at < heldUntil; at += 30_000) {
+        expect(await scenario.idleWhileHeld(a, at, 5_000)).toBe(undefined);
+        await scenario.toolCall(b);
+      }
+      expect(await scenario.idleWhileHeld(a, heldUntil, 5_000)).toBe(undefined);
+      expectHeld(a, DEVICE_A);
+      expect(scenario.reaped).toEqual([]);
+      expect(scenario.heartbeatsBySession.get(a) ?? 0).toBeGreaterThanOrEqual(
+        beatsBeforeInstant + (heldUntil - reportedInstant) / KEEPER_INTERVAL_MS,
+      );
+
+      // Released side: the daemon's window, counted from that call, frees A as an idle expiry.
+      const releasedAt = await scenario.idleUntilReleased(a, 15_000 + RELEASE_SLACK_MS);
+      expect(releasedAt).toBeGreaterThan(usedAt + IDLE_WINDOW_MS);
+      expect(releasedAt).toBeLessThanOrEqual(usedAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+      expect(IDLE_REASONS).toContain(scenario.releaseOf(a)?.reason!);
+      expect(scenario.reaped).toEqual([]);
+      await scenario.idle(1_000);
+      expectFreed(DEVICE_A);
+      expectHeld(b, DEVICE_B);
+    });
+  }
 });
 
 describe("daemon release wiring (#10975)", () => {
@@ -285,11 +339,14 @@ describe("daemon release wiring (#10975)", () => {
   test("a call that never settles holds the session past the idle window; when the veto ceiling lets the expiry through, the call is aborted and the device freed (#10820)", async () => {
     scenario = await LivenessScenario.start();
     const session = await scenario.acquire();
-    const call = scenario.startLongCall(session);
+    // The device command is wedged: it outlives its request deadline and every signal to stop.
+    const call = scenario.startLongCall(session, undefined, { wedged: true });
 
-    // Held side: in flight past the idle window the call is never aborted.
+    // Held side: the caller is answered with a timeout at the request deadline, but the call is
+    // still in flight on the device, so the session is kept and the daemon aborts nothing.
     expect(await scenario.idleWhileHeld(session, 3 * IDLE_WINDOW_MS, 60_000)).toBe(undefined);
     expectHeld(session);
+    expect(String(call.failure())).toContain("timed out");
     expect(scenario.abortedCalls).toEqual([]);
 
     // Released side: past the ceiling the expiry overrides it and aborts what it overrode.
@@ -406,8 +463,9 @@ describe("autolock with a live proxy", () => {
 
     // Held side: past the window with the call open, another request on the same connection
     // resolves its autolock routing (no execution metadata). It must not release the session.
-    for (let step = 0; step < 4; step++) {
-      await scenario.idle(AUTOLOCK_WINDOW_MS);
+    // The call runs 110 s: past the 60 s window, inside its own 120 s request deadline.
+    for (const wait of [AUTOLOCK_WINDOW_MS + 10_000, 40_000]) {
+      await scenario.idle(wait);
       expect(
         scenario.daemon.pool.resolveAutolockSessionForMcpSession(scenario.proxyConnection),
       ).toBe(session);
@@ -808,6 +866,61 @@ describe("the daemon echoes the session a call used (#10974)", () => {
   });
 });
 
+describe("host appearance sync follows the session that holds the device (#8361, #10976)", () => {
+  const DEVICE_C = "emulator-5558";
+  const config = (defaultMode: "light" | "dark"): AppearanceConfig => ({
+    syncWithHost: true,
+    defaultMode,
+    applyOnConnect: true,
+  });
+
+  // #11442 o2: both target sources must name only held devices, each with its holder's session.
+  // The scheduler's own source is what a sync runs on until the daemon scopes it at startup.
+  for (const source of ["the running daemon's scope", "the scheduler's own targets"] as const) {
+    test(`two sessions with different configs and a free device, from ${source}: a tick applies each config to its holder's device only, and a freed device is left alone`, async () => {
+      scenario = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B, DEVICE_C] });
+      const a = await scenario.acquire(DEVICE_A);
+      const b = await scenario.acquire(DEVICE_B);
+      // The global config would turn any device it reached dark.
+      const configs = new Map<string | undefined, AppearanceConfig>([
+        [a, config("light")],
+        [b, config("dark")],
+      ]);
+      const applied: string[] = [];
+      const scheduler = new AppearanceSyncScheduler(scenario.timer, {
+        isEnabled: () => true,
+        getConfig: async (sessionKey) => configs.get(sessionKey) ?? config("dark"),
+        resolveMode: async (resolved) => (resolved?.defaultMode === "dark" ? "dark" : "light"),
+        apply: async (device, mode) => {
+          applied.push(`${device.deviceId}:${mode}`);
+        },
+        ...(source === "the running daemon's scope"
+          ? { getTargets: () => scenario.appearanceSyncTargets() }
+          : {}),
+      });
+
+      // Held side: each held device gets its own session's mode; the free device gets nothing.
+      await scheduler.trigger();
+      expect(applied.toSorted()).toEqual([`${DEVICE_A}:light`, `${DEVICE_B}:dark`]);
+
+      // Released side: once A's session idles out, no tick re-themes its device from the global
+      // config, while B's session still decides for B.
+      for (let step = 0; step < 6 && scenario.isHeld(a); step++) {
+        await scenario.idle(30_000);
+        await scenario.toolCall(b);
+      }
+      await scenario.idle(1_000);
+      expectFreed(DEVICE_A);
+      expectHeld(b, DEVICE_B);
+      configs.set(b, config("light"));
+      applied.length = 0;
+      await scheduler.trigger();
+      expect(applied).toEqual([`${DEVICE_B}:light`]);
+      await scheduler.stop();
+    });
+  }
+});
+
 describe("reads are not activity (#10964)", () => {
   test("a session whose owner only observes by deviceId is freed one idle window after acquisition", async () => {
     scenario = await LivenessScenario.start({ devices: [DEVICE_A] });
@@ -1163,11 +1276,15 @@ async function expectEndedByPeer(session: string, drivenBefore: number): Promise
     code: "daemon_session_not_found",
     releaseReason: "identity-recovery-owned-by-other-daemon",
   });
-  const refusal = await scenario.toolCall(session).then(
+  // The daemon's death dropped the proxy's connection. Its keeper reconnects on its next ticks,
+  // and a call made meanwhile is answered once the proxy has learned what became of the session.
+  await scenario.idle(KEEPER_INTERVAL_MS);
+  const answered = scenario.toolCall(session).then(
     () => undefined,
     (error: unknown) => error,
   );
-  expect(String(refusal)).toContain("identity-recovery-owned-by-other-daemon");
+  await scenario.idle(2 * KEEPER_INTERVAL_MS);
+  expect(String(await answered)).toContain("identity-recovery-owned-by-other-daemon");
   // Neither daemon drives the device twice: the peer keeps its claim and this daemon holds nothing.
   expect(scenario.deviceClaims.get(DEVICE_A)).toBe(PEER_DAEMON_PID);
   expectFreed();
@@ -1216,7 +1333,6 @@ describe("a crash after a terminal release intent (#10959, #11067, #11082)", () 
   test("a release whose database write never landed is still refused after the restart, while the live session beside it is recovered", async () => {
     scenario = await LivenessScenario.start({
       devices: [DEVICE_A, DEVICE_B],
-      terminalReleaseJournal: true,
     });
     const released = await scenario.acquire(DEVICE_A);
     await scenario.idle(60_000);
@@ -1231,7 +1347,7 @@ describe("a crash after a terminal release intent (#10959, #11067, #11082)", () 
     await scenario.idle(SESSION_RELEASE_PERSIST_TIMEOUT_MS + SCAN_MS);
     await release;
     expect(parkedWrites).toHaveBeenCalled();
-    expect(scenario.journalFiles.files.get(TERMINAL_RELEASE_JOURNAL_PATH)).toContain(released);
+    expect(scenario.journaledIntents()).toContain(released);
     expect((await scenario.repository.getSession(released))?.status).toBe("active");
     expect(scenario.isHeld(live)).toBe(true);
 
@@ -1246,11 +1362,13 @@ describe("a crash after a terminal release intent (#10959, #11067, #11082)", () 
       () => undefined,
       (error: unknown) => error,
     );
-    expect(refusal).toBeInstanceOf(TerminalSessionError);
+    // What the agent is told: the terminal refusal, over the wire (not the daemon's own error class).
+    expect(String(refusal)).toContain("session_ownership_lost");
+    expect(String(refusal)).toContain("acquire_new_session");
     expect(scenario.isHeld(released)).toBe(false);
     expectFreed(DEVICE_A);
     expect((await scenario.repository.getSession(released))?.status).not.toBe("active");
-    expect(scenario.journalFiles.files.has(TERMINAL_RELEASE_JOURNAL_PATH)).toBe(false);
+    expect(scenario.journaledIntents()).not.toContain(released);
 
     // Held side: the session that had no intent is rehydrated and reclaimed by its live owner.
     await scenario.idle(NO_HEARTBEAT_BUDGET_MS * 2);

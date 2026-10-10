@@ -1258,8 +1258,11 @@ describe("DaemonManager stop", () => {
       {
         socketExists: () => existsSync(socketPath),
         readRecord: () => readPidFileDataSync(pidFilePath),
-        // These fixtures are ordinary files, not listening daemon sockets.
-        probe: async () => ({ running: false }),
+        // These fixtures are ordinary files, not listening daemon sockets, so a connect is
+        // refused. (An answering non-daemon owner is unauthenticated, which stop refuses, #11252.)
+        probe: async () => {
+          throw new Error(`connect ECONNREFUSED ${socketPath}`);
+        },
       },
     );
   }

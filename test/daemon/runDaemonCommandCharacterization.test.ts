@@ -56,7 +56,7 @@ describe("daemon command characterization with fake I/O", () => {
           ["stdout", "  release-session <id>  Release a session and free its device"],
           [
             "stdout",
-            "  (available-devices, active-sessions, session-info and release-session accept --json)",
+            "  (status, available-devices, active-sessions, session-info and release-session accept --json)",
           ],
           [
             "stdout",
@@ -415,16 +415,24 @@ describe("daemon command characterization with fake I/O", () => {
       const coordinationDir = mkdtempSync(join(tmpdir(), "daemon-status-coord-"));
       const previousCoordinationDir = process.env.AUTOMOBILE_COORDINATION_DIR;
       process.env.AUTOMOBILE_COORDINATION_DIR = coordinationDir;
+      const exited = new Error("fake exit");
+      const exit = spyOn(process, "exit").mockImplementation((code) => {
+        events.push(["exit", code]);
+        throw exited;
+      });
       try {
-        await runDaemonCommand("status", [], {}, Manager);
         if (!running) {
-          expect(events).toEqual([
+          // #11252: an unauthenticated socket owner is not a clean "not running".
+          await expect(runDaemonCommand("status", [], {}, Manager)).rejects.toBe(exited);
+          expect(events.slice(0, 3)).toEqual([
             "status",
             ["  Identity recovery: deferred (busy)"],
-            ["Daemon is not running"],
+            ["Daemon socket is held by a process that is not an authenticated daemon"],
           ]);
+          expect(events.at(-1)).toEqual(["exit", 1]);
           return;
         }
+        await runDaemonCommand("status", [], {}, Manager);
         expect(events.slice(0, 10)).toEqual([
           "status",
           ["  Identity recovery: deferred (busy)"],
@@ -446,6 +454,7 @@ describe("daemon command characterization with fake I/O", () => {
         ]);
         expect(String(events[15])).toContain("--daemon restart' to stop them.");
       } finally {
+        exit.mockRestore();
         log.mockRestore();
         if (previousCoordinationDir === undefined) {
           delete process.env.AUTOMOBILE_COORDINATION_DIR;

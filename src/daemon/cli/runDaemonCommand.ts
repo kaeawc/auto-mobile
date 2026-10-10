@@ -44,6 +44,9 @@ import {
   assertDaemonNamespaceMatchesState,
 } from "../sharedNamespaceGuard";
 
+/** `--json`: print a daemon query's result or refusal as one JSON object (#11252). */
+export const DAEMON_JSON_FLAG = "--json";
+
 /**
  * Run daemon management command
  */
@@ -232,6 +235,14 @@ function printAvailableDevicesContent(content: string | undefined): void {
   }
 }
 
+/**
+ * Whether `--daemon status` must exit non-zero: the namespace's socket is held by a process
+ * that could not be authenticated as its daemon, so "not running" would mislead (#11252).
+ */
+export function daemonStatusIsUnhealthy(status: DaemonStatus): boolean {
+  return !status.running && status.recovery !== undefined;
+}
+
 function printDaemonStatus(status: DaemonStatus, manager: DaemonManager): void {
   if (status.recovery) {
     console.log(
@@ -265,6 +276,8 @@ function printDaemonStatus(status: DaemonStatus, manager: DaemonManager): void {
         `\nThese can cause device pool conflicts. Run 'bunx ${resolveDaemonInstallSpecifier()} --daemon restart' to stop them.`,
       );
     }
+  } else if (status.recovery) {
+    console.log("Daemon socket is held by a process that is not an authenticated daemon");
   } else {
     console.log("Daemon is not running");
   }
@@ -359,17 +372,32 @@ async function runDaemonLifecycleCommand(
   }
 }
 
-async function runDaemonDiagnosticsCommand(command: string, manager: DaemonManager): Promise<void> {
+/** Print `--daemon status` (or its `--json` object); true when it must exit non-zero. */
+async function runDaemonStatusCommand(args: string[], manager: DaemonManager): Promise<boolean> {
+  const status = await manager.status();
+  if (args.includes(DAEMON_JSON_FLAG)) {
+    console.log(JSON.stringify(status));
+    return daemonStatusIsUnhealthy(status);
+  }
+  printDaemonStatus(status, manager);
+  for (const line of await describeForeignForwardLeaseHolders(
+    status.running ? status.pid : undefined,
+  )) {
+    console.log(line);
+  }
+  return daemonStatusIsUnhealthy(status);
+}
+
+async function runDaemonDiagnosticsCommand(
+  command: string,
+  args: string[],
+  manager: DaemonManager,
+): Promise<void> {
+  let statusUnhealthy = false;
   try {
     switch (command) {
       case "status": {
-        const status = await manager.status();
-        printDaemonStatus(status, manager);
-        for (const line of await describeForeignForwardLeaseHolders(
-          status.running ? status.pid : undefined,
-        )) {
-          console.log(line);
-        }
+        statusUnhealthy = await runDaemonStatusCommand(args, manager);
         break;
       }
 
@@ -410,10 +438,10 @@ async function runDaemonDiagnosticsCommand(command: string, manager: DaemonManag
     }
     process.exit(1);
   }
+  if (statusUnhealthy) {
+    process.exit(1);
+  }
 }
-
-/** `--json`: print a daemon query's result or refusal as one JSON object (#11252). */
-export const DAEMON_JSON_FLAG = "--json";
 
 /**
  * A daemon query or release that failed, keeping the daemon's typed refusal fields (#11252)
@@ -846,7 +874,7 @@ const NO_POSITIONAL_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpe
     launchFlags: false,
     valueFlags: ACCEPTANCE_SESSION_RESTART_FLAGS,
   },
-  status: { launchFlags: true },
+  status: { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
   health: { launchFlags: true },
   diagnose: { launchFlags: true },
   "available-devices": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
@@ -889,7 +917,7 @@ function printDaemonUsageError(message: string): void {
     console.log("  session-info <id>     Get information about a session");
     console.log("  release-session <id>  Release a session and free its device");
     console.log(
-      "  (available-devices, active-sessions, session-info and release-session accept --json)",
+      "  (status, available-devices, active-sessions, session-info and release-session accept --json)",
     );
     console.log(
       "  release-liveness-ownership <id> --liveness-owner-token <token>  Hand off liveness; keep the device",
@@ -963,9 +991,9 @@ export async function runDaemonCommand(
     restart: () => runDaemonLifecycleCommand(command, args, options, manager),
     "restart-admitted": () => runDaemonLifecycleCommand(command, args, options, manager),
     "restart-acceptance-session": () => runDaemonLifecycleCommand(command, args, options, manager),
-    status: () => runDaemonDiagnosticsCommand(command, manager),
-    health: () => runDaemonDiagnosticsCommand(command, manager),
-    diagnose: () => runDaemonDiagnosticsCommand(command, manager),
+    status: () => runDaemonDiagnosticsCommand(command, args, manager),
+    health: () => runDaemonDiagnosticsCommand(command, args, manager),
+    diagnose: () => runDaemonDiagnosticsCommand(command, args, manager),
     "available-devices": () => queryAvailableDevices(args, manager),
     "active-sessions": () => queryActiveSessions(args, manager),
     "session-info": () => querySessionInfo(args, manager),

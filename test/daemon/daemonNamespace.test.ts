@@ -617,6 +617,11 @@ describe("--daemon stop keeps the proof a stale control socket needs (issue #101
     };
     h.identity.record = dead;
     h.identity.exists = socketFileExists;
+    // The listener died with its daemon: a probe of the leftover file is refused. (An answering
+    // owner that cannot be authenticated makes stop refuse instead, #11252.)
+    h.identity.onProbe = () => {
+      throw new Error("connect ECONNREFUSED");
+    };
     writeFileSync(h.pidPath, JSON.stringify(dead));
   }
 

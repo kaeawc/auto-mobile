@@ -72,7 +72,7 @@ import {
   structuredContentOmissionReason,
   responseCarriesStructuredContent,
 } from "./stripToolResultStructuredContent";
-import { shapeToolCallError } from "./shapeToolCallError";
+import { isTypedToolRefusal, shapeToolCallError } from "./shapeToolCallError";
 import { forwardingLeaseConflictCause } from "./forwardingLeaseConflictOutcome";
 
 // Import the resource registry
@@ -947,7 +947,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   // The shared envelope (`dispatchToolCall`, #6545) has already read the tool
   // name and arguments and rejected a missing name.
-  const executeToolCall = async ({
+  const executeToolCallBody = async ({
     name,
     args: toolParams,
     progress,
@@ -1807,6 +1807,19 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       } finally {
         endExecutionOnce();
       }
+    }
+  };
+  // A typed refusal thrown while routing, before the body's own `try`, would otherwise escape into
+  // the SDK as an untyped -32603 error. Shape it here so every typed refusal reaches the client in
+  // the same result shape; untyped pre-`try` failures (unknown tool, ...) still throw (#11292).
+  const executeToolCall = async (call: ToolCall<McpToolCallExtra>): Promise<McpToolCallResult> => {
+    try {
+      return await executeToolCallBody(call);
+    } catch (error) {
+      if (!isTypedToolRefusal(error)) {
+        throw error;
+      }
+      return shapeToolCallError(error, { toolName: call.name, source: "MCP" }) as McpToolCallResult;
     }
   };
   installToolCallDispatcher(server, {

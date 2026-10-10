@@ -10,7 +10,7 @@ import {
 } from "./sessionManager";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { judgedLeaseHeartbeat, suspectGraceMsFor } from "./livenessOwnerLease";
-import { effectiveLastToolActivity } from "./sessionClocks";
+import { sessionIdleDeadline } from "./sessionClocks";
 import {
   UNSETTLED_EXECUTION_VETO_CEILING_MS,
   UnsettledExecutionVeto,
@@ -651,9 +651,9 @@ export class SessionHeartbeatMonitor {
     // heartbeat: a `--daemon heartbeat` loop proves liveness, not use, and must
     // not hold the device with no tool calls (owner decision 2026-10-08).
     if (session.livenessPolicy === "cli-idle") {
-      const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
-      // The daemon's own stall is not idleness either (#10835): see `idleStallForgivenAt`.
-      return now - effectiveLastToolActivity(session) > timeoutMs ? "cli-idle-timeout" : undefined;
+      // The daemon's own stall is not idleness either (#10835): see `idleStallForgivenAt`. The
+      // deadline is the one a late call's admission and the reported `idleReleaseAt` use (#11558).
+      return now > sessionIdleDeadline(session) ? "cli-idle-timeout" : undefined;
     }
     return this.heartbeatLeaseStaleReason(session, now);
   }

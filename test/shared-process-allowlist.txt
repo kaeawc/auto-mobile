@@ -42,6 +42,7 @@ test/daemon/canonicalPixels.test.ts
 test/daemon/childProcessCleanup.test.ts
 test/daemon/cliIdleDaemonStallForgiveness.test.ts
 test/daemon/cliIdleReadInFlightReportedDeadline.test.ts
+test/daemon/cliIdleStallLateControlCall.test.ts
 test/daemon/clientNonFiniteEncoding.test.ts
 test/daemon/clientOptionsSchema.test.ts
 test/daemon/clientRequestIdGenerator.test.ts

@@ -1,0 +1,53 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "v_0": 1,
+      "v_1": 2
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "column",
+          "repeat": {
+            "items": [
+              {
+                "id": 0
+              },
+              {
+                "id": 1
+              }
+            ],
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "slider",
+              "stateKey": "v_{item.id}",
+              "min": 0,
+              "max": 10
+            },
+            {
+              "type": "button",
+              "label": "Go",
+              "onTap": [
+                {
+                  "type": "setState",
+                  "key": "v_{item.id}",
+                  "value": 99
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].children[1].onTap[0].value"
+}

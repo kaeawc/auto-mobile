@@ -1,0 +1,13 @@
+{
+  "code": "session_recovery_pending",
+  "builder": "SessionRecoveryAssignmentError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"message\":\"Cannot safely recover session 11111111-2222-4333-8444-555555555555: android device 'Pixel_8_API_35' is unavailable or already in use. The session can still resume if the device returns before the recovery window ends (120 seconds remaining); otherwise acquire a new device with getAndroid or getApple.\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"platform\":\"android\",\"deviceId\":\"emulator-5554\",\"stableDeviceId\":\"Pixel_8_API_35\",\"recoveryWindowRemainingMs\":120000,\"code\":\"session_recovery_pending\",\"retryable\":true,\"recovery\":{\"action\":\"acquire_replacement_session\",\"tools\":[\"getAndroid\",\"getApple\"]}}}"
+      }
+    ],
+    "isError": true
+  }
+}

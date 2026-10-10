@@ -297,6 +297,12 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "Resume (#10990): a session the stable owner token holds is held with the daemon's own " +
       "lastUsedAt, listed in KNOWN_LIVENESS_WRITES.",
   },
+  "src/daemon/daemonRequestHandlers.ts handleSessionInfo": {
+    writes: 2,
+    reason:
+      "A read projection (#11243): the sessionInfo answer reports the session's lastUsedAt and " +
+      "expiresAt converted to wall-clock ms for the CLI; it stamps nothing.",
+  },
   "src/daemon/daemonRequestHandlers.ts handleTokenOwnedSessions": {
     writes: 1,
     reason:

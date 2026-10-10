@@ -231,6 +231,14 @@ const registerSessionParams = z.object({
   clientName: z.string().max(MAX_OBSERVER_CLIENT_NAME_LENGTH).trim().min(1),
 });
 
+/** A session-clock instant as wall-clock epoch ms, for a report another process reads (#11105). */
+function reportedWallClock(
+  manager: { sessionClockToWall?(sessionClockMs: number): number },
+  sessionClockMs: number,
+): number {
+  return manager.sessionClockToWall?.(sessionClockMs) ?? sessionClockMs;
+}
+
 async function handleRegisterSession(
   request: DaemonRequest,
   state: DaemonStateAccess,
@@ -259,7 +267,8 @@ async function handleRegisterSession(
       result: {
         accepted: true,
         heartbeatTimeoutMs: session.heartbeatTimeoutMs,
-        expiresAtMs: session.lastHeartbeat + session.heartbeatTimeoutMs,
+        // Reported to another process: wall-clock epoch ms, not the session clock (#11243).
+        expiresAtMs: reportedWallClock(manager, session.lastHeartbeat + session.heartbeatTimeoutMs),
       },
     };
   }
@@ -904,9 +913,10 @@ export async function handleSessionInfo(
       sessionId: session.sessionId,
       assignedDevice: session.assignedDevice,
       platform: session.platform,
-      createdAt: session.createdAt,
-      lastUsedAt: session.lastUsedAt,
-      expiresAt: session.expiresAt,
+      // Wall-clock epoch ms, like the hold diagnostics beside them (#11243).
+      createdAt: reportedWallClock(manager, session.createdAt),
+      lastUsedAt: reportedWallClock(manager, session.lastUsedAt),
+      expiresAt: reportedWallClock(manager, session.expiresAt),
       cacheSize: JSON.stringify(session.cacheData).length,
       ...sessionHoldDiagnostics(
         session,

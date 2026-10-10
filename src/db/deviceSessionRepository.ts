@@ -128,8 +128,10 @@ export interface DeviceSessionActivityUpdate {
 /**
  * Optional precondition for {@link DeviceSessionPersistence.markReleased} (#11129): apply the
  * release only to the row incarnation it was captured from. `stable_identity_generation` advances
- * on every upsert of the UUID (create, rebind, resume, rehydrate) and on nothing else, so a delayed
- * or retried release of an earlier incarnation cannot clobber a re-acquired row.
+ * on every upsert of the UUID (create, rebind, resume, rehydrate) and on a recovery's claim of a
+ * recoverable row or its hand-back (#11200, #11243), and on nothing else (a release does not
+ * advance it), so a delayed or retried release of an earlier incarnation cannot clobber a
+ * re-acquired row.
  */
 export interface MarkReleasedOptions {
   expectedRowGeneration?: number;
@@ -145,8 +147,10 @@ export interface DeviceSessionPersistence {
   /**
    * Resolves with the row's `stable_identity_generation` after the write when the implementation
    * reports it; that is the value a later release of this incarnation passes as
-   * {@link MarkReleasedOptions.expectedRowGeneration}. `nowMs` is the session clock the row's
-   * stamps are written with (#11129), used for the retention prune; it defaults to the timer.
+   * {@link MarkReleasedOptions.expectedRowGeneration}. `nowMs` is on the clock the row's stamps
+   * are written with, used for the retention prune; it defaults to the timer. Stored stamps are
+   * wall-clock epoch ms (#11162): the session manager converts its session-clock instants,
+   * `nowMs` included, on the way in (`sessionClockPersistence.ts`).
    */
   upsertActiveSession(
     record: DeviceSessionRecord,
@@ -154,7 +158,10 @@ export interface DeviceSessionPersistence {
     options?: UpsertActiveSessionOptions,
   ): Promise<number | void>;
   getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
-  /** `nowMs` is the session clock the persisted stamps were written with (#11129). */
+  /**
+   * `nowMs` is on the clock the persisted stamps were written with: wall-clock epoch ms (#11162),
+   * converted from the session clock by the session manager's `sessionClockPersistence.ts`.
+   */
   listRecoverableSessions?(nowMs?: number): Promise<DeviceSession[]>;
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
   /**
@@ -713,8 +720,8 @@ export class DeviceSessionRepository {
 
   /**
    * Terminalizes expired recoverable rows before reading and returning sessions. `nowMs` must be
-   * on the clock the stamps were written with (the session clock, #11129); the timer is only a
-   * fallback for callers without one.
+   * on the clock the stamps were written with: wall-clock epoch ms (#11162), which the session
+   * manager converts its session clock to; the timer is only a fallback for callers without one.
    */
   async listRecoverableSessions(nowMs: number = this.timer.now()): Promise<DeviceSession[]> {
     const db = await this.getDb();

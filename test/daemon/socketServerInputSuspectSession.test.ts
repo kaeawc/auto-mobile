@@ -1,16 +1,28 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
+import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
   hasActiveSessionExecution,
+  sessionExecutionProbe,
   subscribeToolCallEndActivity,
 } from "../../src/daemon/toolCallActivity";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
@@ -72,6 +84,9 @@ const DEVICE = androidDevice.deviceId;
 const LEASE_MS = SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
 const IDLE_MS = 60_000;
 
+const SESSION_KINDS = ["owned-with-token", "awaiting-owner", "tokenless", "cli-idle"] as const;
+type SessionKind = (typeof SESSION_KINDS)[number];
+
 const SUSPECT_REFUSAL = {
   success: false,
   code: "daemon_session_suspect",
@@ -101,6 +116,60 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
   let tapOnDevice: PromiseWithResolvers<{ success: boolean }> | undefined;
   let tapEntered: PromiseWithResolvers<void>;
   let unsubscribeActivity: () => void;
+  let monitor: SessionHeartbeatMonitor | undefined;
+  /** Whether `beforeEach` creates the owned, heartbeating session most cases start from. */
+  let startOwned = true;
+  const pool = { isSessionRecoveryInFlight: () => false, sessionExecutionsEnded: () => {} };
+
+  /** The session in one of the states the heartbeat monitor judges differently. */
+  async function createSession(kind: SessionKind): Promise<void> {
+    await sessionManager.createSession(
+      SESSION,
+      DEVICE,
+      "android",
+      IDLE_MS,
+      undefined,
+      undefined,
+      undefined,
+      kind === "awaiting-owner" ? "awaiting-owner" : "owned",
+    );
+    if (kind === "owned-with-token") {
+      await heartbeat(true);
+    } else if (kind === "cli-idle") {
+      expect(sessionManager.adoptCliLivenessPolicy(SESSION)).toBe(true);
+    }
+  }
+
+  /** The daemon's heartbeat monitor: control calls veto a reap, which cuts what is in flight. */
+  function startMonitor(): void {
+    sessionManager.startRehydratedOwnerWindows();
+    monitor = new SessionHeartbeatMonitor(
+      sessionManager,
+      sessionExecutionProbe(executionTracker, sessionManager, pool, { excludeReads: true }),
+      async (sessionId, reason) => {
+        await executionTracker.cancelSessionUuidExecutions(
+          sessionId,
+          new SessionReleasedDuringCallError(sessionId, reason),
+        );
+        await sessionManager.releaseSession(sessionId, reason, true);
+      },
+      timer,
+    );
+    monitor.start();
+  }
+
+  const releaseReason = () => sessionManager.getTerminalReleaseSnapshot(SESSION)?.releaseReason;
+  const clocks = () => {
+    const session = sessionManager.getSession(SESSION);
+    return {
+      ownership: session?.ownership,
+      awaitingOwnerSince: session?.awaitingOwnerSince,
+      lastHeartbeat: session?.lastHeartbeat,
+      lastOwnerHeartbeat: session?.lastOwnerHeartbeat,
+      lastUsedAt: session?.lastUsedAt,
+      expiresAt: session?.expiresAt,
+    };
+  };
 
   function stateFor(): DaemonStateAccess {
     return {
@@ -172,14 +241,14 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     // The tracker judges on the session clock and reports in-flight calls, as in `daemon.ts`.
-    const pool = { isSessionRecoveryInFlight: () => false, sessionExecutionsEnded: () => {} };
     executionTracker.setSessionClockOffsetProvider(() => sessionManager.sessionNow() - Date.now());
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
     );
     unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
-    await sessionManager.createSession(SESSION, DEVICE, "android", IDLE_MS);
-    await heartbeat(true);
+    if (startOwned) {
+      await createSession("owned-with-token");
+    }
 
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const stroke =
@@ -218,7 +287,9 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
     internals.handleConnection(socket as unknown as Socket);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await monitor?.stop();
+    monitor = undefined;
     unsubscribeActivity();
     executionTracker.setSessionClockOffsetProvider(() => 0);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
@@ -349,5 +420,127 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
 
     expect(strokes).toEqual(["start", "move", "cancel"]);
     expect(sessionManager.getSession(SESSION)).toBeNull();
+  });
+
+  // The pane is not the session's owner: admission changes nothing the heartbeat monitor reads.
+  describe("input never stands in for the owner", () => {
+    beforeAll(() => {
+      startOwned = false;
+    });
+    afterAll(() => {
+      startOwned = true;
+    });
+
+    /** One tap every 2 s, 1 s off the monitor's scan, until `untilMs`; the frames answered. */
+    async function tapEvery2s(untilMs: number): Promise<(DaemonResponse | undefined)[]> {
+      const answers: (DaemonResponse | undefined)[] = [];
+      await timer.advanceTimeAsync(1_000);
+      for (let at = 1_000; at <= untilMs; at += 2_000) {
+        answers.push(await sendTap(`tap-${at}`));
+        await timer.advanceTimeAsync(2_000);
+        await settle();
+      }
+      return answers;
+    }
+
+    test.each(SESSION_KINDS)(
+      "admitting a tap on a %s session stamps nothing; its end is tool use",
+      async (kind) => {
+        await createSession(kind);
+        timer.advanceTime(1_000);
+        const before = clocks();
+        tapOnDevice = Promise.withResolvers<{ success: boolean }>();
+        socket.send({
+          id: "tap",
+          type: "mcp_request",
+          method: "input/tap",
+          params: { platform: "android", deviceId: DEVICE, x: 1, y: 2, sessionUuid: SESSION },
+        });
+        await tapEntered.promise;
+        timer.advanceTime(500);
+
+        // Admitted and on the device: nothing on the session moved.
+        expect(clocks()).toEqual(before);
+
+        tapOnDevice.resolve({ success: true });
+        await settle();
+        await Promise.all([...internals.activeRequestHandlers]);
+        expect(socket.responses.find((frame) => frame.id === "tap")).toMatchObject({
+          success: true,
+        });
+        // The end restarts the idle window, as it did before admission existed; who owns the
+        // session, and when its owner was last heard, are untouched.
+        expect(clocks()).toEqual({
+          ...before,
+          lastUsedAt: 1_500,
+          expiresAt: 1_500 + (sessionManager.getSession(SESSION)?.sessionTimeoutMs ?? 0),
+          lastHeartbeat: 1_500,
+        });
+      },
+    );
+
+    test("a pane tapping a rehydrated session does not keep it past the owner-reconnect window", async () => {
+      await createSession("awaiting-owner");
+      startMonitor();
+
+      const answers = await tapEvery2s(9_000);
+
+      // Taps are admitted while the session waits; the owner never returned, so the scan at
+      // 10 s (lease + grace + sweep) ends it, exactly as with no pane at all.
+      expect(answers.slice(0, 4)).toEqual(
+        Array(4).fill(expect.objectContaining({ success: true })),
+      );
+      expect(sessionManager.getSession(SESSION)).toBeNull();
+      expect(releaseReason()).toBe("rehydration-owner-timeout");
+      expect(sessionManager.sessionNow()).toBeLessThanOrEqual(11_000);
+    });
+
+    test("one tap at restart leaves the returning owner its whole reconnect window", async () => {
+      await createSession("awaiting-owner");
+      startMonitor();
+      expect(await sendTap()).toMatchObject({ success: true });
+      expect(clocks()).toMatchObject({ ownership: "awaiting-owner", awaitingOwnerSince: 0 });
+
+      await timer.advanceTimeAsync(LEASE_MS + SUSPECT_GRACE_MS - 1);
+      await settle();
+      await heartbeat(true);
+      await timer.advanceTimeAsync(2_000);
+
+      expect(clocks()).toMatchObject({ ownership: "owned", awaitingOwnerSince: undefined });
+      expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("live");
+    });
+
+    test("a pane tapping an owned session whose owner went quiet does not keep it alive", async () => {
+      await createSession("owned-with-token");
+      startMonitor();
+
+      const answers = await tapEvery2s(9_000);
+
+      // Lease 4 s, grace 4 s: admitted, admitted, suspect, suspect, then gone within 10 s.
+      expect(answers).toMatchObject([
+        { success: true },
+        { success: true },
+        SUSPECT_REFUSAL,
+        SUSPECT_REFUSAL,
+        terminalRefusal("heartbeat-timeout"),
+      ]);
+      expect(taps).toBe(2);
+      expect(sessionManager.getSession(SESSION)).toBeNull();
+    });
+
+    test("a session no proxy owns is kept by tool use, input included, as before", async () => {
+      await createSession("tokenless");
+      startMonitor();
+
+      const answers = await tapEvery2s(19_000);
+
+      expect(answers).toEqual(Array(10).fill(expect.objectContaining({ success: true })));
+      expect(sessionManager.getSession(SESSION)).not.toBeNull();
+      // Once the taps stop, the pre-first-heartbeat grace runs out.
+      await timer.advanceTimeAsync(8_000);
+      await settle();
+      expect(sessionManager.getSession(SESSION)).toBeNull();
+      expect(releaseReason()).toBe("missing-first-heartbeat");
+    });
   });
 });

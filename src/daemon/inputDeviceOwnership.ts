@@ -1,5 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
-import type { SessionExecutionMetadata } from "./sessionManager";
+import type { SessionAccess, SessionExecutionMetadata } from "./sessionManager";
 import {
   resolveToolSelectionBaseSessionUuid,
   type ToolSelectionSessionManager,
@@ -123,6 +123,7 @@ interface InputSessionAdmission {
   admitIssuedSessionForAutomation(
     sessionId: string,
     execution?: SessionExecutionMetadata,
+    options?: { access?: SessionAccess },
   ): Promise<{ assignedDevice: string } | undefined>;
 }
 
@@ -137,9 +138,11 @@ function admitsIssuedSessions<T extends object>(manager: T): manager is T & Inpu
  * closed, is released and refuses it terminally (`session_ownership_lost`). `execution` is the
  * input's own tracked execution, so it is not mistaken for earlier work still in flight.
  *
- * Like any admitted control call it stamps the session's tool-call activity. It is not the owner's
- * heartbeat: the owner lease is renewed only by the owner's own heartbeats, so a pane's input
- * cannot keep a session whose owner is gone.
+ * The pane is not the session's owner, so admission is `non-owner-control`: it changes nothing on
+ * the session. It does not reclaim a rehydrated session awaiting its owner (that session is still
+ * released at the owner-reconnect timeout, which cuts an input in flight with the typed refusal),
+ * and it stamps neither the owner lease nor the activity clocks. The input's END is tool use, as
+ * it was before admission existed: the tracker reports it and the idle window restarts there.
  */
 export async function admitInputOnHolderSession(input: {
   deviceId: string;
@@ -154,6 +157,7 @@ export async function admitInputOnHolderSession(input: {
   const admitted = await sessionManager.admitIssuedSessionForAutomation(
     holderSessionUuid,
     input.execution,
+    { access: "non-owner-control" },
   );
   if (admitted?.assignedDevice !== deviceId) {
     throw new ActionableError(

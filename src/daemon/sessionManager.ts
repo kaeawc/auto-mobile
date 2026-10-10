@@ -1704,10 +1704,14 @@ export class SessionManager {
           continue;
         }
         const timeout = new Error("Device health recovery timed out");
+        // Async wrapper: a synchronous throw from `restore` becomes this attempt's rejection.
+        const inFlight = (async () => restore())();
         try {
-          await raceWithDeadline(restore(), {
+          // Later attempts get a scaled deadline: a device slow enough to miss the
+          // first one is likely to need longer, not to fail outright (#11145).
+          await raceWithDeadline(inFlight, {
             timer: this.timer,
-            timeoutMs: restoreTimeoutMs,
+            timeoutMs: restoreTimeoutMs * attempt,
             label: "Device health recovery",
             timeoutError: () => timeout,
           });
@@ -1718,9 +1722,12 @@ export class SessionManager {
             `Device health recovery ${attempt} failed on ${target.deviceId} (${marker.reason})`,
             error,
           );
-          // A timed-out command may still be running. Retain the marker and do
-          // not issue overlapping retries or let a new session race that command.
-          if (error === timeout) {
+          // A timed-out command may still be running. Never issue an overlapping
+          // retry: the marker stays while it runs, so no new session can race it.
+          // Await it instead of giving up, so one slow command does not quarantine
+          // the device until a kill/restart (#11145).
+          if (error === timeout && (await this.inFlightRestoreSucceeded(inFlight, target))) {
+            this.clearRestoreHealth(target, reason);
             return;
           }
         }
@@ -1736,6 +1743,20 @@ export class SessionManager {
           this.healthRecoveries.delete(key);
         }
       });
+  }
+
+  /** Settles a timed-out recovery command; true when it eventually completed. */
+  private async inFlightRestoreSucceeded(
+    inFlight: Promise<void>,
+    target: { deviceId: string },
+  ): Promise<boolean> {
+    try {
+      await inFlight;
+      return true;
+    } catch (error) {
+      logger.warn(`Timed-out device health recovery failed late on ${target.deviceId}`, error);
+      return false;
+    }
   }
 
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;

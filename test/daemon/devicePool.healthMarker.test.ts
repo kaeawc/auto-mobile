@@ -524,3 +524,64 @@ test("the extra app-cleanup recovery text is absent for other health reasons", a
   await abandon(h, "network-condition");
   expect(await allocationError(h)).not.toContain("app-cleanup");
 });
+
+test("a timed-out background recovery that later completes clears the marker (#11145)", async () => {
+  const h = await harness();
+  let calls = 0;
+  const slow = Promise.withResolvers<void>();
+  // A recovery whose own body does not clear the marker: only the recovery loop can.
+  h.manager.markDeviceNeedsAppCleanup(
+    device.deviceId,
+    async () => {
+      calls++;
+      await slow.promise;
+    },
+    1_000,
+  );
+  await h.timer.advanceTimeAsync(1_000);
+  await flush();
+  expect(calls).toBe(1);
+  // Past the 1 s deadline the command is still running: the device stays quarantined.
+  await h.timer.advanceTimeAsync(1_000);
+  await flush();
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("app-cleanup");
+  slow.resolve();
+  await flush();
+  expect(calls).toBe(1);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
+  expect(await h.pool.assignDeviceToSession("next", "android")).toBe(device.deviceId);
+});
+
+test("a timed-out background restore that later fails continues with a scaled deadline (#11145)", async () => {
+  const h = await harness();
+  await abandon(h, "network-condition");
+  h.pause();
+  await h.timer.advanceTimeAsync(1000);
+  await flush();
+  await h.timer.advanceTimeAsync(1000);
+  await flush();
+  const callsWhileInFlight = h.calls;
+  // The slow command fails late; the next attempt must still run, never overlapping it.
+  h.resume();
+  await flush();
+  expect(h.calls).toBe(callsWhileInFlight);
+  h.succeed();
+  h.pause();
+  await h.timer.advanceTimeAsync(2000);
+  await flush();
+  expect(h.calls).toBe(callsWhileInFlight + 1);
+  // Attempt 2 gets 2x the 1 s deadline: still within it after 1.5 s, then it completes.
+  const warn = spyOn(logger, "warn");
+  try {
+    await h.timer.advanceTimeAsync(1500);
+    await flush();
+    h.resume();
+    await flush();
+    expect(
+      warn.mock.calls.some(([message]) => String(message).startsWith("Device health recovery 2")),
+    ).toBe(false);
+  } finally {
+    warn.mockRestore();
+  }
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
+});

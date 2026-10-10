@@ -15,6 +15,11 @@ Run Android work from `android/` via the Gradle wrapper. Never run Gradle tasks 
 ## Running tasks
 
 - Default: `bash scripts/android/gradlew_task.sh <task> [flags]`. It works from any cwd, runs `./gradlew` from `android/` with the arguments unchanged, and returns Gradle's exit code. Combined stdout and stderr are shown and saved to `scratch/gradlew-<UTC timestamp>-<pid>.log`; the log path is printed to stderr before and after the run. `-h` or `--help` as the first argument prints usage.
+- Modes:
+  - Plain (when `build-brief` is absent, `CI` is non-empty, or `AUTOMOBILE_GRADLEW_NO_BUILD_BRIEF` is non-empty): as above, full log shown and tee'd to `scratch/`.
+  - build-brief (when `build-brief` is on `PATH`, `CI` is unset/empty and the opt-out is unset/empty): runs `build-brief -- <args>` from `android/` with `BUILD_BRIEF_LOG_DIR=<repo>/scratch`. Only build-brief's summary reaches stdout (it prints the raw log path on failure); the wrapper adds no tee and, on a non-zero exit, prints the log directory to stderr. Exit code is Gradle's.
+  - Opt out with `AUTOMOBILE_GRADLEW_NO_BUILD_BRIEF=1` when you need the full Gradle output.
+- build-brief is optional and third-party. The owner installs it with Homebrew, pinned: `brew install static-var/tap/build-brief` (pinned version: `<VERSION - owner fills in after installing>`). Never use a `curl | bash` installer; agents must not install it.
 - Equivalent without the script: `(cd android && ./gradlew <task>)`.
 - Use module-scoped tasks that match the request, for example `:junit-runner:test`, `:playground:app:test` or `:auto-mobile-sdk:apiDump`.
 - To reproduce CI's Detekt job run the type-resolved `detektMain detektTest`; a per-module `:module:detekt` run does not reproduce it.

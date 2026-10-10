@@ -900,6 +900,7 @@ test/server/prompts/list.test.ts
 test/server/prototypeDisplay.test.ts
 test/server/prototypeDisplayAssets.test.ts
 test/server/prototypeInspect.test.ts
+test/server/prototypeIosResetRefusal.test.ts
 test/server/prototypeResources.test.ts
 test/server/prototypeToolAnchors.test.ts
 test/server/prototypeToolAppearance.test.ts

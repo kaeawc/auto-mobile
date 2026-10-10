@@ -774,7 +774,7 @@ export class DeviceAutolockManager {
       // No other connection owns it, so this client becomes the owner: keep the pool's
       // ownership map in step, so its disconnect schedules the owner-disconnect release
       // like an acquisition does. (A setActiveDevice share must not move ownership.)
-      this.pool.recordMcpSessionOwnership(mcpSessionId, sessionId);
+      this.pool.recordBindOwnership(mcpSessionId, sessionId);
     }
   }
 

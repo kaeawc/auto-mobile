@@ -42,7 +42,10 @@ import { ToolUnavailableError } from "./toolUnavailableError";
 import { stripInternalToolParams } from "./internalToolParams";
 export { stripInternalToolParams } from "./internalToolParams";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
-import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
+import {
+  DaemonRestartPendingError,
+  daemonRestartPendingToolResult,
+} from "../daemon/daemonRestartAdmission";
 import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
 import {
   INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
@@ -1258,6 +1261,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       toolName: name,
       sessionId,
       sessionUuid: executionSessionUuid,
+      readOnly: tool.isDeviceReadOnlyCall?.(toolParams) === true,
     });
     if (decision.blocked) {
       logger.warn(
@@ -1317,18 +1321,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       );
     } catch (error) {
       if (error instanceof DaemonRestartPendingError) {
-        const pending = {
-          error: {
-            code: error.code,
-            message: error.message,
-            retryable: error.retryable,
-          },
-        };
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(pending) }],
-          structuredContent: pending,
-          isError: true,
-        };
+        return daemonRestartPendingToolResult(error);
       }
       throw error;
     }

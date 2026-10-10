@@ -537,6 +537,30 @@
         "retryable": false,
         "acquireNewSession": true
       }
+    },
+    "daemon_queue_timeout": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_queue_timeout",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "session_recovery_pending": {
+      "expected": "retry",
+      "fields": {
+        "code": "session_recovery_pending",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "daemon_restart_pending": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_restart_pending",
+        "retryable": true,
+        "acquireNewSession": false
+      }
     }
   }
 }

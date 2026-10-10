@@ -184,6 +184,12 @@ export interface MarkReleasedOptions {
    * after it selected the row.
    */
   onlyIfRecoverable?: boolean;
+  /**
+   * Apply the release only while the row's `expires_at_ms` is at or before this instant (single
+   * statement): the expiry sweep must not terminalize a row whose deadline was extended (restart-
+   * recovery activity, #11281) after it selected the row (#11448).
+   */
+  onlyIfExpiredAtMs?: number;
 }
 
 /** The row incarnation a recovery read, which its ownership claim must still match (#11200). */
@@ -664,7 +670,7 @@ export class DeviceSessionRepository {
     reason: string,
     options: MarkReleasedOptions = {},
   ): Promise<void> {
-    const { expectedRowGeneration, onlyIfRecoverable } = options;
+    const { expectedRowGeneration, onlyIfRecoverable, onlyIfExpiredAtMs } = options;
     try {
       const db = await this.getDb();
       let update = db
@@ -692,6 +698,9 @@ export class DeviceSessionRepository {
       }
       if (onlyIfRecoverable) {
         update = update.where((eb) => hasRecoverableReleaseReason(eb));
+      }
+      if (onlyIfExpiredAtMs !== undefined) {
+        update = update.where("expires_at_ms", "<=", onlyIfExpiredAtMs);
       }
       const result = await update.executeTakeFirst();
       if (expectedRowGeneration !== undefined && Number(result.numUpdatedRows) === 0) {
@@ -788,6 +797,7 @@ export class DeviceSessionRepository {
         await this.markReleased(row.session_uuid, "expired", nowMs, "expired", {
           expectedRowGeneration: row.stable_identity_generation ?? 0,
           onlyIfRecoverable: true,
+          onlyIfExpiredAtMs: nowMs,
         });
       } catch (error) {
         logger.warn(

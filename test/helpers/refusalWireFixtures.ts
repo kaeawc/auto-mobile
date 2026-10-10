@@ -12,6 +12,16 @@ import {
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import { IOS_SIM_MAX_BOOTED_ENV } from "../../src/features/iosSimFleet/capacityPolicy";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
+import {
+  MCP_OVERLOAD_ERROR_CODE,
+  MCP_QUEUE_TIMEOUT_ERROR_CODE,
+  McpTimeoutError,
+} from "../../src/daemon/McpTimeoutError";
+import {
+  DaemonRestartPendingError,
+  daemonRestartPendingToolResult,
+} from "../../src/daemon/daemonRestartAdmission";
+import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
@@ -25,6 +35,7 @@ import {
   SessionRebindingError,
   SessionSuspectError,
   SessionTerminalReleaseInProgressError,
+  TerminalSessionError,
 } from "../../src/daemon/sessionManager";
 import { ProvisionDeviceError } from "../../src/devices/exactDeviceProvisioning";
 import {
@@ -344,6 +355,42 @@ const BUILDERS: readonly FixtureEntry[] = [
     "daemonShuttingDownMcpOutcome",
     () => jsonResult(daemonShuttingDownMcpOutcome()),
   ],
+  [
+    "daemon_queue_timeout",
+    "McpTimeoutError via shapeToolCallError",
+    () =>
+      shaped(
+        new McpTimeoutError({
+          toolName: "tapOn",
+          timeoutMs: 30_000,
+          origin: "UnixSocketServer.handleRequest",
+          detail: "spent 30000ms waiting in queue",
+          code: MCP_QUEUE_TIMEOUT_ERROR_CODE,
+        }),
+      ),
+  ],
+  [
+    "session_recovery_pending",
+    "SessionRecoveryAssignmentError via shapeToolCallError",
+    () =>
+      shaped(
+        new SessionRecoveryAssignmentError({
+          sessionUuid: SESSION,
+          platform: "android",
+          deviceId: DEVICE,
+          stableDeviceId: "Pixel_8_API_35",
+          recoveryWindowRemainingMs: 120_000,
+        }),
+      ),
+  ],
+  [
+    "daemon_restart_pending",
+    "daemonRestartPendingToolResult",
+    () => {
+      const { isError, content } = daemonRestartPendingToolResult(new DaemonRestartPendingError());
+      return { isError, content };
+    },
+  ],
 ];
 
 /** Fixture stem of a provisionDevice failure whose bare code has no fixture of its own. */
@@ -580,7 +627,32 @@ function teardownFailure(error: unknown): unknown {
   return response;
 }
 
+/**
+ * A session released by its liveness policy before a direct `input/*` frame reached the device:
+ * the terminal refusal session admission throws for a non-owner control call (#11417, #11439).
+ */
+function terminalAtAdmission(releaseReason: SessionReleaseReason): TerminalSessionError {
+  return new TerminalSessionError(SESSION, {
+    sessionId: SESSION,
+    deviceId: DEVICE,
+    releaseReason,
+    releasedAtMs: 1_000,
+    terminal: true,
+    heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 1_000, ageMs: 1_000 },
+  });
+}
+
 const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
+  // Direct input/* admitted as a non-owner control call on the holder's session (#11439).
+  ["daemon_session_suspect", () => new SessionSuspectError(SESSION, 8_000)],
+  [
+    "session_ownership_lost.admission_heartbeat_timeout",
+    () => terminalAtAdmission("heartbeat-timeout"),
+  ],
+  [
+    "session_ownership_lost.admission_cli_idle_timeout",
+    () => terminalAtAdmission("cli-idle-timeout"),
+  ],
   ["device_owned_by_other_session", () => new InputDeviceOwnedError("input/tap", DEVICE, "holder")],
   ["device_outside_bound_session", boundSessionError],
   ["capacity_exhausted.ios", () => bootCapacityRefusal("ios") as Error],
@@ -662,8 +734,27 @@ export function expectedWireCodes(fixtureCode: string): string[] {
   return [variantless(fixtureCode)];
 }
 
+/**
+ * Codes defined as literals beside unrelated protocol codes rather than as `*_CODE` constants:
+ * each must have a fixture or a recorded reason (#11351).
+ */
+export const LITERAL_CLIENT_REACHABLE_CODES: readonly string[] = [
+  MCP_QUEUE_TIMEOUT_ERROR_CODE,
+  MCP_OVERLOAD_ERROR_CODE,
+  "session_recovery_pending",
+  "daemon_restart_pending",
+  "viewer_read_only",
+  "target_identity_unresolved",
+];
+
 /** Codes that exist as named constants but never reach a client as a typed JSON refusal. */
 export const UNFIXTURED_REFUSAL_CODES: Readonly<Record<string, string>> = {
+  daemon_overloaded:
+    "carried on the socket failure frame as `overloadFailure` (no top-level code), which no surface fixture models yet (#11351)",
+  viewer_read_only:
+    "an aux-socket (WebRTC) response `errorCode` beside `error`; aux-socket error responses are not fixtured yet (#11351)",
+  target_identity_unresolved:
+    "a nested provisionDevice cleanup failure code inside lifecycle.cleanup, never a top-level refusal (#11351)",
   session_released_during_creation:
     "SessionReleasedDuringCreationError is not typed by shapeToolCallError: clients get plain 'Error: ...' text with no code",
   daemon_session_not_found:

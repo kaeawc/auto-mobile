@@ -3463,6 +3463,11 @@ export class UnixSocketServer {
       // socket keeps its own route so its sessionless calls never follow it.
       return;
     }
+    if (this.targetsOneCallOnly(args, sessionUuid)) {
+      // The proxy named its own binding beside an explicit session: the call targeted that
+      // session only, and the connection's default route does not move (#11347).
+      return;
+    }
     const sessionIsActiveAfterForward = this.hasActiveDaemonSession(sessionUuid);
     if (
       (sessionWasActiveBeforeForward || toolName === "executePlan") &&
@@ -3482,6 +3487,19 @@ export class UnixSocketServer {
     if (previousBinding && previousBinding.clientKey !== route.clientKey) {
       this.scheduleMcpClientIdleClose(previousBinding.clientKey);
     }
+  }
+
+  /**
+   * Whether the call carried the connection's bound session ({@link DAEMON_BOUND_SESSION_PARAM})
+   * beside a different session it routed to. Only setActiveDevice or an acquisition moves a
+   * connection's default (#11347); an explicit `sessionUuid` targets its own call.
+   */
+  private targetsOneCallOnly(args: unknown, routedSessionUuid: string): boolean {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return false;
+    }
+    const bound = (args as Record<string, unknown>)[DAEMON_BOUND_SESSION_PARAM];
+    return isNonBlankSessionUuid(bound) && bound !== routedSessionUuid;
   }
 
   private recordGeneratedToolSelectionProfile(

@@ -404,4 +404,39 @@ for (const autolock of ["1", "0"]) {
     expect(untargeted.isError).toBeFalsy();
     expect(received).toEqual([devices[1].deviceId]);
   }, 30000);
+
+  test(`an explicit sessionUuid targets one call and leaves the connection's default alone (#11347, ${mode})`, async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = autolock;
+    const socket = newSocketServer();
+    const proxy = connect(socket, "client");
+    const first = sessionFromResult(
+      await proxy.callTool("getAndroid", { deviceId: devices[0].deviceId }),
+    );
+    const second = sessionFromResult(
+      await proxy.callTool("getAndroid", { deviceId: devices[1].deviceId }),
+    );
+    const selected = await proxy.callTool("setActiveDevice", { deviceId: devices[0].deviceId });
+    expect(selected.isError).toBeFalsy();
+    const socketRoute = () =>
+      internals(socket).boundMcpClientKeysBySocketSession.get("client")?.sessionUuid;
+
+    // The named session takes that one call ...
+    await proxy.callTool("routingProbe", { sessionUuid: second, keepScreenAwake: false });
+    expect(received).toEqual([devices[1].deviceId]);
+    expect(socketRoute()).not.toBe(second);
+    // ... and the untargeted call after it still runs on the selected device, in the proxy
+    // (the session it forwards), the daemon socket (its route) and the daemon (the device).
+    await proxy.callTool("routingProbe", { keepScreenAwake: false });
+    expect(received).toEqual([devices[1].deviceId, devices[0].deviceId]);
+    expect(socketRoute()).toBe(first);
+
+    // Once the socket has a route, naming the other session again does not move it either.
+    await proxy.callTool("routingProbe", { sessionUuid: second, keepScreenAwake: false });
+    expect(socketRoute()).toBe(first);
+    await proxy.callTool("routingProbe", { keepScreenAwake: false });
+    expect(received.at(-1)).toBe(devices[0].deviceId);
+    if (autolock === "1") {
+      expect(pool.resolveAutolockSessionForMcpSession("client")).toBe(first);
+    }
+  }, 30000);
 }

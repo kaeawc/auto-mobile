@@ -199,6 +199,11 @@ releasing.
   to the session without repeating it. A different connection passes `sessionUuid`
   in the call arguments; while the acquiring connection is still connected, that
   works for reads only (see [What is refused](#what-is-refused)).
+- **A connection's default session:** only `setActiveDevice` or an acquisition
+  (`getAndroid`, `getApple`, `startDevice`) changes the session a connection's
+  untargeted calls run on. An explicit `sessionUuid` targets that one call: the
+  next call without one still runs on the default (#11347). A connection that has
+  no default yet adopts the first session it names.
 - **`scripts/mcp-drive.ts`:** a `getAndroid`/`getApple` step captures the session
   and injects it into later steps; `--session <uuid>` reuses an existing one.
 - **Scripts that run `--cli` calls:** keep the acquiring call's `sessionUuid` and

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_BOUND_SESSION_PARAM, DAEMON_VERSION } from "../../src/daemon/constants";
 import { withRoutedSessionMeta } from "../../src/server/routedSessionMeta";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -120,5 +120,72 @@ describe("DaemonMcpProxy never binds a session a failed call merely named (#1134
     await proxy.callTool("tapOn", { sessionUuid: "named" });
 
     expect(await sessionOfUntargetedCall(proxy, client)).toBeUndefined();
+  });
+});
+
+describe("an explicit sessionUuid never moves the connection's default (#11347)", () => {
+  /** Two acquisitions in order, a setActiveDevice selection, and the raw params of every call. */
+  function twoDevices(): {
+    proxy: DaemonMcpProxy;
+    client: FakeDaemonClient;
+    rawParams: Array<Record<string, unknown>>;
+  } {
+    const minted = ["first", "second"];
+    const rawParams: Array<Record<string, unknown>> = [];
+    const connection = connect((name, params) => {
+      rawParams.push(params);
+      if (name === "getAndroid") {
+        return acquired(minted.shift() ?? "extra");
+      }
+      if (name === "setActiveDevice") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ deviceId: "emulator-5554", sessionUuid: "first" }),
+            },
+          ],
+        };
+      }
+      return undefined;
+    });
+    return { ...connection, rawParams };
+  }
+
+  test("naming another held session targets that call and leaves the binding alone", async () => {
+    const { proxy, client, rawParams } = twoDevices();
+    await proxy.callTool("getAndroid", {});
+    await proxy.callTool("getAndroid", {});
+
+    await proxy.callTool("tapOn", { sessionUuid: "first", text: "Go" });
+
+    // The call is forwarded under the session it named, with the binding carried beside it so
+    // the daemon socket keeps its route.
+    expect(rawParams.at(-1)).toMatchObject({
+      sessionUuid: "first",
+      [DAEMON_BOUND_SESSION_PARAM]: "second",
+    });
+    expect(await sessionOfUntargetedCall(proxy, client)).toBe("second");
+  });
+
+  test("setActiveDevice moves the binding, and a later explicit call does not move it back", async () => {
+    const { proxy, client } = twoDevices();
+    await proxy.callTool("getAndroid", {});
+    await proxy.callTool("getAndroid", {});
+
+    await proxy.callTool("setActiveDevice", { deviceId: "emulator-5554" });
+    expect(await sessionOfUntargetedCall(proxy, client)).toBe("first");
+
+    await proxy.callTool("tapOn", { sessionUuid: "second", text: "Go" });
+    expect(await sessionOfUntargetedCall(proxy, client)).toBe("first");
+  });
+
+  test("a connection with no binding adopts the first session it names", async () => {
+    const { proxy, client, rawParams } = twoDevices();
+
+    await proxy.callTool("tapOn", { sessionUuid: "named", text: "Go" });
+
+    expect(rawParams.at(-1)).not.toHaveProperty(DAEMON_BOUND_SESSION_PARAM);
+    expect(await sessionOfUntargetedCall(proxy, client)).toBe("named");
   });
 });

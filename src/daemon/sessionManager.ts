@@ -941,6 +941,13 @@ interface SessionAcquisitionOptions {
   access?: SessionAccess;
   /** Request-local only; not part of Session or the persistence contract. */
   requestDeadlineMs?: number;
+  /**
+   * The tracked call making this lookup, when it passes no execution metadata of its own: an
+   * implicit (autolock) call refreshing its holder is already tracked under that session, and
+   * must not be mistaken for earlier work still in flight when its admission is judged (#11400).
+   * It only names the caller; expiry is still judged as for a lookup that carries no execution.
+   */
+  callerExecutionId?: string;
 }
 
 /** Persisted identity required before recovering a session after daemon restart. */
@@ -2990,7 +2997,8 @@ export class SessionManager {
     requireIssuedSession = false,
     accessOptions: SessionAccess | SessionAcquisitionOptions = "acquire",
   ): Promise<Session> {
-    const { access, requestDeadlineMs } = this.resolveSessionAcquisitionOptions(accessOptions);
+    const { access, requestDeadlineMs, callerExecutionId } =
+      this.resolveSessionAcquisitionOptions(accessOptions);
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     if (pendingRebind) {
       await pendingRebind.promise;
@@ -3022,7 +3030,11 @@ export class SessionManager {
         `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
       );
       this.assertSessionNotSuspect(existing, access);
-      await this.refuseControlCallOnLapsedOwnerLease(existing, access, execution);
+      await this.refuseControlCallOnLapsedOwnerLease(
+        existing,
+        access,
+        execution?.executionId ?? callerExecutionId,
+      );
       await this.refreshExistingSessionForAccess(existing, access);
       return existing;
     }
@@ -3081,10 +3093,15 @@ export class SessionManager {
   private resolveSessionAcquisitionOptions(options: SessionAccess | SessionAcquisitionOptions): {
     access: SessionAccess;
     requestDeadlineMs?: number;
+    callerExecutionId?: string;
   } {
     return typeof options === "string"
       ? { access: options }
-      : { access: options.access ?? "acquire", requestDeadlineMs: options.requestDeadlineMs };
+      : {
+          access: options.access ?? "acquire",
+          requestDeadlineMs: options.requestDeadlineMs,
+          callerExecutionId: options.callerExecutionId,
+        };
   }
 
   /**
@@ -8250,16 +8267,18 @@ export class SessionManager {
   private async refuseControlCallOnLapsedOwnerLease(
     session: Session,
     access: SessionAccess,
-    execution: SessionExecutionMetadata | undefined,
+    callerExecutionId: string | undefined,
   ): Promise<void> {
     if (access === "read-only" || !this.isOwnerLeaseLapsed(session)) {
       return;
     }
     // Only a control call in flight keeps the session (#5343). A read admitted since the owner
-    // went quiet is watching, not use: it must not turn this refusal retryable (#11322).
+    // went quiet is watching, not use: it must not turn this refusal retryable (#11322). Nor must
+    // the refused call itself, which is tracked under the session when it arrived through
+    // autolock (#11400).
     const query: ActiveSessionExecutionQuery = {
       excludeReads: true,
-      ...(execution === undefined ? {} : { excludeExecutionId: execution.executionId }),
+      ...(callerExecutionId === undefined ? {} : { excludeExecutionId: callerExecutionId }),
     };
     if (this.activeSessionExecutionChecker(session.sessionId, query)) {
       throw new SessionSuspectError(session.sessionId, 0);

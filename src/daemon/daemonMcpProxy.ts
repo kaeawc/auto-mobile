@@ -1229,6 +1229,13 @@ export class DaemonMcpProxy {
     | { client: DaemonClientLike; sessionUuids: Set<string> }
     | undefined;
   /**
+   * The latest binding's heartbeat in flight, and whether it was answered not-found on a
+   * connection that had answered before. The connection made to ask that once more is this
+   * proxy's own doing, to the daemon it was already talking to: it re-establishes nothing, for
+   * the latest binding or for any session held besides it (#11557).
+   */
+  private latestHeartbeatAsked: { notFound: boolean } | undefined;
+  /**
    * Whether this connection already declared its bound session CLI-owned
    * (issue #6870 review). Once declared, this proxy's remaining heartbeats must
    * keep carrying the CLI marker: an ordinary heartbeat now restores the strict
@@ -5205,6 +5212,10 @@ export class DaemonMcpProxy {
    * and every session held besides it (#11557).
    */
   private noteOwnershipReestablishment(client: DaemonClientLike): void {
+    if (this.latestHeartbeatAsked?.notFound === true) {
+      this.ownershipReestablishment = undefined;
+      return;
+    }
     const latest = this.latestBindingHeartbeatable() ? [this.boundSessionUuid!] : [];
     const sessionUuids = new Set([...latest, ...this.otherHeldSessions.keys()]);
     this.ownershipReestablishment = sessionUuids.size > 0 ? { client, sessionUuids } : undefined;
@@ -6366,7 +6377,7 @@ export class DaemonMcpProxy {
    * The latest binding passes `asked`: its not-found is about the session when the session is
    * already known recoverable-not-found (#11461) or the answer is that first one. Any other is
    * asked once more on a fresh connection, and that second answer (`asked.notFound`) is the same
-   * daemon's, not a re-established one's.
+   * daemon's, not a re-established one's ({@link latestHeartbeatAsked}).
    */
   private askSessionHeartbeat(
     sessionUuid: string,
@@ -6413,9 +6424,10 @@ export class DaemonMcpProxy {
     if (!sessionUuid || !this.latestBindingClaimable() || this.closing) {
       return;
     }
+    const asked = { notFound: false };
+    this.latestHeartbeatAsked = asked;
     try {
       const claimLivenessOwnership = !this.livenessOwnershipClaimSent;
-      const asked = { notFound: false };
       await runWithoutDaemonLifecycle(() =>
         this.withRecoverableReconnect(
           () => this.askSessionHeartbeat(sessionUuid, claimLivenessOwnership, asked),
@@ -6449,6 +6461,15 @@ export class DaemonMcpProxy {
         return;
       }
       throw error;
+    } finally {
+      this.endLatestHeartbeatAsk(asked);
+    }
+  }
+
+  /** The latest binding's heartbeat settled; a later one in flight keeps its own record. */
+  private endLatestHeartbeatAsk(asked: { notFound: boolean }): void {
+    if (this.latestHeartbeatAsked === asked) {
+      this.latestHeartbeatAsked = undefined;
     }
   }
 

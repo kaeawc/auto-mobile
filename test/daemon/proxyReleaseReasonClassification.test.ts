@@ -581,6 +581,31 @@ describe("every held session is re-established on a new connection as the latest
     }
   });
 
+  // The latest binding's not-found on a connection that had answered is asked once more on a
+  // fresh one. That connection is the proxy's own doing, to the daemon it was already talking to:
+  // it re-establishes nothing, so the held session is not waited for either.
+  test("the connection made to ask the latest binding's not-found again opens no window for a held session", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND]);
+    try {
+      world.release("", SESSION);
+      world.release("", SECOND);
+
+      const sent = await perTick(5);
+
+      expect(world.connectionResets()).toBe(1);
+      const total = (counts: number[]) => counts.reduce((sum, count) => sum + count, 0);
+      // The latest binding: asked, and asked again on the fresh connection.
+      expect(total(sent[SECOND]!)).toBe(2);
+      expect(sent[SECOND]!.slice(-3)).toEqual([0, 0, 0]);
+      // The held session: its one answer, and at most the heartbeat the reset cut short.
+      expect(total(sent[SESSION]!)).toBeLessThanOrEqual(2);
+      expect(sent[SESSION]!.slice(-3)).toEqual([0, 0, 0]);
+      expect(world.timer.getPendingIntervalCount()).toBe(0);
+    } finally {
+      await world.close();
+    }
+  });
+
   test("closing inside the window leaves no timer behind", async () => {
     const { world, perTick } = await holding([SESSION, SECOND]);
     world.release("", SESSION);

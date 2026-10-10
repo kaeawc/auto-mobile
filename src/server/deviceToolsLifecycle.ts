@@ -235,6 +235,7 @@ function createDeleteDeviceWorkflow(
         mode: args.force === true ? "serial-only" : "named",
         initialScan: { serials: new Set(), pooledEntries: [] },
       };
+      // Re-check under the lease: a slot may have taken the device since the entry check.
       const resolution =
         (await managedSlotDeleteRefusal(args, requester)) ?? (await resolveTeardownTarget(context));
       if ("response" in resolution) {
@@ -467,7 +468,20 @@ export function createLifecycleHandlers() {
   ): Promise<TeardownToolResponse> {
     const timeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
     const deadlineMs = deps.timer.now() + timeoutMs;
+    // Refuse a managed slot's device before reserving the teardown lease, as killDevice does:
+    // that reservation preempts the slot's in-flight acquisition even when the delete is then
+    // refused (#11271). The workflow re-checks under the lease.
     try {
+      const slotRefusal = await managedSlotDeleteRefusal(args, requester).catch(
+        (error: unknown) => {
+          lifecycleLease?.release();
+          throw error;
+        },
+      );
+      if (slotRefusal) {
+        lifecycleLease?.release();
+        return slotRefusal.response;
+      }
       return await teardownService.teardown<
         TeardownState,
         "accepted" | "not_required",

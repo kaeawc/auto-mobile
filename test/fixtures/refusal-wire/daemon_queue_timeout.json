@@ -1,0 +1,13 @@
+{
+  "code": "daemon_queue_timeout",
+  "builder": "McpTimeoutError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"MCP timeout: tapOn exceeded 30000ms at UnixSocketServer.handleRequest (spent 30000ms waiting in queue)\",\"code\":\"daemon_queue_timeout\",\"retryable\":true}"
+      }
+    ],
+    "isError": true
+  }
+}

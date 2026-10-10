@@ -185,8 +185,8 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   }
 
   /**
-   * `booted` is the larger of the adb listing and the qemu process count: a
-   * booting emulator has a process before adb lists it as `device`.
+   * `booted` is the larger of the adb listing (any adb state) and the qemu
+   * process count: a booting emulator has a process before adb lists it at all.
    * `effective` adds admitted boots adb does not list yet, but never counts
    * one twice when its qemu process is already in the process count.
    */

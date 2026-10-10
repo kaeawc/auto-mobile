@@ -44,7 +44,7 @@ import type { SlotPlatform } from "./slotRegistry";
 
 /** Invokes a registered tool handler in-process and returns its raw MCP tool response. */
 export type ManagedSlotToolInvoker = (
-  name: "provisionDevice",
+  name: "provisionDevice" | "killDevice",
   args: Record<string, unknown>,
   signal: AbortSignal | undefined,
 ) => Promise<unknown>;

@@ -376,7 +376,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: bats-unit-joblog-${{ matrix.os }}
-          path: scratch/bats-unit-joblog.tsv
+          path: |
+            scratch/bats-unit-joblog.tsv
+            scratch/bats-unit-joblog-durations.tsv
           if-no-files-found: ignore
           retention-days: 7
 

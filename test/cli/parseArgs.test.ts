@@ -437,6 +437,30 @@ describe("--managed-slot-config (#11173)", () => {
     ).toThrow("contract_unsupported");
   });
 
+  test("throws when the flag has no value instead of falling back to env", () => {
+    const env = { AUTOMOBILE_MANAGED_SLOT_CONFIG: JSON.stringify(config) };
+    expect(() => parseArgs(["--managed-slot-config"], logger, env, noFile)).toThrow(
+      "managed_slot_config_invalid",
+    );
+    expect(() => parseArgs(["--managed-slot-config", "--debug"], logger, env, noFile)).toThrow(
+      "managed_slot_config_invalid",
+    );
+  });
+
+  test("does not echo inline JSON snippets in parse errors", () => {
+    let message = "";
+    let cause: unknown;
+    try {
+      parseArgs(["--managed-slot-config", '{"token": "s3cr3t-value" oops}'], logger, {}, noFile);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+      cause = (error as Error).cause;
+    }
+    expect(cause).toBeUndefined();
+    expect(message).toContain("managed_slot_config_invalid");
+    expect(message).not.toContain("s3cr3t-value");
+  });
+
   test("rejects combination with --no-proxy and --initial-session-uuid", () => {
     const json = JSON.stringify(config);
     expect(() =>

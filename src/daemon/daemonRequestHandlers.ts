@@ -57,7 +57,10 @@ import {
   DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
-import { MANAGED_SLOTS_V1_CAPABILITY } from "../models/managedSlotConfig";
+import {
+  MANAGED_SLOTS_PROXY_WIRED,
+  MANAGED_SLOTS_V1_CAPABILITY,
+} from "../models/managedSlotConfig";
 import { executionTracker } from "../server/executionTracker";
 import { sessionHoldDiagnostics, vetoedIdleReleaseAt } from "./sessionHoldDiagnostics";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
@@ -278,7 +281,7 @@ export async function handleDaemonRequest(
           INPUT_TYPE_TEXT_APPEND_CAPABILITY,
           INPUT_GESTURE_STREAM_CAPABILITY,
           DAEMON_REGISTER_SESSION_METHOD,
-          MANAGED_SLOTS_V1_CAPABILITY,
+          ...(MANAGED_SLOTS_PROXY_WIRED ? [MANAGED_SLOTS_V1_CAPABILITY] : []),
         ],
       },
     };

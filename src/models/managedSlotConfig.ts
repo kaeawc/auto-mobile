@@ -23,6 +23,13 @@ export const MANAGED_SLOT_SUPPORTED_CONTRACT_VERSIONS: readonly number[] = [1];
 /** Capability token the daemon advertises in `daemon/capabilities` for contract version 1. */
 export const MANAGED_SLOTS_V1_CAPABILITY = "managed-slots/v1";
 
+/**
+ * True once the proxy consumes a parsed managed slot config (acquisition wiring, #11173). While
+ * false the daemon must not advertise {@link MANAGED_SLOTS_V1_CAPABILITY} and the proxy refuses a
+ * supplied config, so a launcher never gets a silently unmanaged proxy.
+ */
+export const MANAGED_SLOTS_PROXY_WIRED = false;
+
 /** Key under `InitializeResult.capabilities.experimental` that carries the contract. */
 export const MANAGED_SLOTS_EXPERIMENTAL_CAPABILITY = "automobile/managedSlots";
 
@@ -39,7 +46,8 @@ export const MAX_MANAGED_SLOT_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 export type ManagedSlotConfigErrorCode =
   | "managed_slot_config_invalid"
   | "contract_unsupported"
-  | "managed_slot_group_unsupported";
+  | "managed_slot_group_unsupported"
+  | "managed_slots_unsupported";
 
 /** Typed launch-config failure; always raised before any device or registry mutation. */
 export class ManagedSlotConfigError extends ActionableError {
@@ -146,6 +154,20 @@ export function assertManagedSlotContractSupported(
   }
 }
 
+/** Refuses to start with a managed slot config this build cannot honour. */
+export function assertManagedSlotsSupported(
+  config: ManagedSlotConfig | undefined,
+  proxyWired: boolean = MANAGED_SLOTS_PROXY_WIRED,
+): void {
+  if (config !== undefined && !proxyWired) {
+    throw new ManagedSlotConfigError(
+      "managed_slots_unsupported",
+      "managed slots not yet supported by this build; remove --managed-slot-config / " +
+        `${MANAGED_SLOT_CONFIG_ENV} to run an unmanaged proxy`,
+    );
+  }
+}
+
 /** True when a daemon's `daemon/capabilities` list advertises managed slot contract v1. */
 export function daemonSupportsManagedSlots(capabilities: readonly string[]): boolean {
   return capabilities.includes(MANAGED_SLOTS_V1_CAPABILITY);
@@ -206,11 +228,12 @@ export function parseManagedSlotConfigSource(
   let json: unknown;
   try {
     json = JSON.parse(text);
-  } catch (error) {
+  } catch {
+    // The engine's SyntaxError text quotes a snippet of the (possibly secret-bearing) input, and
+    // the same snippet rides on `cause`; report only the source kind (#11208).
     throw new ManagedSlotConfigError(
       "managed_slot_config_invalid",
-      `managed slot config is not valid JSON: ${errorMessage(error)}`,
-      { cause: error },
+      `managed slot config ${trimmed.startsWith("{") ? "inline value" : `file ${trimmed}`} is not valid JSON`,
     );
   }
   return parseManagedSlotConfig(json);

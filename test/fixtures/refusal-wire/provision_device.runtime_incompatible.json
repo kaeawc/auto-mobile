@@ -1,0 +1,13 @@
+{
+  "code": "provision_device.runtime_incompatible",
+  "builder": "ProvisionDeviceError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"runtime_incompatible fixture\",\"error\":{\"code\":\"runtime_incompatible\",\"message\":\"runtime_incompatible fixture\",\"retryable\":false}}"
+      }
+    ]
+  }
+}

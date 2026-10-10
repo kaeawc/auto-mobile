@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.stale_session",
+  "builder": "reconciler failure via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (stale_session: stale_session fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"stale_session\",\"retryable\":true,\"message\":\"stale_session fixture\",\"nextAction\":\"Retry; an earlier execution's session on the slot device could not be released.\"}}}"
+      }
+    ]
+  }
+}

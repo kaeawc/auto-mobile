@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.timeout",
+  "builder": "acquisitionFailure via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (timeout: timeout fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"timeout\",\"retryable\":true,\"message\":\"timeout fixture\",\"nextAction\":\"Retry with a longer preparationTimeoutMs.\"}}}"
+      }
+    ]
+  }
+}

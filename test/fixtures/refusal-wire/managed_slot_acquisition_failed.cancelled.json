@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.cancelled",
+  "builder": "acquisitionFailure via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (cancelled: cancelled fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"cancelled\",\"retryable\":true,\"message\":\"cancelled fixture\",\"nextAction\":\"The preparation was cancelled; retry when needed.\"}}}"
+      }
+    ]
+  }
+}

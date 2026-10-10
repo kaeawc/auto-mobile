@@ -1,0 +1,13 @@
+{
+  "code": "provision_device.creation_not_allowed",
+  "builder": "ProvisionDeviceError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"creation_not_allowed fixture\",\"error\":{\"code\":\"creation_not_allowed\",\"message\":\"creation_not_allowed fixture\",\"retryable\":false}}"
+      }
+    ]
+  }
+}

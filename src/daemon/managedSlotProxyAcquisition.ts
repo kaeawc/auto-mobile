@@ -16,6 +16,7 @@ import {
 } from "../models/managedSlotConfig";
 import {
   managedSlotSessions,
+  type ManagedSlotAcquisitionOwnFailureCode,
   type ManagedSlotsFailure,
   type ManagedSlotsResult,
 } from "../models/managedSlotsResult";
@@ -61,7 +62,12 @@ export interface ManagedSlotProxyAcquisitionPorts {
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
 }
 
-function failure(code: string, message: string, retryable: boolean, nextAction: string) {
+function failure(
+  code: ManagedSlotAcquisitionOwnFailureCode,
+  message: string,
+  retryable: boolean,
+  nextAction: string,
+) {
   return { code, message, retryable, nextAction } satisfies ManagedSlotsFailure;
 }
 
@@ -117,7 +123,7 @@ function classifyError(error: unknown, signal: AbortSignal | undefined): Managed
   const code = (error as { code?: unknown } | null)?.code;
   if (typeof code === "string" && CONFIG_ERROR_CODES.has(code)) {
     return failure(
-      code,
+      code as ManagedSlotConfigErrorCode,
       errorMessage(error),
       false,
       "Fix the managed slot config; nothing changed.",

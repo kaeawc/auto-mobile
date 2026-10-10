@@ -22,9 +22,29 @@ export type ManagedSlotDispositionName = "created" | "reused" | "adopted" | "rep
  * - `scope_invalidated`: this runner incarnation was reset; it never accepts work again.
  * - `scope_transition_pending`: a newer incarnation is waiting for the old one's owners/cleanup.
  * - `execution_policy_failed`: the session could not be put on the managed-execution policy.
+ * - `execution_hold_failed`: the proxy could not hold a slot session for the execution.
  * - `daemon_unavailable`: the proxy could not reach the daemon within the preparation deadline.
  * - `timeout` / `cancelled`: the preparation deadline passed, or the proxy is shutting down.
  */
+export const MANAGED_SLOT_ACQUISITION_OWN_FAILURE_CODES = [
+  "managed_slot_config_invalid",
+  "contract_unsupported",
+  "managed_slot_group_unsupported",
+  "managed_slots_unsupported",
+  "scope_invalidated",
+  "scope_transition_pending",
+  "execution_policy_failed",
+  "execution_hold_failed",
+  "liveness_owner_conflict",
+  "daemon_unavailable",
+  "timeout",
+  "cancelled",
+] as const;
+
+/** Failure codes the acquisition and the proxy mint themselves, beside the reconciler's. */
+export type ManagedSlotAcquisitionOwnFailureCode =
+  (typeof MANAGED_SLOT_ACQUISITION_OWN_FAILURE_CODES)[number];
+
 export interface ManagedSlotsFailure {
   code: string;
   retryable: boolean;

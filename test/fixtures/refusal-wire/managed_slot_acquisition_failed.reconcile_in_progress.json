@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.reconcile_in_progress",
+  "builder": "reconciler failure via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (reconcile_in_progress: reconcile_in_progress fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"reconcile_in_progress\",\"retryable\":true,\"message\":\"reconcile_in_progress fixture\",\"nextAction\":\"Another reconciliation of this slot is in progress; retry later.\"}}}"
+      }
+    ]
+  }
+}

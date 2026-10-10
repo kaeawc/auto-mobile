@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.slot_settling",
+  "builder": "reconciler failure via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (slot_settling: slot_settling fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"slot_settling\",\"retryable\":true,\"message\":\"slot_settling fixture\",\"nextAction\":\"Wait for the previous execution's released work to settle, then retry.\"}}}"
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.liveness_owner_conflict",
+  "builder": "acquisitionFailure via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (liveness_owner_conflict: liveness_owner_conflict fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"liveness_owner_conflict\",\"retryable\":true,\"message\":\"liveness_owner_conflict fixture\",\"nextAction\":\"Retry; another owner claimed the slot's session.\"}}}"
+      }
+    ]
+  }
+}

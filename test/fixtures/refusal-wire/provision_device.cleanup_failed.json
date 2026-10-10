@@ -1,0 +1,13 @@
+{
+  "code": "provision_device.cleanup_failed",
+  "builder": "ProvisionDeviceError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"cleanup_failed fixture\",\"error\":{\"code\":\"cleanup_failed\",\"message\":\"cleanup_failed fixture\",\"retryable\":false}}"
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "code": "provision_device.unsupported",
+  "builder": "ProvisionDeviceError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"unsupported fixture\",\"error\":{\"code\":\"unsupported\",\"message\":\"unsupported fixture\",\"retryable\":false}}"
+      }
+    ]
+  }
+}

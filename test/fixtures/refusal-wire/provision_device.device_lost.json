@@ -1,0 +1,13 @@
+{
+  "code": "provision_device.device_lost",
+  "builder": "ProvisionDeviceError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"device_lost fixture\",\"error\":{\"code\":\"device_lost\",\"message\":\"device_lost fixture\",\"retryable\":true}}"
+      }
+    ]
+  }
+}

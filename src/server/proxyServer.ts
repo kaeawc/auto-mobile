@@ -387,7 +387,7 @@ function managedSlotsResourceContents(result: ManagedSlotsResult) {
  * is refused with the acquisition's typed failure, which also rides in `initialize` and the
  * `automobile:managed-slots` resource.
  */
-function managedSlotsFailedToolResult(result: ManagedSlotsResult, name: string) {
+export function managedSlotsFailedToolResult(result: ManagedSlotsResult, name: string) {
   const failure = result.failure ?? result.slots.find((slot) => slot.failure)?.failure;
   const payload = {
     success: false,

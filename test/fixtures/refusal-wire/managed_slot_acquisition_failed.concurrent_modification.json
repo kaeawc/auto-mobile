@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.concurrent_modification",
+  "builder": "reconciler failure via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (concurrent_modification: concurrent_modification fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"concurrent_modification\",\"retryable\":true,\"message\":\"concurrent_modification fixture\",\"nextAction\":\"The slot changed concurrently; retry to converge on its new state.\"}}}"
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.device_busy",
+  "builder": "reconciler failure via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (device_busy: device_busy fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"device_busy\",\"retryable\":true,\"message\":\"device_busy fixture\",\"nextAction\":\"Wait for the device's live session or foreign claim to end, then retry.\"}}}"
+      }
+    ]
+  }
+}

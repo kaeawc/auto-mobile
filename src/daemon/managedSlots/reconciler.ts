@@ -350,6 +350,11 @@ const FAILURE_RETRYABILITY: Readonly<Record<ManagedSlotReconcileFailureCode, boo
   cancelled: true,
 };
 
+/** Every code the reconciler can fail with; the `Record` key keeps it complete. */
+export const MANAGED_SLOT_RECONCILE_FAILURE_CODES = Object.keys(
+  FAILURE_RETRYABILITY,
+) as ManagedSlotReconcileFailureCode[];
+
 const FAILURE_NEXT_ACTION: Readonly<Record<ManagedSlotReconcileFailureCode, string>> = {
   spec_unsupported: "Fix the requested spec; nothing was changed.",
   runtime_incompatible: "Request a model/runtime pair the host supports; nothing was changed.",
@@ -799,7 +804,7 @@ class ReconcileAbort extends Error {
   }
 }
 
-function failure(
+export function failure(
   code: ManagedSlotReconcileFailureCode,
   message: string,
   extra: Partial<Pick<ManagedSlotReconcileFailure, "provision" | "capacity" | "retryable">> = {},

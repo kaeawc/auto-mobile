@@ -124,6 +124,7 @@ nav:
       - "iOS Simulator fleet cost": using/ios-simulator-fleet-cost.md
       - "Screen control": using/screen-control.md
       - "Device ownership": using/device-ownership.md
+      - "Managed device slots": using/managed-slots.md
       - "Managed Macs and CI runners": using/managed-macs.md
       - "WebRTC Streaming": webrtc-streaming.md
   - "How it Works":

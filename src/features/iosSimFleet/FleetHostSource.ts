@@ -89,11 +89,13 @@ export class CommandFleetHostSource implements FleetHostSource {
   ) {}
 
   async readHostSnapshot(options: FleetReadOptions = {}): Promise<HostSnapshot> {
+    // Host totals come from `os`, independent of `ps`: a failed process read must not discard
+    // them, because the derived boot limit depends only on the totals (#11389).
     const [processes, resources] = await Promise.all([
-      readHostProcessTable(this.executor, options),
+      this.readProcesses(options),
       this.readResources(options),
     ]);
-    return { takenAtMs: this.timer.now(), resources, processes };
+    return { takenAtMs: this.timer.now(), resources, ...processes };
   }
 
   async readInventory(options: FleetReadOptions = {}): Promise<SimulatorInventoryEntry[]> {
@@ -103,6 +105,17 @@ export class CommandFleetHostSource implements FleetHostSource {
       options.signal,
     );
     return parseSimctlInventory(result.stdout);
+  }
+
+  private async readProcesses(
+    options: FleetReadOptions,
+  ): Promise<{ processes: HostProcessRow[]; processesError?: string }> {
+    try {
+      return { processes: await readHostProcessTable(this.executor, options) };
+    } catch (error) {
+      logger.warn(`host process table read failed: ${errorMessage(error)}`, error);
+      return { processes: [], processesError: errorMessage(error) };
+    }
   }
 
   private async readResources(options: FleetReadOptions): Promise<HostResources> {

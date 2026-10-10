@@ -1,13 +1,10 @@
 import { DaemonState } from "../daemon/daemonState";
-import { releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
+import { releasePlanSessionAndDevice } from "../daemon/releaseSessionAndDevice";
 import { ActionableError } from "../models";
 import { createToolExecutionContext } from "./ToolExecutionContext";
 import type { SessionOptions } from "./ToolExecutionContext";
-import {
-  PLAN_AUTO_RELEASE_REASON,
-  type DeviceLabelMap,
-  type SessionExecutionMetadata,
-} from "../daemon/sessionManager";
+import type { DeviceLabelMap, SessionExecutionMetadata } from "../daemon/sessionManager";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { logger } from "../utils/logger";
 import { combineAbortSignals } from "../utils/AbortContext";
 
@@ -243,7 +240,10 @@ export const registerDeviceLabelMap = async (
   return deviceLabelMap;
 };
 
-export const releaseDeviceLabelSessions = async (baseSessionUuid: string): Promise<string[]> => {
+export const releaseDeviceLabelSessions = async (
+  baseSessionUuid: string,
+  excludeExecutionId: string | undefined = getToolSelectionContext()?.execution?.executionId,
+): Promise<string[]> => {
   if (!DaemonState.getInstance().isInitialized()) {
     return [];
   }
@@ -271,13 +271,14 @@ export const releaseDeviceLabelSessions = async (baseSessionUuid: string): Promi
       // build-context/detector) completes BEFORE the device is returned to the pool and
       // possibly reassigned — otherwise hierarchy/nav broadcasts during the release get
       // recorded under the ended session's uuid. Mirrors the base-session path (#4984).
-      await releaseSessionAndDevice(
-        sessionManager,
-        devicePool,
+      // Calls still running under the label session, and base calls on its device, are cut
+      // first; the plan's own call is bound to this device and is spared (#11490).
+      await releasePlanSessionAndDevice(sessionManager, devicePool, {
+        sessionId: sessionUuid,
+        baseSessionId: baseSessionUuid,
         deviceId,
-        sessionUuid,
-        PLAN_AUTO_RELEASE_REASON,
-      );
+        excludeExecutionId,
+      });
     } catch (error) {
       // Each label session is released on its own: one failed release must not leave the
       // remaining sessions holding their devices (#11091). releaseSessionAndDevice already

@@ -1,10 +1,13 @@
 import { logger } from "../utils/logger";
 import {
-  releaseSessionAndDevice,
+  releasePlanSessionAndDevice,
+  type ReleaseCutExecutions,
   type SessionReleaseManager,
   type SessionReleasePool,
 } from "./releaseSessionAndDevice";
-import { PLAN_AUTO_RELEASE_REASON, type SessionReleaseCallback } from "./sessionManager";
+import type { SessionReleaseCallback } from "./sessionManager";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import { executionTracker } from "../server/executionTracker";
 
 /** The slice of the session manager the cascade needs. */
 export interface DerivedLabelSessionSource extends SessionReleaseManager {
@@ -28,6 +31,7 @@ export interface DerivedLabelSessionReleaseCascade {
 export function registerDerivedLabelSessionReleaseCascade(
   manager: DerivedLabelSessionSource,
   pool: SessionReleasePool,
+  executions: ReleaseCutExecutions = executionTracker,
 ): DerivedLabelSessionReleaseCascade {
   const pending = new Set<Promise<void>>();
 
@@ -37,12 +41,18 @@ export function registerDerivedLabelSessionReleaseCascade(
       return;
     }
     try {
-      await releaseSessionAndDevice(
+      // The derived session's own calls are cut before its device is freed (#11490). The call
+      // whose lookup released the base, if any, is answered by that lookup and is spared.
+      await releasePlanSessionAndDevice(
         manager,
         pool,
-        session.assignedDevice,
-        derivedSessionId,
-        PLAN_AUTO_RELEASE_REASON,
+        {
+          sessionId: derivedSessionId,
+          baseSessionId,
+          deviceId: session.assignedDevice,
+          excludeExecutionId: getToolSelectionContext()?.execution?.executionId,
+        },
+        executions,
       );
       logger.info(
         `[DeviceLabelMap] Released label session ${derivedSessionId} with its base ${baseSessionId}`,

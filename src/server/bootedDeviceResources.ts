@@ -1,4 +1,5 @@
 import { adbOfflineHeldDevices } from "./adbOfflineHeldDevices";
+import { describeInventoryDevice, type AdbOfflineHold } from "./inventoryDeviceDescription";
 import { AndroidTransportAliases } from "../utils/androidSerial";
 import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
@@ -13,7 +14,6 @@ import {
 } from "../devices/deviceUtils";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
-  configuredImageForBootedDevice,
   configuredImagesByStableId,
   type StableConfiguredDeviceImage,
 } from "../utils/configuredDeviceInventory";
@@ -519,17 +519,15 @@ async function getDeviceLockStates(): Promise<ResourceContent> {
 // Convert BootedDevice to BootedDeviceInfo
 function toBootedDeviceInfo(
   device: BootedDevice,
-  poolContext?: PoolDeviceContext,
-  configured?: StableConfiguredDeviceImage,
-  adbOfflineState?: string,
+  poolContext: PoolDeviceContext | undefined,
+  configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
+  extras: { adbOffline?: AdbOfflineHold; transportAvdName?: string } = {},
 ): BootedDeviceInfo {
-  const description = describeDevice({
-    kind: "booted",
-    adbOfflineState,
+  const description = describeInventoryDevice({
     device,
     pooled: poolContext?.pooled,
     unhealthy: poolContext?.poolInfo.unhealthy,
-    configured,
+    configuredImages,
     // Preserve the pool's already-published assignment in the canonical session
     // when the optional session-detail map is unavailable for this observation.
     session:
@@ -538,7 +536,8 @@ function toBootedDeviceInfo(
         ? { sessionId: poolContext.poolInfo.assignedSession }
         : undefined),
     deviceSessionUuid: poolContext?.deviceSessionUuid,
-    ...poolContext?.hold,
+    hold: poolContext?.hold,
+    ...extras,
   });
   const projected = projectBootedDevice(description);
   return {
@@ -597,6 +596,7 @@ interface AdbOfflineHeldInput {
   resolveDeviceSessionUuid: (deviceId: string) => string | null;
   deviceManager: PlatformDeviceManager;
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
+  transportAvdName: (deviceId: string) => string | undefined;
 }
 
 /**
@@ -623,8 +623,11 @@ async function adbOfflineHeldDeviceDescriptions(
         input.sessionInfoByDeviceId,
         input.resolveDeviceSessionUuid,
       ),
-      input.configuredImages.get(`android:${avdName}`),
-      adbState,
+      input.configuredImages,
+      {
+        adbOffline: { adbState, avdName },
+        transportAvdName: input.transportAvdName(device.deviceId),
+      },
     ),
   );
 }
@@ -908,6 +911,12 @@ async function discoverBootedDevicesForPlatform(
     });
     getAbortSignal()?.throwIfAborted();
     const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
+    // The same lookup the listDevices tool applies, so both surfaces name the same stable AVD.
+    const transportAvdName = (device: BootedDevice): string | undefined =>
+      device.platform === "android"
+        ? (devicePool?.getAndroidTransportAvdName(device.deviceId) ??
+          aliases.avdName(device.deviceId))
+        : undefined;
     const discovery = {
       ...rawDiscovery,
       devices:
@@ -941,6 +950,8 @@ async function discoverBootedDevicesForPlatform(
               sessionInfoByDeviceId,
               resolveDeviceSessionUuid,
             ),
+            new Map(),
+            { transportAvdName: transportAvdName(device) },
           ),
           devicePool,
         ),
@@ -966,7 +977,8 @@ async function discoverBootedDevicesForPlatform(
             sessionInfoByDeviceId,
             resolveDeviceSessionUuid,
           ),
-          configuredImageForBootedDevice(device, configuredImages),
+          configuredImages,
+          { transportAvdName: transportAvdName(device) },
         ),
         devicePool,
       ),
@@ -979,6 +991,8 @@ async function discoverBootedDevicesForPlatform(
       resolveDeviceSessionUuid,
       deviceManager,
       configuredImages,
+      transportAvdName: (deviceId) =>
+        devicePool?.getAndroidTransportAvdName(deviceId) ?? aliases.avdName(deviceId),
     });
     // A held AVD re-cold-booting while adb still lists its old serial offline would otherwise
     // appear twice under one stableId (#11132). The held row carries the session and pool status

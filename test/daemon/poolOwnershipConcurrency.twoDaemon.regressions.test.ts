@@ -88,7 +88,8 @@ describe("cross-daemon ownership regressions", () => {
     ]);
     expect(result.violation).toBeUndefined();
     // B settled the dead daemon's journal: it wrote the terminal row, then removed A's file.
-    expect(result.trace.join("\n")).toContain(
+    // The trace prints the path with the host's separator; compare with forward slashes.
+    expect(result.trace.join("\n").replaceAll("\\", "/")).toContain(
       "B1 journal removed /automobile-data/terminal-release-intents/daemon-A-1.jsonl",
     );
   });

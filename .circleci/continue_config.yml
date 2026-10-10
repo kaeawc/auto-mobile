@@ -376,6 +376,16 @@ jobs:
             AUTOMOBILE_BATS_MAX_FILE_SECONDS: "240"
             AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "420"
           command: scripts/ci/run-bats.sh unit
+      # Job logs and per-file durations name the slow files when the lane's
+      # time budget is breached (#11474); upload even when the run step fails.
+      - store_artifacts:
+          when: always
+          path: scratch/bats-unit-joblog.tsv
+          destination: bats-unit-joblog/bats-unit-joblog.tsv
+      - store_artifacts:
+          when: always
+          path: scratch/bats-unit-joblog-durations.tsv
+          destination: bats-unit-joblog/bats-unit-joblog-durations.tsv
 
   macos-bats-integration-tests:
     executor: ios

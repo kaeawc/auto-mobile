@@ -1,3 +1,4 @@
+import { AppNotRunningError } from "../../models/AppNotRunningError";
 /** Stable resource error fields for an absent AutoMobile SDK provider. */
 export class ProviderUnavailableError extends Error {
   readonly errorCode = "PROVIDER_UNAVAILABLE";
@@ -14,6 +15,9 @@ export function resourceErrorFields(error: unknown): {
   errorCode?: string;
   errorReason?: string;
 } {
+  if (error instanceof AppNotRunningError) {
+    return { errorCode: error.code };
+  }
   return error instanceof ProviderUnavailableError
     ? { errorCode: error.errorCode, errorReason: error.errorReason }
     : {};

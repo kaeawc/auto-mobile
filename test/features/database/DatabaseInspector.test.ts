@@ -74,6 +74,47 @@ describe("DatabaseInspector", () => {
       expect(providerCalls()).toEqual([]);
     });
 
+    const pidofFailure = (props: Record<string, unknown>) =>
+      Object.assign(new Error("Command failed: adb shell pidof"), props);
+
+    test("a clean pidof miss (exit 1, no output) is app_not_running", async () => {
+      fakeAdb.setCommandError(
+        `shell pidof ${shellQuote(appId)}`,
+        pidofFailure({ code: 1, stdout: "", stderr: "" }),
+      );
+      const watcher = new DatabaseInspector(device, fakeAdb, fakeTimer, () => true);
+
+      const error = await watcher.executeSQL(appId, databasePath, "select 1").catch((e) => e);
+
+      expect(error).toBeInstanceOf(AppNotRunningError);
+      expect(providerCalls()).toEqual([]);
+    });
+
+    test("a probe failure surfaces as the real error, not app_not_running, and skips the provider", async () => {
+      fakeAdb.setCommandError(
+        `shell pidof ${shellQuote(appId)}`,
+        pidofFailure({ code: 1, stdout: "", stderr: "error: device offline" }),
+      );
+      fakeAdb.setCommandResult(sqlCmd, ok);
+      const watcher = new DatabaseInspector(device, fakeAdb, fakeTimer, () => true);
+
+      const error = await watcher.executeSQL(appId, databasePath, "select 1").catch((e) => e);
+
+      expect(error).not.toBeInstanceOf(AppNotRunningError);
+      expect(error.message).toContain("Command failed");
+      expect(providerCalls()).toEqual([]);
+    });
+
+    test("a probe timeout surfaces as the real error", async () => {
+      fakeAdb.setCommandError(`shell pidof ${shellQuote(appId)}`, new Error("adb timed out"));
+      const watcher = new DatabaseInspector(device, fakeAdb, fakeTimer, () => true);
+
+      const error = await watcher.executeSQL(appId, databasePath, "select 1").catch((e) => e);
+
+      expect(error.message).toBe("adb timed out");
+      expect(providerCalls()).toEqual([]);
+    });
+
     test("reads normally when the app is alive", async () => {
       fakeAdb.setCommandResult(sqlCmd, ok);
       const watcher = new DatabaseInspector(device, fakeAdb, fakeTimer, () => true);

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import { registerDatabaseResources } from "../../src/server/databaseResources";
 import { registerDatabaseTools } from "../../src/server/databaseTools";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
@@ -305,7 +306,7 @@ describe("iOS database inspection server integration", function () {
     const match = ResourceRegistry.matchTemplate(
       "automobile:devices/ios-1/databases?appId=com.example.app",
     )!;
-    const content = await match.template.handler(match.params);
+    const content = await invokeResourceTemplate(match);
     expect(JSON.parse(content.text!)).toEqual({
       error: `Failed to list databases: Error: ${message}`,
     });
@@ -378,7 +379,7 @@ describe("iOS database inspection server integration", function () {
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
 
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     const payload = JSON.parse(content.text!);
 
     expect(listDatabases).toHaveBeenCalledWith("com.example.app");
@@ -403,7 +404,7 @@ describe("iOS database inspection server integration", function () {
     registerDatabaseResources();
     const uri = "automobile:devices/ios-1/databases?appId=com.example.app";
     const match = ResourceRegistry.matchTemplate(uri);
-    const content = await match!.template.handler(match!.params);
+    const content = await invokeResourceTemplate(match!);
     const payload = JSON.parse(content.text!);
 
     expect(listDatabases).toHaveBeenCalledWith("com.example.app");

@@ -37,6 +37,11 @@ interface AppearanceSyncDependencies {
 export interface AppearanceSyncScope {
   getTargets: () => AppearanceSyncTarget[];
   isEnabled?: () => boolean;
+  /**
+   * Runs before each apply, inside its tracked deadline: the daemon records the device's night-mode
+   * default here so a sync-driven change is reset for the next owner (#11145). Must not reject.
+   */
+  beforeApply?: (device: AppearanceSyncTarget) => Promise<void>;
 }
 
 export class AppearanceSyncScheduler {
@@ -197,7 +202,10 @@ export class AppearanceSyncScheduler {
     }
 
     let timedOut = false;
-    const apply = this.dependencies.apply(device, mode);
+    const beforeApply = this.scope?.beforeApply;
+    const apply = beforeApply
+      ? beforeApply(device).then(() => this.dependencies.apply(device, mode))
+      : this.dependencies.apply(device, mode);
     this.inFlightApplies.set(device.deviceId, apply);
     void apply.then(
       () => {

@@ -1,4 +1,6 @@
 import { DisplayConfig } from "../../src/features/utility/DisplayConfig";
+import { installDeviceSettingDefaults } from "../../src/features/utility/DeviceSettingDefaults";
+import { SystemConfigurationManager } from "../../src/features/utility/SystemConfigurationManager";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { installFakeDeviceToolProviders } from "../helpers/hermeticDeviceTools";
 import Ajv2020 from "ajv/dist/2020";
@@ -210,6 +212,91 @@ describe("displayConfig handler", () => {
       expect(JSON.parse(response.content[0].text!).message).toBe(resetResult.message);
     } finally {
       set.mockRestore();
+    }
+  });
+});
+
+describe("device setting defaults are recorded before a change (#11145)", () => {
+  const device = { deviceId: "fake-device", platform: "android" as const, name: "Fake" };
+  const result = {
+    success: true,
+    deviceId: device.deviceId,
+    platform: device.platform,
+    supported: { fontScale: true, density: true, theme: true },
+  };
+
+  test("displayConfig records the settings it changes before setting them, and not on a read", async () => {
+    const events: string[] = [];
+    installDeviceSettingDefaults({
+      recordBeforeChange: async (_device, keys) => {
+        events.push(`record:${keys.join(",")}`);
+      },
+    });
+    const get = spyOn(DisplayConfig.prototype, "getConfig").mockResolvedValue(result);
+    const set = spyOn(DisplayConfig.prototype, "setConfig").mockImplementation(async () => {
+      events.push("set");
+      return result;
+    });
+    try {
+      registerUtilityTools();
+      const handler = ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!;
+      await handler(device, { fontScale: 1.3, theme: "dark" });
+      await handler(device, { reset: true });
+      await handler(device, {});
+      expect(events).toEqual([
+        "record:fontScale,nightMode",
+        "set",
+        "record:fontScale,density,nightMode",
+        "set",
+      ]);
+    } finally {
+      installDeviceSettingDefaults(undefined);
+      get.mockRestore();
+      set.mockRestore();
+    }
+  });
+
+  test("changeLocalization records locale, 24-hour format and calendar before changing them", async () => {
+    const events: string[] = [];
+    installDeviceSettingDefaults({
+      recordBeforeChange: async (_device, keys) => {
+        events.push(`record:${keys.join(",")}`);
+      },
+    });
+    const timeFormat = spyOn(
+      SystemConfigurationManager.prototype,
+      "set24HourFormat",
+    ).mockImplementation(async (enabled) => {
+      events.push("set24HourFormat");
+      return { success: true, enabled };
+    });
+    const calendar = spyOn(
+      SystemConfigurationManager.prototype,
+      "setCalendarSystem",
+    ).mockImplementation(async (calendarSystem) => {
+      events.push("setCalendarSystem");
+      return { success: true, calendarSystem };
+    });
+    const broadcast = spyOn(
+      SystemConfigurationManager.prototype,
+      "broadcastLocaleChange",
+    ).mockResolvedValue(false);
+    try {
+      registerUtilityTools();
+      await ToolRegistry.getTool("changeLocalization")!.deviceAwareHandler!(device, {
+        timeFormat: "24",
+        calendarSystem: "japanese",
+      });
+      expect(events).toEqual([
+        "record:timeFormat,calendarSystem",
+        "set24HourFormat",
+        "setCalendarSystem",
+      ]);
+    } finally {
+      installDeviceSettingDefaults(undefined);
+      timeFormat.mockRestore();
+      calendar.mockRestore();
+      broadcast.mockRestore();
     }
   });
 });

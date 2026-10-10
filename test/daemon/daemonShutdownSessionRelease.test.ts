@@ -764,9 +764,18 @@ describe("Daemon shutdown session release (issue #5303)", () => {
         svcWasEnabled: false,
       });
 
-      await expect(daemon.stop()).resolves.toBeUndefined();
+      let stopped = false;
+      const stopping = daemon.stop().then(() => {
+        stopped = true;
+      });
+      // The failed restore is retried after a FakeTimer delay before the device is freed (#11145).
+      for (let tick = 0; tick < 20 && !stopped; tick++) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        await timer.advanceTimeAsync(250);
+      }
+      await expect(stopping).resolves.toBeUndefined();
 
-      expect(restoreSpy).toHaveBeenCalledTimes(2);
+      expect(restoreSpy).toHaveBeenCalledTimes(3);
       expect(sessionManager.getSession(brokenSessionId)).toBeNull();
       expect(sessionManager.getSession(healthySessionId)).toBeNull();
       expect(repository.sessions.get(brokenSessionId)).toMatchObject({

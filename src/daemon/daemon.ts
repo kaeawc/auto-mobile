@@ -125,6 +125,14 @@ import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import { announceSessionRelease } from "./announceSessionRelease";
 import { clearSessionAppearanceConfig } from "../server/appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
+import {
+  DefaultDeviceSettingsAccess,
+  DeviceSettingDefaults,
+  createDeviceSettingDefaultsAcquisitionReset,
+  installDeviceSettingDefaults,
+  recordDeviceSettingDefaultsBeforeChange,
+} from "../features/utility/DeviceSettingDefaults";
+import { DeviceSettingDefaultsRepository } from "../db/deviceSettingDefaultsRepository";
 import { NetworkState } from "../server/NetworkState";
 import {
   createOwnerlessNetworkStateAcquisitionCleanup,
@@ -888,12 +896,25 @@ export class Daemon {
     const clearOwnerlessNetworkState = createOwnerlessNetworkStateAcquisitionCleanup(
       this.sessionManager,
     );
-    this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
+    // Display/system settings a previous session changed are reset to the recorded device
+    // defaults when a different session acquires the device (#11145).
+    const settingDefaults = new DeviceSettingDefaults(
+      new DeviceSettingDefaultsRepository(),
+      new DefaultDeviceSettingsAccess(),
+      (deviceId) => this.sessionManager.getSessionForDevice(deviceId),
+    );
+    installDeviceSettingDefaults(settingDefaults);
+    const resetSettingDefaults = createDeviceSettingDefaultsAcquisitionReset(
+      this.sessionManager,
+      settingDefaults,
+    );
+    this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
       executionTracker.cancelSessionlessDeviceUse(deviceId, {
         excludeExecutionId: getToolSelectionContext()?.execution?.executionId,
       });
       stopOwnerlessRecordings(deviceId);
       clearOwnerlessNetworkState(deviceId);
+      resetSettingDefaults(deviceId, sessionId);
     });
     this.sessionManager.onSessionCreated((session) => {
       NavigationGraphManager.clearReleasedSession(session.sessionId);
@@ -1333,6 +1354,8 @@ export class Daemon {
     startAppearanceSyncScheduler({
       getTargets: () => this.getAppearanceSyncTargets(),
       isEnabled: () => this.passiveWorkPolicy.isAppearanceSyncEnabled(),
+      // A sync-driven night-mode change is reset for the next owner like a tool's (#11145).
+      beforeApply: (device) => recordDeviceSettingDefaultsBeforeChange(device, ["nightMode"]),
     });
     startPerformanceMonitor();
     this.startAdbMissingDeviceListener();

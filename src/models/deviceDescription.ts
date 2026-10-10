@@ -31,7 +31,12 @@ export interface CapabilityInventory {
 
 export interface DeviceDescription {
   unhealthy?: {
-    readonly reason: "biometric-enrollment" | "network-condition" | "clock" | "app-cleanup";
+    readonly reason:
+      | "biometric-enrollment"
+      | "network-condition"
+      | "clock"
+      | "app-cleanup"
+      | "keep-screen-awake";
     readonly since: number;
   };
   name: string;

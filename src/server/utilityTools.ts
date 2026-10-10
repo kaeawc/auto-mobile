@@ -16,6 +16,10 @@ import { ActionableError } from "../models/ActionableError";
 import { isIosSimulatorDevice } from "../features/action/IosSimulatorPermissions";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
 import {
+  recordDeviceSettingDefaultsBeforeChange,
+  type DeviceSettingKey,
+} from "../features/utility/DeviceSettingDefaults";
+import {
   DeviceState,
   biometricEnrollmentSchema,
   doNotDisturbModeSchema,
@@ -799,6 +803,11 @@ async function applyAdditionalLocalizationChanges(
 const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocalizationArgs) => {
   assertChangeLocalizationPlatformConstraints(device.platform, args);
 
+  await recordDeviceSettingDefaultsBeforeChange(device, [
+    ...(args.locale !== undefined ? (["locale"] as const) : []),
+    ...(args.timeFormat !== undefined ? (["timeFormat"] as const) : []),
+    ...(args.calendarSystem !== undefined ? (["calendarSystem"] as const) : []),
+  ]);
   const manager = new SystemConfigurationManager(device);
   const changes: LocalizationChanges = {};
   const errors: string[] = [];
@@ -843,8 +852,23 @@ function isDisplayConfigRead(args: DisplayConfigArgs): boolean {
   return !displayConfigArgsAreSet(args);
 }
 
+/** The device settings a displayConfig call may change (#11145). */
+function displayConfigChangedSettings(args: DisplayConfigArgs): DeviceSettingKey[] {
+  if (args.reset === true) {
+    return ["fontScale", "density", "nightMode"];
+  }
+  return [
+    ...(args.fontScale !== undefined ? (["fontScale"] as const) : []),
+    ...(args.density !== undefined ? (["density"] as const) : []),
+    ...(args.theme !== undefined ? (["nightMode"] as const) : []),
+  ];
+}
+
 const displayConfigHandler = async (device: BootedDevice, args: DisplayConfigArgs) => {
   const displayConfig = new DisplayConfig(device);
+  if (displayConfigArgsAreSet(args)) {
+    await recordDeviceSettingDefaultsBeforeChange(device, displayConfigChangedSettings(args));
+  }
   const result = displayConfigArgsAreSet(args)
     ? await displayConfig.setConfig(displayConfigSetInput(args))
     : await displayConfig.getConfig();

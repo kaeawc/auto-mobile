@@ -533,6 +533,19 @@ export class DisplayConfig {
     }
   }
 
+  /**
+   * Current values in the form `setConfig` accepts back (Android's `"default"` tokens for an
+   * absent font-scale or density override), for recording a device default (#11145). Fields the
+   * platform cannot read are omitted; failures propagate.
+   */
+  async getRestorableConfig(): Promise<DisplayConfigValues> {
+    if (this.device.platform === "ios") {
+      const theme = this.isIosSimulator() ? await this.readIosTheme() : undefined;
+      return theme === undefined ? {} : { theme };
+    }
+    return (await this.readRawValues(this.adbFactory.create(this.device))).restorableValues;
+  }
+
   private invalidRequest(error: string): DisplayConfigResult {
     return {
       success: false,

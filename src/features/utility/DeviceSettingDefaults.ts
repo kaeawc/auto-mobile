@@ -5,6 +5,12 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import {
+  registerDeviceIncarnationListener,
+  type DeviceIncarnationListener,
+} from "../../utils/deviceIncarnation";
 import {
   DisplayConfig,
   type DisplayTheme,
@@ -69,27 +75,75 @@ function recordedKeys(values: DeviceSettingValues): DeviceSettingKey[] {
   return DEVICE_SETTING_KEYS.filter((key) => key in values);
 }
 
+/** Upper bound on a settings change waiting for the device's pending acquisition reset (#11145). */
+export const PENDING_RESET_WAIT_MS = 15_000;
+
 /**
  * Records device defaults before a session's first change of each setting, and resets the
  * changed settings when a different session next acquires the device (#11145).
  */
 export class DeviceSettingDefaults {
   private readonly queues = new Map<string, Promise<void>>();
+  /** Bumped when a different device takes over a serial: queued work of the old one is dropped. */
+  private readonly identityEpochs = new Map<string, number>();
 
   constructor(
     private readonly persistence: DeviceSettingDefaultsPersistence,
     private readonly access: DeviceSettingsAccess,
     /** The session holding a device, if any: only a session's changes are recorded. */
     private readonly holderOf: (deviceId: string) => string | null,
+    private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout"> = defaultTimer,
+    /** How long a settings change waits for the device's pending acquisition reset. */
+    private readonly resetWaitMs: number = PENDING_RESET_WAIT_MS,
   ) {}
 
-  /** Record the current value of each of `keys` not yet recorded, before a session changes it. */
+  /**
+   * Record the current value of each of `keys` not yet recorded, before a session changes it.
+   * Settles only after the device's pending acquisition reset, so the caller's change cannot race
+   * it; the wait is bounded, and on timeout the caller proceeds with a warning.
+   */
   recordBeforeChange(device: BootedDevice, keys: readonly DeviceSettingKey[]): Promise<void> {
     const sessionId = this.holderOf(device.deviceId);
-    if (sessionId === null || keys.length === 0) {
-      return Promise.resolve();
+    const abandoned = { value: false };
+    const work =
+      sessionId === null || keys.length === 0
+        ? this.settled(device.deviceId)
+        : this.enqueueRecord(device, keys, sessionId, abandoned);
+    return this.awaitPendingReset(device.deviceId, work, abandoned);
+  }
+
+  private async awaitPendingReset(
+    deviceId: string,
+    work: Promise<void>,
+    abandoned: { value: boolean },
+  ): Promise<void> {
+    try {
+      await raceWithDeadline(work, {
+        timer: this.timer,
+        timeoutMs: this.resetWaitMs,
+        label: `Reset of device settings on ${deviceId}`,
+      });
+    } catch (error) {
+      // The caller changes the setting now: a record queued behind the reset would observe that
+      // change instead of the device default.
+      abandoned.value = true;
+      logger.warn(
+        `Proceeding with a settings change on ${deviceId} before its pending reset finished: ${errorMessage(error)}`,
+        error,
+      );
     }
+  }
+
+  private enqueueRecord(
+    device: BootedDevice,
+    keys: readonly DeviceSettingKey[],
+    sessionId: string,
+    abandoned: { value: boolean },
+  ): Promise<void> {
     return this.enqueue(device.deviceId, async () => {
+      if (abandoned.value) {
+        return;
+      }
       const record = await this.persistence.get(device.deviceId);
       const known = record?.values ?? {};
       const missing = keys.filter((key) => !(key in known));
@@ -142,16 +196,36 @@ export class DeviceSettingDefaults {
     });
   }
 
+  /**
+   * A different device now holds this serial: drop the predecessor's recorded defaults, and any
+   * queued record or reset of its, so they are never written onto the new device.
+   */
+  forget(deviceId: string): Promise<void> {
+    this.identityEpochs.set(deviceId, (this.identityEpochs.get(deviceId) ?? 0) + 1);
+    return this.enqueue(deviceId, () => this.persistence.delete(deviceId), true);
+  }
+
   /** Settles once the record/reset work queued for the device so far has finished. */
   settled(deviceId: string): Promise<void> {
     return this.queues.get(deviceId) ?? Promise.resolve();
   }
 
-  private enqueue(deviceId: string, work: () => Promise<void>): Promise<void> {
+  private enqueue(
+    deviceId: string,
+    work: () => Promise<void>,
+    survivesIdentityChange = false,
+  ): Promise<void> {
     const previous = this.queues.get(deviceId) ?? Promise.resolve();
-    const next = previous.then(work).catch((error: unknown) => {
-      logger.warn(`Device setting defaults failed on ${deviceId}: ${errorMessage(error)}`, error);
-    });
+    const epoch = this.identityEpochs.get(deviceId) ?? 0;
+    const next = previous
+      .then(() =>
+        survivesIdentityChange || (this.identityEpochs.get(deviceId) ?? 0) === epoch
+          ? work()
+          : undefined,
+      )
+      .catch((error: unknown) => {
+        logger.warn(`Device setting defaults failed on ${deviceId}: ${errorMessage(error)}`, error);
+      });
     this.queues.set(deviceId, next);
     void next.then(() => {
       if (this.queues.get(deviceId) === next) {
@@ -347,4 +421,29 @@ export function createDeviceSettingDefaultsAcquisitionReset(
       defaults.resetOnAcquisition(deviceId, sessionId),
     );
   };
+}
+
+export const DEVICE_SETTING_DEFAULTS_LISTENER_NAME = "device-setting-defaults";
+
+/**
+ * A different device now holds this serial (wipe, recreate, port reuse): the defaults recorded
+ * for its predecessor must never be written onto it (#11145). Same-device incarnation changes keep
+ * the record, since the guest's settings survive them.
+ */
+export function createDeviceSettingDefaultsIdentityListener(
+  defaults: Pick<DeviceSettingDefaults, "forget">,
+): DeviceIncarnationListener {
+  return {
+    name: DEVICE_SETTING_DEFAULTS_LISTENER_NAME,
+    onDeviceIdentityReplaced: (deviceId) => {
+      void defaults.forget(deviceId);
+    },
+    onDeviceIncarnationChanged: () => {},
+  };
+}
+
+export function registerDeviceSettingDefaultsIdentityListener(
+  defaults: Pick<DeviceSettingDefaults, "forget">,
+): () => void {
+  return registerDeviceIncarnationListener(createDeviceSettingDefaultsIdentityListener(defaults));
 }

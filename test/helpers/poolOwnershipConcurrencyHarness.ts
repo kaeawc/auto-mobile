@@ -245,25 +245,8 @@ export interface RunResult {
  * finding in its own right.
  */
 function isExpectedRefusal(error: unknown): boolean {
-  return (
-    error instanceof ActionableError ||
-    error instanceof TerminalSessionError ||
-    TERMINAL_RELEASE_REFUSALS.some((refusal) => errorMessage(error).includes(refusal))
-  );
+  return error instanceof ActionableError || error instanceof TerminalSessionError;
 }
-
-/**
- * Plain-Error refusals the session manager raises while a killDevice holds a session's terminal
- * release reservation (sessionManager.ts reserveSessionForTerminalRelease and the admission
- * checks next to it). They are deliberate refusals, not crashes.
- */
-const TERMINAL_RELEASE_REFUSALS = [
-  "is being terminally released from device",
-  "is already reserved for terminal release",
-  // getOrCreateSession when the session it was assigning is released before it returns (an
-  // executePlan label session whose base is released mid-setup).
-  "creation failed after device assignment",
-] as const;
 
 /**
  * The pool's per-connection acquisition record (connection id -> session ids), read without the

@@ -86,7 +86,9 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
   DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+  DEVICE_SHUTTING_DOWN_CODE,
   SessionCreationTimeoutError,
+  SessionReleasedDuringCreationError,
 } from "./deviceAcquisitionRefusals";
 import { DAEMON_SESSION_SUSPECT_CODE, isIdleReleaseReason } from "./types";
 import {
@@ -568,6 +570,29 @@ export class SessionReleasePersistTimeoutError extends ActionableError {
     this.name = "SessionReleasePersistTimeoutError";
   }
 }
+
+/**
+ * A session under a kill's terminal release reservation cannot be bound, rebound or reserved again
+ * (#11146). It carries the device-shutdown wire code but is not retryable: the session UUID ends
+ * with that release, so only a new UUID (or nothing, for a second kill) can follow.
+ */
+export class SessionTerminalReleaseInProgressError extends ActionableError {
+  readonly code = DEVICE_SHUTTING_DOWN_CODE;
+
+  constructor(
+    readonly sessionUuid: string,
+    readonly deviceId: string,
+    detail: string,
+  ) {
+    super(
+      `Session ${sessionUuid} ${detail} (code ${DEVICE_SHUTTING_DOWN_CODE}, device '${deviceId}').`,
+    );
+    this.name = "SessionTerminalReleaseInProgressError";
+  }
+}
+
+const TERMINAL_RELEASE_IN_PROGRESS_DETAIL =
+  "is being terminally released from its device; use a new session UUID";
 
 export class TerminalSessionError extends Error {
   constructor(
@@ -3129,7 +3154,7 @@ export class SessionManager {
     }
     const session = this.getSession(sessionId);
     if (!session) {
-      throw new Error(`Session ${sessionId} creation failed after device assignment`);
+      throw new SessionReleasedDuringCreationError(sessionId);
     }
     // The live session's own clocks take over from here.
     this.restartRecoveryActivityAt.delete(sessionId);
@@ -3698,7 +3723,11 @@ export class SessionManager {
     }
     const existing = this.terminalReleaseReservations.get(session.sessionId);
     if (existing) {
-      throw new Error(`Session ${session.sessionId} is already reserved for terminal release.`);
+      throw new SessionTerminalReleaseInProgressError(
+        session.sessionId,
+        expectedDeviceId,
+        "is already reserved for terminal release",
+      );
     }
     const reservation: TerminalReleaseReservation = {
       session,
@@ -3716,8 +3745,10 @@ export class SessionManager {
   private assertTerminalReleaseAdmission(sessionId: string, allowedSession?: Session): void {
     const reservation = this.terminalReleaseReservations.get(sessionId);
     if (reservation && reservation.session !== allowedSession) {
-      throw new Error(
-        `Session ${sessionId} is being terminally released from device ${reservation.deviceId}; use a new session UUID.`,
+      throw new SessionTerminalReleaseInProgressError(
+        sessionId,
+        reservation.deviceId,
+        TERMINAL_RELEASE_IN_PROGRESS_DETAIL,
       );
     }
   }
@@ -3728,8 +3759,10 @@ export class SessionManager {
   ): void {
     const reservation = this.terminalReleaseReservations.get(sessionId);
     if (reservation && reservation.owner !== reservationOwner) {
-      throw new Error(
-        `Session ${sessionId} is being terminally released from device ${reservation.deviceId}; use a new session UUID.`,
+      throw new SessionTerminalReleaseInProgressError(
+        sessionId,
+        reservation.deviceId,
+        TERMINAL_RELEASE_IN_PROGRESS_DETAIL,
       );
     }
   }
@@ -4321,7 +4354,9 @@ export class SessionManager {
       }
       this.recordFinalizedSessionRelease(session, reason);
       if (persistedSnapshot !== releaseSnapshot) {
-        this.notifySessionRelease(persistedSnapshot, options);
+        // A terminal reason upgraded this release while it persisted. Its cleanup already ran on
+        // the first notification, so announce only the reason change (#10825, #11146).
+        this.notifySessionRelease(persistedSnapshot, { ...options, upgradeOnly: true });
       }
       logger.info(
         pendingCleanup.length > 0

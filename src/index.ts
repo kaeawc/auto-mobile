@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
-// Must stay first: captures the launcher pid before anything else runs (#11041).
+// Runtime guard stays first so a non-Bun runtime gets a clear message instead of a bundle stack
+// trace; processEntry must follow it immediately: captures the launcher pid before anything else runs (#11041).
+import "./runtime/bunRuntimeGuard";
 import "./daemon/processEntry";
 import "./runtime/reflectMetadata";
 import { errorMessage } from "./utils/describeUnknownError";

@@ -337,6 +337,7 @@ import {
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import {
   sessionOwnershipLostPayload,
+  getActiveDeviceSelectionFromResult,
   getDeviceSessionIdFromResult,
   isDeviceSessionAcquisitionTool,
 } from "./deviceSessionResult";
@@ -1602,7 +1603,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         !result?.isError &&
         sessionToolBinding.bind(
           sessionId,
-          getDeviceSessionIdFromResult(result) ?? routingSessionUuid,
+          getActiveDeviceSelectionFromResult(result)?.sessionUuid ?? routingSessionUuid,
         )
       ) {
         ToolRegistry.notifyToolListChanged();

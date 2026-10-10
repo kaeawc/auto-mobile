@@ -365,10 +365,11 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     const receivedBeforeIos = received.length;
     await proxy.callTool("routingProbe", { platform: "ios", keepScreenAwake: false });
     expect(received.slice(receivedBeforeIos)).not.toContain(devices[0].deviceId);
-    // The released iOS binding must not prevent an unqualified call from using
-    // the still-owned Android binding.
-    await proxy.callTool("routingProbe", {});
-    expect((await proxy.callTool("routingProbe", { sessionUuid: apple })).isError).toBe(true);
+    // setActiveDevice made the iOS session this connection's binding, so its release fences
+    // an unqualified call (and a call naming it) until the caller picks a live session (#11235;
+    // the #6811 contract that #7276's result-reader change silently dropped).
+    await expect(proxy.callTool("routingProbe", {})).rejects.toThrow();
+    await expect(proxy.callTool("routingProbe", { sessionUuid: apple })).rejects.toThrow();
     await proxy.callTool("routingProbe", { platform: "android", keepScreenAwake: false });
     await proxy.callTool("routingProbe", { sessionUuid: android, keepScreenAwake: false });
 

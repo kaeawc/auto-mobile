@@ -299,3 +299,33 @@ test("the owner naming its own autolock session is not marked foreign and still 
   await ownerProxy.callTool("routingProbe", { keepScreenAwake: false });
   expect(received).toEqual([devices[0].deviceId, devices[0].deviceId]);
 }, 30000);
+
+test("setActiveDevice moves the connection's untargeted calls to the selected device (#11235 N1)", async () => {
+  const socket = newSocketServer();
+  const proxy = connect(socket, "client");
+  await proxy.callTool("getAndroid", { deviceId: devices[0].deviceId });
+  const first = pool.resolveAutolockSessionForMcpSession(
+    "client",
+    "android",
+    undefined,
+    devices[0].deviceId,
+  );
+  await proxy.callTool("getAndroid", { deviceId: devices[1].deviceId });
+  const second = pool.resolveAutolockSessionForMcpSession(
+    "client",
+    "android",
+    undefined,
+    devices[1].deviceId,
+  );
+  expect(first).toBeDefined();
+  expect(second).toBeDefined();
+  expect(first).not.toBe(second);
+
+  await proxy.callTool("routingProbe", { keepScreenAwake: false });
+  await proxy.callTool("routingProbe", { sessionUuid: second, keepScreenAwake: false });
+  await proxy.callTool("routingProbe", { keepScreenAwake: false });
+  const selected = await proxy.callTool("setActiveDevice", { deviceId: devices[0].deviceId });
+  expect(selected.isError).toBeFalsy();
+  await proxy.callTool("routingProbe", { keepScreenAwake: false });
+  expect(received.at(-1)).toBe(devices[0].deviceId);
+}, 30000);

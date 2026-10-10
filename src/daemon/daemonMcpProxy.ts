@@ -71,6 +71,7 @@ import {
   readDeviceSessionSuspectRefusal,
   type DeviceSessionSuspectRefusal,
   getDeviceIdFromResult,
+  getActiveDeviceSelectionFromResult,
   getDeviceSessionIdFromResult,
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
@@ -4080,14 +4081,10 @@ export class DaemonMcpProxy {
     if (name !== "setActiveDevice") {
       return;
     }
-    const sessionUuid = getDeviceSessionIdFromResult(result);
-    if (sessionUuid) {
-      this.throwIfSessionReleasedSince(sessionUuid, releaseEpoch);
-      this.rememberSessionUuid(
-        name,
-        { sessionUuid, deviceId: getDeviceIdFromResult(result) },
-        releaseEpoch,
-      );
+    const selection = getActiveDeviceSelectionFromResult(result);
+    if (selection) {
+      this.throwIfSessionReleasedSince(selection.sessionUuid, releaseEpoch);
+      this.rememberSessionUuid(name, selection, releaseEpoch);
     }
   }
 

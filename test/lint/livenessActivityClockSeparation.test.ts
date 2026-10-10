@@ -160,6 +160,8 @@ const LEASE_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
     "ownerLeaseHeartbeat",
     // #11080: whether an owner was live when a daemon stall began, for narrow forgiveness.
     "ownerLeaseLiveAt",
+    // #11162: the judged lease start, which stall forgiveness also anchors on.
+    "judgedLeaseHeartbeat",
   ],
   "src/daemon/SessionHeartbeatMonitor.ts": [
     "SessionHeartbeatMonitor.heartbeatLeaseStaleReason",

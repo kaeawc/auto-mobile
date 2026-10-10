@@ -65,8 +65,8 @@ import { Mutex } from "async-mutex";
 import { errorMessage } from "../utils/describeUnknownError";
 import { effectiveLastToolActivity } from "./sessionClocks";
 import {
-  effectiveLastHeartbeat,
   isLivenessOwnerLeaseLive,
+  judgedLeaseHeartbeat,
   ownerLeaseLiveAt,
   livenessLeaseState,
   livenessOwnerHold,
@@ -7560,7 +7560,9 @@ export class SessionManager {
         continue;
       }
       if (ownerLeaseLiveAt(session, gapBeganAt)) {
-        const leaseStart = effectiveLastHeartbeat(session);
+        // The lease that is judged (#11162): for a session judged on its owner's heartbeats, a
+        // non-owner's tool call must not move the forgiven lease start.
+        const leaseStart = judgedLeaseHeartbeat(session);
         session.stallForgivenAt = Math.max(
           leaseStart,
           Math.min(resumedAt, leaseStart + leaseLostMs),

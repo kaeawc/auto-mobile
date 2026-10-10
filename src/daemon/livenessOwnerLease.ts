@@ -149,22 +149,59 @@ export function ownerLeaseHeartbeat(
 }
 
 /**
+ * Whether the session's lease is judged on its owner's own heartbeats (#11107): an owned session
+ * that has heartbeated. `lastHeartbeat` is also stamped by tool calls from any connection, so such
+ * a session must not let a non-owner's calls stand in for its owner. A session no proxy owns keeps
+ * the activity-refreshed `lastHeartbeat`.
+ */
+export function judgesOwnerHeartbeats(
+  session: Pick<LeaseSession, "livenessOwnerToken" | "hasReceivedHeartbeat">,
+): boolean {
+  return session.livenessOwnerToken !== undefined && session.hasReceivedHeartbeat;
+}
+
+/**
+ * The lease start the session is judged on: {@link ownerLeaseHeartbeat} when
+ * {@link judgesOwnerHeartbeats}, else {@link effectiveLastHeartbeat}. Stall forgiveness anchors on
+ * it too (#11162), so the daemon's stall extends the lease that is actually judged and a
+ * non-owner's tool call cannot restart a dead owner's lease through it.
+ */
+export function judgedLeaseHeartbeat(session: LeaseSession): number {
+  return judgesOwnerHeartbeats(session)
+    ? ownerLeaseHeartbeat(session)
+    : effectiveLastHeartbeat(session);
+}
+
+/**
  * Whether an owned session's owner lease was still running at `at` (#11080): `at` is within one
  * lease of the owner's last heartbeat. The daemon's stall forgiveness asks this of a gap's start,
  * so it excuses only owners that were live when the daemon stopped hearing them. Read from the
- * raw `lastHeartbeat`, not the forgiven lease start, so successive late scans cannot chain one
- * forgiveness onto the last for an owner that is gone. A session not owned (awaiting its
- * rehydrated owner) has no owner lease to have lapsed, and an absent `at` asks nothing: both are
- * treated as live.
+ * raw heartbeat stamp, not the forgiven lease start, so successive late scans cannot chain one
+ * forgiveness onto the last for an owner that is gone; and, for a session judged on its owner's
+ * heartbeats, from `lastOwnerHeartbeat` rather than the activity-refreshed `lastHeartbeat`, so a
+ * non-owner's tool call cannot make a dead owner look live (#11162). A session not owned (awaiting
+ * its rehydrated owner) has no owner lease to have lapsed, and an absent `at` asks nothing: both
+ * are treated as live.
  */
 export function ownerLeaseLiveAt(
-  session: Pick<LeaseSession, "lastHeartbeat" | "heartbeatTimeoutMs" | "ownership">,
+  session: Pick<
+    LeaseSession,
+    | "lastHeartbeat"
+    | "lastOwnerHeartbeat"
+    | "heartbeatTimeoutMs"
+    | "ownership"
+    | "livenessOwnerToken"
+    | "hasReceivedHeartbeat"
+  >,
   at: number | undefined,
 ): boolean {
   if (at === undefined || session.ownership !== "owned") {
     return true;
   }
-  return at - session.lastHeartbeat <= session.heartbeatTimeoutMs;
+  const lastHeartbeat = judgesOwnerHeartbeats(session)
+    ? (session.lastOwnerHeartbeat ?? session.lastHeartbeat)
+    : session.lastHeartbeat;
+  return at - lastHeartbeat <= session.heartbeatTimeoutMs;
 }
 
 /**
@@ -221,7 +258,5 @@ export function sessionJudgedLeaseSnapshot(
   session: LeaseSession,
   now: number,
 ): LivenessOwnerLeaseSnapshot {
-  return session.livenessOwnerToken !== undefined && session.hasReceivedHeartbeat
-    ? sessionOwnerLeaseSnapshot(session, now)
-    : sessionLeaseSnapshot(session, now);
+  return { ...sessionLeaseSnapshot(session, now), lastHeartbeat: judgedLeaseHeartbeat(session) };
 }

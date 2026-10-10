@@ -9,11 +9,7 @@ import {
   type Session,
 } from "./sessionManager";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import {
-  effectiveLastHeartbeat,
-  ownerLeaseHeartbeat,
-  suspectGraceMsFor,
-} from "./livenessOwnerLease";
+import { judgedLeaseHeartbeat, suspectGraceMsFor } from "./livenessOwnerLease";
 import { effectiveLastToolActivity } from "./sessionClocks";
 import {
   UNSETTLED_EXECUTION_VETO_CEILING_MS,
@@ -603,10 +599,7 @@ export class SessionHeartbeatMonitor {
     // heartbeated is judged on its owner's own heartbeats: `lastHeartbeat` is also stamped by tool
     // calls from any connection, which must not keep a dead owner's lease alive (#11107). A
     // session no proxy owns keeps the activity-refreshed `lastHeartbeat` fallback.
-    const lastHeartbeat =
-      session.livenessOwnerToken !== undefined && session.hasReceivedHeartbeat
-        ? ownerLeaseHeartbeat(session)
-        : effectiveLastHeartbeat(session);
+    const lastHeartbeat = judgedLeaseHeartbeat(session);
 
     if (!session.hasReceivedHeartbeat) {
       if (session.heartbeatTimeoutSource === "default") {

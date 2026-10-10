@@ -436,6 +436,7 @@ start_proxy() {
   # stdin reaches the proxy through an anonymous pipe (`cat` reads the FIFO): Bun on macOS never
   # delivers `end` for a named FIFO, so the proxy would not see this script close its stdin and
   # stop_proxy would wait out its full timeout (#11073). $! is the proxy, the last command.
+  # shellcheck disable=SC2002 # The cat is the point: it supplies the anonymous pipe.
   cat "${work_dir}/mcp.in" | "${BUN}" "${server}" --port "${port}" --strict-port \
     > "${work_dir}/mcp.out" 2>> "${work_dir}/proxy.stderr" &
   proxy_pid=$!

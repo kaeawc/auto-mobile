@@ -1392,6 +1392,70 @@ describe("MCP Booted Device Resources", () => {
       sessionManager.stopCleanupTimer();
     });
 
+    describe("pool holds report assigned, as DevicePool.getStats() does (#11304, #11305)", () => {
+      const makeHoldPool = async (
+        extraFor: (
+          timer: FakeTimer,
+        ) => Partial<Parameters<typeof createDevicePoolDependencies>[2]> = () => ({}),
+      ) => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+        const { FakeInstalledAppsRepository } =
+          await import("../../fakes/FakeInstalledAppsRepository");
+        const held: BootedDevice = { ...mockIosDevice1, deviceId: "SIM-HELD" };
+        const free: BootedDevice = { ...mockIosDevice2, deviceId: "SIM-FREE" };
+        fakeDeviceUtils.setBootedDevices("ios", [held, free]);
+        const pool = new DevicePool(
+          createDevicePoolDependencies(sessions, "hold-test", {
+            timer,
+            installedAppsRepository: new FakeInstalledAppsRepository(),
+            deviceManager: fakeDeviceUtils,
+            ...extraFor(timer),
+          }),
+        );
+        await pool.initializeWithDevices([held, free]);
+        DaemonState.getInstance().initialize(sessions, pool);
+        return { pool, sessions, timer, held };
+      };
+
+      const readIos = async (timer: FakeTimer) => {
+        resetBootedDevicesResourceCache();
+        const result = await getBootedDevicesForPlatforms(["ios"], timer);
+        const status = (deviceId: string) =>
+          result.devices.find((device) => device.runtime.deviceId === deviceId)?.runtime;
+        return { result, status };
+      };
+
+      test("a shutdown-reserved idle device is assigned and not counted idle", async () => {
+        const { pool, sessions, timer } = await makeHoldPool();
+        try {
+          await pool.reserveDeviceForShutdown("SIM-HELD");
+          const { result, status } = await readIos(timer);
+          expect(status("SIM-HELD")?.poolStatus).toBe("assigned");
+          expect(status("SIM-HELD")?.session).toBeNull();
+          expect(status("SIM-FREE")?.poolStatus).toBe("idle");
+          expect(result.poolStatus).toMatchObject({ idle: 1, assigned: 1 });
+          expect(result.poolStatus?.idle).toBe(pool.getStats().idle);
+        } finally {
+          sessions.stopCleanupTimer();
+        }
+      });
+
+      test("a readiness-reserved idle device is assigned and not counted idle", async () => {
+        const { pool, sessions, timer, held } = await makeHoldPool();
+        try {
+          await pool.reserveDeviceForReadiness("SIM-HELD", held);
+          const { result, status } = await readIos(timer);
+          expect(status("SIM-HELD")?.poolStatus).toBe("assigned");
+          expect(result.poolStatus).toMatchObject({ idle: 1, assigned: 1 });
+          expect(result.poolStatus?.idle).toBe(pool.getStats().idle);
+        } finally {
+          sessions.stopCleanupTimer();
+        }
+      });
+    });
+
     // #11118: during the disconnect monitor's offline budget the daemon still holds the
     // session, so the listing must keep the session and pool status plus an explicit state.
     test("lists a held device adb reports offline with its session, pool status and connection", async function () {

@@ -237,6 +237,13 @@ function resolveConsoleBusyRegistry(
 /**
  * Error class for device pool operations with retryability flag.
  */
+/**
+ * Who, if anyone, keeps generic allocation off a pooled device: a managed slot, another AutoMobile
+ * daemon, or a readiness/shutdown/recovery reservation. Every inventory surface derives its
+ * "available" and `poolStatus` from this one answer.
+ */
+export type GenericAvailability = "free" | "managed_slot" | "foreign_daemon" | "reserved";
+
 /** A lifecycle stop that must not take a device another live daemon holds (#11200). */
 export interface ShutdownForeignClaim {
   toolName: string;
@@ -8659,7 +8666,7 @@ export class DevicePool {
    * Whether generic allocation may lend `deviceId`, from the last managed-slot snapshot and the
    * live foreign-ownership probe: the same facts allocation filters on. Unknown devices are free.
    */
-  genericAvailability(deviceId: string): "free" | "managed_slot" | "foreign_daemon" {
+  genericAvailability(deviceId: string): GenericAvailability {
     const device = this.devices.get(deviceId);
     if (!device) {
       return "free";
@@ -8667,7 +8674,10 @@ export class DevicePool {
     if (this.isManagedSlotDevice(device)) {
       return "managed_slot";
     }
-    return this.isDrivenByForeignDaemon(device) ? "foreign_daemon" : "free";
+    if (this.isDrivenByForeignDaemon(device)) {
+      return "foreign_daemon";
+    }
+    return this.isReservedForAssignment(device) ? "reserved" : "free";
   }
 
   /** Platform devices generic allocation may lend: none a managed slot holds. */

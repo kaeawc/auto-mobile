@@ -92,7 +92,7 @@ import {
   provisionedDeviceSchema,
   configuredImageSchema,
 } from "./deviceDescription";
-import type { DeviceHeldBy } from "./deviceDescription";
+import { poolHoldFor } from "./deviceDescription";
 import {
   notifyInstalledAppResourceListChanged,
   syncInstalledAppResourceRegistry,
@@ -994,14 +994,6 @@ function androidDeviceIdentityPayload(
   };
 }
 
-function heldByFor(devicePool: DevicePool | undefined, deviceId: string): DeviceHeldBy | undefined {
-  const availability = devicePool?.genericAvailability(deviceId);
-  if (availability === "managed_slot") {
-    return "managed_slot";
-  }
-  return availability === "foreign_daemon" ? "other_daemon" : undefined;
-}
-
 export function listDevicePayloads(
   booted: BootedDevice[],
   devicePool: DevicePool | undefined,
@@ -1032,7 +1024,7 @@ export function listDevicePayloads(
       configured: configuredImageForBootedDevice(device, configuredImages),
       session,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
-      heldBy: pooled ? heldByFor(devicePool, device.deviceId) : undefined,
+      ...(pooled ? poolHoldFor(devicePool, device.deviceId) : {}),
     });
     if (device.platform === "android") {
       return projectAndroidTransportDescription(

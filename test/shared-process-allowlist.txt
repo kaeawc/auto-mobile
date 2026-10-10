@@ -73,6 +73,7 @@ test/daemon/devicePool.androidStartupLeaseOfflineRecovery.test.ts
 test/daemon/devicePool.bootCapacityRefusal.test.ts
 test/daemon/devicePool.capturedPredicates.test.ts
 test/daemon/devicePool.crossDaemonExplicitBind.test.ts
+test/daemon/devicePool.crossDaemonIdleLeaseRelinquish.test.ts
 test/daemon/devicePool.exitedLauncherSameSerial.test.ts
 test/daemon/devicePool.heartbeatExpiry.test.ts
 test/daemon/devicePool.idleEvictionStaleSnapshot.test.ts

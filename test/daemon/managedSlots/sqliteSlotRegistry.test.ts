@@ -21,7 +21,8 @@ describe("defaultSlotRegistryPath", () => {
       "/home/agent",
     );
     expect(resolved).toBe(
-      path.join(
+      // resolve(): on Windows an absolute POSIX-style home is anchored to the current drive.
+      path.resolve(
         "/home/agent",
         ".auto-mobile",
         "adb-servers",

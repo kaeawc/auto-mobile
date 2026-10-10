@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { resolve, sep } from "node:path";
 import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
   DeviceOwnedByOtherDaemonError,
@@ -235,7 +236,8 @@ for (const [platform, deviceId] of [
 test("iOS claims are keyed by UDID under one host-wide scope (#10980)", () => {
   const path = iosDeviceAllocationClaimPath("ABC-123", {}, "/home/someone");
   expect(path).toContain(IOS_SIMULATOR_CLAIM_SCOPE);
-  expect(path.startsWith("/home/someone/.auto-mobile/")).toBe(true);
+  // resolve(): on Windows an absolute POSIX-style home is anchored to the current drive.
+  expect(path.startsWith(resolve("/home/someone", ".auto-mobile") + sep)).toBe(true);
   expect(iosDeviceAllocationClaimPath("ABC-123", { AUTOMOBILE_COORDINATION_DIR: "/x" }, "/h")).toBe(
     iosDeviceAllocationClaimPath("ABC-123", {}, "/h"),
   );

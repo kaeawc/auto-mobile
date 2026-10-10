@@ -73,6 +73,7 @@ test/daemon/devicePool.androidStartupLeaseOfflineRecovery.test.ts
 test/daemon/devicePool.bootCapacityRefusal.test.ts
 test/daemon/devicePool.capturedPredicates.test.ts
 test/daemon/devicePool.crossDaemonExplicitBind.test.ts
+test/daemon/devicePool.crossDaemonIdleLeaseRelinquish.test.ts
 test/daemon/devicePool.exitedLauncherSameSerial.test.ts
 test/daemon/devicePool.heartbeatExpiry.test.ts
 test/daemon/devicePool.idleEvictionStaleSnapshot.test.ts
@@ -123,6 +124,7 @@ test/daemon/managedRebindRefusedFailsClosed.test.ts
 test/daemon/managedSlots/abandonedScopeReclaimer.test.ts
 test/daemon/managedSlots/capacityExternalDevices.test.ts
 test/daemon/managedSlots/daemonManagedSlotAcquisition.ownDevice.test.ts
+test/daemon/managedSlots/daemonManagedSlotAcquisition.redrive.test.ts
 test/daemon/managedSlots/managedExecutionDaemonRestart.test.ts
 test/daemon/managedSlots/managedSlotAcquisition.test.ts
 test/daemon/managedSlots/managedSlotExclusion.test.ts
@@ -133,7 +135,10 @@ test/daemon/managedSlots/slotJournal.test.ts
 test/daemon/managedSlots/slotOwnerLiveness.test.ts
 test/daemon/managedSlots/slotRegistryMigrations.test.ts
 test/daemon/managedSlots/slotScopeReset.test.ts
+test/daemon/managedSlots/slotsOwnExecutionStaleSnapshot.test.ts
+test/daemon/managedSlots/slotsPlatformChangeSqliteJournal.test.ts
 test/daemon/managedSlots/slotsRegistryAbsentThenUnreadable.test.ts
+test/daemon/managedSlots/slotsUnresolvedEmulatorIdentityGate.test.ts
 test/daemon/managedSlots/sqliteSlotRegistry.test.ts
 test/daemon/managerOutputReductionArgs.test.ts
 test/daemon/observationRequestBatch.test.ts
@@ -381,6 +386,7 @@ test/features/featureFlags/FeatureFlagService.toolListChanged.test.ts
 test/features/featureFlags/persistedOutputReductionOverrides.test.ts
 test/features/featureFlags/toolDefinitionAffectingFlags.drift.test.ts
 test/features/iosSimFleet/IosBootInstrumentation.test.ts
+test/features/iosSimFleet/iosBootCapacityGate.test.ts
 test/features/iosSimFleet/iosSimFleet.test.ts
 test/features/memory/MemoryAudit.characterization.test.ts
 test/features/memory/MemoryMetricsCollector.test.ts
@@ -584,6 +590,7 @@ test/features/prototype/prototypeMissingAssets.test.ts
 test/features/prototype/prototypeNodeContractParity.test.ts
 test/features/prototype/prototypeRepeat.test.ts
 test/features/prototype/prototypeSelectionControls.test.ts
+test/features/prototype/prototypeSetStateBinding.test.ts
 test/features/prototype/prototypeThemeModes.test.ts
 test/features/record/McpCallRecorder.test.ts
 test/features/record/McpCallRecorderCoverage.test.ts

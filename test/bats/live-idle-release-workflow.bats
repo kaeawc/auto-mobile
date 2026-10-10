@@ -2,7 +2,7 @@
 #
 # Wiring guard for the live idle-release job (#10840, #10983). The job drives a real emulator, so
 # it runs on dispatch and nightly only: any other trigger would put it on pull requests or merges.
-# It stays advisory (continue-on-error) until it has been green twice.
+# It is advisory only by not being a required check; it must report its own failure (#11368).
 
 WORKFLOW=".github/workflows/live-idle-release.yml"
 RUNNER="scripts/ci/run-live-idle-release.sh"
@@ -24,9 +24,10 @@ RUNNER="scripts/ci/run-live-idle-release.sh"
   [ "${jobs}" -eq "${guards}" ]
 }
 
-@test "the check job is advisory and scheduled runs fall back to the dispatch defaults" {
-  run awk '/^  live-idle-release:/{j=1; next} j && /^  [a-z-]+:/{exit} j && /continue-on-error: true/{print "advisory"}' "${WORKFLOW}"
-  [ "${output}" = "advisory" ]
+@test "the check job reports its own failure (no continue-on-error) and scheduled runs fall back to the dispatch defaults" {
+  run grep -c 'continue-on-error:' "${WORKFLOW}"
+  [ "${status}" -eq 1 ]
+  [ "${output}" = "0" ]
   grep -qF "inputs.scenario || 'all'" "${WORKFLOW}"
   grep -qF "inputs.idle-timeout-ms || '20000'" "${WORKFLOW}"
 }

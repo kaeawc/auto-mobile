@@ -1,0 +1,42 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": false
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "dialog",
+          "title": "T",
+          "text": "X",
+          "openWhen": {
+            "key": "open",
+            "equals": true
+          },
+          "confirm": {
+            "label": "OK"
+          }
+        },
+        {
+          "type": "button",
+          "label": "Go",
+          "onTap": [
+            {
+              "type": "setState",
+              "key": "open",
+              "value": "yes"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].value"
+}

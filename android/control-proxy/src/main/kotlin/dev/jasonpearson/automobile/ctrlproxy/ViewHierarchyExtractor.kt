@@ -1806,8 +1806,10 @@ internal constructor(
         .mapTo(mutableSetOf()) {
           it.windowId
         }
-    // The host decides what CtrlProxy's own prototype covers (isFullyCoveredByOwnOverlay,
-    // layer:"app", covered-tap refusal), so its windows must not prune the app nodes beneath them
+    // The host decides what CtrlProxy's own prototype covers
+    // (OwnWindowCoverRule in isFullyCoveredByApplicationWindow, layer:"app", covered-tap refusal),
+    // so
+    // its windows must not prune the app nodes beneath them
     // here; dropping those nodes left the host nothing to scope or refuse (#10608/#10544).
     val ownPrototypeWindowKeys =
       windowEntries

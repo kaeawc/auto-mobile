@@ -99,7 +99,7 @@ import {
   resolverSelectionStrategySchema,
 } from "./elementSelectorSchemas";
 import {
-  hasOwnPrototype,
+  hasOwnWindow,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
   scopeObserveResultToLayer,
@@ -2209,7 +2209,7 @@ function layerScopedObserveResult(
     scopeObserveResultToLayer(result, layer, platform);
   // A capture taken with the prototype hidden device-side is marked false by the capture itself;
   // any other `layer: "app"` screenshot still shows the prototype, and observe says so.
-  return layer === "app" && carriesScreenshot(result) && hasOwnPrototype(result.viewHierarchy)
+  return layer === "app" && carriesScreenshot(result) && hasOwnWindow(result.viewHierarchy)
     ? { ...scoped, screenshotIncludesPrototype: capturedWithoutPrototype !== false }
     : scoped;
 }

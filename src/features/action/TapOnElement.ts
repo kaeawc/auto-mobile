@@ -1,5 +1,5 @@
 import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
-import type { OwnPrototypeCoverRule } from "../observe/ApplicationWindowCover";
+import type { OwnWindowCoverRule } from "../observe/ApplicationWindowCover";
 import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
@@ -121,7 +121,7 @@ import {
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
 import {
-  isOwnPrototypeNode,
+  isOwnWindowNode,
   resolvePrototypeTapUnderSystemBar,
   type PrototypeBarTapDecision,
 } from "./prototypeTapUnderSystemBars";
@@ -403,7 +403,7 @@ export type TapFocusFailure = "not-found" | "no-visible-tap-area" | "navigation-
 export type TapOnFocusResult = TapOnElementResult & { [tapFocusFailure]?: TapFocusFailure };
 
 /** With no `layer`, a tap must avoid AutoMobile's own prototype windows as well (#10691). */
-function tapOwnPrototypeCoverRule(layer: TapOnElementOptions["layer"]): OwnPrototypeCoverRule {
+function tapOwnWindowCoverRule(layer: TapOnElementOptions["layer"]): OwnWindowCoverRule {
   return layer === undefined ? "touch" : "none";
 }
 
@@ -795,7 +795,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const owner = findTapTargetNode(new SearchableHierarchy().project(hierarchy), element)?.source;
     return resolvePrototypeTapUnderSystemBar({
       hierarchy,
-      ownedByPrototype: isOwnPrototypeNode(hierarchy, owner),
+      ownedByPrototype: isOwnWindowNode(hierarchy, owner),
       bounds: element.bounds,
       point,
     });
@@ -1480,7 +1480,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         },
         // Default-layer selectors also resolve app rows kept under AutoMobile's own prototype
         // (#10691); layer "app" refuses those later with its own prototype-specific error.
-        tapOwnPrototypeCoverRule(context.options.layer),
+        tapOwnWindowCoverRule(context.options.layer),
       );
       if (!safe.point) {
         throw new TapTargetUnavailableError(

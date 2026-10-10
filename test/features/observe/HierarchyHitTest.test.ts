@@ -12,7 +12,7 @@ import {
 import type { ElementBounds, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
-import { ownPrototypeSafeGesturePoint } from "../../../src/features/observe/ApplicationWindowCover";
+import { ownWindowSafeGesturePoint } from "../../../src/features/observe/ApplicationWindowCover";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import capturedIme from "../../fixtures/android-ime-window/playground-gboard-api36.json";
@@ -273,15 +273,13 @@ describe("AutoMobile prototype covers (#10715)", () => {
   test("gesture point moves off a partial prototype and is refused under a full one", () => {
     const partial = hierarchyWith([prototypeWindow(rect(100, 300))]);
     expect(
-      ownPrototypeSafeGesturePoint(partial, target(partial), row.bounds, { x: 200, y: 50 }),
+      ownWindowSafeGesturePoint(partial, target(partial), row.bounds, { x: 200, y: 50 }),
     ).toEqual({
       x: 50,
       y: 50,
     });
     const full = hierarchyWith([prototypeWindow(rect(0, 400))]);
-    expect(
-      ownPrototypeSafeGesturePoint(full, target(full), row.bounds, { x: 200, y: 50 }),
-    ).toBeNull();
+    expect(ownWindowSafeGesturePoint(full, target(full), row.bounds, { x: 200, y: 50 })).toBeNull();
   });
 
   test("observe marks a row a prototype and a dialog cover between them, as tapOn refuses it", () => {

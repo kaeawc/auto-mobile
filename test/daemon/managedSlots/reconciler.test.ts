@@ -1278,6 +1278,33 @@ describe("DefaultManagedSpecResolver any model", () => {
     ).toMatchObject({ kind: "unsupported", code: "runtime_incompatible" });
   });
 
+  test("an Android image that is not installed is a typed spec_unsupported, not avdmanager text (#11268)", async () => {
+    const installed = "system-images;android-35;google_apis;arm64-v8a";
+    const resolver = new DefaultManagedSpecResolver(undefined, {
+      androidImageCatalog: { listInstalledPackages: async () => [installed] },
+    });
+    const missing = await resolver.resolve(
+      "android",
+      { runtime: "system-images;android-99;google_apis;arm64-v8a" },
+      {},
+    );
+    expect(missing).toMatchObject({ kind: "unsupported", code: "spec_unsupported" });
+    expect((missing as { message: string }).message).toContain("android-99");
+    expect(await resolver.resolve("android", { runtime: installed }, {})).toMatchObject({
+      kind: "resolved",
+    });
+    const unreadable = new DefaultManagedSpecResolver(undefined, {
+      androidImageCatalog: {
+        listInstalledPackages: async () => {
+          throw new Error("avdmanager timed out");
+        },
+      },
+    });
+    expect(await unreadable.resolve("android", { runtime: installed }, {})).toMatchObject({
+      kind: "resolved",
+    });
+  });
+
   test("a cutout preference needs an explicit model; 'any' does not", async () => {
     const resolver = new DefaultManagedSpecResolver(ANY_MODEL_CATALOG);
     expect(

@@ -8752,6 +8752,22 @@
                 },
                 "inFlight": {
                   "type": "number"
+                },
+                "hostPressure": {
+                  "type": "object",
+                  "properties": {
+                    "sustained": {
+                      "type": "boolean"
+                    },
+                    "consecutiveSamples": {
+                      "type": "number"
+                    },
+                    "memoryPressure": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["sustained", "consecutiveSamples", "memoryPressure"],
+                  "additionalProperties": false
                 }
               },
               "required": ["limit", "booted", "inFlight"],

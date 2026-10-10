@@ -256,7 +256,18 @@ const bootCapacitySchema = z.object({
   inFlight: z.number(),
 });
 
-const listDevicesOutputSchema = z.object({
+/** iOS also reports host pressure (#11209), which is reported only and never gates a boot. */
+const iosBootCapacitySchema = bootCapacitySchema.extend({
+  hostPressure: z
+    .object({
+      sustained: z.boolean(),
+      consecutiveSamples: z.number(),
+      memoryPressure: z.string(),
+    })
+    .optional(),
+});
+
+export const listDevicesOutputSchema = z.object({
   message: z.string(),
   devices: z.array(
     listDevicesEntrySchema.extend({ transportAliases: z.array(z.string()).optional() }),
@@ -275,7 +286,7 @@ const listDevicesOutputSchema = z.object({
   capacity: z
     .object({
       android: bootCapacitySchema.optional(),
-      ios: bootCapacitySchema.optional(),
+      ios: iosBootCapacitySchema.optional(),
     })
     .optional()
     .describe(

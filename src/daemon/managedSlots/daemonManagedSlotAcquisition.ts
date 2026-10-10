@@ -6,6 +6,7 @@
 
 import { MultiPlatformDeviceManager } from "../../devices/deviceUtils";
 import { FileAvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
+import { listInstalledSystemImages } from "../../utils/android-cmdline-tools/avdmanager";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { Timer } from "../../utils/SystemTimer";
 import { runAsManagedSlotReconciler } from "./managedSlotExclusion";
@@ -90,6 +91,14 @@ export function createDaemonManagedSlotAcquisition(
         // The simulator catalog exists only where simctl does.
         resolver: new DefaultManagedSpecResolver(
           process.platform === "darwin" ? new SimCtlClient(null) : undefined,
+          {
+            androidImageCatalog: {
+              listInstalledPackages: async (signal) =>
+                (await listInstalledSystemImages(undefined, undefined, signal)).map(
+                  (image) => image.packageName,
+                ),
+            },
+          },
         ),
         provisioner: new ToolManagedSlotProvisioner({
           invokeTool,

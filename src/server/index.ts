@@ -1021,6 +1021,23 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       }
     }
 
+    if (name === "setActiveDevice") {
+      // Refused here, before session routing: a bound session that does not match the target would
+      // otherwise surface as a generic routing error instead of the typed refusal (#11268).
+      const rawSessionArg = (toolParams as Record<string, unknown>)?.sessionUuid;
+      assertManagedConnectionPlainToolCall({
+        daemonMode,
+        requiresDevice: false,
+        toolName: name,
+        mcpSessionId: requestMcpSessionId,
+        args: toolParams,
+        sessionUuid:
+          typeof rawSessionArg === "string" && rawSessionArg.trim().length > 0
+            ? rawSessionArg
+            : undefined,
+      });
+    }
+
     if (
       (tool.requiresDevice && !isDeviceSessionAcquisitionTool(name)) ||
       name === "setActiveDevice"

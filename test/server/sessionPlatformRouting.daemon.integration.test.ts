@@ -336,6 +336,7 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
       devices[0].deviceId,
       devices[0].deviceId,
     ]);
+    const apple = pool.resolveAutolockSessionForMcpSession(socketSessionId, "ios")!;
     const pinned = new DaemonMcpProxy({
       clientFactory: () => client,
       daemonManager: daemon,
@@ -351,10 +352,21 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
           keepScreenAwake: false,
         }),
       ).rejects.toThrow("does not match");
+      // A managed connection gets the typed refusal for a non-slot device, not the routing
+      // error above (#11268).
+      DaemonState.getInstance()
+        .getManagedConnectionScopes()
+        .bind(socketSessionId, { scopeKey: "scope-11268", sessionUuids: [apple] });
+      await expect(
+        pinned.callTool("setActiveDevice", {
+          deviceId: devices[0].deviceId,
+          platform: "android",
+        }),
+      ).rejects.toThrow("not one of its slot");
+      DaemonState.getInstance().getManagedConnectionScopes().unbind(socketSessionId);
     } finally {
       await pinned.close();
     }
-    const apple = pool.resolveAutolockSessionForMcpSession(socketSessionId, "ios")!;
     // Releasing the default must not fence a different, still-owned session.
     await proxy.callTool("setActiveDevice", { deviceId: devices[1].deviceId, platform: "ios" });
     await manager.releaseSession(apple, "heartbeat-timeout");

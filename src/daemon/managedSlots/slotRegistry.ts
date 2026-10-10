@@ -147,7 +147,35 @@ export type CommitBindingResult =
 
 export type UpdateSlotStateResult =
   | { kind: "updated"; assignment: SlotAssignmentRecord }
+  /** Entering `replacing` while a live execution holds the slot (retryable). */
+  | { kind: "slot_in_use"; owner: SlotExecOwner; assignment: SlotAssignmentRecord }
   | SlotCasFailure;
+
+/**
+ * States that fence the slot's device against concurrent use: entering one bumps the generation,
+ * so every actor still holding the previous binding (a reuse about to mark the slot `ready`, an
+ * execution about to claim it) loses its compare-and-set instead of overwriting the fence.
+ */
+export const FENCING_SLOT_STATES: ReadonlySet<SlotAssignmentState> = new Set([
+  "replacing",
+  "cleanup_pending",
+]);
+
+/** Whether moving from `current` to `next` enters a fencing state (and so bumps the generation). */
+export function entersFencingState(
+  current: SlotAssignmentState,
+  next: SlotAssignmentState,
+): boolean {
+  return current !== next && FENCING_SLOT_STATES.has(next);
+}
+
+export interface ClaimExecutionOptions {
+  /**
+   * Take the slot over from this session even though it is live: the caller's own reservation,
+   * claimed before provisioning, handing over to the session provisioning produced.
+   */
+  supersedesSessionUuid?: string;
+}
 
 export type ClaimExecutionResult =
   | { kind: "claimed"; assignment: SlotAssignmentRecord }
@@ -245,18 +273,26 @@ export interface SlotRegistry {
     expected: SlotBindingExpectation,
     next: SlotBindingCommit,
   ): Promise<CommitBindingResult>;
-  /** Change only the slot state under the same binding (no generation change). */
+  /**
+   * Change the slot state under the same binding. Entering a fencing state
+   * ({@link FENCING_SLOT_STATES}) bumps the generation; any other change keeps it. Entering
+   * `replacing` is refused while a live execution owns the slot.
+   */
   updateSlotState(
     key: SlotKey,
     expected: SlotBindingExpectation,
     state: SlotAssignmentState,
   ): Promise<UpdateSlotStateResult>;
 
-  /** Record the live execution holding a ready slot; refused while another live owner holds it. */
+  /**
+   * Record the live execution holding a ready slot; refused while another live owner holds it,
+   * unless that owner is the session `options.supersedesSessionUuid` names.
+   */
   claimExecution(
     key: SlotKey,
     expected: SlotBindingExpectation,
     owner: SlotExecOwner,
+    options?: ClaimExecutionOptions,
   ): Promise<ClaimExecutionResult>;
   /** Clear the execution owner if `sessionUuid` holds it. Never touches the binding. Idempotent. */
   releaseExecution(key: SlotKey, sessionUuid: string): Promise<ReleaseExecutionResult>;

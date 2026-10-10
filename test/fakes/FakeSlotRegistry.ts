@@ -2,11 +2,13 @@ import {
   assertValidSlotKey,
   bindingMatches,
   computeSlotScopeKey,
+  entersFencingState,
   isPermanentInvalidationReason,
   isRevivableScope,
   resolveAbandonmentThresholdMs,
   type AbandonmentQuery,
   type BeginScopeInvalidationResult,
+  type ClaimExecutionOptions,
   type ClaimExecutionResult,
   type CommitBindingResult,
   type CompleteScopeInvalidationResult,
@@ -196,6 +198,13 @@ export class FakeSlotRegistry implements SlotRegistry {
     if ("kind" in checked) {
       return checked;
     }
+    const owner = checked.execOwner;
+    if (state === "replacing" && owner && this.isExecOwnerLive(owner)) {
+      return { kind: "slot_in_use", owner: { ...owner }, assignment: copy(checked) };
+    }
+    if (entersFencingState(checked.state, state)) {
+      checked.generation += 1;
+    }
     checked.state = state;
     checked.updatedAtMs = this.timer.now();
     return { kind: "updated", assignment: copy(checked) };
@@ -205,6 +214,7 @@ export class FakeSlotRegistry implements SlotRegistry {
     key: SlotKey,
     expected: SlotBindingExpectation,
     owner: SlotExecOwner,
+    options: ClaimExecutionOptions = {},
   ): Promise<ClaimExecutionResult> {
     const checked = this.checkBinding(key, expected);
     if ("kind" in checked) {
@@ -214,7 +224,12 @@ export class FakeSlotRegistry implements SlotRegistry {
       return { kind: "slot_not_ready", assignment: copy(checked) };
     }
     const current = checked.execOwner;
-    if (current && current.sessionUuid !== owner.sessionUuid && this.isExecOwnerLive(current)) {
+    if (
+      current &&
+      current.sessionUuid !== owner.sessionUuid &&
+      current.sessionUuid !== options.supersedesSessionUuid &&
+      this.isExecOwnerLive(current)
+    ) {
       return { kind: "slot_in_use", owner: { ...current }, assignment: copy(checked) };
     }
     checked.execOwner = { ...owner };

@@ -12,11 +12,13 @@ import {
   assertValidSlotKey,
   bindingMatches,
   computeSlotScopeKey,
+  entersFencingState,
   isPermanentInvalidationReason,
   isRevivableScope,
   resolveAbandonmentThresholdMs,
   type AbandonmentQuery,
   type BeginScopeInvalidationResult,
+  type ClaimExecutionOptions,
   type ClaimExecutionResult,
   type CommitBindingResult,
   type CompleteScopeInvalidationResult,
@@ -42,6 +44,7 @@ import {
   type SlotScopeInvalidationReason,
   type SlotScopeRecord,
   type SlotScopeState,
+  type UpdateSlotStateResult,
 } from "./slotRegistry";
 
 /** Scope under the ADB-server coordination root: host-wide, independent of any one adb server. */
@@ -438,16 +441,23 @@ export class SqliteSlotRegistry implements SlotRegistry {
     key: SlotKey,
     expected: SlotBindingExpectation,
     state: SlotAssignmentState,
-  ) {
+  ): Promise<UpdateSlotStateResult> {
     assertValidSlotKey(key);
-    return this.db.transaction().execute(async (trx) => {
+    return this.db.transaction().execute(async (trx): Promise<UpdateSlotStateResult> => {
       const checked = await this.checkBinding(trx, key, expected);
       if ("kind" in checked) {
         return checked;
       }
+      const owner = checked.execOwner;
+      if (state === "replacing" && owner && this.isExecOwnerLive(owner)) {
+        return { kind: "slot_in_use", owner, assignment: checked };
+      }
+      const generation = entersFencingState(checked.state, state)
+        ? checked.generation + 1
+        : checked.generation;
       const updated = await trx
         .updateTable("slot_assignments")
-        .set({ state, updated_at_ms: this.timer.now() })
+        .set({ state, generation, updated_at_ms: this.timer.now() })
         .where("scope_key", "=", key.scopeKey)
         .where("slot_index", "=", key.slotIndex)
         .returningAll()
@@ -460,6 +470,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
     key: SlotKey,
     expected: SlotBindingExpectation,
     owner: SlotExecOwner,
+    options: ClaimExecutionOptions = {},
   ): Promise<ClaimExecutionResult> {
     assertValidSlotKey(key);
     return this.db.transaction().execute(async (trx): Promise<ClaimExecutionResult> => {
@@ -471,7 +482,12 @@ export class SqliteSlotRegistry implements SlotRegistry {
         return { kind: "slot_not_ready", assignment: checked };
       }
       const current = checked.execOwner;
-      if (current && current.sessionUuid !== owner.sessionUuid && this.isExecOwnerLive(current)) {
+      if (
+        current &&
+        current.sessionUuid !== owner.sessionUuid &&
+        current.sessionUuid !== options.supersedesSessionUuid &&
+        this.isExecOwnerLive(current)
+      ) {
         return { kind: "slot_in_use", owner: current, assignment: checked };
       }
       const updated = await trx

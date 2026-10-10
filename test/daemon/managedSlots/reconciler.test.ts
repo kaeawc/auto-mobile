@@ -501,9 +501,10 @@ describe("ManagedSlotReconciler", () => {
       expect(inventory.has(oldId)).toBe(false);
       expect(result.evidence.deletedStableId).toBe(oldId);
       expect(result.device.stableId).not.toBe(oldId);
-      expect(result.device.name).toBe(managedSlotDeviceName(key, 3));
+      // generation 2 fenced the old device (`replacing`), 3 recorded its verified absence.
+      expect(result.device.name).toBe(managedSlotDeviceName(key, 4));
       expect(result.assignment).toMatchObject({
-        generation: 3,
+        generation: 4,
         stableDeviceId: result.device.stableId,
         state: "ready",
       });
@@ -517,7 +518,7 @@ describe("ManagedSlotReconciler", () => {
 
       expect(result.failure).toMatchObject({ code: "cleanup_pending", retryable: true });
       expect(result.assignment).toMatchObject({
-        generation: 1,
+        generation: 3,
         stableDeviceId: oldId,
         state: "cleanup_pending",
       });
@@ -556,7 +557,7 @@ describe("ManagedSlotReconciler", () => {
       });
       expect(failed.evidence.deletedStableId).toBe(oldId);
       expect(failed.assignment).toMatchObject({
-        generation: 2,
+        generation: 3,
         stableDeviceId: null,
         state: "provisioning",
       });
@@ -564,7 +565,7 @@ describe("ManagedSlotReconciler", () => {
       provisioner.failWith = undefined;
       const retry = expectReady(await reconciler.reconcile(request(SPEC_18)));
       expect(retry.disposition).toBe("created");
-      expect(retry.assignment.generation).toBe(3);
+      expect(retry.assignment.generation).toBe(4);
       expect(deleter.calls).toHaveLength(1);
     });
 
@@ -772,6 +773,92 @@ describe("ManagedSlotReconciler", () => {
 
       expect(result.failure.code).toBe("concurrent_modification");
       expect(provisioner.released).toEqual(["session-2"]);
+    });
+
+    test("a replacement that fences the slot while a reuse provisions wins: the reuse never reports ready", async () => {
+      const stableId = await seedAssigned();
+      provisioner.beforeReturn = async () => {
+        // Another daemon's replacer marks the slot after this reuse read it as ready.
+        const marked = await registry.updateSlotState(
+          key,
+          { generation: 1, stableDeviceId: stableId },
+          "replacing",
+        );
+        expect(marked.kind).toBe("updated");
+      };
+
+      const result = expectFailed(await reconciler.reconcile(request()));
+
+      expect(result.failure.code).toBe("concurrent_modification");
+      expect(provisioner.released).toEqual(["session-2"]);
+      expect(result.assignment).toMatchObject({ generation: 2, state: "replacing" });
+    });
+
+    test("an owned reuse reserves the slot before provisioning, so a replacer cannot fence it", async () => {
+      const stableId = await seedAssigned();
+      const owner = { daemonId: "daemon-a", pid: 4242 };
+      let fenceDuringProvision: string | undefined;
+      provisioner.beforeReturn = async () => {
+        const current = await registry.getAssignment(key);
+        expect(current?.execOwner).toMatchObject({ ...owner, sessionUuid: expect.any(String) });
+        fenceDuringProvision = (
+          await registry.updateSlotState(
+            key,
+            { generation: 1, stableDeviceId: stableId },
+            "replacing",
+          )
+        ).kind;
+      };
+
+      const result = expectReady(await reconciler.reconcile(request(SPEC_18, { owner })));
+
+      expect(fenceDuringProvision).toBe("slot_in_use");
+      expect(result.disposition).toBe("reused");
+      expect(result.assignment).toMatchObject({
+        generation: 1,
+        state: "ready",
+        execOwner: { ...owner, sessionUuid: "session-2" },
+      });
+    });
+
+    test("an owned create claims the slot for the provisioned session", async () => {
+      const owner = { daemonId: "daemon-a", pid: 4242 };
+
+      const result = expectReady(await reconciler.reconcile(request(SPEC_18, { owner })));
+
+      expect(result.assignment.execOwner).toEqual({ ...owner, sessionUuid: result.sessionUuid });
+      const again = expectFailed(await reconciler.reconcile(request(SPEC_18, { owner })));
+      expect(again.failure.code).toBe("slot_in_use");
+    });
+
+    test("a lost reservation releases nothing it did not take and refuses slot_in_use", async () => {
+      const stableId = await seedAssigned();
+      await registry.claimExecution(
+        key,
+        { generation: 1, stableDeviceId: stableId },
+        { daemonId: "other", pid: 7, sessionUuid: "theirs" },
+      );
+      registry.setExecOwnerLiveness(() => true);
+      reconciler = new ManagedSlotReconciler({
+        registry,
+        inventory,
+        matcher,
+        resolver: new DefaultManagedSpecResolver(),
+        provisioner,
+        deleter,
+        claims,
+        capacity,
+        timer,
+        isExecOwnerLive: () => false,
+      });
+
+      const result = expectFailed(
+        await reconciler.reconcile(request(SPEC_18, { owner: { daemonId: "a", pid: 1 } })),
+      );
+
+      expect(result.failure.code).toBe("slot_in_use");
+      expect(provisioner.calls).toHaveLength(0);
+      expect(result.assignment?.execOwner?.sessionUuid).toBe("theirs");
     });
 
     test("concurrent reconciliations of one slot in one process serialize onto one device", async () => {

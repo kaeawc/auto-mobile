@@ -27,6 +27,8 @@ const S2 = "session-2";
 const DEVICE = "emulator-5554";
 const AVD = "Pixel_8_API_35";
 const BINDING = { generation: 1, stableDeviceId: AVD };
+/** Entering cleanup_pending fences the slot: same device, next generation. */
+const FENCED = { generation: 2, stableDeviceId: AVD };
 
 class FakeWork implements ManagedExecutionWork {
   readonly active = new Map<string, number>();
@@ -207,23 +209,21 @@ describe("managed execution release (daemon/releaseExecution)", () => {
     expect(result.slots[0]).toMatchObject({ state: "cleanup_pending", execOwnerReleased: true });
     expect(sessions.released).toEqual([S1]);
     expect(await registry.getAssignment(key)).toMatchObject({
-      ...BINDING,
+      ...FENCED,
       state: "cleanup_pending",
       execOwner: null,
     });
     // The assignment is protected, not freed: the slot's next acquisition waits.
     expect(await registry.isDeviceAssignedToValidSlot("android", AVD)).toBe(true);
-    const blocked = await registry.claimExecution(key, BINDING, {
-      daemonId: "daemon",
-      pid: 1,
-      sessionUuid: S2,
-    });
-    expect(blocked.kind).toBe("slot_not_ready");
+    const owner = { daemonId: "daemon", pid: 1, sessionUuid: S2 };
+    // A claim under the pre-fence binding is stale; under the fenced one the slot is not ready.
+    expect((await registry.claimExecution(key, BINDING, owner)).kind).toBe("stale_binding");
+    expect((await registry.claimExecution(key, FENCED, owner)).kind).toBe("slot_not_ready");
 
     work.active.delete(S1);
     await drain.whenIdle();
 
-    expect(await registry.getAssignment(key)).toMatchObject({ ...BINDING, state: "ready" });
+    expect(await registry.getAssignment(key)).toMatchObject({ ...FENCED, state: "ready" });
     expect(await drain.releaseExecution(S1)).toMatchObject({
       outcome: "reusable_for_this_slot",
       settlement: "confirmed",
@@ -240,14 +240,14 @@ describe("managed execution release (daemon/releaseExecution)", () => {
     expect(result).toMatchObject({ outcome: "cleanup_pending", releaseForced: true });
     expect(sessions.forced).toEqual([S1]);
     expect(await registry.getAssignment(key)).toMatchObject({
-      ...BINDING,
+      ...FENCED,
       state: "cleanup_pending",
       execOwner: null,
     });
 
     sessions.cleanupInProgress.delete(DEVICE);
     await drain.whenIdle();
-    expect(await registry.getAssignment(key)).toMatchObject({ ...BINDING, state: "ready" });
+    expect(await registry.getAssignment(key)).toMatchObject({ ...FENCED, state: "ready" });
   });
 
   test("work that never settles stays cleanup_pending past the watcher cap", async () => {
@@ -344,7 +344,7 @@ describe("managed execution release (daemon/releaseExecution)", () => {
 
       work.active.delete(S1);
       await drain.whenIdle();
-      expect(await registry.getAssignment(key)).toMatchObject({ ...BINDING, state: "ready" });
+      expect(await registry.getAssignment(key)).toMatchObject({ ...FENCED, state: "ready" });
     });
 
     test("non-managed sessions and terminal upgrades are ignored", async () => {

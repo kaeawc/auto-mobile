@@ -205,7 +205,7 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(result.kind).toBe("committed");
     });
 
-    test("updateSlotState CASes on the binding without changing the generation", async () => {
+    test("updateSlotState CASes on the binding; a non-fencing change keeps the generation", async () => {
       const key = { scopeKey: await readyScope(), slotIndex: 0 };
       await boundSlot(key, "avd-1");
       const stale = await registry.updateSlotState(
@@ -217,12 +217,81 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       const updated = await registry.updateSlotState(
         key,
         { generation: 1, stableDeviceId: "avd-1" },
-        "cleanup_pending",
+        "provisioning",
       );
       expect(updated).toMatchObject({
         kind: "updated",
-        assignment: { generation: 1, state: "cleanup_pending" },
+        assignment: { generation: 1, state: "provisioning" },
       });
+    });
+
+    test("entering replacing or cleanup_pending bumps the generation, fencing stale writers", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const before = { generation: 1, stableDeviceId: "avd-1" };
+      const fenced = await registry.updateSlotState(key, before, "replacing");
+      expect(fenced).toMatchObject({
+        kind: "updated",
+        assignment: { generation: 2, stableDeviceId: "avd-1", state: "replacing" },
+      });
+
+      // A reuse that read `ready` before the fence can no longer overwrite it, nor claim.
+      expect((await registry.updateSlotState(key, before, "ready")).kind).toBe("stale_binding");
+      expect((await registry.claimExecution(key, before, ownerFor(1, "s1"))).kind).toBe(
+        "stale_binding",
+      );
+      expect((await registry.getAssignment(key))?.state).toBe("replacing");
+
+      const pending = await registry.updateSlotState(
+        key,
+        { generation: 2, stableDeviceId: "avd-1" },
+        "cleanup_pending",
+      );
+      expect(pending).toMatchObject({ kind: "updated", assignment: { generation: 3 } });
+      // Re-entering the same fencing state is not a new fence.
+      expect(
+        await registry.updateSlotState(
+          key,
+          { generation: 3, stableDeviceId: "avd-1" },
+          "cleanup_pending",
+        ),
+      ).toMatchObject({ kind: "updated", assignment: { generation: 3 } });
+    });
+
+    test("entering replacing is refused while a live execution owns the slot", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const binding = { generation: 1, stableDeviceId: "avd-1" };
+      livePids.add(100);
+      await registry.claimExecution(key, binding, ownerFor(100, "s1"));
+
+      expect(await registry.updateSlotState(key, binding, "replacing")).toMatchObject({
+        kind: "slot_in_use",
+        owner: { sessionUuid: "s1" },
+      });
+      expect(await registry.getAssignment(key)).toMatchObject({ generation: 1, state: "ready" });
+
+      livePids.delete(100);
+      expect((await registry.updateSlotState(key, binding, "replacing")).kind).toBe("updated");
+    });
+
+    test("a claim may supersede only the reservation it names", async () => {
+      const key = { scopeKey: await readyScope(), slotIndex: 0 };
+      await boundSlot(key, "avd-1");
+      const binding = { generation: 1, stableDeviceId: "avd-1" };
+      livePids.add(100);
+      await registry.claimExecution(key, binding, ownerFor(100, "reserve-1"));
+
+      expect(
+        await registry.claimExecution(key, binding, ownerFor(100, "s1"), {
+          supersedesSessionUuid: "reserve-other",
+        }),
+      ).toMatchObject({ kind: "slot_in_use", owner: { sessionUuid: "reserve-1" } });
+      expect(
+        await registry.claimExecution(key, binding, ownerFor(100, "s1"), {
+          supersedesSessionUuid: "reserve-1",
+        }),
+      ).toMatchObject({ kind: "claimed", assignment: { execOwner: { sessionUuid: "s1" } } });
     });
 
     test("mutations on a missing slot or an invalidating scope are refused", async () => {

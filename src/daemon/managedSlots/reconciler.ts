@@ -18,6 +18,7 @@ import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedEr
 import type { AvdConfigReader } from "../../utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
 import { stableStringify } from "../../utils/stableStringify";
 import type { Timer } from "../../utils/SystemTimer";
@@ -26,6 +27,7 @@ import {
   type SlotAssignmentRecord,
   type SlotBindingExpectation,
   type SlotCasFailure,
+  type SlotExecOwner,
   type SlotExecOwnerLiveness,
   type SlotKey,
   type SlotPlatform,
@@ -205,6 +207,8 @@ export interface ManagedSlotReconcilerDependencies {
   /** Whether a recorded execution owner is alive; default treats every owner as live. */
   isExecOwnerLive?: SlotExecOwnerLiveness;
   timer: Pick<Timer, "now">;
+  /** Execution-reservation ids (default: random UUIDs). */
+  idGenerator?: IdGenerator;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -221,6 +225,13 @@ export interface ManagedSlotReconcileRequest {
   /** Absolute deadline on the timer's clock for the whole preparation. */
   deadlineMs: number;
   signal?: AbortSignal;
+  /**
+   * The execution the prepared device is for. When set, the reconciler claims the slot for it
+   * atomically with the outcome: an assigned device is reserved BEFORE it is provisioned (so no
+   * concurrent replacement can mark it while a session is being bound), and the ready result
+   * names this owner with the provisioned session. Without it the caller claims afterwards.
+   */
+  owner?: Omit<SlotExecOwner, "sessionUuid">;
 }
 
 export type ManagedSlotReconcileFailureCode =
@@ -507,6 +518,24 @@ function casFailure(result: SlotCasFailure, step: string): ManagedSlotReconcileF
   }
 }
 
+/** A refused execution claim or fence, as a reconcile failure. */
+function claimFailure(
+  result: SlotCasFailure | { kind: "slot_in_use"; owner: SlotExecOwner } | { kind: "slot_not_ready" },
+  step: string,
+): ManagedSlotReconcileFailure {
+  switch (result.kind) {
+    case "slot_in_use":
+      return failure(
+        "slot_in_use",
+        `Slot is held by live session ${result.owner.sessionUuid} (${step}).`,
+      );
+    case "slot_not_ready":
+      return failure("concurrent_modification", `Slot stopped being ready during ${step}.`);
+    default:
+      return casFailure(result, step);
+  }
+}
+
 /** Map a provision-path error into a typed reconcile failure. */
 function provisionFailure(error: unknown): ManagedSlotReconcileFailure {
   if (error instanceof BootCapacityExhaustedError) {
@@ -564,9 +593,11 @@ export class ManagedSlotReconciler {
   /** Serializes reconciliations of one slot inside this process. */
   private readonly inFlight = new Map<string, Promise<unknown>>();
   private readonly isExecOwnerLive: SlotExecOwnerLiveness;
+  private readonly idGenerator: IdGenerator;
 
   constructor(private readonly deps: ManagedSlotReconcilerDependencies) {
     this.isExecOwnerLive = deps.isExecOwnerLive ?? (() => true);
+    this.idGenerator = deps.idGenerator ?? defaultIdGenerator;
   }
 
   async reconcile(request: ManagedSlotReconcileRequest): Promise<ManagedSlotReconcileResult> {
@@ -729,6 +760,25 @@ export class ManagedSlotReconciler {
     device: DeviceInfo,
   ): Promise<ReadyResult> {
     await this.assertBootCapacity(context.request, device);
+    // Reserve the slot before binding a session to its device, so a concurrent replacement can
+    // neither fence nor delete the device while this attempt provisions it.
+    const reservation = await this.reserveExecution(context, assignment);
+    try {
+      return await this.reuseReserved(context, assignment, device, reservation);
+    } catch (error) {
+      if (reservation) {
+        await this.releaseReservation(context.request.key, reservation);
+      }
+      throw error;
+    }
+  }
+
+  private async reuseReserved(
+    context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
+    device: DeviceInfo,
+    reservation: string | undefined,
+  ): Promise<ReadyResult> {
     const provisioned = await this.provisionExisting(context, device);
     const expected = expectationOf(assignment);
     const fingerprint = encodeManagedSpecFingerprint(context.fingerprint);
@@ -750,9 +800,48 @@ export class ManagedSlotReconciler {
         });
     if (committed.kind !== "updated" && committed.kind !== "committed") {
       await this.releaseSession(provisioned.sessionUuid);
-      throw new ReconcileAbort(casFailure(committed, "reuse"));
+      throw new ReconcileAbort(claimFailure(committed, "reuse"));
     }
-    return this.ready(context, "reused", committed.assignment, provisioned);
+    return await this.claimAndReady(
+      context,
+      "reused",
+      committed.assignment,
+      provisioned,
+      reservation,
+    );
+  }
+
+  /** Claim a ready, assigned slot for a placeholder session before provisioning, when owned. */
+  private async reserveExecution(
+    context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
+  ): Promise<string | undefined> {
+    const { owner, key } = context.request;
+    if (!owner || assignment.state !== "ready") {
+      return undefined;
+    }
+    const reservation = `reserve-${this.idGenerator.next()}`;
+    const claimed = await this.deps.registry.claimExecution(key, expectationOf(assignment), {
+      ...owner,
+      sessionUuid: reservation,
+    });
+    if (claimed.kind !== "claimed") {
+      throw new ReconcileAbort(claimFailure(claimed, "reservation"));
+    }
+    return reservation;
+  }
+
+  private async releaseReservation(key: SlotKey, reservation: string): Promise<void> {
+    try {
+      await this.deps.registry.releaseExecution(key, reservation);
+    } catch (error) {
+      // A leaked reservation names this daemon's PID, so it blocks the slot only until this
+      // process exits; log it so the stuck slot has a trace.
+      logger.warn(
+        `[ManagedSlots] releasing reservation ${reservation} failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   // --- empty slot: adopt or create -------------------------------------------------------------
@@ -855,9 +944,9 @@ export class ManagedSlotReconciler {
     );
     if (ready.kind !== "updated") {
       await this.releaseSession(provisioned.sessionUuid);
-      throw new ReconcileAbort(casFailure(ready, "adoption"));
+      throw new ReconcileAbort(claimFailure(ready, "adoption"));
     }
-    return this.ready(context, "adopted", ready.assignment, provisioned);
+    return await this.claimAndReady(context, "adopted", ready.assignment, provisioned, undefined);
   }
 
   private async createAndCommit(
@@ -906,7 +995,13 @@ export class ManagedSlotReconciler {
       await this.discardUncommitted(context, provisioned);
       throw new ReconcileAbort(casFailure(committed, "create commit"));
     }
-    return this.ready(context, disposition, committed.assignment, provisioned);
+    return await this.claimAndReady(
+      context,
+      disposition,
+      committed.assignment,
+      provisioned,
+      undefined,
+    );
   }
 
   /** A device this attempt created but could not publish: release its session and delete it. */
@@ -957,7 +1052,8 @@ export class ManagedSlotReconciler {
       "replacing",
     );
     if (marked.kind !== "updated") {
-      throw new ReconcileAbort(casFailure(marked, "replace"));
+      // A live execution (or another attempt's reservation) claimed the device after our checks.
+      throw new ReconcileAbort(claimFailure(marked, "replace"));
     }
     const deletion = await this.deleteDevice({
       platform: request.platform,
@@ -1143,6 +1239,34 @@ export class ManagedSlotReconciler {
     if (this.deps.timer.now() >= request.deadlineMs) {
       throw new ReconcileAbort(failure("timeout", "Slot preparation deadline passed."));
     }
+  }
+
+  /**
+   * Hand the slot to the request's execution (superseding its own reservation) under the binding
+   * just committed, then report ready. A lost claim releases the session it would have published.
+   */
+  private async claimAndReady(
+    context: ReconcileContext,
+    disposition: ManagedSlotDisposition,
+    assignment: SlotAssignmentRecord,
+    provisioned: ManagedSlotProvisionedDevice,
+    reservation: string | undefined,
+  ): Promise<ReadyResult> {
+    const { owner, key } = context.request;
+    if (!owner) {
+      return this.ready(context, disposition, assignment, provisioned);
+    }
+    const claimed = await this.deps.registry.claimExecution(
+      key,
+      expectationOf(assignment),
+      { ...owner, sessionUuid: provisioned.sessionUuid },
+      reservation ? { supersedesSessionUuid: reservation } : {},
+    );
+    if (claimed.kind !== "claimed") {
+      await this.releaseSession(provisioned.sessionUuid);
+      throw new ReconcileAbort(claimFailure(claimed, "execution claim"));
+    }
+    return this.ready(context, disposition, claimed.assignment, provisioned);
   }
 
   private ready(

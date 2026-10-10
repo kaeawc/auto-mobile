@@ -397,7 +397,12 @@ export class ManagedExecutionRelease {
           failures.push({ ...key, error: `could not mark cleanup_pending: ${updated.kind}` });
           return null;
         }
-        return { key, ...binding };
+        // Entering the fence bumped the generation; the watcher restores under the new one.
+        return {
+          key,
+          generation: updated.assignment.generation,
+          stableDeviceId: updated.assignment.stableDeviceId,
+        };
       }),
     );
     return results.flatMap((result, index) => {

@@ -113,4 +113,14 @@ describe("--json carries every typed field of the daemon's refusal", () => {
     const { stderr } = await runAgainst(error, "session-info", ["s-1"]);
     expect(stderr.join("\n")).toContain("(released: cli-idle-timeout, idle)");
   });
+
+  test("a heartbeat refusal names an idle-window release too", async () => {
+    const error = Object.assign(new Error("Session not found: s-1"), {
+      code: "session_not_found",
+      releaseReason: "cli-idle-timeout",
+      idle: true,
+    });
+    const { stderr } = await runAgainst(error, "heartbeat", ["s-1"]);
+    expect(stderr.join("\n")).toContain("(released: cli-idle-timeout, idle)");
+  });
 });

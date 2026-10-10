@@ -845,7 +845,8 @@ function heartbeatFailureMessage(sessionId: string, error: unknown): string {
 /** " (released: <reason>)" when the daemon said why a not-found session is gone (#10730). */
 function releasedSuffix(error: unknown): string {
   const reason = releaseReasonFromError(error);
-  return reason ? ` (released: ${reason})` : "";
+  const idle = (error as { idle?: unknown } | null)?.idle === true;
+  return reason ? ` (released: ${reason}${idle ? ", idle" : ""})` : "";
 }
 
 async function recordDaemonHeartbeat(args: string[], manager: DaemonManager): Promise<void> {

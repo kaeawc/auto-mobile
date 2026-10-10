@@ -578,6 +578,28 @@ describe("ManagedSlotReconciler", () => {
       expect(deleter.calls).toHaveLength(0);
     });
 
+    test("an unavailable assigned simulator is discovery_incomplete: never deleted or replaced", async () => {
+      reconciler = new ManagedSlotReconciler({
+        registry,
+        inventory,
+        matcher: new DefaultManagedSpecMatcher({ readConfig: async () => null }),
+        resolver: new DefaultManagedSpecResolver(),
+        provisioner,
+        deleter,
+        claims,
+        capacity,
+        timer,
+      });
+      const oldId = await seedAssigned(SPEC_17);
+      inventory.devices.find((device) => device.deviceId === oldId)!.isAvailable = false;
+
+      const result = expectFailed(await reconciler.reconcile(request(SPEC_18)));
+
+      expect(result.failure).toMatchObject({ code: "discovery_incomplete", retryable: true });
+      expect(deleter.calls).toHaveLength(0);
+      expect(result.assignment).toMatchObject({ stableDeviceId: oldId, state: "ready" });
+    });
+
     test("partial inventory blocks replacement even when the old device is listed", async () => {
       await seedAssigned(SPEC_17);
       inventory.complete = false;
@@ -870,9 +892,20 @@ describe("DefaultManagedSpecMatcher", () => {
     expect(
       await matcherFor(null).matches({ ...sim, runtime: IOS_18, deviceType: IPHONE_16 }, SPEC_18),
     ).toBe("match");
-    expect(await matcherFor(null).matches({ ...sim, isAvailable: false }, SPEC_18)).toBe(
-      "mismatch",
-    );
+  });
+
+  test("an unavailable iOS simulator is unknown, never a mismatch, even with matching metadata", async () => {
+    const sim: DeviceInfo = {
+      name: "s",
+      platform: "ios",
+      deviceId: "U",
+      isRunning: false,
+      isAvailable: false,
+      runtime: IOS_17,
+      deviceType: IPHONE_16,
+    };
+    expect(await matcherFor(null).matches(sim, SPEC_18)).toBe("unknown");
+    expect(await matcherFor(null).matches({ ...sim, runtime: IOS_18 }, SPEC_18)).toBe("unknown");
   });
 });
 

@@ -381,9 +381,12 @@ export class DefaultManagedSpecMatcher implements ManagedSpecMatcher {
         ? "match"
         : "mismatch";
     }
+    // An unavailable simulator (runtime unmounted, or listed under a different Xcode or
+    // DEVELOPER_DIR) proves nothing about its configuration, so it is never a mismatch to replace.
     if (
-      device.isAvailable !== false &&
-      (device.runtime === undefined || device.deviceType === undefined)
+      device.isAvailable === false ||
+      device.runtime === undefined ||
+      device.deviceType === undefined
     ) {
       return "unknown";
     }

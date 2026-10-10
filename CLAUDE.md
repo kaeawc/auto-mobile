@@ -124,6 +124,12 @@ gates. `oxlint`'s actual exit code is authoritative: Error-level rules such as
 diffing warnings does not satisfy the gate. Before asking for a merge, fetch
 `origin/main`, confirm the branch contains it, and re-run local gates.
 
+Before pushing a contract or fake/interface change, also run
+`bash scripts/prepush-integration-safe.sh`: it runs the whole safe tier of
+`*.integration.test.ts` files in a fresh isolated temp dir, not just changed ones.
+Classify every new integration test `safe` or `unsafe` in `test/integration-safe-tier.txt`
+in the PR that adds it (a unit test enforces this), and `unsafe` files stay CI-only.
+
 Known Node-lane flakes this week: a 100ms unit timing overage on a loaded Linux
 runner may be rerun rather than “fixed” when its isolated recheck is clean. Do
 not treat repeated cross-platform failures as a flake; refresh against main and

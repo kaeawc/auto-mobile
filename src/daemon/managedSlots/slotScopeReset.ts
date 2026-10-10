@@ -136,7 +136,8 @@ export interface SlotScopeResetRequest extends SlotScopeQuery {
    * Operator override (#11336): a slot stuck `settling` after its released work outlived the
    * settlement cap is returned to `ready` (its release journal entry committed) so the reset can
    * proceed. It overrides "stuck settling", never "settling normally" and never "in use": a slot
-   * still inside the cap, or with an execution owner, still blocks (#11539).
+   * still inside the cap whose settling daemon is not provably gone, or with a live execution
+   * owner, still blocks (#11539, #11545).
    */
   force?: boolean;
 }
@@ -278,7 +279,7 @@ export class SlotScopeReset {
    * Return each `settling` slot of the scope with no live owner that is provably stuck to `ready`, committing
    * its release journal entry in the same transaction (the existing journal API, never by hand).
    * Stuck means the release outlived the settlement cap, the watcher's own "past cap" state
-   * (#11539). Every slot left alone is returned as a typed refusal saying why and what to do: a
+   * (#11539), or its settling daemon is provably gone (#11545). Every slot left alone is returned as a typed refusal saying why and what to do: a
    * slot with a live execution owner (in any state) is never touched and says so (#11545).
    */
   private async abandonSettlement(
@@ -388,13 +389,15 @@ export class SlotScopeReset {
       };
     }
     const remainingMs = release.createdAtMs + this.settlementCapMs - this.options.timer.now();
-    if (remainingMs > 0) {
+    const settlerGone = this.isSettlerProvablyDead(slot, release);
+    if (remainingMs > 0 && !settlerGone) {
       return {
         slotIndex: key.slotIndex,
         reason: "within_settlement_cap",
         remainingMs,
         message:
-          `Slot ${label} is still settling normally and its released work may be running. ` +
+          `Slot ${label} is still settling under ${describeSettler(slot.settler)}, which is not ` +
+          "known to be gone, so its released work may be running. " +
           `Wait, or retry --force in ${remainingMs}ms once it outlives the settlement cap.`,
       };
     }
@@ -406,8 +409,11 @@ export class SlotScopeReset {
     });
     if (result.kind === "advanced") {
       logger.warn(
-        `[SlotScopeReset] --force abandoned the settlement of slot ${label}, stuck past the ` +
-          `${this.settlementCapMs}ms cap; its released work may still be running (#11336)`,
+        remainingMs > 0
+          ? `[SlotScopeReset] --force abandoned the settlement of slot ${label}: its settling ` +
+              `daemon is gone (${describeSettler(slot.settler)}), and its released work with it (#11545)`
+          : `[SlotScopeReset] --force abandoned the settlement of slot ${label}, stuck past the ` +
+              `${this.settlementCapMs}ms cap; its released work may still be running (#11336)`,
       );
       return undefined;
     }
@@ -418,6 +424,28 @@ export class SlotScopeReset {
       message: `Slot ${label} changed while --force abandoned it (${result.kind}); retry.`,
     };
   }
+
+  /**
+   * Whether the daemon settling this slot is provably gone, by the same predicate the registry's
+   * own recovery uses (`recoverSettledSlots`): the released work ran in that process and died with
+   * it, so nothing is "settling normally" and the cap need not be waited out (#11545). Both the
+   * slot's recorded settler and the release entry's current owner (a redriving daemon may have
+   * taken the entry over) must be dead. A slot with no recorded settler, or a settler whose
+   * liveness cannot be decided (the predicate keeps a possibly-live process), is not provably dead.
+   */
+  private isSettlerProvablyDead(slot: SlotAssignmentRecord, release: SlotJournalEntry): boolean {
+    return (
+      slot.settler !== null &&
+      !this.isExecOwnerLive(slot.settler) &&
+      !this.isExecOwnerLive(release.owner)
+    );
+  }
+}
+
+function describeSettler(settler: SlotProcessIdentity | null): string {
+  return settler === null
+    ? "an unrecorded settler"
+    : `settling daemon ${settler.daemonId} (pid ${settler.pid})`;
 }
 
 function pendingEvidence(

@@ -116,16 +116,19 @@ describe.each(REGISTRIES)("reset-slot-scope --force liveness (#11545): %s", (_na
   }
 
   /** Daemon A's drain marks the slot `settling`, journaled or not, as its settler. */
-  async function markSettlingByA(journaled = true): Promise<void> {
+  async function markSettlingByA(
+    journaled = true,
+    settler: SlotProcessIdentity = A,
+  ): Promise<void> {
     if (!journaled) {
-      const updated = await registry.updateSlotState(key, BINDING, "settling", { settler: A });
+      const updated = await registry.updateSlotState(key, BINDING, "settling", { settler });
       expect(updated.kind).toBe("updated");
       return;
     }
     const opened = await registry.openSlotJournal(key, {
       kind: "release",
       phase: "intent",
-      owner: A,
+      owner: settler,
       target: {
         oldStableId: AVD,
         oldName: AVD,
@@ -135,7 +138,7 @@ describe.each(REGISTRIES)("reset-slot-scope --force liveness (#11545): %s", (_na
         resolvedSpec: {},
         specFingerprint: "fp",
       },
-      assignment: { kind: "state", expected: BINDING, state: "settling", options: { settler: A } },
+      assignment: { kind: "state", expected: BINDING, state: "settling", options: { settler } },
     });
     expect(opened.kind).toBe("opened");
   }
@@ -236,6 +239,122 @@ describe.each(REGISTRIES)("reset-slot-scope --force liveness (#11545): %s", (_na
       timer.setCurrentTime(timer.now() + MANAGED_EXECUTION_SETTLEMENT_CAP_MS);
 
       expect((await reset.reset(RESET)).outcome).toBe("invalidated");
+    });
+  });
+
+  describe("--force inside the settlement cap consults settler liveness", () => {
+    const WITHIN_CAP = {
+      slotIndex: 0,
+      reason: "within_settlement_cap",
+      remainingMs: MANAGED_EXECUTION_SETTLEMENT_CAP_MS - 500,
+      message: expect.stringContaining("retry --force"),
+    };
+
+    async function forceInsideCap() {
+      timer.setCurrentTime(timer.now() + 500);
+      return reset.reset(RESET);
+    }
+
+    test("a slot whose settling daemon is dead is abandoned at once", async () => {
+      await openAs(B);
+      await markSettlingByA();
+      processes.delete(A.pid);
+
+      const forced = await forceInsideCap();
+
+      expect(forced.outcome).toBe("invalidated");
+      expect(forced.scopes[0]?.freedDevices).toEqual([
+        { platform: "android", stableDeviceId: AVD },
+      ]);
+      expect(await registry.listOpenSlotJournal()).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("settling daemon is gone"));
+    });
+
+    test("a dead daemon's leftover owner record does not hold it either", async () => {
+      await openAs(B);
+      await claimByA();
+      await markSettlingByA();
+      processes.delete(A.pid);
+
+      expect((await forceInsideCap()).outcome).toBe("invalidated");
+    });
+
+    test("a slot whose settler is running is still refused, with its settler named", async () => {
+      await openAs(B);
+      await markSettlingByA();
+
+      const forced = await forceInsideCap();
+
+      expect(forced.outcome).toBe("pending");
+      expect(forced.scopes[0]?.forceRefusals).toEqual([WITHIN_CAP]);
+      expect(forced.scopes[0]?.forceRefusals?.[0]?.message).toContain(`pid ${A.pid}`);
+      expect((await registry.getAssignment(key))?.state).toBe("settling");
+      expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
+    });
+
+    test("the settling daemon's own reset is refused: its work may be running", async () => {
+      await openAs(A);
+      await markSettlingByA();
+
+      expect((await forceInsideCap()).scopes[0]?.forceRefusals).toEqual([WITHIN_CAP]);
+    });
+
+    test("a settler PID reused by another process is dead (start identity differs)", async () => {
+      await openAs(B);
+      await markSettlingByA();
+      processes.set(A.pid, "linux:boot:999");
+
+      expect((await forceInsideCap()).outcome).toBe("invalidated");
+    });
+
+    test("a running settler PID that cannot be proven reused is not guessed dead", async () => {
+      await openAs(B);
+      // Recorded without a start identity: a reused PID cannot be told from the settler.
+      await markSettlingByA(true, { daemonId: A.daemonId, pid: A.pid });
+      processes.set(A.pid, "linux:boot:999");
+
+      expect((await forceInsideCap()).scopes[0]?.forceRefusals).toEqual([WITHIN_CAP]);
+      expect((await registry.getAssignment(key))?.state).toBe("settling");
+    });
+
+    test("a dead settler never cuts an execution this daemon holds", async () => {
+      await openAs(B);
+      await claimByA();
+      await markSettlingByA();
+      // A restarted as B: the record still names dead A, and B holds the execution (#11275).
+      processes.delete(A.pid);
+      heldHere.add(S1);
+
+      const forced = await forceInsideCap();
+
+      expect(forced.outcome).toBe("pending");
+      expect(forced.scopes[0]?.forceRefusals?.map((refusal) => refusal.reason)).toEqual([
+        "live_owner",
+      ]);
+      expect(await registry.getAssignment(key)).toMatchObject({
+        state: "settling",
+        execOwner: { sessionUuid: S1 },
+      });
+      expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
+    });
+
+    test("a release entry a running daemon took over is not abandoned under it", async () => {
+      await openAs(B);
+      await markSettlingByA();
+      processes.delete(A.pid);
+      const C: SlotProcessIdentity = {
+        daemonId: "daemon-c",
+        pid: 6161,
+        processGenerationToken: "linux:boot:300",
+      };
+      processes.set(C.pid, C.processGenerationToken ?? undefined);
+      const [entry] = await registry.listOpenSlotJournal(key);
+      expect((await registry.claimSlotJournal(entry!.id, A, C)).kind).toBe("claimed");
+
+      const forced = await forceInsideCap();
+
+      expect(forced.scopes[0]?.forceRefusals).toEqual([WITHIN_CAP]);
+      expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
     });
   });
 });

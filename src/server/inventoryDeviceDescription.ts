@@ -5,6 +5,7 @@ import {
   configuredImageForBootedDevice,
   type StableConfiguredDeviceImage,
 } from "../utils/configuredDeviceInventory";
+import type { Session } from "../daemon/sessionManager";
 import { describeDevice, type DeviceDescriptionInput } from "./deviceDescription";
 
 type BootedInput = Extract<DeviceDescriptionInput, { kind: "booted" }>;
@@ -20,7 +21,12 @@ export interface InventoryDeviceInput {
   device: BootedDevice;
   pooled?: PooledDevice;
   unhealthy?: DeviceHealthMarker;
-  session?: BootedInput["session"];
+  /**
+   * Session detail by session id. The holder is never looked up by a session's own
+   * `assignedDevice`: it is the pool's assignment (`pooled.sessionId`), so every surface names the
+   * same session for a device (#11535). Absent detail still names the assigned session id.
+   */
+  sessionsById?: ReadonlyMap<string, Session>;
   deviceSessionUuid?: string;
   hold?: Pick<BootedInput, "heldBy" | "reserved">;
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>;
@@ -37,6 +43,10 @@ export interface InventoryDeviceInput {
  * are derived here and nowhere else.
  */
 export function describeInventoryDevice(input: InventoryDeviceInput) {
+  const holderId = input.pooled?.sessionId;
+  const session: BootedInput["session"] = holderId
+    ? (input.sessionsById?.get(holderId) ?? { sessionId: holderId })
+    : undefined;
   const description = describeDevice({
     kind: "booted",
     adbOfflineState: input.adbOffline?.adbState,
@@ -48,7 +58,7 @@ export function describeInventoryDevice(input: InventoryDeviceInput) {
       input.configuredImages,
       input.adbOffline?.avdName,
     ),
-    session: input.session,
+    session,
     deviceSessionUuid: input.deviceSessionUuid,
     ...input.hold,
   });

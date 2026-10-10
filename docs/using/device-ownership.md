@@ -28,8 +28,8 @@ a reconnect. Ownership is cooperative: no token is needed, but naming a session'
 UUID never takes it over. While the owner is connected, a control call from any
 other connection that names the session is refused, with autolock on or off, and
 that connection is never bound to the session. The rule covers control tools
-that take no device routing too (`killDevice`, `deleteDevice`, `recordSteps`
-start and stop): the refused call does not run and does not extend the session's
+that take no device routing too (`killDevice`, `deleteDevice`, `exportPlan`,
+`recordSteps` start and stop): the refused call does not run and does not extend the session's
 idle window (#11542). `setToolEnabled` is not refused (see
 [Ownership is cooperative](#ownership-is-cooperative)). Once the owner has disconnected
 (a finished `--cli` call, for example) another connection may name the session.

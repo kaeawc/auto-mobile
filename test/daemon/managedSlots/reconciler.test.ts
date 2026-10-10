@@ -1155,6 +1155,114 @@ describe("ManagedSlotReconciler", () => {
     });
   });
 
+  describe("a duplicate acquisition behind an in-flight reconcile (#11342)", () => {
+    // The first reconcile parks inside provisioning until `release()`.
+    function parkFirst() {
+      let release!: () => void;
+      const parked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      provisioner.beforeCreate = () => parked;
+      return release;
+    }
+
+    async function untilPending(count: number) {
+      for (let turn = 0; turn < 50 && timer.getPendingTimeoutCount() < count; turn += 1) {
+        await Promise.resolve();
+      }
+    }
+
+    test("reports timeout at its own deadline while the first is still running", async () => {
+      const release = parkFirst();
+      const first = reconciler.reconcile(request());
+      await Promise.resolve();
+      const second = reconciler.reconcile(request(SPEC_18, { deadlineMs: timer.now() + 5_000 }));
+      await untilPending(1);
+      timer.advanceTime(5_000);
+
+      expect(expectFailed(await second).failure.code).toBe("timeout");
+      release();
+      expect(expectReady(await first).disposition).toBe("created");
+      expect(provisioner.created()).toHaveLength(1);
+    });
+
+    test("a later caller still queues behind the running reconcile after a waiter times out", async () => {
+      const release = parkFirst();
+      const first = reconciler.reconcile(request());
+      await Promise.resolve();
+      const second = reconciler.reconcile(request(SPEC_18, { deadlineMs: timer.now() + 5_000 }));
+      await untilPending(1);
+      timer.advanceTime(5_000);
+      expect(expectFailed(await second).failure.code).toBe("timeout");
+
+      const third = reconciler.reconcile(request());
+      for (let turn = 0; turn < 50; turn += 1) {
+        await Promise.resolve();
+      }
+      expect(provisioner.calls).toHaveLength(1);
+      release();
+      expect(expectReady(await first).disposition).toBe("created");
+      expect(expectReady(await third).disposition).toBe("reused");
+      expect(provisioner.created()).toHaveLength(1);
+    });
+
+    test("a later caller still queues behind the running reconcile after a waiter is cancelled", async () => {
+      const release = parkFirst();
+      const first = reconciler.reconcile(request());
+      await Promise.resolve();
+      const controller = new AbortController();
+      const second = reconciler.reconcile(request(SPEC_18, { signal: controller.signal }));
+      await untilPending(1);
+      controller.abort();
+      expect(expectFailed(await second).failure.code).toBe("cancelled");
+
+      const third = reconciler.reconcile(request());
+      for (let turn = 0; turn < 50; turn += 1) {
+        await Promise.resolve();
+      }
+      expect(provisioner.calls).toHaveLength(1);
+      release();
+      expect(expectReady(await first).disposition).toBe("created");
+      expect(expectReady(await third).disposition).toBe("reused");
+    });
+
+    test("a chain of two abandoned waiters still holds the queue for the running reconcile", async () => {
+      const release = parkFirst();
+      const first = reconciler.reconcile(request());
+      await Promise.resolve();
+      const second = reconciler.reconcile(request(SPEC_18, { deadlineMs: timer.now() + 5_000 }));
+      const third = reconciler.reconcile(request(SPEC_18, { deadlineMs: timer.now() + 5_000 }));
+      await untilPending(2);
+      timer.advanceTime(5_000);
+      expect(expectFailed(await second).failure.code).toBe("timeout");
+      expect(expectFailed(await third).failure.code).toBe("timeout");
+
+      const fourth = reconciler.reconcile(request());
+      for (let turn = 0; turn < 50; turn += 1) {
+        await Promise.resolve();
+      }
+      expect(provisioner.calls).toHaveLength(1);
+      release();
+      expect(expectReady(await first).disposition).toBe("created");
+      expect(expectReady(await fourth).disposition).toBe("reused");
+    });
+
+    test("reports cancelled when its signal aborts while the first is still running", async () => {
+      const release = parkFirst();
+      const first = reconciler.reconcile(request());
+      await Promise.resolve();
+      const controller = new AbortController();
+      const second = reconciler.reconcile(request(SPEC_18, { signal: controller.signal }));
+      await untilPending(1);
+      controller.abort();
+
+      expect(expectFailed(await second).failure.code).toBe("cancelled");
+      release();
+      expect(expectReady(await first).disposition).toBe("created");
+      expect(provisioner.created()).toHaveLength(1);
+    });
+  });
+
   describe("any model (omitted deviceType)", () => {
     beforeEach(() => {
       reconciler = new ManagedSlotReconciler({

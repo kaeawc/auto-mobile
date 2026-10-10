@@ -340,3 +340,70 @@ describe("capacity_exhausted names external devices (#11209)", () => {
     expect(error.details.externalDevices).toEqual(["emulator-5554"]);
   });
 });
+
+describe("an emulator process adb does not list is added to admitted boots (#11564)", () => {
+  test("an external unlisted emulator and an admitted boot that has not spawned are two", async () => {
+    const { source, gate } = setup();
+    // Started outside AutoMobile: its qemu process runs, adb does not list it yet.
+    source.emulatorProcessRssBytes = [3 * GIB];
+    const first = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+
+    // The process is not the admitted boot's: that one has no process yet.
+    const error = await rejection(gate.admit({ timeoutMs: 60_000, avdName: AVD }));
+
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+    expect(await rejection(gate.assertCapacityAvailable())).toBeInstanceOf(
+      BootCapacityExhaustedError,
+    );
+    first.release();
+    (await gate.admit({ timeoutMs: 60_000, avdName: AVD })).release();
+  });
+
+  test("a boot launched after the sample began is not matched to a process the sample shows", async () => {
+    const { source, gate } = setup();
+    source.emulatorProcessRssBytes = [3 * GIB];
+    const first = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    // The process table was read before this hand-off, so its one process is the external one.
+    source.onSample = () => first.handOff("emulator-5556");
+
+    const error = await rejection(gate.admit({ timeoutMs: 60_000, avdName: AVD }));
+
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+  });
+
+  test("two external unlisted emulators leave no room beside an unspawned boot at a limit of three", async () => {
+    const { source, gate } = setup({ [ANDROID_MAX_BOOTED_ENV]: "3" });
+    source.emulatorProcessRssBytes = [3 * GIB, 3 * GIB];
+    await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+
+    const error = await rejection(gate.admit({ timeoutMs: 60_000, avdName: AVD }));
+
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+  });
+
+  test("steady state is not over-counted: listed emulators and launched boots each count once", async () => {
+    const { source, gate } = setup({ [ANDROID_MAX_BOOTED_ENV]: "3" });
+    // One external emulator, listed and in the process table.
+    source.emulatorSerials = ["emulator-5554"];
+    source.emulatorProcessRssBytes = [3 * GIB];
+    const first = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    first.handOff("emulator-5556");
+    source.emulatorProcessRssBytes = [3 * GIB, 3 * GIB];
+
+    // Two emulators run (one listed, one booting): a third still fits, a fourth does not.
+    const second = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    expect(await rejection(gate.admit({ timeoutMs: 60_000, avdName: AVD }))).toBeInstanceOf(
+      BootCapacityExhaustedError,
+    );
+
+    // Everything booted and listed: three emulators, three processes, nothing in flight.
+    second.handOff("emulator-5558");
+    source.emulatorSerials = ["emulator-5554", "emulator-5556", "emulator-5558"];
+    source.emulatorProcessRssBytes = [3 * GIB, 3 * GIB, 3 * GIB];
+    expect(await gate.describeCapacity()).toEqual({ limit: 3, booted: 3, inFlight: 0 });
+    // One exits: exactly one slot is free again.
+    source.emulatorSerials = ["emulator-5554", "emulator-5556"];
+    source.emulatorProcessRssBytes = [3 * GIB, 3 * GIB];
+    (await gate.admit({ timeoutMs: 60_000, avdName: AVD })).release();
+  });
+});

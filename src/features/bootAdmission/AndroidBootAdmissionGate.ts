@@ -110,19 +110,34 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
 
   /** Refuses with `capacity_exhausted` when a cold boot would be refused now; admits nothing. */
   async assertCapacityAvailable(options: { signal?: AbortSignal } = {}): Promise<void> {
-    const sample = await this.sampleKnownCount(options);
-    assertBootCapacityGranted({ decision: this.decide(sample) }, "android", "emulator");
+    const { sample, window } = await this.sampleInWindow(options);
+    assertBootCapacityGranted({ decision: this.decide(sample, window) }, "android", "emulator");
   }
 
   /** Current limit, booted emulators (every running one, owned or not) and admitted boots in flight. */
   async describeCapacity(options: { signal?: AbortSignal } = {}): Promise<BootCapacitySnapshot> {
-    const sample = await this.sampleKnownCount(options);
-    const counts = this.count(sample);
+    const { sample, window } = await this.sampleInWindow(options);
+    const counts = this.count(sample, window);
     return {
       limit: this.limitsFor(sample).maxBooted,
       booted: counts.booted,
       inFlight: counts.inFlight,
     };
+  }
+
+  /**
+   * A sample inside a ledger window, as `admit` takes it: the window dates the process listing,
+   * so only a boot launched before it is matched to one of the listed processes (#11564).
+   */
+  private async sampleInWindow(options: {
+    signal?: AbortSignal;
+  }): Promise<{ sample: AndroidCapacitySample; window: LedgerSampleWindow }> {
+    const window = this.ledger.beginSample();
+    try {
+      return { sample: await this.sampleKnownCount(options), window };
+    } finally {
+      window.close();
+    }
   }
 
   /**
@@ -191,8 +206,17 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   /**
    * `booted` is the larger of the adb listing (any adb state) and the qemu
    * process count: a booting emulator has a process before adb lists it at all.
-   * `effective` adds admitted boots adb does not list yet, but never counts
-   * one twice when its qemu process is already in the process count.
+   *
+   * `effective` is the larger of two views of the same load, each complete on its own:
+   * the adb listing plus every admitted boot it does not show, and the process table plus
+   * every admitted boot that has no process in it yet. The process table carries no serial,
+   * so a process is matched to an admitted boot by count alone, and only to one launched
+   * before the sample began; any process beyond those is another emulator and is added.
+   * Taking the plain process count instead lost an external emulator adb had not listed
+   * whenever an admitted boot had not spawned yet (#11564).
+   *
+   * "Launched" is the hand-off, the only launch signal an admission carries. A boot whose
+   * process runs but which is not handed off yet counts twice until it is: fail closed.
    */
   private count(
     sample: AndroidCapacitySample,
@@ -204,11 +228,12 @@ export class AndroidBootAdmissionGate implements BootCapacityReporter, BootCapac
   } {
     const listed = sample.emulatorSerials.length;
     const processes = sample.emulatorProcessRssBytes?.length ?? 0;
-    const inFlight = this.ledger.inFlightCount(new Set(sample.emulatorSerials), undefined, window);
+    const inFlight = this.ledger.inFlight(new Set(sample.emulatorSerials), undefined, window);
+    const withoutListedProcess = inFlight.count - inFlight.launchedBeforeSample;
     return {
       booted: Math.max(listed, processes),
-      inFlight,
-      effective: Math.max(listed + inFlight, processes),
+      inFlight: inFlight.count,
+      effective: Math.max(listed + inFlight.count, processes + withoutListedProcess),
     };
   }
 

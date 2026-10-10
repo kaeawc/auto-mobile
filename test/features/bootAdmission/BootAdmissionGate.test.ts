@@ -108,6 +108,32 @@ describe("BootAdmissionLedger", () => {
     expect(ledger.inFlightCount(new Set(), undefined, window)).toBe(1);
     expect(ledger.inFlightCount(new Set(["emulator-5554"]), undefined, window)).toBe(0);
   });
+
+  // #11564: only a boot launched before the sample began can be one of the processes it lists.
+  test("splits in-flight boots by whether they were handed off before the sample began", () => {
+    const ledger = new BootAdmissionLedger(new FakeTimer());
+    const before = ledger.admit();
+    before.handOff("emulator-5554", 1_000);
+    const during = ledger.admit();
+    ledger.admit(); // never launched
+    const window = ledger.beginSample();
+    during.handOff("emulator-5556", 1_000);
+    // Both leave the ledger inside the window: each keeps what it was when the window opened.
+    before.release();
+    during.release();
+    window.close();
+
+    expect(ledger.inFlight(new Set(), undefined, window)).toEqual({
+      count: 3,
+      launchedBeforeSample: 1,
+    });
+    expect(ledger.inFlight(new Set(["emulator-5554"]), undefined, window)).toEqual({
+      count: 2,
+      launchedBeforeSample: 0,
+    });
+    // Nothing dates a listing taken outside a window, so no boot is matched to a process.
+    expect(ledger.inFlight(new Set())).toEqual({ count: 1, launchedBeforeSample: 0 });
+  });
 });
 
 describe("CommandAndroidCapacitySource", () => {

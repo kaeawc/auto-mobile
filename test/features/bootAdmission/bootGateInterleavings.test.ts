@@ -25,6 +25,9 @@ import { FakeTimer } from "../../fakes/FakeTimer";
  * in any order, so a decision can rest on a listing older than any boot that began after it.
  * Boots always succeed and nothing shuts down, so the number of admissions granted is the number
  * of devices running: it must never pass the limit.
+ *
+ * #11564 adds an emulator started outside AutoMobile: its qemu process runs before adb lists it,
+ * it takes a slot no admission accounts for, and it may exit and give the slot back.
  */
 
 const GIB = 1024 ** 3;
@@ -33,6 +36,14 @@ const GIB = 1024 ** 3;
 interface Shape {
   limit: number;
   admitters: number;
+  /**
+   * An emulator nobody admitted starts at any point (Android). Then adb lists it ("lists"), it
+   * exits unlisted ("exits"), or either and an exit after the listing ("any"): the full life
+   * cycle beside two admissions is thousands of orders, so the larger shapes take one half each.
+   */
+  external?: "lists" | "exits" | "any";
+  /** Leave the reader out to keep a larger shape fast. */
+  noReader?: boolean;
 }
 
 /** Let queued promise continuations run; no timer involved. */
@@ -72,6 +83,12 @@ interface Scenario {
   admitted(): number;
   /** Anything other than an admission or a capacity refusal. */
   unexpected: string[];
+  /** Admissions granted beside as many devices as the limit, counting the external emulator. */
+  admittedPastLimit: string[];
+  /** Refusals although the admitted boots and the external emulator left a slot free. */
+  needlessRefusals: string[];
+  /** Nothing but admitted boots takes a slot, so exactly `limit` of them end up admitted. */
+  fillsLimit: boolean;
 }
 
 interface Exploration {
@@ -90,7 +107,7 @@ async function exploreEveryOrder(create: () => Scenario, limit: number): Promise
       await scenario.run(action);
     }
     const order = path.join(" > ");
-    if (scenario.admitted() > limit) {
+    if (scenario.admitted() > limit || scenario.admittedPastLimit.length > 0) {
       result.overLimit.push(order);
       return;
     }
@@ -98,7 +115,8 @@ async function exploreEveryOrder(create: () => Scenario, limit: number): Promise
     if (next.length === 0) {
       result.orders += 1;
       // Each decision below the limit finds a free slot, so exactly `limit` boots are admitted.
-      if (scenario.admitted() !== limit) {
+      const filled = !scenario.fillsLimit || scenario.admitted() === limit;
+      if (!filled || scenario.needlessRefusals.length > 0) {
         result.wrongFinalCount.push(order);
       }
       result.unexpected.push(...scenario.unexpected.map((problem) => `${order}: ${problem}`));
@@ -116,9 +134,17 @@ async function exploreEveryOrder(create: () => Scenario, limit: number): Promise
 class Actors {
   readonly outcomes: Outcome[] = [];
   readonly unexpected: string[] = [];
-  readStarted = false;
+  readonly admittedPastLimit: string[] = [];
+  readonly needlessRefusals: string[] = [];
+  readStarted: boolean;
+  /** The external emulator's process runs; a capacity sample starting now shows it. */
+  externalRunning = false;
+  /** Per admitter: the external emulator ran when its capacity sample started. */
+  private readonly sampledExternal: boolean[] = [];
 
-  constructor(private readonly admitters: number) {}
+  constructor(private readonly shape: Shape) {
+    this.readStarted = shape.noReader === true;
+  }
 
   admitted(): number {
     return this.outcomes.filter((outcome) => outcome === "admitted").length;
@@ -128,22 +154,40 @@ class Actors {
   startActions(): string[] {
     const next = this.outcomes.length;
     return [
-      ...(next < this.admitters ? [`start:${next}`] : []),
+      ...(next < this.shape.admitters ? [`start:${next}`] : []),
       ...(this.readStarted ? [] : ["read"]),
     ];
   }
 
   track(index: number, decision: Promise<"admitted" | "refused">): void {
     this.outcomes[index] = "pending";
+    this.sampledExternal[index] = this.externalRunning;
     decision.then(
       (outcome) => {
         this.outcomes[index] = outcome;
+        this.judge(index, outcome);
       },
       (error: unknown) => {
         this.outcomes[index] = "refused";
         this.unexpected.push(String(error));
       },
     );
+  }
+
+  /**
+   * The sample showed the external emulator's process exactly when it ran as the sample started.
+   * An admission beside it is over the limit unless it has exited since; a refusal needs it, or
+   * the admitted boots alone, to fill the limit.
+   */
+  private judge(index: number, outcome: "admitted" | "refused"): void {
+    const sampled = this.sampledExternal[index] ? 1 : 0;
+    const { limit } = this.shape;
+    if (outcome === "admitted" && this.admitted() + (this.externalRunning ? sampled : 0) > limit) {
+      this.admittedPastLimit.push(`admitter ${index}`);
+    }
+    if (outcome === "refused" && this.admitted() + sampled < limit) {
+      this.needlessRefusals.push(`admitter ${index}`);
+    }
   }
 
   trackRead(read: Promise<unknown>): void {
@@ -190,7 +234,7 @@ function iosScenario(shape: Shape): Scenario {
   const gate = new IosSimCapacityGate(collector, timer, {
     env: { AUTOMOBILE_IOS_SIM_MAX_BOOTED: String(shape.limit) },
   });
-  const actors = new Actors(shape.admitters);
+  const actors = new Actors(shape);
   const releases: Array<(() => void) | undefined> = [];
   const released = new Set<number>();
 
@@ -219,6 +263,9 @@ function iosScenario(shape: Shape): Scenario {
 
   return {
     unexpected: actors.unexpected,
+    admittedPastLimit: actors.admittedPastLimit,
+    needlessRefusals: actors.needlessRefusals,
+    fillsLimit: true,
     admitted: () => actors.admitted(),
     enabled: () => [
       ...actors.startActions(),
@@ -241,13 +288,14 @@ function iosScenario(shape: Shape): Scenario {
 function androidScenario(shape: Shape): Scenario {
   const timer = new FakeTimer();
   const listed = new Set<string>();
+  /** Serials whose qemu process runs: in the process table from spawn, before adb lists them. */
+  const processes = new Set<string>();
   const listings = new HeldListings<AndroidCapacitySample>();
-  // The process table shows no emulator, so only the adb listing and the ledger hold a slot.
   const source: AndroidCapacitySource = {
     sample: () =>
       listings.start({
         emulatorSerials: [...listed],
-        emulatorProcessRssBytes: [],
+        emulatorProcessRssBytes: [...processes].map(() => 3 * GIB),
         host: { totalMemoryBytes: 64 * GIB, cpuCount: 16 },
         errors: [],
       }),
@@ -255,10 +303,28 @@ function androidScenario(shape: Shape): Scenario {
   const gate = new AndroidBootAdmissionGate(source, timer, {
     env: { [ANDROID_MAX_BOOTED_ENV]: String(shape.limit) },
   });
-  const actors = new Actors(shape.admitters);
+  const actors = new Actors(shape);
   const admissions: Array<BootAdmission | undefined> = [];
   const handedOff = new Set<number>();
   const serial = (index: number): string => `emulator-${5554 + index * 2}`;
+  const EXTERNAL_SERIAL = "emulator-5580";
+  let externalStarted = false;
+  const externalActions = (): string[] => {
+    if (!shape.external) {
+      return [];
+    }
+    if (!externalStarted) {
+      return ["externalStart"];
+    }
+    if (!actors.externalRunning) {
+      return [];
+    }
+    const listable = shape.external !== "exits" && !listed.has(EXTERNAL_SERIAL);
+    return [
+      ...(listable ? ["externalList"] : []),
+      ...(shape.external === "lists" ? [] : ["externalExit"]),
+    ];
+  };
 
   const actions: Record<string, (index: number) => void> = {
     start: (index) =>
@@ -283,7 +349,23 @@ function androidScenario(shape: Shape): Scenario {
     // The emulator process was spawned and its serial is known; adb does not list it yet.
     handOff: (index) => {
       handedOff.add(index);
+      processes.add(serial(index));
       admissions[index]?.handOff(serial(index));
+    },
+    // Someone else's emulator: a qemu process from here on, in no admission and not in adb yet.
+    externalStart: () => {
+      externalStarted = true;
+      actors.externalRunning = true;
+      processes.add(EXTERNAL_SERIAL);
+    },
+    externalList: () => {
+      listed.add(EXTERNAL_SERIAL);
+    },
+    // Gone from the process table and from adb; a listing already running still shows it.
+    externalExit: () => {
+      actors.externalRunning = false;
+      processes.delete(EXTERNAL_SERIAL);
+      listed.delete(EXTERNAL_SERIAL);
     },
     // adb lists the emulator from here on; a listing already running does not.
     list: (index) => {
@@ -293,9 +375,13 @@ function androidScenario(shape: Shape): Scenario {
 
   return {
     unexpected: actors.unexpected,
+    admittedPastLimit: actors.admittedPastLimit,
+    needlessRefusals: actors.needlessRefusals,
+    fillsLimit: !shape.external,
     admitted: () => actors.admitted(),
     enabled: () => [
       ...actors.startActions(),
+      ...externalActions(),
       ...listings.openIds().map((id) => `end:${id}`),
       ...actors.outcomes.flatMap((outcome, index) => {
         if (outcome !== "admitted" || listed.has(serial(index))) {
@@ -312,6 +398,12 @@ function androidScenario(shape: Shape): Scenario {
   };
 }
 
+const SHAPES_WITH_EXTERNAL: Shape[] = [
+  { limit: 1, admitters: 1, external: "any" },
+  { limit: 2, admitters: 2, external: "lists", noReader: true },
+  { limit: 2, admitters: 2, external: "exits", noReader: true },
+];
+
 describe("boot capacity gates never admit past the limit in any interleaving (#11537)", () => {
   // Three admissions against a limit of two also hold (40,492 iOS and 73,260 Android orders,
   // checked by hand), but take seconds; this shape already contains every failing order found.
@@ -325,6 +417,22 @@ describe("boot capacity gates never admit past the limit in any interleaving (#1
 
       // The first few orders are enough to reproduce; hundreds would drown the report.
       expect(result.overLimit.slice(0, 5)).toEqual([]);
+      expect(result.wrongFinalCount.slice(0, 5)).toEqual([]);
+      expect(result.unexpected.slice(0, 5)).toEqual([]);
+      expect(result.orders).toBeGreaterThan(200);
+    });
+  }
+});
+
+describe("an external emulator adb has not listed takes a slot in any interleaving (#11564)", () => {
+  // The smallest shape with the hole: a limit of two holds the external emulator and one admitted
+  // boot that has not spawned, and the second admission has to be refused.
+  for (const shape of SHAPES_WITH_EXTERNAL) {
+    test(`Android: ${shape.admitters} admission(s)${shape.noReader ? "" : ", a reader"} and an external emulator (${shape.external}) against a limit of ${shape.limit}`, async () => {
+      const result = await exploreEveryOrder(() => androidScenario(shape), shape.limit);
+
+      expect(result.overLimit.slice(0, 5)).toEqual([]);
+      // No refusal without cause either: once the external emulator exits its slot is free.
       expect(result.wrongFinalCount.slice(0, 5)).toEqual([]);
       expect(result.unexpected.slice(0, 5)).toEqual([]);
       expect(result.orders).toBeGreaterThan(200);

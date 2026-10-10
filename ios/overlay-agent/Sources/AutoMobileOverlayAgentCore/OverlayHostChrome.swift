@@ -29,13 +29,42 @@ struct OverlayHostChrome: Equatable {
         reservesDismissBar ? 0 : safeTop
     }
 
-    /// The bar's background and content colours, as Android's `overlayDismissColors`: 60% white
-    /// with near-black text on a light spec, 60% black with near-white text on a dark one.
-    static func dismissBarColors(dark: Bool) -> (background: OverlayRGBA, content: OverlayRGBA) {
-        dark
-            ? (OverlayRGBA(red: 0, green: 0, blue: 0, alpha: 0x99 / 255), OverlayRGBA(rgb: 0xE6E6E6))
-            : (OverlayRGBA(red: 1, green: 1, blue: 1, alpha: 0x99 / 255), OverlayRGBA(rgb: 0x1A1A1A))
+    /// The bar's translucency, as Android's `OVERLAY_DISMISS_BAR_ALPHA`.
+    static let dismissBarAlpha = 0.6
+
+    /// The bar's background and content colours, as Android's `overlayDismissColors`:
+    /// `surfaceContainerHigh` at 60% over `onSurface`. Host chrome always follows the palette; an
+    /// unthemed spec resolves the baseline Material scheme for its light or dark mode.
+    static func dismissBarColors(palette: OverlayPalette) -> (background: OverlayRGBA, content: OverlayRGBA) {
+        var background = palette.chromeRole("surfaceContainerHigh")
+        background.alpha = dismissBarAlpha
+        return (background, palette.chromeRole("onSurface"))
     }
+
+    /// The close chip's glyph and opaque fill (Android's `overlayCloseColors`), so authored content
+    /// cannot show through it.
+    static func closeChipColors(palette: OverlayPalette) -> (glyph: OverlayRGBA, fill: OverlayRGBA) {
+        (palette.chromeRole("onSurface"), palette.chromeRole("surfaceContainerHigh"))
+    }
+}
+
+/// Colours for node fallbacks. Each is nil when the spec has no `theme`, so the renderer keeps the
+/// iOS system colours there (they follow dark mode on their own).
+extension OverlayPalette {
+    private func themedRole(_ name: String) -> OverlayRGBA? { themed ? colors[name] : nil }
+
+    /// A resolved role; the palette always carries the whole baseline scheme.
+    func chromeRole(_ name: String) -> OverlayRGBA {
+        colors[name] ?? OverlayRGBA(red: 0, green: 0, blue: 0)
+    }
+
+    var sheetSurface: OverlayRGBA? { themedRole("surface") }
+    var sheetHandle: OverlayRGBA? { themedRole("onSurfaceVariant") }
+    var navSelected: OverlayRGBA? { themedRole("onSecondaryContainer") }
+    var navIndicator: OverlayRGBA? { themedRole("secondaryContainer") }
+    var navUnselected: OverlayRGBA? { themedRole("onSurfaceVariant") }
+    var placeholderFill: OverlayRGBA? { themedRole("surfaceVariant") }
+    var placeholderGlyph: OverlayRGBA? { themedRole("onSurfaceVariant") }
 }
 
 extension OverlayNode {

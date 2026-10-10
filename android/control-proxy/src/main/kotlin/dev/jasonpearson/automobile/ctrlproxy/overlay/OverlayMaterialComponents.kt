@@ -298,9 +298,11 @@ internal fun RenderOverlayDialog(
   if (!node.sheetOpen) return
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
     Box(
-      Modifier.fillMaxSize().background(Color(0x52000000)).clickable {
-        interact(OverlayInteraction.SheetDismiss(source.openWhen))
-      },
+      Modifier.fillMaxSize()
+        .background(overlayDialogScrimFallback(MaterialTheme.colorScheme))
+        .clickable {
+          interact(OverlayInteraction.SheetDismiss(source.openWhen))
+        },
     )
     Surface(
       modifier

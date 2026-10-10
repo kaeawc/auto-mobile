@@ -28,7 +28,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.DefaultShadowColor
 import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.RadialGradientShader
@@ -395,7 +394,7 @@ private fun RenderOverlayNodeContent(
             .defaultMinSize(24.dp, 24.dp)
             .background(
               overlayThemedColor(node.style.background, node.style.source.background)
-                ?: Color.LightGray,
+                ?: overlayPlaceholderColor(MaterialTheme.colorScheme),
             ),
         )
     }
@@ -605,7 +604,9 @@ private fun RenderOverlaySheet(
     val density = LocalDensity.current.density
     Box(
       Modifier.fillMaxSize()
-        .background(source.scrim?.let(::overlayColor) ?: Color(0x66000000))
+        .background(
+          source.scrim?.let(::overlayColor) ?: overlaySheetScrimFallback(MaterialTheme.colorScheme),
+        )
         .clickable { interact(OverlayInteraction.SheetDismiss(source.openWhen)) },
     )
     Column(
@@ -647,7 +648,7 @@ private fun RenderOverlaySheet(
           Modifier.align(Alignment.CenterHorizontally)
             .padding(8.dp)
             .size(32.dp, 4.dp)
-            .background(Color.Gray, RoundedCornerShape(2.dp)),
+            .background(overlayHandleColor(MaterialTheme.colorScheme), RoundedCornerShape(2.dp)),
         )
       node.children.forEach {
         RenderOverlayNode(it, interact, columnWeight(it), it.weightAxis(OverlayWeightAxis.VERTICAL))

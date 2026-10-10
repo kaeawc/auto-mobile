@@ -237,6 +237,8 @@ class OverlayController(
       request.copy(
         hasTextField = mappedSpec.hasTextField,
         darkTheme = overlayHostDark(mappedSpec),
+        themeRoot = mappedSpec.root,
+        specTheme = validated.theme,
         onHostDismiss = { interact(runtime, OverlayInteraction.HostDismiss) },
         content = {
           OverlayRuntimeContent(runtime, images, fonts) { interaction ->

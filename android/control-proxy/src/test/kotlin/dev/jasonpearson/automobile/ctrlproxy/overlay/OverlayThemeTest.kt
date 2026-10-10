@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.*
+import kotlin.math.abs
 import kotlinx.serialization.json.Json
 import org.junit.Assert.*
 import org.junit.Test
@@ -318,11 +319,48 @@ class OverlayThemeTest {
   }
 
   @Test
-  fun `host dismiss colours are translucent and contrast with the scheme`() {
-    val dark = overlayDismissColors(true)
-    val light = overlayDismissColors(false)
-    assertTrue(dark.background.alpha < 1f && light.background.alpha < 1f)
-    assertNotEquals(dark.content, light.content)
+  fun `host dismiss and close colours come from the scheme roles and contrast`() {
+    for (scheme in listOf(lightColorScheme(), darkColorScheme())) {
+      val bar = overlayDismissColors(scheme)
+      assertEquals(
+        scheme.surfaceContainerHigh.copy(alpha = OVERLAY_DISMISS_BAR_ALPHA),
+        bar.background,
+      )
+      assertEquals(scheme.onSurface, bar.content)
+      assertTrue(bar.background.alpha < 1f)
+      val close = overlayCloseColors(scheme)
+      assertEquals(scheme.surfaceContainerHigh, close.background)
+      assertEquals(scheme.onSurface, close.content)
+      assertTrue(abs(close.background.luminance() - close.content.luminance()) > 0.3f)
+    }
+    // The dark scheme's Close control is a dark block, not the old white one.
+    assertTrue(overlayCloseColors(darkColorScheme()).background.luminance() < 0.2f)
+  }
+
+  @Test
+  fun `host dismiss colours follow an explicit spec theme`() {
+    val theme =
+      overlayColorScheme(
+        OverlayThemeSpec(
+          dark = true,
+          surface = null,
+          roles =
+            Json.decodeFromString("""{"surfaceContainerHigh":"#102030","onSurface":"#F0E0D0"}"""),
+        ),
+      )
+    assertEquals(Color(0xFF102030), overlayCloseColors(theme).background)
+    assertEquals(Color(0xFFF0E0D0), overlayDismissColors(theme).content)
+  }
+
+  @Test
+  fun `sheet handle scrims and placeholders use scheme roles`() {
+    for (scheme in listOf(lightColorScheme(), darkColorScheme())) {
+      assertEquals(scheme.onSurfaceVariant, overlayHandleColor(scheme))
+      assertEquals(scheme.scrim.copy(alpha = 0.4f), overlaySheetScrimFallback(scheme))
+      assertEquals(scheme.scrim.copy(alpha = 0.32f), overlayDialogScrimFallback(scheme))
+      assertEquals(scheme.surfaceVariant, overlayPlaceholderColor(scheme))
+      assertEquals(scheme.onSurfaceVariant, overlayPlaceholderContentColor(scheme))
+    }
   }
 
   private val roleNames =

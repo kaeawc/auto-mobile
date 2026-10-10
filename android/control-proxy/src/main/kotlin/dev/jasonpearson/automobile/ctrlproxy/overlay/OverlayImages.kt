@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
@@ -21,7 +22,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -135,7 +135,8 @@ private fun overlayImageTarget(constraints: Constraints): OverlayImageTarget {
 internal fun OverlayImageContent(node: OverlayRenderNode, modifier: Modifier) {
   val source = node.source as? OverlayImageNode ?: return
   val background =
-    overlayThemedColor(node.style.background, node.style.source.background) ?: Color.LightGray
+    overlayThemedColor(node.style.background, node.style.source.background)
+      ?: overlayPlaceholderColor(MaterialTheme.colorScheme)
   BoxWithConstraints(modifier.defaultMinSize(24.dp, 24.dp)) {
     val state = rememberOverlayImage(source.asset, overlayImageTarget(constraints))
     val image = (state as? OverlayImageState.Ready)?.image as? BitmapOverlayImage
@@ -149,7 +150,11 @@ internal fun OverlayImageContent(node: OverlayRenderNode, modifier: Modifier) {
     } else {
       Box(fillAuthoredAxes(node.style.source).background(background), Alignment.Center) {
         if (state != OverlayImageState.Loading)
-          Icon(Icons.Default.BrokenImage, contentDescription = null, tint = Color.DarkGray)
+          Icon(
+            Icons.Default.BrokenImage,
+            contentDescription = null,
+            tint = overlayPlaceholderContentColor(MaterialTheme.colorScheme),
+          )
       }
     }
   }
@@ -181,14 +186,19 @@ internal fun OverlayNavigationIcon(item: OverlayItem) {
       } ?: NavigationPlaceholder()
     is OverlayNavigationVisual.Icon ->
       Icon(checkNotNull(overlayIcon(visual.name)), contentDescription = null)
-    OverlayNavigationVisual.Loading -> Box(Modifier.size(24.dp).background(Color.LightGray))
+    OverlayNavigationVisual.Loading ->
+      Box(Modifier.size(24.dp).background(overlayPlaceholderColor(MaterialTheme.colorScheme)))
     OverlayNavigationVisual.Placeholder -> NavigationPlaceholder()
   }
 }
 
 @Composable
 private fun NavigationPlaceholder() {
-  Box(Modifier.size(24.dp).background(Color.LightGray).semantics { role = Role.Image })
+  Box(
+    Modifier.size(24.dp).background(overlayPlaceholderColor(MaterialTheme.colorScheme)).semantics {
+      role = Role.Image
+    },
+  )
 }
 
 /** Nav icons are drawn at 24 dp; decode for up to xxxhdpi so they stay sharp on any display. */

@@ -457,6 +457,7 @@ struct OverlayRootView: View {
 
     var body: some View {
         let palette = OverlayPalette.make(theme: model.spec?.theme, systemDark: systemScheme == .dark)
+        let chip = OverlayHostChrome.closeChipColors(palette: palette)
         // An open dialog makes the page behind it inert for accessibility, as it is for touches
         // (#10899). VoiceOver honours this collapse; the XCUITest snapshot needs the UIKit flags
         // `OverlayLayersViewController.apply` sets on the page's hosting view.
@@ -473,7 +474,7 @@ struct OverlayRootView: View {
                     // layer keeps the bar's space empty; the top layer draws the bar.
                     VStack(spacing: 0) {
                         if layer == .top {
-                            dismissBar(chrome, dark: palette.dark)
+                            dismissBar(chrome, palette: palette)
                         } else {
                             Color.clear.frame(height: chrome.dismissBarHeight(safeTop: model.safeInsets.top))
                         }
@@ -503,7 +504,7 @@ struct OverlayRootView: View {
                     anchorLayer(spec).opacity(opacity).overlayLayerAccessibility(pageAccessibility)
                 } else {
                     OverlayModalLayer(model: model).opacity(opacity)
-                    dismissControl()
+                    dismissControl(glyph: Color(chip.glyph), fill: Color(chip.fill))
                         .padding(.top, model.safeInsets.top)
                         .padding(.trailing, max(model.safeInsets.right, 8))
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -596,7 +597,7 @@ struct OverlayRootView: View {
     }
 
     /// Host-owned control the spec cannot remove (#9307).
-    private func dismissControl(glyph: Color = .white, fill: Color = Color.black.opacity(0.55)) -> some View {
+    private func dismissControl(glyph: Color, fill: Color) -> some View {
         Button {
             model.dismiss(reason: .user)
         } label: {
@@ -616,8 +617,8 @@ struct OverlayRootView: View {
     /// The fullscreen dismiss bar: it clears the status bar and cutout, holds only the control, and
     /// is translucent and themed like the spec (Android's `overlayDismissColors`, #10522). Its rect
     /// is a hit rect, so a tap on the bar beside the control still never reaches the covered app.
-    private func dismissBar(_ chrome: OverlayHostChrome, dark: Bool) -> some View {
-        let colors = OverlayHostChrome.dismissBarColors(dark: dark)
+    private func dismissBar(_ chrome: OverlayHostChrome, palette: OverlayPalette) -> some View {
+        let colors = OverlayHostChrome.dismissBarColors(palette: palette)
         let content = Color(colors.content)
         return dismissControl(glyph: content, fill: content.opacity(0.12))
             .padding(.top, model.safeInsets.top)

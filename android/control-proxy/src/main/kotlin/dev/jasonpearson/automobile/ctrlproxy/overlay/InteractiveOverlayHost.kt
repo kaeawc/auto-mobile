@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import dev.jasonpearson.automobile.protocol.OverlaySpecTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -89,6 +90,9 @@ data class InteractiveOverlayRequest(
   val persistent: Boolean = false,
   /** Dark or light host chrome as the spec paints it; null follows the device setting. */
   val darkTheme: Boolean? = null,
+  /** The spec's render root and theme, so host chrome follows the spec; null uses the baseline. */
+  val themeRoot: OverlayRenderNode? = null,
+  val specTheme: OverlaySpecTheme? = null,
   val onHostDismiss: suspend () -> Unit = {},
   val content: @Composable () -> Unit = { InteractiveOverlayTestContent() },
 ) {
@@ -762,13 +766,29 @@ internal fun InteractiveOverlayWindowContent(
   val configuration = LocalConfiguration.current
   val floor = remember(request.placement, configuration) { insetFloor() }
   val chrome = overlayHostChrome(request)
-  val fullscreen = request.placement as? OverlayPlacement.Fullscreen
   val scope = rememberCoroutineScope()
+  OverlayHostTheme(
+    request.themeRoot,
+    request.specTheme,
+    request.darkTheme ?: isSystemInDarkTheme(),
+  ) {
+    InteractiveOverlayChrome(request, chrome, floor, scope)
+  }
+}
+
+@Composable
+private fun InteractiveOverlayChrome(
+  request: InteractiveOverlayRequest,
+  chrome: OverlayHostChrome,
+  floor: OverlayInsetFloor,
+  scope: CoroutineScope,
+) {
+  val fullscreen = request.placement as? OverlayPlacement.Fullscreen
   if (chrome.dismissVisible) {
     Column(Modifier.fillMaxSize()) {
       // Reserve inset-aware space and clip the spec below it. Modal scrims cannot cover it. The
       // bar is translucent, themed like the spec, and only as tall as its small button (#10437).
-      val dismissColors = overlayDismissColors(request.darkTheme ?: isSystemInDarkTheme())
+      val dismissColors = overlayDismissColors(MaterialTheme.colorScheme)
       Box(
         Modifier.fillMaxWidth()
           .background(dismissColors.background)
@@ -809,10 +829,11 @@ internal fun InteractiveOverlayWindowContent(
         CompositionLocalProvider(LocalOverlayInsetFloor provides floor) { request.content() }
       }
       // Drawn after the content so authored nodes cannot cover it.
+      val closeColors = overlayCloseColors(MaterialTheme.colorScheme)
       TextButton(
         onClick = { scope.launch { request.onHostDismiss() } },
-        modifier = Modifier.align(Alignment.TopEnd).background(Color.White),
-        colors = ButtonDefaults.textButtonColors(contentColor = Color.Black),
+        modifier = Modifier.align(Alignment.TopEnd).background(closeColors.background),
+        colors = ButtonDefaults.textButtonColors(contentColor = closeColors.content),
       ) {
         Text("Close")
       }

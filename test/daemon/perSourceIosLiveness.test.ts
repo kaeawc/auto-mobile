@@ -285,14 +285,16 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
       lister,
     );
     expect((await lister.listConnectedDevices()).complete).toBe(true);
+    const originalPlatform = listing.result.devices[0].properties.hardware.platform;
     // DERIVED unknown platform in a DIFFERENT record; the recognized phone remains present.
+    // The sweep is incomplete (no absence evidence) but the phone it recognized stays fresh.
     listing.result.devices[0].properties.hardware.platform = "futureOS";
     timer.advanceTime(3_000);
     const discovery = await manager.getBootedDevicesDetailed("ios");
     expect(discovery.devices.map((device) => device.deviceId)).toContain(PHYSICAL_UDID);
-    expect(discovery.succeededSources!.has("ios-physical")).toBe(true);
+    expect(discovery.succeededSources!.has("ios-physical")).toBe(false);
     expect(discovery.freshDeviceIds!.has(PHYSICAL_UDID)).toBe(true);
-    expect(discovery.sourceErrors?.["ios-physical"]).toBeUndefined();
+    expect(discovery.sourceErrors?.["ios-physical"]).toBeDefined();
     const reaper = new IdleDeviceReaper(
       {
         getDevice: (id) => devicePool.getDevice(id),
@@ -315,6 +317,7 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     expect(devicePool.getDevice(PHYSICAL_UDID)?.sessionId).toBe("session-d");
 
     // A complete listing genuinely missing the phone is still authoritative.
+    listing.result.devices[0].properties.hardware.platform = originalPlatform;
     listing.result.devices = listing.result.devices.filter((record) => record !== phone);
     timer.advanceTime(3_000);
     const absent = await manager.getBootedDevicesDetailed("ios");

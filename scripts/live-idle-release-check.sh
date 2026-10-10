@@ -63,9 +63,10 @@ SLEEP_CMD="${AUTOMOBILE_IDLE_CHECK_SLEEP:-sleep}"
 NOW_CMD="${AUTOMOBILE_IDLE_CHECK_NOW:-}"
 NC="${AUTOMOBILE_IDLE_CHECK_NC:-nc}"
 
-# Mirrors src/daemon/sessionLivenessWindows.ts: owner lease 4 s + suspect grace
-# 4 s + one 2 s monitor scan.
-SUSPECT_GRACE_MS=4000
+# Mirrors src/daemon/sessionLivenessWindows.ts: idle release lands exactly one
+# idle window after the last control call (#11107), so the only slack after it is
+# one 2 s monitor scan. The 4 s owner lease and 4 s suspect grace judge the
+# owner's heartbeat, not the idle window, and no longer widen this bound.
 MONITOR_SCAN_MS=2000
 NO_HEARTBEAT_BUDGET_MS=10000
 # Only control calls are activity (#10964); a read such as observe never extends the idle window.
@@ -627,7 +628,7 @@ scenario_idle() {
   [[ -n "${first}" ]] || die "${serial} released right after getAndroid"
   local window
   window=$(($(entry_field "${first}" idleReleaseAt) - $(entry_field "${first}" lastToolActivityAt)))
-  if ((window < idle_timeout_ms || window > idle_timeout_ms + SUSPECT_GRACE_MS + slack_ms)); then
+  if ((window < idle_timeout_ms || window > idle_timeout_ms + slack_ms)); then
     die "idleReleaseAt is ${window} ms after the last tool activity; expected about ${idle_timeout_ms} ms"
   fi
 
@@ -652,7 +653,7 @@ scenario_idle() {
     die "lastOwnerHeartbeatAt did not advance (${first_beat} -> ${last_beat}); the proxy is not heartbeating"
   fi
 
-  wait_for_release $((acquired + idle_timeout_ms + SUSPECT_GRACE_MS + MONITOR_SCAN_MS + slack_ms)) ||
+  wait_for_release $((acquired + idle_timeout_ms + MONITOR_SCAN_MS + slack_ms)) ||
     die "${serial} still held after the ${idle_timeout_ms} ms idle window"
   proxy_alive || die "the proxy exited before the release, so this was not an idle release"
   log "idle: released $((released_at - acquired)) ms after the last tool call (idle window ${idle_timeout_ms} ms)"
@@ -701,7 +702,7 @@ scenario_observe_only() {
   query_device_entry
   first="${entry}"
   [[ -n "${first}" ]] || die "${serial} released right after getAndroid"
-  local deadline=$((acquired + idle_timeout_ms + SUSPECT_GRACE_MS + MONITOR_SCAN_MS + slack_ms))
+  local deadline=$((acquired + idle_timeout_ms + MONITOR_SCAN_MS + slack_ms))
   released_at=""
   while [[ -z "${released_at}" ]]; do
     # After the release the owner's next call is refused (lazy expiry): that refusal is the
@@ -813,7 +814,7 @@ scenario_two_devices() {
 
   # Only B is used. A must go at its own idle deadline while B stays held and heartbeating.
   local now="${acquired_a}" released_a=""
-  local deadline=$((acquired_a + idle_timeout_ms + SUSPECT_GRACE_MS + MONITOR_SCAN_MS + slack_ms))
+  local deadline=$((acquired_a + idle_timeout_ms + MONITOR_SCAN_MS + slack_ms))
   while [[ -z "${released_a}" ]]; do
     call_tool "${CONTROL_TOOL}" "$(jq -cn --arg session "${session_b}" '{sessionUuid: $session}')" 120
     now="$(now_ms)"
@@ -896,7 +897,7 @@ scenario_stream() {
   grep -q '"subscription_response"' "${frames}" || die "the observation stream never acknowledged the subscription"
   jq -e -s 'map(select(.type == "subscription_response")) | first | .success == true' "${frames}" > /dev/null ||
     die "the observation stream refused the subscription: $(head -c 300 "${frames}")"
-  wait_for_release $((acquired + idle_timeout_ms + SUSPECT_GRACE_MS + MONITOR_SCAN_MS + slack_ms)) ||
+  wait_for_release $((acquired + idle_timeout_ms + MONITOR_SCAN_MS + slack_ms)) ||
     die "${serial} still held after the ${idle_timeout_ms} ms idle window"
   # Give a late frame time to arrive before judging the stream.
   "${SLEEP_CMD}" 2

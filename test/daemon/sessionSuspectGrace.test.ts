@@ -157,6 +157,24 @@ describe("suspect grace window and daemon stall (#10051)", () => {
     });
   });
 
+  describe("a non-owner's tool calls (#11107)", () => {
+    test("do not hide a dead owner: the session still turns suspect after the lease", async () => {
+      // A second connection names the session every second, as an active agent would, while the
+      // owner's heartbeats have stopped. Tool calls stamp `lastHeartbeat` but not the owner lease.
+      for (let elapsed = 0; elapsed < LEASE_MS + 1_000; elapsed += 1_000) {
+        timer.advanceTime(1_000);
+        if (elapsed + 1_000 <= LEASE_MS) {
+          await sessionManager.getOrCreateSession(SESSION);
+        }
+      }
+
+      expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("suspect");
+      await expect(sessionManager.getOrCreateSession(SESSION)).rejects.toBeInstanceOf(
+        SessionSuspectError,
+      );
+    });
+  });
+
   describe("while suspect", () => {
     beforeEach(() => {
       timer.advanceTime(LEASE_MS + 1);
@@ -732,18 +750,25 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       // keeps working: every call names the session and refreshes its activity.
       for (let elapsed = 0; elapsed < LEASE_MS + SUSPECT_GRACE_MS; elapsed += SCAN_MS) {
         timer.advanceTime(SCAN_MS);
-        await sessionManager.getOrCreateSession(SESSION);
+        // Past the lease the dead owner's session is suspect (#11107), so the restarted proxy's
+        // calls are refused until its claim can win; before it they still refresh activity.
+        const call = sessionManager.getOrCreateSession(SESSION);
+        if (sessionManager.getSessionLeaseState(SESSION)?.phase === "suspect") {
+          await expect(call).rejects.toBeInstanceOf(SessionSuspectError);
+        } else {
+          await call;
+        }
         await monitor.tick();
         expect((await heartbeat(FOREIGN, true)).code).toBe("liveness_owner_conflict");
       }
       expect(reaped).toEqual([]);
 
       timer.advanceTime(1);
-      await sessionManager.getOrCreateSession(SESSION);
       const claim = await heartbeat(FOREIGN, true);
 
       expect(claim.success).toBe(true);
       expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBe(FOREIGN);
+      await expect(sessionManager.getOrCreateSession(SESSION)).resolves.toBeDefined();
     });
 
     test("cache updates by a non-owner do not extend the owner's lease either (F1a)", async () => {

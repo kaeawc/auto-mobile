@@ -36,7 +36,12 @@ import type {
   LivenessLeaseState,
   LivenessOwnerHold,
 } from "./livenessOwnerLease";
-import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
+import type {
+  DeviceRecoveryEligibility,
+  DeviceRecoveryPolicy,
+  PooledDevice,
+  RefusedOwnedSessionRestore,
+} from "./devicePool";
 import type { DeviceSessionRecord, RetiredDeviceSession } from "./deviceSessionRegistry";
 import type { BootedDevice } from "../models";
 import {
@@ -138,7 +143,7 @@ export interface DaemonStateAccess {
       sessionIds: readonly string[],
       mcpSessionId: string,
       livenessOwnerToken?: string,
-    ): Promise<void>;
+    ): Promise<readonly RefusedOwnedSessionRestore[] | void>;
     releaseMcpSessionBindings?(mcpSessionId: string): void;
     refreshDevices(): Promise<number>;
     refreshDevicesWithOutcome?(): Promise<import("./devicePoolRefresh").DevicePoolRefreshResult>;

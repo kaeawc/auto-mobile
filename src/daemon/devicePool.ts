@@ -357,6 +357,13 @@ function describeMultiDeviceAllocationAttempts(
 /**
  * Pooled Device Status
  */
+/** A live session whose ownership a reconnecting client was refused (#11107). */
+export interface RefusedOwnedSessionRestore {
+  sessionId: string;
+  deviceId: string;
+  reason: "owned-by-other-connection";
+}
+
 export type DeviceStatus = "idle" | "busy" | "error";
 type MutableMetadataSource = "refresh" | "snapshot";
 export type SessionPreservingRecoveryResult =
@@ -7925,15 +7932,18 @@ export class DevicePool {
 
   /**
    * Restore ownership of live result-minted sessions after a daemon socket
-   * reconnect. Unlike autolock restoration, this intentionally does not select
-   * an implicit routing default or mutate persisted autolock metadata.
+   * reconnect. Sessions another connection still owns are not restored and are returned as
+   * refusals instead of failing the whole restore. Unlike autolock restoration, this
+   * intentionally does not select an implicit routing default or mutate persisted autolock
+   * metadata.
    */
   async restoreOwnedDeviceSessionsForMcpSession(
     sessionIds: readonly string[],
     mcpSessionId: string,
     livenessOwnerToken?: string,
-  ): Promise<void> {
-    await this.assignmentMutex.runExclusive(() => {
+  ): Promise<readonly RefusedOwnedSessionRestore[]> {
+    return await this.assignmentMutex.runExclusive(() => {
+      const refused: RefusedOwnedSessionRestore[] = [];
       for (const sessionId of sessionIds) {
         const session = this.sessionManager.getSession(sessionId);
         const device = session ? this.devices.get(session.assignedDevice) : undefined;
@@ -7944,11 +7954,15 @@ export class DevicePool {
           this.sessionManager.isAdmittedForAutomation(session)
         ) {
           if (!this.mayRestoreMcpSessionOwnership(session, mcpSessionId, livenessOwnerToken)) {
-            throw deviceAlreadyAssignedToAnotherSessionError(device.id);
+            // One refused session must not stop the rest from restoring: the caller decides
+            // whether the refusal matters to the call it is routing.
+            refused.push({ sessionId, deviceId: device.id, reason: "owned-by-other-connection" });
+            continue;
           }
           this.recordMcpSessionOwnership(mcpSessionId, sessionId);
         }
       }
+      return refused;
     });
   }
 

@@ -68,8 +68,8 @@ import {
   ownerLeaseLiveAt,
   livenessLeaseState,
   livenessOwnerHold,
-  sessionLeaseSnapshot,
   sessionOwnerLeaseSnapshot,
+  sessionJudgedLeaseSnapshot,
   suspectGraceMsFor,
   type LivenessLeaseState,
   type LivenessOwnerHold,
@@ -7356,21 +7356,23 @@ export class SessionManager {
     if (!session || session.livenessPolicy === "cli-idle") {
       return undefined;
     }
-    return livenessLeaseState(sessionLeaseSnapshot(session, this.sessionNow()));
+    return livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow()));
   }
 
   /** Whether the session is inside its suspect window (lease expired, grace running). */
   private isSessionSuspect(session: Session): boolean {
     return (
       session.livenessPolicy === "heartbeat" &&
-      livenessLeaseState(sessionLeaseSnapshot(session, this.sessionNow())).phase === "suspect"
+      livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow())).phase === "suspect"
     );
   }
 
   /** Reject a tool call against a suspect session; only its owner's heartbeat restores it. */
   private assertSessionNotSuspect(session: Session): void {
     if (this.isSessionSuspect(session)) {
-      const { remainingMs } = livenessLeaseState(sessionLeaseSnapshot(session, this.sessionNow()));
+      const { remainingMs } = livenessLeaseState(
+        sessionJudgedLeaseSnapshot(session, this.sessionNow()),
+      );
       throw new SessionSuspectError(session.sessionId, remainingMs);
     }
   }
@@ -7759,7 +7761,7 @@ export class SessionManager {
   ): string {
     if (
       suspectGraceMsFor(session) > 0 &&
-      livenessLeaseState(sessionLeaseSnapshot(session, this.sessionNow())).phase === "lapsed"
+      livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow())).phase === "lapsed"
     ) {
       return "heartbeat-timeout";
     }

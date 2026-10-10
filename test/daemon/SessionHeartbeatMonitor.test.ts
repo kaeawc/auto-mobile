@@ -351,7 +351,8 @@ describe("SessionHeartbeatMonitor", () => {
       // The owner stops heartbeating; tool calls keep stamping the activity heartbeat.
       for (let elapsed = 0; elapsed <= 1_000 + SUSPECT_GRACE_MS; elapsed += 500) {
         timer.advanceTime(500);
-        await sessionManager.getOrCreateSession("s1");
+        // Once the lease lapses the session is suspect and refuses the other connection's calls.
+        await sessionManager.getOrCreateSession("s1").catch(() => undefined);
       }
       await monitor.tick();
 

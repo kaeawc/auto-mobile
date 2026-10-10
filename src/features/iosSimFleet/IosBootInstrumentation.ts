@@ -19,29 +19,29 @@ export interface IosBootRequest {
   runtime?: string;
   /** Resource profile the boot is for; omitted means no overrides were requested. */
   profile?: SimulatorWorkloadProfile;
-  /** Total budget for waiting on capacity plus the boot itself. */
+  /** Budget for the boot itself; a platform at capacity is refused before it starts. */
   timeoutMs: number;
-  /** Cancels a capacity wait (the boot path's ambient request signal). */
+  /** Cancels the capacity check (the boot path's ambient request signal). */
   signal?: AbortSignal;
 }
 
 /** Seam the iOS boot path calls; swappable for a fake so boot tests stay hermetic. */
 export interface IosBootInstrumentation {
-  /** Runs `boot` with the budget left after any capacity wait and records a successful duration. */
+  /** Runs `boot` with the full budget once admitted and records a successful duration. */
   run<T>(request: IosBootRequest, boot: (remainingMs: number) => Promise<T>): Promise<T>;
 }
 
 export interface FleetBootInstrumentationOptions {
   history: BootDurationHistory;
   timer: Pick<Timer, "now">;
-  /** Absent means boots are never queued; durations are still recorded. */
+  /** Absent means boots are never refused; durations are still recorded. */
   gate?: SimulatorCapacityGate;
 }
 
 /**
  * Records boot-to-ready durations keyed by workload profile and, when a gate is
- * supplied, queues a boot only while the fleet is over its derived limit. A
- * compatible warm simulator is never a reason to queue.
+ * supplied, refuses a boot at once while the fleet is at its derived limit. A
+ * compatible warm simulator is never a reason to refuse.
  */
 export class FleetBootInstrumentation implements IosBootInstrumentation {
   constructor(private readonly options: FleetBootInstrumentationOptions) {}
@@ -49,16 +49,11 @@ export class FleetBootInstrumentation implements IosBootInstrumentation {
   async run<T>(request: IosBootRequest, boot: (remainingMs: number) => Promise<T>): Promise<T> {
     const { history, timer, gate } = this.options;
     const profileId = bootProfileId(request.profile);
-    const startedAtMs = timer.now();
-    const releaseAdmission = gate
-      ? await this.awaitCapacity(gate, request, profileId, startedAtMs)
-      : undefined;
+    const releaseAdmission = gate ? await this.admit(gate, request, profileId) : undefined;
     const bootStartedAtMs = timer.now();
-    // Only time spent queued for capacity is deducted; the unqueued path keeps the caller's budget.
-    const waitedMs = gate ? bootStartedAtMs - startedAtMs : 0;
     let result: T;
     try {
-      result = await boot(Math.max(1, request.timeoutMs - waitedMs));
+      result = await boot(request.timeoutMs);
     } finally {
       // The admitted boot counted toward the limit until now; the fleet sample takes over.
       releaseAdmission?.();
@@ -73,23 +68,18 @@ export class FleetBootInstrumentation implements IosBootInstrumentation {
     return result;
   }
 
-  private async awaitCapacity(
+  private async admit(
     gate: SimulatorCapacityGate,
     request: IosBootRequest,
     profileId: string,
-    startedAtMs: number,
   ): Promise<(() => void) | undefined> {
-    const result = await gate.waitForCapacity(
+    const result = await gate.admitBoot(
       { runtime: request.runtime, profileId, excludeUdids: [request.udid] },
-      {
-        deadlineMs: startedAtMs + request.timeoutMs,
-        signal: request.signal,
-        bootUdid: request.udid,
-      },
+      { signal: request.signal, bootUdid: request.udid },
     );
     assertCapacityGranted(result);
     if (result.decision.outcome === "reuse-warm") {
-      // Never substitute a different simulator for the one requested; just do not queue behind it.
+      // Never substitute a different simulator for the one requested; just do not refuse because of it.
       logger.info(
         `compatible warm simulator ${result.decision.udid} is booted; booting ${request.udid} as requested`,
       );

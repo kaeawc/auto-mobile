@@ -39,23 +39,28 @@ describe("AndroidBootAdmissionGate (#11181)", () => {
     expect(await gate.describeCapacity()).toEqual({ limit: 2, booted: 1, inFlight: 0 });
   });
 
-  test("queues at capacity and admits once an emulator shuts down", async () => {
+  test("refuses at capacity at once, without sampling again or sleeping", async () => {
     const { timer, source, gate } = setup();
-    timer.enableAutoAdvance();
     source.emulatorSerials = ["emulator-5554", "emulator-5556"];
-    source.onSample = (sample) => {
-      if (sample === 3) {
-        source.emulatorSerials = ["emulator-5554"];
-      }
-    };
 
-    await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    const error = await rejection(gate.admit({ timeoutMs: 120_000, avdName: AVD }));
 
-    expect(source.samples).toBe(3);
-    expect(timer.now()).toBe(10_000);
+    expect(error).toBeInstanceOf(BootCapacityExhaustedError);
+    expect(source.samples).toBe(1);
+    expect(timer.now()).toBe(0);
+    expect(timer.getPendingSleepCount()).toBe(0);
   });
 
-  test("fails with the typed retryable capacity_exhausted error at the deadline", async () => {
+  test("admits right away once an emulator has shut down", async () => {
+    const { source, gate } = setup();
+    source.emulatorSerials = ["emulator-5554", "emulator-5556"];
+    await rejection(gate.admit({ timeoutMs: 60_000, avdName: AVD }));
+    source.emulatorSerials = ["emulator-5554"];
+
+    await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+  });
+
+  test("fails with the typed retryable capacity_exhausted error immediately", async () => {
     const { timer, source, gate } = setup();
     timer.enableAutoAdvance();
     source.emulatorSerials = ["emulator-5554", "emulator-5556"];
@@ -75,8 +80,7 @@ describe("AndroidBootAdmissionGate (#11181)", () => {
         platform: "android",
       },
     });
-    // It gave up before sleeping past the deadline, not after.
-    expect(timer.now()).toBeLessThanOrEqual(12_000);
+    expect(timer.now()).toBe(0);
   });
 
   test("counts emulators adb does not list: booting ones and ones on another adb server", async () => {
@@ -142,22 +146,17 @@ describe("AndroidBootAdmissionGate (#11181)", () => {
     second.release();
   });
 
-  test("an abort while queued rejects with the abort and admits nothing", async () => {
-    const { timer, source, gate } = setup({ [ANDROID_MAX_BOOTED_ENV]: "1" });
-    source.emulatorSerials = ["emulator-5554"];
+  test("an abort before sampling rejects with the abort and admits nothing", async () => {
+    const { source, gate } = setup({ [ANDROID_MAX_BOOTED_ENV]: "1" });
     const controller = new AbortController();
-    const wait = rejection(
-      gate.admit({ timeoutMs: 60_000, signal: controller.signal, avdName: AVD }),
-    );
-    for (let drain = 0; drain < 20 && timer.getPendingSleepCount() === 0; drain++) {
-      await Promise.resolve();
-    }
-    expect(timer.getPendingSleepCount()).toBe(1);
-
     controller.abort(new Error("boot cancelled"));
 
-    expect(await wait).not.toBeInstanceOf(BootCapacityExhaustedError);
-    source.emulatorSerials = [];
+    const error = await rejection(
+      gate.admit({ timeoutMs: 60_000, signal: controller.signal, avdName: AVD }),
+    );
+
+    expect(error).not.toBeInstanceOf(BootCapacityExhaustedError);
+    expect(source.samples).toBe(0);
     expect((await gate.describeCapacity()).inFlight).toBe(0);
   });
 

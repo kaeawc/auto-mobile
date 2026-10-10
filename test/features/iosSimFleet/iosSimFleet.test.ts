@@ -237,10 +237,14 @@ describe("capacity gate", () => {
     expect(decision).toMatchObject({ outcome: "allow", bootedCount: 1 });
   });
 
-  test("queues at capacity and reports why", async () => {
+  test("refuses at capacity and reports why", async () => {
     const { collector, timer } = setup([IOS27, IOS18]);
     const decision = await new IosSimCapacityGate(collector, timer, { env }).evaluateBoot();
-    expect(decision).toMatchObject({ outcome: "queue", reason: "at-capacity", retryAfterMs: 5000 });
+    expect(decision).toMatchObject({
+      outcome: "refuse",
+      reason: "at-capacity",
+      retryAfterMs: 5000,
+    });
   });
 
   test("prefers a compatible warm device over a new boot, even at capacity", async () => {
@@ -256,37 +260,35 @@ describe("capacity gate", () => {
         deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
         excludeUdids: [IOS18],
       }),
-    ).toMatchObject({ outcome: "queue" });
+    ).toMatchObject({ outcome: "refuse" });
   });
 
   // #11100: the boot path boots the requested UDID regardless, so a warm device
   // must not admit it past maxBooted.
-  test("waitForCapacity still queues at capacity when a compatible warm device exists", async () => {
+  test("admitBoot still refuses at capacity when a compatible warm device exists", async () => {
     const { collector, timer, history } = setup([IOS27, IOS18]);
-    timer.enableAutoAdvance();
     history.record({ udid: IOS18, profileId: "lean-v1", durationMs: 30_000, recordedAtMs: 0 });
     const gate = new IosSimCapacityGate(collector, timer, { env });
 
-    const result = await gate.waitForCapacity(
+    const result = await gate.admitBoot(
       { profileId: "lean-v1", excludeUdids: ["NEW-UDID"] },
-      { deadlineMs: timer.now() + 7_000, bootUdid: "NEW-UDID" },
+      { bootUdid: "NEW-UDID" },
     );
 
     expect(result).toMatchObject({
-      timedOut: true,
-      decision: { outcome: "queue", reason: "at-capacity" },
+      decision: { outcome: "refuse", reason: "at-capacity" },
     });
     expect(result.releaseAdmission).toBeUndefined();
   });
 
-  test("waitForCapacity reports a warm device as a hint when a boot fits", async () => {
+  test("admitBoot reports a warm device as a hint when a boot fits", async () => {
     const { collector, timer, history } = setup([IOS27]);
     history.record({ udid: IOS27, profileId: "lean-v1", durationMs: 30_000, recordedAtMs: 0 });
     const gate = new IosSimCapacityGate(collector, timer, { env });
 
-    const result = await gate.waitForCapacity(
+    const result = await gate.admitBoot(
       { profileId: "lean-v1", excludeUdids: ["NEW-UDID"] },
-      { deadlineMs: timer.now() + 7_000, bootUdid: "NEW-UDID" },
+      { bootUdid: "NEW-UDID" },
     );
 
     expect(result.decision).toEqual({ outcome: "reuse-warm", udid: IOS27 });
@@ -294,7 +296,7 @@ describe("capacity gate", () => {
     result.releaseAdmission?.();
   });
 
-  test("queues only after sustained pressure, not on one sample", async () => {
+  test("refuses only after sustained pressure, not on one sample", async () => {
     const { collector, timer, source } = setup([IOS27], { ...calm, memoryPressure: "warn" });
     const gate = new IosSimCapacityGate(collector, timer, {
       env: { [IOS_SIM_MAX_BOOTED_ENV]: "4" },
@@ -302,7 +304,7 @@ describe("capacity gate", () => {
     expect((await gate.evaluateBoot()).outcome).toBe("allow");
     expect((await gate.evaluateBoot()).outcome).toBe("allow");
     expect(await gate.evaluateBoot()).toMatchObject({
-      outcome: "queue",
+      outcome: "refuse",
       reason: "sustained-pressure",
     });
     source.snapshot = snapshot(calm);
@@ -315,33 +317,14 @@ describe("capacity gate", () => {
     expect((await gate.evaluateBoot()).outcome).toBe("allow");
   });
 
-  test("waitForCapacity polls until capacity frees, using the injected timer", async () => {
-    const { collector, timer, source } = setup([IOS27, IOS18]);
-    timer.enableAutoAdvance();
-    const gate = new IosSimCapacityGate(collector, timer, { env });
-    let calls = 0;
-    const original = source.readInventory.bind(source);
-    source.readInventory = async () => {
-      calls += 1;
-      if (calls === 3) {
-        source.inventory = inventoryWithBooted(IOS27);
-      }
-      return original();
-    };
-    const result = await gate.waitForCapacity(undefined, { deadlineMs: timer.now() + 60_000 });
-    expect(result.decision.outcome).toBe("allow");
-    expect(result.timedOut).toBe(false);
-    expect(calls).toBe(3);
-  });
-
-  test("waitForCapacity times out before the deadline and assert throws", async () => {
+  test("admitBoot refuses at once at the limit without sleeping, and assert throws the typed error", async () => {
     const { collector, timer } = setup([IOS27, IOS18]);
-    timer.enableAutoAdvance();
     const gate = new IosSimCapacityGate(collector, timer, { env });
-    const result = await gate.waitForCapacity(undefined, { deadlineMs: timer.now() + 7_000 });
-    expect(result.timedOut).toBe(true);
-    expect(() => assertCapacityGranted(result)).toThrow("waiting for simulator capacity");
-    // #11181: the same typed, retryable error the Android gate throws.
+    const startedAt = timer.now();
+    const result = await gate.admitBoot(undefined, {});
+    expect(timer.now()).toBe(startedAt);
+    expect(result.decision.outcome).toBe("refuse");
+    expect(result.releaseAdmission).toBeUndefined();
     let thrown: unknown;
     try {
       assertCapacityGranted(result);
@@ -361,64 +344,36 @@ describe("capacity gate", () => {
     });
   });
 
-  test("waitForCapacity honors cancellation", async () => {
+  test("admitBoot honors cancellation", async () => {
     const { collector, timer } = setup([IOS27, IOS18]);
     const gate = new IosSimCapacityGate(collector, timer, { env });
     const controller = new AbortController();
     controller.abort();
-    await expect(
-      gate.waitForCapacity(undefined, { signal: controller.signal, deadlineMs: 1000 }),
-    ).rejects.toThrow();
+    await expect(gate.admitBoot(undefined, { signal: controller.signal })).rejects.toThrow();
   });
 
-  // #11064: the boot path's cancellation must end a queued capacity wait.
-  test("waitForCapacity aborts while sleeping between queued samples", async () => {
-    const { collector, timer } = setup([IOS27, IOS18]);
-    const gate = new IosSimCapacityGate(collector, timer, { env });
-    const controller = new AbortController();
-    let outcome: "pending" | "rejected" | "resolved" = "pending";
-    const wait = gate
-      .waitForCapacity(undefined, { signal: controller.signal, deadlineMs: timer.now() + 60_000 })
-      .then(
-        () => {
-          outcome = "resolved";
-        },
-        () => {
-          outcome = "rejected";
-        },
-      );
-    for (let drain = 0; drain < 20 && timer.getPendingSleepCount() === 0; drain++) {
-      await Promise.resolve();
-    }
-    expect(timer.getPendingSleepCount()).toBe(1);
-    controller.abort(new Error("boot cancelled"));
-    await wait;
-    expect(outcome).toBe("rejected");
-  });
-
-  test("waitForCapacity bounds a stalled fleet sample by its deadline", async () => {
+  test("admitBoot bounds a stalled fleet sample", async () => {
     const { collector, timer, source } = setup([IOS27]);
     source.gate = new Promise<void>(() => {});
     const gate = new IosSimCapacityGate(collector, timer, { env });
-    const wait = gate.waitForCapacity(undefined, { deadlineMs: timer.now() + 1_000 });
-    timer.advanceTime(1_000);
+    const wait = gate.admitBoot(undefined, {});
+    timer.advanceTime(15_000);
     await expect(wait).rejects.toThrow("collecting iOS simulator capacity");
   });
 
   test("an admitted boot counts toward the limit until it is released", async () => {
     const { collector, timer } = setup([IOS27]);
     const gate = new IosSimCapacityGate(collector, timer, { env });
-    const deadlineMs = timer.now() + 1_000;
     // One free slot (1 booted, limit 2): two concurrent boots must not both be admitted.
     const [first, second] = await Promise.all([
-      gate.waitForCapacity(undefined, { deadlineMs, bootUdid: "NEW-A" }),
-      gate.waitForCapacity(undefined, { deadlineMs, bootUdid: "NEW-B" }),
+      gate.admitBoot(undefined, { bootUdid: "NEW-A" }),
+      gate.admitBoot(undefined, { bootUdid: "NEW-B" }),
     ]);
-    expect([first.decision.outcome, second.decision.outcome].sort()).toEqual(["allow", "queue"]);
+    expect([first.decision.outcome, second.decision.outcome].sort()).toEqual(["allow", "refuse"]);
     const admitted = first.decision.outcome === "allow" ? first : second;
     expect(admitted.releaseAdmission).toBeDefined();
     admitted.releaseAdmission?.();
-    const third = await gate.waitForCapacity(undefined, { deadlineMs, bootUdid: "NEW-C" });
+    const third = await gate.admitBoot(undefined, { bootUdid: "NEW-C" });
     expect(third.decision.outcome).toBe("allow");
   });
 
@@ -427,8 +382,7 @@ describe("capacity gate", () => {
     const gate = new IosSimCapacityGate(collector, timer, {
       env: { [IOS_SIM_MAX_BOOTED_ENV]: "3" },
     });
-    const deadlineMs = timer.now() + 1_000;
-    const admitted = await gate.waitForCapacity(undefined, { deadlineMs, bootUdid: IOS18 });
+    const admitted = await gate.admitBoot(undefined, { bootUdid: IOS18 });
     expect(admitted.decision).toMatchObject({ outcome: "allow", bootedCount: 1 });
     source.inventory = inventoryWithBooted(IOS27, IOS18);
     expect(await gate.evaluateBoot()).toMatchObject({ outcome: "allow", bootedCount: 2 });

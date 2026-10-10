@@ -4,11 +4,11 @@ import {
   atCapacityDecision,
   BootAdmissionLedger,
   DEFAULT_ADMISSION_RETRY_AFTER_MS,
-  waitForBootAdmission,
-  type BootAdmissionWaitResult,
+  admitBootNow,
+  type BootAdmissionResult,
   type BootCapacityReporter,
   type BootCapacitySnapshot,
-  type QueuedCapacityDecision,
+  type RefusedCapacityDecision,
 } from "../bootAdmission/BootAdmissionGate";
 import { BOOTED_STATE, type FleetCostSource } from "./FleetCostCollector";
 import {
@@ -27,21 +27,19 @@ const DEFAULT_SUSTAINED_SAMPLES = 3;
 export type CapacityDecision =
   /**
    * A compatible booted simulator exists; reuse it instead of booting. From
-   * `waitForCapacity` it is only returned once a new boot also fits the limit.
+   * `admitBoot` it is only returned once a new boot also fits the limit.
    */
   | { outcome: "reuse-warm"; udid: string }
   /** A new boot fits within capacity. */
   | { outcome: "allow"; limits: CapacityLimits; bootedCount: number }
-  /** A new boot would exceed capacity or add to sustained host pressure; wait and re-ask. */
-  | QueuedCapacityDecision;
+  /** A new boot would exceed capacity or add to sustained host pressure; refuse it. */
+  | RefusedCapacityDecision;
 
-/** `releaseAdmission` is present when the wait admitted a boot; call it once the boot ends. */
-export type CapacityWaitResult = BootAdmissionWaitResult<CapacityDecision>;
+/** `releaseAdmission` is present when the boot was admitted; call it once the boot ends. */
+export type CapacityAdmission = BootAdmissionResult<CapacityDecision>;
 
-export interface CapacityWaitOptions {
+export interface CapacityAdmitOptions {
   signal?: AbortSignal;
-  /** Absolute deadline on the gate's timer clock. */
-  deadlineMs: number;
   /** UDID the admitted boot is for; counted as in flight until it reports Booted. */
   bootUdid?: string;
 }
@@ -53,10 +51,10 @@ export interface CapacityWaitOptions {
  */
 export interface SimulatorCapacityGate {
   evaluateBoot(request?: WarmDeviceRequest): Promise<CapacityDecision>;
-  waitForCapacity(
+  admitBoot(
     request: WarmDeviceRequest | undefined,
-    options: CapacityWaitOptions,
-  ): Promise<CapacityWaitResult>;
+    options: CapacityAdmitOptions,
+  ): Promise<CapacityAdmission>;
 }
 
 export interface CapacityGateOptions {
@@ -72,7 +70,7 @@ export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityRe
   private readonly sustainedSamples: number;
   private pressuredStreak = 0;
   private latestReport: FleetCostReport | undefined;
-  /** Boots admitted by `waitForCapacity` and not yet released. */
+  /** Boots admitted by `admitBoot` and not yet released. */
   private readonly admittedBoots: BootAdmissionLedger;
 
   constructor(
@@ -106,7 +104,7 @@ export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityRe
    *
    * `substitute` is for a caller that uses the warm device instead of booting, so
    * a warm match wins even at capacity. `hint` is for a caller that boots its own
-   * device regardless (`waitForCapacity`): there the limit is checked first and a
+   * device regardless (`admitBoot`): there the limit is checked first and a
    * warm match is only reported once a boot fits, or it would push the fleet past
    * `maxBooted` (#11100).
    */
@@ -124,7 +122,7 @@ export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityRe
     const queued = this.queueReason(report.host, bootedCount, limits);
     if (queued) {
       return {
-        outcome: "queue",
+        outcome: "refuse",
         reason: queued.reason,
         limits,
         bootedCount,
@@ -137,13 +135,12 @@ export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityRe
       : { outcome: "allow", limits, bootedCount };
   }
 
-  async waitForCapacity(
+  async admitBoot(
     request: WarmDeviceRequest | undefined,
-    options: CapacityWaitOptions,
-  ): Promise<CapacityWaitResult> {
-    return await waitForBootAdmission<FleetCostReport, CapacityDecision>({
+    options: CapacityAdmitOptions,
+  ): Promise<CapacityAdmission> {
+    return await admitBootNow<FleetCostReport, CapacityDecision>({
       timer: this.timer,
-      deadlineMs: options.deadlineMs,
       signal: options.signal,
       label: "iOS simulator capacity",
       sample: () => this.refresh(),
@@ -192,7 +189,7 @@ export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityRe
     if (bootedCount > 0 && this.pressuredStreak >= this.sustainedSamples) {
       return {
         reason: "sustained-pressure",
-        message: `Host has been under memory/CPU pressure for ${this.pressuredStreak} consecutive samples (memory pressure: ${host?.memoryPressure ?? "unknown"}); deferring another boot.`,
+        message: `Host has been under memory/CPU pressure for ${this.pressuredStreak} consecutive samples (memory pressure: ${host?.memoryPressure ?? "unknown"}); refusing another boot.`,
       };
     }
     return undefined;
@@ -203,6 +200,6 @@ export class IosSimCapacityGate implements SimulatorCapacityGate, BootCapacityRe
  * Throws the typed retryable `capacity_exhausted` error
  * (`BootCapacityExhaustedError`) when a wait ended without capacity.
  */
-export function assertCapacityGranted(result: CapacityWaitResult): void {
+export function assertCapacityGranted(result: CapacityAdmission): void {
   assertBootCapacityGranted(result, "ios", "simulator");
 }

@@ -13,5 +13,5 @@ export interface BootAdmission {
   handOff(deviceId: string | undefined): void;
 }
 
-/** Waits for an admission before a cold boot; rejects with `BootCapacityExhaustedError` at the deadline. */
+/** Takes an admission before a cold boot; rejects at once with `BootCapacityExhaustedError` when the platform is at its limit. */
 export type AdmitColdBoot = () => Promise<BootAdmission>;

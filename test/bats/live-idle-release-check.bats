@@ -112,7 +112,7 @@ scan_device() {
 }
 
 active_sessions() {
-  local dir dev entries=()
+  local dir dev entries=() jitter
   for dir in "${state}"/emulator-*; do
     [[ -d "${dir}" && -f "${dir}/session" ]] || continue
     scan_device "$(basename "${dir}")"
@@ -120,8 +120,14 @@ active_sessions() {
   for dir in "${state}"/emulator-*; do
     [[ -d "${dir}" && -f "${dir}/session" ]] || continue
     dev="$(basename "${dir}")"
+    # FAKE_ACTIVITY_JITTER_MS: once the session has idled 8 s, the unmoved lastToolActivityAt reads
+    # back that many ms earlier, as the daemon's wall/monotonic conversion does (#11368).
+    jitter=0
+    if (($(cat "${dir}/last_beat") - $(cat "${dir}/last_tool") >= 8000)); then
+      jitter=$((-${FAKE_ACTIVITY_JITTER_MS:-0}))
+    fi
     entries+=("$(jq -cn --arg id "$(cat "${dir}/session")" --arg dev "${dev}" \
-      --argjson tool "$(cat "${dir}/last_tool")" --argjson beat "$(cat "${dir}/last_beat")" \
+      --argjson tool "$(($(cat "${dir}/last_tool") + jitter))" --argjson beat "$(cat "${dir}/last_beat")" \
       --argjson idle "${idle_ms}" --arg kind "${FAKE_HOLDER_KIND:-stdio-proxy}" \
       '{sessionId: $id, assignedDevice: $dev, platform: "android", lastToolActivityAt: $tool,
         lastOwnerHeartbeatAt: $beat, idleReleaseAt: ($tool + $idle + 4000),
@@ -223,6 +229,10 @@ fi
 printf '%s\n' '{"id":"1","type":"subscription_response","success":true,"subscriptionId":"devicedatastream-1"}'
 if [[ "${FAKE_STREAM_ENDED:-0}" == 1 ]]; then
   printf '%s\n' '{"type":"device_session_ended","deviceId":"emulator-5560"}'
+fi
+# The real stream pushes a terminal SESSION_ENDED error frame when the session is released.
+if [[ "${FAKE_STREAM_NO_SESSION_ENDED:-0}" != 1 ]]; then
+  printf '%s\n' '{"type":"error","success":false,"code":"SESSION_ENDED","error":"Observation stream ended: session_ended"}'
 fi
 cat > /dev/null
 EOF
@@ -437,6 +447,24 @@ run_check() {
   [[ "${output}" == *"FAIL observe-only"*"a read must not count as use"* ]]
 }
 
+@test "idle: a few ms of wall-clock jitter on an unmoved lastToolActivityAt is not activity" {
+  FAKE_ACTIVITY_JITTER_MS=2 run_check --scenario idle
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS idle"* ]]
+}
+
+@test "idle: a shift beyond the jitter bound still fails" {
+  FAKE_ACTIVITY_JITTER_MS=50 run_check --scenario idle
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"heartbeats moved lastToolActivityAt"* ]]
+}
+
+@test "observe-only: a few ms of wall-clock jitter is not activity" {
+  FAKE_ACTIVITY_JITTER_MS=2 run_check --scenario observe-only
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS observe-only"* ]]
+}
+
 @test "all: a failing scenario does not hide the scenarios after it" {
   FAKE_SELECTOR_NOT_CREDITED=1 run_check --scenario all
   [ "${status}" -eq 1 ]
@@ -465,13 +493,20 @@ run_check() {
   [ ! -e "${FAKE}/tool.calls" ]
 }
 
-@test "stream: the subscription survives the idle release and frames are kept as evidence" {
+@test "stream: the subscription ends with SESSION_ENDED at the idle release and frames are kept as evidence" {
   run_check --scenario stream
   [ "${status}" -eq 0 ]
   [[ "${output}" == *"PASS stream"* ]]
   grep -q '"command":"subscribe"' "${FAKE}/nc.requests"
   grep -q "\"sessionUuid\":\"${SESSION_UUID}\"" "${FAKE}/nc.requests"
   grep -q subscription_response "${EVIDENCE}/stream.stream.frames"
+  grep -q SESSION_ENDED "${EVIDENCE}/stream.stream.frames"
+}
+
+@test "stream: fails when the idle release never ends the subscription" {
+  FAKE_STREAM_NO_SESSION_ENDED=1 run_check --scenario stream
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"did not end with SESSION_ENDED"* ]]
 }
 
 @test "stream: fails when the idle release pushes device_session_ended" {

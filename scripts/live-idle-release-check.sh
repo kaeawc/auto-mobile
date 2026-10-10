@@ -22,10 +22,11 @@
 #                 idle window, and lastToolActivityAt never moves.
 #   two-devices   One proxy holds two emulators (needs --second-serial). Using
 #                 only B lets A go at its own idle deadline while B stays held.
-#   stream        An observation-stream subscriber (nc -U on the aux socket) stays
-#                 subscribed across the idle release; the release is recorded next
-#                 to the frames the stream pushed (no device_session_ended: the
-#                 device epoch outlives the agent session).
+#   stream        An owner's observation-stream subscriber (nc -U on the aux socket)
+#                 receives a terminal SESSION_ENDED frame at the idle release (every
+#                 idle release is terminal for the session) and no device_session_ended
+#                 frame (the device epoch outlives the agent session). The frames are
+#                 kept as evidence.
 #   provision     Like selector, for a session minted by provisionDevice
 #                 (#10821). Opt-in only: provisionDevice is not enabled everywhere,
 #                 so it is not part of `all`.
@@ -426,6 +427,23 @@ entry_field() {
   jq -r --arg field "$2" '.[$field] | if . == null then "null" else tostring end' <<< "$1"
 }
 
+# The daemon re-derives a fixed activity instant against a wall clock on every query, so one
+# unmoved instant reads back a few milliseconds apart (measured offsets 0 to -2 ms, #11368).
+# TIMESTAMP_JITTER_MS bounds that conversion error. It is far below the smallest real step (a
+# heartbeat or control call is at least a call interval away), so a genuine credit still fails the
+# comparison. "null" only matches "null".
+TIMESTAMP_JITTER_MS=5
+same_instant() {
+  local a="$1" b="$2" delta
+  if [[ "${a}" == "null" || "${b}" == "null" ]]; then
+    [[ "${a}" == "${b}" ]]
+    return
+  fi
+  delta=$((a - b))
+  ((delta < 0)) && delta=$((-delta))
+  ((delta <= TIMESTAMP_JITTER_MS))
+}
+
 proxy_alive() {
   [[ -n "${proxy_pid}" ]] && kill -0 "${proxy_pid}" 2> /dev/null
 }
@@ -645,7 +663,7 @@ scenario_idle() {
   query_device_entry
   last="${entry}"
   [[ -n "${last}" ]] || die "${serial} released before the idle window ended"
-  [[ "$(entry_field "${last}" lastToolActivityAt)" == "$(entry_field "${first}" lastToolActivityAt)" ]] ||
+  same_instant "$(entry_field "${last}" lastToolActivityAt)" "$(entry_field "${first}" lastToolActivityAt)" ||
     die "heartbeats moved lastToolActivityAt; a heartbeat must not count as use"
   local first_beat last_beat
   first_beat="$(entry_field "${first}" lastOwnerHeartbeatAt)"
@@ -717,7 +735,7 @@ scenario_observe_only() {
       die "observe was refused with no_active_device_session while ${serial} is still held"
     elif [[ -z "${entry}" ]]; then
       released_at="${now}"
-    elif [[ "$(entry_field "${entry}" lastToolActivityAt)" != "$(entry_field "${first}" lastToolActivityAt)" ]]; then
+    elif ! same_instant "$(entry_field "${entry}" lastToolActivityAt)" "$(entry_field "${first}" lastToolActivityAt)"; then
       die "an observe moved lastToolActivityAt; a read must not count as use"
     elif ((now >= deadline)); then
       die "${serial} still held after its ${idle_timeout_ms} ms idle window although its owner only observed"
@@ -881,9 +899,14 @@ stop_stream_subscriber() {
   fi
 }
 
-# A subscriber on the held device sees the idle release as a session event, not as the end of the
-# stream: the subscription must be acknowledged, and no device_session_ended frame may arrive,
-# because releasing the agent's session leaves the device's epoch (and its stream) running.
+# True when the captured frames hold the terminal session-ended notice (code SESSION_ENDED).
+stream_has_session_ended() {
+  [[ -f "$1" ]] && jq -e -s 'any(.[]; .code == "SESSION_ENDED")' "$1" > /dev/null 2>&1
+}
+
+# An owner's session-authenticated subscription ends with a terminal SESSION_ENDED frame when its
+# session is idle-released (#11130, #11258): every idle release is terminal for the session. The
+# device epoch outlives the session, so no device_session_ended frame may arrive.
 scenario_stream() {
   current_scenario="stream"
   acquire_device
@@ -900,13 +923,18 @@ scenario_stream() {
     die "the observation stream refused the subscription: $(head -c 300 "${frames}")"
   wait_for_release $((acquired + idle_timeout_ms + MONITOR_SCAN_MS + slack_ms)) ||
     die "${serial} still held after the ${idle_timeout_ms} ms idle window"
-  # Give a late frame time to arrive before judging the stream.
-  "${SLEEP_CMD}" 2
-  kill -0 "${subscriber_pid}" 2> /dev/null || die "the observation stream closed the subscriber when the session was idle-released"
+  # The terminal frame is pushed on release; give it time to arrive before judging the stream.
+  attempts=0
+  while ! stream_has_session_ended "${frames}" && ((attempts < 5)); do
+    "${SLEEP_CMD}" 1
+    attempts=$((attempts + 1))
+  done
+  stream_has_session_ended "${frames}" ||
+    die "the observation stream did not end with SESSION_ENDED when the session was idle-released"
   if grep -q '"device_session_ended"' "${frames}"; then
     die "the idle release pushed device_session_ended; the device epoch must outlive the agent session"
   fi
-  log "stream: subscription stayed open across the idle release; frames in ${frames}"
+  log "stream: subscription ended with SESSION_ENDED at the idle release; frames in ${frames}"
   stop_stream_subscriber
   stop_proxy
   finish_scenario

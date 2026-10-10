@@ -277,6 +277,14 @@ describe("root SPM toolchain floor workflow", () => {
     expect(cleanup?.run).not.toContain("uninstall.sh");
   });
 
+  // Parse the workflow once at load; each case below then only pays for its bash spawns.
+  const installerSteps = loadJobSteps(".github/workflows/pull_request.yml", "installer-minimal");
+  const prepareScript = stepNamed(installerSteps, "Confirm clean installer fixture")!.run!;
+  const cleanupScript = stepNamed(
+    installerSteps,
+    "Remove generated project MCP configuration",
+  )!.run!;
+
   for (const target of [
     ".mcp.json",
     ".codex/config.toml",
@@ -287,9 +295,8 @@ describe("root SPM toolchain floor workflow", () => {
     test.skipIf(process.platform === "win32")(
       `cleanup preserves unrelated files for ${target ?? "no client"}`,
       () => {
-        const steps = loadJobSteps(".github/workflows/pull_request.yml", "installer-minimal");
-        const prepare = stepNamed(steps, "Confirm clean installer fixture")!.run!;
-        const cleanup = stepNamed(steps, "Remove generated project MCP configuration")!.run!;
+        const prepare = prepareScript;
+        const cleanup = cleanupScript;
         const root = mkdtempSync(join(tmpdir(), "installer-cleanup-"));
         try {
           const env = { ...process.env, GITHUB_ENV: join(root, "result") };

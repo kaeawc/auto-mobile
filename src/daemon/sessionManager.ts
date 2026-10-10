@@ -786,6 +786,8 @@ type SessionClockExecution = SessionExecutionMetadata & { sessionClockStartTime:
 export interface ActiveSessionExecutionQuery {
   startedAtOrBefore?: number;
   excludeExecutionId?: string;
+  /** Count control calls only: a read never counts as its session owner's liveness (#11322). */
+  excludeReads?: boolean;
 }
 
 export type ActiveSessionExecutionChecker = (
@@ -3015,7 +3017,7 @@ export class SessionManager {
       logger.info(
         `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
       );
-      this.assertSessionNotSuspect(existing);
+      this.assertSessionNotSuspect(existing, access);
       await this.refuseControlCallOnLapsedOwnerLease(existing, access, execution);
       await this.refreshExistingSessionForAccess(existing, access);
       return existing;
@@ -3278,7 +3280,8 @@ export class SessionManager {
         // acquisition semantics promote awaiting-owner to owned.
         const observed = this.getSessionInternal(sessionId, true, execution, false);
         if (observed) {
-          this.assertSessionNotSuspect(observed);
+          // Answered in every lease phase (#11322): a read is never refused, and never restores
+          // or extends the lease it is watching.
           return observed;
         }
         if (this.sessions.has(sessionId)) {
@@ -8204,9 +8207,13 @@ export class SessionManager {
     );
   }
 
-  /** Reject a tool call against a suspect session; only its owner's heartbeat restores it. */
-  private assertSessionNotSuspect(session: Session): void {
-    if (this.isSessionSuspect(session)) {
+  /**
+   * Reject a control call against a suspect session; only its owner's heartbeat restores it.
+   * Reads are never refused (#11322): they are answered in every lease phase, restore nothing,
+   * and never count as the owner's liveness.
+   */
+  private assertSessionNotSuspect(session: Session, access: SessionAccess): void {
+    if (access !== "read-only" && this.isSessionSuspect(session)) {
       const { remainingMs } = livenessLeaseState(
         sessionJudgedLeaseSnapshot(session, this.sessionNow()),
       );
@@ -8244,8 +8251,12 @@ export class SessionManager {
     if (access === "read-only" || !this.isOwnerLeaseLapsed(session)) {
       return;
     }
-    const query: ActiveSessionExecutionQuery =
-      execution === undefined ? {} : { excludeExecutionId: execution.executionId };
+    // Only a control call in flight keeps the session (#5343). A read admitted since the owner
+    // went quiet is watching, not use: it must not turn this refusal retryable (#11322).
+    const query: ActiveSessionExecutionQuery = {
+      excludeReads: true,
+      ...(execution === undefined ? {} : { excludeExecutionId: execution.executionId }),
+    };
     if (this.activeSessionExecutionChecker(session.sessionId, query)) {
       throw new SessionSuspectError(session.sessionId, 0);
     }

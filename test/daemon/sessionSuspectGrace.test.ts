@@ -12,6 +12,10 @@ import {
   TerminalSessionError,
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
+import {
+  hasActiveSessionExecution,
+  sessionExecutionProbe,
+} from "../../src/daemon/toolCallActivity";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -210,21 +214,45 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       expect(sessionManager.getAssignedDevices().has(DEVICE)).toBe(true);
     });
 
-    test("no tool call runs against it until the owner restores it", async () => {
+    test("no control call runs against it until the owner restores it", async () => {
       await expect(sessionManager.getOrCreateSession(SESSION)).rejects.toBeInstanceOf(
         SessionSuspectError,
       );
-      await expect(
-        sessionManager.admitIssuedSessionForAutomation(SESSION, undefined, {
-          access: "read-only",
-        }),
-      ).rejects.toBeInstanceOf(SessionSuspectError);
 
       await heartbeat(OWNER);
 
       await expect(sessionManager.getOrCreateSession(SESSION)).resolves.toMatchObject({
         sessionId: SESSION,
       });
+    });
+
+    // #11322: reads are never refused, and never count as the owner's liveness.
+    test("a read is answered while suspect and restores nothing", async () => {
+      for (const admitRead of [
+        () =>
+          sessionManager.admitIssuedSessionForAutomation(
+            SESSION,
+            { executionId: "exec-read", startTime: timer.now() },
+            { access: "read-only" },
+          ),
+        () =>
+          sessionManager.getOrCreateSession(
+            SESSION,
+            undefined,
+            undefined,
+            undefined,
+            false,
+            "read-only",
+          ),
+      ]) {
+        expect(await admitRead()).toMatchObject({ sessionId: SESSION, assignedDevice: DEVICE });
+      }
+
+      expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("suspect");
+      expect(sessionManager.getSession(SESSION)?.lastUsedAt).toBe(leaseStartedAt);
+      await expect(sessionManager.getOrCreateSession(SESSION)).rejects.toBeInstanceOf(
+        SessionSuspectError,
+      );
     });
 
     // #10824: the call's end used to restart the lease whether or not the call was admitted, so a
@@ -448,6 +476,116 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
         expect(await pendingHeartbeat).toMatchObject({ success: false });
         await expect(pendingCall).rejects.toBeInstanceOf(TerminalSessionError);
+      });
+    });
+
+    // #11322: a read is tracked like any call, so one admitted after the owner went quiet used to
+    // veto the scan's release past the no-heartbeat budget and turn later control calls' refusal
+    // into the retryable suspect one. Wired as the daemon wires the tracker to both.
+    describe("a read in flight when the lease runs out (#11322)", () => {
+      let tracker: ExecutionTracker;
+      let readMonitor: SessionHeartbeatMonitor;
+      const pool = { isSessionRecoveryInFlight: () => false };
+
+      beforeEach(() => {
+        tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+        sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
+          hasActiveSessionExecution(tracker, sessionManager, pool, sessionId, query),
+        );
+        readMonitor = new SessionHeartbeatMonitor(
+          sessionManager,
+          sessionExecutionProbe(tracker, sessionManager, pool, { excludeReads: true }),
+          async (sessionId, reason) => {
+            reaped.push({ sessionId, reason });
+            await sessionManager.releaseSession(sessionId, reason);
+          },
+          timer,
+        );
+      });
+
+      afterEach(async () => {
+        await readMonitor.stop();
+      });
+
+      /** Start a read the way the MCP server does and leave it running. */
+      async function startRead(kind: "device" | "inventory"): Promise<string> {
+        const execution = tracker.startExecution("observe", undefined, SESSION);
+        if (kind === "device") {
+          tracker.markDeviceReadCall(execution.id);
+        } else {
+          tracker.markReadOnlySessionAccess(execution.id);
+        }
+        await sessionManager.admitIssuedSessionForAutomation(
+          SESSION,
+          { executionId: execution.id, startTime: execution.startTime },
+          { access: "read-only" },
+        );
+        tracker.markSessionAdmitted(execution.id);
+        return execution.id;
+      }
+
+      async function advanceToReleaseBudgetAndScan(): Promise<void> {
+        timer.advanceTime(leaseStartedAt + NO_HEARTBEAT_RELEASE_BUDGET_MS - timer.now());
+        await readMonitor.tick();
+      }
+
+      for (const [phase, elapsedMs] of [
+        ["suspect", LEASE_MS + 1],
+        ["lapsed", LEASE_MS + SUSPECT_GRACE_MS + 1],
+      ] as const) {
+        for (const kind of ["device", "inventory"] as const) {
+          test(`${kind === "device" ? "a device" : "an inventory"} read admitted while ${phase} is answered and does not hold the session past the budget`, async () => {
+            timer.advanceTime(elapsedMs);
+            expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe(phase);
+
+            await startRead(kind);
+            await advanceToReleaseBudgetAndScan();
+
+            expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
+            expect(sessionManager.getSession(SESSION)).toBeNull();
+            expect(sessionManager.getAssignedDevices().has(DEVICE)).toBe(false);
+          });
+        }
+      }
+
+      test("a control call after the lapse gets the terminal refusal while a read is in flight", async () => {
+        timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS + 1);
+        await startRead("device");
+        const control = tracker.startExecution("tapOn", undefined, SESSION);
+
+        const refusal = await sessionManager
+          .admitIssuedSessionForAutomation(SESSION, {
+            executionId: control.id,
+            startTime: control.startTime,
+          })
+          .catch((error: unknown) => error);
+
+        expect(refusal).toBeInstanceOf(TerminalSessionError);
+        expect((refusal as TerminalSessionError).release).toMatchObject({
+          releaseReason: "heartbeat-timeout",
+          terminal: true,
+        });
+        expect(sessionManager.getSession(SESSION)).toBeNull();
+      });
+
+      test("a control call admitted while the owner was live still keeps the session (#5343)", async () => {
+        const control = tracker.startExecution("tapOn", undefined, SESSION);
+        await sessionManager.admitIssuedSessionForAutomation(SESSION, {
+          executionId: control.id,
+          startTime: control.startTime,
+        });
+        tracker.markSessionAdmitted(control.id);
+        timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS + 1);
+        await startRead("device");
+
+        await advanceToReleaseBudgetAndScan();
+        expect(reaped).toEqual([]);
+        expect(sessionManager.getSession(SESSION)).not.toBeNull();
+
+        // Once the control call ends, the read alone keeps nothing.
+        tracker.endExecution(control.id);
+        await readMonitor.tick();
+        expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
       });
     });
 

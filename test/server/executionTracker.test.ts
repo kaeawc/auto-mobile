@@ -710,6 +710,57 @@ describe("ExecutionTracker", function () {
   });
 });
 
+describe("ExecutionTracker control-call-only queries (#11322)", () => {
+  test("excludeReads leaves out inventory reads and device reads, and keeps control calls", () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["a", "b", "c"]));
+    const deviceRead = tracker.startExecution("observe", undefined, "s");
+    tracker.markDeviceReadCall(deviceRead.id);
+    const inventoryRead = tracker.startExecution("listDevices", undefined, "s");
+    tracker.markReadOnlySessionAccess(inventoryRead.id);
+
+    expect(tracker.hasActiveSessionUuidExecutions("s")).toBe(true);
+    expect(tracker.hasActiveSessionUuidExecutions("s", { excludeReads: true })).toBe(false);
+    expect(tracker.hasActiveDeviceSessionExecutions("s", { excludeReads: true })).toBe(false);
+
+    const control = tracker.startExecution("tapOn", undefined, "s");
+    expect(tracker.hasActiveSessionUuidExecutions("s", { excludeReads: true })).toBe(true);
+    expect(
+      tracker.hasActiveSessionUuidExecutions("s", {
+        excludeReads: true,
+        excludeExecutionId: control.id,
+      }),
+    ).toBe(false);
+  });
+
+  test("excludeReads leaves a read out of an autolock session's executions too", () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["a", "b"]));
+    const read = tracker.startExecution("observe");
+    tracker.setResolvedAutolockSessionUuid(read.id, "autolock");
+    tracker.markDeviceReadCall(read.id);
+
+    expect(tracker.hasActiveAutolockSessionExecutions("autolock")).toBe(true);
+    expect(tracker.hasActiveAutolockSessionExecutions("autolock", { excludeReads: true })).toBe(
+      false,
+    );
+  });
+
+  test("excludeReads leaves reads' deadlines out of the latest deadline", () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["a", "b"]));
+    const read = tracker.startExecution("observe", undefined, "s");
+    tracker.markDeviceReadCall(read.id);
+    tracker.setExecutionDeadline(read.id, () => 9_000);
+
+    expect(tracker.getLatestSessionExecutionDeadlineMs("s")).toBe(9_000);
+    expect(
+      tracker.getLatestSessionExecutionDeadlineMs("s", { excludeReads: true }),
+    ).toBeUndefined();
+
+    const control = tracker.startExecution("tapOn", undefined, "s");
+    tracker.setExecutionDeadline(control.id, () => 5_000);
+    expect(tracker.getLatestSessionExecutionDeadlineMs("s", { excludeReads: true })).toBe(5_000);
+  });
+});
+
 describe("ExecutionTracker session execution deadlines (#10712)", () => {
   test("reports the latest deadline among a session's executions, or infinity when one has none", () => {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["a", "b", "c"]));

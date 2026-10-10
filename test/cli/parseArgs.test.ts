@@ -369,3 +369,86 @@ describe("parseArgs (#4277)", () => {
     });
   });
 });
+
+describe("--managed-slot-config (#11173)", () => {
+  const config = {
+    contractVersion: 1,
+    managedHostScope: "host-a",
+    runnerNamespace: "ns",
+    runnerIncarnation: "inc",
+    localSlotCapacity: 1,
+    requests: [
+      {
+        slotIndex: 0,
+        role: "primary",
+        platform: "android",
+        requestedSpec: {
+          runtime: "system-images;android-34;google_apis;x86_64",
+          deviceType: "pixel_8",
+        },
+      },
+    ],
+  };
+  const noFile = (): string => {
+    throw new Error("unexpected file read");
+  };
+
+  test("is absent by default", () => {
+    expect(parseArgs([], logger, {}, noFile).managedSlotConfig).toBeUndefined();
+  });
+
+  test("parses inline JSON from the flag, separate and = forms", () => {
+    const json = JSON.stringify(config);
+    const separate = parseArgs(["--managed-slot-config", json], logger, {}, noFile);
+    const equals = parseArgs([`--managed-slot-config=${json}`], logger, {}, noFile);
+    expect(separate.managedSlotConfig?.runnerNamespace).toBe("ns");
+    expect(equals.managedSlotConfig?.runnerNamespace).toBe("ns");
+    expect(separate.invalidInvocation).toBeUndefined();
+  });
+
+  test("reads a file path and lets the flag win over the env", () => {
+    const parsed = parseArgs(
+      ["--managed-slot-config", "/cfg.json"],
+      logger,
+      { AUTOMOBILE_MANAGED_SLOT_CONFIG: JSON.stringify({ ...config, runnerNamespace: "env" }) },
+      () => JSON.stringify({ ...config, runnerNamespace: "file" }),
+    );
+    expect(parsed.managedSlotConfig?.runnerNamespace).toBe("file");
+  });
+
+  test("uses the env when the flag is absent", () => {
+    const parsed = parseArgs(
+      [],
+      logger,
+      { AUTOMOBILE_MANAGED_SLOT_CONFIG: JSON.stringify(config) },
+      noFile,
+    );
+    expect(parsed.managedSlotConfig?.managedHostScope).toBe("host-a");
+  });
+
+  test("rejects an unsupported contract version at parse time", () => {
+    expect(() =>
+      parseArgs(
+        ["--managed-slot-config", JSON.stringify({ ...config, contractVersion: 9 })],
+        logger,
+        {},
+        noFile,
+      ),
+    ).toThrow("contract_unsupported");
+  });
+
+  test("rejects combination with --no-proxy and --initial-session-uuid", () => {
+    const json = JSON.stringify(config);
+    expect(() =>
+      parseArgs(["--no-proxy", "--managed-slot-config", json], logger, {}, noFile),
+    ).toThrow("managed_slot_config_invalid");
+    expect(() =>
+      parseArgs(
+        ["--initial-session-uuid", "u-1", "--managed-slot-config", json],
+        logger,
+        {},
+        noFile,
+      ),
+    ).toThrow("managed_slot_config_invalid");
+  });
+});

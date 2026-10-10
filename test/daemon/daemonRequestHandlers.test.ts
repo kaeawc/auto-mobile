@@ -250,6 +250,7 @@ describe("handleDaemonRequest", () => {
           "input/typeText.mode:append",
           "input/gestureStream",
           "daemon/registerSession",
+          "managed-slots/v1",
         ],
       },
     });

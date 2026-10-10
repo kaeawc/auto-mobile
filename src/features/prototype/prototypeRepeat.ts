@@ -264,6 +264,8 @@ export interface KeyInstance<T> {
   located: T;
   value: Raw;
   item?: number;
+  /** True when the entry's `value` operand holds a repeat placeholder, so its type is not static. */
+  operandTemplated: boolean;
 }
 
 /**
@@ -283,18 +285,23 @@ export function repeatKeyInstances<T extends { value: Raw; path: string }>(
   }
   return located.flatMap((entry) => {
     const scope = scopes.find((candidate) => entry.path.startsWith(`${candidate.path}.children[`));
+    const operandTemplated =
+      scope !== undefined &&
+      typeof entry.value.value === "string" &&
+      hasPlaceholder(entry.value.value, scope.binding);
     const templated =
       scope &&
       checkedKeyValues(entry.value).some(
         (key) => typeof key === "string" && hasPlaceholder(key, scope.binding),
       );
     if (!scope || !templated) {
-      return [{ located: entry, value: entry.value }];
+      return [{ located: entry, value: entry.value, operandTemplated }];
     }
     return scope.items.map((item, index) => ({
       located: entry,
       value: bindCheckedKeys(entry.value, instance(scope, item, index)),
       item: index,
+      operandTemplated,
     }));
   });
 }

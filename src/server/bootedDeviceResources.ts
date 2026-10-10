@@ -20,6 +20,7 @@ import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
+import { classifyPoolStatus } from "../daemon/devicePool";
 import type { Session } from "../daemon/sessionManager";
 import type {
   DevicePool,
@@ -745,13 +746,14 @@ interface PoolDeviceContext {
   hold: ReturnType<typeof poolHoldFor>;
 }
 
-/** An idle device allocation cannot lend counts as assigned, matching `DevicePool.getStats()`. */
+/** The same classification as `DevicePool.getStats()` (#11387): see {@link classifyPoolStatus}. */
 function effectivePoolStatus(
   status: PooledDevice["status"],
   hold: ReturnType<typeof poolHoldFor>,
+  unhealthy: boolean,
 ): PoolDeviceStatus {
   const held = hold.heldBy !== undefined || hold.reserved === true;
-  return status === "busy" || (status === "idle" && held) ? "assigned" : status;
+  return classifyPoolStatus(status, held || unhealthy);
 }
 
 function resolvePoolDeviceContext(
@@ -770,7 +772,11 @@ function resolvePoolDeviceContext(
   }
 
   const hold = poolHoldFor(devicePool, device.deviceId);
-  const poolStatus = effectivePoolStatus(pooledDevice.status, hold);
+  const poolStatus = effectivePoolStatus(
+    pooledDevice.status,
+    hold,
+    devicePool.getDeviceHealthMarker(device.deviceId) !== undefined,
+  );
 
   return {
     poolInfo: {
@@ -811,9 +817,7 @@ function summarizePoolStatus(
   // phantom (shut-down) pool entries are excluded.
   for (const device of discoveredDevices) {
     if (succeededPlatforms.has(device.platform)) {
-      if (!device.unhealthy || device.runtime.poolStatus !== "idle") {
-        tally(device.runtime.poolStatus ?? undefined);
-      }
+      tally(device.runtime.poolStatus ?? undefined);
     }
   }
 
@@ -821,9 +825,13 @@ function summarizePoolStatus(
   // tracked counts — we cannot confirm which of those entries are phantom.
   for (const pooled of devicePool.getAllDevices()) {
     if (!succeededPlatforms.has(pooled.platform)) {
-      if (!devicePool.getDeviceHealthMarker(pooled.id) || pooled.status !== "idle") {
-        tally(effectivePoolStatus(pooled.status, poolHoldFor(devicePool, pooled.id)));
-      }
+      tally(
+        effectivePoolStatus(
+          pooled.status,
+          poolHoldFor(devicePool, pooled.id),
+          devicePool.getDeviceHealthMarker(pooled.id) !== undefined,
+        ),
+      );
     }
   }
 

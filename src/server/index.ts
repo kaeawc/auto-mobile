@@ -1296,15 +1296,25 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       sessionUuid: providedSessionUuid,
     });
 
+    // A plain read (inventory, diagnostics, status) names a session only to watch it: it is
+    // admitted read-only (no activity refresh), so neither its start nor its end is use (#11107).
+    const plainReadCall =
+      !tool.requiresDevice &&
+      (isDeviceInventoryTool(name) || tool.isDeviceReadOnlyCall?.(parsedParams) === true);
     // #11344: a control call never runs on a session another connected client owns. Refused
-    // before the execution starts, so naming the session neither extends nor binds it.
-    if (
-      daemonMode &&
-      tool.requiresDevice &&
-      !isDeviceSessionAcquisitionTool(name) &&
-      tool.isDeviceReadOnlyCall?.(parsedParams) !== true
-    ) {
+    // before the execution starts, so naming the session neither extends nor binds it. A plain
+    // control tool (killDevice, recordSteps) is admitted on the session it names, so it is judged
+    // like a device call (#11542). `setActiveDevice` refuses in its own handler, and editing
+    // another session's tool profile is intended (docs/using/device-ownership.md).
+    const controlCallOnNamedSession = tool.requiresDevice
+      ? tool.isDeviceReadOnlyCall?.(parsedParams) !== true
+      : !plainReadCall && name !== "setActiveDevice" && name !== SET_TOOL_ENABLED_TOOL_NAME;
+    if (daemonMode && !isDeviceSessionAcquisitionTool(name) && controlCallOnNamedSession) {
       refuseControlOnForeignOwnedSession(name, providedSessionUuid, requestMcpSessionId);
+      // The session a `device` label resolves to is the one the call runs on (#11542).
+      if (derivedLabelSessionUuid !== providedSessionUuid) {
+        refuseControlOnForeignOwnedSession(name, derivedLabelSessionUuid, requestMcpSessionId);
+      }
     }
 
     // #6869: the capabilities this acquisition declares, validated up front.
@@ -1338,11 +1348,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       }
       throw error;
     }
-    // A plain read (inventory, diagnostics, status) names a session only to watch it: it is
-    // admitted read-only (no activity refresh), so neither its start nor its end is use (#11107).
-    const plainReadCall =
-      !tool.requiresDevice &&
-      (isDeviceInventoryTool(name) || tool.isDeviceReadOnlyCall?.(parsedParams) === true);
     if (plainReadCall) {
       executionTracker.markReadOnlySessionAccess(execution.id);
     }

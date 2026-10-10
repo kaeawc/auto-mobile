@@ -1,29 +1,29 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { INTERNAL_MCP_SESSION_PARAM } from "../../../src/daemon/constants";
-import { DaemonState } from "../../../src/daemon/daemonState";
-import { DevicePool } from "../../../src/daemon/devicePool";
-import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../../src/daemon/inputDeviceOwnership";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import type { BootedDevice } from "../../../src/models";
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import type { BootedDevice } from "../../src/models";
 import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
   setDeviceToolsDependencies,
-} from "../../../src/server/deviceTools";
-import { ToolRegistry } from "../../../src/server/toolRegistry";
+} from "../../src/server/deviceTools";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../../src/server/videoRecordingManager";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
-import { logger } from "../../../src/utils/logger";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeDisplayInventoryProvider } from "../../fakes/FakeDisplayInventoryProvider";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { McpTestFixture } from "../../fixtures/mcpTestFixture";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
-import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
+} from "../../src/server/videoRecordingManager";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { logger } from "../../src/utils/logger";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 
 /** Records each platform kill and stops there: a recorded kill proves the call got past every gate. */
 class RecordingKillDeviceManager extends FakeDeviceUtils {
@@ -47,13 +47,12 @@ function wire(result: { content?: unknown }): Record<string, unknown> {
 }
 
 /**
- * The MCP ingress applies the #11344 owner rule ("a control call naming a session another
- * connected client owns is refused, and naming it neither extends nor binds it") only to
- * device-aware tools. A plain tool (`ToolRegistry.register`: killDevice, deleteDevice, ...) that
- * names the session is admitted on it instead, so the lifecycle holder gate sees the caller as the
- * holder.
+ * #11542: the MCP ingress applies the #11344 owner rule ("a control call naming a session another
+ * connected client owns is refused, and naming it neither extends nor binds it") to plain tools
+ * (`ToolRegistry.register`: killDevice, deleteDevice, ...) as well as device-aware ones. Admitted
+ * on the named session instead, the lifecycle holder gate would see the caller as the holder.
  */
-describe("hunt: a plain control tool naming a session another connection owns", () => {
+describe("a plain control tool naming a session another connection owns", () => {
   let manager: RecordingKillDeviceManager;
   let sessionManager: SessionManager;
   let timer: FakeTimer;
@@ -109,7 +108,7 @@ describe("hunt: a plain control tool naming a session another connection owns", 
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "hunt-plain-tool-foreign-session", {
+      createDevicePoolDependencies(sessionManager, "plain-tool-foreign-session", {
         timer,
         deviceManager: manager,
       }),
@@ -187,5 +186,48 @@ describe("hunt: a plain control tool naming a session another connection owns", 
     await call({ device: free, sessionUuid: HOLDER, [INTERNAL_MCP_SESSION_PARAM]: OTHER });
 
     expect(sessionManager.getSession(HOLDER)!.lastUsedAt).toBe(before);
+  });
+
+  test("force overrides the holder check, not the naming of another connection's session", async () => {
+    const named = await call({
+      device: held,
+      force: true,
+      sessionUuid: HOLDER,
+      [INTERNAL_MCP_SESSION_PARAM]: OTHER,
+    });
+
+    expect(wire(named).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect(manager.killed).toEqual([]);
+
+    await call({ device: held, force: true, [INTERNAL_MCP_SESSION_PARAM]: OTHER });
+
+    expect(manager.killed).toEqual([held.deviceId]);
+  });
+
+  test("the owner's own killDevice naming its session still reaches the device", async () => {
+    await call({ device: held, sessionUuid: HOLDER, [INTERNAL_MCP_SESSION_PARAM]: OWNER });
+
+    expect(manager.killed).toEqual([held.deviceId]);
+  });
+
+  test("a plain read naming the owner's session from another connection is not refused", async () => {
+    const before = sessionManager.getSession(HOLDER)!.lastUsedAt;
+    timer.advanceTime(60_000);
+
+    const result = await fixture!.client.callTool({
+      name: "listDevices",
+      arguments: { platform: "ios", sessionUuid: HOLDER, [INTERNAL_MCP_SESSION_PARAM]: OTHER },
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(sessionManager.getSession(HOLDER)!.lastUsedAt).toBe(before);
+  });
+
+  test("once the owner has disconnected another connection may name the session", async () => {
+    DaemonState.getInstance().getDevicePool().releaseMcpSessionBindings(OWNER);
+
+    await call({ device: held, sessionUuid: HOLDER, [INTERNAL_MCP_SESSION_PARAM]: OTHER });
+
+    expect(manager.killed).toEqual([held.deviceId]);
   });
 });

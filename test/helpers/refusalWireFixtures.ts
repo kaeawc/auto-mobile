@@ -51,6 +51,7 @@ import {
   sessionReleasedDuringCallPayload,
 } from "../../src/server/deviceSessionResult";
 import {
+  managedEndedPayload,
   managedSlotsFailedToolResult,
   noActiveDeviceSessionResult,
 } from "../../src/server/proxyServer";
@@ -279,6 +280,14 @@ const BUILDERS: readonly FixtureEntry[] = [
       ) as RefusalWireResult,
   ],
   [
+    "managed_execution_ended",
+    "managedEndedPayload",
+    () =>
+      jsonResult(
+        managedEndedPayload(readyManagedSlotsResult(SESSION), SESSION, "heartbeat_timeout"),
+      ),
+  ],
+  [
     "session_terminal_release_in_progress",
     "SessionTerminalReleaseInProgressError via shapeToolCallError",
     () =>
@@ -436,6 +445,19 @@ export function failedManagedSlotsResult(
     outcome: "failed",
     slots: onSlot ? [slot] : [],
     ...(onSlot ? {} : { failure: slotFailure }),
+  };
+}
+
+/** A ready acquisition whose one slot (index 1, generation 3) holds `sessionUuid`. */
+export function readyManagedSlotsResult(sessionUuid: string): ManagedSlotsResult {
+  const { slots, scope } = failedManagedSlotsResult(capacitySlotFailure(), true);
+  return {
+    contractVersion: 1,
+    scope: { ...scope, scopeKey: "0123abcd" },
+    outcome: "ready",
+    slots: [
+      { ...slots[0], failure: undefined, slotIndex: 1, assignmentGeneration: 3, sessionUuid },
+    ],
   };
 }
 

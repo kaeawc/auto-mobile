@@ -161,6 +161,7 @@ class HeldDeviceWaitingMCPClientTest {
       listOf(
         "session_ownership_lost",
         "no_active_device_session",
+        "managed_execution_ended",
         "session_terminal_release_in_progress",
         "device_outside_bound_session",
         "daemon_session_suspect",

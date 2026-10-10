@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 import type { SessionManager } from "../../src/daemon/sessionManager";
@@ -155,6 +155,14 @@ function setup() {
 }
 
 describe("registerRecordingSessionCleanup", () => {
+  // The finalized-id capture is module-level state keyed by session id; tests that never take
+  // their captured ids would leak them into a later test that reuses the id under random order.
+  beforeEach(() => {
+    for (const sessionId of ["session-a", "session-b", "session-c"]) {
+      takeRecordingIdsFinalizedByRelease(sessionId);
+    }
+  });
+
   test("idle release stops the owner's recording and the next owner can start one", async () => {
     const { manager, recordings } = setup();
     recordings.start("SIM-1", "session-a");

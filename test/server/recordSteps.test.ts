@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
@@ -31,6 +40,11 @@ describe("recordSteps connection scope and direct transport teardown", () => {
     originallyEnabled = serverConfig.isMcpRecordingEnabled();
     direct = createMcpServer({ sessionContext: { sessionId: "direct-A" } });
     loopback = createMcpServer({ daemonMode: true, sessionContext: { sessionId: "loopback" } });
+  });
+
+  beforeEach(() => {
+    // Recorder state is module-level; another file in the same process may have left some.
+    resetMcpRecordingState();
   });
 
   afterEach(() => {

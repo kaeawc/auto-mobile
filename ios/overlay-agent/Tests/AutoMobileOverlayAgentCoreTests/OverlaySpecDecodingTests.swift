@@ -30,7 +30,7 @@ final class OverlaySpecDecodingTests: XCTestCase {
         let dir = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("test/fixtures/overlay-spec/valid")
+            .appendingPathComponent("test/fixtures/prototype-spec/valid")
         let files = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
         XCTAssertGreaterThan(files.count, 20)

@@ -9,7 +9,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Transport limits for overlay image assets (#9301), read from the same
- * `schemas/overlay-asset-contract.json` that TypeScript imports so the host and the device cannot
+ * `schemas/prototype-asset-contract.json` that TypeScript imports so the host and the device cannot
  * disagree. The overlay spec carries only opaque asset ids; bytes, MIME types and caps live here.
  *
  * The caps are conservative choices, not spec values: the heap, not the 64 MiB frame limit, is the
@@ -19,7 +19,7 @@ import kotlinx.serialization.json.jsonPrimitive
 object OverlayAssetContract {
   private val contract: JsonObject =
     Json.parseToJsonElement(
-        checkNotNull(javaClass.getResourceAsStream("/overlay-asset-contract.json")) {
+        checkNotNull(javaClass.getResourceAsStream("/prototype-asset-contract.json")) {
             "Missing overlay asset contract"
           }
           .bufferedReader()

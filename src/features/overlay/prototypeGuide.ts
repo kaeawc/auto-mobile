@@ -1,4 +1,4 @@
-import contract from "../../../schemas/overlay-spec-contract.json";
+import contract from "../../../schemas/prototype-spec-contract.json";
 import { GUIDE_COMPONENTS, GUIDE_ERRORS, GUIDE_INTRO, GUIDE_REPEAT } from "./prototypeGuideProse";
 import { MAX_OVERLAY_COMPONENT_DEPTH } from "./overlayComponents";
 
@@ -183,7 +183,7 @@ export function searchIcons(query: string): { total: number; names: string[] } {
 export function renderPrototypeGuide(): string {
   return [
     GUIDE_INTRO,
-    "## Limits\n\nGenerated from `schemas/overlay-spec-contract.json`.\n\n" + renderLimitsTable(),
+    "## Limits\n\nGenerated from `schemas/prototype-spec-contract.json`.\n\n" + renderLimitsTable(),
     renderWindow(),
     renderNodes(),
     renderActions(),

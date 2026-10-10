@@ -72,7 +72,7 @@ describe("repeatErrors", () => {
   test("component labels, titles and button actions bind and are checked per field", () => {
     const fixture = JSON.parse(
       readFileSync(
-        join(import.meta.dir, "../../fixtures/overlay-spec/valid/repeat-component-labels.json"),
+        join(import.meta.dir, "../../fixtures/prototype-spec/valid/repeat-component-labels.json"),
         "utf8",
       ),
     );

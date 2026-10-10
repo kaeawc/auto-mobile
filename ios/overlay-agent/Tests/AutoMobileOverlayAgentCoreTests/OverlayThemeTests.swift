@@ -6,7 +6,7 @@ final class OverlayThemeTests: XCTestCase {
         let dir = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("test/fixtures/overlay-spec/valid")
+            .appendingPathComponent("test/fixtures/prototype-spec/valid")
         return try JSONDecoder().decode(OverlaySpec.self, from: Data(contentsOf: dir.appendingPathComponent(name)))
     }
 

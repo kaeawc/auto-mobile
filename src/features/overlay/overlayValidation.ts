@@ -1,5 +1,5 @@
 import { z } from "zod";
-import contract from "../../../schemas/overlay-spec-contract.json";
+import contract from "../../../schemas/prototype-spec-contract.json";
 import { logger } from "../../utils/logger";
 import { expandOverlayComponents } from "./overlayComponents";
 import { repeatErrors, repeatKeyInstances, type KeyInstance } from "./overlayRepeat";

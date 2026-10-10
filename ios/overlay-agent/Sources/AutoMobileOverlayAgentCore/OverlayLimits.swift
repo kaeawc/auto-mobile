@@ -4,7 +4,7 @@ import Foundation
 /// `guardOverlayTree`. A spec that reaches the agent without the host check (a direct client)
 /// cannot exhaust it: the tree is bounded before `repeat` expansion allocates anything.
 ///
-/// The constants repeat `schemas/overlay-spec-contract.json`; `OverlayLimitsTests` fails when they
+/// The constants repeat `schemas/prototype-spec-contract.json`; `OverlayLimitsTests` fails when they
 /// drift from it.
 enum OverlayLimits {
     static let maxNodes = 2000

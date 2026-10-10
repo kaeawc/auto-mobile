@@ -51,7 +51,7 @@ class OverlaySpecTest {
   fun `every node type has the same fields in the Kotlin models and the shared contract`() {
     val contract =
       Json.parseToJsonElement(
-          checkNotNull(javaClass.getResourceAsStream("/overlay-spec-contract.json"))
+          checkNotNull(javaClass.getResourceAsStream("/prototype-spec-contract.json"))
             .readBytes()
             .decodeToString(),
         )
@@ -81,7 +81,7 @@ class OverlaySpecTest {
   fun `theme colours have the same fields in the Kotlin model and the shared contract`() {
     val definitions =
       Json.parseToJsonElement(
-          checkNotNull(javaClass.getResourceAsStream("/overlay-spec-contract.json"))
+          checkNotNull(javaClass.getResourceAsStream("/prototype-spec-contract.json"))
             .readBytes()
             .decodeToString(),
         )
@@ -111,7 +111,7 @@ class OverlaySpecTest {
   fun `style has the same fields in the Kotlin model and the shared contract`() {
     val contract =
       Json.parseToJsonElement(
-          checkNotNull(javaClass.getResourceAsStream("/overlay-spec-contract.json"))
+          checkNotNull(javaClass.getResourceAsStream("/prototype-spec-contract.json"))
             .readBytes()
             .decodeToString(),
         )
@@ -232,7 +232,7 @@ class OverlaySpecTest {
     @BeforeAll
     @JvmStatic
     fun loadFixtures() {
-      val relative = "test/fixtures/overlay-spec"
+      val relative = "test/fixtures/prototype-spec"
       val directory =
         generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
           .map { File(it, relative) }

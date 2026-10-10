@@ -121,9 +121,9 @@ test/fixtures/android-display/fold-pixel10pf-api36/*.txt text eol=lf
 test/fixtures/android-display/fold-pixel10pf-api36/fold-*-hinge-angle0.txt -text
 
 # Shared overlay specs: preserve byte limits and path parity on Windows.
-test/fixtures/overlay-spec/**/*.json text eol=lf
-schemas/overlay-spec-contract.json text eol=lf
-schemas/overlay-asset-contract.json text eol=lf
+test/fixtures/prototype-spec/**/*.json text eol=lf
+schemas/prototype-spec-contract.json text eol=lf
+schemas/prototype-asset-contract.json text eol=lf
 
 # Real `ps -o lstart=` captures whose exact bytes (trailing padding) are asserted (issue #10116).
 test/fixtures/daemon-ps-lstart/*.txt text eol=lf

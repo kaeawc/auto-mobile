@@ -62,7 +62,7 @@ function record(value: unknown): Raw | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Raw) : undefined;
 }
 
-/** Node children live only in `child` and `children` (schemas/overlay-spec-contract.json). */
+/** Node children live only in `child` and `children` (schemas/prototype-spec-contract.json). */
 function childrenOf(node: Raw, path: string): { node: Raw; path: string }[] {
   const single = record(node.child);
   if (single) {

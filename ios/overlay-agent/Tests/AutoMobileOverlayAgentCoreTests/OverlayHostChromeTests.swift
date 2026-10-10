@@ -10,7 +10,7 @@ final class OverlayHostChromeTests: XCTestCase {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("test/fixtures/overlay-spec/valid/\(name).json")
+            .appendingPathComponent("test/fixtures/prototype-spec/valid/\(name).json")
         return try JSONDecoder().decode(OverlaySpec.self, from: Data(contentsOf: url))
     }
 

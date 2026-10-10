@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { z } from "zod";
-import contract from "../../../schemas/overlay-spec-contract.json";
+import contract from "../../../schemas/prototype-spec-contract.json";
 import {
   OVERLAY_COLOR_ROLES,
   OVERLAY_NODE_TYPES,

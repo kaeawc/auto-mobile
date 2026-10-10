@@ -48,7 +48,7 @@ internal object BitmapPngCodec : OverlayScreenshotComparator.PngCodec {
 }
 
 /**
- * Loads a shared fixture from the repo's `test/fixtures/overlay-spec/valid` directory. With
+ * Loads a shared fixture from the repo's `test/fixtures/prototype-spec/valid` directory. With
  * [resolveElementAnchors] each `element` anchor is replaced by a fixed `bounds` anchor with the
  * same alignment (and offset), standing in for the host's selector resolution: the renderer refuses
  * an unresolved element anchor.
@@ -59,7 +59,7 @@ internal fun validOverlayFixture(
 ): OverlaySpec {
   val file =
     generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
-      .map { File(it, "test/fixtures/overlay-spec/valid/$name.json") }
+      .map { File(it, "test/fixtures/prototype-spec/valid/$name.json") }
       .first { it.isFile }
   if (!resolveElementAnchors) return loadOverlaySpec(file)
   val resolved = resolveElementAnchors(Json.parseToJsonElement(file.readText()))

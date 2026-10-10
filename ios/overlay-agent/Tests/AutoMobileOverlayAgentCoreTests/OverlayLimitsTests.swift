@@ -8,7 +8,7 @@ final class OverlayLimitsTests: XCTestCase {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("test/fixtures/overlay-spec")
+            .appendingPathComponent("test/fixtures/prototype-spec")
     }
 
     private func data(_ path: String) throws -> Data {
@@ -30,7 +30,7 @@ final class OverlayLimitsTests: XCTestCase {
         let contract = try JSONSerialization.jsonObject(
             with: Data(
                 contentsOf: fixtureRoot.deletingLastPathComponent().deletingLastPathComponent()
-                    .deletingLastPathComponent().appendingPathComponent("schemas/overlay-spec-contract.json")
+                    .deletingLastPathComponent().appendingPathComponent("schemas/prototype-spec-contract.json")
             )
         ) as? [String: Any]
         let limits = try XCTUnwrap(contract?["limits"] as? [String: Int])

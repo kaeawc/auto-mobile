@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
-import contract from "../../../schemas/overlay-spec-contract.json";
+import contract from "../../../schemas/prototype-spec-contract.json";
 import { BOUND_STATE_KEY_PATTERN } from "./overlayTemplate";
 export const { MAX_OVERLAY_SPEC_BYTES, MAX_OVERLAY_EMIT_PAYLOAD_BYTES } = contract.limits;
 export type OverlayJson =

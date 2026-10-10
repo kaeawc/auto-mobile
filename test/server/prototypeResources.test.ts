@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import contract from "../../schemas/overlay-spec-contract.json";
+import contract from "../../schemas/prototype-spec-contract.json";
 import { validateOverlaySpec } from "../../src/features/overlay/overlayValidation";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { registerPrototypeResources } from "../../src/server/prototypeResources";

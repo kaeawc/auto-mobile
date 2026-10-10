@@ -1,7 +1,7 @@
-import contract from "../../../schemas/overlay-asset-contract.json";
+import contract from "../../../schemas/prototype-asset-contract.json";
 
 /**
- * Overlay image and font asset transport limits (#9301). The same `schemas/overlay-asset-contract.json` is
+ * Overlay image and font asset transport limits (#9301). The same `schemas/prototype-asset-contract.json` is
  * packaged into the Android protocol module, so host and device cannot disagree. Specs reference an
  * asset only by an opaque id; bytes, MIME types and caps live here, never in a spec.
  */

@@ -1,4 +1,4 @@
-import contract from "../../../schemas/overlay-spec-contract.json";
+import contract from "../../../schemas/prototype-spec-contract.json";
 import {
   bindNodeFields,
   bindTyped,

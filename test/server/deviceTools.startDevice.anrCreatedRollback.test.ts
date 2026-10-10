@@ -1,40 +1,40 @@
-import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
-import { logger } from "../../../src/utils/logger";
+import { logger } from "../../src/utils/logger";
 import {
   setDeviceToolsDependencies,
   resetDeviceToolsDependencies,
   registerDeviceTools,
   startDeviceSchema,
-} from "../../../src/server/deviceTools";
-import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
-import { FakeDeviceMatcher } from "../../fakes/FakeDeviceMatcher";
-import { FakeDeviceCreationGate } from "../../fakes/FakeDeviceCreationGate";
-import { FakeDeviceProvisioner } from "../../fakes/FakeDeviceProvisioner";
-import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { DaemonState } from "../../../src/daemon/daemonState";
-import { SystemUiAnrRecoveryRequiredError } from "../../../src/ctrlProxy/RunnerReadinessService";
+} from "../../src/server/deviceTools";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
+import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
+import { FakeDeviceProvisioner } from "../fakes/FakeDeviceProvisioner";
+import { ToolRegistry } from "../../src/server/toolRegistry";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 
-import { clearDirectSessionDevices } from "../../../src/server/directSessionDeviceRegistry";
-import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
-import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
-import { DevicePool } from "../../../src/daemon/devicePool";
-import { SessionManager } from "../../../src/daemon/sessionManager";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
-import { setDeviceManager } from "../../../src/server/bootedDeviceResources";
-import { FakeTimer } from "../../fakes/FakeTimer";
-import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
-import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
-import { FakeVideoRecordingRepository } from "../../fakes/FakeVideoRecordingRepository";
+import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { setDeviceManager } from "../../src/server/bootedDeviceResources";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
-} from "../../../src/server/videoRecordingManager";
+} from "../../src/server/videoRecordingManager";
 
 isolateToolRegistry();
 
-describe("hunt: createIfMissing rollback after System UI recovery", () => {
+describe("createIfMissing rollback after System UI recovery", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
   let fakeMatcher: FakeDeviceMatcher;
   let fakeGate: FakeDeviceCreationGate;
@@ -187,5 +187,37 @@ describe("hunt: createIfMissing rollback after System UI recovery", () => {
       `destroyDevice:android:${created.name}`,
     );
     expect(await fakeDeviceUtils.listDeviceImages("android")).toEqual([]);
+  });
+
+  it("never deletes an AVD that pre-existed when binding fails after a System UI ANR", async () => {
+    fakeGate.setAllowed(true);
+    const existing = { name: "Pixel_8_API_34", platform: "android" as const, isRunning: false };
+    fakeDeviceUtils.setDeviceImages("android", [existing]);
+    fakeMatcher.setImageResult(existing);
+    let readinessAttempts = 0;
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        readinessAttempts++;
+        if (readinessAttempts === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+      },
+    });
+    await useFakeTeardown("android");
+    const bind = spyOn(DevicePool.prototype, "bindOrReuseDeviceSession").mockRejectedValue(
+      new Error("session bind failed"),
+    );
+
+    try {
+      await expect(callStartDevice({ platform: "android", createIfMissing: true })).rejects.toThrow(
+        /session bind failed/,
+      );
+    } finally {
+      bind.mockRestore();
+    }
+
+    expect(readinessAttempts).toBe(2);
+    expect(fakeProvisioner.requests).toEqual([]);
+    expect(fakeDeviceUtils.getExecutedOperations().join("\n")).not.toContain("destroyDevice");
   });
 });

@@ -8523,7 +8523,9 @@ export class DevicePool {
    * Get all idle devices (available for assignment)
    */
   getIdleDevices(): PooledDevice[] {
-    return Array.from(this.devices.values()).filter((device) => this.isIdleDeviceEligible(device));
+    return Array.from(this.devices.values()).filter(
+      (device) => this.isIdleDeviceEligible(device) && !this.isHeldOutsideGenericAllocation(device),
+    );
   }
 
   /**
@@ -8678,6 +8680,11 @@ export class DevicePool {
       return "foreign_daemon";
     }
     return this.isReservedForAssignment(device) ? "reserved" : "free";
+  }
+
+  /** A managed slot or another daemon holds the device, so generic allocation never lends it. */
+  private isHeldOutsideGenericAllocation(device: PooledDevice): boolean {
+    return this.isManagedSlotDevice(device) || this.isDrivenByForeignDaemon(device);
   }
 
   /** Platform devices generic allocation may lend: none a managed slot holds. */
@@ -8949,7 +8956,10 @@ export class DevicePool {
     const all = this.getAllDevices();
     const idle = this.getIdleDevices().length;
     const assigned = all.filter(
-      (device) => device.status === "busy" || this.isReservedForAssignment(device),
+      (device) =>
+        device.status === "busy" ||
+        this.isReservedForAssignment(device) ||
+        (device.status === "idle" && this.isHeldOutsideGenericAllocation(device)),
     ).length;
     const error = this.getErrorDevices().length;
     const avgAssignments =

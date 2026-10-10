@@ -91,6 +91,16 @@ describe("DevicePool managed-slot exclusion", () => {
     expect(sessions.getSession("generic-2")).toBeNull();
   });
 
+  test("stats and the available count treat a managed-slot device as assigned, not idle", async () => {
+    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT");
+    await setUp([ios("SIM-SLOT"), ios("SIM-FREE")]);
+    await pool.managedSlotStableIds("ios");
+
+    expect(pool.getStats()).toMatchObject({ total: 2, idle: 1, assigned: 1 });
+    expect(pool.getAvailableDeviceCount()).toBe(1);
+    expect(pool.getIdleDevices().map((device) => device.id)).toEqual(["SIM-FREE"]);
+  });
+
   test("multi-device criteria allocation never lends the assigned device", async () => {
     await assignManagedSlotDevice(registry, "ios", "SIM-SLOT");
     await setUp([ios("SIM-SLOT"), ios("SIM-FREE")]);

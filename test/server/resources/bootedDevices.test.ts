@@ -46,6 +46,10 @@ import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../../src/devices/
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
+import type { ForeignDeviceOwnership } from "../../../src/daemon/foreignDeviceOwnership";
+import { RegistryManagedSlotExclusion } from "../../../src/daemon/managedSlots/managedSlotExclusion";
+import { assignManagedSlotDevice } from "../../daemon/managedSlots/managedSlotFixtures";
+import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
@@ -1450,6 +1454,45 @@ describe("MCP Booted Device Resources", () => {
           expect(status("SIM-HELD")?.poolStatus).toBe("assigned");
           expect(result.poolStatus).toMatchObject({ idle: 1, assigned: 1 });
           expect(result.poolStatus?.idle).toBe(pool.getStats().idle);
+        } finally {
+          sessions.stopCleanupTimer();
+        }
+      });
+
+      test("a managed-slot device is assigned/held and not counted idle", async () => {
+        const registry = new FakeSlotRegistry(new FakeTimer());
+        await assignManagedSlotDevice(registry, "ios", "SIM-HELD");
+        const { pool, sessions, timer } = await makeHoldPool((t) => ({
+          managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, t),
+        }));
+        try {
+          const { result, status } = await readIos(timer);
+          expect(status("SIM-HELD")?.poolStatus).toBe("assigned");
+          expect(status("SIM-HELD")?.heldBy).toBe("managed_slot");
+          expect(result.poolStatus).toMatchObject({ idle: 1, assigned: 1 });
+          expect(result.poolStatus?.idle).toBe(pool.getStats().idle);
+          expect(pool.getAvailableDeviceCount()).toBe(1);
+        } finally {
+          sessions.stopCleanupTimer();
+        }
+      });
+
+      test("a device another daemon drives is assigned/held and not counted idle", async () => {
+        const ownership: ForeignDeviceOwnership = {
+          async refresh() {},
+          foreignOwnerPid: (id) => (id === "SIM-HELD" ? 4242 : undefined),
+          claim: async () => true,
+          release() {},
+        };
+        const { pool, sessions, timer } = await makeHoldPool(() => ({
+          iosForeignDeviceOwnership: ownership,
+        }));
+        try {
+          const { result, status } = await readIos(timer);
+          expect(status("SIM-HELD")?.poolStatus).toBe("assigned");
+          expect(status("SIM-HELD")?.heldBy).toBe("other_daemon");
+          expect(result.poolStatus).toMatchObject({ idle: 1, assigned: 1 });
+          expect(pool.getStats()).toMatchObject({ idle: 1, assigned: 1 });
         } finally {
           sessions.stopCleanupTimer();
         }

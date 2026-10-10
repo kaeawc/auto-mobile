@@ -86,6 +86,7 @@ test/daemon/devicePool.recoveryStopOfflineConfirmation.test.ts
 test/daemon/devicePool.removeDeviceLeaks.test.ts
 test/daemon/devicePool.selectionPresenceSweep.test.ts
 test/daemon/devicePool.staleIdentityRefresh.test.ts
+test/daemon/devicePool.stateChangeListener.test.ts
 test/daemon/devicePool.statsBuckets.test.ts
 test/daemon/devicePoolCreate.test.ts
 test/daemon/devicePoolPhysicalIosRename.test.ts
@@ -104,6 +105,7 @@ test/daemon/explicitReleaseCutCall.test.ts
 test/daemon/failuresPushSocketServer.test.ts
 test/daemon/findAvailableDaemonPort.test.ts
 test/daemon/forwardLeaseHolders.test.ts
+test/daemon/freshStartAlreadyBoundRefusal.test.ts
 test/daemon/gatedToolThroughDaemon.test.ts
 test/daemon/gestureOwnership.test.ts
 test/daemon/getApplePreparationTimeout.property.test.ts
@@ -117,6 +119,7 @@ test/daemon/liveDeadlineRegistry.test.ts
 test/daemon/livenessKeeperSuspectInteractions.test.ts
 test/daemon/livenessOwnerLease.test.ts
 test/daemon/managedExecutionLiveness.test.ts
+test/daemon/managedRebindRefusedFailsClosed.test.ts
 test/daemon/managedSlots/abandonedScopeReclaimer.test.ts
 test/daemon/managedSlots/capacityExternalDevices.test.ts
 test/daemon/managedSlots/daemonManagedSlotAcquisition.ownDevice.test.ts
@@ -355,6 +358,7 @@ test/features/action/textTransportTimeout.test.ts
 test/features/action/touchscreenInput.test.ts
 test/features/appearance/AppearanceConfig.property.test.ts
 test/features/bootAdmission/AndroidBootAdmissionGate.test.ts
+test/features/bootAdmission/AndroidCapacitySource.test.ts
 test/features/database/bigIntegerJson.test.ts
 test/features/database/sqlLexer.test.ts
 test/features/debug/VisualHighlight.test.ts
@@ -850,6 +854,7 @@ test/server/deviceMatcher.test.ts
 test/server/deviceResourceSchemas.test.ts
 test/server/deviceSessionRecoveryTools.test.ts
 test/server/deviceSessionResultOwnership.test.ts
+test/server/deviceStateChangeNotifier.test.ts
 test/server/deviceTools.listDevicesCapacitySchema.test.ts
 test/server/deviceTools.listDevicesOwnership.test.ts
 test/server/deviceTools.screenSize.test.ts

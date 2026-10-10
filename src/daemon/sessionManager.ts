@@ -3011,26 +3011,45 @@ export class SessionManager {
     );
   }
 
+  /**
+   * Mark a row found past its deadline `expired`, and resolve with the row as it stands afterwards
+   * (the row given when nothing was written). The write is conditioned, in the statement, on the
+   * deadline still being at or before the instant it was judged at (#11498): an activity write by
+   * the row's owner does not advance the generation, so a lease or a device-restart recovery
+   * window it extended after this read would otherwise be released anyway. The caller answers from
+   * the returned row, never from the one it read before the write.
+   */
   private async terminalizeExpiredPersistedSession(
     persisted: DeviceSession | undefined,
-  ): Promise<void> {
+  ): Promise<DeviceSession | undefined> {
+    const now = this.sessionNow();
     if (
-      persisted &&
-      persisted.expires_at_ms <= this.sessionNow() &&
-      (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason))
+      !persisted ||
+      persisted.expires_at_ms > now ||
+      (persisted.release_reason && isTerminalReleaseReason(persisted.release_reason))
     ) {
-      this.restartRecoveryActivityAt.delete(persisted.session_uuid);
-      // Only the row judged expired: a peer may re-upsert the UUID after this read (#11129).
-      await this.deviceSessionRepository.markReleased(
-        persisted.session_uuid,
-        "expired",
-        this.sessionNow(),
-        "expired",
-        persisted.stable_identity_generation === undefined
-          ? {}
-          : { expectedRowGeneration: persisted.stable_identity_generation },
-      );
+      return persisted;
     }
+    // Only the row judged expired: a peer may re-upsert the UUID after this read (#11129).
+    await this.deviceSessionRepository.markReleased(
+      persisted.session_uuid,
+      "expired",
+      now,
+      "expired",
+      {
+        ...(persisted.stable_identity_generation === undefined
+          ? {}
+          : { expectedRowGeneration: persisted.stable_identity_generation }),
+        // The repository compares stored stamps, which are wall ms; the session-clock wrapper
+        // converts the release stamp but passes options through as given.
+        onlyIfExpiredAtMs: this.sessionClockToWall(now),
+      },
+    );
+    const current = await this.readPersistedSession(persisted.session_uuid);
+    if (!this.isReissuablePersistedSession(current)) {
+      this.restartRecoveryActivityAt.delete(persisted.session_uuid);
+    }
+    return current;
   }
 
   private terminalReleaseFromPersisted(
@@ -3673,7 +3692,7 @@ export class SessionManager {
     requireIssuedSession: boolean,
     shared: SharedSessionAssignment,
   ): Promise<Session> {
-    const persisted = await this.readPersistedSession(sessionId);
+    let persisted = await this.readPersistedSession(sessionId);
     const persistedTerminalRelease = persisted
       ? this.terminalReleaseFromPersisted(sessionId, persisted)
       : undefined;
@@ -3693,15 +3712,24 @@ export class SessionManager {
     // was bypassed by the call path — the ownership bypass this closes. The
     // pool-less `if (!devicePool)` throw below stays as a secondary safety net.
     if (requireIssuedSession && !this.isReissuablePersistedSession(persisted)) {
-      await this.terminalizeExpiredPersistedSession(persisted);
-      throw this.unadmittedSessionError(
-        sessionId,
-        persisted,
-        new UnissuedSessionError(
-          `Session ${sessionId} is not an active daemon session (not found). ` +
-            "Acquire a device with getAndroid or getApple before using its sessionUuid.",
-        ),
-      );
+      // Answered from the row as the expiry write left it (#11498): a row whose deadline was
+      // extended under this call is still live or recoverable, and is admitted like any other.
+      persisted = await this.terminalizeExpiredPersistedSession(persisted);
+      const terminalRelease = persisted && this.terminalReleaseFromPersisted(sessionId, persisted);
+      if (terminalRelease) {
+        this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
+        throw new TerminalSessionError(sessionId, terminalRelease);
+      }
+      if (!this.isReissuablePersistedSession(persisted)) {
+        throw this.unadmittedSessionError(
+          sessionId,
+          persisted,
+          new UnissuedSessionError(
+            `Session ${sessionId} is not an active daemon session (not found). ` +
+              "Acquire a device with getAndroid or getApple before using its sessionUuid.",
+          ),
+        );
+      }
     }
     // Need to create new session - assign device from pool
     if (!devicePool) {

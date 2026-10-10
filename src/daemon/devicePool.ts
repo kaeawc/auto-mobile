@@ -8970,7 +8970,14 @@ export class DevicePool {
       return;
     }
     await this.managedSlotExclusion.refresh({ maxAgeMs: input.maxAgeMs });
-    const refusal = this.managedSlotRefusalFor(input);
+    let refusal = this.managedSlotRefusalFor(input);
+    if (refusal && input.maxAgeMs && input.requesterSessionUuid) {
+      // A cached snapshot can predate the requester's own claim of this slot (#11457). Re-read
+      // before refusing a session so a fresh execution is never refused its own device; callers
+      // with no session, and every call the cache lets through, keep the shared read.
+      await this.managedSlotExclusion.refresh();
+      refusal = this.managedSlotRefusalFor(input);
+    }
     if (refusal) {
       throw refusal;
     }
